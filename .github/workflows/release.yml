@@ -1,0 +1,92 @@
+# Publishes a release in the public outflareai/outflare when a version tag
+# arrives there. Tags are cut and published by automation, never by hand
+# (docs/releasing.md): each release is checked before it reaches the public
+# repository with its tag, and this workflow then runs there:
+#
+#   - the image ghcr.io/outflareai/outflare:<tag> for linux/amd64 and linux/arm64,
+#     also tagged with the bare version (0.3.0, 0.3) and, for non-prereleases, latest;
+#   - a GitHub release with outflare-<tag>.tar.gz, a docker-compose.yml set to that
+#     image plus .env.example, so people can self-host without cloning. Its notes
+#     are the tag's section of CHANGELOG.md; the run stops before publishing
+#     anything if that section is missing.
+#
+# In the private repository the job is skipped: images and releases come
+# only from the public code.
+#
+# Release images send the anonymous daily report (docs/telemetry.md) to the
+# TELEMETRY_URL repository variable (Settings > Secrets and variables > Actions >
+# Variables), for example https://<cloud host>/v1/cloud/telemetry/ping. Without it the
+# image sends nothing, like a build from source. See docs/releasing.md.
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+  packages: write
+
+jobs:
+  release:
+    if: github.repository == 'outflareai/outflare'
+    runs-on: ubuntu-latest
+    env:
+      TAG: ${{ github.ref_name }}
+      TELEMETRY_URL: ${{ vars.TELEMETRY_URL }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+
+      - name: Release notes from CHANGELOG.md
+        run: scripts/changelog-section.sh "$TAG" > "$RUNNER_TEMP/notes.md"
+
+      - name: Say where usage reports go
+        run: |
+          if [ -z "$TELEMETRY_URL" ]; then
+            echo "::warning::TELEMETRY_URL repository variable is not set: this release sends no usage reports and gets no update checks."
+          else
+            echo "Usage reports go to $TELEMETRY_URL"
+          fi
+
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
+      - uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.7.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - id: meta
+        uses: docker/metadata-action@c299e40c65443455700f0fdfc63efafe5b349051 # v5.10.0
+        with:
+          images: ghcr.io/${{ github.repository }}
+          tags: |
+            type=ref,event=tag
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+          labels: |
+            org.opencontainers.image.title=Outflare
+            org.opencontainers.image.licenses=AGPL-3.0-only
+      - uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6.19.2
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            VERSION=${{ github.ref_name }}
+            TELEMETRY_URL=${{ vars.TELEMETRY_URL }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Pack the self-host bundle
+        run: scripts/release-bundle.sh "$TAG" dist
+
+      - name: Create the GitHub release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          pre=""
+          case "$TAG" in *-*) pre="--prerelease" ;; esac
+          gh release create "$TAG" "dist/outflare-$TAG.tar.gz" --verify-tag --notes-file "$RUNNER_TEMP/notes.md" $pre --title "Outflare $TAG"

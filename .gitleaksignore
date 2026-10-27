@@ -1,0 +1,9 @@
+# Reviewed false positives (test fixtures and doc examples), one gitleaks
+# Fingerprint per line: commit:file:rule:line. Add a line only after checking
+# the value is fake. A real secret is revoked first, never ignored (AGENTS.md).
+0ffd6b4dd07a39225b961e2c642ccdbf5450cc2b:engine/internal/agent/agent_test.go:generic-api-key:124
+0ffd6b4dd07a39225b961e2c642ccdbf5450cc2b:engine/internal/llm/llm_test.go:generic-api-key:13
+0ffd6b4dd07a39225b961e2c642ccdbf5450cc2b:engine/internal/llm/llm_test.go:generic-api-key:67
+37fb4adf01ba46818e69a63ca41ceadcbe04bef1:engine/internal/api/emails_test.go:generic-api-key:141
+0ffd6b4dd07a39225b961e2c642ccdbf5450cc2b:engine/internal/api/ai_settings_test.go:generic-api-key:78
+42005cf7a2cb34aee16fdea582488d75211de52f:engine/internal/api/emails_activity_test.go:generic-api-key:29

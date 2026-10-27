@@ -1,0 +1,35 @@
+{
+  "name": "@outflare/mcp",
+  "version": "0.1.0",
+  "private": true,
+  "description": "MCP server that lets AI agents run Outflare: mailboxes, leads, sequences, inbox and the policy check",
+  "license": "Apache-2.0",
+  "type": "module",
+  "bin": {
+    "outflare-mcp": "./dist/index.js"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "build": "tsc",
+    "typecheck": "tsc --noEmit",
+    "test": "node --test test/*.test.mjs",
+    "bundle": "esbuild dist/index.js --bundle --platform=node --format=esm --target=node18 --outfile=dist/outflare-mcp.mjs \"--banner:js=import { createRequire } from 'node:module'; const require = createRequire(import.meta.url);\""
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.32.1",
+    "@outflare/sdk": "workspace:*",
+    "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.5",
+    "esbuild": "0.28.2",
+    "typescript": "^5.9.3"
+  }
+}

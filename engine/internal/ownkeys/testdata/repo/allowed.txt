@@ -1,0 +1,2 @@
+# Allowed only in engine/ok.go, so bad.go still fails.
+env GOOGLE_OAUTH_CLIENT_ID  engine/ok.go  the OAuth app

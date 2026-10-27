@@ -1,0 +1,549 @@
+import { useCallback, useEffect, useState, type FormEvent, type ReactNode } from "react";
+import type { InboundMessage, InboxTag, InboxView, Member, ThreadEntry } from "@outflare/sdk";
+import { api, errorMessage } from "../api";
+import { useBrand } from "@/lib/brand";
+import { ask, Badge, Button, Card, confirmAction, Empty, ErrorText, field, Loading, Menu, PageHeader, toast } from "../ui";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { X } from "lucide-react";
+import { listTime, stamp } from "../format";
+
+type Category = NonNullable<InboundMessage["category"]>;
+type Status = "open" | "snoozed" | "done" | "all";
+
+// What a reply means, in the order people work through them, and the
+// group each label belongs to.
+type Group = "hot" | "later" | "closed" | "automatic";
+export const categories: { id: Category; label: string; group: Group; tone: "green" | "blue" | "amber" | "grey" | "red" }[] = [
+  { id: "interested", label: "Interested", group: "hot", tone: "green" },
+  { id: "meeting_booked", label: "Meeting booked", group: "hot", tone: "green" },
+  { id: "question", label: "Question", group: "hot", tone: "blue" },
+  { id: "referral", label: "Referral", group: "later", tone: "blue" },
+  { id: "not_now", label: "Not now", group: "later", tone: "amber" },
+  { id: "objection", label: "Objection", group: "later", tone: "amber" },
+  { id: "not_interested", label: "Not interested", group: "closed", tone: "grey" },
+  { id: "wrong_person", label: "Wrong person", group: "closed", tone: "grey" },
+  { id: "unsubscribe", label: "Unsubscribed", group: "closed", tone: "red" },
+  { id: "complaint", label: "Complaint", group: "closed", tone: "red" },
+  { id: "out_of_office", label: "Out of office", group: "automatic", tone: "grey" },
+  { id: "auto_reply", label: "Auto-reply", group: "automatic", tone: "grey" },
+];
+const groups: { id: Group; label: string; help: string }[] = [
+  { id: "hot", label: "Hot", help: "Interested, meeting booked or a question: answer these first." },
+  { id: "later", label: "Later", help: "Referrals, not now and objections: worth coming back to." },
+  { id: "closed", label: "Closed", help: "Not interested, wrong person, unsubscribed or a complaint." },
+  { id: "automatic", label: "Automatic", help: "Out-of-office and other automatic replies." },
+];
+const categoryOf = (c: InboundMessage["category"]) => categories.find((x) => x.id === c);
+const sourceLabel: Record<string, string> = {
+  rules: "Labelled by the built-in rules",
+  ai: "Labelled by the AI",
+  human: "Labelled by a person",
+  api_token: "Labelled by an integration",
+  agent: "Labelled by an agent",
+  system: "Labelled by Outflare",
+};
+// Where replies come from: Outflare's own mailboxes or a connected sequencer.
+const sources: Record<string, string> = { mailbox: "Outflare mailboxes", emailbison: "EmailBison", instantly: "Instantly", smartlead: "Smartlead", lemlist: "lemlist", apollo: "Apollo" };
+const sourceName = (s: string) => sources[s] ?? s;
+const detailNames: Record<string, string> = { return_date: "Back on", referral_name: "Referred to", referral_email: "Their email", meeting_time: "Meeting", objection: "Objection" };
+
+const tagTones: Record<string, string> = {
+  gray: "border-border bg-muted text-muted-foreground",
+  red: "border-red-600/25 bg-red-500/10 text-red-700 dark:text-red-400",
+  orange: "border-orange-600/25 bg-orange-500/10 text-orange-700 dark:text-orange-400",
+  amber: "border-amber-600/30 bg-amber-500/10 text-amber-700 dark:text-amber-400",
+  green: "border-green-600/25 bg-green-500/10 text-green-700 dark:text-green-400",
+  teal: "border-teal-600/25 bg-teal-500/10 text-teal-700 dark:text-teal-400",
+  blue: "border-blue-600/25 bg-blue-500/10 text-blue-700 dark:text-blue-400",
+  violet: "border-violet-600/25 bg-violet-500/10 text-violet-700 dark:text-violet-400",
+  pink: "border-pink-600/25 bg-pink-500/10 text-pink-700 dark:text-pink-400",
+};
+const tagColors = Object.keys(tagTones) as InboxTag["color"][];
+
+function Tag({ name, tags, children }: { name: string; tags: InboxTag[]; children?: ReactNode }) {
+  const color = tags.find((t) => t.name === name)?.color ?? "gray";
+  return <span className={`inline-flex h-5 items-center gap-1 rounded border px-1.5 font-mono text-[11px] ${tagTones[color]}`}>{name}{children}</span>;
+}
+
+function CategoryBadge({ m }: { m: InboundMessage }) {
+  const c = categoryOf(m.category);
+  if (!c) return null;
+  const sure = m.category_confidence != null && m.category_confidence < 1 ? `, ${Math.round(m.category_confidence * 100)}% sure` : "";
+  return <Badge tone={c.tone} title={m.category_source ? sourceLabel[m.category_source] + sure : undefined}>{c.label}</Badge>;
+}
+
+// Snooze choices, worked out in the reader's own time zone.
+function snoozeTimes(): { label: string; at: Date }[] {
+  const at9 = (days: number) => {
+    const d = new Date();
+    d.setDate(d.getDate() + days);
+    d.setHours(9, 0, 0, 0);
+    return d;
+  };
+  const monday = (8 - new Date().getDay()) % 7 || 7;
+  return [
+    { label: "For 3 hours", at: new Date(Date.now() + 3 * 3600_000) },
+    { label: "Until tomorrow, 9am", at: at9(1) },
+    { label: "Until Monday, 9am", at: at9(monday) },
+    { label: "For a week", at: at9(7) },
+    { label: "For a month", at: at9(30) },
+  ];
+}
+
+type Kind = "" | "reply" | "auto_reply" | "bounce" | "other" | "all";
+const kinds: [Kind, string][] = [["", "Replies"], ["auto_reply", "Auto-replies"], ["bounce", "Bounces"], ["other", "Other mail"], ["all", "Everything"]];
+const kindLabel: Record<string, string> = { auto_reply: "Auto-reply", bounce: "Bounce", other: "Other" };
+
+type Props = { ws: string; canManage: boolean; open?: string; setOpen: (id: string | undefined) => void; onRead: () => void };
+
+// The inbox's filters, as the API takes them; a saved view stores the same.
+type Filters = { status: Status; kind: Kind; category: string; group: string; source: string; tag: string; assigned_to: string; unread: string; needs_review: string; q: string };
+const noFilters: Filters = { status: "open", kind: "", category: "", group: "", source: "", tag: "", assigned_to: "", unread: "", needs_review: "", q: "" };
+
+export function Inbox({ ws, canManage, open, setOpen, onRead }: Props) {
+  const [list, setList] = useState<InboundMessage[] | null>(null);
+  const [f, setF] = useState<Filters>(noFilters);
+  const set = (patch: Partial<Filters>) => setF((cur) => ({ ...cur, ...patch }));
+  const [members, setMembers] = useState<Member[]>([]);
+  const [tags, setTags] = useState<InboxTag[]>([]);
+  const [views, setViews] = useState<InboxView[]>([]);
+  const [view, setView] = useState<InboxView | null>(null);
+  const [managingTags, setManagingTags] = useState(false);
+
+  const { query: brandQuery } = useBrand(ws);
+  const load = useCallback(async () => {
+    const query = { ...Object.fromEntries(Object.entries(f).filter(([, v]) => v !== "")), ...brandQuery };
+    const { data } = await api.GET("/v1/workspaces/{ws}/inbox", { params: { path: { ws }, query } });
+    if (data) setList(data.data);
+  }, [ws, f, brandQuery.brand]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const loadTags = useCallback(() => {
+    api.GET("/v1/workspaces/{ws}/inbox-tags", { params: { path: { ws } } }).then(({ data }) => setTags(data?.data ?? []));
+  }, [ws]);
+  const loadViews = useCallback(() => {
+    api.GET("/v1/workspaces/{ws}/inbox-views", { params: { path: { ws } } }).then(({ data }) => setViews(data?.data ?? []));
+  }, [ws]);
+
+  useEffect(() => {
+    api.GET("/v1/workspaces/{ws}/members", { params: { path: { ws } } }).then(({ data }) => setMembers(data?.data ?? []));
+    loadTags();
+    loadViews();
+  }, [ws, loadTags, loadViews]);
+
+  useEffect(() => {
+    const t = setTimeout(load, 200);
+    const poll = setInterval(load, 30000);
+    return () => {
+      clearTimeout(t);
+      clearInterval(poll);
+    };
+  }, [load]);
+
+  const changed = (Object.keys(noFilters) as (keyof Filters)[]).filter((k) => f[k] !== noFilters[k]);
+  const filtered = changed.length > 0;
+  const reset = () => { setF(noFilters); setView(null); };
+  const emptyText = { open: "Nothing waiting. New replies show up here within two minutes of arriving.", snoozed: "Nothing snoozed.", done: "Nothing marked done yet.", all: "No replies yet. They show up here within two minutes of arriving." }[f.status];
+  const shownSources = [...new Set(["mailbox", "emailbison", ...(list ?? []).map((m) => m.source)])];
+
+  function openView(v: InboxView) {
+    setView(v);
+    setF({ ...noFilters, ...(v.filters as Partial<Filters>) });
+  }
+  async function saveView() {
+    const r = await ask({
+      title: "Save these filters as a view",
+      body: "The view shows in the Views menu. Only you see it unless you share it with the workspace.",
+      input: { label: "Name", placeholder: "Hot replies from EmailBison", maxLength: 60 },
+      choices: [{ label: "Cancel", value: "cancel" }, { label: "Save for everyone", value: "shared" }, { label: "Save for me", value: "mine", variant: "primary" }],
+    });
+    if (!r?.value.trim()) return;
+    const filters = Object.fromEntries(changed.map((k) => [k, f[k]]));
+    const { data, error } = await api.POST("/v1/workspaces/{ws}/inbox-views", { params: { path: { ws } }, body: { name: r.value.trim(), filters, shared: r.choice === "shared" } });
+    if (error || !data) return toast(errorMessage(error), "error");
+    setView(data);
+    loadViews();
+    toast(`Saved "${data.name}".`);
+  }
+  async function updateView() {
+    if (!view) return;
+    const filters = Object.fromEntries(changed.map((k) => [k, f[k]]));
+    const { data, error } = await api.PATCH("/v1/workspaces/{ws}/inbox-views/{id}", { params: { path: { ws, id: view.id } }, body: { filters } });
+    if (error || !data) return toast(errorMessage(error), "error");
+    setView(data);
+    loadViews();
+    toast(`Updated "${data.name}".`);
+  }
+  async function deleteView() {
+    if (!view || !(await confirmAction(`Delete the view "${view.name}"?`, view.shared ? "It's shared, so it goes for everyone in the workspace. The replies stay." : "The replies stay.", "Delete view"))) return;
+    const { error } = await api.DELETE("/v1/workspaces/{ws}/inbox-views/{id}", { params: { path: { ws, id: view.id } } });
+    if (error) return toast(errorMessage(error), "error");
+    setView(null);
+    loadViews();
+  }
+
+  return (
+    <div>
+      <div className={open ? "hidden md:block" : ""}>
+        <PageHeader title="Inbox" description="Replies from every mailbox and sequencer, labelled by what they mean. Answer them, mark them done or snooze them." />
+      </div>
+      <div className="grid gap-6 md:grid-cols-[24rem_1fr]">
+        <div className={open ? "hidden md:block" : ""}>
+          <Card
+            title={view ? view.name : "Messages"}
+            action={
+              <div className="flex gap-1">
+                <Menu
+                  label="Views"
+                  items={[
+                    ...views.map((v) => ({ label: v.shared ? v.name : `${v.name} (only you)`, onClick: () => openView(v) })),
+                    filtered && { label: "Save these filters…", onClick: saveView },
+                    !!view && filtered && { label: `Update "${view.name}"`, onClick: updateView },
+                    !!view && { label: "Show everything", onClick: reset },
+                    !!view && { label: `Delete "${view.name}"`, onClick: deleteView, danger: true },
+                  ]}
+                />
+                {canManage && <Button variant="ghost" onClick={() => setManagingTags(true)}>Tags</Button>}
+              </div>
+            }
+          >
+            <Tabs value={f.status} onValueChange={(v) => set({ status: v as Status })} className="mb-2">
+              <TabsList className="h-8 w-full">
+                {(["open", "snoozed", "done", "all"] as const).map((s) => <TabsTrigger key={s} value={s} className="px-2.5 text-[12px] capitalize">{s}</TabsTrigger>)}
+              </TabsList>
+            </Tabs>
+            <div role="group" aria-label="Label group" className="mb-2 flex gap-1">
+              {[{ id: "", label: "All", help: "Every label" }, ...groups].map((g) => (
+                <button
+                  key={g.id}
+                  title={g.help}
+                  aria-pressed={f.group === g.id}
+                  onClick={() => set({ group: g.id })}
+                  className={`h-7 flex-1 rounded-md border px-2 text-[12px] ${f.group === g.id ? "border-foreground/30 bg-accent font-medium" : "border-border text-muted-foreground hover:text-foreground"}`}
+                >
+                  {g.label}
+                </button>
+              ))}
+            </div>
+            <div className="mb-2 grid grid-cols-2 gap-2 text-sm">
+              <select aria-label="Label" className={`${field} min-w-0`} value={f.category} onChange={(e) => set({ category: e.target.value })}>
+                <option value="">Any label</option>
+                <option value="none">Not labelled yet</option>
+                {categories.map((c) => <option key={c.id} value={c.id}>{c.label}</option>)}
+              </select>
+              <select aria-label="Assigned to" className={`${field} min-w-0`} value={f.assigned_to} onChange={(e) => set({ assigned_to: e.target.value })}>
+                <option value="">Anyone</option>
+                <option value="me">Assigned to me</option>
+                <option value="none">Unassigned</option>
+                {members.map((m) => <option key={m.user_id} value={m.user_id ?? ""}>{m.name || m.email}</option>)}
+              </select>
+              <select aria-label="Source" className={`${field} min-w-0`} value={f.source} onChange={(e) => set({ source: e.target.value })}>
+                <option value="">Every source</option>
+                {shownSources.map((s) => <option key={s} value={s}>{sourceName(s)}</option>)}
+              </select>
+              <select aria-label="Tag" className={`${field} min-w-0`} value={f.tag} onChange={(e) => set({ tag: e.target.value })}>
+                <option value="">Any tag</option>
+                {tags.map((t) => <option key={t.id} value={t.name}>{t.name}</option>)}
+              </select>
+            </div>
+            <div className="mb-3 flex flex-wrap items-center gap-2 text-sm">
+              <select aria-label="Show" className={field} value={f.kind} onChange={(e) => set({ kind: e.target.value as Kind })}>
+                {kinds.map(([k, label]) => <option key={k} value={k}>{label}</option>)}
+              </select>
+              <label className="flex items-center gap-1"><input type="checkbox" checked={f.unread === "true"} onChange={(e) => set({ unread: e.target.checked ? "true" : "" })} />Unread only</label>
+              <label className="flex items-center gap-1" title="Labels the AI wasn't sure of, and opt-outs to check"><input type="checkbox" checked={f.needs_review === "true"} onChange={(e) => set({ needs_review: e.target.checked ? "true" : "" })} />Needs review</label>
+              <input type="search" aria-label="Search messages" className={`${field} w-full`} placeholder="Search sender, subject or text" value={f.q} onChange={(e) => set({ q: e.target.value })} />
+            </div>
+            {list === null && <Loading />}
+            {list?.length === 0 && (
+              <p className="py-6 text-center text-sm text-muted-foreground">
+                {changed.length === 1 && changed[0] === "status" ? emptyText : filtered ? <>Nothing matches. <button className="underline" onClick={reset}>Clear the filters</button></> : emptyText}
+              </p>
+            )}
+            <ul className="-mx-4 -mb-4 text-sm">
+              {list?.map((m) => (
+                <li key={m.id}>
+                  <button onClick={() => setOpen(m.id)} aria-current={open === m.id ? "true" : undefined} className={`w-full border-t border-border px-4 py-2.5 text-left hover:bg-accent/50 ${open === m.id ? "bg-accent" : ""}`}>
+                    <div className="flex items-center justify-between gap-2">
+                      <span className={`flex min-w-0 items-center gap-1.5 ${m.read ? "" : "font-semibold"}`}>
+                        {!m.read && <span className="h-2 w-2 shrink-0 rounded-full bg-brand" aria-label="Unread" />}
+                        <span className="truncate">{m.lead_name || m.from_name || m.from}</span>
+                      </span>
+                      <span className="shrink-0 text-xs text-muted-foreground" title={stamp(m.received_at)}>{listTime(m.received_at)}</span>
+                    </div>
+                    <div className={`truncate ${m.read ? "text-muted-foreground" : ""}`}>{m.subject || "(no subject)"}</div>
+                    <div className="mt-0.5 flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
+                      <CategoryBadge m={m} />
+                      {m.needs_review && <Badge tone="amber" title="A person should check this label">Review</Badge>}
+                      {kindLabel[m.kind] && !m.category && <Badge>{kindLabel[m.kind]}</Badge>}
+                      {m.source !== "mailbox" && <Badge title="Where this reply came from">{sourceName(m.source)}</Badge>}
+                      {m.snoozed_until && new Date(m.snoozed_until) > new Date() && <Badge title={stamp(m.snoozed_until)}>Snoozed</Badge>}
+                      {m.assignee_name && <Badge title="Assigned to">{m.assignee_name}</Badge>}
+                      {m.labels.map((l) => <Tag key={l} name={l} tags={tags} />)}
+                      <span className="truncate">{[m.company, m.sequence_name].filter(Boolean).join(" · ")}</span>
+                    </div>
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </Card>
+        </div>
+        {open ? (
+          <Conversation key={open} ws={ws} id={open} canManage={canManage} members={members} tags={tags} onBack={() => setOpen(undefined)} onChange={() => { load(); loadTags(); }} onRead={onRead} />
+        ) : (
+          <div className="hidden md:block">{list && list.length > 0 && <Empty title="Pick a message to read it">The whole conversation shows here, and you can reply from the same mailbox.</Empty>}</div>
+        )}
+      </div>
+      {managingTags && <TagsDialog ws={ws} tags={tags} onChange={() => { loadTags(); load(); }} onClose={() => setManagingTags(false)} />}
+    </div>
+  );
+}
+
+function Conversation({ ws, id, canManage, members, tags, onBack, onChange, onRead }: { ws: string; id: string; canManage: boolean; members: Member[]; tags: InboxTag[]; onBack: () => void; onChange: () => void; onRead: () => void }) {
+  const [msg, setMsg] = useState<InboundMessage | null>(null);
+  const [missing, setMissing] = useState(false);
+  const [thread, setThread] = useState<ThreadEntry[]>([]);
+  const [body, setBody] = useState("");
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
+  const path = { ws, id };
+
+  const load = useCallback(async () => {
+    const { data } = await api.GET("/v1/workspaces/{ws}/inbox/{id}", { params: { path: { ws, id } } });
+    if (!data) return setMissing(true);
+    setMsg(data.message);
+    setThread(data.thread);
+    if (!data.message.read && canManage) {
+      await api.PATCH("/v1/workspaces/{ws}/inbox/{id}", { params: { path: { ws, id } }, body: { read: true } });
+      onRead();
+      onChange();
+    }
+  }, [ws, id, canManage, onChange, onRead]);
+
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  async function reply(e?: FormEvent) {
+    e?.preventDefault();
+    if (!body.trim() || busy) return;
+    setBusy(true);
+    const { error } = await api.POST("/v1/workspaces/{ws}/inbox/{id}/reply", { params: { path }, body: { body } });
+    setBusy(false);
+    if (error) return setError(errorMessage(error));
+    setError("");
+    setBody("");
+    toast("Reply sent.");
+    load();
+  }
+
+  async function markUnread() {
+    await api.PATCH("/v1/workspaces/{ws}/inbox/{id}", { params: { path }, body: { read: false } });
+    onChange();
+    onBack();
+  }
+
+  type Patch = { category?: Category | null; assigned_to?: string | null; snoozed_until?: string | null; done?: boolean; labels?: string[]; needs_review?: boolean };
+  async function triage(body: Patch, said?: string, close = false) {
+    const { data, error } = await api.PATCH("/v1/workspaces/{ws}/inbox/{id}", { params: { path }, body });
+    if (error || !data) return toast(errorMessage(error), "error");
+    setMsg(data);
+    onChange();
+    if (said) toast(said);
+    if (close) onBack();
+  }
+
+  // The breadcrumb names the sender, not the conversation's id.
+  const crumb = msg ? msg.lead_name || msg.from_name || msg.from : "";
+  useEffect(() => {
+    if (crumb) window.dispatchEvent(new CustomEvent("outflare:item-name", { detail: { id, name: crumb } }));
+  }, [id, crumb]);
+
+  if (missing) return <Empty title="This message isn't here any more" action={<Button variant="ghost" onClick={onBack}>Back to inbox</Button>} />;
+  if (!msg) return <Loading />;
+  const name = msg.lead_name || msg.from_name || msg.from;
+  const snoozed = msg.snoozed_until && new Date(msg.snoozed_until) > new Date();
+  return (
+    <div className="space-y-3">
+      <button onClick={onBack} className="text-sm text-muted-foreground hover:text-foreground md:hidden">← Inbox</button>
+      <Card
+        title={msg.subject || "(no subject)"}
+        description={<>{name} &lt;{msg.from}&gt;{msg.company && ` · ${msg.company}`}{msg.sequence_name && ` · ${msg.sequence_name}`}</>}
+        action={
+          canManage && (
+            <div className="flex flex-wrap gap-2">
+              {msg.done ? (
+                <Button variant="ghost" onClick={() => triage({ done: false }, "Moved back to open.")}>Reopen</Button>
+              ) : (
+                <Button onClick={() => triage({ done: true, snoozed_until: null }, "Marked done.", true)}>Done</Button>
+              )}
+              <Menu
+                label={snoozed ? "Snoozed" : "Snooze"}
+                items={[
+                  ...snoozeTimes().map((t) => ({ label: t.label, onClick: () => triage({ snoozed_until: t.at.toISOString() }, `Snoozed until ${t.at.toLocaleString(undefined, { weekday: "short", day: "numeric", month: "short", hour: "numeric", minute: "2-digit" })}.`, true) })),
+                  !!snoozed && { label: "Wake it now", onClick: () => triage({ snoozed_until: null }, "Back in the open inbox.") },
+                ]}
+              />
+              <Menu label="More" items={[{ label: "Mark unread", onClick: markUnread }]} />
+            </div>
+          )
+        }
+      >
+        {canManage && msg.kind !== "bounce" && msg.kind !== "other" && (
+          <div className="mb-4 flex flex-wrap items-center gap-2 border-b border-border pb-4 text-[13px]">
+            <select aria-label="Label" className={field} value={msg.category ?? ""} onChange={(e) => triage({ category: (e.target.value || null) as Category | null })}>
+              <option value="">Not labelled</option>
+              {groups.map((g) => (
+                <optgroup key={g.id} label={g.label}>
+                  {categories.filter((c) => c.group === g.id).map((c) => <option key={c.id} value={c.id}>{c.label}</option>)}
+                </optgroup>
+              ))}
+            </select>
+            <select aria-label="Assigned to" className={field} value={msg.assigned_to ?? ""} onChange={(e) => triage({ assigned_to: e.target.value || null })}>
+              <option value="">Unassigned</option>
+              {members.map((m) => <option key={m.user_id} value={m.user_id ?? ""}>{m.name || m.email}</option>)}
+            </select>
+            <Labels labels={msg.labels} tags={tags} onChange={(labels) => triage({ labels })} />
+            {msg.category_source && (
+              <span className="text-[12px] text-muted-foreground">
+                {sourceLabel[msg.category_source]}
+                {msg.category_confidence != null && msg.category_confidence < 1 && `, ${Math.round(msg.category_confidence * 100)}% sure`}
+                {msg.category_reason && `: ${msg.category_reason}`}
+              </span>
+            )}
+          </div>
+        )}
+        {Object.keys(msg.details ?? {}).length > 0 && (
+          <dl className="mb-4 flex flex-wrap gap-x-4 gap-y-1 text-[12px]">
+            {Object.entries(msg.details).map(([k, v]) => (
+              <div key={k} className="flex gap-1">
+                <dt className="text-muted-foreground">{detailNames[k] ?? k}</dt>
+                <dd>{String(v)}</dd>
+              </div>
+            ))}
+          </dl>
+        )}
+        {msg.needs_review && (
+          <div className="mb-4 flex flex-wrap items-center justify-between gap-2 rounded-md bg-amber-50 p-2 text-sm text-amber-900 dark:bg-amber-950 dark:text-amber-200">
+            <span>Check this label: {msg.category_source === "ai" ? "the AI wasn't sure of it" : "it was flagged for a person to look at"}. Pick another label above to change it.</span>
+            {canManage && <Button variant="ghost" onClick={() => triage({ needs_review: false }, "Label confirmed.")}>The label is right</Button>}
+          </div>
+        )}
+        {msg.source !== "mailbox" && <p className="mb-4 text-[12px] text-muted-foreground">This reply came from {sourceName(msg.source)}. Answering sends it through {sourceName(msg.source)}.</p>}
+        {snoozed && <p className="mb-4 rounded-md bg-muted p-2 text-sm">Snoozed until {stamp(msg.snoozed_until!)}. It comes back to the open inbox then.</p>}
+        {msg.opt_out && <p className="mb-4 rounded-md bg-amber-50 p-2 text-sm text-amber-900 dark:bg-amber-950 dark:text-amber-200">They asked to be removed, so they're on the suppression list and their sequences have stopped. If they didn't, pick another label above and the suppression is lifted.</p>}
+        {msg.kind === "bounce" && <p className="mb-4 rounded-md bg-red-50 p-2 text-sm text-red-800 dark:bg-red-950 dark:text-red-200">A bounce report: the address it names was suppressed so it isn't emailed again.</p>}
+        <ol className="space-y-3">
+          {thread.map((t) => (
+            <li key={t.id} className={`rounded-md border p-3 text-sm ${t.direction === "out" ? "ml-6 border-border bg-muted/40 sm:ml-12 " : "mr-6 border-border sm:mr-12"}`}>
+              <div className="mb-1 flex flex-wrap justify-between gap-2 text-xs text-muted-foreground">
+                <span>{t.direction === "out" ? `You, from ${t.from}` : t.from}</span>
+                <span>{stamp(t.at)}</span>
+              </div>
+              <pre className="whitespace-pre-wrap break-words font-sans">{t.body}</pre>
+            </li>
+          ))}
+        </ol>
+        {canManage && msg.kind !== "bounce" && !msg.opt_out && (
+          <form onSubmit={reply} className="mt-4 space-y-2">
+            <label htmlFor="reply" className="block text-sm font-medium">Reply from {msg.mailbox_email}</label>
+            <textarea
+              id="reply"
+              className={`${field} min-h-32 w-full [field-sizing:content]`}
+              placeholder={`Write to ${name}…`}
+              value={body}
+              onChange={(e) => setBody(e.target.value)}
+              onKeyDown={(e) => { if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) reply(); }}
+            />
+            <div className="flex flex-wrap items-center gap-3">
+              <Button disabled={!body.trim() || busy}>{busy ? "Sending…" : "Send reply"}</Button>
+              <span className="text-xs text-muted-foreground">Sends now, in the same thread. Ctrl or ⌘ + Enter to send.</span>
+            </div>
+            <ErrorText>{error}</ErrorText>
+          </form>
+        )}
+      </Card>
+    </div>
+  );
+}
+
+function Labels({ labels, tags, onChange }: { labels: string[]; tags: InboxTag[]; onChange: (l: string[]) => void }) {
+  const [text, setText] = useState("");
+  function add(e: FormEvent) {
+    e.preventDefault();
+    const l = text.trim().toLowerCase();
+    if (l && !labels.includes(l)) onChange([...labels, l]);
+    setText("");
+  }
+  return (
+    <form onSubmit={add} className="flex flex-wrap items-center gap-1.5">
+      {labels.map((l) => (
+        <Tag key={l} name={l} tags={tags}>
+          <button type="button" aria-label={`Remove tag ${l}`} className="opacity-70 hover:opacity-100" onClick={() => onChange(labels.filter((x) => x !== l))}><X className="size-3" /></button>
+        </Tag>
+      ))}
+      <input aria-label="Add a tag" list="inbox-tags" className={`${field} h-7 w-28`} maxLength={40} placeholder="Add tag" value={text} onChange={(e) => setText(e.target.value)} />
+      <datalist id="inbox-tags">{tags.filter((t) => !labels.includes(t.name)).map((t) => <option key={t.id} value={t.name} />)}</datalist>
+    </form>
+  );
+}
+
+// The workspace's tags: add, rename, recolour or delete them. Renaming or
+// deleting a tag changes every reply that carries it.
+function TagsDialog({ ws, tags, onChange, onClose }: { ws: string; tags: InboxTag[]; onChange: () => void; onClose: () => void }) {
+  const [name, setName] = useState("");
+  const [error, setError] = useState("");
+
+  async function create(e: FormEvent) {
+    e.preventDefault();
+    if (!name.trim()) return;
+    const { error } = await api.POST("/v1/workspaces/{ws}/inbox-tags", { params: { path: { ws } }, body: { name: name.trim() } });
+    if (error) return setError(errorMessage(error));
+    setError("");
+    setName("");
+    onChange();
+  }
+  async function update(t: InboxTag, body: { name?: string; color?: InboxTag["color"] }) {
+    if (body.name !== undefined && (!body.name.trim() || body.name.trim().toLowerCase() === t.name)) return;
+    const { error } = await api.PATCH("/v1/workspaces/{ws}/inbox-tags/{id}", { params: { path: { ws, id: t.id } }, body });
+    if (error) return setError(errorMessage(error));
+    setError("");
+    onChange();
+  }
+  async function remove(t: InboxTag) {
+    const on = t.replies === 1 ? "1 reply" : `${t.replies} replies`;
+    if (!(await confirmAction(`Delete the tag "${t.name}"?`, `It comes off ${on}. The replies stay.`, "Delete tag"))) return;
+    const { error } = await api.DELETE("/v1/workspaces/{ws}/inbox-tags/{id}", { params: { path: { ws, id: t.id } } });
+    if (error) return setError(errorMessage(error));
+    onChange();
+  }
+
+  return (
+    <Dialog open onOpenChange={(o) => !o && onClose()}>
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle>Tags</DialogTitle>
+          <DialogDescription>Tags sort replies your own way. Renaming or deleting one changes every reply that carries it.</DialogDescription>
+        </DialogHeader>
+        <ul className="max-h-80 space-y-1.5 overflow-y-auto text-sm">
+          {tags.length === 0 && <li className="py-2 text-muted-foreground">No tags yet. Add one below, or type one on a reply.</li>}
+          {tags.map((t) => (
+            <li key={t.id} className="flex items-center gap-2">
+              <select aria-label={`Colour of ${t.name}`} className={`${field} w-24`} value={t.color} onChange={(e) => update(t, { color: e.target.value as InboxTag["color"] })}>
+                {tagColors.map((c) => <option key={c} value={c}>{c}</option>)}
+              </select>
+              <input aria-label={`Name of ${t.name}`} className={`${field} min-w-0 flex-1 font-mono`} maxLength={40} defaultValue={t.name} onBlur={(e) => update(t, { name: e.target.value })} onKeyDown={(e) => e.key === "Enter" && e.currentTarget.blur()} />
+              <span className="w-16 shrink-0 text-right text-xs text-muted-foreground">{t.replies} {t.replies === 1 ? "reply" : "replies"}</span>
+              <button aria-label={`Delete ${t.name}`} className="flex size-8 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground" onClick={() => remove(t)}><X className="size-4" /></button>
+            </li>
+          ))}
+        </ul>
+        <form onSubmit={create} className="flex gap-2">
+          <input aria-label="New tag" className={`${field} flex-1`} maxLength={40} placeholder="New tag" value={name} onChange={(e) => setName(e.target.value)} />
+          <Button disabled={!name.trim()}>Add tag</Button>
+        </form>
+        <ErrorText>{error}</ErrorText>
+      </DialogContent>
+    </Dialog>
+  );
+}

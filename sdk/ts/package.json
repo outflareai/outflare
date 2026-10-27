@@ -1,0 +1,54 @@
+{
+  "name": "@outflare/sdk",
+  "version": "0.1.0",
+  "private": true,
+  "description": "TypeScript client for the Outflare API",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/outflareai/outflare.git",
+    "directory": "sdk/ts"
+  },
+  "homepage": "https://outflare.ai/docs/sdk/typescript/",
+  "bugs": "https://github.com/outflareai/outflare/issues",
+  "keywords": [
+    "outflare",
+    "cold-email",
+    "sequencer",
+    "outbound",
+    "gtm",
+    "openapi",
+    "sdk"
+  ],
+  "type": "module",
+  "sideEffects": false,
+  "engines": {
+    "node": ">=18"
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "generate": "openapi-typescript ../../api/openapi.yaml -o src/schema.ts",
+    "build": "tsc",
+    "typecheck": "tsc --noEmit",
+    "test": "node --test test/*.test.mjs"
+  },
+  "devDependencies": {
+    "openapi-typescript": "^7.13.0",
+    "typescript": "^5.9.3"
+  },
+  "dependencies": {
+    "openapi-fetch": "^0.17.0"
+  }
+}

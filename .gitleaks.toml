@@ -1,0 +1,8 @@
+# gitleaks settings for the Security workflow and for local runs
+# (gitleaks git .). AGENTS.md, "Secrets and security".
+[extend]
+useDefault = true
+
+[allowlist]
+description = "The documented local-development key (base64 of dev-only-dev-only-...), never used anywhere real"
+regexes = ['''ZGV2LW9ubHktZGV2LW9ubHktZGV2LW9ubHktZGV2LTA=''']

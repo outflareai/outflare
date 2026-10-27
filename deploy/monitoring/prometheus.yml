@@ -1,0 +1,18 @@
+# Prometheus for a self-hosted Outflare (docker compose --profile monitoring).
+# Scrapes the engine's private metrics listener (OUTFLARE_METRICS_ADDR) and
+# evaluates the alert rules in alerts.yml. See docs/monitoring.md.
+global:
+  scrape_interval: 15s
+  evaluation_interval: 30s
+
+rule_files:
+  - /etc/prometheus/alerts.yml
+
+scrape_configs:
+  - job_name: outflare
+    static_configs:
+      - targets: ["engine:9091"]
+    # With OUTFLARE_METRICS_TOKEN set on the engine, put the same value in
+    # deploy/monitoring/metrics-token and uncomment:
+    # authorization:
+    #   credentials_file: /etc/prometheus/metrics-token

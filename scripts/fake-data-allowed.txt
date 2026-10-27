@@ -1,0 +1,31 @@
+# Real email addresses and domains allowed in this public repository
+# (AGENTS.md, "What may go in a public repository"). Everything else uses
+# example.com or a .example, .test or .invalid domain. A line with an @ is
+# one exact address; a domain line allows any address there, subdomains
+# too. A new line needs a reason and a maintainer's approval.
+
+# Our shared inboxes. Never a person's address, ours included.
+hello@outflare.ai
+crawl@outflare.ai
+push@outflare.ai
+# Git and GitHub's own no-reply addresses.
+users.noreply.github.com
+noreply.github.com
+# Mail providers named for what they are: free mail, private mail, aliases
+# and throwaway inboxes, as in the email-domain classifier and its tests.
+gmail.com
+googlemail.com
+outlook.com
+hotmail.com
+yahoo.com
+icloud.com
+proton.me
+pm.me
+protonmail.com
+duck.com
+mozmail.com
+anonaddy.com
+privaterelay.appleid.com
+mailinator.com
+# Service-account addresses in Google Cloud examples.
+iam.gserviceaccount.com

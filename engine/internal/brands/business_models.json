@@ -1,0 +1,400 @@
+{
+  "groups": [
+    {
+      "id": "software",
+      "label": "Software"
+    },
+    {
+      "id": "commerce",
+      "label": "Commerce"
+    },
+    {
+      "id": "services",
+      "label": "Services"
+    },
+    {
+      "id": "bookings",
+      "label": "Bookings"
+    },
+    {
+      "id": "education",
+      "label": "Education"
+    },
+    {
+      "id": "finance",
+      "label": "Finance"
+    },
+    {
+      "id": "media",
+      "label": "Media and community"
+    },
+    {
+      "id": "other",
+      "label": "Other"
+    }
+  ],
+  "models": [
+    {
+      "id": "b2b_saas_sales_led",
+      "group": "software",
+      "label": "B2B SaaS, sales-led",
+      "packs": [
+        "saas_sales_led",
+        "subscription"
+      ]
+    },
+    {
+      "id": "b2b_saas_self_serve",
+      "group": "software",
+      "label": "B2B SaaS, self-serve",
+      "packs": [
+        "saas_self_serve",
+        "subscription"
+      ]
+    },
+    {
+      "id": "consumer_subscription",
+      "group": "software",
+      "label": "Consumer subscription app",
+      "packs": [
+        "subscription",
+        "saas_self_serve"
+      ]
+    },
+    {
+      "id": "developer_tools",
+      "group": "software",
+      "label": "Developer tools and APIs",
+      "packs": [
+        "saas_self_serve",
+        "usage"
+      ]
+    },
+    {
+      "id": "mobile_app",
+      "group": "software",
+      "label": "Mobile app",
+      "packs": [
+        "mobile",
+        "subscription"
+      ]
+    },
+    {
+      "id": "games",
+      "group": "software",
+      "label": "Games",
+      "packs": [
+        "mobile",
+        "ecommerce"
+      ]
+    },
+    {
+      "id": "dtc_store",
+      "group": "commerce",
+      "label": "Online store, own brand (DTC)",
+      "packs": [
+        "ecommerce"
+      ]
+    },
+    {
+      "id": "retailer",
+      "group": "commerce",
+      "label": "Online retailer, many brands",
+      "packs": [
+        "ecommerce"
+      ]
+    },
+    {
+      "id": "subscription_box",
+      "group": "commerce",
+      "label": "Subscription box or replenishment",
+      "packs": [
+        "subscription",
+        "ecommerce"
+      ]
+    },
+    {
+      "id": "marketplace",
+      "group": "commerce",
+      "label": "Marketplace",
+      "packs": [
+        "marketplace"
+      ]
+    },
+    {
+      "id": "wholesale",
+      "group": "commerce",
+      "label": "Wholesale and B2B commerce",
+      "packs": [
+        "ecommerce",
+        "lead_gen"
+      ]
+    },
+    {
+      "id": "agency",
+      "group": "services",
+      "label": "Agency",
+      "packs": [
+        "lead_gen"
+      ]
+    },
+    {
+      "id": "consulting",
+      "group": "services",
+      "label": "Consulting and professional services",
+      "packs": [
+        "lead_gen"
+      ]
+    },
+    {
+      "id": "local_services",
+      "group": "services",
+      "label": "Local services (trades, clinics, salons)",
+      "packs": [
+        "lead_gen",
+        "bookings"
+      ]
+    },
+    {
+      "id": "healthcare",
+      "group": "services",
+      "label": "Healthcare provider",
+      "packs": [
+        "lead_gen",
+        "bookings"
+      ]
+    },
+    {
+      "id": "legal_accounting",
+      "group": "services",
+      "label": "Legal and accounting",
+      "packs": [
+        "lead_gen"
+      ]
+    },
+    {
+      "id": "real_estate",
+      "group": "services",
+      "label": "Real estate",
+      "packs": [
+        "lead_gen"
+      ]
+    },
+    {
+      "id": "recruiting",
+      "group": "services",
+      "label": "Recruiting and staffing",
+      "packs": [
+        "lead_gen"
+      ]
+    },
+    {
+      "id": "travel_hospitality",
+      "group": "bookings",
+      "label": "Travel and hospitality",
+      "packs": [
+        "bookings"
+      ]
+    },
+    {
+      "id": "events_ticketing",
+      "group": "bookings",
+      "label": "Events and ticketing",
+      "packs": [
+        "bookings",
+        "ecommerce"
+      ]
+    },
+    {
+      "id": "restaurants_food",
+      "group": "bookings",
+      "label": "Restaurants and food",
+      "packs": [
+        "bookings"
+      ]
+    },
+    {
+      "id": "fitness_classes",
+      "group": "bookings",
+      "label": "Fitness and classes",
+      "packs": [
+        "bookings",
+        "subscription"
+      ]
+    },
+    {
+      "id": "online_courses",
+      "group": "education",
+      "label": "Online courses",
+      "packs": [
+        "ecommerce",
+        "subscription"
+      ]
+    },
+    {
+      "id": "coaching_memberships",
+      "group": "education",
+      "label": "Coaching and memberships",
+      "packs": [
+        "subscription",
+        "lead_gen"
+      ]
+    },
+    {
+      "id": "schools_training",
+      "group": "education",
+      "label": "Schools and training",
+      "packs": [
+        "lead_gen"
+      ]
+    },
+    {
+      "id": "fintech_banking",
+      "group": "finance",
+      "label": "Fintech and banking",
+      "packs": [
+        "lead_gen",
+        "subscription"
+      ]
+    },
+    {
+      "id": "lending",
+      "group": "finance",
+      "label": "Lending",
+      "packs": [
+        "lead_gen"
+      ]
+    },
+    {
+      "id": "insurance",
+      "group": "finance",
+      "label": "Insurance",
+      "packs": [
+        "lead_gen",
+        "subscription"
+      ]
+    },
+    {
+      "id": "investing_crypto",
+      "group": "finance",
+      "label": "Investing and crypto",
+      "packs": [
+        "lead_gen",
+        "subscription"
+      ]
+    },
+    {
+      "id": "publisher_ads",
+      "group": "media",
+      "label": "Publisher with ads",
+      "packs": [
+        "content"
+      ]
+    },
+    {
+      "id": "paid_newsletter",
+      "group": "media",
+      "label": "Paid newsletter or subscriptions",
+      "packs": [
+        "content",
+        "subscription"
+      ]
+    },
+    {
+      "id": "community_memberships",
+      "group": "media",
+      "label": "Community and memberships",
+      "packs": [
+        "subscription",
+        "content"
+      ]
+    },
+    {
+      "id": "creator",
+      "group": "media",
+      "label": "Creator",
+      "packs": [
+        "content",
+        "ecommerce"
+      ]
+    },
+    {
+      "id": "podcast_video",
+      "group": "media",
+      "label": "Podcast and video",
+      "packs": [
+        "content"
+      ]
+    },
+    {
+      "id": "lead_gen_affiliate",
+      "group": "other",
+      "label": "Lead generation and affiliate",
+      "packs": [
+        "lead_gen"
+      ]
+    },
+    {
+      "id": "nonprofit",
+      "group": "other",
+      "label": "Nonprofit and donations",
+      "packs": [
+        "donations"
+      ]
+    },
+    {
+      "id": "hardware",
+      "group": "other",
+      "label": "Hardware and devices",
+      "packs": [
+        "ecommerce"
+      ]
+    },
+    {
+      "id": "government",
+      "group": "other",
+      "label": "Government and public sector",
+      "packs": [
+        "lead_gen"
+      ]
+    },
+    {
+      "id": "other",
+      "group": "other",
+      "label": "Other",
+      "packs": [
+        "lead_gen"
+      ]
+    }
+  ],
+  "revenue_models": [
+    {
+      "id": "subscription",
+      "label": "Subscription"
+    },
+    {
+      "id": "one_off",
+      "label": "One-off purchase"
+    },
+    {
+      "id": "usage",
+      "label": "Usage-based"
+    },
+    {
+      "id": "commission",
+      "label": "Commission or take rate"
+    },
+    {
+      "id": "advertising",
+      "label": "Advertising"
+    },
+    {
+      "id": "donations",
+      "label": "Donations"
+    },
+    {
+      "id": "free",
+      "label": "Free or not yet charging"
+    }
+  ]
+}

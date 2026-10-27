@@ -1,0 +1,42 @@
+[build-system]
+requires = ["hatchling>=1.24"]
+build-backend = "hatchling.build"
+
+[project]
+name = "outflare"
+dynamic = ["version"]
+description = "Python client for the Outflare API: every operation as a method, with retries, idempotency and webhook checks"
+readme = "README.md"
+license = "Apache-2.0"
+requires-python = ">=3.9"
+dependencies = ["httpx>=0.27,<1"]
+keywords = ["outflare", "cold-email", "outbound", "gtm", "api", "sdk"]
+classifiers = [
+  "Programming Language :: Python :: 3",
+  "Typing :: Typed",
+  "License :: OSI Approved :: Apache Software License",
+]
+
+[project.urls]
+Homepage = "https://outflare.ai/docs/sdk/python/"
+Source = "https://github.com/outflareai/outflare/tree/main/sdk/python"
+Issues = "https://github.com/outflareai/outflare/issues"
+
+[project.optional-dependencies]
+test = ["pytest>=8"]
+
+[tool.hatch.version]
+path = "src/outflare/_version.py"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/outflare"]
+
+[tool.ruff]
+target-version = "py39"
+line-length = 120
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "RUF"]
+
+[tool.ruff.lint.per-file-ignores]
+"src/outflare/_operations.py" = ["E501"]  # generated; long Literal[...] hints

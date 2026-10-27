@@ -1,0 +1,115 @@
+# Security scan (AGENTS.md, "Secrets and security"). This repository is public:
+# anything committed here, on any branch, in any commit, is readable by
+# everyone forever, so a leaked secret has to be revoked, not just deleted.
+#
+# - secrets: gitleaks. A pull request scans its own commits; main and the
+#   daily run scan the whole history of every branch and every pull request head.
+# - fake-data: a pull request may not add a real email address, in its
+#   code, title or description (scripts/check-fake-data.mjs).
+# - workflows: zizmor, for workflow mistakes a public repo can't afford
+#   (unpinned actions, write tokens, untrusted input in scripts).
+# - dependencies: govulncheck (Go) and pnpm audit (npm, high and critical),
+#   daily, so a new advisory doesn't block unrelated pull requests.
+#
+# A failed run on main is filed as an issue for the maintainers.
+# Known false positives go in .gitleaksignore, never in a wider allowlist.
+name: Security
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    - cron: "23 3 * * *" # daily, 03:23 UTC
+  workflow_dispatch:
+
+concurrency:
+  group: security-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+env:
+  GITLEAKS_VERSION: 8.21.2
+  GITLEAKS_SHA256: 5bc41815076e6ed6ef8fbecc9d9b75bcae31f39029ceb55da08086315316e3ba
+  ZIZMOR_VERSION: 1.31.1
+
+jobs:
+  secrets:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - name: Install gitleaks
+        run: |
+          curl -fsSL -o gitleaks.tgz "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
+          echo "${GITLEAKS_SHA256}  gitleaks.tgz" | sha256sum -c -
+          tar -xzf gitleaks.tgz gitleaks && rm gitleaks.tgz && sudo mv gitleaks /usr/local/bin/
+      - name: Scan for committed secrets
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE: ${{ github.event.pull_request.base.sha }}
+          HEAD: ${{ github.event.pull_request.head.sha }}
+          # Read-only (permissions above), used only for this fetch, never
+          # written to .git/config. Without it the fetch fails while the
+          # repository is private.
+          TOKEN: ${{ github.token }}
+        run: |
+          if [ "$EVENT" = pull_request ]; then
+            range="$BASE..$HEAD"
+          else
+            # Every branch, plus every pull request's head: those stay
+            # readable on GitHub after their branch is deleted.
+            auth="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$TOKEN" | base64 -w0)"
+            git -c http.https://github.com/.extraheader="$auth" fetch --quiet origin \
+              '+refs/heads/*:refs/remotes/origin/*' '+refs/pull/*/head:refs/remotes/pull/*'
+            range="--all"
+          fi
+          gitleaks git --no-banner --redact --log-opts="$range" .
+
+  fake-data:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - name: No real email addresses in the change, title or description
+        env:
+          BASE: ${{ github.event.pull_request.base.sha }}
+          HEAD: ${{ github.event.pull_request.head.sha }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          PR_BODY: ${{ github.event.pull_request.body }}
+        run: node scripts/check-fake-data.mjs "$BASE" "$HEAD"
+
+  workflows:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - name: Audit GitHub Actions workflows
+        run: pipx run "zizmor==${ZIZMOR_VERSION}" --offline --format=github .github/workflows
+
+  dependencies:
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
+        with:
+          go-version-file: go.mod
+      - name: Go vulnerabilities that our code reaches
+        run: go run golang.org/x/vuln/cmd/govulncheck@latest ./...
+      - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v4.4.0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 22
+      - name: npm advisories (high and critical, shipped packages)
+        run: pnpm audit --prod --audit-level high

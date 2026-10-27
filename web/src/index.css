@@ -1,0 +1,196 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+@import "@fontsource-variable/geist";
+@import "@fontsource-variable/geist-mono";
+
+/* Dark is the default; the theme button in the sidebar switches to light.
+   The choice is kept per browser in localStorage ("theme"). */
+@custom-variant dark (&:where([data-theme="dark"], [data-theme="dark"] *));
+
+@theme {
+  --font-sans: "Geist Variable", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "Geist Mono Variable", ui-monospace, SFMono-Regular, Menlo, monospace;
+
+  /* Neutral greys, cool and slightly blue, close to zinc. 950 is the page
+     background in dark mode, 900 raised surfaces, 800 borders. */
+  --color-neutral-50: oklch(0.985 0 0);
+  --color-neutral-100: oklch(0.967 0.001 286.4);
+  --color-neutral-200: oklch(0.92 0.004 286.3);
+  --color-neutral-300: oklch(0.871 0.006 286.3);
+  --color-neutral-400: oklch(0.705 0.015 286.1);
+  --color-neutral-500: oklch(0.6 0.016 285.9);
+  --color-neutral-600: oklch(0.47 0.017 285.8);
+  --color-neutral-700: oklch(0.34 0.012 285.8);
+  --color-neutral-800: oklch(0.255 0.006 286);
+  --color-neutral-900: oklch(0.19 0.005 285.9);
+  --color-neutral-950: oklch(0.145 0.004 285.8);
+
+  /* The one brand color: active nav, live states, links in prose. */
+  --color-brand: oklch(0.72 0.17 152);
+  --color-brand-strong: oklch(0.62 0.17 152);
+}
+
+/* shadcn/ui design tokens (components in src/components/ui). Light first,
+   then dark, which is the default. Greys match the neutral scale above. */
+:root {
+  --radius: 0.5rem;
+  /* Chart series, in fixed order (validated for colour-blind separation). */
+  --series-1: #2a78d6;
+  --series-2: #eb6834;
+  --series-3: #1baf7a;
+  --series-4: #eda100;
+  --series-5: #e87ba4;
+  --series-6: #6250d6;
+  --background: oklch(1 0 0);
+  --foreground: oklch(0.145 0.004 285.8);
+  --card: oklch(1 0 0);
+  --card-foreground: oklch(0.145 0.004 285.8);
+  --popover: oklch(1 0 0);
+  --popover-foreground: oklch(0.145 0.004 285.8);
+  --primary: oklch(0.19 0.005 285.9);
+  --primary-foreground: oklch(0.985 0 0);
+  --secondary: oklch(0.967 0.001 286.4);
+  --secondary-foreground: oklch(0.19 0.005 285.9);
+  --muted: oklch(0.967 0.001 286.4);
+  --muted-foreground: oklch(0.55 0.016 285.9);
+  --accent: oklch(0.967 0.001 286.4);
+  --accent-foreground: oklch(0.19 0.005 285.9);
+  --destructive: oklch(0.577 0.245 27.3);
+  --border: oklch(0.92 0.004 286.3);
+  --input: oklch(0.92 0.004 286.3);
+  --ring: oklch(0.705 0.015 286.1);
+  --sidebar: oklch(0.985 0 0);
+  --sidebar-foreground: oklch(0.145 0.004 285.8);
+  --sidebar-primary: oklch(0.62 0.17 152);
+  --sidebar-primary-foreground: oklch(0.985 0 0);
+  --sidebar-accent: oklch(0.94 0.003 286.3);
+  --sidebar-accent-foreground: oklch(0.19 0.005 285.9);
+  --sidebar-border: oklch(0.92 0.004 286.3);
+  --sidebar-ring: oklch(0.705 0.015 286.1);
+}
+
+[data-theme="dark"] {
+  --series-1: #3987e5;
+  --series-2: #d95926;
+  --series-3: #199e70;
+  --series-4: #c98500;
+  --series-5: #d55181;
+  --series-6: #9085e9;
+  --background: oklch(0.145 0.004 285.8);
+  --foreground: oklch(0.985 0 0);
+  --card: oklch(0.165 0.004 285.8);
+  --card-foreground: oklch(0.985 0 0);
+  --popover: oklch(0.19 0.005 285.9);
+  --popover-foreground: oklch(0.985 0 0);
+  --primary: oklch(0.985 0 0);
+  --primary-foreground: oklch(0.19 0.005 285.9);
+  --secondary: oklch(0.255 0.006 286);
+  --secondary-foreground: oklch(0.985 0 0);
+  --muted: oklch(0.21 0.005 285.9);
+  --muted-foreground: oklch(0.65 0.016 285.9);
+  --accent: oklch(0.235 0.006 286);
+  --accent-foreground: oklch(0.985 0 0);
+  --destructive: oklch(0.704 0.191 22.2);
+  --border: oklch(1 0 0 / 9%);
+  --input: oklch(1 0 0 / 12%);
+  --ring: oklch(0.55 0.016 285.9);
+  --sidebar: oklch(0.145 0.004 285.8);
+  --sidebar-foreground: oklch(0.92 0.004 286.3);
+  --sidebar-primary: oklch(0.72 0.17 152);
+  --sidebar-primary-foreground: oklch(0.145 0.004 285.8);
+  --sidebar-accent: oklch(0.21 0.005 285.9);
+  --sidebar-accent-foreground: oklch(0.985 0 0);
+  --sidebar-border: oklch(1 0 0 / 9%);
+  --sidebar-ring: oklch(0.55 0.016 285.9);
+}
+
+@theme inline {
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-ring: var(--sidebar-ring);
+}
+
+@layer base {
+html {
+  color-scheme: light;
+  font-feature-settings: "ss01", "cv11";
+}
+html[data-theme="dark"] {
+  color-scheme: dark;
+}
+
+* {
+  @apply border-border outline-ring/50;
+}
+
+body {
+  @apply bg-background font-sans text-[13px] leading-5 text-foreground antialiased;
+}
+
+/* Numbers line up in every table and tile. */
+td, th, dd, output {
+  font-variant-numeric: tabular-nums;
+}
+
+code, kbd, samp, pre {
+  @apply font-mono;
+}
+code {
+  @apply rounded border border-neutral-200 bg-neutral-50 px-1 py-px text-[12px] dark:border-neutral-800 dark:bg-neutral-900;
+}
+pre code {
+  @apply border-0 bg-transparent p-0;
+}
+
+/* Tables: dense rows, quiet uppercase headings, a hover on rows. */
+table {
+  @apply w-full border-collapse;
+}
+thead th {
+  @apply border-b border-neutral-200 px-2 py-2 text-left font-mono text-[11px] font-medium tracking-wide text-neutral-500 uppercase dark:border-neutral-800;
+}
+tbody td {
+  @apply border-b border-neutral-100 px-2 py-2 align-top dark:border-neutral-800/70;
+}
+tbody tr:last-child td {
+  @apply border-b-0;
+}
+tbody tr {
+  @apply transition-colors hover:bg-neutral-50 dark:hover:bg-neutral-900/60;
+}
+
+::selection {
+  @apply bg-brand/30;
+}
+
+:focus-visible {
+  @apply outline-2 outline-offset-2 outline-ring;
+}
+}

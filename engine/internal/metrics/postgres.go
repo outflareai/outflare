@@ -1,0 +1,293 @@
+package metrics
+
+import (
+	"context"
+	"log/slog"
+	"strconv"
+	"sync"
+	"time"
+
+	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/prometheus/client_golang/prometheus"
+)
+
+// Postgres reports the connection pool, the job queue and the database's
+// own counters. It queries on each scrape, at most once every cacheFor, so
+// a busy scraper or several cannot load the database.
+type Postgres struct {
+	Pool *pgxpool.Pool
+	Log  *slog.Logger
+
+	mu      sync.Mutex
+	at      time.Time
+	samples []prometheus.Metric
+}
+
+const (
+	cacheFor     = 10 * time.Second
+	queryTimeout = 5 * time.Second
+	topTables    = 25 // largest tables get their own size series
+)
+
+func desc(sub, name, help string, labels ...string) *prometheus.Desc {
+	return prometheus.NewDesc(prometheus.BuildFQName(namespace, sub, name), help, labels, nil)
+}
+
+var (
+	poolAcquired    = desc("db_pool", "acquired_conns", "Pool connections in use.")
+	poolIdle        = desc("db_pool", "idle_conns", "Pool connections idle.")
+	poolTotal       = desc("db_pool", "total_conns", "Pool connections open.")
+	poolMax         = desc("db_pool", "max_conns", "Most connections the pool will open.")
+	poolAcquires    = desc("db_pool", "acquires_total", "Connections handed out by the pool.")
+	poolWaits       = desc("db_pool", "empty_acquires_total", "Acquires that had to wait because every connection was busy.")
+	poolWaitSeconds = desc("db_pool", "empty_acquire_wait_seconds_total", "Time spent waiting for a busy pool.")
+	poolAcquireSecs = desc("db_pool", "acquire_seconds_total", "Time spent acquiring connections.")
+	poolCanceled    = desc("db_pool", "canceled_acquires_total", "Acquires given up before a connection was free.")
+	queued          = desc("jobs", "queued", "Jobs due now and waiting for a worker, by kind.", "kind")
+	scheduled       = desc("jobs", "scheduled", "Jobs waiting for a later run_at (retries and schedules), by kind.", "kind")
+	oldestDue       = desc("jobs", "oldest_due_seconds", "How long the longest-waiting due job has waited, by kind.", "kind")
+	running         = desc("jobs", "running", "Jobs claimed by any worker, by kind.", "kind")
+	dbBackends      = desc("pg", "connections", "Connections to the database, by state.", "state")
+	dbMaxConns      = desc("pg", "max_connections", "The server's max_connections.")
+	dbLongestXact   = desc("pg", "longest_transaction_seconds", "Age of the oldest open transaction.")
+	dbLockWaits     = desc("pg", "lock_waiting_connections", "Connections waiting on a lock.")
+	dbSize          = desc("pg", "database_bytes", "Size of the database.")
+	dbCommits       = desc("pg", "commits_total", "Transactions committed.")
+	dbRollbacks     = desc("pg", "rollbacks_total", "Transactions rolled back.")
+	dbBlocksHit     = desc("pg", "blocks_hit_total", "Blocks read from the buffer cache.")
+	dbBlocksRead    = desc("pg", "blocks_read_total", "Blocks read from disk.")
+	dbDeadlocks     = desc("pg", "deadlocks_total", "Deadlocks detected.")
+	dbTempBytes     = desc("pg", "temp_bytes_total", "Bytes written to temporary files by queries too big for work_mem.")
+	tableBytes      = desc("pg", "table_bytes", "Size of a table with its indexes and TOAST, for the largest tables.", "table")
+	tableDeadRows   = desc("pg", "table_dead_rows", "Dead rows waiting for vacuum, for the largest tables.", "table")
+	tableSeqScans   = desc("pg", "table_seq_scans_total", "Sequential scans, for the largest tables.", "table")
+	pipeItems       = desc("pipeline", "items", "Pipeline items now, by pipeline, stage and state (due, scheduled, working, held).", "pipeline", "stage", "state")
+	pipeOldest      = desc("pipeline", "oldest_due_seconds", "How long the longest-waiting due item has waited, by pipeline and stage. The highest is the bottleneck.", "pipeline", "stage")
+	pipeRuns        = desc("pipeline", "runs", "Pipeline runs that are running or paused, by pipeline and state.", "pipeline", "state")
+	pipeBreakers    = desc("pipeline", "breakers", "Outside accounts by breaker state (open, half_open) and kind of account.", "account", "state")
+	inboxPending    = desc("inbox", "pending", "Inbox rows (browser batches) waiting for a worker.")
+	inboxOldest     = desc("inbox", "oldest_seconds", "How long the oldest waiting inbox row has waited.")
+	inboxFailed     = desc("inbox", "failed", "Inbox rows set aside after failing too often.")
+	scrapeErrors    = desc("metrics", "scrape_errors", "Queries that failed in the last database scrape.")
+	scrapeDuration  = desc("metrics", "scrape_duration_seconds", "Time the last database scrape took.")
+	allDescs        = []*prometheus.Desc{poolAcquired, poolIdle, poolTotal, poolMax, poolAcquires, poolWaits, poolWaitSeconds, poolAcquireSecs, poolCanceled, queued, scheduled, oldestDue, running, dbBackends, dbMaxConns, dbLongestXact, dbLockWaits, dbSize, dbCommits, dbRollbacks, dbBlocksHit, dbBlocksRead, dbDeadlocks, dbTempBytes, tableBytes, tableDeadRows, tableSeqScans, pipeItems, pipeOldest, pipeRuns, pipeBreakers, inboxPending, inboxOldest, inboxFailed, scrapeErrors, scrapeDuration}
+	gauge, counter  = prometheus.GaugeValue, prometheus.CounterValue
+)
+
+// rowser is the part of pgx.Rows the scrapes read.
+type rowser interface {
+	Next() bool
+	Scan(...any) error
+}
+
+func (p *Postgres) Describe(ch chan<- *prometheus.Desc) {
+	for _, d := range allDescs {
+		ch <- d
+	}
+}
+
+func (p *Postgres) Collect(ch chan<- prometheus.Metric) {
+	// The pool's own numbers are free; read them every time.
+	s := p.Pool.Stat()
+	ch <- prometheus.MustNewConstMetric(poolAcquired, gauge, float64(s.AcquiredConns()))
+	ch <- prometheus.MustNewConstMetric(poolIdle, gauge, float64(s.IdleConns()))
+	ch <- prometheus.MustNewConstMetric(poolTotal, gauge, float64(s.TotalConns()))
+	ch <- prometheus.MustNewConstMetric(poolMax, gauge, float64(s.MaxConns()))
+	ch <- prometheus.MustNewConstMetric(poolAcquires, counter, float64(s.AcquireCount()))
+	ch <- prometheus.MustNewConstMetric(poolWaits, counter, float64(s.EmptyAcquireCount()))
+	ch <- prometheus.MustNewConstMetric(poolWaitSeconds, counter, s.EmptyAcquireWaitTime().Seconds())
+	ch <- prometheus.MustNewConstMetric(poolAcquireSecs, counter, s.AcquireDuration().Seconds())
+	ch <- prometheus.MustNewConstMetric(poolCanceled, counter, float64(s.CanceledAcquireCount()))
+
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if time.Since(p.at) > cacheFor {
+		p.samples = p.query()
+		p.at = time.Now()
+	}
+	for _, m := range p.samples {
+		ch <- m
+	}
+}
+
+func (p *Postgres) query() []prometheus.Metric {
+	start := time.Now()
+	ctx, cancel := context.WithTimeout(context.Background(), queryTimeout)
+	defer cancel()
+	var out []prometheus.Metric
+	add := func(d *prometheus.Desc, t prometheus.ValueType, v float64, labels ...string) {
+		out = append(out, prometheus.MustNewConstMetric(d, t, v, labels...))
+	}
+	failed := 0
+	run := func(name, sql string, scan func(rowser) error) {
+		rows, err := p.Pool.Query(ctx, sql)
+		if err == nil {
+			err = scan(rows)
+			rows.Close()
+			if err == nil {
+				err = rows.Err()
+			}
+		}
+		if err != nil {
+			failed++
+			if p.Log != nil {
+				p.Log.Warn("metrics query", "query", name, "err", err)
+			}
+		}
+	}
+	// Both filters use the partial indexes on queued and running jobs.
+	run("jobs_queued", `
+		SELECT kind,
+			count(*) FILTER (WHERE run_at <= now()),
+			count(*) FILTER (WHERE run_at > now()),
+			coalesce(extract(epoch FROM now() - min(run_at) FILTER (WHERE run_at <= now())), 0)::float8
+		FROM jobs WHERE status = 'queued' GROUP BY kind`, func(r rowser) error {
+		for r.Next() {
+			var kind string
+			var due, later int64
+			var oldest float64
+			if err := r.Scan(&kind, &due, &later, &oldest); err != nil {
+				return err
+			}
+			add(queued, gauge, float64(due), kind)
+			add(scheduled, gauge, float64(later), kind)
+			add(oldestDue, gauge, oldest, kind)
+		}
+		return nil
+	})
+	// The pending filter uses the inbox's partial index.
+	run("inbox", `
+		SELECT count(*) FILTER (WHERE failed_at IS NULL),
+			coalesce(extract(epoch FROM now() - min(received_at) FILTER (WHERE failed_at IS NULL)), 0)::float8,
+			count(*) FILTER (WHERE failed_at IS NOT NULL)
+		FROM site_event_inbox`, func(r rowser) error {
+		for r.Next() {
+			var pending, failed int64
+			var oldest float64
+			if err := r.Scan(&pending, &oldest, &failed); err != nil {
+				return err
+			}
+			add(inboxPending, gauge, float64(pending))
+			add(inboxOldest, gauge, oldest)
+			add(inboxFailed, gauge, float64(failed))
+		}
+		return nil
+	})
+	run("jobs_running", `SELECT kind, count(*) FROM jobs WHERE status = 'running' GROUP BY kind`, func(r rowser) error {
+		for r.Next() {
+			var kind string
+			var n int64
+			if err := r.Scan(&kind, &n); err != nil {
+				return err
+			}
+			add(running, gauge, float64(n), kind)
+		}
+		return nil
+	})
+	// Live items only: finished ones are not scanned.
+	run("pipeline_items", `
+		SELECT pipeline, stage,
+			count(*) FILTER (WHERE state = 'waiting' AND next_at <= now()),
+			count(*) FILTER (WHERE state = 'waiting' AND next_at > now()),
+			count(*) FILTER (WHERE state = 'working'),
+			count(*) FILTER (WHERE state = 'held'),
+			coalesce(extract(epoch FROM now() - min(next_at) FILTER (WHERE state = 'waiting' AND next_at <= now())), 0)::float8
+		FROM pipeline_items WHERE state IN ('waiting', 'working', 'held') GROUP BY pipeline, stage`, func(r rowser) error {
+		for r.Next() {
+			var pipeline, stage string
+			var due, later, working, held int64
+			var oldest float64
+			if err := r.Scan(&pipeline, &stage, &due, &later, &working, &held, &oldest); err != nil {
+				return err
+			}
+			add(pipeItems, gauge, float64(due), pipeline, stage, "due")
+			add(pipeItems, gauge, float64(later), pipeline, stage, "scheduled")
+			add(pipeItems, gauge, float64(working), pipeline, stage, "working")
+			add(pipeItems, gauge, float64(held), pipeline, stage, "held")
+			add(pipeOldest, gauge, oldest, pipeline, stage)
+		}
+		return nil
+	})
+	run("pipeline_runs", `SELECT pipeline, state, count(*) FROM pipeline_runs WHERE state IN ('running', 'paused') GROUP BY 1, 2`, func(r rowser) error {
+		for r.Next() {
+			var pipeline, state string
+			var n int64
+			if err := r.Scan(&pipeline, &state, &n); err != nil {
+				return err
+			}
+			add(pipeRuns, gauge, float64(n), pipeline, state)
+		}
+		return nil
+	})
+	run("pipeline_breakers", `SELECT split_part(key, ':', 1), breaker, count(*) FROM pipeline_limits WHERE breaker <> 'closed' GROUP BY 1, 2`, func(r rowser) error {
+		for r.Next() {
+			var account, state string
+			var n int64
+			if err := r.Scan(&account, &state, &n); err != nil {
+				return err
+			}
+			add(pipeBreakers, gauge, float64(n), account, state)
+		}
+		return nil
+	})
+	run("pg_activity", `
+		SELECT coalesce(state, 'unknown'), count(*),
+			coalesce(max(extract(epoch FROM now() - xact_start)), 0)::float8,
+			count(*) FILTER (WHERE wait_event_type = 'Lock')
+		FROM pg_stat_activity WHERE datname = current_database() AND backend_type = 'client backend'
+		GROUP BY 1`, func(r rowser) error {
+		var longest, waits float64
+		for r.Next() {
+			var state string
+			var n, w int64
+			var age float64
+			if err := r.Scan(&state, &n, &age, &w); err != nil {
+				return err
+			}
+			add(dbBackends, gauge, float64(n), state)
+			longest, waits = max(longest, age), waits+float64(w)
+		}
+		add(dbLongestXact, gauge, longest)
+		add(dbLockWaits, gauge, waits)
+		return nil
+	})
+	run("pg_database", `
+		SELECT current_setting('max_connections')::float8, pg_database_size(current_database())::float8,
+			xact_commit::float8, xact_rollback::float8, blks_hit::float8, blks_read::float8, deadlocks::float8, temp_bytes::float8
+		FROM pg_stat_database WHERE datname = current_database()`, func(r rowser) error {
+		for r.Next() {
+			var maxConns, size, commits, rollbacks, hit, read, deadlocks, temp float64
+			if err := r.Scan(&maxConns, &size, &commits, &rollbacks, &hit, &read, &deadlocks, &temp); err != nil {
+				return err
+			}
+			add(dbMaxConns, gauge, maxConns)
+			add(dbSize, gauge, size)
+			add(dbCommits, counter, commits)
+			add(dbRollbacks, counter, rollbacks)
+			add(dbBlocksHit, counter, hit)
+			add(dbBlocksRead, counter, read)
+			add(dbDeadlocks, counter, deadlocks)
+			add(dbTempBytes, counter, temp)
+		}
+		return nil
+	})
+	run("pg_tables", `
+		SELECT relname, pg_total_relation_size(relid)::float8, n_dead_tup::float8, seq_scan::float8
+		FROM pg_stat_user_tables ORDER BY pg_total_relation_size(relid) DESC LIMIT `+strconv.Itoa(topTables), func(r rowser) error {
+		for r.Next() {
+			var table string
+			var size, dead, scans float64
+			if err := r.Scan(&table, &size, &dead, &scans); err != nil {
+				return err
+			}
+			add(tableBytes, gauge, size, table)
+			add(tableDeadRows, gauge, dead, table)
+			add(tableSeqScans, counter, scans, table)
+		}
+		return nil
+	})
+
+	add(scrapeErrors, gauge, float64(failed))
+	add(scrapeDuration, gauge, time.Since(start).Seconds())
+	return out
+}

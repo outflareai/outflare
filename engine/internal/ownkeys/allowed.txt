@@ -1,0 +1,47 @@
+# The engine's exceptions to the bring-your-own-keys rule (AGENTS.md).
+#
+# Every third-party API a workspace uses runs on the workspace's own
+# account, with its own key or OAuth sign-in. The lines below are the only
+# environment variables that may name a third-party service, and the files
+# allowed to read them. Each one runs Outflare itself, never a workspace
+# feature. Adding a line needs a maintainer's approval in the pull request; never add
+# one to make a feature work without the workspace's own key.
+#
+#   env NAME|PREFIX*  path[,path]  why
+#   dynamic PATTERN   path[,path]  why
+#   import PKG        path[,path]  why
+#
+# Paths ending in / are directories. Format: engine/internal/ownkeys/scan.go.
+
+# Account emails (confirm, reset), sent from the operator's own address.
+env POSTMARK_SERVER_TOKEN       engine/internal/sysmail/sysmail.go  Outflare's own account email (sysmail), not campaign or workspace mail
+env RESEND_API_KEY              engine/internal/sysmail/sysmail.go  Outflare's own account email (sysmail), not campaign or workspace mail
+env CLOUDFLARE_EMAIL_API_TOKEN  engine/internal/sysmail/sysmail.go  Outflare's own account email (sysmail), not campaign or workspace mail
+env CLOUDFLARE_ACCOUNT_ID       engine/internal/sysmail/sysmail.go  the account that sends Outflare's own account email
+
+# OAuth apps: the operator's app id, which only sends a person to sign in to
+# their own account. The tokens it produces are the workspace's, sealed in
+# its own connection.
+env GOOGLE_OAUTH_CLIENT_ID         engine/internal/config/config.go,engine/internal/connectors/oauth.go  Outflare's Google OAuth app (sign-in, Gmail, and Google connectors on the workspace's own account)
+env GOOGLE_OAUTH_CLIENT_SECRET     engine/internal/config/config.go,engine/internal/connectors/oauth.go  Outflare's Google OAuth app (sign-in, Gmail, and Google connectors on the workspace's own account)
+env MICROSOFT_OAUTH_CLIENT_ID      engine/internal/config/config.go,engine/internal/connectors/oauth.go  Outflare's Microsoft OAuth app (Outlook mailboxes and calendars on the workspace's own account)
+env MICROSOFT_OAUTH_CLIENT_SECRET  engine/internal/config/config.go,engine/internal/connectors/oauth.go  Outflare's Microsoft OAuth app (Outlook mailboxes and calendars on the workspace's own account)
+dynamic *CLIENT_ID      engine/internal/connectors/oauth.go  CONNECTOR_<ID>_CLIENT_ID: each vendor's OAuth app, which signs the workspace in to its own account
+dynamic *CLIENT_SECRET  engine/internal/connectors/oauth.go  CONNECTOR_<ID>_CLIENT_SECRET: each vendor's OAuth app, which signs the workspace in to its own account
+dynamic *SCOPES         engine/internal/connectors/oauth.go  CONNECTOR_<ID>_SCOPES: the scopes those OAuth apps ask for
+dynamic *AUTH_URL       engine/internal/connectors/oauth.go  CONNECTOR_<ID>_AUTH_URL: the install link an OAuth app is given (Stripe Apps), not a key
+
+# The operator's own product analytics (docs/product-analytics.md).
+env OUTFLARE_POSTHOG_KEY   engine/internal/config/config.go  the operator's own PostHog project key, for Outflare's own product events
+env OUTFLARE_POSTHOG_HOST  engine/internal/config/config.go  where the operator's own PostHog is
+
+# Reads that aren't keys.
+dynamic *           engine/internal/config/config.go   the getenv helper; each of its calls is checked by name
+dynamic *           engine/internal/llm/llm.go         Provider.Env: an operator's base URL override for a provider's API, never a key
+dynamic OUTFLARE_*  engine/internal/cli/cli.go,mcp/src/index.ts  the CLI's and MCP server's own settings (OUTFLARE_URL, OUTFLARE_TOKEN, ...)
+dynamic os.Getenv   engine/outflare/run.go             hands the CLI its environment (see engine/internal/cli/cli.go)
+dynamic os.Environ  engine/internal/mcphost/mcphost.go  starts Outflare's own MCP server; vendor keys are scrubbed from the environment at start-up
+dynamic os.Environ  engine/internal/ownkeys/ownkeys.go  Scrub, which removes vendor keys from the environment
+
+# SDKs that would read ambient credentials if asked.
+import github.com/anthropics/anthropic-sdk-go  engine/internal/llm/claude.go  built with option.WithoutEnvironmentDefaults and the workspace's key only (TestClaudeUsesOnlyTheWorkspaceKey)

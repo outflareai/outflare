@@ -1,0 +1,12 @@
+node_modules/
+dist/
+.env
+*.local
+/engine/bin/
+coverage/
+.DS_Store
+__pycache__/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+*.egg-info/

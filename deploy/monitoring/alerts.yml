@@ -1,0 +1,208 @@
+# Alert rules for Outflare's operational metrics (docs/monitoring.md).
+# Prometheus loads them as they are; Grafana Cloud takes them with
+# `mimirtool rules load deploy/monitoring/alerts.yml`. The thresholds suit
+# a single server; change them in your copy rather than silencing alerts.
+groups:
+  - name: outflare
+    rules:
+      - alert: OutflareDown
+        # absent() covers service discovery finding no server at all.
+        expr: up{job="outflare"} == 0 or absent(up{job="outflare"})
+        for: 2m
+        labels: { severity: critical }
+        annotations:
+          summary: "Outflare's metrics can't be read: the server is down or restarting."
+
+      - alert: OutflareHighErrorRate
+        expr: |
+          sum(rate(outflare_http_requests_total{code="5xx"}[5m]))
+            / clamp_min(sum(rate(outflare_http_requests_total[5m])), 0.1) > 0.02
+        for: 10m
+        labels: { severity: critical }
+        annotations:
+          summary: "More than 2% of requests are failing with a 5xx."
+
+      - alert: OutflareSlowRequests
+        expr: |
+          histogram_quantile(0.95, sum by (le) (rate(outflare_http_request_duration_seconds_bucket{route!="GET /mcp"}[5m]))) > 2
+        for: 10m
+        labels: { severity: warning }
+        annotations:
+          summary: "95th percentile request time is over 2 seconds."
+
+      - alert: OutflareJobBacklog
+        expr: max by (kind) (outflare_jobs_oldest_due_seconds) > 600
+        for: 10m
+        labels: { severity: warning }
+        annotations:
+          summary: "A job has waited over 10 minutes for a worker ({{ $labels.kind }}): workers are saturated or stuck."
+
+      - alert: OutflareSiteEventsBehind
+        expr: max(outflare_inbox_oldest_seconds) > 300
+        for: 5m
+        labels: { severity: warning }
+        annotations:
+          summary: "Website events have waited over 5 minutes to be stored: no worker is running, or workers can't keep up. They are safe in the inbox."
+
+      - alert: OutflareSiteEventsSetAside
+        expr: max(outflare_inbox_failed) > 0
+        for: 15m
+        labels: { severity: warning }
+        annotations:
+          summary: "Website event batches failed 5 times and were set aside (site_events.store_failed in the logs)."
+
+      - alert: OutflareJobsDying
+        expr: sum by (kind) (increase(outflare_jobs_processed_total{outcome="dead"}[15m])) > 10
+        labels: { severity: warning }
+        annotations:
+          summary: "Jobs of kind {{ $labels.kind }} are failing for good (job.dead)."
+
+      - alert: OutflareWebhookSignaturesFailing
+        expr: sum by (connector) (increase(outflare_hooks_deliveries_total{outcome="bad_signature"}[15m])) > 20
+        labels: { severity: warning }
+        annotations:
+          summary: "Many {{ $labels.connector }} webhook deliveries have a wrong signature: a stale signing secret on a connection, or someone posting to an address (connection_hook.received with bad_signature in the logs)."
+
+      - alert: OutflareWebhookEventsFailing
+        expr: sum by (connector) (increase(outflare_hooks_events_total{result="failed"}[30m])) > 5
+        labels: { severity: warning }
+        annotations:
+          summary: "{{ $labels.connector }} webhook events are failing after their retries (connection_hook.event_failed in the logs). They can be replayed from Logs, Incoming webhooks."
+
+      - alert: OutflareWebhookEventsSlow
+        expr: histogram_quantile(0.95, sum by (le) (rate(outflare_hooks_handle_lag_seconds_bucket[15m]))) > 300
+        for: 15m
+        labels: { severity: warning }
+        annotations:
+          summary: "Webhook events wait over 5 minutes to be handled: workers are behind or stuck (jobs of kind hooks.handle)."
+
+      - alert: OutflarePipelineStageBehind
+        expr: max by (pipeline, stage) (outflare_pipeline_oldest_due_seconds) > 1800
+        for: 10m
+        labels: { severity: warning }
+        annotations:
+          summary: "Pipeline stage {{ $labels.pipeline }}/{{ $labels.stage }} has an item waiting over 30 minutes: it can't keep up or its workers are stuck."
+
+      - alert: OutflarePipelineErrors
+        expr: |
+          sum by (pipeline, stage) (rate(outflare_pipeline_items_total{outcome=~"retried|failed"}[15m]))
+            / sum by (pipeline, stage) (rate(outflare_pipeline_items_total[15m])) > 0.1
+        for: 15m
+        labels: { severity: warning }
+        annotations:
+          summary: "Over 10% of items in {{ $labels.pipeline }}/{{ $labels.stage }} are retrying or failing; see \"Why items stop\"."
+
+      - alert: OutflarePipelineItemsFailing
+        expr: sum by (pipeline, stage) (increase(outflare_pipeline_items_total{outcome="failed"}[30m])) > 25
+        labels: { severity: warning }
+        annotations:
+          summary: "Items in {{ $labels.pipeline }}/{{ $labels.stage }} are failing for good."
+
+      - alert: OutflareBreakerOpen
+        expr: sum by (account) (outflare_pipeline_breakers{state="open"}) > 0
+        for: 10m
+        labels: { severity: info }
+        annotations:
+          summary: "An outside {{ $labels.account }} account has been failing for 10 minutes and its calls are paused."
+
+      - alert: OutflareJobsReaped
+        expr: sum by (kind) (increase(outflare_jobs_reaped_total[15m])) > 0
+        labels: { severity: warning }
+        annotations:
+          summary: "Jobs of kind {{ $labels.kind }} ran past their lease and were put back in the queue, so they may run twice."
+
+      - alert: OutflareDBPoolSaturated
+        expr: max(outflare_db_pool_acquired_conns / outflare_db_pool_max_conns) > 0.9
+        for: 5m
+        labels: { severity: warning }
+        annotations:
+          summary: "The engine's database pool is over 90% in use; requests queue for connections."
+
+      - alert: OutflareDBPoolWaiting
+        expr: sum(rate(outflare_db_pool_empty_acquire_wait_seconds_total[5m])) > 0.5
+        for: 10m
+        labels: { severity: warning }
+        annotations:
+          summary: "Requests and jobs spend over half a second per second waiting for a database connection."
+
+      - alert: OutflarePostgresConnectionsNearMax
+        expr: max(sum without (state) (outflare_pg_connections) / outflare_pg_max_connections) > 0.8
+        for: 5m
+        labels: { severity: warning }
+        annotations:
+          summary: "Postgres is over 80% of max_connections."
+
+      - alert: OutflareLongTransaction
+        expr: max(outflare_pg_longest_transaction_seconds) > 300
+        for: 5m
+        labels: { severity: warning }
+        annotations:
+          summary: "A transaction has been open for over 5 minutes; it holds locks and stops vacuum."
+
+      - alert: OutflareDeadlocks
+        expr: increase(outflare_pg_deadlocks_total[15m]) > 0
+        labels: { severity: warning }
+        annotations:
+          summary: "Postgres detected deadlocks."
+
+      - alert: OutflareGoroutineLeak
+        expr: max(go_goroutines{job="outflare"}) > 20000
+        for: 15m
+        labels: { severity: warning }
+        annotations:
+          summary: "The engine runs over 20,000 goroutines; something is leaking."
+
+      - alert: OutflareDatabaseGrowingFast
+        # Worth a look before the volume fills: a table or index growing
+        # without bound, or data that should expire not being cleaned up.
+        expr: max(outflare_pg_database_bytes) > 1e9 and max(outflare_pg_database_bytes) > 1.25 * max(outflare_pg_database_bytes offset 1d)
+        for: 1h
+        labels: { severity: info }
+        annotations:
+          summary: "The database grew over 25% in a day (now {{ $value | humanize1024 }}B); check which tables grow and whether old data is cleaned up."
+
+      - alert: OutflareMetricsQueriesFailing
+        expr: max(outflare_metrics_scrape_errors) > 0
+        for: 15m
+        labels: { severity: info }
+        annotations:
+          summary: "Some database metrics can't be read; check the engine log for \"metrics query\"."
+
+      - alert: OutflareAICallsRunaway
+        # Calls run on workspaces' own keys, so a loop that keeps calling
+        # spends their money. Normal use is far below this.
+        expr: sum by (task) (rate(outflare_ai_calls_total[10m])) > 5
+        for: 15m
+        labels: { severity: critical }
+        annotations:
+          summary: "One tool ({{ $labels.task }}) has made over 5 AI calls a second for 15 minutes, on workspaces' own keys: check for a loop."
+
+      - alert: OutflareAILimitsReachedSurge
+        expr: sum(increase(outflare_ai_budget_alerts_total{level="100"}[1h])) > 20
+        labels: { severity: warning }
+        annotations:
+          summary: "Over 20 AI spend limits were reached in an hour: a tool may be using far more AI than it should."
+
+      - alert: OutflareDomainConnectLookupsFailing
+        # DNS providers' Domain Connect APIs not answering: the one-off
+        # approval falls back to a Cloudflare token meanwhile.
+        expr: sum(rate(outflare_domain_connect_lookups_total{outcome="lookup_failed"}[15m])) > 0.05 and sum(rate(outflare_domain_connect_lookups_total{outcome="lookup_failed"}[15m])) / sum(rate(outflare_domain_connect_lookups_total[15m])) > 0.5
+        for: 15m
+        labels: { severity: warning }
+        annotations:
+          summary: "Over half of Domain Connect lookups fail: a DNS provider's API is down or our signing key's TXT record at outflare.ai is missing; check the engine log for domain_connect."
+
+      - alert: OutflareQueryUnavailable
+        # The engine couldn't make or log in as a workspace's query role:
+        # Query is off for everyone it hits.
+        expr: sum(increase(outflare_query_runs_total{outcome="unavailable"}[15m])) > 0
+        labels: { severity: warning }
+        annotations:
+          summary: "Query couldn't set up its read-only database role; check the engine log for \"query: no query role\" (the database user needs CREATEROLE)."
+
+      - alert: OutflareQueriesTimingOut
+        expr: sum(rate(outflare_query_runs_total{outcome="timeout"}[15m])) / sum(rate(outflare_query_runs_total[15m])) > 0.25 and sum(increase(outflare_query_runs_total[15m])) > 20
+        for: 15m
+        labels: { severity: info }
+        annotations:
+          summary: "Over a quarter of queries are running past 15 seconds: the query views may need an index, or the database is overloaded."

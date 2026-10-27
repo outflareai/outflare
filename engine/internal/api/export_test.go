@@ -1,0 +1,22 @@
+package api
+
+import (
+	"context"
+	"time"
+)
+
+// SetCRMImportSizes makes CRM import pages, batches and steps small, so a
+// test covers paging and steps with a few records. It returns the undo.
+func SetCRMImportSizes(page, batch int, step time.Duration) func() {
+	p, b, s := crmImportPage, crmImportBatch, crmImportStep
+	crmImportPage, crmImportBatch, crmImportStep = page, batch, step
+	return func() { crmImportPage, crmImportBatch, crmImportStep = p, b, s }
+}
+
+// SyncPayments runs one payment sync now, as its job would.
+func (s *Server) SyncPayments(ctx context.Context, ws, id string) error {
+	return s.syncPayments(ctx, ws, id)
+}
+
+// SchedulePayments queues the payment syncs that are due, as the loop would.
+func (s *Server) SchedulePayments(ctx context.Context) error { return s.schedulePayments(ctx) }

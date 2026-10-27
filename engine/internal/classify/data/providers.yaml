@@ -1,0 +1,216 @@
+# Mailbox providers Outflare has reviewed. Each entry is the provider's own
+# domains, as it publishes them. These win over the open lists.
+#
+# category: free_personal, private_mailbox or relay_alias (see ../taxonomy.go)
+# subcategory: for relay_alias, permanent_alias or anonymous_alias
+# subdomains: true when the provider hands out addresses on subdomains
+#   (alias@name.example.com), so any subdomain is the provider too
+
+# Free consumer mailboxes, including ISP mail.
+- id: gmail
+  name: Gmail
+  category: free_personal
+  domains: [gmail.com, googlemail.com]
+- id: outlook
+  name: Outlook.com
+  category: free_personal
+  domains: [outlook.com, hotmail.com, hotmail.co.uk, hotmail.fr, hotmail.de, hotmail.it, hotmail.es, live.com, live.co.uk, live.fr, live.com.au, msn.com, windowslive.com]
+- id: yahoo
+  name: Yahoo Mail
+  category: free_personal
+  domains: [yahoo.com, yahoo.co.uk, yahoo.fr, yahoo.de, yahoo.it, yahoo.es, yahoo.ca, yahoo.com.au, yahoo.co.jp, yahoo.co.in, yahoo.com.br, ymail.com, rocketmail.com]
+- id: icloud
+  name: iCloud Mail
+  category: free_personal
+  domains: [icloud.com, me.com, mac.com]
+- id: aol
+  name: AOL Mail
+  category: free_personal
+  domains: [aol.com, aim.com]
+- id: gmx
+  name: GMX
+  category: free_personal
+  domains: [gmx.com, gmx.de, gmx.net, gmx.at, gmx.ch]
+- id: webde
+  name: WEB.DE
+  category: free_personal
+  domains: [web.de]
+- id: mailcom
+  name: mail.com
+  category: free_personal
+  domains: [mail.com]
+- id: yandex
+  name: Yandex Mail
+  category: free_personal
+  domains: [yandex.com, yandex.ru, ya.ru]
+- id: mailru
+  name: Mail.ru
+  category: free_personal
+  domains: [mail.ru, bk.ru, inbox.ru, list.ru]
+- id: zoho_personal
+  name: Zoho Mail (personal)
+  category: free_personal
+  domains: [zohomail.com]
+- id: qq
+  name: QQ Mail
+  category: free_personal
+  domains: [qq.com, foxmail.com]
+- id: netease
+  name: NetEase Mail
+  category: free_personal
+  domains: [163.com, 126.com, yeah.net]
+- id: naver
+  name: Naver Mail
+  category: free_personal
+  domains: [naver.com]
+- id: daum
+  name: Daum Mail
+  category: free_personal
+  domains: [daum.net, hanmail.net]
+- id: libero
+  name: Libero Mail
+  category: free_personal
+  domains: [libero.it]
+- id: orange
+  name: Orange
+  category: free_personal
+  domains: [orange.fr, wanadoo.fr]
+- id: laposte
+  name: La Poste Mail
+  category: free_personal
+  domains: [laposte.net]
+- id: free_fr
+  name: Free
+  category: free_personal
+  domains: [free.fr]
+- id: tonline
+  name: T-Online
+  category: free_personal
+  domains: [t-online.de]
+- id: seznam
+  name: Seznam
+  category: free_personal
+  domains: [seznam.cz]
+- id: wp
+  name: WP Poczta
+  category: free_personal
+  domains: [wp.pl]
+- id: rediffmail
+  name: Rediffmail
+  category: free_personal
+  domains: [rediffmail.com]
+- id: uol
+  name: UOL
+  category: free_personal
+  domains: [uol.com.br, bol.com.br]
+- id: telstra
+  name: Telstra BigPond
+  category: free_personal
+  domains: [bigpond.com, bigpond.net.au]
+- id: optus
+  name: Optus
+  category: free_personal
+  domains: [optusnet.com.au]
+- id: comcast
+  name: Xfinity (Comcast)
+  category: free_personal
+  domains: [comcast.net]
+- id: att
+  name: AT&T Mail
+  category: free_personal
+  domains: [att.net, sbcglobal.net]
+- id: verizon
+  name: Verizon
+  category: free_personal
+  domains: [verizon.net]
+- id: bt
+  name: BT Mail
+  category: free_personal
+  domains: [btinternet.com]
+- id: sky
+  name: Sky Mail
+  category: free_personal
+  domains: [sky.com]
+- id: virginmedia
+  name: Virgin Media
+  category: free_personal
+  domains: [virginmedia.com]
+
+# Privacy-first or paid personal mailboxes. Not disposable.
+- id: proton
+  name: Proton Mail
+  category: private_mailbox
+  domains: [proton.me, protonmail.com, protonmail.ch, pm.me]
+- id: tuta
+  name: Tuta
+  category: private_mailbox
+  domains: [tuta.com, tuta.io, tutanota.com, tutanota.de, tutamail.com, keemail.me]
+- id: fastmail
+  name: Fastmail
+  category: private_mailbox
+  domains: [fastmail.com, fastmail.fm]
+- id: posteo
+  name: Posteo
+  category: private_mailbox
+  domains: [posteo.de, posteo.net]
+- id: mailboxorg
+  name: mailbox.org
+  category: private_mailbox
+  domains: [mailbox.org]
+- id: hey
+  name: HEY
+  category: private_mailbox
+  domains: [hey.com]
+- id: startmail
+  name: StartMail
+  category: private_mailbox
+  domains: [startmail.com]
+- id: runbox
+  name: Runbox
+  category: private_mailbox
+  domains: [runbox.com]
+- id: disroot
+  name: Disroot
+  category: private_mailbox
+  domains: [disroot.org]
+- id: riseup
+  name: Riseup
+  category: private_mailbox
+  domains: [riseup.net]
+
+# Alias and forwarding services. They forward to a real mailbox, so they
+# are not disposable on that alone.
+- id: apple_hide_my_email
+  name: Hide My Email (Apple)
+  category: relay_alias
+  subcategory: permanent_alias
+  domains: [privaterelay.appleid.com]
+- id: firefox_relay
+  name: Firefox Relay
+  category: relay_alias
+  subcategory: permanent_alias
+  domains: [mozmail.com]
+  subdomains: true
+- id: duckduckgo
+  name: DuckDuckGo Email Protection
+  category: relay_alias
+  subcategory: permanent_alias
+  domains: [duck.com]
+- id: simplelogin
+  name: SimpleLogin
+  category: relay_alias
+  subcategory: anonymous_alias
+  domains: [simplelogin.com, simplelogin.co, simplelogin.fr, aleeas.com, slmail.me, 8alias.com, 8shield.net, dralias.com]
+  subdomains: true
+- id: addy
+  name: addy.io
+  category: relay_alias
+  subcategory: anonymous_alias
+  domains: [anonaddy.com, anonaddy.me, addymail.com]
+  subdomains: true
+- id: 33mail
+  name: 33mail
+  category: relay_alias
+  subcategory: anonymous_alias
+  domains: [33mail.com]
+  subdomains: true
