@@ -406,6 +406,12 @@ func (s *Server) authenticated(w http.ResponseWriter, r *http.Request) (*princip
 
 // record writes an audit event for the request's actor.
 func record(ctx context.Context, q pgx.Tx, p *principal, workspaceID, action, targetType, targetID string, data map[string]any) error {
+	return recordWithProps(ctx, q, p, workspaceID, action, targetType, targetID, data, nil)
+}
+
+// recordWithProps is record with extra product event properties: ids,
+// enums and counts only, never names or text.
+func recordWithProps(ctx context.Context, q pgx.Tx, p *principal, workspaceID, action, targetType, targetID string, data, props map[string]any) error {
 	e := audit.Event{
 		WorkspaceID: workspaceID,
 		Action:      action,
@@ -413,6 +419,7 @@ func record(ctx context.Context, q pgx.Tx, p *principal, workspaceID, action, ta
 		TargetID:    targetID,
 		RequestID:   RequestID(ctx),
 		Data:        data,
+		Props:       props,
 		ActorType:   "system",
 	}
 	if p != nil {

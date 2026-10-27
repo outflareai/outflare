@@ -139,10 +139,9 @@ func TestDeadAfterMaxAttemptsAndPermanent(t *testing.T) {
 	jobs.Enqueue(ctx, pool, jobs.NewJob{Kind: "always-fails", MaxAttempts: 3})
 	jobs.Enqueue(ctx, pool, jobs.NewJob{Kind: "permanent"})
 	jobs.Enqueue(ctx, pool, jobs.NewJob{Kind: "panics", MaxAttempts: 1})
-	jobs.Enqueue(ctx, pool, jobs.NewJob{Kind: "unregistered"})
 	go q.Run(ctx, 4)
 
-	waitFor(t, func() bool { return countStatus(t, pool, "dead") == 4 })
+	waitFor(t, func() bool { return countStatus(t, pool, "dead") == 3 })
 	var attempts int
 	pool.QueryRow(ctx, `SELECT attempts FROM jobs WHERE kind = 'always-fails'`).Scan(&attempts)
 	if attempts != 3 {
@@ -152,6 +151,34 @@ func TestDeadAfterMaxAttemptsAndPermanent(t *testing.T) {
 	if attempts != 1 {
 		t.Fatalf("permanent attempts = %d, want 1", attempts)
 	}
+}
+
+// A process without a kind's handler (an engine-only worker during a Cloud
+// deploy) leaves its jobs queued for a process that has it.
+func TestLeavesKindsWithoutHandler(t *testing.T) {
+	pool := testPool(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	id, _ := jobs.Enqueue(ctx, pool, jobs.NewJob{Kind: "elsewhere"})
+	jobs.Enqueue(ctx, pool, jobs.NewJob{Kind: "here"})
+	q := newQueue(pool)
+	q.Handle("here", func(ctx context.Context, j jobs.Job) error { return nil })
+	go q.Run(ctx, 2)
+
+	waitFor(t, func() bool { return countStatus(t, pool, "succeeded") == 1 })
+	time.Sleep(200 * time.Millisecond) // a few more polls
+	var status string
+	var attempts int
+	pool.QueryRow(ctx, `SELECT status, attempts FROM jobs WHERE id = $1`, id).Scan(&status, &attempts)
+	if status != "queued" || attempts != 0 {
+		t.Fatalf("unhandled job = %s after %d attempts, want queued after 0", status, attempts)
+	}
+
+	other := newQueue(pool)
+	other.Handle("elsewhere", func(ctx context.Context, j jobs.Job) error { return nil })
+	go other.Run(ctx, 1)
+	waitFor(t, func() bool { return countStatus(t, pool, "succeeded") == 2 })
 }
 
 func TestRetiredKindClosesQuietly(t *testing.T) {

@@ -36,7 +36,7 @@ func newFake(t *testing.T) (*fake, *c.Client) {
 	}))
 	t.Cleanup(srv.Close)
 	urls := map[string]string{}
-	for _, id := range []string{"apollo", "peopledatalabs", "prospeo", "leadmagic", "findymail", "moltsets"} {
+	for _, id := range []string{"apollo", "peopledatalabs", "prospeo", "leadmagic", "findymail", "moltsets", "snitcher"} {
 		urls[id] = srv.URL
 	}
 	return f, &c.Client{BaseURLs: urls}
@@ -201,11 +201,76 @@ func TestEveryConnectorIsWellFormed(t *testing.T) {
 				t.Errorf("%s claims search but does not implement it", d.ID)
 			}
 		}
+		if d.Has(c.CapRevealCompany) {
+			if _, ok := conn.(c.CompanyRevealer); !ok {
+				t.Errorf("%s claims company reveal but does not implement it", d.ID)
+			}
+		}
 		if d.Has(c.CapEnrichPerson) || d.Has(c.CapFindEmail) {
 			if _, ok := conn.(c.PersonEnricher); !ok {
 				t.Errorf("%s claims enrichment but does not implement it", d.ID)
 			}
 		}
+	}
+}
+
+func TestRevealCompany(t *testing.T) {
+	f, cl := newFake(t)
+	key := c.Creds{"api_key": "test-not-a-real-key"}
+	ctx := context.Background()
+
+	f.routes["/v5/ip/enrich"] = func(w http.ResponseWriter, _ map[string]any, r *http.Request) {
+		if r.Header.Get("X-Api-Key") != "test-not-a-real-key" || r.URL.Query().Get("return_ip_metadata") != "true" {
+			t.Errorf("pdl request: %v %v", r.Header, r.URL.Query())
+		}
+		switch r.URL.Query().Get("ip") {
+		case "192.0.2.1":
+			io.WriteString(w, `{"status":200,"data":{"ip":{"metadata":{"hosting":false}},"company":{"name":"northpeak","display_name":"Northpeak","website":"www.northpeak.example","industry":"software","employee_count":120}}}`)
+		case "192.0.2.2":
+			io.WriteString(w, `{"status":200,"data":{"ip":{"metadata":{"vpn":true}},"company":null}}`)
+		default:
+			w.WriteHeader(404)
+			io.WriteString(w, `{"status":404,"error":{"type":"not_found"}}`)
+		}
+	}
+	got, err := (PDL{}).RevealCompany(ctx, cl, key, "192.0.2.1")
+	if err != nil || !got.Found || got.Network != c.NetworkBusiness || got.Company.Domain != "northpeak.example" || got.Company.Name != "Northpeak" || got.Company.Employees != 120 {
+		t.Fatalf("pdl: %+v %v", got, err)
+	}
+	if got, err = (PDL{}).RevealCompany(ctx, cl, key, "192.0.2.2"); err != nil || got.Found || got.Network != c.NetworkHosting {
+		t.Fatalf("pdl vpn: %+v %v", got, err)
+	}
+	if got, err = (PDL{}).RevealCompany(ctx, cl, key, "192.0.2.3"); err != nil || got.Found {
+		t.Fatalf("pdl miss: %+v %v", got, err)
+	}
+
+	f.routes["/company/find"] = func(w http.ResponseWriter, _ map[string]any, r *http.Request) {
+		if r.Method != http.MethodPost || r.Header.Get("Authorization") != "Bearer test-not-a-real-key" {
+			t.Errorf("snitcher request: %s %v", r.Method, r.Header)
+		}
+		switch r.URL.Query().Get("ip") {
+		case "192.0.2.1":
+			io.WriteString(w, `{"type":"business","company":{"name":"Northpeak","domain":"northpeak.example","employees":"120"}}`)
+		case "192.0.2.2":
+			io.WriteString(w, `{"type":"isp","company":{"name":"Some ISP","domain":"isp.example"}}`)
+		case "192.0.2.4":
+			w.WriteHeader(202)
+			io.WriteString(w, `{}`)
+		default:
+			w.WriteHeader(401)
+		}
+	}
+	if got, err = (Snitcher{}).RevealCompany(ctx, cl, key, "192.0.2.1"); err != nil || !got.Found || got.Company.Domain != "northpeak.example" || got.Company.Employees != 120 {
+		t.Fatalf("snitcher: %+v %v", got, err)
+	}
+	if got, err = (Snitcher{}).RevealCompany(ctx, cl, key, "192.0.2.2"); err != nil || got.Found || got.Network != c.NetworkISP {
+		t.Fatalf("snitcher isp: %+v %v", got, err)
+	}
+	if _, err = (Snitcher{}).RevealCompany(ctx, cl, key, "192.0.2.4"); err != c.ErrRetryLater {
+		t.Fatalf("snitcher queued: %v", err)
+	}
+	if _, err = (Snitcher{}).RevealCompany(ctx, cl, key, "192.0.2.9"); c.KindOf(err) != c.ErrAuth {
+		t.Fatalf("snitcher bad key: %v", err)
 	}
 }
 

@@ -27,6 +27,7 @@ import (
 	"github.com/outflareai/outflare/engine/internal/jobs"
 	"github.com/outflareai/outflare/engine/internal/outcomes"
 	"github.com/outflareai/outflare/engine/internal/track"
+	"github.com/outflareai/outflare/engine/internal/usagelimits"
 )
 
 const (
@@ -90,7 +91,7 @@ func Unit(r connectors.SEOReader) string {
 }
 
 // DefaultBudget is the monthly budget until someone sets one: $10 of
-// DataForSEO, or 10,000 Ahrefs API units.
+// DataForSEO, or 10,000 Ahrefs API units (usagelimits.Starting).
 func DefaultBudget(unit string) float64 {
 	if unit == UnitUSD {
 		return 10
@@ -98,54 +99,91 @@ func DefaultBudget(unit string) float64 {
 	return 10000
 }
 
-// Budget is a connection's monthly budget and what it has spent.
+// Budget is a connection's monthly budget and what it has spent. It is
+// the connection's monthly usage limit (usagelimits), which the
+// connection's page under Connectors also sets, with a daily one.
 type Budget struct {
 	Unit  string  `json:"unit"`
 	Limit float64 `json:"limit"`
 	Spent float64 `json:"spent"`
 	// Default: nobody set a budget, so the default applies.
 	Default bool `json:"default"`
+	// Unlimited: the connection has no monthly limit (Limit is 0).
+	Unlimited bool `json:"unlimited"`
 }
 
 // Left is what can still be spent this month.
-func (b Budget) Left() float64 { return math.Max(0, b.Limit-b.Spent) }
+func (b Budget) Left() float64 {
+	if b.Unlimited {
+		return usagelimits.Max
+	}
+	return math.Max(0, b.Limit-b.Spent)
+}
 
 // BudgetOf works out a connection's budget for this calendar month (UTC).
 func BudgetOf(ctx context.Context, q jobs.Querier, o *connectors.Opened, r connectors.SEOReader) (Budget, error) {
-	return budgetFor(ctx, q, o.ID, o.Config, r)
-}
-
-func budgetFor(ctx context.Context, q jobs.Querier, id string, config json.RawMessage, r connectors.SEOReader) (Budget, error) {
-	return BudgetIn(ctx, q, id, config, Unit(r))
+	return BudgetIn(ctx, q, o.WorkspaceID, o.ID, Unit(r))
 }
 
 // BudgetIn works out a connection's budget for this calendar month (UTC),
 // counted in unit. Every paid read of the connection (SEO reports, rank
 // checks) shares it.
-func BudgetIn(ctx context.Context, q jobs.Querier, id string, config json.RawMessage, unit string) (Budget, error) {
-	s := SettingsOf(config)
-	b := Budget{Unit: unit}
-	if s.MonthlyBudget != nil {
-		b.Limit = *s.MonthlyBudget
-	} else {
-		b.Limit, b.Default = DefaultBudget(b.Unit), true
+func BudgetIn(ctx context.Context, q jobs.Querier, ws, id, unit string) (Budget, error) {
+	l, err := usagelimits.Load(ctx, q, ws, id)
+	if err != nil && !errors.Is(err, usagelimits.ErrNotFound) {
+		return Budget{}, err
 	}
-	err := q.QueryRow(ctx, `SELECT COALESCE(sum(units), 0)::float8 FROM spend_entries
-		WHERE integration_id = $1 AND unit_name = $2 AND occurred_at >= date_trunc('month', now() AT TIME ZONE 'UTC') AT TIME ZONE 'UTC'`,
-		id, b.Unit).Scan(&b.Spent)
+	b := Budget{Unit: unit, Default: l.Default}
+	switch {
+	case l.Unit == unit && l.Monthly != nil && l.Stop:
+		b.Limit = *l.Monthly
+	case l.Default:
+		b.Limit = DefaultBudget(unit)
+	default:
+		// Limits in another unit, none for the month, or ones that only
+		// warn: nothing caps the month here.
+		b.Unlimited = true
+	}
+	err = q.QueryRow(ctx, `SELECT COALESCE(sum(units), 0)::float8 FROM spend_entries
+		WHERE workspace_id = $1 AND integration_id = $2 AND unit_name = $3 AND occurred_at >= date_trunc('month', now() AT TIME ZONE 'UTC') AT TIME ZONE 'UTC'`,
+		ws, id, b.Unit).Scan(&b.Spent)
 	return b, err
 }
 
-// BudgetError means a call would take the connection over its budget.
+// BudgetError means a call would take the connection over a usage limit.
 type BudgetError struct {
 	Name   string
 	Budget Budget
 	Cost   float64
+	// Limit is the limit it would pass.
+	Limit *usagelimits.Error
 }
 
 func (e *BudgetError) Error() string {
+	if e.Limit != nil {
+		return e.Limit.Error()
+	}
 	return fmt.Sprintf("%s's monthly budget is %s and %s is spent; this call would cost about %s. Raise the budget in the connection's SEO settings, or wait for next month.",
 		e.Name, Amount(e.Budget.Unit, e.Budget.Limit), Amount(e.Budget.Unit, e.Budget.Spent), Amount(e.Budget.Unit, e.Cost))
+}
+
+func (e *BudgetError) Unwrap() error {
+	if e.Limit == nil {
+		return nil
+	}
+	return e.Limit
+}
+
+// CheckBudget reports whether a call costing about cost (in b's unit) may
+// run on the connection: a *BudgetError when it would pass the daily or
+// monthly limit.
+func CheckBudget(ctx context.Context, q jobs.Querier, ws, id, name string, b Budget, cost float64) error {
+	err := usagelimits.Check(ctx, q, ws, id, b.Unit, cost)
+	var le *usagelimits.Error
+	if errors.As(err, &le) {
+		return &BudgetError{Name: name, Budget: b, Cost: cost, Limit: le}
+	}
+	return err
 }
 
 // Amount writes a spend for people: $1.23 or 1,500 API units.
@@ -209,8 +247,8 @@ func Fetch(ctx context.Context, pool *pgxpool.Pool, o *connectors.Opened, r conn
 		}
 	}
 	est := amountOf(b.Unit, r.Estimate(q))
-	if b.Spent+est > b.Limit {
-		return out, &BudgetError{Name: o.Name, Budget: b, Cost: est}
+	if err := CheckBudget(ctx, pool, o.WorkspaceID, o.ID, o.Name, b, est); err != nil {
+		return out, err
 	}
 	cctx, cancel := context.WithTimeout(ctx, 90*time.Second)
 	defer cancel()

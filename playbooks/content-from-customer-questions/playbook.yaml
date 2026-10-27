@@ -1,0 +1,54 @@
+id: content-from-customer-questions
+version: 1
+title: Write content from your customers' questions
+summary: Turn the questions people ask in replies into briefs for pages that answer them in search.
+description: |
+  The questions prospects and customers ask by email are the same ones
+  others type into search and AI assistants. This playbook collects them
+  from the inbox, groups the ones that come up again and again, checks
+  whether the site already answers them, and writes a short brief for
+  each page that's missing.
+tier: clever
+goals: [search, ai_answers]
+publisher: outflare
+author: { github: outflareai }
+needs:
+  data:
+    - { check: inbox, label: Replies arriving in Outflare's inbox }
+    - { check: seo_site, label: Your site added to SEO }
+  connections:
+    - capability: plan
+      label: An AI model, unless you run this from your own AI app
+      optional: true
+      recommended: [claude, openai]
+inputs:
+  - name: days
+    label: How far back to look, in days
+    example: "90"
+steps:
+  - say: Read replies from the period and pull out every question.
+    tools: [listInbox, getInboundMessage]
+  - say: Group questions that mean the same thing and count them.
+    tools: []
+  - say: Check which ones the site already answers and which pages target them.
+    tools: [listSEOSites, getSiteSearch, listPageTargets]
+  - say: Write a brief for each missing page and post them to the mission.
+    tools: [postMissionUpdate]
+guardrails:
+  - Briefs never quote a customer by name or include their email address or company.
+measure:
+  - metric: Clicks to new pages
+    how: "Search Console clicks to pages written from the briefs."
+  - metric: Fewer repeat questions
+    how: "How often the same questions arrive by email, before and after."
+prompt: |
+  Run the "Content from customer questions" playbook. Read the replies from
+  the last {{days}} days and pull out every question people ask about our
+  product or problem. Group the ones that mean the same thing and count
+  them. Check which ones our site already answers, then write a short brief
+  for a page that answers each of the top five that it doesn't. Never quote
+  anyone by name or include their email address or company.
+example: |
+  Northpeak's inbox asked "can I export to CSV?" 23 times in 90 days and
+  the site had no page about it. The brief became a docs page that now
+  ranks first for "northpeak csv export".

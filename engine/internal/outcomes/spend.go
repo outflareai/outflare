@@ -14,6 +14,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/outflareai/outflare/engine/internal/jobs"
+	"github.com/outflareai/outflare/engine/internal/usagelimits"
 )
 
 // Spend categories.
@@ -168,7 +169,8 @@ func scanEntry(row pgx.Row, ws string) (Entry, error) {
 // domain, in that order.
 //
 // Pass the transaction that made the change that cost money, so the charge
-// commits or rolls back with it.
+// commits or rolls back with it. A charge to a connection is counted
+// toward its usage limits (usagelimits.Booked).
 func Record(ctx context.Context, q jobs.Querier, e Entry) (Entry, bool, error) {
 	if e.WorkspaceID == "" {
 		return Entry{}, false, errors.New("outcomes: Record needs a workspace")
@@ -193,6 +195,13 @@ func Record(ctx context.Context, q jobs.Querier, e Entry) (Entry, bool, error) {
 		e.WorkspaceID, e.ProjectID, e.SequenceID, e.MissionID, e.MailboxID, e.Domain, e.Category, e.Provider,
 		e.IntegrationID, e.Units, e.UnitName, e.AmountCents, e.Currency, e.OccurredAt, e.Source, e.Ref, e.Note, e.ActorID), e.WorkspaceID)
 	if err == nil {
+		// A connection's charge counts toward its usage limits, which
+		// warn the workspace at 80% and when one is reached.
+		if created.IntegrationID != nil {
+			if err := usagelimits.Booked(ctx, q, e.WorkspaceID, *created.IntegrationID); err != nil {
+				return Entry{}, false, err
+			}
+		}
 		return created, true, nil
 	}
 	if !errors.Is(err, pgx.ErrNoRows) {

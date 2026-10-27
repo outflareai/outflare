@@ -1,0 +1,53 @@
+id: get-named-in-ai-answers
+version: 1
+title: Get named in AI answers
+summary: See which questions AI assistants answer without naming you, and what to publish so they do.
+description: |
+  People ask ChatGPT, Claude and Perplexity which tool to use. If the
+  answer names three competitors and not you, you lose the sale before
+  anyone visits your site. This playbook samples the questions buyers ask
+  in your category, finds the ones where competitors are named and you
+  aren't, reads the pages the assistants cite, and lists what to publish
+  or correct.
+tier: clever
+goals: [ai_answers, search]
+publisher: outflare
+author: { github: outflareai }
+needs:
+  connections:
+    - capability: llm.sample
+      label: An AI model to ask the questions
+      recommended: [openai, claude, gemini]
+inputs:
+  - name: brand
+    label: Brand
+    example: Northpeak
+  - name: category
+    label: What you sell, in a few words
+    example: project planning software for small agencies
+steps:
+  - say: Read how often AI answers name the brand today.
+    tools: [getAIVisibility, listAICohorts]
+  - say: Add a set of buyer questions for the category if there isn't one.
+    tools: [createAICohort, listAIPrompts]
+  - say: Read the answers where competitors are named and the brand isn't, and the pages they cite.
+    tools: [listAISamples, listAIFacts]
+  - say: Compare with what competitors publish.
+    tools: [getSEOCompetitorGaps]
+  - say: Post a short list of pages to write or facts to correct.
+    tools: [postMissionUpdate]
+guardrails:
+  - Questions are asked with the workspace's own AI key, within its monthly AI limit.
+measure:
+  - metric: Share of AI answers
+    how: "Share of sampled answers that name the brand, before and after."
+prompt: |
+  Run the "Get named in AI answers" playbook for {{brand}}, which sells
+  {{category}}. Check how often AI assistants name us today. If there's no
+  set of buyer questions for our category, add one. Then find the answers
+  that name competitors but not us, read the pages they cite, and give me a
+  short list of pages to write or facts to correct so we get named.
+example: |
+  Northpeak was named in 4 of 40 answers about agency project tools. Most
+  answers cited two comparison pages and a review site, none of which
+  listed Northpeak; the list started with asking those three to add it.

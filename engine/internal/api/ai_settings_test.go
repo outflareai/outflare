@@ -9,6 +9,8 @@ import (
 	"strings"
 	"sync"
 	"testing"
+
+	"github.com/outflareai/outflare/engine/internal/llm"
 )
 
 const openAIKey = "sk-proj-good-0123456789abcdef"
@@ -83,7 +85,7 @@ func TestAISettings(t *testing.T) {
 
 	// Nothing connected: the settings say what to do.
 	s := owner.must(200, "GET", base+"/ai-settings", nil)
-	if s["problem"].(map[string]any)["code"] != "connector_needed" || s["monthly_limit_cents"].(float64) != 5000 || len(s["providers"].([]any)) != 5 {
+	if s["problem"].(map[string]any)["code"] != "connector_needed" || s["monthly_limit_cents"].(float64) != 5000 || len(s["providers"].([]any)) != len(llm.Providers) {
 		t.Fatalf("empty settings = %v", s)
 	}
 

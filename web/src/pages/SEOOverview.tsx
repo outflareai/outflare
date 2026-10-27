@@ -100,7 +100,17 @@ function BrandCard({ b, go }: { b: SEOOverviewBrand; go: Props["go"] }) {
   const hasSearch = b.weeks.some((w) => w.search_clicks !== null);
   const hasTraffic = b.weeks.some((w) => w.visitors !== null);
   const status = b.seo_status;
-  const missing = [!hasSearch && "a search console", !hasTraffic && "an analytics tool", status.state === "not_connected" && "Ahrefs or DataForSEO"].filter(Boolean) as string[];
+  const src = b.sources;
+  const missing = [
+    !hasSearch && src.search.state === "not_connected" && "a search console",
+    !hasTraffic && src.traffic.state === "not_connected" && "an analytics tool",
+    status.state === "not_connected" && "Ahrefs or DataForSEO",
+  ].filter(Boolean) as string[];
+  // Tools that are connected, but read other websites of the workspace.
+  const elsewhere = [
+    !hasSearch && src.search.state === "other_sites" && { what: "Search console numbers", hosts: src.search.hosts },
+    !hasTraffic && src.traffic.state === "other_sites" && { what: "Visitor numbers", hosts: src.traffic.hosts },
+  ].filter(Boolean) as { what: string; hosts: string[] }[];
 
   return (
     <section aria-label={name} className="space-y-3">
@@ -119,6 +129,17 @@ function BrandCard({ b, go }: { b: SEOOverviewBrand; go: Props["go"] }) {
         <Tile label="Organic traffic" sub={b.seo.at(-1)?.connector === "ahrefs" ? "Ahrefs estimate, monthly" : "estimate, monthly"} trend={b.trends.organic_traffic} points={snaps("organic_traffic")} alt={{ label: "Keywords", trend: b.trends.organic_keywords }} />
       </div>
       {status.state !== "ready" && status.state !== "not_connected" && <StatusLine status={status} brand={b.brand?.id} go={go} />}
+      {elsewhere.map((x) => (
+        <div key={x.what} className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-dashed px-3 py-2 text-[13px]">
+          <span className="flex items-center gap-2">
+            <Badge tone="amber">Other websites</Badge>
+            <span>
+              {x.what} come in for {hostList(x.hosts)}, but not for {b.hosts.length ? <span className="font-mono">{b.hosts[0]}</span> : "this brand"}. Add the website to that tool, or set which brand its site belongs to.
+            </span>
+          </span>
+          <Button variant="ghost" onClick={() => go("analytics")}>Check analytics sites</Button>
+        </div>
+      ))}
       <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-[13px]">
         {b.sites.map((s) => (
           <button key={s.id} className="flex items-center gap-1.5 hover:underline" onClick={() => go("audits", s.id)}>
@@ -138,12 +159,18 @@ function BrandCard({ b, go }: { b: SEOOverviewBrand; go: Props["go"] }) {
   );
 }
 
+function hostList(hosts: string[]) {
+  const shown = hosts.slice(0, 2).join(" and ");
+  return hosts.length > 2 ? `${shown} and ${hosts.length - 2} more` : shown;
+}
+
 // StatusLine says why the SEO numbers are missing or old, with the next step.
 function StatusLine({ status, brand, go }: { status: SEOStatus; brand?: string; go: Props["go"] }) {
   const tone: Tone = status.state === "failed" ? "red" : status.state === "reading" ? "blue" : "amber";
-  const label = { failed: "Read failed", reading: "Reading", off: "Turned off", not_followed: "Not followed", no_website: "No website", not_connected: "", ready: "" }[status.state];
+  const label = { failed: "Read failed", reading: "Reading", off: "Turned off", not_followed: "Not followed", no_website: "No website", not_shared: "Not shared", not_connected: "", ready: "" }[status.state];
   const action =
     status.state === "no_website" ? <Button variant="ghost" onClick={() => go("brands", brand)}>Add the website</Button>
+    : status.state === "not_shared" ? <Button variant="ghost" onClick={() => go("connectors", status.integration_id ?? undefined)}>Share it</Button>
     : status.state === "reading" ? null
     : <Button variant="ghost" onClick={() => go("seo")}>Open SEO settings</Button>;
   return (

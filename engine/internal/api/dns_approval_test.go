@@ -45,7 +45,7 @@ func TestDNSApproval(t *testing.T) {
 		switch r.URL.Path {
 		case "/dc/v2/northpeak.example/settings":
 			w.Write([]byte(`{"providerId":"cloudflare.com","providerName":"Cloudflare","urlSyncUX":"https://dash.example.net/dc","urlAPI":"https://` + r.Host + `/dc"}`))
-		case "/dc/v2/domainTemplates/providers/outflare.ai/services/siteverify":
+		case "/dc/v2/domainTemplates/providers/outflare.ai/services/siteverify", "/dc/v2/domainTemplates/providers/outflare.ai/services/dmarc":
 			w.WriteHeader(http.StatusOK)
 		default:
 			http.NotFound(w, r)
@@ -58,7 +58,7 @@ func TestDNSApproval(t *testing.T) {
 	})
 	owner, ws := setupOwner(t, e.h)
 	base := "/v1/workspaces/" + ws
-	e.runServerJobs(t)
+	e.runServerAndMailJobs(t)
 
 	anon := &client{t: t, h: e.h}
 	key := anon.must(200, "GET", "/v1/domain-connect", nil)
@@ -123,6 +123,25 @@ func TestDNSApproval(t *testing.T) {
 	}
 	if len(named(got(), "seo_site.dns_approved")) != 1 {
 		t.Fatal("no seo_site.dns_approved event")
+	}
+
+	// A cold email domain missing only its DMARC record: the general
+	// template adds it.
+	e.dns.mx["northpeak.example"] = []*net.MX{{Host: "aspmx.l.google.com.", Pref: 1}}
+	e.dns.txt["northpeak.example"] = []string{"v=spf1 include:_spf.google.com ~all"}
+	dPath := base + "/sending-domains/northpeak.example"
+	owner.must(201, "POST", base+"/sending-domains", map[string]any{"domain": "northpeak.example"})
+	waitFor(t, owner, dPath, func(m map[string]any) bool { return m["checked_at"] != nil })
+	a = owner.must(200, "GET", dPath+"/dns/approval?return=/acme/domains", nil)
+	if a["available"] != true {
+		t.Fatalf("sending domain: %v", a)
+	}
+	if link, _ := url.Parse(a["url"].(string)); !strings.HasSuffix(link.Path, "/services/dmarc/apply") || link.Query().Get("state") != "dc.northpeak.example" {
+		t.Fatalf("sending domain link: %s", link)
+	}
+	owner.must(202, "POST", dPath+"/dns/approved", map[string]any{"provider": "Cloudflare"})
+	if run := owner.must(200, "GET", dPath, nil)["dns_install"].(map[string]any); run["provider"] != "Cloudflare" {
+		t.Fatalf("sending domain approved: %v", run)
 	}
 
 	owner.must(404, "GET", base+"/email-provider-domains/00000000-0000-4000-8000-000000000000/dns/approval", nil)

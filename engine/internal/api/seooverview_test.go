@@ -165,6 +165,26 @@ func TestSEOOverviewByBrand(t *testing.T) {
 	if gn := all[0].(map[string]any); gn["brand"].(map[string]any)["name"] != "Geonode" || gn["trends"].(map[string]any)["branded_search"].(map[string]any)["direction"] != "unknown" {
 		t.Fatalf("geonode: %v", gn)
 	}
+	// Search and visitor numbers for other websites only: say which, not
+	// "connect a tool".
+	source := func(b any, kind string) map[string]any {
+		return b.(map[string]any)["sources"].(map[string]any)[kind].(map[string]any)
+	}
+	for _, kind := range []string{"search", "traffic"} {
+		if s := source(all[1], kind); s["state"] != "ready" {
+			t.Fatalf("repocket %s: %v", kind, s)
+		}
+		if s := source(all[0], kind); s["state"] != "other_sites" || !hasString(s["hosts"], "repocket.com") {
+			t.Fatalf("geonode %s: %v", kind, s)
+		}
+	}
+	// An SEO tool shared with other brands only is "not shared", not
+	// "not connected".
+	owner.must(200, "PATCH", base+"/integrations/"+dfs, map[string]any{"brand_ids": []string{"repocket"}})
+	if st := status(owner, "geonode"); st["state"] != "not_shared" || st["integration_id"] != dfs {
+		t.Fatalf("not shared: %v", st)
+	}
+	owner.must(200, "PATCH", base+"/integrations/"+dfs, map[string]any{"brand_ids": []string{}})
 
 	// A token that may read analytics but not SEO sites gets no audits.
 	secret := owner.must(201, "POST", base+"/api-tokens", map[string]any{"name": "Reports", "scopes": []string{"analytics.read"}})["token"].(string)

@@ -85,8 +85,20 @@ type Settings struct {
 	// domain are not listed.
 	ExcludeDomains []string `json:"exclude_domains"`
 	// ExcludeCustomers leaves out people and companies that already pay.
-	ExcludeCustomers bool       `json:"exclude_customers"`
-	UpdatedAt        *time.Time `json:"updated_at"`
+	ExcludeCustomers bool `json:"exclude_customers"`
+	// RevealCompanies looks up the company behind unknown visitors'
+	// addresses with the workspace's own provider. Off until the workspace
+	// turns it on.
+	RevealCompanies bool `json:"reveal_companies"`
+	// RevealIntegrationID is the connection that looks them up; nil means
+	// the first one that can.
+	RevealIntegrationID *string `json:"reveal_integration_id"`
+	// RevealDailyLimit caps lookups a day (UTC).
+	RevealDailyLimit int `json:"reveal_daily_limit"`
+	// NotCompanies are domains marked as not a company, such as an ISP
+	// whose customers' traffic a provider took for the ISP's own.
+	NotCompanies []string   `json:"not_companies"`
+	UpdatedAt    *time.Time `json:"updated_at"`
 }
 
 // DefaultKeyPages are the pages most sites mean by buying intent.
@@ -94,15 +106,17 @@ var DefaultKeyPages = []string{"/pricing*", "/plans*", "/demo*", "/contact*", "/
 
 // Defaults are the settings of a workspace that has not changed them.
 func Defaults() Settings {
-	return Settings{KeyPages: DefaultKeyPages, HotScore: 60, EmailClicks: true, ExcludeDomains: []string{}}
+	return Settings{KeyPages: DefaultKeyPages, HotScore: 60, EmailClicks: true, ExcludeDomains: []string{}, RevealCompanies: false, RevealDailyLimit: 500, NotCompanies: []string{}}
 }
 
 // Load reads a workspace's settings, or the defaults.
 func Load(ctx context.Context, q Querier, ws string) (Settings, error) {
 	s := Defaults()
 	var at time.Time
-	err := q.QueryRow(ctx, `SELECT key_pages, hot_score, email_clicks, exclude_domains, exclude_customers, updated_at
-		FROM visitor_settings WHERE workspace_id = $1`, ws).Scan(&s.KeyPages, &s.HotScore, &s.EmailClicks, &s.ExcludeDomains, &s.ExcludeCustomers, &at)
+	err := q.QueryRow(ctx, `SELECT key_pages, hot_score, email_clicks, exclude_domains, exclude_customers,
+			reveal_companies, reveal_integration_id::text, reveal_daily_limit, not_companies, updated_at
+		FROM visitor_settings WHERE workspace_id = $1`, ws).Scan(&s.KeyPages, &s.HotScore, &s.EmailClicks, &s.ExcludeDomains, &s.ExcludeCustomers,
+		&s.RevealCompanies, &s.RevealIntegrationID, &s.RevealDailyLimit, &s.NotCompanies, &at)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return s, nil
 	}
@@ -115,13 +129,26 @@ func Load(ctx context.Context, q Querier, ws string) (Settings, error) {
 
 // Save stores a workspace's settings.
 func Save(ctx context.Context, q Querier, ws string, s Settings) error {
-	_, err := q.Exec(ctx, `INSERT INTO visitor_settings (workspace_id, key_pages, hot_score, email_clicks, exclude_domains, exclude_customers)
-		VALUES ($1, $2, $3, $4, $5, $6)
+	_, err := q.Exec(ctx, `INSERT INTO visitor_settings (workspace_id, key_pages, hot_score, email_clicks, exclude_domains, exclude_customers,
+			reveal_companies, reveal_integration_id, reveal_daily_limit, not_companies)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
 		ON CONFLICT (workspace_id) DO UPDATE SET key_pages = EXCLUDED.key_pages, hot_score = EXCLUDED.hot_score,
 			email_clicks = EXCLUDED.email_clicks, exclude_domains = EXCLUDED.exclude_domains,
-			exclude_customers = EXCLUDED.exclude_customers, updated_at = now()`,
-		ws, s.KeyPages, s.HotScore, s.EmailClicks, s.ExcludeDomains, s.ExcludeCustomers)
+			exclude_customers = EXCLUDED.exclude_customers, reveal_companies = EXCLUDED.reveal_companies,
+			reveal_integration_id = EXCLUDED.reveal_integration_id, reveal_daily_limit = EXCLUDED.reveal_daily_limit,
+			not_companies = EXCLUDED.not_companies, updated_at = now()`,
+		ws, s.KeyPages, s.HotScore, s.EmailClicks, s.ExcludeDomains, s.ExcludeCustomers, s.RevealCompanies, s.RevealIntegrationID, s.RevealDailyLimit, s.NotCompanies)
 	return err
+}
+
+// Matches reports whether a domain is one of domains or under one.
+func Matches(domain string, domains []string) bool {
+	for _, x := range domains {
+		if domain == x || strings.HasSuffix(domain, "."+x) {
+			return true
+		}
+	}
+	return false
 }
 
 // CleanPattern normalises a key page pattern a person typed: a path that

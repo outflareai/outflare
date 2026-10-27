@@ -1,5 +1,6 @@
 // Package models connects a workspace's own AI model API key: Claude,
-// OpenAI, Gemini, Mistral or OpenRouter. Missions use the one the workspace
+// OpenAI, Gemini, Mistral, xAI, or a router (OpenRouter, Vercel AI Gateway,
+// Requesty). Missions use the one the workspace
 // picks to turn a goal into a plan and to run the built-in agent; AI
 // visibility asks the models the workspace picks its prompts.
 package models
@@ -32,13 +33,26 @@ func IsModel(id string) bool {
 	return ok
 }
 
-var info = map[string]struct{ summary, website, docs, keyHint string }{
-	llm.Claude.ID:  {"Anthropic's Claude models.", "https://www.anthropic.com/api", "https://docs.anthropic.com/en/api/getting-started", "Claude Console → Settings → API keys."},
-	llm.OpenAI.ID:  {"OpenAI's GPT models.", "https://openai.com/api/", "https://platform.openai.com/docs/overview", "OpenAI Platform → API keys. A project key limited to this use is safest."},
-	llm.Gemini.ID:  {"Google's Gemini models.", "https://ai.google.dev/", "https://ai.google.dev/gemini-api/docs", "Google AI Studio → Get API key."},
-	llm.Mistral.ID: {"Mistral's models, hosted in the EU.", "https://mistral.ai/", "https://docs.mistral.ai/", "Mistral console → API keys."},
-	llm.OpenRouter.ID: {"Hundreds of models from many vendors (OpenAI, Google, Meta, xAI, Perplexity...) with one key; OpenRouter reports what each call cost.",
-		"https://openrouter.ai/", "https://openrouter.ai/docs/quickstart", "OpenRouter → Settings → API keys. A key with its own credit limit is safest."},
+// router is the tag on providers that reach many vendors' models.
+var router = c.Tag{Label: "Router", Help: "One key reaches many vendors' models (Claude, GPT, Gemini, Llama and more), billed by the router."}
+
+var info = map[string]struct {
+	summary, website, docs, keyHint string
+	tags                            []c.Tag
+}{
+	llm.Claude.ID: {summary: "Anthropic's Claude models.", website: "https://www.anthropic.com/api", docs: "https://docs.anthropic.com/en/api/getting-started", keyHint: "Claude Console → Settings → API keys."},
+	llm.OpenAI.ID: {summary: "OpenAI's GPT models.", website: "https://openai.com/api/", docs: "https://platform.openai.com/docs/overview", keyHint: "OpenAI Platform → API keys. A project key limited to this use is safest.",
+		tags: []c.Tag{{Label: "ChatGPT plan sign-in soon", Help: "OpenAI lets apps use a ChatGPT Plus or Pro plan instead of an API key (Sign in with ChatGPT). Outflare doesn't offer it yet: connect an API key for now."}}},
+	llm.Gemini.ID:  {summary: "Google's Gemini models.", website: "https://ai.google.dev/", docs: "https://ai.google.dev/gemini-api/docs", keyHint: "Google AI Studio → Get API key."},
+	llm.Mistral.ID: {summary: "Mistral's models, hosted in the EU.", website: "https://mistral.ai/", docs: "https://docs.mistral.ai/", keyHint: "Mistral console → API keys."},
+	llm.XAI.ID: {summary: "xAI's Grok models.", website: "https://x.ai/api", docs: "https://docs.x.ai/docs/overview", keyHint: "xAI Console → API Keys.",
+		tags: []c.Tag{{Label: "SuperGrok sign-in soon", Help: "xAI lets some apps use a SuperGrok or X Premium+ plan instead of an API key. It isn't open to Outflare yet: connect an API key for now."}}},
+	llm.OpenRouter.ID: {summary: "Hundreds of models from many vendors (OpenAI, Google, Meta, xAI, Perplexity...) with one key; OpenRouter reports what each call cost.",
+		website: "https://openrouter.ai/", docs: "https://openrouter.ai/docs/quickstart", keyHint: "OpenRouter → Settings → API keys. A key with its own credit limit is safest.", tags: []c.Tag{router}},
+	llm.VercelAIGateway.ID: {summary: "Models from many vendors with one Vercel key, billed to your Vercel team.",
+		website: "https://vercel.com/ai-gateway", docs: "https://vercel.com/docs/ai-gateway", keyHint: "Vercel dashboard → AI Gateway → API Keys.", tags: []c.Tag{router}},
+	llm.Requesty.ID: {summary: "Models from many vendors with one Requesty key, with its own spending limits and fallbacks.",
+		website: "https://www.requesty.ai/", docs: "https://docs.requesty.ai/quickstart", keyHint: "Requesty → API Keys.", tags: []c.Tag{router}},
 }
 
 func (m Model) Definition() c.Definition {
@@ -48,7 +62,7 @@ func (m Model) Definition() c.Definition {
 		Summary: "Plan and run missions from a goal you type, with your own " + m.P.Name + " API key. " + i.summary,
 		Description: "Outflare sends the model the goal, the project brief and a summary of the workspace (mailbox capacity, lead counts, campaigns, connectors) to plan, and the mission's progress and API answers while Outflare's agent runs it. " +
 			"Your key is encrypted, only ever sent to " + m.P.Name + "'s own API, and never shown again, logged or given to the model. Usage is billed to your " + m.P.Name + " account; set a monthly limit under Settings → AI model.",
-		Website: i.website, DocsURL: i.docs, KeyURL: m.P.KeyURL, Auth: c.AuthAPIKey,
+		Website: i.website, DocsURL: i.docs, KeyURL: m.P.KeyURL, Auth: c.AuthAPIKey, Tags: i.tags,
 		Fields:       []c.Field{{Name: "api_key", Label: "API key", Secret: true, Placeholder: placeholder(m.P), Help: i.keyHint}},
 		Capabilities: []string{"plan", "llm.sample"}, Pricing: "Pay per token, billed by " + m.P.Name,
 	}

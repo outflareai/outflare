@@ -23,6 +23,7 @@ var aliases = map[string]string{
 	"hubspot_private_app":      "hubspot",
 	"cloudflare_web_analytics": "cloudflare",
 	"vercel_analytics":         "vercel",
+	"vercel_ai_gateway":        "vercel",
 	"zoom_scheduler":           "zoom",
 	"cheapverifier":            "cheapinboxes",
 }

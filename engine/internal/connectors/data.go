@@ -17,9 +17,10 @@ const (
 
 // Data capabilities.
 const (
-	CapSearchPeople = "data.search_people" // implements PeopleSearcher
-	CapEnrichPerson = "data.enrich_person" // implements PersonEnricher
-	CapFindEmail    = "data.find_email"    // a PersonEnricher that finds work emails from a name and company
+	CapSearchPeople  = "data.search_people"  // implements PeopleSearcher
+	CapEnrichPerson  = "data.enrich_person"  // implements PersonEnricher
+	CapFindEmail     = "data.find_email"     // a PersonEnricher that finds work emails from a name and company
+	CapRevealCompany = "data.reveal_company" // implements CompanyRevealer
 )
 
 // Filter names a PeopleSearcher may support. They match the project's ICP
@@ -240,3 +241,33 @@ type PersonEnricher interface {
 	Connector
 	EnrichPerson(ctx context.Context, c *Client, creds Creds, q PersonQuery) (Enriched, error)
 }
+
+// Networks an address can belong to, as a CompanyRevealer reports them.
+// Only a business network names a company; the rest are people at home, on
+// a phone or behind a service, and say nothing about who they work for.
+const (
+	NetworkBusiness = "business"
+	NetworkISP      = "isp"
+	NetworkMobile   = "mobile"
+	NetworkHosting  = "hosting" // a data centre, VPN, proxy, Tor or relay
+	NetworkUnknown  = ""
+)
+
+// Revealed is the company behind an IP address. Found is false when the
+// provider had no company for it.
+type Revealed struct {
+	Found   bool
+	Network string
+	Company Company
+}
+
+// CompanyRevealer finds the company a website visitor's IP address belongs
+// to, from the workspace's own provider account. The address is used for
+// the lookup only and never kept.
+type CompanyRevealer interface {
+	RevealCompany(ctx context.Context, cl *Client, cr Creds, ip string) (Revealed, error)
+}
+
+// ErrRetryLater is returned by a CompanyRevealer when the provider is still
+// looking the address up and asks to be called again shortly.
+var ErrRetryLater = Errf(ErrUnavailable, "the provider is still looking this address up")

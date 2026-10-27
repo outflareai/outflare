@@ -1,0 +1,54 @@
+id: answer-interested-replies
+version: 1
+title: Answer every interested reply within the hour
+summary: Find replies that show interest, draft an answer that books the call, and send it once you approve.
+description: |
+  An interested reply goes cold fast. Answering within the hour books far
+  more meetings than answering the next day, but replies land across many
+  mailboxes and sequencers. This playbook reads the inbox, picks out the
+  replies that ask a question or show interest, drafts a short answer that
+  moves to a meeting, and waits for you to approve each one.
+tier: obvious
+goals: [customers, replies]
+publisher: outflare
+author: { github: outflareai }
+needs:
+  data:
+    - { check: inbox, label: Replies arriving in Outflare's inbox }
+  connections:
+    - capability: plan
+      label: An AI model, unless you run this from your own AI app
+      optional: true
+      recommended: [claude, openai]
+inputs:
+  - name: booking_link
+    label: Your booking link
+    example: https://cal.example.com/northpeak/intro
+steps:
+  - say: List replies from the last day that nobody has answered yet.
+    tools: [listInbox]
+  - say: Read each conversation and keep the ones that are interested or ask a question.
+    tools: [getInboundMessage]
+  - say: Tag them so the team sees them.
+    tools: [listInboxTags, updateInboundMessage]
+  - say: Draft a short reply in the same thread that answers the question and offers the booking link.
+    tools: [replyToInboundMessage]
+guardrails:
+  - Every reply waits for a person to approve it before it is sent.
+  - Out-of-office, unsubscribe and not-interested replies are left alone.
+measure:
+  - metric: Time to first answer
+    how: "Median minutes from an interested reply to our answer."
+  - metric: Reply to meeting rate
+    how: "Share of interested replies that become a booked meeting."
+prompt: |
+  Run the "Answer interested replies" playbook. Go through replies from the
+  last 24 hours that nobody has answered. Keep the ones that show interest
+  or ask a question, and tag them "Interested". For each one, draft a short,
+  friendly answer in the same thread that answers their question and offers
+  a time to talk with {{booking_link}}. Leave out-of-office, unsubscribe and
+  not-interested replies alone. Hold every reply for my approval.
+example: |
+  Of 140 replies one morning, 9 were interested. Each got a three-line
+  answer drafted with the booking link; the team approved them in a few
+  minutes and 4 booked a call the same day.

@@ -14,6 +14,7 @@ import (
 	c "github.com/outflareai/outflare/engine/internal/connectors"
 	"github.com/outflareai/outflare/engine/internal/leads"
 	"github.com/outflareai/outflare/engine/internal/outcomes"
+	"github.com/outflareai/outflare/engine/internal/usagelimits"
 	"github.com/outflareai/outflare/engine/internal/verify"
 )
 
@@ -123,6 +124,9 @@ func (r *runner) note(ctx context.Context, o *c.Opened, err error) {
 }
 
 func (r *runner) preview(ctx context.Context) error {
+	if err := r.overLimit(ctx, r.search, 0); err != nil {
+		return err
+	}
 	page, err := r.searcher.SearchPeople(ctx, r.search.Client, r.search.Creds, r.run.Params.Filters, "", previewSize)
 	r.note(ctx, r.search, err)
 	if err != nil {
@@ -147,6 +151,18 @@ func (r *runner) charge(o *c.Opened, credits float64) {
 	r.pageCredits[o.ID] += credits
 }
 
+// overLimit stops the run when a call costing about next credits would
+// take the connection past one of its usage limits (usagelimits), counting
+// the credits this run spent and has not booked yet.
+func (r *runner) overLimit(ctx context.Context, o *c.Opened, next float64) error {
+	err := usagelimits.Check(ctx, r.s.Pool, r.ws, o.ID, "credit", r.pageCredits[o.ID]+next)
+	var le *usagelimits.Error
+	if errors.As(err, &le) {
+		return r.stop("%s", le.Error())
+	}
+	return err
+}
+
 func (r *runner) overCap(next float64) bool {
 	cap := r.run.Params.CreditCap
 	return cap != nil && r.run.Credits+next > *cap+1e-9
@@ -168,6 +184,9 @@ func (r *runner) build(ctx context.Context) error {
 		}
 		if r.overCap(0) {
 			return r.stop("Reached the credit cap of %g.", *p.CreditCap)
+		}
+		if err := r.overLimit(ctx, r.search, 0); err != nil {
+			return err
 		}
 		page, err := r.searcher.SearchPeople(ctx, r.search.Client, r.search.Creds, p.Filters, cursor, pageSize)
 		r.note(ctx, r.search, err)
@@ -355,6 +374,9 @@ func (r *runner) lookup(ctx context.Context, o *c.Opened, p c.Person) (c.Enriche
 	}
 	if r.overCap(1) {
 		return c.Enriched{}, r.stop("Reached the credit cap of %g.", *r.run.Params.CreditCap)
+	}
+	if err := r.overLimit(ctx, o, 1); err != nil {
+		return c.Enriched{}, err
 	}
 	e, err := enr.EnrichPerson(ctx, o.Client, o.Creds, q)
 	r.note(ctx, o, err)

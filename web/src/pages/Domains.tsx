@@ -9,7 +9,7 @@ import type { Tab } from "../App";
 import { DataTable } from "@/components/data-table";
 import { health as sharedHealth, mailboxStatus } from "@/lib/status";
 import { track } from "@/lib/analytics";
-import { DNSOneClick, heldByMission, takeDNSFocus } from "@/components/dns-one-click";
+import { dnsHelp, DNSWays, heldByMission, takeDNSFocus, type DNSRow } from "@/components/dns-one-click";
 import { takeConnectOutcome } from "./Connectors";
 
 type Health = SendingDomain["health"];
@@ -342,15 +342,7 @@ function TrackingDomains({ ws, canManage }: { ws: string; canManage: boolean }) 
                   <div className="flex flex-wrap items-center gap-2 rounded bg-muted/50 px-2 py-1.5 font-mono text-xs">
                     <span className="text-muted-foreground">CNAME</span> <span>{t.domain}</span> <span className="text-muted-foreground">→</span> <span>{t.target}</span> <Copy text={t.target} />
                   </div>
-                  <DNSOneClick ws={ws} page="domains" item={t.id} approval={{ kind: "tracking_domain", id: t.id }} connections={t.dns_connections} canManage={canManage} reload={load}
-                    records={[{ type: "CNAME", name: t.domain, value: t.target }]} run={t.dns_install}
-                    used={(how) => track("ui.dns_one_click_used", { where: "tracking_domain", how })}
-                    intro={<>Or add it in one click: connect the Cloudflare account {t.domain} is on.</>}
-                    after="Then Outflare looks for it on its own over the next hour."
-                    onAdd={async (integration) => {
-                      const { data, error } = await api.POST("/v1/workspaces/{ws}/tracking-domains/{id}/dns", { params: { path: { ws, id: t.id } }, body: { integration_id: integration } });
-                      return { error, held: heldByMission(data) };
-                    }} />
+                  <TrackingDNS ws={ws} t={t} canManage={canManage} reload={load} />
                 </>
               )}
             </div>
@@ -488,6 +480,11 @@ function Detail({ ws, canManage, open, onOpen, go }: Props) {
         <ul className="space-y-3">
           {[...problems, ...notes].map((i) => <IssueRow key={i.code + i.title} issue={i} domain={d.domain} />)}
         </ul>
+        {missingRecords(d).length > 0 && (
+          <div className="mt-4">
+            <SendingDNS ws={ws} d={d} canManage={canManage} reload={load} />
+          </div>
+        )}
       </Card>
 
       <Stats cols={5}>
@@ -540,6 +537,46 @@ function Detail({ ws, canManage, open, onOpen, go }: Props) {
         )}
       </Card>
     </div>
+  );
+}
+
+// missingRecords are the records the domain's issues ask for, with full
+// names, as the server adds them.
+function missingRecords(d: SendingDomainDetail): DNSRow[] {
+  return d.issues.flatMap((i) => (i.record ? [{ type: i.record.type, name: i.record.host === "@" ? d.domain : `${i.record.host}.${d.domain}`, value: i.record.value }] : []));
+}
+
+// The ways to add a domain's missing SPF or DMARC record.
+function SendingDNS({ ws, d, canManage, reload }: { ws: string; d: SendingDomainDetail; canManage: boolean; reload: () => void }) {
+  const records = missingRecords(d);
+  return (
+    <DNSWays ws={ws} page="domains" item={d.domain} approval={{ kind: "sending_domain", id: d.domain }} connections={d.dns_connections} canManage={canManage} reload={reload}
+      records={records} run={d.dns_install} {...dnsHelp(d.domain, records, "so mail sent from it passes SPF and DMARC checks")}
+      used={(way, how) => track("ui.dns_one_click_used", { where: "sending_domain", way, how })}
+      manual={<>Add each record shown above where {d.domain}'s DNS is managed, then press Re-check DNS.</>}
+      intro={<>Connect the Cloudflare account {d.domain} is on.</>}
+      after="Records already there stay as they are. Then Outflare checks the domain again."
+      onAdd={async (integration) => {
+        const { data, error } = await api.POST("/v1/workspaces/{ws}/sending-domains/{domain}/dns", { params: { path: { ws, domain: d.domain } }, body: { integration_id: integration } });
+        return { error, held: heldByMission(data) };
+      }} />
+  );
+}
+
+// The ways to add a tracking domain's CNAME.
+function TrackingDNS({ ws, t, canManage, reload }: { ws: string; t: TrackingDomain; canManage: boolean; reload: () => void }) {
+  const records = [{ type: "CNAME", name: t.domain, value: t.target }];
+  return (
+    <DNSWays ws={ws} page="domains" item={t.id} approval={{ kind: "tracking_domain", id: t.id }} connections={t.dns_connections} canManage={canManage} reload={reload}
+      records={records} run={t.dns_install} {...dnsHelp(t.domain, records, "so links in our emails use our own domain")}
+      used={(way, how) => track("ui.dns_one_click_used", { where: "tracking_domain", way, how })}
+      manual={<>Add the CNAME above where {t.domain}'s DNS is managed, DNS only (not proxied), then press Check now.</>}
+      intro={<>Connect the Cloudflare account {t.domain} is on.</>}
+      after="Then Outflare looks for it on its own over the next hour."
+      onAdd={async (integration) => {
+        const { data, error } = await api.POST("/v1/workspaces/{ws}/tracking-domains/{id}/dns", { params: { path: { ws, id: t.id } }, body: { integration_id: integration } });
+        return { error, held: heldByMission(data) };
+      }} />
   );
 }
 

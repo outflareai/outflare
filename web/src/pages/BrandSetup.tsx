@@ -276,7 +276,7 @@ export function InstallStep({ ws, brand, step, install, canManage, catalog, onCh
       )}
       {method === "developer" && <DeveloperPanel message={install.developer} used={used} />}
       {method === "ai" && (
-        <AIPromptPanel prompt={install.ai_prompt} used={used} intro="Paste this into Claude Code, Cursor, Lovable or whichever tool edits your site's code. It finds where the change goes and makes it." />
+        <AIPromptPanel prompt={install.ai_prompt} used={used} intro={stepID === "verify_site" ? "Paste this into Claude, ChatGPT or any agent that can reach your DNS host. It has the record exactly as it must be added." : "Paste this into Claude Code, Cursor, Lovable or whichever tool edits your site's code. It finds where the change goes and makes it."} />
       )}
       {method === "manual" && (
         <Panel>

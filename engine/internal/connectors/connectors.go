@@ -138,12 +138,21 @@ type Definition struct {
 	Status       string   `json:"status"`
 	// Pricing note shown in the catalog, e.g. "Pay per credit".
 	Pricing string `json:"pricing,omitempty"`
+	// Short labels on the catalog card, each with a sentence that says
+	// what it means ("Router", "ChatGPT plan sign-in soon").
+	Tags []Tag `json:"tags,omitempty"`
 	// Other OAuth connectors the same sign-in connects too, when the
 	// person grants their scopes (Google Analytics and Search Console).
 	AlsoConnects []string `json:"also_connects,omitempty"`
 	// Older connector ids this one replaces, so saved connections and
 	// API calls that use them keep working.
 	Replaces []string `json:"-"`
+}
+
+// Tag is a label on a connector's catalog card.
+type Tag struct {
+	Label string `json:"label"`
+	Help  string `json:"help"`
 }
 
 // Methods returns every way to connect, recommended first.

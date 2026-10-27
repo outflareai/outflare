@@ -100,13 +100,16 @@ type missionView struct {
 	StartedByAgent bool       `json:"started_by_agent"`
 	// Who carries the mission out: external (your own agent) or builtin
 	// (Outflare's agent, in turns).
-	Runner         string       `json:"runner"`
-	Turns          missionTurns `json:"turns"`
-	CreatedAt      time.Time    `json:"created_at"`
-	UpdatedAt      time.Time    `json:"updated_at"`
-	creatorIsToken bool
-	tokenActorID   *string
-	workspaceID    string
+	Runner string       `json:"runner"`
+	Turns  missionTurns `json:"turns"`
+	// The playbook the mission was started from, if any.
+	PlaybookID      *string   `json:"playbook_id"`
+	PlaybookVersion *int      `json:"playbook_version"`
+	CreatedAt       time.Time `json:"created_at"`
+	UpdatedAt       time.Time `json:"updated_at"`
+	creatorIsToken  bool
+	tokenActorID    *string
+	workspaceID     string
 }
 
 // missionTurns is the built-in agent's schedule.
@@ -127,7 +130,7 @@ const missionColumns = `m.id, m.name, m.project_id::text, p.name, m.brand_id::te
 	(SELECT count(*) FROM mission_actions x WHERE x.mission_id = m.id AND x.status = 'pending'),
 	(SELECT count(*) FROM mission_calls c WHERE c.mission_id = m.id),
 	(SELECT max(created_at) FROM mission_calls c WHERE c.mission_id = m.id),
-	m.runner, m.turns, m.last_turn_at, m.next_turn_at, m.turn_summary, m.turn_error`
+	m.runner, m.turns, m.last_turn_at, m.next_turn_at, m.turn_summary, m.turn_error, m.playbook_id, m.playbook_version`
 
 const missionFrom = `FROM missions m
 	LEFT JOIN projects p ON p.id = m.project_id
@@ -142,7 +145,7 @@ func scanMission(row pgx.Row) (missionView, error) {
 		&v.Limits.MaxSends, &v.Limits.MaxSpendCents, &v.Limits.EndsAt, &v.BriefVersion, &v.ApprovedBy, &v.ApprovedByName, &v.ApprovedAt,
 		&v.StartedAt, &v.EndedAt, &v.Report, &v.CreatedBy, &v.CreatedByName, &v.creatorIsToken,
 		&v.CreatedAt, &v.UpdatedAt, &v.workspaceID, &v.PendingActions, &v.Calls, &v.LastCallAt,
-		&v.Runner, &v.Turns.Count, &v.Turns.LastAt, &v.Turns.NextAt, &v.Turns.Summary, &v.Turns.Error)
+		&v.Runner, &v.Turns.Count, &v.Turns.LastAt, &v.Turns.NextAt, &v.Turns.Summary, &v.Turns.Error, &v.PlaybookID, &v.PlaybookVersion)
 	v.StartedByAgent = v.creatorIsToken
 	v.Writes = writePolicy(v.Status, v.Mode)
 	return v, err
@@ -401,6 +404,9 @@ type missionInput struct {
 	MaxSpendCents optional[int64]  `json:"max_spend_cents"`
 	EndsAt        optional[string] `json:"ends_at"`
 	endsAt        *time.Time
+	// Set when a playbook starts the mission (playbooks.go), never from JSON.
+	playbookID      *string
+	playbookVersion *int
 }
 
 func (in *missionInput) validate() error {
@@ -543,12 +549,12 @@ func (s *Server) insertMission(ctx context.Context, tx pgx.Tx, a *access, in *mi
 		}
 		if err := tx.QueryRow(ctx, `
 			INSERT INTO missions (workspace_id, project_id, name, goal, goal_metric, goal_target, instructions, plan, plan_updated_at,
-			                      mode, token_id, max_sends, max_spend_cents, ends_at, created_by)
+			                      mode, token_id, max_sends, max_spend_cents, ends_at, created_by, playbook_id, playbook_version)
 			VALUES ($1, $2, $3, COALESCE($4, ''), $5, $6, COALESCE($7, ''), $8, CASE WHEN $8 <> '' THEN now() END,
-			        COALESCE($9, 'dry_run'), $10, $11, $12, $13, $14)
+			        COALESCE($9, 'dry_run'), $10, $11, $12, $13, $14, $15, $16)
 			RETURNING id`,
 			a.WorkspaceID, in.ProjectID.Value, *in.Name, in.Goal, in.GoalMetric.Value, in.GoalTarget.Value, in.Instructions, plan,
-			in.Mode, in.TokenID.Value, in.MaxSends.Value, in.MaxSpendCents.Value, in.endsAt, a.ActorID).Scan(&id); err != nil {
+			in.Mode, in.TokenID.Value, in.MaxSends.Value, in.MaxSpendCents.Value, in.endsAt, a.ActorID, in.playbookID, in.playbookVersion).Scan(&id); err != nil {
 			return "", err
 		}
 	}

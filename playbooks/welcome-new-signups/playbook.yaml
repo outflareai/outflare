@@ -1,0 +1,67 @@
+id: welcome-new-signups
+version: 1
+title: Welcome new sign-ups and get them to their first win
+summary: A short welcome journey that follows what each new user does, not how many days have passed.
+description: |
+  Most welcome emails go out on a timer: day 1, day 3, day 7. People who
+  already got going get told how to start, and people who are stuck get
+  nothing useful. This playbook finds the one action that tells you a new
+  user got value (their first API call, first project, first purchase),
+  then builds a journey that stops as soon as they take it and nudges
+  them with a specific next step until they do.
+tier: obvious
+goals: [activation, retention]
+publisher: outflare
+author: { github: outflareai }
+needs:
+  data:
+    - { check: customer_events, label: Sign-up and product events sent to Outflare }
+  connections:
+    - capability: email.send
+      label: An email provider for lifecycle email
+      recommended: [resend, postmark, amazon_ses]
+    - capability: plan
+      label: An AI model, unless you run this from your own AI app
+      optional: true
+      recommended: [claude, openai]
+inputs:
+  - name: brand
+    label: Brand
+    example: Northpeak
+  - name: first_win
+    label: What a first win looks like
+    help: The action that shows a new user got value. Leave it empty and the agent suggests one from your events.
+    example: created their first project
+    optional: true
+steps:
+  - say: Read the brand's context so the emails sound like the brand.
+    tools: [getBrandContext]
+  - say: Look at the events new users send in their first week and pick the one that best marks a first win, unless one was given.
+    tools: [listCustomerEvents, listRecords]
+  - say: Write three short emails (welcome, a nudge with one concrete next step, and a last helpful tip) as templates.
+    tools: [listEmailTopics, createEmailTemplate, previewEmailTemplate]
+  - say: Build a journey that starts on sign-up, sends the emails, and exits as soon as the first-win event arrives.
+    tools: [createJourney]
+  - say: Ask a person to turn the journey on.
+    tools: [activateJourney]
+guardrails:
+  - Only people who signed up themselves get these emails, and the contact rules and opt-outs apply to every send.
+  - The journey is turned on only after a person approves it.
+measure:
+  - metric: Activation rate
+    how: "Share of new sign-ups who reach the first win within 7 days, before and after."
+  - metric: Time to first win
+    how: "Median hours from sign-up to the first-win event."
+prompt: |
+  Run the "Welcome new sign-ups" playbook for {{brand}}. Look at the events
+  new users send in their first week and find the action that best shows
+  they got value (use "{{first_win}}" if I gave one). Then write three short,
+  plain emails in our voice: a welcome, a nudge with one concrete next step,
+  and a final tip. Build a lifecycle journey that starts on sign-up, sends
+  them over the first week, and stops as soon as someone reaches that first
+  win. Don't turn the journey on: show me the emails and the journey first.
+example: |
+  Northpeak's events showed that users who create a project in their first
+  day stay three times longer. The journey sends a welcome straight away,
+  "Create your first project in two minutes" after a day, and a template
+  gallery link after three days, and leaves anyone who already created one.

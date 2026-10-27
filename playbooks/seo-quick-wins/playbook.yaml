@@ -1,0 +1,48 @@
+id: seo-quick-wins
+version: 1
+title: Fix your SEO quick wins
+summary: Crawl your site, find the issues that cost the most clicks, and turn each one into a fix your team or coding agent can ship.
+description: |
+  Most sites have a handful of problems that cost far more than the rest:
+  pages that rank on page two for searches with real volume, broken pages
+  that still get links, missing titles on pages people do find. This
+  playbook crawls the site, reads Search Console, and ranks the fixes by
+  the clicks they are likely to bring.
+tier: obvious
+goals: [search]
+publisher: outflare
+author: { github: outflareai }
+needs:
+  data:
+    - { check: seo_site, label: Your site added to SEO }
+  connections:
+    - capability: analytics.read
+      label: Google Search Console
+      recommended: [google_search_console, bing_webmaster]
+inputs:
+  - name: site
+    label: Site
+    example: northpeak.example
+steps:
+  - say: Find the site and crawl it.
+    tools: [listSEOSites, startCrawl, getCrawl]
+  - say: Read what the audit found and how the site does in search.
+    tools: [listCrawlIssues, getSiteSearch]
+  - say: Rank the fixes by the clicks they are likely to bring and keep the top ten.
+    tools: [listFixes]
+  - say: Turn each one into a prompt a coding agent can work from.
+    tools: [getFixPrompt]
+guardrails:
+  - Never changes the site itself; fixes go to the fixes list for a person or a coding agent.
+measure:
+  - metric: Clicks from search
+    how: "Search Console clicks to the fixed pages, 28 days before and after."
+prompt: |
+  Run the "SEO quick wins" playbook for {{site}}. Crawl the site, read what
+  the audit found and how its pages do in Google Search Console, and rank
+  the problems by how many clicks fixing them is likely to bring. Give me
+  the top ten as fixes, each with a prompt I can hand to a coding agent.
+example: |
+  For northpeak.example the top fix was a pricing page ranking 11th for a
+  search with 2,400 monthly impressions and no meta description; the
+  second was a broken docs page that still had 14 links pointing at it.

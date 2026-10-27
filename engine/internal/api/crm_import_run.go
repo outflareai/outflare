@@ -14,6 +14,7 @@ import (
 
 	"github.com/outflareai/outflare/engine/internal/connectors"
 	"github.com/outflareai/outflare/engine/internal/jobs"
+	"github.com/outflareai/outflare/engine/internal/usagelimits"
 )
 
 // Moving from another CRM, once: the import copies the CRM's objects into
@@ -246,8 +247,11 @@ func (s *Server) RegisterJobs(q *jobs.Queue) {
 	q.Handle(jobSetupInstall, s.setupInstallJob)
 	q.Handle(jobDNSAdd, s.dnsAddJob)
 	q.Handle(jobTrackingCheck, s.trackingCheckJob)
+	q.Handle(jobVisitorReveal, s.visitorRevealJob)
 	q.Handle(jobAIBudgetAlert, s.aiBudgetAlertJob)
+	q.Handle(usagelimits.JobAlert, s.connectionLimitAlertJob)
 	s.registerSocialJobs(q)
+	s.registerSemanticJobs(q)
 }
 
 func (s *Server) crmImportJob(ctx context.Context, job jobs.Job) error {

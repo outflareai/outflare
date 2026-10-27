@@ -28,6 +28,10 @@ var KindHosts = map[string]string{
 	"x.com": "x", "twitter.com": "x", "linkedin.com": "linkedin", "youtube.com": "youtube", "instagram.com": "instagram",
 	"tiktok.com": "tiktok", "facebook.com": "facebook", "discord.gg": "discord", "discord.com": "discord",
 	"reddit.com": "reddit", "github.com": "github",
+	"bsky.app": "bluesky", "threads.com": "threads", "threads.net": "threads", "dev.to": "dev_to", "hub.docker.com": "docker_hub",
+	// Mastodon runs on many servers; these are the large ones.
+	"mastodon.social": "mastodon", "mastodon.online": "mastodon", "mas.to": "mastodon", "fosstodon.org": "mastodon",
+	"hachyderm.io": "mastodon", "infosec.exchange": "mastodon", "mstdn.social": "mastodon",
 }
 
 // KindOf names a link's kind by its host, or "" when it is no known place.
@@ -48,14 +52,19 @@ func KindOf(u *url.URL) string {
 // notProfiles are first path parts that are a site's own pages, a share
 // button or one post rather than a brand's profile.
 var notProfiles = map[string][]string{
-	"x":         {"intent", "share", "home", "i", "search", "hashtag", "login", "signup", "tos", "privacy", "explore", "settings"},
-	"linkedin":  {"sharearticle", "shareArticle", "share", "feed", "login", "signup", "legal", "jobs", "help", "pulse"},
-	"facebook":  {"sharer", "sharer.php", "share", "dialog", "plugins", "login", "policies", "help", "events"},
-	"youtube":   {"watch", "embed", "shorts", "results", "playlist", "redirect", "t", "about", "howyoutubeworks"},
-	"instagram": {"p", "reel", "reels", "explore", "accounts", "about", "legal"},
-	"tiktok":    {"video", "tag", "discover", "legal", "about", "embed"},
-	"reddit":    {"submit", "search", "login", "register", "comments", "policies"},
-	"github":    {"login", "join", "features", "pricing", "about", "site", "security", "sponsors"},
+	"x":          {"intent", "share", "home", "i", "search", "hashtag", "login", "signup", "tos", "privacy", "explore", "settings"},
+	"linkedin":   {"sharearticle", "shareArticle", "share", "feed", "login", "signup", "legal", "jobs", "help", "pulse"},
+	"facebook":   {"sharer", "sharer.php", "share", "dialog", "plugins", "login", "policies", "help", "events"},
+	"youtube":    {"watch", "embed", "shorts", "results", "playlist", "redirect", "t", "about", "howyoutubeworks"},
+	"instagram":  {"p", "reel", "reels", "explore", "accounts", "about", "legal"},
+	"tiktok":     {"video", "tag", "discover", "legal", "about", "embed"},
+	"reddit":     {"submit", "search", "login", "register", "comments", "policies"},
+	"github":     {"login", "join", "features", "pricing", "about", "site", "security", "sponsors"},
+	"bluesky":    {"search", "settings", "notifications", "feeds", "lists", "messages"},
+	"threads":    {"login", "search", "settings", "activity", "post"},
+	"mastodon":   {"about", "explore", "public", "auth", "settings", "tags", "privacy-policy"},
+	"dev_to":     {"enter", "search", "settings", "dashboard", "t", "about", "privacy", "terms", "faq", "api"},
+	"docker_hub": {"search", "signup", "login", "explore", "_", "settings", "billing", "orgs", "repositories"},
 }
 
 // Clean tidies a found link into the address a brand keeps: https, no
@@ -116,7 +125,7 @@ func Clean(raw string, base *url.URL) (Link, bool) {
 		// A profile is its first one or two parts: linkedin.com/company/acme,
 		// youtube.com/@acme, reddit.com/r/acme, github.com/acme.
 		keep := 1
-		if (kind == "linkedin" || kind == "reddit") && len(parts) > 1 {
+		if (kind == "linkedin" || kind == "reddit" || kind == "bluesky" || kind == "docker_hub") && len(parts) > 1 {
 			keep = 2
 		}
 		if kind == "youtube" && (first == "c" || first == "channel" || first == "user") && len(parts) > 1 {

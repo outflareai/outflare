@@ -7,6 +7,9 @@ import (
 	"time"
 
 	"github.com/outflareai/outflare/engine/internal/connectors"
+	"github.com/outflareai/outflare/engine/internal/jobs"
+	"github.com/outflareai/outflare/engine/internal/outcomes"
+	"github.com/outflareai/outflare/engine/internal/usagelimits"
 )
 
 // A crawl of a site the workspace has proved it owns can read a page
@@ -27,12 +30,28 @@ type FallbackFetcher struct {
 	Connector string
 	open      *connectors.Opened
 	fetch     connectors.PageFetcher
+	ledger    jobs.Querier
 }
 
-// Fetch reads a page; Tokens is what it cost on the provider's plan.
+// Fetch reads a page; Tokens is what it cost on the provider's plan. With
+// a ledger, a read first checks the connection's usage limits (a
+// *usagelimits.Error when one is reached) and books its tokens after.
 func (f *FallbackFetcher) Fetch(ctx context.Context, raw string, renderJS bool) (*Response, float64, error) {
 	start := time.Now()
+	if f.ledger != nil {
+		if err := usagelimits.Check(ctx, f.ledger, f.open.WorkspaceID, f.open.ID, "token", 0); err != nil {
+			return nil, 0, err
+		}
+	}
 	p, err := f.fetch.FetchPage(ctx, f.open.Client, f.open.Creds, raw, renderJS)
+	if f.ledger != nil && p.Cost.Units > 0 {
+		units, id := p.Cost.Units, f.open.ID
+		if _, _, berr := outcomes.Record(ctx, f.ledger, outcomes.Entry{WorkspaceID: f.open.WorkspaceID, Category: outcomes.CategoryData,
+			Provider: f.Connector, IntegrationID: &id, Units: &units, UnitName: "token", OccurredAt: time.Now(), Source: outcomes.SourceAuto,
+			Note: "Page read for a site crawl"}); berr != nil && err == nil {
+			err = berr
+		}
+	}
 	if err != nil {
 		return nil, p.Cost.Units, err
 	}
@@ -49,6 +68,9 @@ func (f *FallbackFetcher) Fetch(ctx context.Context, raw string, renderJS bool) 
 type ConnectorFallback struct {
 	Store *connectors.Store
 	Pool  connectors.Querier
+	// Ledger, when set, books each read's tokens and holds reads to the
+	// connection's usage limits.
+	Ledger jobs.Querier
 }
 
 func (c *ConnectorFallback) For(ctx context.Context, ws string) (*FallbackFetcher, error) {
@@ -72,7 +94,7 @@ func (c *ConnectorFallback) For(ctx context.Context, ws string) (*FallbackFetche
 		if !ok {
 			continue
 		}
-		return &FallbackFetcher{Connector: i.Connector, open: o, fetch: pf}, nil
+		return &FallbackFetcher{Connector: i.Connector, open: o, fetch: pf, ledger: c.Ledger}, nil
 	}
 	return nil, nil
 }

@@ -13,7 +13,7 @@ import (
 
 // openAIModel calls a provider that speaks OpenAI's chat completions API:
 // OpenAI itself, Gemini (through Google's OpenAI-compatible endpoint),
-// Mistral and OpenRouter.
+// Mistral, xAI and the routers (OpenRouter, Vercel AI Gateway, Requesty).
 type openAIModel struct {
 	c    Config
 	http *http.Client
@@ -278,13 +278,11 @@ var notChat = []string{"embed", "tts", "whisper", "transcribe", "dall-e", "image
 	"search", "ocr", "aqa", "veo", "babbage", "davinci", "computer-use", "codex"}
 
 func listOpenAIModels(ctx context.Context, c Config, h *http.Client) ([]ModelInfo, error) {
-	if c.Provider.ID == OpenRouter.ID {
-		// OpenRouter lists its models to anyone, so ask about the key
-		// itself first: that proves it works, at no cost.
-		var key struct {
-			Data json.RawMessage `json:"data"`
-		}
-		if err := doOpenAI(ctx, c, h, http.MethodGet, "/key", nil, &key); err != nil {
+	// OpenRouter and Vercel AI Gateway list their models to anyone, so ask
+	// about the key itself first: that proves it works, at no cost.
+	if check, ok := map[string]string{OpenRouter.ID: "/key", VercelAIGateway.ID: "/credits"}[c.Provider.ID]; ok {
+		var key json.RawMessage
+		if err := doOpenAI(ctx, c, h, http.MethodGet, check, nil, &key); err != nil {
 			return nil, err
 		}
 	}
@@ -292,6 +290,7 @@ func listOpenAIModels(ctx context.Context, c Config, h *http.Client) ([]ModelInf
 		Data []struct {
 			ID           string `json:"id"`
 			Name         string `json:"name"`
+			Type         string `json:"type"` // Vercel AI Gateway: language, embedding, image
 			Capabilities *struct {
 				FunctionCalling *bool `json:"function_calling"`
 			} `json:"capabilities"`
@@ -305,7 +304,7 @@ func listOpenAIModels(ctx context.Context, c Config, h *http.Client) ([]ModelInf
 	for _, d := range out.Data {
 		id := strings.TrimPrefix(d.ID, "models/")
 		low := strings.ToLower(id)
-		if id == "" || seen[id] || containsAny(low, notChat) {
+		if id == "" || seen[id] || containsAny(low, notChat) || (c.Provider.ID == VercelAIGateway.ID && d.Type != "" && d.Type != "language") {
 			continue
 		}
 		// Mistral says which models can call tools; the agent needs them.

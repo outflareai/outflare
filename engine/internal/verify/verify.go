@@ -13,6 +13,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"math"
 	"strings"
 	"sync"
 	"time"
@@ -24,6 +25,8 @@ import (
 	"github.com/outflareai/outflare/engine/internal/connectors/verifiers"
 	"github.com/outflareai/outflare/engine/internal/jobs"
 	"github.com/outflareai/outflare/engine/internal/mailbox"
+	"github.com/outflareai/outflare/engine/internal/outcomes"
+	"github.com/outflareai/outflare/engine/internal/usagelimits"
 )
 
 // JobVerify verifies a batch of addresses in one workspace.
@@ -292,6 +295,19 @@ func (s *Service) Verify(ctx context.Context, ws string, emails []string, force 
 		}
 	}
 
+	// A paid service checks at most what its usage limits allow (one
+	// credit an address); the rest get the free checks.
+	var limited []string
+	if opened != nil {
+		left, capped, err := usagelimits.Allowance(ctx, s.Pool, ws, opened.ID, "credit")
+		if err != nil {
+			return nil, err
+		}
+		if n := int(math.Floor(left + 1e-9)); capped && n < len(emails) {
+			emails, limited = emails[:n], emails[n:]
+		}
+	}
+
 	conc := s.Concurrency
 	if conc <= 0 {
 		conc = 5
@@ -343,10 +359,22 @@ func (s *Service) Verify(ctx context.Context, ws string, emails []string, force 
 	}
 	wg.Wait()
 
+	var keep []Result
 	if opened != nil {
 		_ = s.Store.Checked(ctx, s.Pool, ws, opened.ID, &opened.Account, stopped)
+		if err := s.book(ctx, ws, opened, errs); err != nil {
+			return nil, err
+		}
 	}
-	var keep []Result
+	for _, e := range limited {
+		r, err := s.Builtin.Verify(ctx, nil, nil, e)
+		if err != nil {
+			continue // checked again with the next batch that asks
+		}
+		r.Email = strings.ToLower(e)
+		r.Reason = strings.TrimSpace(r.Reason + " (built-in fallback: usage limit reached)")
+		keep = append(keep, Result{Verification: r, Provider: verifiers.BuiltinID, CheckedAt: time.Now()})
+	}
 	var retry []string
 	var lastErr error
 	for i := range emails {
@@ -382,6 +410,28 @@ func (s *Service) Verify(ctx context.Context, ws string, emails []string, force 
 		}
 	}
 	return keep, nil
+}
+
+// book puts the paid checks in the spend ledger, one credit an address,
+// so they count toward the connection's usage limits.
+func (s *Service) book(ctx context.Context, ws string, o *connectors.Opened, errs []error) error {
+	n := 0
+	for _, err := range errs {
+		if err == nil {
+			n++
+		}
+	}
+	if n == 0 {
+		return nil
+	}
+	units := float64(n)
+	id := o.ID
+	_, _, err := outcomes.Record(ctx, s.Pool, outcomes.Entry{
+		WorkspaceID: ws, Category: outcomes.CategoryVerification, Provider: o.Connector.Definition().ID,
+		IntegrationID: &id, Units: &units, UnitName: "credit", OccurredAt: time.Now(), Source: outcomes.SourceAuto,
+		Note: fmt.Sprintf("Verified %d addresses, one credit each (estimated)", n),
+	})
+	return err
 }
 
 func (s *Service) save(ctx context.Context, ws string, rs []Result) error {

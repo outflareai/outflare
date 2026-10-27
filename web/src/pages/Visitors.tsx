@@ -13,7 +13,9 @@ import type { Tab } from "../App";
 // Visitors: the companies and people on the workspace's website, scored for
 // buying intent. People are known from the workspace's own sign-in or from
 // a click on a tracked link in an email Outflare sent them; their company is
-// their first company, else the one with their email's domain.
+// their first company, else the one with their email's domain. When the
+// workspace turns lookups on, unknown visitors' companies come from its own
+// data provider, and stay off the CRM until someone adds them.
 
 type Visitor = components["schemas"]["Visitor"];
 type Totals = components["schemas"]["VisitorTotals"];
@@ -28,10 +30,12 @@ const views = [
   { id: "people", label: "People" },
 ] as const;
 
+const field = "h-8 rounded-md border border-input bg-transparent px-2.5 text-[13px]";
+
 const how: Record<string, string> = {
   product: "Signed in",
   email_click: "Email click",
-  company_ip: "Company network",
+  company_ip: "IP lookup",
   provider: "Data provider",
 };
 
@@ -75,7 +79,7 @@ export function Visitors({ ws, canManage, go }: Props) {
   const header = (
     <PageHeader
       title="Visitors"
-      description="The companies and people on your website, best first by buying intent. People are known when they sign in to your product or arrive from a tracked link in an email you sent them. Agents use the visitors tools."
+      description="The companies and people on your website, best first by buying intent. People are known when they sign in to your product or arrive from a tracked link in an email you sent them. Companies can also come from your own data provider's IP lookups, which are often wrong, so they stay off your CRM until you add them. Agents use the visitors tools."
       action={
         <div className="flex flex-wrap items-center gap-2">
           <div className="flex rounded-md border" role="group" aria-label="Date range">
@@ -95,7 +99,7 @@ export function Visitors({ ws, canManage, go }: Props) {
     <div className="space-y-6">
       {header}
       {error && <ErrorText>{error}</ErrorText>}
-      {showSettings && canManage && <SettingsCard ws={ws} onSaved={load} />}
+      {showSettings && canManage && <SettingsCard ws={ws} onSaved={load} go={go} />}
 
       {!hasKeys && (
         <>
@@ -107,7 +111,8 @@ export function Visitors({ ws, canManage, go }: Props) {
       )}
 
       <Stats cols={4}>
-        <Stat label={`Visitors, ${days} days`} value={totals.browsers.toLocaleString()} sub="browsers, known or not" />
+        <Stat label={`Visitors, ${days} days`} value={totals.browsers.toLocaleString()}
+          sub={totals.no_company > 0 ? `${totals.no_company.toLocaleString()} on home, phone or VPN networks: no company` : "browsers, known or not"} />
         <Stat label="Known people" value={totals.people.toLocaleString()} sub={plural(totals.known, "browser")} />
         <Stat label="Companies" value={totals.companies.toLocaleString()} />
         <Stat label="Hot" value={totals.hot.toLocaleString()} sub={`in ${view}`} tone={totals.hot > 0 ? "green" : undefined} />
@@ -115,7 +120,7 @@ export function Visitors({ ws, canManage, go }: Props) {
 
       <DataTable
         data={rows}
-        rowId={(r) => r.record_id}
+        rowId={(r) => r.record_id ?? `domain:${r.domain}`}
         onRowClick={setOpen}
         searchPlaceholder={view === "companies" ? "Search companies" : "Search people"}
         toolbar={
@@ -151,7 +156,10 @@ export function Visitors({ ws, canManage, go }: Props) {
             accessorFn: (r) => `${r.name} ${r.domain ?? ""} ${r.email ?? ""} ${r.company?.name ?? ""}`,
             cell: ({ row: { original: r } }) => (
               <div className="min-w-0">
-                <div className="font-medium">{r.name || r.domain || r.email || "Unnamed"}</div>
+                <div className="flex items-center gap-2 font-medium">
+                  {r.name || r.domain || r.email || "Unnamed"}
+                  {!r.in_crm && <Badge tone="grey" title="Found by your data provider from visitors' IP addresses. Lookups are often wrong: check it before you add it to your CRM.">Not in CRM</Badge>}
+                </div>
                 <div className="truncate text-[12px] text-muted-foreground">
                   {r.kind === "company"
                     ? [r.domain, r.people > 0 ? plural(r.people, "person", "people") : ""].filter(Boolean).join(" · ")
@@ -180,20 +188,53 @@ export function Visitors({ ws, canManage, go }: Props) {
         initialSort={[{ id: "score", desc: true }]}
       />
 
-      {open && <VisitorSheet ws={ws} v={open} onClose={() => setOpen(null)} go={go} />}
+      {open && <VisitorSheet ws={ws} v={open} canManage={canManage} onClose={() => setOpen(null)} onChanged={() => { setOpen(null); load(); }} go={go} />}
     </div>
   );
 }
 
-function VisitorSheet({ ws, v, onClose, go }: { ws: string; v: Visitor; onClose: () => void; go: (tab: Tab, item?: string) => void }) {
+function VisitorSheet({ ws, v, canManage, onClose, onChanged, go }: {
+  ws: string; v: Visitor; canManage: boolean; onClose: () => void; onChanged: () => void; go: (tab: Tab, item?: string) => void;
+}) {
   const [pages, setPages] = useState<TimelineItem[] | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const fromLookup = v.kind === "company" && v.identified_by.includes("company_ip") && !!v.domain;
 
   useEffect(() => {
-    if (v.kind !== "person") return;
+    if (v.kind !== "person" || !v.record_id) return;
     api.GET("/v1/workspaces/{ws}/records/{record}/timeline", { params: { path: { ws, record: v.record_id }, query: { kinds: "event", limit: 100 } } }).then(({ data }) =>
       setPages((data?.data ?? []).filter((t) => t.title === "page.viewed" && t.source === "browser").slice(0, 25)),
     );
   }, [ws, v]);
+
+  async function addToCRM() {
+    setBusy(true);
+    const { error } = await api.POST("/v1/workspaces/{ws}/visitors/companies", { params: { path: { ws } }, body: { domain: v.domain ?? "" } });
+    setBusy(false);
+    if (error) return setError(errorMessage(error));
+    toast(`${v.name || v.domain} is in your CRM, marked as found by an IP lookup.`);
+    onChanged();
+  }
+
+  // Marks the domain as not a company, such as an ISP whose customers the
+  // provider took for its own: its visitors lose it.
+  async function notACompany() {
+    setBusy(true);
+    const cur = await api.GET("/v1/workspaces/{ws}/visitors/settings", { params: { path: { ws } } });
+    if (cur.error || !cur.data) {
+      setBusy(false);
+      return setError(errorMessage(cur.error));
+    }
+    const { error } = await api.PUT("/v1/workspaces/{ws}/visitors/settings", {
+      params: { path: { ws } },
+      body: { not_companies: [...cur.data.not_companies, v.domain ?? ""] },
+    });
+    setBusy(false);
+    if (error) return setError(errorMessage(error));
+    toast(`${v.domain} won't be named as a company again.`);
+    onChanged();
+  }
 
   const path = (t: TimelineItem) => {
     const ctx = (t.detail as { context?: { page?: { path?: string } } }).context;
@@ -237,6 +278,22 @@ function VisitorSheet({ ws, v, onClose, go }: { ws: string; v: Visitor; onClose:
               )}
             </div>
           )}
+          {fromLookup && (
+            <div className="space-y-2 rounded-md border p-3">
+              <div className="text-muted-foreground">
+                {v.in_crm
+                  ? "Your data provider matched these visitors to this company from their IP address."
+                  : "Found by your data provider from visitors' IP addresses, and not in your CRM. Lookups are often wrong, for example naming an internet provider instead of its customers."}
+              </div>
+              {canManage && (
+                <div className="flex flex-wrap gap-2">
+                  {!v.in_crm && <Button onClick={addToCRM} disabled={busy}>Add to CRM</Button>}
+                  <Button variant="ghost" onClick={notACompany} disabled={busy}>Not a company (ISP)</Button>
+                </div>
+              )}
+              {error && <ErrorText>{error}</ErrorText>}
+            </div>
+          )}
           <div className="flex flex-wrap gap-2">
             <Button variant="ghost" onClick={() => go("leads")}>Open leads</Button>
             <Button variant="ghost" onClick={() => go("sequences")}>Sequences</Button>
@@ -247,11 +304,13 @@ function VisitorSheet({ ws, v, onClose, go }: { ws: string; v: Visitor; onClose:
   );
 }
 
-function SettingsCard({ ws, onSaved }: { ws: string; onSaved: () => void }) {
+function SettingsCard({ ws, onSaved, go }: { ws: string; onSaved: () => void; go: (tab: Tab, item?: string) => void }) {
   const [s, setS] = useState<Settings | null>(null);
   const [keyPages, setKeyPages] = useState("");
   const [exclude, setExclude] = useState("");
+  const [notCompanies, setNotCompanies] = useState("");
   const [hot, setHot] = useState("60");
+  const [limit, setLimit] = useState("500");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
 
@@ -261,7 +320,9 @@ function SettingsCard({ ws, onSaved }: { ws: string; onSaved: () => void }) {
       setS(data);
       setKeyPages(data.key_pages.join("\n"));
       setExclude(data.exclude_domains.join("\n"));
+      setNotCompanies(data.not_companies.join("\n"));
       setHot(String(data.hot_score));
+      setLimit(String(data.reveal_daily_limit));
     });
   }, [ws]);
 
@@ -272,7 +333,10 @@ function SettingsCard({ ws, onSaved }: { ws: string; onSaved: () => void }) {
     const split = (v: string) => v.split(/[\s,]+/).filter(Boolean);
     const { data, error } = await api.PUT("/v1/workspaces/{ws}/visitors/settings", {
       params: { path: { ws } },
-      body: { key_pages: split(keyPages), exclude_domains: split(exclude), hot_score: Number(hot), email_clicks: s.email_clicks, exclude_customers: s.exclude_customers },
+      body: {
+        key_pages: split(keyPages), exclude_domains: split(exclude), hot_score: Number(hot), email_clicks: s.email_clicks, exclude_customers: s.exclude_customers,
+        reveal_companies: s.reveal_companies, reveal_integration_id: s.reveal_integration_id, reveal_daily_limit: Number(limit), not_companies: split(notCompanies),
+      },
     });
     setBusy(false);
     if (error || !data) return setError(errorMessage(error));
@@ -305,6 +369,37 @@ function SettingsCard({ ws, onSaved }: { ws: string; onSaved: () => void }) {
           <Switch checked={s.exclude_customers} onCheckedChange={(v) => setS({ ...s, exclude_customers: v })} className="mt-0.5" />
           <span><span className="font-medium">Leave out customers.</span> <span className="text-muted-foreground">People and companies that pay you, or are marked as customers.</span></span>
         </label>
+        <div className="space-y-3 border-t pt-4">
+          <div className="text-[13px] font-medium">Company lookups</div>
+          {s.reveal_connections.length === 0 ? (
+            <p className="text-[13px] text-muted-foreground">
+              Find the company behind visitors nobody knows yet, with your own People Data Labs or Snitcher account.{" "}
+              <button type="button" className="underline" onClick={() => go("connectors")}>Connect one</button> first. Outflare never looks anything up on its own account.
+            </p>
+          ) : (
+            <>
+              <label className="flex items-start gap-3 text-[13px]">
+                <Switch checked={s.reveal_companies} onCheckedChange={(v) => setS({ ...s, reveal_companies: v })} className="mt-0.5" />
+                <span><span className="font-medium">Look up companies from visitors' addresses.</span> <span className="text-muted-foreground">Only visitors who accepted your site's cookies, each address once a week, on your provider's credits. Home, phone, VPN and data-centre connections name nobody. Companies found stay off your CRM until you add them, and are dropped after 90 days without a visit.</span></span>
+              </label>
+              {s.reveal_connections.length > 1 && (
+                <label className="block space-y-1 text-[13px]">
+                  <span className="font-medium">Look up with</span>
+                  <select className={field + " w-full"} value={s.reveal_integration_id ?? ""} onChange={(e) => setS({ ...s, reveal_integration_id: e.target.value || null })}>
+                    <option value="">The first that can</option>
+                    {s.reveal_connections.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+                  </select>
+                </label>
+              )}
+              <Input label="Lookups a day at most" type="number" min={1} max={100000} value={limit} onChange={(e) => setLimit(e.target.value)} hint={`${plural(s.reveals_today, "lookup")} today (UTC).`} />
+              <label className="block space-y-1 text-[13px]">
+                <span className="font-medium">Not companies</span>
+                <textarea className="min-h-16 w-full rounded-md border border-input bg-transparent px-2.5 py-1.5 font-mono text-[13px]" value={notCompanies} onChange={(e) => setNotCompanies(e.target.value)} placeholder="isp.example" />
+                <span className="text-muted-foreground">Internet providers and carriers your provider mistook for a company. Their visitors lose them, and they are never named again.</span>
+              </label>
+            </>
+          )}
+        </div>
         {error && <ErrorText>{error}</ErrorText>}
         <Button type="submit" disabled={busy}>Save</Button>
       </form>

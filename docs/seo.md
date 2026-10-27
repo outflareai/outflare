@@ -57,6 +57,10 @@ same budget.
 - The budget runs per calendar month (UTC). Before each live call Outflare
   estimates its cost and refuses with `402 budget_reached` if it would go
   over; raise the budget in the connection's SEO settings to carry on.
+  The budget is the connection's monthly usage limit: its page under
+  Connectors can also set a daily limit, make the limits only warn, and
+  shows usage by day. Owners and admins are emailed at 80% and when a
+  limit is reached ([usage-limits.md](usage-limits.md)).
 - Every live call is recorded in Outcomes (category `data`, provider
   `dataforseo` or `ahrefs`), so SEO spend shows next to the rest of your
   cost per meeting. Calls that fail after the provider charged are recorded
@@ -106,12 +110,20 @@ for each brand from what is already stored, so it is free:
   when it is connected; the rating is the brand's main website's, the rest are
   added up across its websites.
 - **SEO status:** `seo_status` says why those numbers are there or not: no SEO
-  tool connected (`not_connected`), no website for the brand (`no_website`),
+  tool connected (`not_connected`), one connected but shared with other brands
+  only (`not_shared`), no website for the brand (`no_website`),
   its SEO tool reads other domains (`not_followed`), snapshots off (`off`),
   the first read under way (`reading`), the last read failed (`failed`, with
   the reason for callers with `seo.read`, such as a used-up monthly budget),
   or `ready`. The page shows it with the next step, and checks back on its
   own while a first read is under way.
+- **Sources:** `sources.search` and `sources.traffic` say whether the
+  brand's websites have search console and visitor numbers (`ready`), or a
+  connected tool has numbers for other websites of the workspace only
+  (`other_sites`, with those `hosts`), or nothing has them yet
+  (`not_connected`). So a brand whose website isn't in the connected tool, or
+  whose site is set to another brand, is told that instead of being asked to
+  connect a tool again.
 - **Trends:** the last 4 whole weeks against the 4 before (for snapshots, the
   latest against the last one at least 4 weeks older). Within 3% is flat.
 - **Site health and fixes:** the brand's audited sites and its open fixes, for

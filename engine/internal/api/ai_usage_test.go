@@ -27,7 +27,7 @@ func TestAIUsage(t *testing.T) {
 
 	// Before any call every tool is listed, with nothing spent.
 	u := owner.must(200, "GET", base+"/ai-usage", nil)
-	if u["month"] != time.Now().UTC().Format("2006-01") || u["total"].(map[string]any)["calls"].(float64) != 0 || len(u["tools"].([]any)) != 9 {
+	if u["month"] != time.Now().UTC().Format("2006-01") || u["total"].(map[string]any)["calls"].(float64) != 0 || len(u["tools"].([]any)) != 10 {
 		t.Fatalf("empty usage = %v", u)
 	}
 	owner.must(400, "GET", base+"/ai-usage?month=2026-13", nil)

@@ -1958,6 +1958,78 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/workspaces/{ws}/sending-domains/{domain}/dns": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                domain: components["parameters"]["Domain"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Add a domain's missing SPF or DMARC record in one click
+         * @description Scope: mailboxes.manage. Adds the records the domain's issues ask for (`issues[].record`) through the workspace's own DNS host connection (such as Cloudflare), in the background. It only adds records, never changes or deletes one. Poll the domain: `dns_install` says how it went, and the domain is checked again once they're in. 400 when nothing is missing.
+         */
+        post: operations["addSendingDomainDNS"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/workspaces/{ws}/sending-domains/{domain}/dns/approval": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                domain: components["parameters"]["Domain"];
+            };
+            cookie?: never;
+        };
+        /**
+         * Get a one-off approval link for a domain's missing SPF or DMARC record
+         * @description Scope: mailboxes.manage. Looks up the domain's DNS provider. When it supports Domain Connect and has Outflare's template, `url` takes the person to the provider's own screen to approve exactly these records once; Outflare keeps no access afterwards. Otherwise `reason` says why, and .../dns with a DNS host connection is the way.
+         */
+        get: operations["getSendingDomainDNSApproval"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/workspaces/{ws}/sending-domains/{domain}/dns/approved": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                domain: components["parameters"]["Domain"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Report coming back from the DNS provider's approval
+         * @description Scope: mailboxes.manage. Call it when the provider sends the browser back. Without `error` Outflare checks the domain again (it trusts DNS, not the redirect) and `dns_install` shows `provider`; with one nothing changes.
+         */
+        post: operations["reportSendingDomainDNSApproved"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/workspaces/{ws}/sending-servers": {
         parameters: {
             query?: never;
@@ -4531,7 +4603,7 @@ export interface paths {
         get?: never;
         /**
          * Set an SEO connection's domains, country, budget and snapshots
-         * @description Scope: integrations.manage. Send only what changes. `domains: null` follows the domains the analytics tools line up (at most five); `monthly_budget: null` is the default ($10 for DataForSEO, 10,000 API units for Ahrefs); 0 stops every call.
+         * @description Scope: integrations.manage. Send only what changes. `domains: null` follows the domains the analytics tools line up (at most five); `monthly_budget: null` is the default ($10 for DataForSEO, 10,000 API units for Ahrefs); 0 stops every call. The budget is the connection's monthly usage limit, which `PUT .../integrations/{id}/usage/limits` also sets, with a daily one.
          */
         put: operations["setSEOSettings"];
         post?: never;
@@ -5958,7 +6030,7 @@ export interface paths {
          * Choose the AI models to sample
          * @description Scope: seo.manage. Send only what changes. Each model is one of the
          *     workspace's own AI model connections (Claude, OpenAI, Gemini,
-         *     Mistral or OpenRouter, with its own key) and a model id from GET
+         *     Mistral, xAI or a router, with its own key) and a model id from GET
          *     .../integrations/{id}/models. OpenRouter reaches many vendors'
          *     models with one key. `web_search` lets the model search the web
          *     before it answers, as AI assistants do for people, so its answer
@@ -7309,7 +7381,7 @@ export interface paths {
         };
         /**
          * List the models an AI model connection can use
-         * @description Scope: integrations.manage. For a Claude, OpenAI, Gemini, Mistral or OpenRouter
+         * @description Scope: integrations.manage. For an AI model (Claude, OpenAI, Gemini, Mistral, xAI or a router)
          *     connection: the chat models its key can use, asked of the provider
          *     live (costs nothing). `price` is set where Outflare knows the list
          *     price; for the rest, enter it with your choice in `PUT /ai-settings`.
@@ -7381,6 +7453,104 @@ export interface paths {
         put: operations["updateAIToolLimits"];
         post?: never;
         delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/workspaces/{ws}/connection-usage": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+            };
+            cookie?: never;
+        };
+        /**
+         * What each paid connection used, with its limits
+         * @description Scope: integrations.read. Every connection whose calls cost money
+         *     per call (SEO data, lead data, email verification, page reads and
+         *     web searches), with what it used today and this calendar month
+         *     (UTC) and its daily and monthly limits. AI models are not here:
+         *     their spend and limits are under `GET /ai-usage`. The calls run on
+         *     the workspace's own account with each provider, which bills the
+         *     workspace; the limits only stop Outflare from making more of them.
+         */
+        get: operations["listConnectionUsage"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/workspaces/{ws}/integrations/{id}/usage": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        /**
+         * See a paid connection's usage and limits
+         * @description Scope: integrations.read. What the connection used today and this
+         *     calendar month (UTC), in the unit its limits count (`USD`, or the
+         *     provider's own: `credit`, `API unit`, `token`), its usage per day
+         *     for the last 30 days, its limits and the warnings sent. Usage is
+         *     summed from the spend ledger, so every feature's calls count.
+         *     `estimated` means the provider doesn't say what a call cost, so it
+         *     is worked out from the price list. Not found for a connection that
+         *     costs nothing per call.
+         */
+        get: operations["getConnectionUsage"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/workspaces/{ws}/integrations/{id}/usage/limits": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Set a paid connection's daily and monthly limits
+         * @description Scope: integrations.manage. Replaces the connection's limits: send
+         *     all of them. A limit that is null or left out is no limit; 0 stops
+         *     every call. `unit` is one of the connection's `units` (its usual
+         *     one when left out). With `hard_stop` (the default) Outflare makes
+         *     no more calls through the connection once a limit is reached, and
+         *     the feature that wanted one says why (`usage_limit_reached`, or
+         *     `budget_reached` for SEO reports); false only warns. Owners and
+         *     admins are emailed when usage reaches 80% of a limit and again when
+         *     it reaches it, once a day or month (the `connection_limit.warned`
+         *     and `connection_limit.reached` webhooks). For Ahrefs and DataForSEO
+         *     the monthly limit is the SEO budget.
+         */
+        put: operations["updateConnectionLimits"];
+        post?: never;
+        /**
+         * Go back to a paid connection's starting limits
+         * @description Scope: integrations.manage. Removes the limits set for the connection. Ahrefs (10,000 API units a month) and DataForSEO (US$10 a month) go back to their starting monthly limit; other connections have none.
+         */
+        delete: operations["resetConnectionLimits"];
         options?: never;
         head?: never;
         patch?: never;
@@ -8051,6 +8221,135 @@ export interface paths {
          * @description Scope: outcomes.manage.
          */
         delete: operations["deleteSpendRate"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/playbooks": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Every playbook this server ships
+         * @description Public, no key needed. Playbooks are ready-made recipes from the
+         *     repository's `playbooks/` folder: what data and connections each one
+         *     needs, its steps (each names the operations, and so the MCP tools,
+         *     it uses), its guardrails, how to tell it worked, and the prompt that
+         *     runs it. Copy a prompt into any AI app with the Outflare MCP
+         *     connected, or start one in a workspace with
+         *     `POST /v1/workspaces/{ws}/playbooks/{id}/runs`.
+         */
+        get: operations["listPlaybookCatalog"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/playbooks/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get a playbook
+         * @description Public, no key needed.
+         */
+        get: operations["getPlaybookCatalog"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/workspaces/{ws}/playbooks": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+            };
+            cookie?: never;
+        };
+        /**
+         * Playbooks, with whether this workspace is ready to run each
+         * @description Scope: missions.read. Each playbook with `readiness`: the
+         *     connections the workspace still has to add (only its own accounts
+         *     count), optional ones that would help, and data it doesn't collect
+         *     yet. `runs` counts the missions started from it here.
+         */
+        get: operations["listPlaybooks"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/workspaces/{ws}/playbooks/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                /** @example seo-quick-wins */
+                id: string;
+            };
+            cookie?: never;
+        };
+        /**
+         * Get a playbook and whether this workspace is ready to run it
+         * @description Scope: missions.read.
+         */
+        get: operations["getPlaybook"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/workspaces/{ws}/playbooks/{id}/runs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                /** @example seo-quick-wins */
+                id: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Start a playbook as a mission
+         * @description Scope: missions.run. Creates a mission draft named after the
+         *     playbook, with its prompt filled in from `inputs`, its steps as the
+         *     plan and its guardrails in the instructions. Like any mission it
+         *     does nothing until a person approves it, and the mode decides
+         *     whether writes are dry runs, wait for approval or run within the
+         *     limits. Fails with 409 `connector_needed` while a required
+         *     connection is missing: playbooks run only on the workspace's own
+         *     accounts. Missing data doesn't stop it.
+         */
+        post: operations["startPlaybook"];
+        delete?: never;
         options?: never;
         head?: never;
         patch?: never;
@@ -10131,6 +10430,41 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/workspaces/{ws}/semantic-search": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+            };
+            cookie?: never;
+        };
+        /**
+         * Read whether meaning-based search is on, and how far along it is
+         * @description Scope: integrations.read. Meaning-based search (`GET .../search?mode=meaning`) turns each record, received message,
+         *     meeting and deal into a vector (an embedding) with the workspace's own AI connection, so search can compare what
+         *     things mean. It is on unless an admin turned it off, and runs once the workspace has an OpenAI, Gemini, Mistral or
+         *     OpenRouter connection (Claude has no embeddings; the AI model chosen under Settings is used when it can). The calls
+         *     are billed by that provider to the workspace's account, under the tool `semantic_search` in `GET .../ai-usage`,
+         *     where a monthly limit for it can be set: usually cents a month, since each item is embedded once and again only
+         *     when it changes. `problem` says what is missing when it can't run: `semantic_search_unavailable` (the database has
+         *     no pgvector) or `connector_needed`.
+         */
+        get: operations["getSemanticSearch"];
+        /**
+         * Turn meaning-based search on or off
+         * @description Scope: integrations.manage. Off stops the embedding calls and deletes the workspace's vectors; word search carries
+         *     on. On embeds everything again, once a connection that makes embeddings is there.
+         */
+        put: operations["updateSemanticSearch"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/workspaces/{ws}/query/tables": {
         parameters: {
             query?: never;
@@ -10410,6 +10744,31 @@ export interface paths {
          */
         put: operations["updateVisitorSettings"];
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/workspaces/{ws}/visitors/companies": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Add a visitor company to the CRM
+         * @description Scope: customers.manage. A company found only from visitors' IP addresses (in_crm false on the Visitors list) becomes a CRM
+         *     company: a prospect, its domain marked as from a lookup (source visitor_reveal, unverified), and its visitors move onto it.
+         *     Lookups never add companies by themselves. A company the CRM already has at that domain is used instead (200).
+         */
+        post: operations["addVisitorCompany"];
         delete?: never;
         options?: never;
         head?: never;
@@ -14077,6 +14436,40 @@ export interface webhooks {
         patch?: never;
         trace?: never;
     };
+    "connection_limit.warned": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** A paid connection used 80% of a daily or monthly usage limit. */
+        post: operations["webhook_connection_limit_warned"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "connection_limit.reached": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** A paid connection reached a daily or monthly usage limit. */
+        post: operations["webhook_connection_limit_reached"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "experiment.started": {
         parameters: {
             query?: never;
@@ -15540,7 +15933,7 @@ export interface components {
              */
             id: string;
             /** @enum {string} */
-            type: "lead.replied" | "lead.unsubscribed" | "inbox.replied" | "inbox.updated" | "inbox.classified" | "lead.bounced" | "mailbox.auto_paused" | "lead.created" | "lead.updated" | "lead.deleted" | "leads.imported" | "suppressions.added" | "suppression.removed" | "lead_list.created" | "lead_list.leads_added" | "lead_list.run_started" | "lead_list.build_done" | "lead_list.build_failed" | "lead_list.refresh_done" | "lead_list.refresh_failed" | "lead_list.enrich_done" | "lead_list.enrich_failed" | "import.done" | "import.failed" | "sequence.created" | "sequence.updated" | "sequence.activated" | "sequence.paused" | "sequence.archived" | "sequence.deleted" | "sequence.steps_updated" | "sequence.leads_enrolled" | "enrollment.stopped" | "mailbox.imported" | "mailbox.updated" | "mailbox.paused" | "mailbox.resumed" | "mailbox.stage_changed" | "mailbox.deleted" | "domain.added" | "domain.paused" | "domain.resumed" | "domain.removed" | "email.queued" | "email.sent" | "email.delivered" | "email.bounced" | "email.complained" | "email.failed" | "email.suppressed" | "email.cancelled" | "email.unsubscribed" | "email.opened" | "email.clicked" | "email.preferences_changed" | "email_domain.verified" | "email_domain.verification_failed" | "email_provider.events_failed" | "email_template.published" | "meeting.created" | "meeting.updated" | "meeting.deleted" | "deal.created" | "deal.updated" | "deal.deleted" | "spend.recorded" | "integration.connected" | "integration.updated" | "integration.disconnected" | "connect_request.created" | "deploy.detected" | "deploy.failed" | "digest.ready" | "ai_budget.warned" | "ai_budget.reached" | "experiment.started" | "experiment.concluded" | "project.created" | "project.updated" | "project.deleted" | "mission.created" | "mission.updated" | "mission.submitted" | "mission.approved" | "mission.paused" | "mission.resumed" | "mission.stopped" | "mission.completed" | "mission.action_held" | "mission.action_approved" | "mission.action_rejected" | "infra.plan_created" | "infra.plan_approved" | "infra.ordered" | "infra.order_failed" | "infra.domains_bought" | "infra.mailbox_joined" | "infra.plan_warming" | "infra.plan_ready" | "infra.plan_cancelled" | "fix.found" | "fix.updated" | "fix.started" | "fix.verify_requested" | "fix.confirmed" | "fix.reopened" | "record.created" | "record.bulk_created" | "record.updated" | "record.merged" | "identity.verified" | "identity.closed" | "relationship.added" | "relationship.ended" | "consent.granted" | "consent.withdrawn" | "consent.bulk_withdrawn" | "brand.created" | "brand.updated" | "email_broadcast.created" | "email_broadcast.started" | "email_broadcast.sent" | "email_broadcast.failed" | "email_broadcast.cancelled" | "journey.created" | "journey.updated" | "journey_run.entered" | "journey_run.exited" | "brand_setup.installed" | "brand_setup.install_failed" | "install.issue_opened" | "install.issue_resolved" | "seo_site.created" | "seo_site.verified" | "seo_site.unverified" | "seo_site.deleted" | "crawl.started" | "crawl.stopped" | "crawl.done" | "social_action.drafted" | "social_action.approved" | "social_action.rejected" | "social_action.done" | "social_action.failed" | "visitor.became_hot" | "workspace.updated" | "webhook.test";
+            type: "lead.replied" | "lead.unsubscribed" | "inbox.replied" | "inbox.updated" | "inbox.classified" | "lead.bounced" | "mailbox.auto_paused" | "lead.created" | "lead.updated" | "lead.deleted" | "leads.imported" | "suppressions.added" | "suppression.removed" | "lead_list.created" | "lead_list.leads_added" | "lead_list.run_started" | "lead_list.build_done" | "lead_list.build_failed" | "lead_list.refresh_done" | "lead_list.refresh_failed" | "lead_list.enrich_done" | "lead_list.enrich_failed" | "import.done" | "import.failed" | "sequence.created" | "sequence.updated" | "sequence.activated" | "sequence.paused" | "sequence.archived" | "sequence.deleted" | "sequence.steps_updated" | "sequence.leads_enrolled" | "enrollment.stopped" | "mailbox.imported" | "mailbox.updated" | "mailbox.paused" | "mailbox.resumed" | "mailbox.stage_changed" | "mailbox.deleted" | "domain.added" | "domain.paused" | "domain.resumed" | "domain.removed" | "email.queued" | "email.sent" | "email.delivered" | "email.bounced" | "email.complained" | "email.failed" | "email.suppressed" | "email.cancelled" | "email.unsubscribed" | "email.opened" | "email.clicked" | "email.preferences_changed" | "email_domain.verified" | "email_domain.verification_failed" | "email_provider.events_failed" | "email_template.published" | "meeting.created" | "meeting.updated" | "meeting.deleted" | "deal.created" | "deal.updated" | "deal.deleted" | "spend.recorded" | "integration.connected" | "integration.updated" | "integration.disconnected" | "connect_request.created" | "deploy.detected" | "deploy.failed" | "digest.ready" | "ai_budget.warned" | "ai_budget.reached" | "connection_limit.warned" | "connection_limit.reached" | "experiment.started" | "experiment.concluded" | "project.created" | "project.updated" | "project.deleted" | "mission.created" | "mission.updated" | "mission.submitted" | "mission.approved" | "mission.paused" | "mission.resumed" | "mission.stopped" | "mission.completed" | "mission.action_held" | "mission.action_approved" | "mission.action_rejected" | "infra.plan_created" | "infra.plan_approved" | "infra.ordered" | "infra.order_failed" | "infra.domains_bought" | "infra.mailbox_joined" | "infra.plan_warming" | "infra.plan_ready" | "infra.plan_cancelled" | "fix.found" | "fix.updated" | "fix.started" | "fix.verify_requested" | "fix.confirmed" | "fix.reopened" | "record.created" | "record.bulk_created" | "record.updated" | "record.merged" | "identity.verified" | "identity.closed" | "relationship.added" | "relationship.ended" | "consent.granted" | "consent.withdrawn" | "consent.bulk_withdrawn" | "brand.created" | "brand.updated" | "email_broadcast.created" | "email_broadcast.started" | "email_broadcast.sent" | "email_broadcast.failed" | "email_broadcast.cancelled" | "journey.created" | "journey.updated" | "journey_run.entered" | "journey_run.exited" | "brand_setup.installed" | "brand_setup.install_failed" | "install.issue_opened" | "install.issue_resolved" | "seo_site.created" | "seo_site.verified" | "seo_site.unverified" | "seo_site.deleted" | "crawl.started" | "crawl.stopped" | "crawl.done" | "social_action.drafted" | "social_action.approved" | "social_action.rejected" | "social_action.done" | "social_action.failed" | "visitor.became_hot" | "workspace.updated" | "webhook.test";
             /** Format: date-time */
             created_at: string;
             /** Format: uuid */
@@ -15779,10 +16172,116 @@ export interface components {
              */
             runner: "builtin" | "external";
             turns: components["schemas"]["MissionTurns"];
+            /** @description The playbook it was started from (GET /v1/playbooks/{id}). */
+            playbook_id: string | null;
+            playbook_version: number | null;
             /** Format: date-time */
             created_at: string;
             /** Format: date-time */
             updated_at: string;
+        };
+        /** @description A playbook from the repository's playbooks/ folder (playbooks/README.md has the format). */
+        Playbook: {
+            /** @example seo-quick-wins */
+            id: string;
+            /** @description Raised whenever the steps or prompt change. */
+            version: number;
+            title: string;
+            summary: string;
+            description: string;
+            /**
+             * @description obvious suits almost anyone; clever needs one more source or idea; edge is niche.
+             * @enum {string}
+             */
+            tier: "obvious" | "clever" | "edge";
+            goals: ("customers" | "revenue" | "activation" | "retention" | "partners" | "search" | "ai_answers" | "tracking" | "replies")[];
+            /**
+             * @description outflare: looked after by the Outflare team. community: anyone else, after review.
+             * @enum {string}
+             */
+            publisher: "outflare" | "community";
+            author: {
+                github: string;
+                name?: string;
+            };
+            needs: {
+                data: components["schemas"]["PlaybookDataNeed"][];
+                connections: components["schemas"]["PlaybookConnectionNeed"][];
+            };
+            inputs: {
+                /** @description Used in the prompt as {{name}}. */
+                name: string;
+                label: string;
+                help?: string;
+                example: string;
+                optional: boolean;
+            }[];
+            steps: {
+                say: string;
+                /** @description The operationIds (and MCP tools) the step uses. */
+                tools: string[];
+            }[];
+            guardrails: string[];
+            measure: {
+                metric: string;
+                how: string;
+            }[];
+            /** @description The prompt to copy, with {{inputs}} to fill in. */
+            prompt: string;
+            /** @description A worked example with fictional data. */
+            example: string;
+            /**
+             * Format: uri
+             * @description The playbook's file on GitHub.
+             */
+            source_url: string;
+        };
+        PlaybookDataNeed: {
+            /** @enum {string} */
+            check: "records" | "customer_events" | "inbox" | "site_tracking" | "seo_site" | "mailboxes" | "leads";
+            label: string;
+        };
+        /** @description A connected account of the workspace's own. Any connector with the capability, or in the category, counts. */
+        PlaybookConnectionNeed: {
+            /** @example email.send */
+            capability?: string;
+            /** @example analytics */
+            category?: string;
+            label: string;
+            optional: boolean;
+            /** @description Connector ids the author suggests, best first (GET /v1/connectors). */
+            recommended: string[];
+        };
+        WorkspacePlaybook: components["schemas"]["Playbook"] & {
+            readiness: {
+                /** @description Every required connection and data source is in place. */
+                ready: boolean;
+                missing_connections: components["schemas"]["PlaybookConnectionNeed"][];
+                missing_optional: components["schemas"]["PlaybookConnectionNeed"][];
+                missing_data: components["schemas"]["PlaybookDataNeed"][];
+            };
+            /** @description Missions started from this playbook in the workspace. */
+            runs: number;
+        };
+        PlaybookRunInput: {
+            /** @description Values for the playbook's inputs, by name. */
+            inputs?: {
+                [key: string]: string;
+            };
+            /**
+             * @description Defaults to dry_run.
+             * @enum {string}
+             */
+            mode?: "dry_run" | "approve_writes" | "autonomous";
+            /** Format: uuid */
+            project_id?: string | null;
+            /**
+             * Format: uuid
+             * @description The API token that runs the mission.
+             */
+            token_id?: string | null;
+            /** Format: int64 */
+            max_spend_cents?: number | null;
         };
         /** @description The built-in agent's turns. All empty for an external runner. */
         MissionTurns: {
@@ -16823,6 +17322,13 @@ export interface components {
              */
             status: "available" | "planned";
             pricing?: string;
+            /** @description Short labels for the catalog card: Router on AI models that reach many vendors with one key, and which AI models also let people use a subscription plan instead of an API key (shown as soon until Outflare supports it). */
+            tags?: {
+                /** @example Router */
+                label: string;
+                /** @description What the label means */
+                help: string;
+            }[];
             /** @description Other connectors the same sign-in connects too, when the person grants them (one Google sign-in connects Google Analytics and Search Console). */
             also_connects?: string[];
             /** @description Can be connected on this server now, in at least one way. */
@@ -17014,9 +17520,11 @@ export interface components {
             kind: "company" | "person";
             /**
              * Format: uuid
-             * @description The company or person record (GET .../records/{id}).
+             * @description The company or person record (GET .../records/{id}); null for a company found only from addresses and not in the CRM.
              */
-            record_id: string;
+            record_id: string | null;
+            /** @description False for a company a lookup found that is not in the CRM yet; add it with POST .../visitors/companies. */
+            in_crm: boolean;
             name: string;
             /** @description A person's email. */
             email: string | null;
@@ -17039,10 +17547,16 @@ export interface components {
             /** Format: date-time */
             last_seen_at: string;
             last_path: string;
-            /** @description How they became known: product (the workspace's own sign-in), email_click (a tracked link in an email Outflare sent). */
+            /** @description How they became known: product (the workspace's own sign-in), email_click (a tracked link in an email Outflare sent), company_ip (the company behind their IP address, from the workspace's own provider). */
             identified_by: ("product" | "email_click" | "company_ip" | "provider")[];
             score: number;
             hot: boolean;
+        };
+        VisitorCompanyAdded: {
+            /** Format: uuid */
+            record_id: string;
+            /** @description False when the CRM had a company at that domain already. */
+            created: boolean;
         };
         VisitorRef: {
             /** Format: uuid */
@@ -17058,6 +17572,8 @@ export interface components {
             companies: number;
             /** @description In this view. */
             hot: number;
+            /** @description Unknown browsers whose address turned out to be a home, phone, VPN or data-centre connection, so no company can be named. Lookups only. */
+            no_company: number;
         };
         VisitorSettings: {
             /**
@@ -17076,6 +17592,28 @@ export interface components {
             exclude_domains: string[];
             /** @description Leave out people and companies that already pay. */
             exclude_customers: boolean;
+            /** @description Find the company behind unknown visitors' IP addresses with the workspace's own provider (People Data Labs, Snitcher), for visitors who accepted the site's cookies. Off until the workspace turns it on (default false), and needs such a connection. */
+            reveal_companies: boolean;
+            /**
+             * Format: uuid
+             * @description The connection that looks companies up; null for the first one that can.
+             */
+            reveal_integration_id: string | null;
+            /** @description Lookups a day (UTC) at most, so the provider's credits are never run down. Default 500. */
+            reveal_daily_limit: number;
+            /** @description Domains marked as not a company, such as an ISP or mobile carrier whose customers' traffic a provider took for its own. Lookups that name them name nobody. Adding one takes it off its visitors and archives company records only lookups made. */
+            not_companies: string[];
+            /** @description The workspace's connections that can find companies from addresses. */
+            reveal_connections: {
+                /** Format: uuid */
+                id: string;
+                name: string;
+                /** @example snitcher */
+                connector: string;
+                status: string;
+            }[];
+            /** @description Addresses looked up today (UTC). */
+            reveals_today: number;
             /** Format: date-time */
             updated_at: string | null;
         };
@@ -17085,6 +17623,11 @@ export interface components {
             email_clicks?: boolean;
             exclude_domains?: string[];
             exclude_customers?: boolean;
+            reveal_companies?: boolean;
+            /** Format: uuid */
+            reveal_integration_id?: string | null;
+            reveal_daily_limit?: number;
+            not_companies?: string[];
         };
         SiteKey: {
             /** Format: uuid */
@@ -17900,10 +18443,13 @@ export interface components {
         SEOBudget: {
             /** @enum {string} */
             unit: "USD" | "API unit";
+            /** @description The connection's monthly usage limit (0 when unlimited). */
             limit: number;
             /** @description Spent this calendar month (UTC). */
             spent: number;
             default: boolean;
+            /** @description No monthly limit stops calls (set on the connection's page under Connectors); a daily one still may. */
+            unlimited?: boolean;
         };
         SEOAnswer: {
             report: components["schemas"]["SEOReportName"];
@@ -18612,7 +19158,7 @@ export interface components {
             /** Format: uuid */
             integration_id: string;
             /** @enum {string} */
-            provider: "claude" | "openai" | "gemini" | "mistral" | "openrouter";
+            provider: "claude" | "openai" | "gemini" | "mistral" | "xai" | "openrouter" | "vercel_ai_gateway" | "requesty";
             model: string;
             web_search: boolean;
             input_cents_per_million?: number;
@@ -19057,11 +19603,13 @@ export interface components {
         /**
          * @description A channel whose pages and profiles Outflare reads. X and LinkedIn are read through their own app or sign-in, with posts;
          *     every channel's public profiles in a brand's links (an X account, a LinkedIn company page, a YouTube channel, an Instagram,
-         *     TikTok, Facebook or GitHub account, a subreddit, a Discord invite) have their followers read every day through the
-         *     workspace's own page reader (Geonode).
+         *     TikTok, Facebook, Threads, Bluesky or Mastodon account, a GitHub account, a subreddit, a Discord invite, a DEV author, a
+         *     Docker Hub namespace) have their headline count read every day through the workspace's own page reader (Geonode):
+         *     followers, or subscribers (YouTube), members (subreddit, Discord), stars across repositories (GitHub), pulls across
+         *     images (Docker Hub) or published posts (DEV), kept in `followers`.
          * @enum {string}
          */
-        SocialAccountChannel: "x" | "linkedin" | "youtube" | "instagram" | "tiktok" | "facebook" | "reddit" | "github" | "discord";
+        SocialAccountChannel: "x" | "linkedin" | "youtube" | "instagram" | "tiktok" | "facebook" | "reddit" | "github" | "discord" | "bluesky" | "threads" | "mastodon" | "dev_to" | "docker_hub";
         /** @description A page or profile of the brand's own, reached through the workspace's own connection. */
         SocialAccount: {
             /** Format: uuid */
@@ -19768,6 +20316,12 @@ export interface components {
              */
             direction: "up" | "down" | "flat" | "unknown";
         };
+        SEOOverviewSource: {
+            /** @enum {string} */
+            state: "ready" | "other_sites" | "not_connected";
+            /** @description For other_sites: the websites that do have numbers. */
+            hosts: string[];
+        };
         SEOOverviewBrand: {
             /** @description null for the websites no brand claims. */
             brand: {
@@ -19810,12 +20364,12 @@ export interface components {
             /** @description Where the brand's SEO snapshots stand, so a missing number has a reason and a next step. */
             seo_status: {
                 /**
-                 * @description not_connected: no SEO tool serves the brand. no_website: the brand has no website to read. not_followed:
+                 * @description not_connected: no SEO tool is connected. not_shared: one is, but only for other brands. no_website: the brand has no website to read. not_followed:
                  *     its SEO tool reads other domains. off: snapshots are turned off. reading: the first read is under way.
                  *     failed: the last read failed. ready: read every week.
                  * @enum {string}
                  */
-                state: "not_connected" | "no_website" | "not_followed" | "off" | "reading" | "failed" | "ready";
+                state: "not_connected" | "not_shared" | "no_website" | "not_followed" | "off" | "reading" | "failed" | "ready";
                 /** @description What it means and what to do, for people. A failed read's reason needs seo.read. */
                 message: string;
                 /**
@@ -19829,6 +20383,16 @@ export interface components {
                  * @description The last good read of the brand's domains.
                  */
                 last_ok_at: string | null;
+            };
+            /**
+             * @description Whether the brand's websites have search numbers (from a search console) and visitor numbers (from an
+             *     analytics tool) in the period. ready: they do. other_sites: a connected tool has numbers for other websites
+             *     of the workspace only, so the brand's website is not in that tool or the site is set to another brand.
+             *     not_connected: no tool has these numbers yet.
+             */
+            sources: {
+                search: components["schemas"]["SEOOverviewSource"];
+                traffic: components["schemas"]["SEOOverviewSource"];
             };
             trends: {
                 branded_search: components["schemas"]["SEOTrend"];
@@ -19895,7 +20459,7 @@ export interface components {
             task_models: {
                 [key: string]: {
                     /** @enum {string} */
-                    provider: "claude" | "openai" | "gemini" | "mistral" | "openrouter";
+                    provider: "claude" | "openai" | "gemini" | "mistral" | "xai" | "openrouter" | "vercel_ai_gateway" | "requesty";
                     model: string;
                     input_cents_per_million?: number;
                     output_cents_per_million?: number;
@@ -19924,7 +20488,7 @@ export interface components {
             /** @description The model in use now; null when none can be. */
             active: null | {
                 /** @enum {string} */
-                provider: "claude" | "openai" | "gemini" | "mistral" | "openrouter";
+                provider: "claude" | "openai" | "gemini" | "mistral" | "xai" | "openrouter" | "vercel_ai_gateway" | "requesty";
                 provider_name: string;
                 /** Format: uuid */
                 integration_id: string;
@@ -19944,7 +20508,7 @@ export interface components {
             };
             providers: {
                 /** @enum {string} */
-                connector: "claude" | "openai" | "gemini" | "mistral" | "openrouter";
+                connector: "claude" | "openai" | "gemini" | "mistral" | "xai" | "openrouter" | "vercel_ai_gateway" | "requesty";
                 name: string;
                 default_model: string | null;
                 /** @description The lighter model routine check-ins use by default; null uses the main model. */
@@ -19977,6 +20541,63 @@ export interface components {
             web_searches: number;
             /** @description US cents on the workspace's own provider bill, each call rounded up. */
             cost_cents: number;
+        };
+        ConnectionUsage: {
+            /** Format: uuid */
+            integration_id: string;
+            name: string;
+            /** @example ahrefs */
+            connector: string;
+            /**
+             * @description Units the limits can count, the usual one first: USD, or the provider's own (credit, API unit, token).
+             * @example [
+             *       "API unit"
+             *     ]
+             */
+            units: string[];
+            limits: components["schemas"]["ConnectionLimits"];
+            used: {
+                unit: string;
+                /** @description Used today (UTC). */
+                today: number;
+                /** @description Used this calendar month (UTC). */
+                month: number;
+            };
+            /** @description The provider doesn't say what each call cost, so usage is worked out from its price list. */
+            estimated: boolean;
+            /** @description Usage per day for the last 30 days (GET .../usage only). */
+            days?: {
+                /** Format: date */
+                date: string;
+                used: number;
+                calls: number;
+            }[];
+            /** @description The last warnings sent (GET .../usage only). */
+            alerts?: {
+                /** @enum {string} */
+                period: "day" | "month";
+                /** Format: date */
+                period_start: string;
+                /** @enum {integer} */
+                level: 80 | 100;
+                unit: string;
+                limit: number;
+                used: number;
+                /** Format: date-time */
+                sent_at: string;
+            }[];
+        };
+        ConnectionLimits: {
+            /** @example API unit */
+            unit: string;
+            /** @description Per day (UTC); null is no limit. */
+            daily_limit: number | null;
+            /** @description Per calendar month (UTC); null is no limit. */
+            monthly_limit: number | null;
+            /** @description Calls stop at a limit; false only warns. */
+            hard_stop: boolean;
+            /** @description Nobody set limits: the connector's starting limit applies (Ahrefs 10,000 API units, DataForSEO US$10 a month), or none. */
+            default: boolean;
         };
         AIUsage: {
             /** @example 2026-10 */
@@ -21261,6 +21882,10 @@ export interface components {
             updated_at: string;
         };
         SendingDomainDetail: components["schemas"]["SendingDomain"] & {
+            /** @description The last one-click run that added the domain's missing SPF or DMARC record (addSendingDomainDNS). */
+            dns_install: components["schemas"]["EmailDomainDNSInstall"] | null;
+            /** @description The workspace's connections that can add the domain's records, such as Cloudflare. */
+            dns_connections: string[];
             /** @description The last 14 days by UTC date, oldest first. */
             daily: {
                 /** Format: date */
@@ -22459,14 +23084,32 @@ export interface components {
             record_name: string | null;
             /** @description A record's name, or the subject or title. */
             title: string;
-            /** @description The words around the match in a reply's body or a meeting's notes; empty otherwise. */
+            /** @description The words around the match in a reply's body or a meeting's notes (by meaning: their start); empty otherwise. */
             snippet: string;
             /** @description A record's type or the identity that matched (email: ...), sent or received for a message, a meeting's status, a deal's stage, an email's status. */
             detail: string;
             /** Format: date-time */
             at: string;
-            /** @description How well it matched; higher is better. */
+            /** @description How well it matched; higher is better. By meaning */
             rank: number;
+        };
+        SemanticSearch: {
+            /** @description On unless an admin turned it off. */
+            enabled: boolean;
+            /** @description Whether the server's database has pgvector. */
+            available: boolean;
+            /** @description The connector making the embeddings: openai, gemini, mistral or openrouter. */
+            provider: string | null;
+            /** @description The provider's embedding model, such as text-embedding-3-small. */
+            model: string | null;
+            /** @description Items with a current vector. */
+            embedded: number;
+            /** @description Items new or changed since their vector was made, embedded within minutes. */
+            waiting: number;
+            problem: null | {
+                code: string;
+                message: string;
+            };
         };
         QueryTable: {
             /** @description The table's name in SQL, such as people or deals. */
@@ -22963,7 +23606,7 @@ export interface components {
              * @description What it is. Guessed from the address when left out (apps.apple.com is app_store); other when unknown.
              * @enum {string}
              */
-            kind?: "app_store" | "google_play" | "tv_app" | "chrome_web_store" | "microsoft_store" | "steam" | "docs" | "help" | "blog" | "status" | "x" | "linkedin" | "youtube" | "instagram" | "tiktok" | "facebook" | "discord" | "reddit" | "github" | "other";
+            kind?: "app_store" | "google_play" | "tv_app" | "chrome_web_store" | "microsoft_store" | "steam" | "docs" | "help" | "blog" | "status" | "x" | "linkedin" | "youtube" | "instagram" | "tiktok" | "facebook" | "discord" | "reddit" | "github" | "bluesky" | "threads" | "mastodon" | "dev_to" | "docker_hub" | "other";
             /**
              * Format: uri
              * @example https://apps.apple.com/app/repocket/id1234567890
@@ -28145,6 +28788,122 @@ export interface operations {
                     "application/json": components["schemas"]["Queued"] | components["schemas"]["MissionHeld"];
                 };
             };
+            404: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    addSendingDomainDNS: {
+        parameters: {
+            query?: never;
+            header?: {
+                /**
+                 * @description Makes the write safe to retry. A repeat with the same key from the same caller within 24 hours gets the first
+                 *     answer back (with `Idempotent-Replayed: true`) instead of running again. The same key for a different request
+                 *     is refused with 422 `idempotency_key_reused`; while the first is still running, 409 `idempotency_in_progress`.
+                 *     Use a new random key, such as a UUID, for each distinct write.
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                domain: components["parameters"]["Domain"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /**
+                     * Format: uuid
+                     * @description One of `dns_connections`: a connection that can add DNS records (capability dns.write).
+                     */
+                    integration_id: string;
+                };
+            };
+        };
+        responses: {
+            /** @description Queued. Inside a mission, a MissionHeld answer when the call was held for approval or dry-run instead. */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Queued"] | components["schemas"]["MissionHeld"];
+                };
+            };
+            400: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    getSendingDomainDNSApproval: {
+        parameters: {
+            query?: {
+                /** @description The app path the provider sends the browser back to, such as /acme/domains. Default: /. */
+                return?: string;
+            };
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                domain: components["parameters"]["Domain"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Whether the provider can, and the link. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DNSApproval"];
+                };
+            };
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    reportSendingDomainDNSApproved: {
+        parameters: {
+            query?: never;
+            header?: {
+                /**
+                 * @description Makes the write safe to retry. A repeat with the same key from the same caller within 24 hours gets the first
+                 *     answer back (with `Idempotent-Replayed: true`) instead of running again. The same key for a different request
+                 *     is refused with 422 `idempotency_key_reused`; while the first is still running, 409 `idempotency_in_progress`.
+                 *     Use a new random key, such as a UUID, for each distinct write.
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                domain: components["parameters"]["Domain"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DNSApproved"];
+            };
+        };
+        responses: {
+            /** @description Noted. Inside a mission, a MissionHeld answer when the call was held for approval or dry-run instead. */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Queued"] | components["schemas"]["MissionHeld"];
+                };
+            };
+            400: components["responses"]["Error"];
+            403: components["responses"]["Error"];
             404: components["responses"]["Error"];
             default: components["responses"]["Error"];
         };
@@ -38205,6 +38964,142 @@ export interface operations {
             default: components["responses"]["Error"];
         };
     };
+    listConnectionUsage: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The paid connections. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["ConnectionUsage"][];
+                    };
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    getConnectionUsage: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The connection's usage. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConnectionUsage"];
+                };
+            };
+            404: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    updateConnectionLimits: {
+        parameters: {
+            query?: never;
+            header?: {
+                /**
+                 * @description Makes the write safe to retry. A repeat with the same key from the same caller within 24 hours gets the first
+                 *     answer back (with `Idempotent-Replayed: true`) instead of running again. The same key for a different request
+                 *     is refused with 422 `idempotency_key_reused`; while the first is still running, 409 `idempotency_in_progress`.
+                 *     Use a new random key, such as a UUID, for each distinct write.
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @example credit */
+                    unit?: string;
+                    /** @example 200 */
+                    daily_limit?: number | null;
+                    /** @example 3000 */
+                    monthly_limit?: number | null;
+                    /** @default true */
+                    hard_stop?: boolean;
+                };
+            };
+        };
+        responses: {
+            /** @description The connection's usage, with its new limits. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConnectionUsage"];
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            400: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    resetConnectionLimits: {
+        parameters: {
+            query?: never;
+            header?: {
+                /**
+                 * @description Makes the write safe to retry. A repeat with the same key from the same caller within 24 hours gets the first
+                 *     answer back (with `Idempotent-Replayed: true`) instead of running again. The same key for a different request
+                 *     is refused with 422 `idempotency_key_reused`; while the first is still running, 409 `idempotency_in_progress`.
+                 *     Use a new random key, such as a UUID, for each distinct write.
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The connection's usage, with its starting limits. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConnectionUsage"];
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            404: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
     getAISettings: {
         parameters: {
             query?: never;
@@ -39544,6 +40439,141 @@ export interface operations {
                 content?: never;
             };
             404: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    listPlaybookCatalog: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Playbooks, by tier then title. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["Playbook"][];
+                    };
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    getPlaybookCatalog: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @example seo-quick-wins */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The playbook. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Playbook"];
+                };
+            };
+            404: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    listPlaybooks: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Playbooks. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["WorkspacePlaybook"][];
+                    };
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    getPlaybook: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                /** @example seo-quick-wins */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The playbook. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkspacePlaybook"];
+                };
+            };
+            404: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    startPlaybook: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                /** @example seo-quick-wins */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PlaybookRunInput"];
+            };
+        };
+        responses: {
+            /** @description The mission. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Mission"];
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            400: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
             default: components["responses"]["Error"];
         };
     };
@@ -43040,6 +44070,15 @@ export interface operations {
                 kinds?: string;
                 /** @description Results to return. Default 20. */
                 limit?: number;
+                /**
+                 * @description words matches the words typed. meaning finds what means the same even in other words ("unhappy with price"
+                 *     finds "too expensive for us"), over records, received messages, meetings and deals (not email). It compares
+                 *     vectors made with the workspace's own AI key (GET .../semantic-search); turning what was asked into one is a
+                 *     small AI call on that key. It answers semantic_search_unavailable (503) when the server's database has no
+                 *     pgvector, semantic_search_off (409) when an admin turned it off, and connector_needed (409) without an
+                 *     OpenAI, Gemini, Mistral or OpenRouter connection. rank is then the similarity, from -1 to 1.
+                 */
+                mode?: "words" | "meaning";
             };
             header?: never;
             path: {
@@ -43061,6 +44100,62 @@ export interface operations {
                     };
                 };
             };
+            default: components["responses"]["Error"];
+        };
+    };
+    getSemanticSearch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The settings and progress. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SemanticSearch"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    updateSemanticSearch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    enabled: boolean;
+                };
+            };
+        };
+        responses: {
+            /** @description The settings and progress. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SemanticSearch"];
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            400: components["responses"]["Error"];
             default: components["responses"]["Error"];
         };
     };
@@ -43521,6 +44616,50 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["VisitorSettings"];
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            default: components["responses"]["Error"];
+        };
+    };
+    addVisitorCompany: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /**
+                     * @description The company's domain as the Visitors list shows it.
+                     * @example northpeak.example
+                     */
+                    domain: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The CRM had it already. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["VisitorCompanyAdded"];
+                };
+            };
+            /** @description Added. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["VisitorCompanyAdded"];
                 };
             };
             202: components["responses"]["MissionHeld"];
@@ -49444,6 +50583,50 @@ export interface operations {
         };
     };
     webhook_ai_budget_reached: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["WebhookEvent"];
+            };
+        };
+        responses: {
+            /** @description Any 2xx answer means received; anything else is retried. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    webhook_connection_limit_warned: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["WebhookEvent"];
+            };
+        };
+        responses: {
+            /** @description Any 2xx answer means received; anything else is retried. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    webhook_connection_limit_reached: {
         parameters: {
             query?: never;
             header?: never;

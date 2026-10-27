@@ -23,6 +23,7 @@ COPY go.mod go.sum ./
 RUN go mod download
 COPY api api
 COPY engine engine
+COPY playbooks playbooks
 ARG VERSION=dev
 # Where the daily anonymous usage report goes (docs/telemetry.md); empty sends nothing.
 ARG TELEMETRY_URL=

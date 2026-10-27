@@ -391,9 +391,14 @@ func (s *Server) loadBrandSetup(ctx context.Context, ws string, b *brandRecord) 
 	return v, nil
 }
 
+// ids are the working connections' ids: one whose sign-in broke is left
+// out, so the step offers to connect again instead of retrying it.
 func ids(list []connectors.Integration) []string {
 	out := []string{}
 	for _, i := range list {
+		if i.Status != connectors.StatusConnected {
+			continue
+		}
 		out = append(out, i.ID)
 	}
 	return out

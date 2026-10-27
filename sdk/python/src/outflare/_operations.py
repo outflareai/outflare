@@ -481,6 +481,31 @@ class Operations(_Mixin):
             idempotency_key=idempotency_key,
         )
 
+    def add_sending_domain_dns(
+        self,
+        domain: str,
+        *,
+        ws: str | None = None,
+        integration_id: str,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Add a domain's missing SPF or DMARC record in one click.
+
+        Scope: mailboxes.manage. Adds the records the domain's issues ask for (`issues[].record`) through the workspace's own DNS host connection (such as Cloudflare), in the background. It only adds records, never changes or deletes one. Poll the domain: `dns_install` says how it went, and the domain is checked again once they're in. 400 when nothing is missing.
+
+        Needs: the mailboxes.manage scope.
+        POST /v1/workspaces/{ws}/sending-domains/{domain}/dns
+        """
+        return self._call(
+            "POST",
+            "/v1/workspaces/{ws}/sending-domains/{domain}/dns",
+            path={"domain": domain, "ws": ws},
+            body={"integration_id": integration_id},
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
     def add_seo_competitor(
         self,
         *,
@@ -701,6 +726,32 @@ class Operations(_Mixin):
             "/v1/workspaces/{ws}/tracking-domains/{id}/dns",
             path={"id": id, "ws": ws},
             body={"integration_id": integration_id},
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
+    def add_visitor_company(
+        self,
+        *,
+        ws: str | None = None,
+        domain: str,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Add a visitor company to the CRM.
+
+        Scope: customers.manage. A company found only from visitors' IP addresses (in_crm false on the Visitors list) becomes a CRM
+        company: a prospect, its domain marked as from a lookup (source visitor_reveal, unverified), and its visitors move onto it.
+        Lookups never add companies by themselves. A company the CRM already has at that domain is used instead (200).
+
+        Needs: the customers.manage scope.
+        POST /v1/workspaces/{ws}/visitors/companies
+        """
+        return self._call(
+            "POST",
+            "/v1/workspaces/{ws}/visitors/companies",
+            path={"ws": ws},
+            body={"domain": domain},
             extra_body=extra_body,
             idempotency_key=idempotency_key,
         )
@@ -4921,6 +4972,32 @@ class Operations(_Mixin):
             path={"id": id, "ws": ws},
         )
 
+    def get_connection_usage(
+        self,
+        id: str,
+        *,
+        ws: str | None = None,
+    ) -> Any:
+        """See a paid connection's usage and limits.
+
+        Scope: integrations.read. What the connection used today and this
+        calendar month (UTC), in the unit its limits count (`USD`, or the
+        provider's own: `credit`, `API unit`, `token`), its usage per day
+        for the last 30 days, its limits and the warnings sent. Usage is
+        summed from the spend ledger, so every feature's calls count.
+        `estimated` means the provider doesn't say what a call cost, so it
+        is worked out from the price list. Not found for a connection that
+        costs nothing per call.
+
+        Needs: the integrations.read scope.
+        GET /v1/workspaces/{ws}/integrations/{id}/usage
+        """
+        return self._call(
+            "GET",
+            "/v1/workspaces/{ws}/integrations/{id}/usage",
+            path={"id": id, "ws": ws},
+        )
+
     def get_connector_logo(
         self,
         id: str,
@@ -6088,6 +6165,41 @@ class Operations(_Mixin):
             path={"id": id, "ws": ws},
         )
 
+    def get_playbook(
+        self,
+        id: str,
+        *,
+        ws: str | None = None,
+    ) -> Any:
+        """Get a playbook and whether this workspace is ready to run it.
+
+        Scope: missions.read.
+
+        Needs: the missions.read scope.
+        GET /v1/workspaces/{ws}/playbooks/{id}
+        """
+        return self._call(
+            "GET",
+            "/v1/workspaces/{ws}/playbooks/{id}",
+            path={"id": id, "ws": ws},
+        )
+
+    def get_playbook_catalog(
+        self,
+        id: str,
+    ) -> Any:
+        """Get a playbook.
+
+        Public, no key needed.
+
+        GET /v1/playbooks/{id}
+        """
+        return self._call(
+            "GET",
+            "/v1/playbooks/{id}",
+            path={"id": id},
+        )
+
     def get_project(
         self,
         id: str,
@@ -6268,6 +6380,31 @@ class Operations(_Mixin):
             path={"type": type, "ws": ws},
         )
 
+    def get_semantic_search(
+        self,
+        *,
+        ws: str | None = None,
+    ) -> Any:
+        """Read whether meaning-based search is on, and how far along it is.
+
+        Scope: integrations.read. Meaning-based search (`GET .../search?mode=meaning`) turns each record, received message,
+        meeting and deal into a vector (an embedding) with the workspace's own AI connection, so search can compare what
+        things mean. It is on unless an admin turned it off, and runs once the workspace has an OpenAI, Gemini, Mistral or
+        OpenRouter connection (Claude has no embeddings; the AI model chosen under Settings is used when it can). The calls
+        are billed by that provider to the workspace's account, under the tool `semantic_search` in `GET .../ai-usage`,
+        where a monthly limit for it can be set: usually cents a month, since each item is embedded once and again only
+        when it changes. `problem` says what is missing when it can't run: `semantic_search_unavailable` (the database has
+        no pgvector) or `connector_needed`.
+
+        Needs: the integrations.read scope.
+        GET /v1/workspaces/{ws}/semantic-search
+        """
+        return self._call(
+            "GET",
+            "/v1/workspaces/{ws}/semantic-search",
+            path={"ws": ws},
+        )
+
     def get_sending_domain(
         self,
         domain: str,
@@ -6285,6 +6422,27 @@ class Operations(_Mixin):
             "GET",
             "/v1/workspaces/{ws}/sending-domains/{domain}",
             path={"domain": domain, "ws": ws},
+        )
+
+    def get_sending_domain_dns_approval(
+        self,
+        domain: str,
+        *,
+        ws: str | None = None,
+        return_: str | None = None,
+    ) -> Any:
+        """Get a one-off approval link for a domain's missing SPF or DMARC record.
+
+        Scope: mailboxes.manage. Looks up the domain's DNS provider. When it supports Domain Connect and has Outflare's template, `url` takes the person to the provider's own screen to approve exactly these records once; Outflare keeps no access afterwards. Otherwise `reason` says why, and .../dns with a DNS host connection is the way.
+
+        Needs: the mailboxes.manage scope.
+        GET /v1/workspaces/{ws}/sending-domains/{domain}/dns/approval
+        """
+        return self._call(
+            "GET",
+            "/v1/workspaces/{ws}/sending-domains/{domain}/dns/approval",
+            path={"domain": domain, "ws": ws},
+            query={"return": return_},
         )
 
     def get_sending_server(
@@ -8032,6 +8190,30 @@ class Operations(_Mixin):
             path={"ws": ws},
         )
 
+    def list_connection_usage(
+        self,
+        *,
+        ws: str | None = None,
+    ) -> Any:
+        """What each paid connection used, with its limits.
+
+        Scope: integrations.read. Every connection whose calls cost money
+        per call (SEO data, lead data, email verification, page reads and
+        web searches), with what it used today and this calendar month
+        (UTC) and its daily and monthly limits. AI models are not here:
+        their spend and limits are under `GET /ai-usage`. The calls run on
+        the workspace's own account with each provider, which bills the
+        workspace; the limits only stop Outflare from making more of them.
+
+        Needs: the integrations.read scope.
+        GET /v1/workspaces/{ws}/connection-usage
+        """
+        return self._call(
+            "GET",
+            "/v1/workspaces/{ws}/connection-usage",
+            path={"ws": ws},
+        )
+
     def list_connector_catalog(
         self,
     ) -> Any:
@@ -8958,7 +9140,7 @@ class Operations(_Mixin):
     ) -> Any:
         """List the models an AI model connection can use.
 
-        Scope: integrations.manage. For a Claude, OpenAI, Gemini, Mistral or OpenRouter
+        Scope: integrations.manage. For an AI model (Claude, OpenAI, Gemini, Mistral, xAI or a router)
         connection: the chat models its key can use, asked of the provider
         live (costs nothing). `price` is set where Outflare knows the list
         price; for the rest, enter it with your choice in `PUT /ai-settings`.
@@ -9701,6 +9883,47 @@ class Operations(_Mixin):
         return self._call(
             "GET",
             "/v1/workspaces/{ws}/platforms",
+            path={"ws": ws},
+        )
+
+    def list_playbook_catalog(
+        self,
+    ) -> Any:
+        """Every playbook this server ships.
+
+        Public, no key needed. Playbooks are ready-made recipes from the
+        repository's `playbooks/` folder: what data and connections each one
+        needs, its steps (each names the operations, and so the MCP tools,
+        it uses), its guardrails, how to tell it worked, and the prompt that
+        runs it. Copy a prompt into any AI app with the Outflare MCP
+        connected, or start one in a workspace with
+        `POST /v1/workspaces/{ws}/playbooks/{id}/runs`.
+
+        GET /v1/playbooks
+        """
+        return self._call(
+            "GET",
+            "/v1/playbooks",
+        )
+
+    def list_playbooks(
+        self,
+        *,
+        ws: str | None = None,
+    ) -> Any:
+        """Playbooks, with whether this workspace is ready to run each.
+
+        Scope: missions.read. Each playbook with `readiness`: the
+        connections the workspace still has to add (only its own accounts
+        count), optional ones that would help, and data it doesn't collect
+        yet. `runs` counts the missions started from it here.
+
+        Needs: the missions.read scope.
+        GET /v1/workspaces/{ws}/playbooks
+        """
+        return self._call(
+            "GET",
+            "/v1/workspaces/{ws}/playbooks",
             path={"ws": ws},
         )
 
@@ -12200,6 +12423,32 @@ class Operations(_Mixin):
             idempotency_key=idempotency_key,
         )
 
+    def report_sending_domain_dns_approved(
+        self,
+        domain: str,
+        *,
+        ws: str | None = None,
+        error: str | None = None,
+        provider: str | None = None,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Report coming back from the DNS provider's approval.
+
+        Scope: mailboxes.manage. Call it when the provider sends the browser back. Without `error` Outflare checks the domain again (it trusts DNS, not the redirect) and `dns_install` shows `provider`; with one nothing changes.
+
+        Needs: the mailboxes.manage scope.
+        POST /v1/workspaces/{ws}/sending-domains/{domain}/dns/approved
+        """
+        return self._call(
+            "POST",
+            "/v1/workspaces/{ws}/sending-domains/{domain}/dns/approved",
+            path={"domain": domain, "ws": ws},
+            body={"error": error, "provider": provider},
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
     def report_seo_site_dns_approved(
         self,
         site: str,
@@ -12273,6 +12522,27 @@ class Operations(_Mixin):
             "/v1/auth/password-reset",
             body={"email": email},
             extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
+    def reset_connection_limits(
+        self,
+        id: str,
+        *,
+        ws: str | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Go back to a paid connection's starting limits.
+
+        Scope: integrations.manage. Removes the limits set for the connection. Ahrefs (10,000 API units a month) and DataForSEO (US$10 a month) go back to their starting monthly limit; other connections have none.
+
+        Needs: the integrations.manage scope.
+        DELETE /v1/workspaces/{ws}/integrations/{id}/usage/limits
+        """
+        return self._call(
+            "DELETE",
+            "/v1/workspaces/{ws}/integrations/{id}/usage/limits",
+            path={"id": id, "ws": ws},
             idempotency_key=idempotency_key,
         )
 
@@ -12669,6 +12939,7 @@ class Operations(_Mixin):
         q: str,
         kinds: str | None = None,
         limit: int | None = None,
+        mode: Literal["words", "meaning"] | None = None,
     ) -> Any:
         """Search records and their history.
 
@@ -12685,7 +12956,7 @@ class Operations(_Mixin):
             "GET",
             "/v1/workspaces/{ws}/search",
             path={"ws": ws},
-            query={"q": q, "kinds": kinds, "limit": limit},
+            query={"q": q, "kinds": kinds, "limit": limit, "mode": mode},
         )
 
     def send_email(
@@ -13063,7 +13334,7 @@ class Operations(_Mixin):
     ) -> Any:
         """Set an SEO connection's domains, country, budget and snapshots.
 
-        Scope: integrations.manage. Send only what changes. `domains: null` follows the domains the analytics tools line up (at most five); `monthly_budget: null` is the default ($10 for DataForSEO, 10,000 API units for Ahrefs); 0 stops every call.
+        Scope: integrations.manage. Send only what changes. `domains: null` follows the domains the analytics tools line up (at most five); `monthly_budget: null` is the default ($10 for DataForSEO, 10,000 API units for Ahrefs); 0 stops every call. The budget is the connection's monthly usage limit, which `PUT .../integrations/{id}/usage/limits` also sets, with a daily one.
 
         Needs: the integrations.manage scope.
         PUT /v1/workspaces/{ws}/seo/{id}/settings
@@ -13495,6 +13766,48 @@ class Operations(_Mixin):
         return self._call(
             "POST",
             "/v1/auth/passkey/options",
+            idempotency_key=idempotency_key,
+        )
+
+    def start_playbook(
+        self,
+        id: str,
+        *,
+        ws: str | None = None,
+        inputs: dict[str, Any] | None = None,
+        max_spend_cents: int | None = None,
+        mode: Literal["dry_run", "approve_writes", "autonomous"] | None = None,
+        project_id: str | None = None,
+        token_id: str | None = None,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Start a playbook as a mission.
+
+        Scope: missions.run. Creates a mission draft named after the
+        playbook, with its prompt filled in from `inputs`, its steps as the
+        plan and its guardrails in the instructions. Like any mission it
+        does nothing until a person approves it, and the mode decides
+        whether writes are dry runs, wait for approval or run within the
+        limits. Fails with 409 `connector_needed` while a required
+        connection is missing: playbooks run only on the workspace's own
+        accounts. Missing data doesn't stop it.
+
+        Needs: the missions.run scope.
+        POST /v1/workspaces/{ws}/playbooks/{id}/runs
+        """
+        return self._call(
+            "POST",
+            "/v1/workspaces/{ws}/playbooks/{id}/runs",
+            path={"id": id, "ws": ws},
+            body={
+                "inputs": inputs,
+                "max_spend_cents": max_spend_cents,
+                "mode": mode,
+                "project_id": project_id,
+                "token_id": token_id,
+            },
+            extra_body=extra_body,
             idempotency_key=idempotency_key,
         )
 
@@ -14392,7 +14705,7 @@ class Operations(_Mixin):
 
         Scope: seo.manage. Send only what changes. Each model is one of the
         workspace's own AI model connections (Claude, OpenAI, Gemini,
-        Mistral or OpenRouter, with its own key) and a model id from GET
+        Mistral, xAI or a router, with its own key) and a model id from GET
         .../integrations/{id}/models. OpenRouter reaches many vendors'
         models with one key. `web_search` lets the model search the web
         before it answers, as AI assistants do for people, so its answer
@@ -14641,6 +14954,44 @@ class Operations(_Mixin):
             "/v1/workspaces/{ws}/brands/{brand}/setup",
             path={"brand": brand, "ws": ws},
             body={"dismissed": dismissed, "skip": skip, "unskip": unskip},
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
+    def update_connection_limits(
+        self,
+        id: str,
+        *,
+        ws: str | None = None,
+        daily_limit: float | None = None,
+        hard_stop: bool | None = None,
+        monthly_limit: float | None = None,
+        unit: str | None = None,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Set a paid connection's daily and monthly limits.
+
+        Scope: integrations.manage. Replaces the connection's limits: send
+        all of them. A limit that is null or left out is no limit; 0 stops
+        every call. `unit` is one of the connection's `units` (its usual
+        one when left out). With `hard_stop` (the default) Outflare makes
+        no more calls through the connection once a limit is reached, and
+        the feature that wanted one says why (`usage_limit_reached`, or
+        `budget_reached` for SEO reports); false only warns. Owners and
+        admins are emailed when usage reaches 80% of a limit and again when
+        it reaches it, once a day or month (the `connection_limit.warned`
+        and `connection_limit.reached` webhooks). For Ahrefs and DataForSEO
+        the monthly limit is the SEO budget.
+
+        Needs: the integrations.manage scope.
+        PUT /v1/workspaces/{ws}/integrations/{id}/usage/limits
+        """
+        return self._call(
+            "PUT",
+            "/v1/workspaces/{ws}/integrations/{id}/usage/limits",
+            path={"id": id, "ws": ws},
+            body={"daily_limit": daily_limit, "hard_stop": hard_stop, "monthly_limit": monthly_limit, "unit": unit},
             extra_body=extra_body,
             idempotency_key=idempotency_key,
         )
@@ -16026,6 +16377,31 @@ class Operations(_Mixin):
             idempotency_key=idempotency_key,
         )
 
+    def update_semantic_search(
+        self,
+        *,
+        ws: str | None = None,
+        enabled: bool,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Turn meaning-based search on or off.
+
+        Scope: integrations.manage. Off stops the embedding calls and deletes the workspace's vectors; word search carries
+        on. On embeds everything again, once a connection that makes embeddings is there.
+
+        Needs: the integrations.manage scope.
+        PUT /v1/workspaces/{ws}/semantic-search
+        """
+        return self._call(
+            "PUT",
+            "/v1/workspaces/{ws}/semantic-search",
+            path={"ws": ws},
+            body={"enabled": enabled},
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
     def update_sender(
         self,
         id: str,
@@ -16655,6 +17031,10 @@ class Operations(_Mixin):
         exclude_domains: list[str] | None = None,
         hot_score: int | None = None,
         key_pages: list[str] | None = None,
+        not_companies: list[str] | None = None,
+        reveal_companies: bool | None = None,
+        reveal_daily_limit: int | None = None,
+        reveal_integration_id: str | None = None,
         extra_body: dict[str, Any] | None = None,
         idempotency_key: str | None = None,
     ) -> Any:
@@ -16675,6 +17055,10 @@ class Operations(_Mixin):
                 "exclude_domains": exclude_domains,
                 "hot_score": hot_score,
                 "key_pages": key_pages,
+                "not_companies": not_companies,
+                "reveal_companies": reveal_companies,
+                "reveal_daily_limit": reveal_daily_limit,
+                "reveal_integration_id": reveal_integration_id,
             },
             extra_body=extra_body,
             idempotency_key=idempotency_key,

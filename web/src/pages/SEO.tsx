@@ -166,13 +166,19 @@ function SEOTool({ ws, source, canManage, onChanged }: { ws: string; source: SEO
         )}
       </div>
       <div className="px-4 pb-3">
-        <div className="flex items-center justify-between text-[12px]">
-          <span>{money(b.unit, b.spent)} of {money(b.unit, b.limit)} spent this month{b.default ? " (default budget)" : ""}</span>
-          <span className="text-muted-foreground">{money(b.unit, Math.max(0, b.limit - b.spent))} left</span>
-        </div>
-        <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-muted" role="meter" aria-valuemin={0} aria-valuemax={b.limit} aria-valuenow={b.spent} aria-label="Budget used">
-          <div className={`h-full rounded-full ${used >= 0.9 ? "bg-amber-500" : "bg-brand"}`} style={{ width: `${used * 100}%` }} />
-        </div>
+        {b.unlimited ? (
+          <div className="text-[12px]">{money(b.unit, b.spent)} spent this month · no monthly limit (change it on the connection's page under Connectors)</div>
+        ) : (
+          <>
+            <div className="flex items-center justify-between text-[12px]">
+              <span>{money(b.unit, b.spent)} of {money(b.unit, b.limit)} spent this month{b.default ? " (default budget)" : ""}</span>
+              <span className="text-muted-foreground">{money(b.unit, Math.max(0, b.limit - b.spent))} left</span>
+            </div>
+            <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-muted" role="meter" aria-valuemin={0} aria-valuemax={b.limit} aria-valuenow={b.spent} aria-label="Budget used">
+              <div className={`h-full rounded-full ${used >= 0.9 ? "bg-amber-500" : "bg-brand"}`} style={{ width: `${used * 100}%` }} />
+            </div>
+          </>
+        )}
       </div>
       {failed.length > 0 && (
         <ul className="mx-4 mb-3 space-y-1 rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-[13px] text-amber-800 dark:text-amber-200">
@@ -187,7 +193,7 @@ function SEOTool({ ws, source, canManage, onChanged }: { ws: string; source: SEO
 function Settings({ ws, source, onSaved }: { ws: string; source: SEOSource; onSaved: () => void }) {
   const [domains, setDomains] = useState(source.domains_set ? source.domains.map((d) => d.host).join(", ") : "");
   const [country, setCountry] = useState(source.country);
-  const [budget, setBudget] = useState(source.budget.default ? "" : String(source.budget.limit));
+  const [budget, setBudget] = useState(source.budget.default || source.budget.unlimited ? "" : String(source.budget.limit));
   const [sync, setSync] = useState(source.sync);
   const [saving, setSaving] = useState(false);
   const unit = source.budget.unit;

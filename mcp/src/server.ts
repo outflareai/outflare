@@ -349,7 +349,7 @@ export function createServer({ client: gtm, workspace, agency, readOnly = false,
   registerBrandTools(server, gtm, () => ws, readOnly, call);
   registerSetupTools(server, gtm, () => ws, readOnly, call);
   registerRecordTools(server, gtm, () => ws, readOnly, call);
-  registerQueryTools(server, gtm, () => ws, call);
+  registerQueryTools(server, gtm, () => ws, readOnly, call);
 
   // Reading.
 
@@ -1142,7 +1142,7 @@ export function createServer({ client: gtm, workspace, agency, readOnly = false,
     {
       title: "AI model settings",
       description:
-        "Which AI model (Claude, OpenAI, Gemini or Mistral, with the workspace's own key) plans missions and runs Outflare's own agent, its price, the monthly AI limit and this month's AI spend. " +
+        "Which AI model (Claude, OpenAI, Gemini, Mistral, xAI or a router such as OpenRouter, with the workspace's own key) plans missions and runs Outflare's own agent, its price, the monthly AI limit and this month's AI spend. " +
         "problem says what must be done first, such as connecting a provider or choosing a model. Keys are never shown.",
       annotations: read,
     },
@@ -1163,10 +1163,34 @@ export function createServer({ client: gtm, workspace, agency, readOnly = false,
   );
 
   server.registerTool(
+    "list_connection_usage",
+    {
+      title: "What each paid connection used",
+      description:
+        "Every connection that costs money per call (Ahrefs, DataForSEO, data providers such as Apollo, email verifiers, Geonode page reads and searches) with what it used today and this calendar month (UTC) " +
+        "and its daily and monthly usage limits, in the provider's own unit (credit, API unit, token) or US dollars. The calls run on the workspace's own accounts; AI spend is under get_ai_usage.",
+      inputSchema: {},
+      annotations: read,
+    },
+    () => call(() => gtm.GET("/v1/workspaces/{ws}/connection-usage", { params: { path } })),
+  );
+
+  server.registerTool(
+    "get_connection_usage",
+    {
+      title: "See a paid connection's usage and limits",
+      description: "One paid connection's usage today and this month, per day for the last 30 days, its daily and monthly limits, and the warnings sent at 80% and 100%. estimated: the provider doesn't say what a call cost, so it comes from the price list.",
+      inputSchema: { integration_id: id },
+      annotations: read,
+    },
+    ({ integration_id }) => call(() => gtm.GET("/v1/workspaces/{ws}/integrations/{id}/usage", { params: { path: { ...path, id: integration_id } } })),
+  );
+
+  server.registerTool(
     "list_ai_models",
     {
       title: "List an AI connection's models",
-      description: "The chat models a connected Claude, OpenAI, Gemini or Mistral key can use, asked of the provider (free). price is set where Outflare knows it. Needs integrations.manage.",
+      description: "The chat models a connected AI model key (Claude, OpenAI, Gemini, Mistral, xAI, OpenRouter, Vercel AI Gateway, Requesty) can use, asked of the provider (free). price is set where Outflare knows it. Needs integrations.manage.",
       inputSchema: { integration_id: id },
       annotations: read,
     },
@@ -2999,7 +3023,7 @@ export function createServer({ client: gtm, workspace, agency, readOnly = false,
       ),
   );
 
-  const socialAccountChannel = z.enum(["x", "linkedin", "youtube", "instagram", "tiktok", "facebook", "reddit", "github", "discord"]).describe("A channel: x, linkedin, youtube, instagram, tiktok, facebook, reddit, github or discord");
+  const socialAccountChannel = z.enum(["x", "linkedin", "youtube", "instagram", "tiktok", "facebook", "reddit", "github", "discord", "bluesky", "threads", "mastodon", "dev_to", "docker_hub"]).describe("A channel: x, linkedin, youtube, instagram, tiktok, facebook, reddit, github, discord, bluesky, threads, mastodon, dev_to or docker_hub");
   const socialDays = z.number().int().min(1).max(365).optional();
 
   server.registerTool(
@@ -4369,6 +4393,31 @@ export function createServer({ client: gtm, workspace, agency, readOnly = false,
   );
 
   server.registerTool(
+    "add_domain_dns",
+    {
+      title: "Add a domain's missing SPF or DMARC record in one click",
+      description:
+        "Add the records a sending domain's issues ask for (issues[].record: a missing SPF or DMARC record) through the workspace's own DNS host connection (one of get_domain's dns_connections, such as Cloudflare). " +
+        "It only adds records, never changes one. Runs in the background; get_domain shows dns_install, and the domain is checked again once they're in.",
+      inputSchema: { domain: z.string(), integration_id: id.describe("A connection from the domain's dns_connections") },
+      annotations: write,
+    },
+    ({ domain, integration_id }) =>
+      call(() => gtm.POST("/v1/workspaces/{ws}/sending-domains/{domain}/dns", { params: { path: { ws, domain } }, body: { integration_id } })),
+  );
+
+  server.registerTool(
+    "get_domain_dns_approval",
+    {
+      title: "Get a one-off approval link for a domain's missing SPF or DMARC record",
+      description: "Get a link for the user to approve the domain's missing SPF or DMARC record once on their DNS provider's own screen (Domain Connect, at Cloudflare, GoDaddy and others): they see the exact record and approve, and Outflare keeps no access. Hand the url to the user to open. When available is false, reason says why (the provider doesn't support it, or both records are missing); use add_domain_dns with a DNS connection instead.",
+      inputSchema: { domain: z.string() },
+      annotations: read,
+    },
+    ({ domain }) => call(() => gtm.GET("/v1/workspaces/{ws}/sending-domains/{domain}/dns/approval", { params: { path: { ws, domain } } })),
+  );
+
+  server.registerTool(
     "add_tracking_domain",
     {
       title: "Add a tracking domain",
@@ -4913,6 +4962,48 @@ export function createServer({ client: gtm, workspace, agency, readOnly = false,
   );
 
   server.registerTool(
+    "list_playbooks",
+    {
+      title: "List playbooks",
+      description:
+        "Ready-made recipes (welcome new sign-ups, answer interested replies, SEO quick wins and more), each with whether this workspace is ready: " +
+        "the connections still missing (the workspace's own accounts only) and data it doesn't collect yet. Use get_playbook for the steps and prompt.",
+      inputSchema: {},
+      annotations: read,
+    },
+    () => call(() => gtm.GET("/v1/workspaces/{ws}/playbooks", { params: { path } })),
+  );
+
+  server.registerTool(
+    "get_playbook",
+    {
+      title: "Get a playbook",
+      description: "One playbook: what it needs, its steps with the tools each one uses, guardrails, how to measure it, the prompt and its inputs, and whether this workspace is ready.",
+      inputSchema: { playbook_id: z.string().min(1).max(60) },
+      annotations: read,
+    },
+    ({ playbook_id }) => call(() => gtm.GET("/v1/workspaces/{ws}/playbooks/{id}", { params: { path: { ws, id: playbook_id } } })),
+  );
+
+  server.registerTool(
+    "start_playbook",
+    {
+      title: "Start a playbook",
+      description:
+        "Create a mission draft from a playbook, with its prompt filled in from inputs and its steps as the plan. It waits for a person to approve it like any mission; " +
+        "then call use_mission with its id and follow the plan. Fails with connector_needed until the workspace connects what the playbook needs.",
+      inputSchema: {
+        playbook_id: z.string().min(1).max(60),
+        inputs: z.record(z.string(), z.string().max(500)).optional().describe("Values for the playbook's inputs, by name (get_playbook lists them)."),
+        mode: z.enum(["dry_run", "approve_writes", "autonomous"]).optional(),
+        project_id: id.optional(),
+      },
+      annotations: write,
+    },
+    ({ playbook_id, ...body }) => call(() => gtm.POST("/v1/workspaces/{ws}/playbooks/{id}/runs", { params: { path: { ws, id: playbook_id } }, body })),
+  );
+
+  server.registerTool(
     "update_mission",
     {
       title: "Change a mission",
@@ -5053,6 +5144,9 @@ export function createServer({ client: gtm, workspace, agency, readOnly = false,
         "key_pages are paths such as /pricing, optionally ending in * (/pricing*), that count most toward a visitor's score. hot_score (1 to 100) is " +
         "where a visitor becomes hot (an alert, visitor.became_hot, at most once a week each). email_clicks: know visitors who arrive from tracked " +
         "links in Outflare email. exclude_domains leaves out companies such as your own and competitors; exclude_customers leaves out paying customers. " +
+        "reveal_companies (off by default) looks up the company behind unknown visitors' IP addresses with the workspace's own People Data Labs or " +
+        "Snitcher connection, for visitors who accepted cookies, at most reveal_daily_limit lookups a day; reveal_integration_id picks the connection. " +
+        "not_companies marks domains that are not a company (an ISP or carrier a provider confused with its customers): their visitors lose them. " +
         "Fields left out keep their value.",
       inputSchema: {
         key_pages: z.array(z.string()).max(50).optional(),
@@ -5060,10 +5154,27 @@ export function createServer({ client: gtm, workspace, agency, readOnly = false,
         email_clicks: z.boolean().optional(),
         exclude_domains: z.array(z.string()).max(200).optional(),
         exclude_customers: z.boolean().optional(),
+        reveal_companies: z.boolean().optional(),
+        reveal_integration_id: id.nullable().optional(),
+        reveal_daily_limit: z.number().int().min(1).max(100000).optional(),
+        not_companies: z.array(z.string()).max(1000).optional(),
       },
       annotations: write,
     },
     (body) => call(() => gtm.PUT("/v1/workspaces/{ws}/visitors/settings", { params: { path }, body })),
+  );
+
+  server.registerTool(
+    "add_visitor_company",
+    {
+      title: "Add a website visitor's company to the CRM",
+      description:
+        "Adds a company found only from visitors' IP addresses (in_crm false in list_website_visitors) to the CRM as a prospect, marked as " +
+        "from a lookup, and puts its visitors on it. Lookups never add companies on their own; use the CRM's company when it has one.",
+      inputSchema: { domain: z.string().describe("The company's domain as list_website_visitors shows it.") },
+      annotations: write,
+    },
+    (body) => call(() => gtm.POST("/v1/workspaces/{ws}/visitors/companies", { params: { path }, body })),
   );
 
   server.registerTool(
@@ -5341,11 +5452,30 @@ export function createServer({ client: gtm, workspace, agency, readOnly = false,
   );
 
   server.registerTool(
+    "update_connection_limits",
+    {
+      title: "Set a paid connection's daily and monthly limits",
+      description:
+        "Replaces a paid connection's usage limits (send all of them): daily_limit and monthly_limit in unit, one of the units get_connection_usage lists. null is no limit, 0 stops every call. " +
+        "hard_stop (default true) stops calls at a limit; false only warns. Owners and admins are emailed at 80% and 100%. For Ahrefs and DataForSEO the monthly limit is the SEO budget. Ask the person before raising or removing a limit.",
+      inputSchema: {
+        integration_id: id,
+        unit: z.string().max(50).optional(),
+        daily_limit: z.number().min(0).nullable().optional(),
+        monthly_limit: z.number().min(0).nullable().optional(),
+        hard_stop: z.boolean().optional(),
+      },
+      annotations: { ...write, idempotentHint: true },
+    },
+    ({ integration_id, ...body }) => call(() => gtm.PUT("/v1/workspaces/{ws}/integrations/{id}/usage/limits", { params: { path: { ...path, id: integration_id } }, body })),
+  );
+
+  server.registerTool(
     "update_ai_settings",
     {
       title: "Choose the AI model and monthly AI limit",
       description:
-        "Replaces the AI model settings. integration_id null uses the first connected AI model with its default. OpenAI, Gemini and Mistral need a model from list_ai_models, " +
+        "Replaces the AI model settings. integration_id null uses the first connected AI model with its default. Providers other than Claude need a model from list_ai_models, " +
         "and a price in US cents per million tokens when Outflare doesn't know it. monthly_limit_cents caps all AI spend each month (null is no limit). Ask the person before raising a limit. " +
         "task_models picks a cheaper or stronger model per task (plan, turn, check_in, reply_labelling, classify_domain) on the same connection; leave it out to keep the current choices. Check-ins, reply labelling and domain research already default to the provider's cheaper models.",
       inputSchema: {

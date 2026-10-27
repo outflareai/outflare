@@ -61,6 +61,7 @@ export const tabNames: Record<Tab, string> = {
   visitors: "Visitors",
   inbox: "Inbox",
   missions: "Missions",
+  playbooks: "Playbooks",
   outcomes: "Outcomes",
   projects: "Projects",
   sequences: "Sequences",
@@ -107,6 +108,7 @@ export const tabBlurbs: Record<Tab, string> = {
   "ai-usage": "Where your AI spend goes: each tool, model and day, on your own provider bill, with a monthly limit per tool.",
   tools: "Every tool in Outflare, what it does, and where to learn more.",
   inbox: "Replies from every mailbox in one place, with the ones that need an answer first.",
+  playbooks: "Ready-made recipes for growth, from welcoming new sign-ups to getting named in AI answers. Copy the prompt or start one as a mission.",
   missions: "Goals your agents work toward, such as 10 meetings by a date. Approve the plan, see every call, stop it any time.",
   projects: "The brief for each motion: offer, ideal customer, tone and budget. People and agents work from it.",
   sequences: "The emails and follow-ups each lead gets, the schedule they send on, and who is in them.",
@@ -172,6 +174,7 @@ export const tabDocs: Partial<Record<Tab, string>> = {
   setup: "/docs/guides/brand-setup/",
   inbox: "/docs/guides/inbox/",
   missions: "/docs/agents/missions/",
+  playbooks: "/playbooks/",
   projects: "/docs/guides/projects/",
   sequences: "/docs/guides/sequences/",
   leads: "/docs/guides/import-leads/",
@@ -231,7 +234,7 @@ export type NavGroup = { label?: string; tabs: Tab[] };
 // company hub. A module's pages show beneath it while you are in it. A new
 // tool joins its module; a new module is one more entry here, in this
 // order: CRM, Visitors, Outreach, Deliverability, Lifecycle, SEO, Social, Paid ads,
-// Partners, Analytics. A module with no pages yet is left out.
+// Partners, Analytics, Playbooks. A module with no pages yet is left out.
 export const everyday: Tab[] = ["overview", "inbox", "missions", "projects"];
 
 export type Module = { id: string; label: string; icon: IconName; tabs: Tab[] };
@@ -246,6 +249,8 @@ export const modules: Module[] = [
   { id: "ads", label: "Paid ads", icon: "ads", tabs: ["ads"] },
   // Partners goes here when its pages land.
   { id: "analytics", label: "Analytics", icon: "reports", tabs: ["outcomes", "analytics", "tracking", "links"] },
+  // Playbooks: recipes that use every module above, from playbooks/ in the repository.
+  { id: "playbooks", label: "Playbooks", icon: "playbooks", tabs: ["playbooks"] },
   // The company hub: what Outflare knows about the business, for every module.
   { id: "company", label: "Company", icon: "company", tabs: ["company", "brands", "setup", "ideal-customers"] },
 ];
@@ -886,6 +891,10 @@ function callFor(tab: Tab, ws: string, item?: string): Call {
       return item
         ? { title: "One conversation", path: "/v1/workspaces/{ws}/inbox/{id}", params: { ...base, id: item }, mcp: "get_inbox_message", ask: "Summarise this reply and draft an answer.", scope: "inbox.read" }
         : { title: "Unread replies", path: "/v1/workspaces/{ws}/inbox", params: base, query: { unread: true }, mcp: "list_inbox", ask: "Which replies are interested and need an answer?", scope: "inbox.read" };
+    case "playbooks":
+      return item
+        ? { title: "One playbook", path: "/v1/workspaces/{ws}/playbooks/{id}", params: { ...base, id: item }, mcp: "get_playbook", ask: "Run this playbook for my brand.", scope: "missions.read" }
+        : { title: "Playbooks", path: "/v1/workspaces/{ws}/playbooks", params: base, mcp: "list_playbooks", ask: "Which playbooks am I ready to run, and what should I connect for the rest?", scope: "missions.read" };
     case "missions":
       return item
         ? { title: "One mission", path: "/v1/workspaces/{ws}/missions/{id}", params: { ...base, id: item }, mcp: "get_mission", ask: "What has this mission done so far, and what is it waiting on?", scope: "missions.read" }

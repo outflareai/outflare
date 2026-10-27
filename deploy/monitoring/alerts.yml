@@ -183,6 +183,24 @@ groups:
         annotations:
           summary: "Over 20 AI spend limits were reached in an hour: a tool may be using far more AI than it should."
 
+      - alert: OutflareConnectionLimitReached
+        # A workspace's paid connection (Ahrefs, DataForSEO, a data
+        # provider, an email verifier, Geonode) reached a usage limit its
+        # admins set; they are emailed. Info only: it is working as meant.
+        expr: sum(increase(outflare_connection_limits_alerts_total{level="100"}[1h])) > 0
+        labels: { severity: info }
+        annotations:
+          summary: "A paid connection reached its daily or monthly usage limit in the last hour; its workspace's admins were emailed. See the Paid connection limits row."
+
+      - alert: OutflareConnectionLimitStopsSurge
+        # Calls refused at a limit, steadily: a feature keeps asking after
+        # the limit is reached instead of stopping.
+        expr: sum by (connector) (increase(outflare_connection_limits_stops_total[1h])) > 500
+        for: 30m
+        labels: { severity: warning }
+        annotations:
+          summary: "Over 500 calls an hour through {{ $labels.connector }} are being refused at a usage limit: a feature is retrying into the limit instead of stopping; check which job (engine log, usage_limit_reached)."
+
       - alert: OutflareDomainConnectLookupsFailing
         # DNS providers' Domain Connect APIs not answering: the one-off
         # approval falls back to a Cloudflare token meanwhile.
@@ -206,3 +224,19 @@ groups:
         labels: { severity: info }
         annotations:
           summary: "Over a quarter of queries are running past 15 seconds: the query views may need an index, or the database is overloaded."
+
+      - alert: OutflareSemanticSearchNoPgvector
+        # Workspaces have meaning-based search on, but the database can't
+        # store vectors, so it does nothing for them.
+        expr: max(outflare_semantic_search_available) == 0 and max(outflare_semantic_search_workspaces) > 0
+        for: 1h
+        labels: { severity: info }
+        annotations:
+          summary: "Meaning-based search is on in workspaces but the database has no pgvector; add the extension (docs/workspace-search.md) or ignore if this install doesn't need it."
+
+      - alert: OutflareEmbeddingsFailing
+        expr: sum(rate(outflare_semantic_search_embed_runs_total{outcome="failed"}[30m])) / sum(rate(outflare_semantic_search_embed_runs_total[30m])) > 0.5 and sum(increase(outflare_semantic_search_embed_runs_total[30m])) > 5
+        for: 30m
+        labels: { severity: warning }
+        annotations:
+          summary: "Most embedding jobs fail; check search.embed_failed events and the engine log for the provider's error (a bad key, AI limits reached or the provider down)."

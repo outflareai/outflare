@@ -274,12 +274,13 @@ func (q *Queue) claim(ctx context.Context, limit int) ([]Job, error) {
 			WHERE status = 'queued' AND run_at <= now()
 			  AND (cardinality($3::text[]) = 0 OR kind = ANY($3))
 			  AND NOT (kind = ANY($4))
+			  AND kind = ANY($5)
 			ORDER BY run_at
 			LIMIT $1
 			FOR UPDATE SKIP LOCKED
 		)
 		RETURNING id, kind, payload, workspace_id::text, attempts, max_attempts, extract(epoch FROM now() - run_at)::float8`,
-		limit, q.workerID, nonNil(q.Only), nonNil(q.Skip))
+		limit, q.workerID, nonNil(q.Only), nonNil(q.Skip), q.kinds())
 	if err != nil {
 		return nil, err
 	}
@@ -290,6 +291,23 @@ func (q *Queue) claim(ctx context.Context, limit int) ([]Job, error) {
 		j.waited = time.Duration(waited * float64(time.Second))
 		return j, err
 	})
+}
+
+// kinds lists the job kinds this process can finish: those with a handler,
+// plus retired ones it closes. A job of any other kind (a Cloud-only kind
+// while an engine-only process runs during a deploy) stays queued for a
+// process that has its handler, instead of dying here.
+func (q *Queue) kinds() []string {
+	kinds := make([]string, 0, len(q.handlers)+len(Retired))
+	for k := range q.handlers {
+		kinds = append(kinds, k)
+	}
+	for k := range Retired {
+		if _, ok := q.handlers[k]; !ok {
+			kinds = append(kinds, k)
+		}
+	}
+	return kinds
 }
 
 func nonNil(s []string) []string {

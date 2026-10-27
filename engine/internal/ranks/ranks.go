@@ -300,13 +300,16 @@ func (s *Service) checkWith(ctx context.Context, ws, siteID, host, integrationID
 	var kwErr error
 	for i, t := range list {
 		q := connectors.SERPQuery{Keyword: t.keyword, Country: t.country, Device: t.device, Depth: Depth}
-		b, err := seosync.BudgetIn(ctx, s.Pool, o.ID, o.Config, unit)
+		b, err := seosync.BudgetIn(ctx, s.Pool, ws, o.ID, unit)
 		if err != nil {
 			return err
 		}
-		est := r.EstimateSERP(q)
-		if cost := amount(unit, est); cost > b.Left() {
-			return s.fail(ctx, ws, list[i:], &seosync.BudgetError{Name: o.Name, Budget: b, Cost: cost}, res)
+		if err := seosync.CheckBudget(ctx, s.Pool, ws, o.ID, o.Name, b, amount(unit, r.EstimateSERP(q))); err != nil {
+			var be *seosync.BudgetError
+			if errors.As(err, &be) {
+				return s.fail(ctx, ws, list[i:], err, res)
+			}
+			return err
 		}
 		cctx, cancel := context.WithTimeout(ctx, 90*time.Second)
 		out, err := r.SERP(cctx, o.Client, o.Creds, t.engine, q)

@@ -31,6 +31,7 @@ import (
 	"github.com/outflareai/outflare/engine/internal/audit"
 	"github.com/outflareai/outflare/engine/internal/jobs"
 	"github.com/outflareai/outflare/engine/internal/track"
+	"github.com/outflareai/outflare/engine/internal/usagelimits"
 )
 
 // JobRun works one step of a crawl run.
@@ -807,6 +808,12 @@ func (s *Service) viaFallback(ctx context.Context, r *run, raw string, js bool) 
 		Props: map[string]any{"run_id": r.id, "site_id": r.siteID, "connector": r.fb.Connector, "render_js": js}}
 	resp, tokens, err := r.fb.Fetch(ctx, raw, js)
 	ev.Props["tokens"] = tokens
+	if le := (*usagelimits.Error)(nil); errors.As(err, &le) {
+		// The connection reached a usage limit: no more reads this step.
+		r.fbFails = maxFallbackFails
+		track.Fail(ctx, s.Log, ev, "usage_limit_reached", fmt.Errorf("crawl %s fallback via %s: %w", r.id, r.fb.Connector, err))
+		return nil
+	}
 	if err != nil {
 		r.fbFails++
 		if ctx.Err() == nil {

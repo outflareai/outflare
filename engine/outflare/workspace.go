@@ -18,6 +18,7 @@ import (
 	"github.com/outflareai/outflare/engine/internal/customers"
 	"github.com/outflareai/outflare/engine/internal/llm"
 	"github.com/outflareai/outflare/engine/internal/outcomes"
+	"github.com/outflareai/outflare/engine/internal/usagelimits"
 )
 
 // Workspace features for extensions: routes behind the workspace check,
@@ -128,7 +129,7 @@ func ConnectorErrorKind(err error) string {
 // ErrorCode is the engine's catalog code for an error from Connections or
 // AI (connector_needed, connector_auth, connector_quota,
 // connector_unavailable, connector_invalid, ai_model_needed,
-// ai_budget_reached), or "" when it has none.
+// ai_budget_reached, usage_limit_reached), or "" when it has none.
 func ErrorCode(err error) string {
 	var coded interface{ Code() string }
 	switch {
@@ -211,6 +212,9 @@ func (c *Connection) Search(ctx context.Context, q WebQuery, ref string) (WebRes
 	if !ok {
 		return WebResults{}, ErrNotConnected
 	}
+	if err := c.withinLimits(ctx); err != nil {
+		return WebResults{}, err
+	}
 	res, err := s.WebSearch(ctx, c.o.Client, c.o.Creds, q)
 	if serr := c.spent(ctx, res.Cost, ref, "Web search"); serr != nil && err == nil {
 		err = serr
@@ -225,11 +229,20 @@ func (c *Connection) Fetch(ctx context.Context, url string, renderJS bool, ref s
 	if !ok {
 		return FetchedPage{}, ErrNotConnected
 	}
+	if err := c.withinLimits(ctx); err != nil {
+		return FetchedPage{}, err
+	}
 	p, err := f.FetchPage(ctx, c.o.Client, c.o.Creds, url, renderJS)
 	if serr := c.spent(ctx, p.Cost, ref, "Page read"); serr != nil && err == nil {
 		err = serr
 	}
 	return p, err
+}
+
+// withinLimits refuses a call once the connection reached a usage limit
+// that stops calls; ErrorCode gives usage_limit_reached.
+func (c *Connection) withinLimits(ctx context.Context) error {
+	return usagelimits.Check(ctx, c.h.Pool, c.WorkspaceID, c.ID, "", 0)
 }
 
 // spent books a call in the workspace's spend ledger: provider units

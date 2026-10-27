@@ -18,5 +18,6 @@ Outflare's maintainers work in a private repository, and each release is publish
 - Keep each PR focused on one change.
 - `make test` and `pnpm -r build` must pass, and `pytest` in `sdk/python` if you change the Python SDK. CI runs all three.
 - Go code is `gofmt`ed. Every migration is a new numbered file in `engine/internal/db/migrations/` that only expands the schema, so the previous version still runs on it; never edit one that has shipped. See [docs/migrations.md](docs/migrations.md).
-- Add a line under `## [Unreleased]` in [CHANGELOG.md](CHANGELOG.md) when your change is something a self-hoster would notice.
+- Add a change note in [changes/](changes/README.md) when your change is something a person using Outflare would notice. It appears in the daily changelog at [outflare.ai/changelog](https://outflare.ai/changelog/), with thanks to you if you're from outside the team, and in the next release's notes.
 - API changes start in `api/openapi.yaml`.
+- New playbooks go in `playbooks/<id>/playbook.yaml`; [playbooks/README.md](playbooks/README.md) has the format, and `go test ./engine/internal/playbooks/` checks them.

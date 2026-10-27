@@ -14,6 +14,7 @@ import (
 	"github.com/outflareai/outflare/engine/internal/auth"
 	"github.com/outflareai/outflare/engine/internal/connectors"
 	"github.com/outflareai/outflare/engine/internal/seosync"
+	"github.com/outflareai/outflare/engine/internal/usagelimits"
 )
 
 // SEO: DataForSEO and Ahrefs read about a domain from the outside. Every
@@ -96,8 +97,7 @@ func (s *Server) seoSources(ctx context.Context, ws string) ([]seoSource, error)
 			}
 			src.Domains = append(src.Domains, d)
 		}
-		cfg, _ := json.Marshal(set)
-		if src.Budget, err = seoBudget(ctx, s, i.ID, cfg, r); err != nil {
+		if src.Budget, err = seosync.BudgetIn(ctx, s.pool, ws, i.ID, seosync.Unit(r)); err != nil {
 			return nil, err
 		}
 		out = append(out, src)
@@ -105,8 +105,27 @@ func (s *Server) seoSources(ctx context.Context, ws string) ([]seoSource, error)
 	return out, nil
 }
 
-func seoBudget(ctx context.Context, s *Server, id string, config json.RawMessage, r connectors.SEOReader) (seosync.Budget, error) {
-	return seosync.BudgetOf(ctx, s.pool, &connectors.Opened{Integration: connectors.Integration{ID: id, Config: config}}, r)
+// setSEOBudget makes budget the connection's monthly usage limit, keeping
+// its daily one; nil goes back to the default.
+func setSEOBudget(ctx context.Context, tx pgx.Tx, a *access, id, unit string, budget *float64) error {
+	l, err := usagelimits.Load(ctx, tx, a.WorkspaceID, id)
+	if err != nil {
+		return err
+	}
+	kept := !l.Default && l.Unit == unit && (l.Daily != nil || !l.Stop)
+	if budget == nil && !kept {
+		return usagelimits.Reset(ctx, tx, a.WorkspaceID, id)
+	}
+	next := usagelimits.Limits{Unit: unit, Monthly: budget, Stop: true}
+	if budget == nil {
+		def := seosync.DefaultBudget(unit)
+		next.Monthly = &def
+	}
+	if kept {
+		next.Daily, next.Stop = l.Daily, l.Stop
+	}
+	actor := a.principal.ActorID
+	return usagelimits.Save(ctx, tx, a.WorkspaceID, id, next, &actor)
 }
 
 func (s *Server) listSEO(w http.ResponseWriter, r *http.Request) {
@@ -221,7 +240,7 @@ func (s *Server) seoReport(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) setSEOSettings(w http.ResponseWriter, r *http.Request) {
-	o, _, ok := s.openSEO(w, r)
+	o, reader, ok := s.openSEO(w, r)
 	if !ok {
 		return
 	}
@@ -304,6 +323,12 @@ func (s *Server) setSEOSettings(w http.ResponseWriter, r *http.Request) {
 		if _, err := tx.Exec(r.Context(), `UPDATE integrations SET config = (config - 'domains' - 'country' - 'monthly_budget' - 'sync' - 'link_rows' - 'gap_rows') || $3::jsonb, updated_at = now()
 			WHERE workspace_id = $1 AND id = $2`, a.WorkspaceID, o.ID, patch); err != nil {
 			return err
+		}
+		// The budget is the connection's monthly usage limit.
+		if req.MonthlyBudget.Set {
+			if err := setSEOBudget(r.Context(), tx, a, o.ID, seosync.Unit(reader), set.MonthlyBudget); err != nil {
+				return err
+			}
 		}
 		// New settings (a raised budget, new domains) can fix a failed read:
 		// try again now rather than at next week's snapshot.

@@ -20,6 +20,18 @@ The email-click token is safe to sit in a URL:
 
 Turn it off with **Know people from email clicks** in the page's settings (`email_clicks: false`).
 
+## Company lookups
+
+Visitors nobody knows yet can be matched to a company from their IP address, with the workspace's own data provider: People Data Labs (IP Enrichment) or Snitcher (IP to Company). It is off until you turn on **Look up companies from visitors' addresses** in the page's settings (`reveal_companies`), and it needs one of those connections. Outflare never looks anything up on its own account.
+
+- Only visitors who accepted your site's cookies are looked up, each browser at most once a day and each address at most once a week, up to **Lookups a day at most** (`reveal_daily_limit`, 500 by default). Lookups spend your provider's credits.
+- The address goes to the provider in a background job and is never stored. Lookups are kept by a keyed hash of the address, with the company's domain and name.
+- A home, phone, VPN or data-centre connection names nobody. Those visitors are counted as on such a network (`no_company` in the totals).
+- Lookups are often wrong, so they never add anything to your CRM. A company the CRM already has at that domain is linked straight away and can turn hot. Any other company is listed as **Not in CRM** until someone clicks **Add to CRM** (`POST /v1/workspaces/{ws}/visitors/companies`, MCP `add_visitor_company`). It is then added as a prospect, with its domain marked as from a lookup (`source` `visitor_reveal`, unverified), so it is never treated as opted in.
+- **Not a company (ISP)** (`not_companies`) is for an internet provider or carrier mistaken for its customers. Its visitors lose it, it is never named again, and a company record that only lookups put in the CRM is archived.
+- A company found for visitors who don't come back within 90 days, and that nobody added, is dropped.
+- When a site sends its events through its own domain, Outflare sees that server's address rather than the visitor's, so lookups name nobody for it.
+
 ## Companies and people
 
 The page lists companies (people grouped by their company in the CRM, or by their email's domain when that matches a company record) or people, for the last 1 to 365 days, with pages viewed, key pages viewed, visits, the last page and a score. Totals show how many browsers came, how many were known, and how many people, companies and hot visitors there were. Open a person to see their recent pages.

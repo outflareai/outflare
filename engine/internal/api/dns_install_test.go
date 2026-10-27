@@ -1,14 +1,20 @@
 package api_test
 
 import (
+	"context"
 	"encoding/json"
+	"io"
+	"log/slog"
+	"net"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/outflareai/outflare/engine/internal/jobs"
 	"github.com/outflareai/outflare/engine/internal/track"
 )
 
@@ -19,7 +25,7 @@ func TestDNSOneClickElsewhere(t *testing.T) {
 	e := freshEnv(t)
 	owner, ws := setupOwner(t, e.h)
 	base := "/v1/workspaces/" + ws
-	e.runServerJobs(t)
+	e.runServerAndMailJobs(t)
 
 	var mu sync.Mutex
 	var cfRecords []map[string]any
@@ -74,6 +80,16 @@ func TestDNSOneClickElsewhere(t *testing.T) {
 	if c := site["dns_connections"].([]any); len(c) != 1 || c[0] != cfConn {
 		t.Fatalf("dns_connections = %v", c)
 	}
+	// A connection whose sign-in broke isn't offered.
+	if _, err := e.pool.Exec(t.Context(), `UPDATE integrations SET status = 'error' WHERE id = $1`, cfConn); err != nil {
+		t.Fatal(err)
+	}
+	if c := owner.must(200, "GET", sitePath, nil)["dns_connections"].([]any); len(c) != 0 {
+		t.Fatalf("broken connection offered: %v", c)
+	}
+	if _, err := e.pool.Exec(t.Context(), `UPDATE integrations SET status = 'connected' WHERE id = $1`, cfConn); err != nil {
+		t.Fatal(err)
+	}
 	owner.must(400, "POST", sitePath+"/dns", map[string]any{"integration_id": "00000000-0000-4000-8000-000000000000"})
 	owner.must(404, "POST", base+"/seo-sites/00000000-0000-4000-8000-000000000000/dns", map[string]any{"integration_id": cfConn})
 	owner.must(202, "POST", sitePath+"/dns", map[string]any{"integration_id": cfConn})
@@ -116,9 +132,57 @@ func TestDNSOneClickElsewhere(t *testing.T) {
 		t.Fatalf("CNAME not added: %v", cfRecords)
 	}
 
-	for _, name := range []string{"seo_site.dns_requested", "seo_site.dns_added", "tracking_domain.dns_requested", "tracking_domain.dns_added"} {
+	// A cold email domain on Google with no SPF or DMARC record yet.
+	e.dns.mx["northpeak.example"] = []*net.MX{{Host: "aspmx.l.google.com.", Pref: 1}}
+	dPath := base + "/sending-domains/northpeak.example"
+	owner.must(201, "POST", base+"/sending-domains", map[string]any{"domain": "northpeak.example"})
+	d := waitFor(t, owner, dPath, func(m map[string]any) bool { return m["checked_at"] != nil })
+	if c := d["dns_connections"].([]any); len(c) != 1 || c[0] != cfConn || d["dns_install"] != nil {
+		t.Fatalf("sending domain: %v", d)
+	}
+	owner.must(404, "POST", base+"/sending-domains/nowhere.example/dns", map[string]any{"integration_id": cfConn})
+	owner.must(202, "POST", dPath+"/dns", map[string]any{"integration_id": cfConn})
+	d = waitFor(t, owner, dPath, func(m map[string]any) bool {
+		in, _ := m["dns_install"].(map[string]any)
+		return in != nil && in["status"] != "queued"
+	})
+	if in := d["dns_install"].(map[string]any); in["status"] != "done" || in["added"] != 2.0 {
+		t.Fatalf("sending domain install = %v", in)
+	}
+	mu.Lock()
+	spf := slices.ContainsFunc(cfRecords, func(r map[string]any) bool {
+		return r["name"] == "northpeak.example" && strings.Contains(r["content"].(string), "v=spf1 include:_spf.google.com")
+	})
+	mu.Unlock()
+	if !spf {
+		t.Fatalf("SPF not added: %v", cfRecords)
+	}
+	if added("TXT", "_dmarc.northpeak.example") == nil {
+		t.Fatalf("DMARC not added: %v", cfRecords)
+	}
+	// Once DNS has them, there's nothing left to add.
+	e.dns.txt["northpeak.example"] = []string{"v=spf1 include:_spf.google.com ~all"}
+	e.dns.txt["_dmarc.northpeak.example"] = []string{"v=DMARC1; p=none"}
+	owner.must(202, "POST", dPath+"/check", nil)
+	waitFor(t, owner, dPath, func(m map[string]any) bool { return !strings.Contains(issueCodes(m), "spf_missing") })
+	owner.must(400, "POST", dPath+"/dns", map[string]any{"integration_id": cfConn})
+
+	for _, name := range []string{"seo_site.dns_requested", "seo_site.dns_added", "tracking_domain.dns_requested", "tracking_domain.dns_added", "sending_domain.dns_requested", "sending_domain.dns_added"} {
 		if len(named(got(), name)) == 0 {
 			t.Errorf("no %s event", name)
 		}
 	}
+}
+
+// runServerAndMailJobs works the server's jobs and the mail jobs (domain
+// checks) on one queue until the test ends.
+func (e *env) runServerAndMailJobs(t *testing.T) {
+	q := jobs.New(e.pool, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	q.PollInterval = 20 * time.Millisecond
+	e.srv.RegisterJobs(q)
+	e.mail.Register(q)
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() { q.Run(ctx, 2); close(done) }() //nolint:errcheck
+	t.Cleanup(func() { cancel(); <-done })
 }

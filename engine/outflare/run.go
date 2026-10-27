@@ -275,7 +275,7 @@ func Run(ctx context.Context, log *slog.Logger, cmd string, exts ...Extension) e
 	hooks := &webhooks.Service{Pool: pool, Box: box, Log: log, AllowPrivate: cfg.WebhooksAllowPrivate}
 	hooks.Register(queue)
 	crawler := &crawl.Service{Pool: pool, Log: log, Resolver: net.DefaultResolver, AllowPrivate: cfg.CrawlAllowPrivate,
-		Fallback: &crawl.ConnectorFallback{Store: integrations, Pool: pool}, AfterAudit: seointel.AfterAudit}
+		Fallback: &crawl.ConnectorFallback{Store: integrations, Pool: pool, Ledger: pool}, AfterAudit: seointel.AfterAudit}
 	crawler.Register(queue)
 	// Production deploys of the websites a workspace watches on GitHub or
 	// Vercel, which fix re-checks and experiments start from.
@@ -483,6 +483,12 @@ func Run(ctx context.Context, log *slog.Logger, cmd string, exts ...Extension) e
 		go func() {
 			defer wg.Done()
 			apiServer.RunSetup(ctx, time.Minute)
+		}()
+		// Meaning-based search's vectors, kept current.
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			apiServer.RunSemanticSearch(ctx, 5*time.Minute)
 		}()
 		// The AI usage log keeps 13 months of calls.
 		wg.Add(1)

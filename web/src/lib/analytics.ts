@@ -84,10 +84,12 @@ export function page(name: string) {
 export type UiEvent =
   | "ui.error_shown" // an error message was shown to the person (error_code)
   | "ui.crashed" // a script error or a page that failed to render
-  | "ui.dns_one_click_used" // Cloudflare one click for a DNS record outside Lifecycle (where: seo_site, tracking_domain, brand_setup; how: sign_in, connected, added, approval, approved, approval_cancelled)
+  | "ui.dns_one_click_used" // a way to add DNS records outside Lifecycle (where: seo_site, tracking_domain, sending_domain, brand_setup; way: cloudflare, ai, developer, manual; how: sign_in, connected, added, approval, approved, approval_cancelled, copied, claude, chatgpt, email)
   | "ui.request_failed" // a call never got an answer (offline, blocked)
   | "ui.command_run" // a command palette command
   | "ui.copied" // a copy button
+  | "ui.playbook_opened" // a playbook opened on the Playbooks page (playbook_id, ready)
+  | "ui.playbook_prompt_copied" // a playbook's prompt copied (playbook_id)
   | "ui.dialog_answered" // a confirm or prompt dialog: the choice, or cancelled
   | "ui.docs_opened" // a link to a guide on outflare.ai (tab, from)
   | "ui.nav_pinned" // a page pinned to the sidebar (tab, from)

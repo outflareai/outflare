@@ -25,6 +25,7 @@ All third-party APIs are on an account basis. Outflare never gives access to its
 - Webhook events are audit actions listed in `engine/internal/webhooks/events.go`. Record the change with `record(...)`/`audit.Record` in its transaction as usual; to deliver it, add the action to `Catalog` and to `WebhookEvent.type` and `webhooks:` in `api/openapi.yaml` (a test checks they match). Listed events are a promise: add freely, never rename or remove, and only add fields to their `data`.
 - Auth: humans sign in with a session cookie (`outflare_session`); machines use workspace-bound API tokens (`Authorization: Bearer oft_...`) with explicit scopes. Wrap workspace routes in `s.inWorkspace(scope, handler)`; it returns 404 for workspaces the caller cannot see.
 - `web/` is a Vite + React app served by the engine from `WEB_DIR` in production.
+- `playbooks/` holds community playbooks as data (`playbook.yaml` per folder, Apache-2.0), embedded by the engine (`engine/internal/playbooks`). A playbook has no code or tables: starting one creates a mission, and its steps name `operationId`s, which its test checks against `api/openapi.yaml` and the connector catalog.
 - `mcp/` is the MCP server (`@outflare/mcp`): one tool per API call, through `@outflare/sdk`. A new endpoint agents should use gets a tool in `mcp/src/server.ts` and a row in `mcp/README.md`.
 
 ## Open core: what goes where (hard rule)

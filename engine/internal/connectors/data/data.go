@@ -22,7 +22,7 @@ import (
 
 // All returns every available data connector.
 func All() []c.Connector {
-	return []c.Connector{Apollo{}, PDL{}, MoltSets{}, Prospeo{}, LeadMagic{}, Findymail{}}
+	return []c.Connector{Apollo{}, PDL{}, MoltSets{}, Prospeo{}, LeadMagic{}, Findymail{}, Snitcher{}}
 }
 
 // Planned lists data and signal providers we intend to add. Listing them

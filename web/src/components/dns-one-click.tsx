@@ -1,11 +1,12 @@
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useState, type ComponentProps, type ReactNode } from "react";
 import type { components, Connector } from "@outflare/sdk";
 import { api, errorMessage } from "../api";
-import { Button, Status, toast } from "../ui";
+import { Badge, Button, Status, toast } from "../ui";
+import { cn } from "@/lib/utils";
 import { Icon } from "../icons";
 import { plural } from "../format";
 import { ConnectorLogo } from "@/components/connector-logo";
-import { Panel } from "@/components/install-methods";
+import { AIPromptPanel, DeveloperPanel, Panel } from "@/components/install-methods";
 import { authOption, ConnectDialog, startConnectorOAuth, type ReturnPage } from "@/pages/Connectors";
 
 // One click for any DNS record Outflare asks for (a sending domain's, a
@@ -19,7 +20,7 @@ export type DNSRow = { type: string; name: string; value: string; priority?: num
 export type DNSRun = { status: "queued" | "done" | "failed"; added?: number; existing?: number; zone?: string; error?: string; provider?: string };
 type Approval = components["schemas"]["DNSApproval"];
 // What the records belong to, for the one-off approval at the provider.
-export type DNSApprovalFor = { kind: "seo_site" | "tracking_domain" | "email_domain"; id: string };
+export type DNSApprovalFor = { kind: "seo_site" | "tracking_domain" | "email_domain" | "sending_domain"; id: string };
 
 async function approvalLink(ws: string, f: DNSApprovalFor, ret: string) {
   const query = { return: ret };
@@ -30,6 +31,8 @@ async function approvalLink(ws: string, f: DNSApprovalFor, ret: string) {
       return api.GET("/v1/workspaces/{ws}/tracking-domains/{id}/dns/approval", { params: { path: { ws, id: f.id }, query } });
     case "email_domain":
       return api.GET("/v1/workspaces/{ws}/email-provider-domains/{id}/dns/approval", { params: { path: { ws, id: f.id }, query } });
+    case "sending_domain":
+      return api.GET("/v1/workspaces/{ws}/sending-domains/{domain}/dns/approval", { params: { path: { ws, domain: f.id }, query } });
   }
 }
 
@@ -41,6 +44,8 @@ async function reportApproval(ws: string, f: DNSApprovalFor, body: { error?: str
       return api.POST("/v1/workspaces/{ws}/tracking-domains/{id}/dns/approved", { params: { path: { ws, id: f.id } }, body });
     case "email_domain":
       return api.POST("/v1/workspaces/{ws}/email-provider-domains/{id}/dns/approved", { params: { path: { ws, id: f.id } }, body });
+    case "sending_domain":
+      return api.POST("/v1/workspaces/{ws}/sending-domains/{domain}/dns/approved", { params: { path: { ws, domain: f.id } }, body });
   }
 }
 
@@ -246,6 +251,69 @@ export function DNSOneClick({ ws, page, item, approval, connections, records, ru
         {run?.status === "failed" && <span className="text-[13px] text-destructive">{run.error}</span>}
       </div>
     </Panel>
+  );
+}
+
+// dnsHelp writes the prompt for the person's own AI agent and the message
+// for a developer, for records the server has no wording of its own for.
+// why finishes "Add these DNS records for <domain>, ...".
+export function dnsHelp(domain: string, records: DNSRow[], why: string): { prompt: string; developer: { subject: string; body: string } } {
+  const list = records
+    .map((r, i) => `${i + 1}. Type: ${r.type}\n   Name (host): ${r.name}\n${r.type === "MX" ? `   Priority: ${r.priority ?? 10}\n` : ""}   Value: ${r.value}\n`)
+    .join("");
+  const these = records.length === 1 ? "this DNS record" : "these DNS records";
+  const prompt =
+    `Add ${these} for ${domain}, ${why}.\n\n${list}\n` +
+    "Rules:\n" +
+    "- Add each record exactly as written. The names are full names: if the DNS dashboard adds the domain to the name by itself, enter only the part before it (@ for the domain itself).\n" +
+    "- CNAME records must not be proxied (in Cloudflare, DNS only, grey cloud).\n" +
+    "- Never change or delete records that are already there. A name may hold only one SPF and one DMARC record: if one is already there, merge into it instead of adding a second.\n" +
+    "- If you can't reach the DNS host, tell me which one it is and what to click instead.\n" +
+    "- Don't ask me to paste passwords or API keys into this chat; if a sign-in is needed, stop and let me do it.\n" +
+    "When you're done, tell me. Outflare looks for the records on its own.";
+  const body =
+    `Hi,\n\nCould you add ${these} for ${domain}, ${why}?\n\n${list}\n` +
+    "They go alongside the records already there; nothing else changes. CNAME records should be DNS only (not proxied). Outflare checks for them on its own and ticks them off once they're visible.\n\nThanks!";
+  return { prompt, developer: { subject: `Please add DNS records for ${domain}`, body } };
+}
+
+export type DNSWay = "cloudflare" | "ai" | "developer" | "manual";
+const dnsWays: { id: DNSWay; label: string; icon: Parameters<typeof Icon>[0]["name"] }[] = [
+  { id: "cloudflare", label: "Cloudflare (one click)", icon: "connectors" },
+  { id: "ai", label: "Ask your AI agent", icon: "ai" },
+  { id: "developer", label: "Send to a developer", icon: "inbox" },
+  { id: "manual", label: "Do it myself", icon: "code" },
+];
+
+// DNSWays is every way to add records, quickest first, the same wherever
+// Outflare asks for DNS: one click (the DNS provider's approval or the
+// workspace's own Cloudflare), a prompt for the person's own AI agent, a
+// message for a developer, or copying them. used gets the way and what was
+// done (connected, added, copied, claude, chatgpt, email).
+export function DNSWays({ prompt, developer, manual, used, ...oneClick }: Omit<ComponentProps<typeof DNSOneClick>, "used"> & {
+  prompt: string;
+  developer: { subject: string; body: string };
+  manual: ReactNode;
+  used: (way: DNSWay, how?: string) => void;
+}) {
+  const [way, setWay] = useState<DNSWay>("cloudflare");
+  return (
+    <div className="space-y-3">
+      <div role="tablist" className="flex flex-wrap gap-1.5">
+        {dnsWays.map((w, i) => (
+          <button key={w.id} type="button" role="tab" aria-selected={way === w.id} onClick={() => setWay(w.id)}
+            className={cn("inline-flex h-8 items-center gap-1.5 rounded-md border px-3 text-[13px]", way === w.id ? "border-brand/50 bg-brand/10 font-medium" : "hover:bg-accent")}>
+            {w.id === "cloudflare" ? <ConnectorLogo id="cloudflare" size="sm" /> : <Icon name={w.icon} className="size-3.5" />}
+            {w.label}
+            {i === 0 && <Badge tone="green">Quickest</Badge>}
+          </button>
+        ))}
+      </div>
+      {way === "cloudflare" && <DNSOneClick {...oneClick} used={(how) => used("cloudflare", how)} />}
+      {way === "ai" && <AIPromptPanel prompt={prompt} used={(how) => used("ai", how)} intro="Paste this into Claude, ChatGPT or any agent that can reach your DNS host. It lists every record still missing, exactly as it must be added." />}
+      {way === "developer" && <DeveloperPanel message={developer} used={(how) => used("developer", how)} />}
+      {way === "manual" && <Panel><div className="text-[13px] text-muted-foreground">{manual}</div></Panel>}
+    </div>
   );
 }
 

@@ -21,7 +21,7 @@ const links = z
     z.object({
       url: z.string().min(1).max(2000),
       kind: z
-        .enum(["app_store", "google_play", "tv_app", "chrome_web_store", "microsoft_store", "steam", "docs", "help", "blog", "status", "x", "linkedin", "youtube", "instagram", "tiktok", "facebook", "discord", "reddit", "github", "other"])
+        .enum(["app_store", "google_play", "tv_app", "chrome_web_store", "microsoft_store", "steam", "docs", "help", "blog", "status", "x", "linkedin", "youtube", "instagram", "tiktok", "facebook", "discord", "reddit", "github", "bluesky", "threads", "mastodon", "dev_to", "docker_hub", "other"])
         .optional()
         .describe("Guessed from the address when left out."),
       label: z.string().max(60).optional().describe("Such as Fire TV or Support docs."),

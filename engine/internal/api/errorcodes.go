@@ -67,6 +67,7 @@ var errorCodes = []errorCode{
 	{"connector_invalid", []int{422}, "The connected service refused the request as invalid.", false},
 	{"connector_quota", []int{429}, "The connected service's quota or rate limit is used up.", true},
 	{"connector_unavailable", []int{502}, "The connected service could not be reached or failed.", true},
+	{"usage_limit_reached", []int{409}, "A paid connection reached a daily or monthly usage limit set on its page under Connectors. The message says which; raise the limit or wait for the next day or month.", false},
 	{"connector_needed", []int{409}, "This needs a connector that is not connected yet. The message names it.", false},
 	{"already_connected", []int{409}, "The connector is already connected in this workspace. Use the connection instead of asking for it again.", false},
 	{"use_oauth", []int{400}, "This connector connects through its sign-in page, not a key.", false},
@@ -83,7 +84,7 @@ var errorCodes = []errorCode{
 	{"pick_site", []int{400}, "The connection can read several sites; name one with site.", false},
 	{"unknown_site", []int{400, 404}, "The connection cannot read that site.", false},
 	{"no_domains", []int{400}, "The connection has no domains to snapshot.", false},
-	{"budget_reached", []int{402}, "The connection's monthly spending budget is used up.", false},
+	{"budget_reached", []int{402}, "An SEO connection reached its daily or monthly usage limit (its budget). Raise it in the SEO settings or on the connection's page under Connectors.", false},
 	{"platform_error", []int{502}, "The sending platform returned an error.", true},
 	{"send_failed", []int{502}, "The email could not be sent through the mailbox.", true},
 	{"bad_signature", []int{401}, "An inbound webhook's signature does not match.", false},
@@ -136,6 +137,10 @@ var errorCodes = []errorCode{
 	{"query_invalid", []int{400}, "The SQL was refused or failed: the message is the database's own. Queries are one SELECT over the tables GET .../query/tables lists.", false},
 	{"query_timeout", []int{400}, "The query ran too long and was stopped. Filter it more, or count and group instead of listing rows.", false},
 	{"query_unavailable", []int{503}, "Query couldn't set up its read-only database role. The server's log says why; the database user needs to be able to create roles.", true},
+
+	// Search.
+	{"semantic_search_unavailable", []int{503}, "Meaning-based search needs the pgvector extension in the server's Postgres database, and it isn't there. Word search works without it.", false},
+	{"semantic_search_off", []int{409}, "Meaning-based search is off in this workspace. An admin turns it on with PUT .../semantic-search.", false},
 }
 
 func (s *Server) listErrorCodes(w http.ResponseWriter, r *http.Request) {

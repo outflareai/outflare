@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 	"unicode"
+	"unicode/utf8"
 
 	"github.com/jackc/pgx/v5"
 
@@ -15,8 +16,9 @@ import (
 
 // Search finds customer records and their history (emails sent and
 // received, meetings, deals, lifecycle email) by the words in them, with
-// Postgres full-text search (migration 0200). Each kind needs the read
-// scope the API asks for it, and brands follow the record timeline.
+// Postgres full-text search (migration 0200), or by what they mean
+// (mode=meaning, semantic.go). Each kind needs the read scope the API asks
+// for it, and brands follow the record timeline.
 
 func (s *Server) routesSearch(mux *http.ServeMux) {
 	// Any caller in the workspace: each kind needs its own read scope.
@@ -68,9 +70,19 @@ func (s *Server) search(w http.ResponseWriter, r *http.Request) {
 	a := accessFrom(r.Context())
 	ctx := r.Context()
 	q := r.URL.Query()
+	mode := q.Get("mode")
+	if mode != "" && mode != "words" && mode != "meaning" {
+		writeError(w, r, http.StatusBadRequest, "invalid_request", "mode is words (the default) or meaning")
+		return
+	}
 	tsq := searchQuery(q.Get("q"))
-	if tsq == "" {
+	text := strings.TrimSpace(q.Get("q"))
+	if (mode == "meaning" && text == "") || (mode != "meaning" && tsq == "") {
 		writeError(w, r, http.StatusBadRequest, "invalid_request", "q is the words to search for")
+		return
+	}
+	if utf8.RuneCountInString(text) > 500 {
+		writeError(w, r, http.StatusBadRequest, "invalid_request", "q is at most 500 characters")
 		return
 	}
 	limit := 20
@@ -92,6 +104,10 @@ func (s *Server) search(w http.ResponseWriter, r *http.Request) {
 			}
 			want[k] = true
 		}
+	}
+	if mode == "meaning" {
+		s.searchMeaning(w, r, text, want, limit)
+		return
 	}
 	// What the caller may find: a kind it asked for (or all), with its scope.
 	may := map[string]bool{}
@@ -203,7 +219,7 @@ func (s *Server) search(w http.ResponseWriter, r *http.Request) {
 		kinds[h.Kind]++
 	}
 	ev := track.Event{Name: "search.ran", UserID: a.UserID, ActorID: a.ActorID, ActorType: a.ActorType, WorkspaceID: a.WorkspaceID, RequestID: RequestID(ctx),
-		Props: map[string]any{"results": len(hits), "kinds": kinds, "words": strings.Count(tsq, "&") + 1, "duration_ms": time.Since(start).Milliseconds()}}
+		Props: map[string]any{"mode": "words", "results": len(hits), "kinds": kinds, "words": strings.Count(tsq, "&") + 1, "duration_ms": time.Since(start).Milliseconds()}}
 	if info := reqInfoFrom(ctx); info != nil {
 		ev.Surface = surface(r, info)
 	}

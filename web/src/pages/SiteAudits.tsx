@@ -8,7 +8,7 @@ import { api, errorMessage } from "../api";
 import { Badge, Button, Card, confirmAction, CopyButton, Empty, ErrorText, field, Loading, PageHeader, Stat, Stats, toast, type tones } from "../ui";
 import { ago, plural } from "../format";
 import { track } from "@/lib/analytics";
-import { DNSOneClick, heldByMission, takeDNSFocus } from "@/components/dns-one-click";
+import { dnsHelp, DNSWays, heldByMission, takeDNSFocus } from "@/components/dns-one-click";
 import { takeConnectOutcome } from "./Connectors";
 import type { Tab } from "../App";
 
@@ -267,6 +267,7 @@ function Site({ ws, canManage, open, onOpen, go }: Props) {
   if (!site) return <Loading />;
 
   const path = { params: { path: { ws, site: site.id } } };
+  const proofRecord = [{ type: "TXT", name: site.verification.dns_name, value: site.verification.dns_value }];
   const last = site.last_crawl;
 
   async function crawl() {
@@ -318,9 +319,10 @@ function Site({ ws, canManage, open, onOpen, go }: Props) {
       {!site.verified && (
         <Card title="Prove you own it" description={`Proved sites are crawled up to ${(10000).toLocaleString()} pages, faster, may audit pages their own robots.txt hides, and can read pages a firewall blocks through your Geonode connection. Add any one of these, then check.`}>
           <div className="mb-4">
-            <DNSOneClick ws={ws} page="audits" item={site.id} approval={{ kind: "seo_site", id: site.id }} connections={site.dns_connections} canManage={canManage} reload={load}
-              records={[{ type: "TXT", name: site.verification.dns_name, value: site.verification.dns_value }]} run={site.dns_install}
-              used={(how) => track("ui.dns_one_click_used", { where: "seo_site", how })}
+            <DNSWays ws={ws} page="audits" item={site.id} approval={{ kind: "seo_site", id: site.id }} connections={site.dns_connections} canManage={canManage} reload={load}
+              records={proofRecord} run={site.dns_install} {...dnsHelp(site.host, proofRecord, "so Outflare can confirm the site is ours")}
+              used={(way, how) => track("ui.dns_one_click_used", { where: "seo_site", way, how })}
+              manual={<>Add any one of the proofs below where {site.host} is managed, then press Check.</>}
               intro={<>Quickest: connect the Cloudflare account {site.host} is on.</>}
               after="Then Outflare looks for it every minute until the site is proved."
               onAdd={async (integration) => {

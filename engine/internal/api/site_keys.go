@@ -598,6 +598,9 @@ func (s *Server) siteEvents(w http.ResponseWriter, r *http.Request) {
 			return err
 		})
 	}
+	if err == nil && in.Consent && accepted > 0 {
+		err = s.queueReveal(ctx, k.workspaceID, anon, siteClientIP(r, k))
+	}
 	if err != nil {
 		s.internal(w, r, err)
 		return

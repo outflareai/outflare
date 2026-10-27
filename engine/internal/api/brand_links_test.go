@@ -53,6 +53,8 @@ func fakeGeonodePages(t *testing.T) *httptest.Server {
 				<a href="/northpeak/verified_followers"><span class="font-bold">12.3K</span> <span>Followers</span></a></body></html>`
 		case req.URL == "https://www.youtube.com/@ghostpeaktv" && req.RenderJS:
 			page = `<html><head><meta property="og:title" content="Ghostpeak TV"></head><body><span>@ghostpeaktv</span><span>4.2K subscribers</span></body></html>`
+		case req.URL == "https://public.api.bsky.app/xrpc/app.bsky.actor.getProfile?actor=ghostpeak.example" && !req.RenderJS:
+			page = `{"handle":"ghostpeak.example","displayName":"Ghostpeak","followersCount":845,"followsCount":12,"postsCount":40}`
 		case req.URL == "https://x.com/ghostpeak":
 			page = `<html><head><title>Log in to X / X</title></head><body>Sign in to see this.</body></html>`
 		}
@@ -154,7 +156,7 @@ func TestBrandLinkDiscoveryAndPublicXFollowers(t *testing.T) {
 	// The X link's followers come from its public profile page, through
 	// Geonode, with no X app. A profile behind a login wall is an error on
 	// the account, never zero followers.
-	owner.must(201, "POST", base+"/brands", map[string]any{"name": "Ghostpeak", "handle": "ghostpeak", "links": []map[string]any{{"url": "https://x.com/ghostpeak"}, {"url": "https://www.youtube.com/@ghostpeaktv"}}})
+	owner.must(201, "POST", base+"/brands", map[string]any{"name": "Ghostpeak", "handle": "ghostpeak", "links": []map[string]any{{"url": "https://x.com/ghostpeak"}, {"url": "https://www.youtube.com/@ghostpeaktv"}, {"url": "https://bsky.app/profile/ghostpeak.example"}}})
 	if err := e.srv.SyncSocialAccounts(ctx, ws, gn); err != nil {
 		t.Fatal(err)
 	}
@@ -175,6 +177,10 @@ func TestBrandLinkDiscoveryAndPublicXFollowers(t *testing.T) {
 	// YouTube channel's subscribers.
 	if yt := accts["ghostpeaktv"]; yt == nil || yt["channel"] != "youtube" || yt["followers"] != 4200.0 || yt["name"] != "Ghostpeak TV" || yt["last_error"] != nil {
 		t.Fatalf("youtube: %v", yt)
+	}
+	// Bluesky's public API answers with its counts, read without scripts.
+	if bs := accts["ghostpeak.example"]; bs == nil || bs["channel"] != "bluesky" || bs["followers"] != 845.0 || bs["posts"] != 40.0 || bs["name"] != "Ghostpeak" {
+		t.Fatalf("bluesky: %v", bs)
 	}
 	owner.must(200, "GET", base+"/social/accounts?channel=youtube", nil)
 	owner.must(400, "GET", base+"/social/accounts?channel=myspace", nil)

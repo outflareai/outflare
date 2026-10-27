@@ -2,7 +2,8 @@ import { useEffect, useState } from "react";
 import type { components } from "@outflare/sdk";
 import { api, errorMessage } from "../api";
 import { Button, Card, Empty, ErrorText, field, PageHeader, Stat, Stats, toast } from "../ui";
-import { type Tab } from "@/lib/paths";
+import { appPath, type Tab } from "@/lib/paths";
+import { semanticSearchDocs } from "./SemanticSearch";
 
 type Usage = components["schemas"]["AIUsage"];
 
@@ -121,7 +122,17 @@ export function AIUsage({ ws, canManage, go }: { ws: string; canManage: boolean;
             <tbody className="divide-y">
               {u.tools.map((t) => (
                 <tr key={t.task}>
-                  <td className="py-1.5 pr-3"><div className="font-medium">{t.name}</div>{t.description && <div className="text-xs text-muted-foreground">{t.description}</div>}</td>
+                  <td className="py-1.5 pr-3">
+                    <div className="font-medium">{t.name}</div>
+                    {t.description && <div className="text-xs text-muted-foreground">{t.description}</div>}
+                    {t.task === "semantic_search" && (
+                      <div className="text-xs text-muted-foreground">
+                        <a className="underline underline-offset-2" href={semanticSearchDocs} target="_blank" rel="noreferrer">Why this costs anything</a>
+                        {" · "}
+                        <a className="underline underline-offset-2" href={appPath(ws, "workspace") + "#meaning-search"}>Turn it off</a>
+                      </div>
+                    )}
+                  </td>
                   <td className="tabular-nums">{t.calls.toLocaleString()}</td>
                   <td className="tabular-nums">{tokens(t.input_tokens + t.cache_read_tokens + t.cache_write_tokens)} / {tokens(t.output_tokens)}</td>
                   <td className="tabular-nums">{dollars(t.cost_cents)}{u.total.cost_cents > 0 && t.cost_cents > 0 && <span className="text-muted-foreground"> · {Math.round((t.cost_cents / u.total.cost_cents) * 100)}%</span>}</td>

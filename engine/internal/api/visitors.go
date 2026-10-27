@@ -17,6 +17,7 @@ import (
 
 	"github.com/outflareai/outflare/engine/internal/audit"
 	"github.com/outflareai/outflare/engine/internal/auth"
+	"github.com/outflareai/outflare/engine/internal/connectors"
 	"github.com/outflareai/outflare/engine/internal/tracking"
 	"github.com/outflareai/outflare/engine/internal/visitors"
 )
@@ -39,6 +40,7 @@ func (s *Server) routesVisitors(mux *http.ServeMux) {
 	mux.HandleFunc("GET /v1/workspaces/{ws}/visitors", s.inBrand(read, s.listVisitors))
 	mux.HandleFunc("GET /v1/workspaces/{ws}/visitors/settings", s.inWorkspace(read, s.getVisitorSettings))
 	mux.HandleFunc("PUT /v1/workspaces/{ws}/visitors/settings", s.inWorkspace(manage, s.updateVisitorSettings))
+	mux.HandleFunc("POST /v1/workspaces/{ws}/visitors/companies", s.inWorkspace(manage, s.addVisitorCompany))
 }
 
 // withVisitToken is where a click on a tracked email link goes: the link's
@@ -161,32 +163,49 @@ func (s *Server) countVisit(ctx context.Context, tx pgx.Tx, ws string, set visit
 	if err := visitors.Count(ctx, tx, set, visitors.Seen{Workspace: ws, AnonymousID: anon, RecordID: rec, BrandID: brand, Path: c.Page.Path, At: at, IdentifiedBy: by, NewSession: newSession}); err != nil {
 		return err
 	}
-	if rec == nil {
-		return nil
+	if rec != nil {
+		return s.alertIfHot(ctx, tx, ws, set, *rec, at)
 	}
-	return s.alertIfHot(ctx, tx, ws, set, *rec, at)
+	// An unknown visitor whose company was found from their address.
+	var acct *string
+	if err := tx.QueryRow(ctx, `SELECT account_id::text FROM site_visitors WHERE workspace_id = $1 AND anonymous_id = $2`, ws, anon).Scan(&acct); err != nil || acct == nil {
+		return err
+	}
+	return s.alertSubjects(ctx, tx, ws, set, []hotSubject{{id: *acct, kind: "company"}}, at)
 }
 
 // alertIfHot records visitor.became_hot for a person, and for the company
 // they work at, whose score reached the workspace's hot score, at most once
 // a week each.
 func (s *Server) alertIfHot(ctx context.Context, tx pgx.Tx, ws string, set visitors.Settings, rec string, now time.Time) error {
-	subjects := []string{rec}
+	subjects := []hotSubject{{id: rec, kind: "person"}}
 	if co, err := companyOf(ctx, tx, rec); err != nil {
 		return err
 	} else if co != "" {
-		subjects = append(subjects, co)
+		subjects = append(subjects, hotSubject{id: co, kind: "company"})
 	}
-	for i, id := range subjects {
+	return s.alertSubjects(ctx, tx, ws, set, subjects, now)
+}
+
+// hotSubject is a person or company record that may turn hot.
+type hotSubject struct {
+	id   string
+	kind string // person or company
+}
+
+// alertSubjects scores each subject from its visits and alerts the ones that
+// reached the hot score.
+func (s *Server) alertSubjects(ctx context.Context, tx pgx.Tx, ws string, set visitors.Settings, subjects []hotSubject, now time.Time) error {
+	for _, sub := range subjects {
 		var act visitors.Activity
 		var last *time.Time
 		col := "sv.record_id = $2"
-		if i == 1 {
+		if sub.kind == "company" {
 			col = "(sv.account_id = $2 OR (sv.record_id IS NOT NULL AND (" + strings.ReplaceAll(companyOfSQL, "$1", "sv.record_id") + " LIMIT 1)::uuid = $2))"
 		}
 		err := tx.QueryRow(ctx, `SELECT COALESCE(sum(pageviews), 0), COALESCE(sum(key_pageviews), 0), COALESCE(sum(sessions), 0),
 				max(last_seen_at), count(DISTINCT record_id)
-			FROM site_visitors sv WHERE sv.workspace_id = $1 AND `+col, ws, id).
+			FROM site_visitors sv WHERE sv.workspace_id = $1 AND `+col, ws, sub.id).
 			Scan(&act.Pageviews, &act.KeyPageviews, &act.Sessions, &last, &act.People)
 		if err != nil {
 			return err
@@ -201,21 +220,17 @@ func (s *Server) alertIfHot(ctx context.Context, tx pgx.Tx, ws string, set visit
 		}
 		tag, err := tx.Exec(ctx, `INSERT INTO visitor_alerts (workspace_id, record_id, kind, score, alerted_at) VALUES ($1, $2, 'hot', $3, $4)
 			ON CONFLICT (record_id, kind) DO UPDATE SET score = EXCLUDED.score, alerted_at = EXCLUDED.alerted_at
-			WHERE visitor_alerts.alerted_at < $4 - $5::interval`, ws, id, score, now, visitorAlertEvery.String())
+			WHERE visitor_alerts.alerted_at < $4 - $5::interval`, ws, sub.id, score, now, visitorAlertEvery.String())
 		if err != nil {
 			return err
 		}
 		if tag.RowsAffected() == 0 {
 			continue
 		}
-		kind := "person"
-		if i == 1 {
-			kind = "company"
-		}
 		if err := audit.Record(ctx, tx, audit.Event{WorkspaceID: ws, ActorType: "system", Action: "visitor.became_hot",
-			TargetType: "record", TargetID: id, RequestID: RequestID(ctx),
-			Data:  map[string]any{"record_id": id, "kind": kind, "score": score, "hot_score": set.HotScore, "pageviews": act.Pageviews, "key_pageviews": act.KeyPageviews, "sessions": act.Sessions, "people": act.People},
-			Props: map[string]any{"kind": kind, "score": score}}); err != nil {
+			TargetType: "record", TargetID: sub.id, RequestID: RequestID(ctx),
+			Data:  map[string]any{"record_id": sub.id, "kind": sub.kind, "score": score, "hot_score": set.HotScore, "pageviews": act.Pageviews, "key_pageviews": act.KeyPageviews, "sessions": act.Sessions, "people": act.People},
+			Props: map[string]any{"kind": sub.kind, "score": score}}); err != nil {
 			return err
 		}
 	}
@@ -252,7 +267,8 @@ type visitorRef struct {
 
 type visitorView struct {
 	Kind         string       `json:"kind"`
-	RecordID     string       `json:"record_id"`
+	RecordID     *string      `json:"record_id"`
+	InCRM        bool         `json:"in_crm"`
 	Name         string       `json:"name"`
 	Email        *string      `json:"email"`
 	Domain       *string      `json:"domain"`
@@ -281,6 +297,9 @@ type visitorTotals struct {
 	People    int `json:"people"`
 	Companies int `json:"companies"`
 	Hot       int `json:"hot"`
+	// Unknown browsers whose address was looked up and turned out to be a
+	// home, phone or data-centre connection: no company to name.
+	NoCompany int `json:"no_company"`
 }
 
 func (s *Server) listVisitors(w http.ResponseWriter, r *http.Request) {
@@ -329,8 +348,10 @@ func (s *Server) listVisitors(w http.ResponseWriter, r *http.Request) {
 	brand := sel.sql("sv.brand_id", &args)
 
 	var totals visitorTotals
-	if err := s.pool.QueryRow(ctx, `SELECT count(*), count(record_id), count(DISTINCT record_id) FROM site_visitors sv
-		WHERE sv.workspace_id = $1 AND sv.last_seen_at >= $2`+brand, args...).Scan(&totals.Browsers, &totals.Known, &totals.People); err != nil {
+	if err := s.pool.QueryRow(ctx, `SELECT count(*), count(record_id), count(DISTINCT record_id),
+			count(*) FILTER (WHERE record_id IS NULL AND network IN ('isp', 'mobile', 'hosting'))
+		FROM site_visitors sv
+		WHERE sv.workspace_id = $1 AND sv.last_seen_at >= $2`+brand, args...).Scan(&totals.Browsers, &totals.Known, &totals.People, &totals.NoCompany); err != nil {
 		s.internal(w, r, err)
 		return
 	}
@@ -433,7 +454,7 @@ func (s *Server) visitorPeople(ctx context.Context, args []any, brand string) ([
 		return nil, err
 	}
 	return pgx.CollectRows(rows, func(row pgx.CollectableRow) (visitorView, error) {
-		v := visitorView{Kind: "person", People: 1, PeopleSample: []visitorRef{}}
+		v := visitorView{Kind: "person", People: 1, PeopleSample: []visitorRef{}, InCRM: true}
 		var coID, coName *string
 		err := row.Scan(&v.RecordID, &v.Name, &v.JobTitle, &v.Email, &coID, &coName, &v.customer, &v.domains,
 			&v.Browsers, &v.Pageviews, &v.KeyPageviews, &v.Sessions, &v.FirstSeenAt, &v.LastSeenAt, &v.LastPath, &v.IdentifiedBy)
@@ -446,59 +467,98 @@ func (s *Server) visitorPeople(ctx context.Context, args []any, brand string) ([
 }
 
 func (s *Server) visitorCompanies(ctx context.Context, args []any, brand string) ([]visitorView, error) {
+	// A visitor's company: the one found from their address, a known
+	// person's, or the CRM company with the domain a lookup named. A domain
+	// with no CRM company is listed on its own, as not in the CRM.
 	rows, err := s.pool.Query(ctx, `
 		WITH sv AS (
-			SELECT sv.*, COALESCE(sv.account_id, (`+strings.ReplaceAll(companyOfSQL, "$1", "sv.record_id")+` LIMIT 1)::uuid) AS company
+			SELECT sv.*, COALESCE(sv.account_id, (`+strings.ReplaceAll(companyOfSQL, "$1", "sv.record_id")+` LIMIT 1)::uuid,
+				(SELECT d.record_id FROM record_identities d JOIN records c ON c.id = d.record_id AND c.merged_into IS NULL AND c.archived_at IS NULL
+				 WHERE sv.company_domain <> '' AND d.workspace_id = sv.workspace_id AND d.namespace = 'domain' AND d.value = sv.company_domain
+				   AND d.valid_to IS NULL AND c.record_type = 'account' ORDER BY d.verified DESC, d.created_at LIMIT 1)) AS company
 			FROM site_visitors sv
-			WHERE sv.workspace_id = $1 AND sv.last_seen_at >= $2 AND (sv.record_id IS NOT NULL OR sv.account_id IS NOT NULL)`+brand+`
+			WHERE sv.workspace_id = $1 AND sv.last_seen_at >= $2 AND (sv.record_id IS NOT NULL OR sv.account_id IS NOT NULL OR sv.company_domain <> '')`+brand+`
 		), v AS (
-			SELECT company, count(*) AS browsers, count(DISTINCT record_id) AS people, sum(pageviews) AS pageviews, sum(key_pageviews) AS key_pageviews,
+			SELECT company, CASE WHEN company IS NULL THEN company_domain ELSE '' END AS only_domain,
+				max(company_name) AS found_name, count(*) AS browsers, count(DISTINCT record_id) AS people, sum(pageviews) AS pageviews, sum(key_pageviews) AS key_pageviews,
 				sum(sessions) AS sessions, min(first_seen_at) AS first_seen, max(last_seen_at) AS last_seen,
 				(array_agg(last_path ORDER BY last_seen_at DESC))[1] AS last_path,
 				array_agg(DISTINCT identified_by) FILTER (WHERE identified_by <> '') AS identified_by,
 				(array_agg(DISTINCT record_id) FILTER (WHERE record_id IS NOT NULL))[1:3] AS sample
-			FROM sv WHERE company IS NOT NULL
-			GROUP BY company
+			FROM sv WHERE company IS NOT NULL OR company_domain <> ''
+			GROUP BY 1, 2
 			ORDER BY max(last_seen_at) DESC
 			LIMIT `+strconv.Itoa(maxVisitorCandidates)+`
 		)
-		SELECT c.id::text, c.name,
-			(SELECT d.value FROM record_identities d WHERE d.record_id = c.id AND d.namespace = 'domain' AND d.valid_to IS NULL ORDER BY d.verified DESC, d.created_at LIMIT 1),
+		SELECT c.id::text, COALESCE(c.name, NULLIF(v.found_name, ''), v.only_domain),
+			COALESCE((SELECT d.value FROM record_identities d WHERE d.record_id = c.id AND d.namespace = 'domain' AND d.valid_to IS NULL ORDER BY d.verified DESC, d.created_at LIMIT 1), NULLIF(v.only_domain, '')),
 			`+customerSQL("c")+`,
-			ARRAY(SELECT d.value FROM record_identities d WHERE d.record_id = c.id AND d.namespace = 'domain' AND d.valid_to IS NULL),
+			CASE WHEN c.id IS NULL THEN ARRAY[v.only_domain] ELSE ARRAY(SELECT d.value FROM record_identities d WHERE d.record_id = c.id AND d.namespace = 'domain' AND d.valid_to IS NULL) END,
 			COALESCE((SELECT json_agg(json_build_object('id', p.id, 'name', p.name)) FROM records p WHERE p.id = ANY(v.sample)), '[]'),
 			v.people, v.browsers, v.pageviews, v.key_pageviews, v.sessions, v.first_seen, v.last_seen, v.last_path, COALESCE(v.identified_by, '{}')
-		FROM v JOIN records c ON c.id = v.company AND c.merged_into IS NULL AND c.archived_at IS NULL`, args...)
+		FROM v LEFT JOIN records c ON c.id = v.company AND c.merged_into IS NULL AND c.archived_at IS NULL
+		WHERE c.id IS NOT NULL OR v.only_domain <> ''`, args...)
 	if err != nil {
 		return nil, err
 	}
 	return pgx.CollectRows(rows, func(row pgx.CollectableRow) (visitorView, error) {
 		v := visitorView{Kind: "company"}
-		err := row.Scan(&v.RecordID, &v.Name, &v.Domain, &v.customer, &v.domains, &v.PeopleSample,
+		var id *string
+		err := row.Scan(&id, &v.Name, &v.Domain, &v.customer, &v.domains, &v.PeopleSample,
 			&v.People, &v.Browsers, &v.Pageviews, &v.KeyPageviews, &v.Sessions, &v.FirstSeenAt, &v.LastSeenAt, &v.LastPath, &v.IdentifiedBy)
+		v.RecordID, v.InCRM = id, id != nil
 		slices.Sort(v.IdentifiedBy)
 		return v, err
 	})
 }
 
 func (s *Server) getVisitorSettings(w http.ResponseWriter, r *http.Request) {
-	set, err := visitors.Load(r.Context(), s.pool, accessFrom(r.Context()).WorkspaceID)
+	ws := accessFrom(r.Context()).WorkspaceID
+	set, err := visitors.Load(r.Context(), s.pool, ws)
 	if err != nil {
 		s.internal(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, set)
+	out, err := s.visitorSettingsView(r.Context(), ws, set)
+	if err != nil {
+		s.internal(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+type visitorSettingsView struct {
+	visitors.Settings
+	// The connections that can look companies up, and how many lookups
+	// were made today (UTC).
+	RevealConnections []map[string]string `json:"reveal_connections"`
+	RevealsToday      int                 `json:"reveals_today"`
+}
+
+func (s *Server) visitorSettingsView(ctx context.Context, ws string, set visitors.Settings) (visitorSettingsView, error) {
+	v := visitorSettingsView{Settings: set}
+	var err error
+	if v.RevealConnections, err = s.revealConnections(ctx, ws); err != nil {
+		return v, err
+	}
+	err = s.pool.QueryRow(ctx, `SELECT count(*) FROM visitor_ip_lookups WHERE workspace_id = $1 AND checked_at >= date_trunc('day', now() AT TIME ZONE 'UTC') AT TIME ZONE 'UTC'`, ws).
+		Scan(&v.RevealsToday)
+	return v, err
 }
 
 func (s *Server) updateVisitorSettings(w http.ResponseWriter, r *http.Request) {
 	a := accessFrom(r.Context())
 	ctx := r.Context()
 	var in struct {
-		KeyPages         *[]string `json:"key_pages"`
-		HotScore         *int      `json:"hot_score"`
-		EmailClicks      *bool     `json:"email_clicks"`
-		ExcludeDomains   *[]string `json:"exclude_domains"`
-		ExcludeCustomers *bool     `json:"exclude_customers"`
+		KeyPages            *[]string        `json:"key_pages"`
+		HotScore            *int             `json:"hot_score"`
+		EmailClicks         *bool            `json:"email_clicks"`
+		ExcludeDomains      *[]string        `json:"exclude_domains"`
+		ExcludeCustomers    *bool            `json:"exclude_customers"`
+		RevealCompanies     *bool            `json:"reveal_companies"`
+		RevealIntegrationID optional[string] `json:"reveal_integration_id"`
+		RevealDailyLimit    *int             `json:"reveal_daily_limit"`
+		NotCompanies        *[]string        `json:"not_companies"`
 	}
 	if !decode(w, r, &in) {
 		return
@@ -560,12 +620,66 @@ func (s *Server) updateVisitorSettings(w http.ResponseWriter, r *http.Request) {
 			set.ExcludeCustomers = *in.ExcludeCustomers
 			changed = append(changed, "exclude_customers")
 		}
+		if in.RevealCompanies != nil {
+			set.RevealCompanies = *in.RevealCompanies
+			changed = append(changed, "reveal_companies")
+		}
+		if in.RevealIntegrationID.Set {
+			if id := in.RevealIntegrationID.Value; id != nil {
+				if !validUUID(*id) {
+					return errInvalid("reveal_integration_id must be a connection id")
+				}
+				i, err := s.integrations.Get(ctx, tx, a.WorkspaceID, *id)
+				if errors.Is(err, connectors.ErrNotFound) || (err == nil && !s.canReveal(i.Connector)) {
+					return errInvalid("reveal_integration_id must be a connection that can find companies, such as People Data Labs or Snitcher")
+				} else if err != nil {
+					return err
+				}
+			}
+			set.RevealIntegrationID = in.RevealIntegrationID.Value
+			changed = append(changed, "reveal_integration_id")
+		}
+		if in.RevealDailyLimit != nil {
+			if *in.RevealDailyLimit < 1 || *in.RevealDailyLimit > 100000 {
+				return errInvalid("reveal_daily_limit must be 1 to 100000")
+			}
+			set.RevealDailyLimit = *in.RevealDailyLimit
+			changed = append(changed, "reveal_daily_limit")
+		}
+		var marked []string
+		if in.NotCompanies != nil {
+			if len(*in.NotCompanies) > 1000 {
+				return errInvalid("not_companies takes at most 1000 domains")
+			}
+			domains := []string{}
+			for _, d := range *in.NotCompanies {
+				c, ok := tracking.ValidDomain(d)
+				if !ok {
+					return errInvalid("not_companies are domains such as isp.example; " + strconv.Quote(cutUTF8(d, 60)) + " is not one")
+				}
+				c = strings.TrimPrefix(c, "www.")
+				if !slices.Contains(domains, c) {
+					domains = append(domains, c)
+				}
+				if !slices.Contains(set.NotCompanies, c) && !slices.Contains(marked, c) {
+					marked = append(marked, c)
+				}
+			}
+			set.NotCompanies = domains
+			changed = append(changed, "not_companies")
+		}
+		if len(marked) > 0 {
+			if err := cleanNotCompanies(ctx, tx, a.WorkspaceID, marked); err != nil {
+				return err
+			}
+		}
 		if err := visitors.Save(ctx, tx, a.WorkspaceID, set); err != nil {
 			return err
 		}
 		return record(ctx, tx, &a.principal, a.WorkspaceID, "visitor_settings.updated", "workspace", a.WorkspaceID,
 			map[string]any{"changed": changed, "hot_score": set.HotScore, "email_clicks": set.EmailClicks, "key_pages": len(set.KeyPages),
-				"exclude_domains": len(set.ExcludeDomains), "exclude_customers": set.ExcludeCustomers})
+				"exclude_domains": len(set.ExcludeDomains), "exclude_customers": set.ExcludeCustomers,
+				"reveal_companies": set.RevealCompanies, "reveal_daily_limit": set.RevealDailyLimit, "not_companies": len(set.NotCompanies), "marked_not_companies": len(marked)})
 	})
 	if err != nil {
 		var bad errInvalid
@@ -578,5 +692,16 @@ func (s *Server) updateVisitorSettings(w http.ResponseWriter, r *http.Request) {
 	}
 	now := time.Now()
 	set.UpdatedAt = &now
-	writeJSON(w, http.StatusOK, set)
+	out, err := s.visitorSettingsView(ctx, a.WorkspaceID, set)
+	if err != nil {
+		s.internal(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+// canReveal reports whether a connector can find companies from addresses.
+func (s *Server) canReveal(connector string) bool {
+	d, _ := s.integrations.Registry.Definition(connector)
+	return d.Has(connectors.CapRevealCompany)
 }

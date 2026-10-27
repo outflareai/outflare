@@ -628,7 +628,7 @@ Give a mission agent `missions.read` and `missions.run` on top of the outreach s
 
 #### From a goal, with Outflare's own agent
 
-You don't need an agent of your own. Connect an AI model on the Connectors page with your own API key: **Claude**, **OpenAI**, **Gemini**, **Mistral** or **OpenRouter** (one key for many models; usage is billed to your account with them). Choose which one and which of its models under **Settings → General → AI model** (`PUT /v1/workspaces/{ws}/ai-settings`), and, if you like, a different model per task (planning, agent turns, routine check-ins, reply labelling, domain research) so routine work runs on a cheaper model; under Claude Opus 5.5, check-ins default to Claude Sonnet 5.5, and reply labelling and domain research to Claude Haiku 5.5. Every workspace uses its own key: Outflare never supplies one. Then type a goal in the box at the top of the Missions page, or post it:
+You don't need an agent of your own. Connect an AI model on the Connectors page with your own API key: **Claude**, **OpenAI**, **Gemini**, **Mistral**, **xAI**, or a router, **OpenRouter**, **Vercel AI Gateway** or **Requesty** (one key for many vendors' models; usage is billed to your account with them). OpenAI and xAI also let some apps use a ChatGPT or SuperGrok plan instead of a key; the Connectors page tags them, and that sign-in is coming to Outflare. Choose which one and which of its models under **Settings → General → AI model** (`PUT /v1/workspaces/{ws}/ai-settings`), and, if you like, a different model per task (planning, agent turns, routine check-ins, reply labelling, domain research) so routine work runs on a cheaper model; under Claude Opus 5.5, check-ins default to Claude Sonnet 5.5, and reply labelling and domain research to Claude Haiku 5.5. Every workspace uses its own key: Outflare never supplies one. Then type a goal in the box at the top of the Missions page, or post it:
 
 ```sh
 curl -X POST "$OUTFLARE_URL/v1/workspaces/$WS/missions/plan" -H "Authorization: Bearer $TOKEN" \
@@ -643,7 +643,7 @@ Keys are handled with care, because an AI key can run up a bill. Each is encrypt
 
 ## Develop
 
-You need Go 1.25+, Node 22+, pnpm 10 and Postgres 16.
+You need Go 1.25+, Node 22+, pnpm 10 and Postgres 16, with [pgvector](docs/workspace-search.md#self-hosting-pgvector) for meaning-based search (optional; the rest works without it).
 
 ```sh
 make migrate          # create the schema in DATABASE_URL

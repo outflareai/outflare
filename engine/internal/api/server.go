@@ -71,7 +71,8 @@ type Server struct {
 	inbox           *inbox.Syncer
 	oauth           *oauth.Tokens
 	box             *secrets.Box
-	query           queryState // Query's own connections
+	query           queryState    // Query's own connections
+	semantic        semanticState // whether pgvector is there, and query vectors
 	integrations    *connectors.Store
 	lists           *lists.Service
 	verifier        *verify.Service
@@ -377,6 +378,7 @@ func (s *Server) buildHandler() http.Handler {
 	s.routesMerges(mux)
 	s.routesQuery(mux)
 	s.routesSearch(mux)
+	s.routesSemanticSearch(mux)
 	s.routesAnalyticsBrands(mux)
 	s.routesAds(mux)
 	s.routesContext(mux)
@@ -403,6 +405,7 @@ func (s *Server) buildHandler() http.Handler {
 	s.routesIntegrations(mux)
 	s.routesAISettings(mux)
 	s.routesAIUsage(mux)
+	s.routesConnectionUsage(mux)
 	s.routesAnalytics(mux)
 	s.routesAnalyticsHistory(mux)
 	s.routesExperiments(mux)
@@ -442,6 +445,7 @@ func (s *Server) buildHandler() http.Handler {
 	s.routesVerification(mux)
 	s.routesClassify(mux)
 	s.routesMissions(mux)
+	s.routesPlaybooks(mux)
 	s.routesTelemetry(mux)
 	s.routesAgentOAuth(mux)
 	s.routesMCP(mux)

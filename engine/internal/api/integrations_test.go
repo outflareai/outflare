@@ -105,6 +105,26 @@ func TestConnectWithAPIKey(t *testing.T) {
 	if len(list) != 1 || list[0].(map[string]any)["email"] != "bob@bad.example" || list[0].(map[string]any)["provider"] != "zerobounce" {
 		t.Fatalf("undeliverable: %v", list)
 	}
+	// Paid checks are booked, one credit an address, and count toward the
+	// connection's usage limits: past a limit, the free checks take over.
+	if u := owner.must(200, "GET", base+"/integrations/"+id+"/usage", nil); u["used"].(map[string]any)["today"].(float64) != 2 || u["limits"].(map[string]any)["unit"] != "credit" {
+		t.Fatalf("verification usage: %v", u)
+	}
+	owner.must(200, "PUT", base+"/integrations/"+id+"/usage/limits", map[string]any{"daily_limit": 3})
+	if _, err := e.verify.Verify(context.Background(), ws, []string{"dan@ok.example", "eve@ok.example"}, false); err != nil {
+		t.Fatal(err)
+	}
+	if u := owner.must(200, "GET", base+"/integrations/"+id+"/usage", nil); u["used"].(map[string]any)["today"].(float64) != 3 {
+		t.Fatalf("usage at the limit: %v", u)
+	}
+	byProvider := map[string]string{}
+	for _, v := range owner.must(200, "GET", base+"/verifications", nil)["data"].([]any) {
+		byProvider[v.(map[string]any)["email"].(string)] = v.(map[string]any)["provider"].(string)
+	}
+	if byProvider["dan@ok.example"] != "zerobounce" || byProvider["eve@ok.example"] != "builtin" {
+		t.Fatalf("checks past the limit: %v", byProvider)
+	}
+	owner.must(200, "DELETE", base+"/integrations/"+id+"/usage/limits", nil)
 	owner.raw("POST", base+"/leads/import", "text/csv", "email\nAnn@ok.example\nbob@bad.example\ncat@new.example\n")
 	for filter, want := range map[string]string{"deliverable": "Ann@ok.example", "undeliverable": "bob@bad.example", "unverified": "cat@new.example"} {
 		got := owner.must(200, "GET", base+"/leads?verification="+filter, nil)["data"].([]any)

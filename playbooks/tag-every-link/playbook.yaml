@@ -1,0 +1,48 @@
+id: tag-every-link
+version: 1
+title: Tag every link you share
+summary: Find the traffic you can't credit to a channel and give every link you share a campaign tag.
+description: |
+  When links go out without tags, visits and sign-ups land in "direct" or
+  "unknown" and nobody can tell which channel worked. This playbook looks
+  at where your site's visits come from, finds the channels with untagged
+  traffic, and makes tagged campaign links for each one, using one
+  spelling for every source.
+tier: obvious
+goals: [tracking]
+publisher: outflare
+author: { github: outflareai }
+needs:
+  data:
+    - { check: site_tracking, label: Visits from Outflare's site tracking }
+  connections:
+    - category: analytics
+      label: Your web analytics, to compare with what Outflare sees
+      optional: true
+      recommended: [google_analytics, plausible, posthog]
+inputs:
+  - name: brand
+    label: Brand
+    example: Northpeak
+steps:
+  - say: Read the channels and sources campaign links can use.
+    tools: [getTrackingTaxonomy]
+  - say: Compare where visits come from with the campaigns that exist, and list the channels with untagged traffic.
+    tools: [getAnalyticsOverview, listTrackingCampaigns]
+  - say: Create a campaign for each gap and a tagged link for every place the brand shares links.
+    tools: [createTrackingCampaign, createTrackingLink]
+guardrails:
+  - Only creates campaigns and links; it never changes your site or posts anything.
+measure:
+  - metric: Tagged traffic
+    how: "Share of visits with a known channel and campaign, before and after."
+prompt: |
+  Run the "Tag every link" playbook for {{brand}}. Look at where the site's
+  visits come from and which campaigns already exist, and tell me which
+  channels send traffic we can't credit. Then create a campaign for each
+  gap and a tagged link for every place we share links (newsletter, social
+  profiles, partner pages, email signatures), and give me the list.
+example: |
+  Northpeak found that 31% of sign-ups came from "unknown". Most were from
+  the newsletter and two partner blogs; three campaigns and eight links
+  fixed it the same week.

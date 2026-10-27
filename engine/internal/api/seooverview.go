@@ -72,10 +72,21 @@ type seoOverviewBrand struct {
 	Fixes  *int                  `json:"open_fixes"`
 	// SEOStatus says why the SEO snapshot numbers are there or not.
 	SEOStatus seoOverviewStatus `json:"seo_status"`
+	// Sources says, for search and visitors, whether the brand's websites
+	// have data, or the workspace's tools read other websites only.
+	Sources map[string]seoOverviewSource `json:"sources"`
+}
+
+// seoOverviewSource is where one kind of number stands for a brand: ready
+// (its websites have data), other_sites (a connected tool reads websites
+// of the workspace, but none of the brand's) or not_connected.
+type seoOverviewSource struct {
+	State string   `json:"state"`
+	Hosts []string `json:"hosts"`
 }
 
 // seoOverviewStatus is where a brand's SEO snapshots stand: not_connected
-// (no SEO tool serves it), no_website (nothing to read), not_followed (its
+// (no SEO tool connected), not_shared (connected for other brands only), no_website (nothing to read), not_followed (its
 // SEO tools read other domains), off (snapshots are turned off), reading
 // (the first read is under way), failed (the last read failed) or ready.
 type seoOverviewStatus struct {
@@ -179,9 +190,18 @@ func (s *Server) seoOverview(w http.ResponseWriter, r *http.Request) {
 		s.internal(w, r, err)
 		return
 	}
+	measured, err := s.measuredHosts(r.Context(), ws, from)
+	if err != nil {
+		s.internal(w, r, err)
+		return
+	}
 	for _, e := range out {
 		if e.Hosts == nil {
 			e.Hosts = []string{}
+		}
+		e.Sources = map[string]seoOverviewSource{
+			"search":  sourceOf(e.Hosts, measured, func(m hostMeasures) bool { return m.search }),
+			"traffic": sourceOf(e.Hosts, measured, func(m hostMeasures) bool { return m.traffic }),
 		}
 		if err := s.fillSEOOverview(r.Context(), ws, e, from, to, seesSites); err != nil {
 			s.internal(w, r, err)
@@ -235,6 +255,53 @@ func (s *Server) workspaceHosts(ctx context.Context, ws string) ([]string, map[s
 	}
 	slices.Sort(out)
 	return out, set, rows.Err()
+}
+
+// hostMeasures says what the workspace's tools measure for a website.
+type hostMeasures struct{ search, traffic bool }
+
+// measuredHosts lists the websites with search or visitor numbers since
+// from, whichever brand they belong to.
+func (s *Server) measuredHosts(ctx context.Context, ws string, from time.Time) (map[string]hostMeasures, error) {
+	rows, err := s.pool.Query(ctx, `
+		SELECT host, bool_or(clicks IS NOT NULL OR impressions IS NOT NULL), bool_or(visitors IS NOT NULL OR sessions IS NOT NULL)
+		FROM analytics_daily
+		WHERE workspace_id = $1 AND report = 'traffic' AND key = '' AND host <> '' AND day >= $2
+		GROUP BY host`, ws, from)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := map[string]hostMeasures{}
+	for rows.Next() {
+		var h string
+		var m hostMeasures
+		if err := rows.Scan(&h, &m.search, &m.traffic); err != nil {
+			return nil, err
+		}
+		out[h] = m
+	}
+	return out, rows.Err()
+}
+
+// sourceOf says whether a brand's websites have a kind of number, and if
+// not, which other websites do.
+func sourceOf(hosts []string, measured map[string]hostMeasures, has func(hostMeasures) bool) seoOverviewSource {
+	var others []string
+	for h, m := range measured {
+		if !has(m) {
+			continue
+		}
+		if slices.Contains(hosts, h) {
+			return seoOverviewSource{State: "ready", Hosts: []string{}}
+		}
+		others = append(others, h)
+	}
+	if len(others) == 0 {
+		return seoOverviewSource{State: "not_connected", Hosts: []string{}}
+	}
+	slices.Sort(others)
+	return seoOverviewSource{State: "other_sites", Hosts: others}
 }
 
 // brandTerms are the words a search must contain to count as branded: the
@@ -574,6 +641,14 @@ func seoStatusOf(e *seoOverviewBrand, conns []seoOverviewConn, seesErrors bool) 
 		return cmpBool(a.Connector != "ahrefs", b.Connector != "ahrefs")
 	})
 	if len(serving) == 0 {
+		// Connected, but for other brands only: say so rather than ask to
+		// connect it again.
+		for _, c := range conns {
+			if c.Status == "connected" {
+				return seoOverviewStatus{State: "not_shared", IntegrationID: &c.ID, Connector: &c.Connector,
+					Message: c.ConnectorName + " is connected, but not for this brand. Share it with this brand, or connect this brand's own account."}
+			}
+		}
 		return seoOverviewStatus{State: "not_connected", Message: "Connect Ahrefs or DataForSEO to see domain rating, links and organic traffic. Each runs on your own account."}
 	}
 	c := serving[0]

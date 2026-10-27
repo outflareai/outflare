@@ -14,6 +14,7 @@ import { useSiteSetupAfterConnect } from "@/components/analytics-sites";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Switch } from "@/components/ui/switch";
 import { ConnectorLogo } from "@/components/connector-logo";
+import { type ConnectionUsage, UsageLimits, usageLine } from "./ConnectionUsage";
 import { SupplierMailboxes } from "./SupplierMailboxes";
 import { LiveUpdates } from "@/components/live-updates";
 import { ImportDialog } from "./ImportDialog";
@@ -93,6 +94,8 @@ export function takeConnectOutcome(): string | null {
 export function Connectors({ ws, canManage, canVerify, canImport, open, setOpen, go }: { ws: string; canManage: boolean; canVerify: boolean; canImport: boolean; open?: string; setOpen: (id?: string) => void; go: (tab: Tab, item?: string) => void }) {
   const [catalog, setCatalog] = useState<Connector[] | null>(null);
   const [integrations, setIntegrations] = useState<Integration[] | null>(null);
+  // Paid connections' usage and limits, by connection id.
+  const [usage, setUsage] = useState<Map<string, ConnectionUsage>>(new Map());
   const [connecting, setConnecting] = useState<{ def: Connector; replace?: Integration } | null>(null);
   const [importing, setImporting] = useState<Integration | null>(null);
   const [importingCRM, setImportingCRM] = useState<Integration | null>(null);
@@ -111,12 +114,14 @@ export function Connectors({ ws, canManage, canVerify, canImport, open, setOpen,
   }, [openCategory]);
 
   const load = useCallback(async () => {
-    const [c, i] = await Promise.all([
+    const [c, i, u] = await Promise.all([
       api.GET("/v1/workspaces/{ws}/connectors", { params: { path: { ws } } }),
       api.GET("/v1/workspaces/{ws}/integrations", { params: { path: { ws }, query: brandQuery } }),
+      api.GET("/v1/workspaces/{ws}/connection-usage", { params: { path: { ws } } }),
     ]);
     setCatalog(c.data?.data ?? []);
     setIntegrations(i.data?.data ?? []);
+    setUsage(new Map((u.data?.data ?? []).map((x) => [x.integration_id, x])));
   }, [ws, brandQuery.brand]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
@@ -205,14 +210,16 @@ export function Connectors({ ws, canManage, canVerify, canImport, open, setOpen,
     // Pages for one integration plug in here, by capability.
     const i = integrations?.find((x) => x.id === open);
     if (i?.capabilities.includes("vendor.mailboxes")) return <SupplierMailboxes ws={ws} integrationId={i.id} supplier={i.connector_name} canManage={canVerify} onBack={() => setOpen()} />;
+    const paid = !!i && usage.has(i.id);
     return (
       <div className="space-y-6">
         <PageHeader back={{ label: "Connectors", onClick: () => setOpen() }} title={i ? <span className="flex items-center gap-2.5"><ConnectorLogo id={i.connector} />{i.name}</span> : "Connection"} description={i ? `${i.connector_name} · ${categoryLabel(i.category)}` : undefined} />
+        {i && paid && <UsageLimits ws={ws} integrationId={i.id} name={i.connector_name} canManage={canManage} />}
         {i?.capabilities.includes("hooks.receive") ? (
           <LiveUpdates ws={ws} integration={i} canManage={canManage} />
         ) : i?.capabilities.includes("analytics.read") || i?.capabilities.includes("seo.read") ? (
           <Empty title="Read it on the Analytics page" action={<Button onClick={() => go("analytics")}>Open Analytics</Button>}>{i.capabilities.includes("seo.read") ? `Rankings, links and budget for ${i.connector_name}, next to each website.` : `Traffic, pages, sources, search queries and events from ${i.connector_name}.`}</Empty>
-        ) : integrations === null ? <Loading /> : <Empty title={i ? "Nothing more to show for this connection yet" : "This connection doesn't exist"}>{i ? "Go back to Connectors to test, rename or disconnect it." : "It may have been disconnected. Go back to Connectors to see what is connected."}</Empty>}
+        ) : integrations === null ? <Loading /> : paid ? null : <Empty title={i ? "Nothing more to show for this connection yet" : "This connection doesn't exist"}>{i ? "Go back to Connectors to test, rename or disconnect it." : "It may have been disconnected. Go back to Connectors to see what is connected."}</Empty>}
       </div>
     );
   }
@@ -282,6 +289,7 @@ export function Connectors({ ws, canManage, canVerify, canImport, open, setOpen,
                       <div className="text-[12px]">
                         <div>{i.account?.email || i.account?.name || <span className="text-muted-foreground">—</span>}</div>
                         {i.account?.credits !== undefined && <div className="font-mono text-muted-foreground">{credits(i.account.credits)}</div>}
+                        {usage.has(i.id) && <button type="button" className="text-left text-muted-foreground underline-offset-2 hover:underline" onClick={() => setOpen(i.id)}>{usageLine(usage.get(i.id)!)}</button>}
                       </div>
                     ),
                   },
@@ -296,6 +304,7 @@ export function Connectors({ ws, canManage, canVerify, canImport, open, setOpen,
                       <div className="flex items-center justify-end gap-1">
                         {i.capabilities.includes("vendor.mailboxes") && <Button variant="ghost" onClick={() => setOpen(i.id)}>Mailboxes</Button>}
                         {i.capabilities.includes("hooks.receive") && <Button variant="ghost" onClick={() => setOpen(i.id)}>Live updates</Button>}
+                        {usage.has(i.id) && !i.capabilities.includes("hooks.receive") && <Button variant="ghost" onClick={() => setOpen(i.id)}>Usage</Button>}
                         {canImport && i.capabilities.includes("import.campaigns") && <Button onClick={() => setImporting(i)}>Import</Button>}
                         {canManage && i.capabilities.includes("import.crm") && <Button onClick={() => setImportingCRM(i)}>Import</Button>}
                         {i.capabilities.includes("deploys.read") && <Button variant="ghost" onClick={() => setDeploys(i)}>Deploys</Button>}
@@ -384,6 +393,7 @@ export function ConnectorCard({ def, also, canManage, onConnect }: { def: Connec
           <div className="flex flex-wrap items-center gap-x-2 gap-y-1 font-medium">
             {def.name}
             {def.connected > 0 && <Badge tone="green">{def.connected > 1 ? `${def.connected} connected` : "Connected"}</Badge>}
+            {(def.tags ?? []).map((t) => <Badge key={t.label} tone={t.label === "Router" ? "grey" : "blue"} title={t.help}>{t.label}</Badge>)}
           </div>
           <div className="mt-0.5 text-[12px] text-muted-foreground">{howToConnect(def)}{def.pricing ? ` · ${def.pricing}` : ""}</div>
         </div>
@@ -454,6 +464,7 @@ export function ConnectDialog({ ws, def, replace, brand, why, onSignIn, onClose,
           <DialogHeader className="text-left">
             <DialogTitle className="flex items-center gap-2.5 text-[15px]"><ConnectorLogo id={def.id} />{replace ? (replace.auth_method === "oauth2" ? `Use an API key for "${replace.name}"` : `Replace the key for "${replace.name}"`) : `Connect ${def.name}`}</DialogTitle>
             <DialogDescription className="text-[13px]">{why ?? (def.description || def.summary)}</DialogDescription>
+            {(def.tags ?? []).filter((t) => t.label !== "Router").map((t) => <p key={t.label} className="text-[12px] text-muted-foreground"><Badge tone="blue">{t.label}</Badge> {t.help}</p>)}
           </DialogHeader>
           {brand && !replace && (
             <fieldset className="space-y-1.5">

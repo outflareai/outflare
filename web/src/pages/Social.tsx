@@ -22,6 +22,7 @@ type Channel = SocialAccount["channel"];
 const channels: { id: Channel; name: string }[] = [
   { id: "x", name: "X" }, { id: "linkedin", name: "LinkedIn" }, { id: "youtube", name: "YouTube" }, { id: "instagram", name: "Instagram" },
   { id: "tiktok", name: "TikTok" }, { id: "facebook", name: "Facebook" }, { id: "reddit", name: "Reddit" }, { id: "github", name: "GitHub" }, { id: "discord", name: "Discord" },
+  { id: "bluesky", name: "Bluesky" }, { id: "threads", name: "Threads" }, { id: "mastodon", name: "Mastodon" }, { id: "dev_to", name: "DEV" }, { id: "docker_hub", name: "Docker Hub" },
 ];
 const n = (v: number | null | undefined) => (v === null || v === undefined ? "—" : v.toLocaleString());
 const change = (v: number | null | undefined) => (v === null || v === undefined ? undefined : `${v > 0 ? "+" : ""}${v.toLocaleString()}`);
@@ -245,16 +246,24 @@ function Line({ points, first, last }: { points: number[]; first: string; last: 
 // or remove right here. Every public profile's followers are read once a
 // day through the workspace's own Geonode account (X and LinkedIn also
 // through their own app or sign-in, with posts), so growth shows day by day.
-const socialKinds = ["x", "linkedin", "youtube", "instagram", "tiktok", "facebook", "reddit", "github", "discord"] as const;
+const socialKinds = ["x", "linkedin", "youtube", "instagram", "tiktok", "facebook", "threads", "bluesky", "mastodon", "reddit", "discord", "github", "docker_hub", "dev_to"] as const;
 type SocialKind = (typeof socialKinds)[number];
-const kindName: Record<SocialKind, string> = { x: "X", linkedin: "LinkedIn", youtube: "YouTube", instagram: "Instagram", tiktok: "TikTok", facebook: "Facebook", reddit: "Reddit", github: "GitHub", discord: "Discord" };
+const kindName: Record<SocialKind, string> = {
+  x: "X", linkedin: "LinkedIn", youtube: "YouTube", instagram: "Instagram", tiktok: "TikTok", facebook: "Facebook", threads: "Threads", bluesky: "Bluesky",
+  mastodon: "Mastodon", reddit: "Reddit", discord: "Discord", github: "GitHub", docker_hub: "Docker Hub", dev_to: "DEV",
+};
+// What each channel's headline count is (the engine keeps it as followers).
+const unit: Partial<Record<SocialKind, string>> = { youtube: "subscribers", reddit: "members", discord: "members", github: "stars", docker_hub: "pulls", dev_to: "posts" };
 // X and LinkedIn are the profiles most brands have: shown even when missing.
 const usual: readonly SocialKind[] = ["x", "linkedin"];
 
 // The account id the engine gives a profile address (sociallinks.PublicProfile).
 const profileID = (kind: string, url: string) => {
   try {
-    const parts = new URL(url).pathname.split("/").filter(Boolean).map((p) => p.toLowerCase());
+    const u = new URL(url);
+    const parts = u.pathname.split("/").filter(Boolean).map((p) => p.toLowerCase());
+    if (kind === "bluesky" || kind === "docker_hub") return parts[1] ?? "";
+    if (kind === "mastodon") return `${u.hostname.toLowerCase()}/${parts[0] ?? ""}`;
     if (kind === "linkedin" || kind === "reddit" || (kind === "youtube" && parts[0] && !parts[0].startsWith("@"))) return parts.slice(0, 2).join("/");
     if (kind === "discord" && parts[0] === "invite") return parts[1] ?? "";
     return (parts[0] ?? "").replace(/^@/, kind === "youtube" ? "@" : "");
@@ -262,13 +271,17 @@ const profileID = (kind: string, url: string) => {
     return "";
   }
 };
-// Profiles whose followers aren't public: a person on LinkedIn, a person on Reddit.
-const notPublic = (kind: string, url: string) => (kind === "linkedin" && !/linkedin\.com\/(company|showcase)\//i.test(url)) || (kind === "reddit" && !/reddit\.com\/r\//i.test(url));
+// Profiles whose followers aren't public: a person on LinkedIn, a person on
+// Reddit, a Discord server's channel link (its members need an invite link).
+const notPublic = (kind: string, url: string) => (kind === "linkedin" && !/linkedin\.com\/(company|showcase)\//i.test(url)) || (kind === "reddit" && !/reddit\.com\/r\//i.test(url)) || (kind === "discord" && /discord\.com\/channels\//i.test(url));
 const short = (url: string) => url.replace(/^https?:\/\/(www\.)?/, "").replace(/\/$/, "");
+// The Mastodon servers Outflare recognises (sociallinks.KindHosts).
+const mastodonHosts = ["mastodon.social", "mastodon.online", "mas.to", "fosstodon.org", "hachyderm.io", "infosec.exchange", "mstdn.social"];
 const kindOfURL = (url: string): SocialKind | undefined => {
   try {
     const h = new URL(url).hostname.replace(/^(www|m)\./, "");
-    return ({ "x.com": "x", "twitter.com": "x", "linkedin.com": "linkedin", "youtube.com": "youtube", "instagram.com": "instagram", "tiktok.com": "tiktok", "facebook.com": "facebook", "reddit.com": "reddit", "github.com": "github", "discord.gg": "discord", "discord.com": "discord" } as Record<string, SocialKind>)[h];
+    return ({ "x.com": "x", "twitter.com": "x", "linkedin.com": "linkedin", "youtube.com": "youtube", "instagram.com": "instagram", "tiktok.com": "tiktok", "facebook.com": "facebook", "reddit.com": "reddit", "github.com": "github", "discord.gg": "discord", "discord.com": "discord",
+      "bsky.app": "bluesky", "threads.com": "threads", "threads.net": "threads", "dev.to": "dev_to", "hub.docker.com": "docker_hub", ...Object.fromEntries(mastodonHosts.map((m) => [m, "mastodon"])) } as Record<string, SocialKind>)[h];
   } catch {
     return undefined;
   }
@@ -327,14 +340,31 @@ function YourAccounts({ ws, brands, accounts, conns, canManage, go, signIn, onCh
     return true;
   }
 
+  // Adds every profile pasted (one or several addresses), to one brand.
   async function add() {
     const b = brands.find((x) => x.id === adding.brand) ?? brands[0];
-    const url = withScheme(adding.url);
-    const kind = kindOfURL(url);
     if (!b || !adding.url.trim()) return;
-    if (!kind) return toast("Paste the address of an X, LinkedIn, YouTube, Instagram, TikTok, Facebook, Reddit, GitHub or Discord profile.", "error");
-    if (b.links.some((l) => l.kind === kind && profileID(kind, l.url) === profileID(kind, url))) return toast(`${b.name} already has that profile.`, "error");
-    if (await saveLinks(b, [...b.links, { url, kind }], canRead(kind) ? `Added. Reading its followers now.` : "Added.", kind)) setAdding({ brand: adding.brand, url: "" });
+    const urls = adding.url.split(/[\s,]+|(?=https?:\/\/)/).filter((v) => v.trim()).map(withScheme);
+    const links = [...b.links];
+    const skipped: string[] = [];
+    const kinds: SocialKind[] = [];
+    for (const url of urls) {
+      const kind = kindOfURL(url);
+      if (!kind || links.some((l) => l.kind === kind && profileID(kind, l.url) === profileID(kind, url))) {
+        skipped.push(short(url));
+        continue;
+      }
+      links.push({ url, kind });
+      kinds.push(kind);
+    }
+    if (kinds.length === 0) {
+      return toast(urls.length === 1 && !kindOfURL(urls[0])
+        ? `Paste the address of a profile on ${socialKinds.map((k) => kindName[k]).join(", ")}.`
+        : `${b.name} already has ${urls.length === 1 ? "that profile" : "those profiles"}.`, "error");
+    }
+    const what = kinds.length === 1 ? "Added." : `Added ${kinds.length} profiles.`;
+    const done = `${what}${kinds.some(canRead) ? " Reading their followers now." : ""}${skipped.length ? ` Skipped ${skipped.join(", ")} (already there or not a profile).` : ""}`;
+    if (await saveLinks(b, links, done, kinds.find(canRead))) setAdding({ brand: adding.brand, url: "" });
   }
 
   async function edit() {
@@ -385,14 +415,14 @@ function YourAccounts({ ws, brands, accounts, conns, canManage, go, signIn, onCh
   // How a confirmed profile is going: its followers, or what reading it needs.
   function status(kind: SocialKind, url: string) {
     if (notPublic(kind, url)) {
-      return <span className="text-muted-foreground">{kind === "linkedin" ? (linkedIn ? "Read through your LinkedIn sign-in" : "A person's profile: connect LinkedIn to read it") : "A person's profile shows no followers"}</span>;
+      return <span className="text-muted-foreground">{kind === "linkedin" ? (linkedIn ? "Read through your LinkedIn sign-in" : "A person's profile: connect LinkedIn to read it") : kind === "discord" ? "Use an invite link (discord.gg/…) to read its members" : "A person's profile shows no followers"}</span>;
     }
     const id = profileID(kind, url);
     const a = accounts.find((x) => x.channel === kind && x.status !== "disconnected" && (x.external_id.toLowerCase() === id || x.handle.toLowerCase() === id.split("/").pop()?.replace(/^@/, "")));
     if (a?.last_synced_at && a.followers !== null) {
       return (
         <span className="text-muted-foreground">
-          <span className="font-mono tabular-nums text-foreground">{n(a.followers)}</span> followers
+          <span className="font-mono tabular-nums text-foreground">{n(a.followers)}</span> {unit[kind] ?? "followers"}
           {a.followers_change_1d !== null && a.followers_change_1d !== undefined && <span className={a.followers_change_1d < 0 ? "text-red-600 dark:text-red-400" : "text-green-700 dark:text-green-400"}> {change(a.followers_change_1d)} today</span>}
           {" "}· read {ago(a.last_synced_at)}
         </span>
@@ -470,7 +500,7 @@ function YourAccounts({ ws, brands, accounts, conns, canManage, go, signIn, onCh
               {brands.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
             </select>
           )}
-          <input aria-label="Profile address" placeholder="Add a profile: paste its address, like x.com/northpeak" className={`${field} h-8 min-w-0 flex-1 text-[13px]`} value={adding.url} onChange={(e) => setAdding({ ...adding, url: e.target.value })} />
+          <input aria-label="Profile address" placeholder="Add profiles: paste one or more addresses, like x.com/northpeak" className={`${field} h-8 min-w-0 flex-1 text-[13px]`} value={adding.url} onChange={(e) => setAdding({ ...adding, url: e.target.value })} />
           <Button disabled={!adding.url.trim() || !!busy}>Add</Button>
         </form>
       )}

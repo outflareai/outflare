@@ -103,6 +103,8 @@ var Catalog = []Event{
 	// AI spend
 	{"ai_budget.warned", "ai", "AI calls this month reached 80% of the workspace's monthly AI limit, or of one tool's limit. data has task (empty for the workspace's limit, else the tool id), level (80), limit_cents, spent_cents and month (YYYY-MM); GET .../ai-usage has the detail."},
 	{"ai_budget.reached", "ai", "AI calls this month reached the workspace's monthly AI limit, or one tool's limit, so Outflare makes no more of those calls until next month or a higher limit. data has task, level (100), limit_cents, spent_cents and month."},
+	{"connection_limit.warned", "connectors", "A paid connection (SEO data, lead data, email verification, page reads) used 80% of its daily or monthly usage limit. data has integration_id, connector, period (day or month), period_start, level (80), unit (USD, credit, API unit, token), limit, used and hard_stop; GET .../integrations/{id}/usage has the detail."},
+	{"connection_limit.reached", "connectors", "A paid connection reached its daily or monthly usage limit, so with hard_stop Outflare makes no more calls through it until the next day or month, or a higher limit. data has the same fields as connection_limit.warned, with level 100."},
 	// Experiments
 	{"experiment.started", "experiments", "An SEO experiment started measuring: its site deployed, or a person said when the change went live. data has site_id, by (deploy or person), deploy_id and changed_at."},
 	{"experiment.concluded", "experiments", "An SEO experiment ended with a result. data has site_id, design, metric, verdict (better, worse, no_clear_change or too_early), lift, p_value, days_measured and treatment_pages."},

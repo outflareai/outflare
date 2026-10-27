@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"slices"
 	"strings"
 	"time"
 
@@ -13,7 +14,8 @@ import (
 
 // Public profiles: the profiles in a brand's links (X, a LinkedIn company
 // page, YouTube, Instagram, TikTok, Facebook, a subreddit, GitHub, a
-// Discord server), read from their public page through the workspace's own
+// Discord server, Bluesky, Threads, Mastodon, DEV, Docker Hub), read from
+// their public page or the channel's public API through the workspace's own
 // page reader (Geonode), with no app of the channel's own. The page shows
 // followers (and sometimes following and posts); posts and their numbers
 // need the channel's own app, as X and LinkedIn have.
@@ -88,7 +90,7 @@ func (p publicProfiles) SocialStats(ctx context.Context, cl *connectors.Client, 
 	}
 	// Pages that draw their counts with scripts need them run; the JSON
 	// answers (GitHub, Reddit, Discord) don't.
-	render := p.channel != "github" && p.channel != "reddit" && p.channel != "discord"
+	render := !slices.Contains(sociallinks.JSONKinds, p.channel)
 	page, err := p.fetch.FetchPage(ctx, cl, creds, pub.ReadURL, render)
 	if err != nil {
 		return connectors.SocialStats{}, err

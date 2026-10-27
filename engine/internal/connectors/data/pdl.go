@@ -12,7 +12,8 @@ import (
 // PDL is People Data Labs: https://docs.peopledatalabs.com/docs/person-search-api
 // and https://docs.peopledatalabs.com/docs/person-enrichment-api
 //
-// Search and enrichment both spend one credit per person returned.
+// Search and enrichment both spend one credit per person returned. IP
+// enrichment (reveal.go) spends one per company found.
 type PDL struct{}
 
 func (PDL) Definition() c.Definition {
@@ -23,8 +24,8 @@ func (PDL) Definition() c.Definition {
 		Website:     "https://www.peopledatalabs.com", DocsURL: "https://docs.peopledatalabs.com/docs/person-search-api",
 		KeyURL: "https://dashboard.peopledatalabs.com/api-keys", Auth: c.AuthAPIKey,
 		Fields:       apiKeyField("People Data Labs dashboard → API Keys."),
-		Capabilities: []string{c.CapSearchPeople, c.CapEnrichPerson},
-		Pricing:      "One credit per person returned",
+		Capabilities: []string{c.CapSearchPeople, c.CapEnrichPerson, c.CapRevealCompany},
+		Pricing:      "One credit per person returned; one per company found from a website visitor's address",
 	}
 }
 

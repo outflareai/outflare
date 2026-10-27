@@ -45,7 +45,8 @@ var (
 	brandPlatforms = []string{"web", "ios", "android", "tv", "desktop", "console", "extension", "api"}
 	handleShape    = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,38}[a-z0-9]$`)
 	brandLinkKinds = []string{"app_store", "google_play", "tv_app", "chrome_web_store", "microsoft_store", "steam", "docs", "help", "blog", "status",
-		"x", "linkedin", "youtube", "instagram", "tiktok", "facebook", "discord", "reddit", "github", "other"}
+		"x", "linkedin", "youtube", "instagram", "tiktok", "facebook", "discord", "reddit", "github",
+		"bluesky", "threads", "mastodon", "dev_to", "docker_hub", "other"}
 )
 
 // brandLink is one place the brand lives besides its website: an app

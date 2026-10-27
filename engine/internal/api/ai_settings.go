@@ -26,7 +26,7 @@ import (
 )
 
 // The AI model a workspace uses to plan missions and run Outflare's own
-// agent: which connection (Claude, OpenAI, Gemini, Mistral or OpenRouter), which of its
+// agent: which connection (Claude, OpenAI, Gemini, Mistral, xAI or a router), which of its
 // models, what that costs, and the most AI may spend in a month. The key
 // stays sealed on the integration; settings only point at it.
 
@@ -214,7 +214,7 @@ func (s *Server) aiConnections(ctx context.Context, ws string) ([]connectors.Int
 func pickAI(row aiSettingsRow, conns []connectors.Integration) (connectors.Integration, llm.Provider, string, llm.Price, string, error) {
 	if len(conns) == 0 {
 		return connectors.Integration{}, llm.Provider{}, "", llm.Price{}, "", errAI{http.StatusConflict, "connector_needed",
-			"Connect an AI model with your own API key first: Claude, OpenAI, Gemini, Mistral or OpenRouter (connector ids claude, openai, gemini, mistral, openrouter)."}
+			"Connect an AI model with your own API key first: Claude, OpenAI, Gemini, Mistral, xAI, OpenRouter, Vercel AI Gateway or Requesty (connector ids claude, openai, gemini, mistral, xai, openrouter, vercel_ai_gateway, requesty)."}
 	}
 	conn, model := conns[0], ""
 	if row.IntegrationID != nil {
@@ -583,7 +583,7 @@ func (s *Server) putAISettings(w http.ResponseWriter, r *http.Request) {
 		}
 		i := slices.IndexFunc(conns, func(c connectors.Integration) bool { return c.ID == *req.IntegrationID })
 		if i < 0 {
-			bad("integration_id is not a connected AI model in this workspace (Claude, OpenAI, Gemini, Mistral or OpenRouter)")
+			bad("integration_id is not a connected AI model in this workspace (Claude, OpenAI, Gemini, Mistral, xAI, OpenRouter, Vercel AI Gateway or Requesty)")
 			return
 		}
 		p, _ := llm.ProviderFor(conns[i].Connector)
@@ -697,7 +697,7 @@ func (s *Server) listIntegrationModels(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !models.IsModel(o.Integration.Connector) {
-		writeError(w, r, http.StatusBadRequest, "invalid_request", "this integration is not an AI model; models are listed for claude, openai, gemini and mistral")
+		writeError(w, r, http.StatusBadRequest, "invalid_request", "this integration is not an AI model; models are listed for AI model connections such as claude, openai or openrouter")
 		return
 	}
 	list, err := models.Models(r.Context(), o)

@@ -159,9 +159,11 @@ Read (always available):
 | `get_connection_hook`, `set_up_connection_hook`, `rotate_connection_hook`, `remove_connection_hook` | A connection's live updates: its own webhook address, which Outflare registers at the tool when it can (Geonode), whether events arrive, a new address, and turning them off |
 | `list_hook_events`, `replay_hook_event` | The events connectors sent by webhook, with what happened to each, and handling one again |
 | `list_site_keys`, `create_site_key`, `update_site_key`, `rotate_site_key`, `revoke_site_key`, `create_site_proxy_secret` | Website tracking keys (ofk_) and their snippet: anonymous page views with the landing page's campaign tags, click ids and referral code; a proxy secret (ofp_) for sites that forward tracking through their own domain |
-| `list_website_visitors`, `get_visitor_settings`, `update_visitor_settings` | The companies and people on the website, scored for buying intent (key pages, return visits), known from the product or from clicks on tracked links in Outflare email; key pages, hot score and who is left out |
-| `get_ai_settings`, `list_ai_models` | Which AI model (Claude, OpenAI, Gemini, Mistral, OpenRouter) plans missions and runs Outflare's agent, its price, the monthly AI limit and spend; the models a connection can use |
+| `list_website_visitors`, `get_visitor_settings`, `update_visitor_settings`, `add_visitor_company` | The companies and people on the website, scored for buying intent (key pages, return visits), known from the product, from clicks on tracked links in Outflare email, or (when turned on) from the company behind their address with the workspace's own People Data Labs or Snitcher key; key pages, hot score, lookups and who is left out; add a looked-up company to the CRM |
+| `get_ai_settings`, `list_ai_models` | Which AI model (Claude, OpenAI, Gemini, Mistral, xAI, OpenRouter, Vercel AI Gateway, Requesty) plans missions and runs Outflare's agent, its price, the monthly AI limit and spend; the models a connection can use |
 | `get_ai_usage` | Where the workspace's AI spend goes in a month: by tool, provider, model and day, each tool's own limit, and the latest calls with tokens and cost |
+| `list_connection_usage` | What each paid connection (SEO data, lead data, email verification, page reads) used today and this month, with its daily and monthly limits |
+| `get_connection_usage` | One paid connection's usage per day, its limits and the 80% and 100% warnings sent |
 | `get_verification_settings`, `verification_summary`, `list_verifications` | Which service verifies addresses, what is blocked, counts by status and per-address results |
 | `classify_email` | What kind of email domain an address or domain is (free, private, alias, throwaway, school, government, unknown), with attributes, risk, evidence and a recommended sign-up action. Unknown domains are researched in the background where the workspace turned domain research on |
 | `get_sequence_mailboxes` | A sequence's mailboxes and why, capacity needed versus allocated, and what blocked others |
@@ -171,6 +173,7 @@ Read (always available):
 | `list_allocation_changes` | Mailbox assignment history with reasons |
 | `list_senders`, `list_teams` | Who mailboxes send as, and the teams that own sequences and senders |
 | `use_mission` | Act inside a mission from now on, or stop (null) |
+| `list_playbooks`, `get_playbook`, `start_playbook` | Ready-made playbooks with whether the workspace is ready for each (connections and data still missing); start one as a mission draft with its prompt filled in. Needs `missions.read`, and `missions.run` to start |
 | `list_missions`, `get_mission` | Missions; check in on one: the project brief, what writes do now, limits, progress, open connect requests, notes from people |
 | `list_mission_actions`, `get_mission_action` | Writes held or dry-run in a mission, and their decisions and results |
 | `list_mission_calls` | Every call made in a mission |
@@ -209,7 +212,8 @@ Write (left out when `OUTFLARE_MCP_READ_ONLY=1`):
 | `install_brand_setup` | Add the website script through the workspace's own Tag Manager, or the verification record on its own Cloudflare, in one click |
 | `get_brand_rules`, `set_brand_rules` | The cross-brand contact rule: no first email from a second brand within N days of another brand's email |
 | `add_to_brand`, `remove_from_brand` | Move projects, domains, mailboxes, lead lists, sequences or missions into a brand, or make them shared by every brand again |
-| `search_workspace` | Find records by name, attribute text, email, phone or id, and emails sent and received, meetings, deals and lifecycle email by their words, ranked, with whose each one is |
+| `search_workspace` | Find records by name, attribute text, email, phone or id, and emails sent and received, meetings, deals and lifecycle email by their words, ranked, with whose each one is. With `mode: meaning`, find records, replies, meetings and deals by what they mean |
+| `get_semantic_search`, `set_semantic_search` | Read whether meaning-based search is on and how far along it is, or turn it off and on |
 | `list_query_tables`, `run_query` | Read-only SQL over the workspace's own data (people, companies, product events, deals, outreach, replies, emails, visits): counts, sums, rates and joins in one call. It sees only what the connection may read, and never changes anything |
 | `get_catalog` | Everything customer records can hold: record types (person, account and the workspace's own), their fields, the shared option lists and product events. Read it before writing records |
 | `list_records`, `get_record`, `lookup_record` | Find people, companies and other records by type, name or identity; `lookup_record` says which record holds an email or id verified |
@@ -228,6 +232,7 @@ Write (left out when `OUTFLARE_MCP_READ_ONLY=1`):
 | `update_domain` | Pause or resume a domain, cap its daily sends, or set limits on all its mailboxes |
 | `update_mailbox` | Pause or resume a mailbox, or change its name, daily limit, minimum gap or pool |
 | `check_domain` | Re-check a domain's DNS and blocklists after a DNS change |
+| `add_domain_dns`, `get_domain_dns_approval` | Add a domain's missing SPF or DMARC record through the workspace's Cloudflare in one click, or with a link the user approves once at their DNS provider |
 | `update_sending_server` | Pause or resume a sending server, cap its daily sends, set its IPs, or turn off the automatic blocklist pause |
 | `check_sending_server` | Re-check a server's IPs against blocklists, e.g. after a delisting request |
 | `add_tracking_domain`, `check_tracking_domain`, `add_tracking_domain_dns`, `get_tracking_domain_dns_approval` | Use the user's own domain for unsubscribe and click links, check its CNAME, and add it through the workspace's Cloudflare in one click or with a link the user approves once at their DNS provider |
@@ -262,6 +267,7 @@ Write (left out when `OUTFLARE_MCP_READ_ONLY=1`):
 | `start_import` | Bring campaigns (as drafts), leads and sending accounts over from Instantly or Smartlead |
 | `update_ai_settings` | Choose the AI model, its price, a model per task (plan, turn, check_in, reply_labelling, classify_domain, ai_visibility, social_replies, email_verification) and the monthly AI limit |
 | `update_ai_tool_limits` | Set a monthly AI limit for each tool, on top of the workspace's |
+| `update_connection_limits` | Set a paid connection's daily and monthly usage limits, and whether reaching one stops calls |
 | `update_verification_settings` | Pick the verification service and what to block |
 | `verify_emails` | Verify addresses, a lead list, or every unverified lead |
 | `assign_mailboxes`, `release_mailboxes` | Move mailboxes to a sequence or free them; busy ones drain first |

@@ -1,0 +1,25 @@
+# Change notes (changes/README.md): every pull request that changes what Outflare
+# does adds a note, or carries the no-note label. Separate from CI so adding the
+# label re-runs only this check.
+name: Change notes
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, labeled, unlabeled]
+
+permissions:
+  contents: read
+
+jobs:
+  notes:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - name: Notes are present and well formed
+        env:
+          BASE: ${{ github.event.pull_request.base.sha }}
+          PR_LABELS: ${{ join(github.event.pull_request.labels.*.name, ',') }}
+        run: node scripts/changes.mjs check "$BASE"

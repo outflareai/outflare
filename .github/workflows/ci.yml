@@ -31,8 +31,11 @@ jobs:
           - { name: api 2/2, part: api 2 2 }
           - { name: rest, part: rest }
     services:
+      # Postgres with pgvector, so meaning-based search is tested. The
+      # migrations job below keeps plain Postgres, which proves the engine
+      # migrates and runs without it.
       postgres:
-        image: postgres:16-alpine
+        image: pgvector/pgvector:0.8.0-pg16
         env:
           POSTGRES_PASSWORD: postgres
           POSTGRES_DB: outflare_test

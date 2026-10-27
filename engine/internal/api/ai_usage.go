@@ -53,10 +53,12 @@ func aiCallTask(task string) string {
 }
 
 // aiTools are the tools the usage page always lists, in order, even in a
-// month they made no calls: the model tasks and AI visibility's sampling.
+// month they made no calls: the model tasks, AI visibility's sampling and
+// meaning-based search's embeddings.
 func aiTools() []aiTask {
 	out := slices.Clone(aiTasks)
-	return append(out, aiTask{taskVisibilitySampling, "AI visibility sampling", "Asking the AI models chosen under AI visibility what they answer about your brands."})
+	return append(out, aiTask{taskVisibilitySampling, "AI visibility sampling", "Asking the AI models chosen under AI visibility what they answer about your brands."},
+		aiTask{taskSemanticSearch, "Meaning-based search", "Turning your records, replies, meetings and deals into vectors, so search finds them by what they mean."})
 }
 
 // aiToolName is the name a person sees for a tool: lead_finder becomes

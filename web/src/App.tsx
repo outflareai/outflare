@@ -50,6 +50,7 @@ import { CampaignLinks } from "./pages/CampaignLinks";
 import { IdealCustomers } from "./pages/IdealCustomers";
 import { Agency } from "./pages/Agency";
 import { Missions } from "./pages/Missions";
+import { Playbooks } from "./pages/Playbooks";
 import { Infrastructure } from "./pages/Infrastructure";
 import { Instance } from "./pages/Instance";
 import { Account } from "./pages/Account";
@@ -512,6 +513,7 @@ function Shell({ me, onSignOut, onReload }: { me: Me; onSignOut: () => void; onR
         {ready && ws && tab === "topics" && <Topics key={ws.id} ws={ws.id} canManage={writer} go={setTab} />}
         {ready && ws && tab === "providers" && <Providers key={ws.id} ws={ws.id} canManage={isAdmin} open={item ?? ""} onOpen={(id) => setItem(id || undefined)} go={setTab} />}
         {ready && ws && tab === "inbox" && <Inbox key={ws.id} ws={ws.id} canManage={writer} open={item} setOpen={setItem} onRead={() => setUnread((n) => Math.max(0, n - 1))} />}
+        {ready && ws && tab === "playbooks" && <Playbooks key={ws.id} ws={ws.id} canManage={writer} go={setTab} />}
         {ready && ws && tab === "missions" && <Missions key={ws.id} ws={ws.id} canManage={writer} open={item} setOpen={setItem} />}
         {ready && ws && tab === "outcomes" && <Outcomes key={ws.id} ws={ws.id} canManage={writer} go={setTab} />}
         {ready && ws && tab === "projects" && <Projects key={ws.id} ws={ws.id} canManage={writer} isAdmin={isAdmin} open={item} setOpen={setItem} go={setTab} />}

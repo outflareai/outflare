@@ -226,7 +226,7 @@ func (s *Server) putAIVisibilitySettings(w http.ResponseWriter, r *http.Request)
 			at := fmt.Sprintf("models[%d]: ", i)
 			j := slices.IndexFunc(conns, func(c connectors.Integration) bool { return c.ID == t.IntegrationID })
 			if !validUUID(t.IntegrationID) || j < 0 {
-				bad(at + "integration_id is not a connected AI model in this workspace (Claude, OpenAI, Gemini, Mistral or OpenRouter)")
+				bad(at + "integration_id is not a connected AI model in this workspace (Claude, OpenAI, Gemini, Mistral, xAI, OpenRouter, Vercel AI Gateway or Requesty)")
 				return
 			}
 			p, _ := llm.ProviderFor(conns[j].Connector)

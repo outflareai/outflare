@@ -41,7 +41,7 @@ var approvalErrors = []string{"invalid_request", "unauthorized_client", "access_
 
 // dnsSubject is something whose records a person can approve.
 type dnsSubject struct {
-	Subject string // seo_site, tracking_domain, email_domain
+	Subject string // seo_site, tracking_domain, email_domain, sending_domain
 	ID      string
 	BrandID string
 	Kind    string // the templates' kind: site, tracking, email
@@ -159,7 +159,7 @@ func (s *Server) dnsApproved(w http.ResponseWriter, r *http.Request, a *access, 
 				return err
 			}
 		default:
-			if _, err := tx.Exec(ctx, `UPDATE `+dnsSubjects[sub.Subject]+` SET dns_install = $3 WHERE workspace_id = $1 AND id = $2`, a.WorkspaceID, sub.ID, run); err != nil {
+			if _, err := tx.Exec(ctx, `UPDATE `+dnsSubjects[sub.Subject].table+` SET dns_install = $3 WHERE workspace_id = $1 AND `+dnsSubjects[sub.Subject].key+` = $2`, a.WorkspaceID, sub.ID, run); err != nil {
 				return err
 			}
 			if err := s.afterDNSAdded(ctx, tx, a.WorkspaceID, dnsAddJob{Subject: sub.Subject, ID: sub.ID}); err != nil {
@@ -236,6 +236,35 @@ func (s *Server) emailDomainSubject(w http.ResponseWriter, r *http.Request) (*ac
 	sub := dnsSubject{Subject: "email_domain", ID: cur.ID, BrandID: deref(cur.BrandID), Kind: "email", FQDN: cur.Domain}
 	sub.All, sub.Want = approvalRecs(cur.Records)
 	return a, sub, true
+}
+
+// sendingDomainSubject is a cold email domain's missing SPF or DMARC
+// record. The general templates add one record each, so a domain missing
+// both is offered its DNS host connection instead.
+func (s *Server) sendingDomainSubject(w http.ResponseWriter, r *http.Request) (*access, dnsSubject, bool) {
+	a := accessFrom(r.Context())
+	d, ok := s.findDomain(w, r, a.WorkspaceID, domainParam(r))
+	if !ok {
+		return nil, dnsSubject{}, false
+	}
+	sub := dnsSubject{Subject: "sending_domain", ID: d.Domain, BrandID: deref(d.BrandID), Kind: "any", FQDN: d.Domain}
+	for _, rec := range sendingDomainRecords(*d) {
+		sub.Want = append(sub.Want, domainconnect.Rec{Type: rec.Type, Name: rec.Name, Value: rec.Content})
+	}
+	sub.All = sub.Want
+	return a, sub, true
+}
+
+func (s *Server) sendingDomainDNSApproval(w http.ResponseWriter, r *http.Request) {
+	if _, sub, ok := s.sendingDomainSubject(w, r); ok {
+		s.dnsApproval(w, r, sub)
+	}
+}
+
+func (s *Server) sendingDomainDNSApproved(w http.ResponseWriter, r *http.Request) {
+	if a, sub, ok := s.sendingDomainSubject(w, r); ok {
+		s.dnsApproved(w, r, a, sub)
+	}
 }
 
 func (s *Server) seoSiteDNSApproval(w http.ResponseWriter, r *http.Request) {

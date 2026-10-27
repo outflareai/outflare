@@ -107,6 +107,16 @@ var (
 		Help: "Workspaces warned about their AI spend, by level (80: most of a limit, 100: reached it) and scope (workspace or tool).",
 	}, []string{"level", "scope"})
 
+	// Usage limits on paid connections. connector is a catalog id.
+	connectionLimitAlerts = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Namespace: namespace, Subsystem: "connection_limits", Name: "alerts_total",
+		Help: "Workspaces warned that a paid connection used most of a usage limit (level 80) or reached it (level 100), by period (day or month).",
+	}, []string{"level", "period"})
+	connectionLimitStops = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Namespace: namespace, Subsystem: "connection_limits", Name: "stops_total",
+		Help: "Paid connector calls Outflare did not make because the connection reached a usage limit, by connector and period.",
+	}, []string{"connector", "period"})
+
 	// Incoming webhooks from connectors. connector is a catalog id (or
 	// "unknown" for an address that matches no connection).
 	hooksReceived = prometheus.NewCounterVec(prometheus.CounterOpts{
@@ -145,6 +155,27 @@ var (
 		Namespace: namespace, Subsystem: "query", Name: "rows_total",
 		Help: "Rows queries returned.",
 	})
+	// Meaning-based search: vectors made with workspaces' own AI keys.
+	semanticRuns = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Namespace: namespace, Subsystem: "semantic_search", Name: "embed_runs_total",
+		Help: "Embedding jobs run, by outcome (success, failed).",
+	}, []string{"outcome"})
+	semanticItems = prometheus.NewCounter(prometheus.CounterOpts{
+		Namespace: namespace, Subsystem: "semantic_search", Name: "embedded_total",
+		Help: "Records, replies, meetings and deals turned into vectors.",
+	})
+	semanticDuration = prometheus.NewHistogram(prometheus.HistogramOpts{
+		Namespace: namespace, Subsystem: "semantic_search", Name: "embed_run_seconds",
+		Help: "Time one embedding job took, the provider's API included.", Buckets: []float64{.1, .5, 1, 2.5, 5, 10, 30, 60, 120, 300},
+	})
+	semanticAvailable = prometheus.NewGauge(prometheus.GaugeOpts{
+		Namespace: namespace, Subsystem: "semantic_search", Name: "available",
+		Help: "1 when the database has pgvector, so meaning-based search can run; 0 when it hasn't.",
+	})
+	semanticWorkspaces = prometheus.NewGauge(prometheus.GaugeOpts{
+		Namespace: namespace, Subsystem: "semantic_search", Name: "workspaces",
+		Help: "Workspaces with meaning-based search turned on.",
+	})
 
 	buildInfo = prometheus.NewGaugeVec(prometheus.GaugeOpts{
 		Namespace: namespace, Name: "build_info",
@@ -160,9 +191,11 @@ var own = []prometheus.Collector{
 	siteEvents, inboxEvents, inboxBatch,
 	pipelineItems, pipelineCodes, pipelineBatch, pipelineBatchSize, pipelineWait, pipelineLimitWaits, pipelineLimitReports,
 	aiCalls, aiTokens, aiCost, aiBudgetAlerts,
+	connectionLimitAlerts, connectionLimitStops,
 	hooksReceived, hookEvents, hookLag,
 	domainConnectLookups, domainConnectDuration,
 	queryRuns, queryDuration, queryRows,
+	semanticRuns, semanticItems, semanticDuration, semanticAvailable, semanticWorkspaces,
 	buildInfo,
 }
 
@@ -258,6 +291,26 @@ func QueryRan(outcome string, d time.Duration, rows int) {
 	queryRows.Add(float64(rows))
 }
 
+// SemanticEmbedded records one embedding job: its outcome, how many items
+// it embedded and how long it took.
+func SemanticEmbedded(outcome string, items int, d time.Duration) {
+	semanticRuns.WithLabelValues(outcome).Inc()
+	semanticItems.Add(float64(items))
+	semanticDuration.Observe(d.Seconds())
+}
+
+// SetSemanticAvailable says whether the database has pgvector.
+func SetSemanticAvailable(ok bool) {
+	if ok {
+		semanticAvailable.Set(1)
+	} else {
+		semanticAvailable.Set(0)
+	}
+}
+
+// SetSemanticWorkspaces is how many workspaces have meaning-based search on.
+func SetSemanticWorkspaces(n int) { semanticWorkspaces.Set(float64(n)) }
+
 // AICall records one AI model call made with a workspace's own key: its
 // provider (connector id), tool, tokens and cost in cents.
 func AICall(provider, task string, input, output, cacheRead, cacheWrite, cents int64) {
@@ -280,6 +333,17 @@ func AIBudgetAlert(level int, tool bool) {
 		scope = "tool"
 	}
 	aiBudgetAlerts.WithLabelValues(strconv.Itoa(level), scope).Inc()
+}
+
+// ConnectionLimitAlert counts a usage limit warning sent to a workspace:
+// level 80 or 100, for a daily or monthly limit.
+func ConnectionLimitAlert(level int, period string) {
+	connectionLimitAlerts.WithLabelValues(strconv.Itoa(level), period).Inc()
+}
+
+// ConnectionLimitStop counts a paid call refused at a usage limit.
+func ConnectionLimitStop(connector, period string) {
+	connectionLimitStops.WithLabelValues(connector, period).Inc()
 }
 
 // HookDelivery counts one webhook delivery by its outcome.

@@ -17,7 +17,7 @@ type Fact = Schemas["AIFact"];
 type Settings = Schemas["AIVisibilitySettings"];
 type BotHits = Schemas["AIBotHits"];
 
-const aiConnectors = ["claude", "openai", "gemini", "mistral", "openrouter"];
+const aiConnectors = ["claude", "openai", "gemini", "mistral", "xai", "openrouter", "vercel_ai_gateway", "requesty"];
 const pct = (v?: number | null) => (v === undefined || v === null ? "–" : `${Math.round(v * 100)}%`);
 const usd = (cents: number) => `$${(cents / 100).toFixed(2)}`;
 const held = (data: object) => "queued" in data && toast("Held for approval by the mission's owner.");

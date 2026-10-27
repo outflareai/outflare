@@ -28,7 +28,8 @@ type LinkKind = NonNullable<Link["kind"]>;
 const linkNames: Record<LinkKind, string> = {
   app_store: "App Store", google_play: "Google Play", tv_app: "TV app store", chrome_web_store: "Chrome Web Store", microsoft_store: "Microsoft Store",
   steam: "Steam", docs: "Docs", help: "Help centre", blog: "Blog", status: "Status page", x: "X", linkedin: "LinkedIn", youtube: "YouTube",
-  instagram: "Instagram", tiktok: "TikTok", facebook: "Facebook", discord: "Discord", reddit: "Reddit", github: "GitHub", other: "Other",
+  instagram: "Instagram", tiktok: "TikTok", facebook: "Facebook", discord: "Discord", reddit: "Reddit", github: "GitHub",
+  bluesky: "Bluesky", threads: "Threads", mastodon: "Mastodon", dev_to: "DEV", docker_hub: "Docker Hub", other: "Other",
 };
 const linkName = (l: Link) => l.label || linkNames[l.kind ?? "other"];
 

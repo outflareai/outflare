@@ -2,9 +2,29 @@
 
 What changed in each release of Outflare, for people who self-host. The newest release is first. Versions follow [Semantic Versioning](https://semver.org/); before 1.0, a minor version (0.x.0) may change the API, and its notes say how.
 
-Every pull request that changes what Outflare does adds a line under **Unreleased**, in the section that fits: Added, Changed, Fixed, Removed, Security. Write it for someone running Outflare, not for the reviewer: what they can now do or what behaves differently, and anything they must do when they upgrade. A release is cut and published automatically soon after each change that adds a line here ([docs/releasing.md](docs/releasing.md)).
+Each pull request that changes what Outflare does adds a change note in [changes/](changes/README.md) (or a line under **Unreleased**, the older way). Write it for someone running Outflare, not for the reviewer: what they can now do or what behaves differently, and anything they must do when they upgrade. The notes become the [daily changelog](https://outflare.ai/changelog/), and a release is cut and published automatically soon after each change: the notes added since the last release become its section here ([docs/releasing.md](docs/releasing.md)).
 
 ## [Unreleased]
+
+## [0.4.0] - 2026-10-27
+
+### Added
+
+- Usage limits for every paid connection: Ahrefs, DataForSEO, lead data providers such as Apollo, email verifiers and Geonode. Each connection's page under Connectors shows what Outflare's calls used today and this month, and takes a daily and a monthly limit in the provider's own unit (credits, API units, tokens) or in US dollars. At a limit Outflare stops calling (or only warns, if you choose), and owners and admins are emailed at 80% and 100%. The SEO budget is now the connection's monthly limit, and paid email verification and Geonode page reads during crawls are now booked in Outcomes. API `GET /connection-usage`, `GET`/`PUT`/`DELETE .../integrations/{id}/usage[/limits]`, webhooks `connection_limit.warned` and `connection_limit.reached`, MCP `list_connection_usage`, `get_connection_usage` and `update_connection_limits`. Upgrading runs migration 0205, which carries existing SEO budgets over.
+- Meaning-based search: `GET .../search?mode=meaning` (and `mode: "meaning"` on the MCP tool `search_workspace`) finds records, replies, meetings and deals by what they mean, so "unhappy with price" finds "too expensive for us". It is on by default and uses the workspace's own OpenAI, Gemini, Mistral or OpenRouter key (Claude has no embeddings); its cost, usually cents a month, is its own tool in AI usage, and an admin can turn it off under Settings → Meaning-based search, which deletes its vectors. It needs the pgvector extension in Postgres: Outflare adds it where the database allows, and without it everything else works as before. Self-hosted with Docker: switch the database image to `pgvector/pgvector:pg16` and run `REINDEX DATABASE outflare;` once if you move from `postgres:16-alpine`. Upgrading runs migration 0201.
+- **Playbooks**: ready-made recipes for growth, such as welcoming new sign-ups, answering interested replies and fixing SEO quick wins. Each one says what it needs and whether your workspace is ready, and starts as a mission draft you approve. Copy its prompt into your own AI app, or call `GET /v1/playbooks`, `POST /v1/workspaces/{ws}/playbooks/{id}/runs` or the MCP tools `list_playbooks`, `get_playbook` and `start_playbook`. Anyone can add one in `playbooks/` with a pull request. Upgrading runs migration 0195.
+- Everywhere Outflare asks you to add DNS records (proving a site is yours, a tracking domain, a sending domain's records, an email provider's domain) now offers the same four ways: one click (your DNS host's own approval screen, or your Cloudflare connection), a prompt to paste into your own AI agent, a message for a developer, or doing it yourself. A cold email domain's missing SPF or DMARC record can now be added the same way from its page in Domains (`POST .../sending-domains/{domain}/dns`, `GET .../dns/approval`, `POST .../dns/approved`; `dns_install` and `dns_connections` on the domain; MCP `add_domain_dns`, `get_domain_dns_approval`). Upgrading runs migration 0206.
+- New AI connections: xAI (Grok) and two more routers beside OpenRouter, Vercel AI Gateway and Requesty, each with your own key. On the Connectors page, routers are tagged **Router**, and OpenAI and xAI are tagged for subscription sign-in (ChatGPT plans, SuperGrok), which is coming: connect an API key for now. The catalog lists them as `tags` on each connector.
+- Company lookups on the Visitors page: with your own People Data Labs or Snitcher key, and only once you turn it on, unknown visitors who accepted cookies are matched to a company from their IP address. The address is never stored, home and phone connections name nobody, and found companies stay off your CRM until someone adds them. Migration 0192.
+
+### Changed
+
+- Social also reads Bluesky, Threads and Mastodon accounts (followers), DEV authors (published posts) and Docker Hub namespaces (pulls across their images) every day, and GitHub accounts now count stars across their repositories instead of followers. Bluesky, Mastodon, DEV, Docker Hub, GitHub, Reddit and Discord are read from their public APIs, a token each through your Geonode account. Paste several profile addresses at once on Social → Accounts. A Discord channel link needs an invite link (discord.gg/…) instead to read members. Upgrading runs migration 0208.
+- The SEO overview tells a brand when its tools are connected but not for it: an SEO tool shared with other brands only ("Not shared", with a button to share it), or a search console or analytics tool that has numbers for other websites of the workspace but not the brand's. It no longer asks you to connect a tool you already have. The API adds `not_shared` to `seo_status.state` and a `sources` object.
+
+### Fixed
+
+- A worker no longer picks up a job it has no handler for, so a job queued by a newer or extended version during a deploy waits for a worker that can run it instead of dying.
 
 ## [0.3.0] - 2026-10-27
 

@@ -17,9 +17,8 @@ import { isID, type Tab } from "@/lib/paths";
 import { cn } from "@/lib/utils";
 import { ConnectorLogo } from "@/components/connector-logo";
 import { DataTable } from "@/components/data-table";
-import { AIPromptPanel, DeveloperPanel, Panel } from "@/components/install-methods";
 import { takeConnectOutcome } from "./Connectors";
-import { DNSOneClick, heldByMission, takeDNSFocus } from "@/components/dns-one-click";
+import { DNSWays, heldByMission, takeDNSFocus } from "@/components/dns-one-click";
 
 export type Go = (tab: Tab, item?: string) => void;
 
@@ -539,46 +538,15 @@ function DomainCard({ ws, domain: d, provider, canManage, reload, focused }: { w
   );
 }
 
-type DNSWay = "cloudflare" | "ai" | "developer" | "manual";
-const dnsWays: { id: DNSWay; label: string; icon: Parameters<typeof Icon>[0]["name"] }[] = [
-  { id: "cloudflare", label: "Cloudflare (one click)", icon: "connectors" },
-  { id: "ai", label: "Ask your AI agent", icon: "ai" },
-  { id: "developer", label: "Send to a developer", icon: "inbox" },
-  { id: "manual", label: "Do it myself", icon: "code" },
-];
-
 // The ways to add a sending domain's records, quickest first: one click
 // through the workspace's own Cloudflare, a prompt for an AI agent, a
 // message for a developer, or copying them from the list below.
 function DomainDNSWays({ ws, domain: d, canManage, reload }: { ws: string; domain: EmailDomain; canManage: boolean; reload: () => void }) {
-  const [way, setWay] = useState<DNSWay>("cloudflare");
-  const used = (how?: string) => track("ui.email_domain_dns_way_used", { way, how, connector: d.connector });
   return (
-    <div className="space-y-3">
-      <div role="tablist" className="flex flex-wrap gap-1.5">
-        {dnsWays.map((w, i) => (
-          <button key={w.id} role="tab" aria-selected={way === w.id} onClick={() => setWay(w.id)}
-            className={cn("inline-flex h-8 items-center gap-1.5 rounded-md border px-3 text-[13px]", way === w.id ? "border-brand/50 bg-brand/10 font-medium" : "hover:bg-accent")}>
-            {w.id === "cloudflare" ? <ConnectorLogo id="cloudflare" size="sm" /> : <Icon name={w.icon} className="size-3.5" />}
-            {w.label}
-            {i === 0 && <Badge tone="green">Quickest</Badge>}
-          </button>
-        ))}
-      </div>
-      {way === "cloudflare" && <CloudflareDNS ws={ws} domain={d} canManage={canManage} reload={reload} used={used} />}
-      {way === "ai" && <AIPromptPanel prompt={d.ai_prompt} used={used} intro="Paste this into Claude, ChatGPT or any agent that can reach your DNS host. It lists every record still missing, exactly as it must be added." />}
-      {way === "developer" && <DeveloperPanel message={d.developer} used={used} />}
-      {way === "manual" && <Panel><p className="text-[13px] text-muted-foreground">Add each record below where {d.domain}'s DNS is managed. Each one ticks off by itself once it's visible, and a wrong one says what's wrong.</p></Panel>}
-    </div>
-  );
-}
-
-// One click through the workspace's own Cloudflare: sign in once, then see
-// exactly which records go in and add them all with one button.
-function CloudflareDNS({ ws, domain: d, canManage, reload, used }: { ws: string; domain: EmailDomain; canManage: boolean; reload: () => void; used: (how?: string) => void }) {
-  return (
-    <DNSOneClick ws={ws} page="providers" item={d.id} approval={{ kind: "email_domain", id: d.id }} connections={d.dns_connections} records={d.records.filter((r) => r.status !== "verified")} run={d.dns_install}
-      canManage={canManage} reload={reload} used={used}
+    <DNSWays ws={ws} page="providers" item={d.id} approval={{ kind: "email_domain", id: d.id }} connections={d.dns_connections} records={d.records.filter((r) => r.status !== "verified")} run={d.dns_install}
+      canManage={canManage} reload={reload} used={(way, how) => track("ui.email_domain_dns_way_used", { way, how, connector: d.connector })}
+      prompt={d.ai_prompt} developer={d.developer}
+      manual={<>Add each record below where {d.domain}'s DNS is managed. Each one ticks off by itself once it's visible, and a wrong one says what's wrong.</>}
       intro={<>Connect the Cloudflare account {d.domain} is on.</>}
       after="Records already there stay as they are, including your DMARC policy. Then Outflare checks every minute until the provider confirms."
       onAdd={async (integration) => {

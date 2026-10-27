@@ -105,3 +105,38 @@ func TestNewNeedsModel(t *testing.T) {
 		t.Errorf("claude default = %v %v", m, err)
 	}
 }
+
+// Vercel AI Gateway lists its models to anyone, so the key is checked
+// on its credits first, and only language models are offered.
+func TestVercelAIGatewayChecksTheKey(t *testing.T) {
+	var paths []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		paths = append(paths, r.URL.Path)
+		if r.Header.Get("Authorization") != "Bearer vck-test-not-a-real-key" {
+			w.WriteHeader(401)
+			return
+		}
+		switch r.URL.Path {
+		case "/credits":
+			w.Write([]byte(`{"balance":"10.00","total_used":"0.00"}`))
+		case "/models":
+			w.Write([]byte(`{"data":[{"id":"anthropic/claude-sonnet-5-5","name":"Claude Sonnet 5.5","type":"language"},{"id":"openai/text-embedding-3-small","type":"embedding"},{"id":"xai/grok-image","type":"image"}]}`))
+		}
+	}))
+	defer srv.Close()
+	cfg := Config{Provider: VercelAIGateway, Key: "vck-test-not-a-real-key", BaseURL: srv.URL}
+	list, err := ListModels(context.Background(), cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(list) != 1 || list[0].ID != "anthropic/claude-sonnet-5-5" {
+		t.Errorf("models = %+v, want only the language model", list)
+	}
+	if len(paths) != 2 || paths[0] != "/credits" {
+		t.Errorf("paths = %v, want the credits check first", paths)
+	}
+	cfg.Key = "vck-wrong-test-not-a-real-key"
+	if _, err := ListModels(context.Background(), cfg); !errors.Is(err, ErrAuth) {
+		t.Errorf("a refused key = %v, want ErrAuth", err)
+	}
+}

@@ -12,6 +12,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/outflareai/outflare/engine/internal/auth"
+	"github.com/outflareai/outflare/engine/internal/connectors"
 	"github.com/outflareai/outflare/engine/internal/leads"
 	"github.com/outflareai/outflare/engine/internal/mailbox"
 )
@@ -27,6 +28,9 @@ func (s *Server) routesDomains(mux *http.ServeMux) {
 	mux.HandleFunc("PATCH /v1/workspaces/{ws}/sending-domains/{domain}", s.inWorkspace(manage, s.updateDomain))
 	mux.HandleFunc("DELETE /v1/workspaces/{ws}/sending-domains/{domain}", s.inWorkspace(manage, s.deleteDomain))
 	mux.HandleFunc("POST /v1/workspaces/{ws}/sending-domains/{domain}/check", s.inWorkspace(manage, s.checkDomain))
+	mux.HandleFunc("POST /v1/workspaces/{ws}/sending-domains/{domain}/dns", s.inWorkspace(manage, s.addDomainDNS))
+	mux.HandleFunc("GET /v1/workspaces/{ws}/sending-domains/{domain}/dns/approval", s.inWorkspace(manage, s.sendingDomainDNSApproval))
+	mux.HandleFunc("POST /v1/workspaces/{ws}/sending-domains/{domain}/dns/approved", s.inWorkspace(manage, s.sendingDomainDNSApproved))
 }
 
 type mailboxCounts struct {
@@ -91,6 +95,10 @@ type domainDay struct {
 type domainDetail struct {
 	domainView
 	Daily []domainDay `json:"daily"`
+	// The last one-click run that added the domain's missing SPF or DMARC
+	// record, and the connections that can add them.
+	DNSInstall     *connectors.DNSInstall `json:"dns_install"`
+	DNSConnections []string               `json:"dns_connections"`
 }
 
 // domainSelect reads domains with their mailbox and sending counts. $1 is
@@ -254,7 +262,33 @@ func (s *Server) getDomain(w http.ResponseWriter, r *http.Request) {
 		s.internal(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, domainDetail{*d, daily})
+	out := domainDetail{domainView: *d, Daily: daily}
+	if err := s.pool.QueryRow(r.Context(), `SELECT dns_install FROM sending_domains WHERE workspace_id = $1 AND domain = $2`, a.WorkspaceID, d.Domain).Scan(&out.DNSInstall); err != nil {
+		s.internal(w, r, err)
+		return
+	}
+	dns, err := s.dnsConnections(r.Context(), a.WorkspaceID)
+	if err != nil {
+		s.internal(w, r, err)
+		return
+	}
+	out.DNSConnections = dns(deref(d.BrandID))
+	writeJSON(w, http.StatusOK, out)
+}
+
+// addDomainDNS adds the domain's missing SPF or DMARC record with the
+// workspace's own DNS host connection, then checks the domain again.
+func (s *Server) addDomainDNS(w http.ResponseWriter, r *http.Request) {
+	a := accessFrom(r.Context())
+	d, ok := s.findDomain(w, r, a.WorkspaceID, domainParam(r))
+	if !ok {
+		return
+	}
+	if len(sendingDomainRecords(*d)) == 0 {
+		writeError(w, r, http.StatusBadRequest, "invalid_request", "nothing to add: "+d.Domain+" has the SPF and DMARC records Outflare can add")
+		return
+	}
+	s.queueDNSAdd(w, r, a, "sending_domain", d.Domain, deref(d.BrandID))
 }
 
 func (s *Server) findDomain(w http.ResponseWriter, r *http.Request, ws, domain string) (*domainView, bool) {

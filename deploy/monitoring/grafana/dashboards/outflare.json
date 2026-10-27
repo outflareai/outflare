@@ -3462,6 +3462,306 @@
           "sort": "desc"
         }
       }
+    },
+    {
+      "type": "row",
+      "title": "Paid connection limits",
+      "id": 70,
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 238
+      },
+      "panels": []
+    },
+    {
+      "type": "timeseries",
+      "title": "Usage limits warned and reached",
+      "description": "Workspaces warned that a paid connection (SEO data, lead data, email verification, page reads) used 80% of a daily or monthly usage limit, or reached it, per hour. Normal: a few a day; a burst means a feature is using far more than usual.",
+      "id": 71,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 239
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (level, period) (increase(outflare_connection_limits_alerts_total{job=\"$job\"}[1h]))",
+          "legendFormat": "{{level}}% · {{period}}",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "fillOpacity": 10,
+            "stacking": {
+              "mode": "none"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "mean",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Calls stopped at a usage limit",
+      "description": "Paid connector calls Outflare did not make because the connection reached its limit, per hour, by connector. Normal: zero or a trickle; a steady stream means a feature keeps retrying into a limit and should back off.",
+      "id": 72,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 239
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (connector) (increase(outflare_connection_limits_stops_total{job=\"$job\"}[1h]))",
+          "legendFormat": "{{connector}}",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "fillOpacity": 10,
+            "stacking": {
+              "mode": "none"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "mean",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "type": "row",
+      "title": "Search by meaning (pgvector)",
+      "id": 73,
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 247
+      },
+      "panels": []
+    },
+    {
+      "type": "timeseries",
+      "title": "Items embedded",
+      "description": "Records, replies, meetings and deals turned into vectors per minute, with the workspace's own AI key. Bursts when a workspace first connects an AI model, then a trickle as things change.",
+      "id": 74,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 0,
+        "y": 248
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum(rate(outflare_semantic_search_embedded_total{job=\"$job\"}[5m])) * 60",
+          "legendFormat": "items",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "fillOpacity": 10,
+            "stacking": {
+              "mode": "normal"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "mean",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Embedding jobs by outcome",
+      "description": "Embedding jobs per minute: failed means a workspace's provider refused or failed (a bad key, its AI limit reached), and the job tries again on the next tick. A few are normal; a steady stream is not.",
+      "id": 75,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 8,
+        "y": 248
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (outcome) (rate(outflare_semantic_search_embed_runs_total{job=\"$job\"}[5m])) * 60",
+          "legendFormat": "{{outcome}}",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "fillOpacity": 10,
+            "stacking": {
+              "mode": "normal"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "mean",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "pgvector and workspaces",
+      "description": "available is 1 when the database has pgvector; workspaces is how many have meaning-based search on with an AI model that makes embeddings. Without pgvector, search by words works and meaning-based search stays off.",
+      "id": 76,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 248
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "max(outflare_semantic_search_available{job=\"$job\"})",
+          "legendFormat": "available",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          }
+        },
+        {
+          "refId": "B",
+          "expr": "max(outflare_semantic_search_workspaces{job=\"$job\"})",
+          "legendFormat": "workspaces",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "fillOpacity": 10,
+            "stacking": {
+              "mode": "normal"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "mean",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
     }
   ]
 }

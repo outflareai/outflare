@@ -119,3 +119,27 @@ func TestConnectorOffersOAuthAndAPIKey(t *testing.T) {
 	}
 	owner.must(201, "POST", "/v1/connect/complete", map[string]any{"token": secret, "credentials": map[string]string{"api_key": "pat-good"}})
 }
+
+// AI models say which also let people sign in with a subscription plan,
+// and which are routers; models with neither carry no tags.
+func TestAIModelTags(t *testing.T) {
+	e := freshEnv(t)
+	anon := &client{t: t, h: e.h}
+	label := func(id string) string {
+		tags, _ := catalogEntryFor(t, anon, "/v1/connectors", id)["tags"].([]any)
+		var out []string
+		for _, x := range tags {
+			out = append(out, x.(map[string]any)["label"].(string))
+		}
+		return strings.Join(out, ",")
+	}
+	for id, want := range map[string]string{
+		"openai": "ChatGPT plan sign-in soon", "xai": "SuperGrok sign-in soon",
+		"openrouter": "Router", "vercel_ai_gateway": "Router", "requesty": "Router",
+		"claude": "", "gemini": "", "mistral": "",
+	} {
+		if got := label(id); got != want {
+			t.Errorf("%s tags = %q, want %q", id, got, want)
+		}
+	}
+}
