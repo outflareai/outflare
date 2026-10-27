@@ -51,7 +51,7 @@ func fake(t *testing.T, routes map[string]any) (*c.Client, *[]seen, string) {
 	t.Cleanup(srv.Close)
 	cl := &c.Client{BaseURLs: map[string]string{}}
 	for _, id := range []string{"google_ads", "meta_ads", "microsoft_ads.customer", "microsoft_ads.campaign", "microsoft_ads.reporting",
-		"reddit_ads", "x_ads", "linkedin_ads"} {
+		"reddit_ads", "reddit_ads.conversions", "x_ads", "linkedin_ads"} {
 		cl.BaseURLs[id] = srv.URL
 	}
 	return cl, &reqs, srv.URL
@@ -352,5 +352,117 @@ func TestLinkedInAds(t *testing.T) {
 	}
 	if last.header.Get("LinkedIn-Version") == "" || last.header.Get("X-Restli-Protocol-Version") != "2.0.0" {
 		t.Fatal("missing LinkedIn version headers")
+	}
+}
+
+// conv is a conversion with every key, hashed as adconv hashes them.
+func conv(i int, clicks map[string]string) c.AdConversion {
+	v := int64(12_500_000)
+	return c.AdConversion{EventID: "msg-1", Time: time.Date(2026, 10, 1, 9, 30, 0, 0, time.UTC), ValueMicros: &v, Currency: "USD",
+		ClickIDs: clicks, Emails: []string{c.HashID("Ana@Acme.example ")}, Phones: []string{c.HashID("+15550100")},
+		PhoneDigits: []string{c.HashID("15550100")}, ExternalID: c.HashID("rec-1"), ConsentGranted: true, Index: i}
+}
+
+func TestHashID(t *testing.T) {
+	if c.HashID(" Ana@Acme.example") != c.HashID("ana@acme.example") || len(c.HashID("x")) != 64 {
+		t.Fatal("HashID must trim, lowercase and give sha256 hex")
+	}
+}
+
+func TestGoogleAdsConversions(t *testing.T) {
+	cl, reqs, _ := fake(t, map[string]any{
+		"POST /v23/customers/111/googleAds:search": map[string]any{"results": []any{map[string]any{"conversionAction": map[string]any{"id": "42", "name": "Paid order"}}}},
+		"POST /v23/customers/111:uploadClickConversions": map[string]any{"partialFailureError": map[string]any{"message": "1 failed", "details": []any{map[string]any{"errors": []any{
+			map[string]any{"message": "click too old", "location": map[string]any{"fieldPathElements": []any{map[string]any{"fieldName": "conversions", "index": 1}}}}}}}}},
+	})
+	g, creds, acct := GoogleAds{}, c.Creds{"access_token": "tok", "developer_token": "dev"}, c.AdAccount{ID: "111"}
+	ts, err := g.ConversionTargets(ctx, cl, creds, acct)
+	if err != nil || len(ts) != 1 || ts[0].ID != "42" || ts[0].Name != "Paid order" {
+		t.Fatalf("targets %+v %v", ts, err)
+	}
+	none := c.AdConversion{EventID: "msg-3", Time: time.Now(), Index: 7}
+	res, err := g.SendConversions(ctx, cl, creds, acct, ts[0], []c.AdConversion{conv(0, map[string]string{"gclid": "g1"}), conv(1, map[string]string{"wbraid": "w1"}), none})
+	if err != nil || len(res) != 3 {
+		t.Fatalf("send %+v %v", res, err)
+	}
+	if !res[0].OK || res[1].OK || res[1].Reason != "click too old" || !res[2].Skipped || res[2].Index != 7 {
+		t.Fatalf("results %+v", res)
+	}
+	body := (*reqs)[len(*reqs)-1].body
+	for _, want := range []string{`"gclid":"g1"`, `"wbraid":"w1"`, `"orderId":"msg-1"`, `"conversionAction":"customers/111/conversionActions/42"`,
+		`"conversionDateTime":"2026-10-01 09:30:00+00:00"`, `"conversionValue":12.5`, `"adUserData":"GRANTED"`, `"partialFailure":true`, c.HashID("ana@acme.example")} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("upload body lacks %s: %s", want, body)
+		}
+	}
+}
+
+func TestMetaAdsConversions(t *testing.T) {
+	cl, reqs, _ := fake(t, map[string]any{
+		"GET /v24.0/act_55/adspixels": map[string]any{"data": []any{map[string]any{"id": "777", "name": "Pixel"}}},
+		"POST /v24.0/777/events":      map[string]any{"events_received": 1},
+	})
+	m, creds, acct := MetaAds{}, c.Creds{"api_key": "tok"}, c.AdAccount{ID: "55"}
+	ts, err := m.ConversionTargets(ctx, cl, creds, acct)
+	if err != nil || len(ts) != 1 || ts[0].EventTypes[0] != "Purchase" {
+		t.Fatalf("targets %+v %v", ts, err)
+	}
+	cv := conv(0, map[string]string{"fbclid": "abc"})
+	cv.EventType, cv.ClickTime = "Purchase", time.UnixMilli(1_700_000_000_000)
+	res, err := m.SendConversions(ctx, cl, creds, acct, ts[0], []c.AdConversion{cv})
+	if err != nil || !res[0].OK {
+		t.Fatalf("send %+v %v", res, err)
+	}
+	body := (*reqs)[len(*reqs)-1].body
+	for _, want := range []string{`"fbc":"fb.1.1700000000000.abc"`, `"event_id":"msg-1"`, `"event_name":"Purchase"`, `"ph":["` + c.HashID("15550100") + `"]`, `"value":12.5`} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("events body lacks %s: %s", want, body)
+		}
+	}
+}
+
+func TestMicrosoftAdsConversions(t *testing.T) {
+	cl, reqs, _ := fake(t, map[string]any{
+		"POST /ConversionGoals/QueryByIds": map[string]any{"ConversionGoals": []any{map[string]any{"Id": 1, "Name": "Offline sale", "Status": "Active"}, map[string]any{"Id": 2, "Name": "Old", "Status": "Deleted"}}},
+		"POST /OfflineConversions/Apply":   map[string]any{"PartialErrors": []any{map[string]any{"Index": 0, "Message": "unknown click"}}},
+	})
+	ms, creds, acct := MicrosoftAds{}, c.Creds{"access_token": "tok", "developer_token": "dev"}, c.AdAccount{ID: "77", Meta: map[string]string{"customer_id": "8"}}
+	ts, err := ms.ConversionTargets(ctx, cl, creds, acct)
+	if err != nil || len(ts) != 1 || ts[0].ID != "Offline sale" {
+		t.Fatalf("targets %+v %v", ts, err)
+	}
+	res, err := ms.SendConversions(ctx, cl, creds, acct, ts[0], []c.AdConversion{conv(0, map[string]string{"msclkid": "m1"}), conv(1, nil)})
+	if err != nil || res[0].OK || res[0].Reason != "unknown click" || !res[1].OK {
+		t.Fatalf("send %+v %v", res, err)
+	}
+	last := (*reqs)[len(*reqs)-1]
+	if !strings.Contains(last.body, `"MicrosoftClickId":"m1"`) || !strings.Contains(last.body, `"ConversionName":"Offline sale"`) || last.header.Get("CustomerAccountId") != "77" {
+		t.Fatalf("apply %s %v", last.body, last.header)
+	}
+}
+
+func TestRedditAdsConversions(t *testing.T) {
+	cl, reqs, _ := fake(t, map[string]any{"POST /conversions/events/a1": map[string]any{}})
+	r, acct := RedditAds{}, c.AdAccount{ID: "a1"}
+	if _, err := r.ConversionTargets(ctx, cl, c.Creds{"access_token": "tok"}, acct); c.KindOf(err) != c.ErrAuth {
+		t.Fatalf("without a conversions token: %v", err)
+	}
+	if got := c.MissingSetup(RedditAds{}, c.Creds{}); len(got) != 0 {
+		t.Fatalf("the conversions token is optional: %+v", got)
+	}
+	creds := c.Creds{"access_token": "tok", "conversions_token": "ct"}
+	ts, err := r.ConversionTargets(ctx, cl, creds, acct)
+	if err != nil || len(ts) != 1 {
+		t.Fatalf("targets %+v %v", ts, err)
+	}
+	cv := conv(0, map[string]string{"rdt_cid": "r1"})
+	cv.EventType = "Purchase"
+	res, err := r.SendConversions(ctx, cl, creds, acct, ts[0], []c.AdConversion{cv})
+	if err != nil || !res[0].OK {
+		t.Fatalf("send %+v %v", res, err)
+	}
+	last := (*reqs)[len(*reqs)-1]
+	if last.header.Get("Authorization") != "Bearer ct" || !strings.Contains(last.body, `"click_id":"r1"`) || !strings.Contains(last.body, `"tracking_type":"Purchase"`) || !strings.Contains(last.body, `"conversion_id":"msg-1"`) {
+		t.Fatalf("reddit %s %v", last.body, last.header)
 	}
 }

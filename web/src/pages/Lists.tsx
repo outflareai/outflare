@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
-import type { DataPerson, DataProvider, LeadList, LeadListMember, ListRun, PeopleFilter, Schemas } from "@outflare/sdk";
+import type { DataPerson, DataProvider, LeadList, LeadListMember, ListRun, PeopleFilter, Schemas, SmartList } from "@outflare/sdk";
 import { ArrowDown, ArrowUp, Search, X } from "lucide-react";
 import { useBrand } from "@/lib/brand";
 import { BrandBadge } from "@/components/brand-badge";
@@ -11,8 +11,12 @@ import { Switch } from "@/components/ui/switch";
 import { ago, plural } from "../format";
 import type { Tab } from "../App";
 import { ConnectorLogo } from "@/components/connector-logo";
+import { SmartListDetail, SmartListSheet } from "./SmartLists";
 
 type Project = Schemas["Project"];
+
+// One row of the Lists page: a lead list or a smart list.
+type Row = { id: string; name: string; description?: string | null; brand_id?: string | null; lead?: LeadList; smart?: SmartList };
 type FilterKey = keyof PeopleFilter;
 
 // Words people use, for the shared filter names and seniorities.
@@ -79,6 +83,9 @@ function credits(n: number) {
 
 export function Lists({ ws, canManage, open, setOpen, go }: { ws: string; canManage: boolean; open?: string; setOpen: (id?: string) => void; go: (t: Tab) => void }) {
   const [lists, setLists] = useState<LeadList[] | null>(null);
+  const [smart, setSmart] = useState<SmartList[] | null>(null);
+  const [editingSmart, setEditingSmart] = useState<SmartList | "new" | null>(null);
+  const [choosing, setChoosing] = useState(false);
   const [providers, setProviders] = useState<DataProvider[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
   const [editing, setEditing] = useState<LeadList | "new" | null>(null);
@@ -88,13 +95,15 @@ export function Lists({ ws, canManage, open, setOpen, go }: { ws: string; canMan
 
   const brand = useBrand(ws).brand?.handle;
   const load = useCallback(async () => {
-    const [l, p, pr] = await Promise.all([
+    const [l, sl, p, pr] = await Promise.all([
       api.GET("/v1/workspaces/{ws}/lead-lists", { params: { path: { ws }, query: { ...(brand ? { brand } : {}) } } }),
+      api.GET("/v1/workspaces/{ws}/smart-lists", { params: { path: { ws }, query: { ...(brand ? { brand } : {}) } } }),
       api.GET("/v1/workspaces/{ws}/data-providers", { params: { path: { ws } } }),
       api.GET("/v1/workspaces/{ws}/projects", { params: { path: { ws } } }),
     ]);
     if (l.data) setLists(l.data.data);
     else setError(errorMessage(l.error));
+    setSmart(sl.data?.data ?? []);
     if (p.data) setProviders(p.data.data);
     if (pr.data) setProjects(pr.data.data);
   }, [ws, brand]);
@@ -134,10 +143,50 @@ export function Lists({ ws, canManage, open, setOpen, go }: { ws: string; canMan
           }}
         />
       )}
+      {choosing && (
+        <NewListChoice
+          onClose={() => setChoosing(false)}
+          onPick={(k) => {
+            setChoosing(false);
+            if (k === "smart") setEditingSmart("new");
+            else setEditing("new");
+          }}
+        />
+      )}
+      {editingSmart && (
+        <SmartListSheet
+          ws={ws}
+          list={editingSmart === "new" ? null : editingSmart}
+          onClose={() => setEditingSmart(null)}
+          onSaved={(l) => {
+            setEditingSmart(null);
+            load();
+            setOpen(l.id);
+          }}
+        />
+      )}
       {connecting && <ConnectDialog ws={ws} provider={connecting} onClose={() => setConnecting(null)} onDone={() => { setConnecting(null); load(); }} />}
     </>
   );
 
+  const openSmart = open ? smart?.find((l) => l.id === open) : undefined;
+  if (open && smart === null) return <Loading />;
+  if (openSmart) {
+    return (
+      <>
+        <SmartListDetail
+          key={open}
+          ws={ws}
+          list={openSmart}
+          canManage={canManage}
+          onBack={() => setOpen(undefined)}
+          onEdit={(l) => setEditingSmart(l)}
+          onChanged={load}
+        />
+        {sheet}
+      </>
+    );
+  }
   if (open) {
     return (
       <>
@@ -158,15 +207,21 @@ export function Lists({ ws, canManage, open, setOpen, go }: { ws: string; canMan
     );
   }
 
-  const shown = (lists ?? []).filter((l) => !project || (project === "none" ? !l.project_id : l.project_id === project));
+  // Smart lists belong to no project, so a project filter hides them.
+  const rows: Row[] = [
+    ...(lists ?? []).filter((l) => !project || (project === "none" ? !l.project_id : l.project_id === project)).map((l) => ({ id: l.id, name: l.name, description: l.description, brand_id: l.brand_id, lead: l })),
+    ...(project && project !== "none" ? [] : (smart ?? []).map((l) => ({ id: l.id, name: l.name, description: l.description, brand_id: l.brand_id, smart: l }))),
+  ];
+  const total = (lists?.length ?? 0) + (smart?.length ?? 0);
   const noProvider = connectedSearch.length === 0;
+  const newList = canManage && <Button onClick={() => setChoosing(true)}>New list</Button>;
 
   return (
     <div className="space-y-6">
       <PageHeader
-        title="Lead lists"
-        description="Build lists of leads from your own data provider accounts, or import them. Every list can be added to a sequence."
-        action={canManage && <Button onClick={() => setEditing("new")}>New list</Button>}
+        title="Lists"
+        description="Lead lists hold people you found or imported. Smart lists fill themselves with the people who match your rules, and keep up as people change."
+        action={newList}
       />
       <ErrorText>{error}</ErrorText>
       {lists === null && !error && <Loading />}
@@ -194,19 +249,19 @@ export function Lists({ ws, canManage, open, setOpen, go }: { ws: string; canMan
           </p>
         </Card>
       )}
-      {lists !== null && lists.length === 0 && (
+      {lists !== null && total === 0 && (
         <Empty
           title="No lists yet"
-          action={canManage && <Button onClick={() => setEditing("new")}>New list</Button>}
+          action={newList}
         >
           {noProvider
-            ? "Connect a provider above to build a list from a search, or create an empty list and import leads into it."
+            ? "Make a smart list from the people you already have, connect a provider above to build a list from a search, or create an empty list and import leads into it."
             : `Search ${connectedSearch.map((i) => i.provider.name).filter((v, i, a) => a.indexOf(v) === i).join(" or ")} for the people you want to reach. You'll see a preview before any credits are spent.`}
         </Empty>
       )}
-      {lists !== null && lists.length > 0 && (
+      {lists !== null && total > 0 && (
         <DataTable
-          data={shown}
+          data={rows}
           rowId={(l) => l.id}
           onRowClick={(l) => setOpen(l.id)}
           searchPlaceholder="Search lists"
@@ -220,14 +275,15 @@ export function Lists({ ws, canManage, open, setOpen, go }: { ws: string; canMan
             )
           }
           empty={<>No lists in this project. <button className="underline" onClick={() => setProject("")}>Show all</button></>}
-          mobile={(l) => (
+          mobile={({ lead: l, smart: s, name, brand_id }) => (
             <div className="space-y-1">
               <div className="flex items-start justify-between gap-2">
-                <span className="flex flex-wrap items-center gap-1.5 font-medium">{l.name} <BrandBadge id={l.brand_id} /></span>
-                <span className="font-mono text-[12px] tabular-nums">{plural(l.leads, "lead")}</span>
+                <span className="flex flex-wrap items-center gap-1.5 font-medium">{name} <BrandBadge id={brand_id} /></span>
+                <span className="font-mono text-[12px] tabular-nums">{s ? plural(s.members, "person", "people") : plural(l!.leads, "lead")}</span>
               </div>
-              <div className="text-[12px] text-muted-foreground">{l.kind === "search" ? `${integrationName(l.search_integration_id) ?? "Search"} search` : "Manual"}{l.project_id ? ` · ${projectName(l.project_id) ?? "Project"}` : ""}</div>
-              {l.last_run && <RunLine run={l.last_run} />}
+              <div className="text-[12px] text-muted-foreground">{s ? "Smart list" : l!.kind === "search" ? `${integrationName(l!.search_integration_id) ?? "Search"} search` : "Manual"}{l?.project_id ? ` · ${projectName(l.project_id) ?? "Project"}` : ""}</div>
+              {l?.last_run && <RunLine run={l.last_run} />}
+              {s && <SmartLine list={s} />}
             </div>
           )}
           columns={[
@@ -245,33 +301,65 @@ export function Lists({ ws, canManage, open, setOpen, go }: { ws: string; canMan
             {
               id: "source",
               header: "Source",
-              accessorFn: (l) => (l.kind === "search" ? integrationName(l.search_integration_id) ?? "Search" : "Manual"),
-              cell: ({ row: { original: l } }) =>
-                l.kind === "search" ? (
+              accessorFn: ({ lead: l }) => (!l ? "Smart list" : l.kind === "search" ? integrationName(l.search_integration_id) ?? "Search" : "Manual"),
+              cell: ({ row: { original: { lead: l } } }) =>
+                !l ? (
+                  <Badge tone="blue">Smart list</Badge>
+                ) : l.kind === "search" ? (
                   <span>{integrationName(l.search_integration_id) ?? <span className="text-amber-600 dark:text-amber-400">Provider disconnected</span>} <span className="text-muted-foreground">search</span></span>
                 ) : (
                   <span className="text-muted-foreground">Manual</span>
                 ),
             },
-            ...(projects.length > 0 ? [{ id: "project", header: "Project", accessorFn: (l: LeadList) => projectName(l.project_id) ?? "", cell: ({ getValue }: { getValue: () => unknown }) => (getValue() as string) || <span className="text-muted-foreground">Shared</span> }] : []),
-            { id: "leads", header: "Leads", accessorFn: (l) => l.leads, meta: { align: "right" }, cell: ({ getValue }) => <span className="font-mono tabular-nums">{(getValue() as number).toLocaleString()}</span> },
+            ...(projects.length > 0 ? [{ id: "project", header: "Project", accessorFn: (r: Row) => projectName(r.lead?.project_id) ?? "", cell: ({ getValue }: { getValue: () => unknown }) => (getValue() as string) || <span className="text-muted-foreground">Shared</span> }] : []),
+            { id: "leads", header: "People", accessorFn: (r) => r.smart?.members ?? r.lead!.leads, meta: { align: "right" }, cell: ({ getValue }) => <span className="font-mono tabular-nums">{(getValue() as number).toLocaleString()}</span> },
             {
               id: "last",
               header: "Last run",
-              accessorFn: (l) => l.last_run?.created_at ?? "",
-              cell: ({ row: { original: l } }) => (l.last_run ? <RunLine run={l.last_run} /> : <span className="text-muted-foreground">–</span>),
+              accessorFn: (r) => r.smart?.refreshed_at ?? r.lead!.last_run?.created_at ?? "",
+              cell: ({ row: { original: { lead: l, smart: s } } }) => (s ? <SmartLine list={s} /> : l!.last_run ? <RunLine run={l!.last_run} /> : <span className="text-muted-foreground">–</span>),
             },
             {
               id: "refresh",
               header: "Refresh",
-              accessorFn: (l) => l.refresh_every_days ?? 0,
-              cell: ({ row: { original: l } }) => (l.refresh_every_days ? <span>Every {plural(l.refresh_every_days, "day")}</span> : <span className="text-muted-foreground">When asked</span>),
+              accessorFn: (r) => (r.smart ? -1 : r.lead!.refresh_every_days ?? 0),
+              cell: ({ row: { original: { lead: l, smart: s } } }) => (s ? <span>Every 15 minutes</span> : l!.refresh_every_days ? <span>Every {plural(l!.refresh_every_days, "day")}</span> : <span className="text-muted-foreground">When asked</span>),
             },
           ]}
         />
       )}
       {sheet}
     </div>
+  );
+}
+
+function SmartLine({ list }: { list: SmartList }) {
+  if (list.error_code) return <Status tone="amber">Couldn't update</Status>;
+  if (!list.refreshed_at) return <Status tone="blue">Filling</Status>;
+  return <span className="text-[12px] text-muted-foreground">Updated {ago(list.refreshed_at)}</span>;
+}
+
+// NewListChoice asks which kind of list to make.
+function NewListChoice({ onClose, onPick }: { onClose: () => void; onPick: (k: "smart" | "lead") => void }) {
+  return (
+    <Sheet open onOpenChange={(o) => !o && onClose()}>
+      <SheetContent className="w-full overflow-y-auto sm:max-w-md">
+        <SheetHeader>
+          <SheetTitle>New list</SheetTitle>
+          <SheetDescription>Pick the kind of list. You can use either in email, journeys and sequences.</SheetDescription>
+        </SheetHeader>
+        <div className="grid gap-2 px-4 pb-6 text-[13px]">
+          <button type="button" className="rounded-md border p-3 text-left hover:bg-muted/50" onClick={() => onPick("smart")}>
+            <span className="block font-medium">Smart list</span>
+            <span className="block text-[12px] text-muted-foreground">People you already have who match rules, such as a field, something they did, or another list. It keeps itself up to date.</span>
+          </button>
+          <button type="button" className="rounded-md border p-3 text-left hover:bg-muted/50" onClick={() => onPick("lead")}>
+            <span className="block font-medium">Lead list</span>
+            <span className="block text-[12px] text-muted-foreground">New people found with a data provider search, or imported from a CSV.</span>
+          </button>
+        </div>
+      </SheetContent>
+    </Sheet>
   );
 }
 
@@ -372,7 +460,7 @@ function ListDetail({
     load();
   }
 
-  if (error) return <div className="space-y-4"><PageHeader title="Lead list" back={{ label: "Lead lists", onClick: onBack }} /><ErrorText>{error}</ErrorText></div>;
+  if (error) return <div className="space-y-4"><PageHeader title="Lead list" back={{ label: "Lists", onClick: onBack }} /><ErrorText>{error}</ErrorText></div>;
   if (!list) return <Loading />;
 
   const isSearch = list.kind === "search";
@@ -384,7 +472,7 @@ function ListDetail({
   return (
     <div className="space-y-6">
       <PageHeader
-        back={{ label: "Lead lists", onClick: onBack }}
+        back={{ label: "Lists", onClick: onBack }}
         title={<>{list.name}<Badge tone={isSearch ? "blue" : "grey"}>{isSearch ? `${integrationName(list.search_integration_id) ?? "search"}` : "manual"}</Badge>{list.project_id && <Badge>{projectName(list.project_id) ?? "project"}</Badge>}</>}
         description={list.description || (isSearch ? "Built from a search. Refresh to add people who match now and weren't found before." : "Add leads by importing a CSV, through the API, or from an agent.")}
         action={

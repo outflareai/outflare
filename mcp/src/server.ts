@@ -550,6 +550,61 @@ export function createServer({ client: gtm, workspace, agency, readOnly = false,
     ({ list_id, ...q }) => call(() => gtm.GET("/v1/workspaces/{ws}/lead-lists/{id}/members", { params: { path: { ...path, id: list_id }, query: q } })),
   );
 
+  const smartRule = z.object({
+    attribute: z.string().optional().describe("A field on the person's customer record, such as plan or address.country."),
+    event: z.string().optional().describe("Whether they did this customer event: op exists (did) or not_exists (didn't)."),
+    within_days: z.number().int().min(0).max(3650).optional().describe("event: only the last this many days; 0 or left out is ever."),
+    in_list: z.string().uuid().optional().describe("Whether they are a lead in this lead list: op exists or not_exists."),
+    op: z.enum(["eq", "neq", "gt", "lt", "contains", "exists", "not_exists"]),
+    value: z.unknown().optional().describe("What eq, neq, gt, lt and contains compare with."),
+  });
+  const smartListFields = {
+    name: z.string().min(1).max(200).optional(),
+    description: z.string().max(2000).optional(),
+    brand_id: z.string().nullable().optional().describe("A brand's handle or id: only that brand's people and the shared ones. null for every brand."),
+    rules: z.array(smartRule).max(20).optional().describe("The tests a person must pass. Set one of attribute, event or in_list in each."),
+    match: z.enum(["all", "any"]).optional().describe("all (default): every rule must hold. any: one is enough."),
+  };
+
+  server.registerTool(
+    "list_smart_lists",
+    {
+      title: "List smart lists",
+      description: "Groups of people on customer records that keep themselves up to date from rules (such as paid in the last 90 days), with how many are in each now.",
+      inputSchema: { brand: brandParam },
+      annotations: read,
+    },
+    (q) => call(() => gtm.GET("/v1/workspaces/{ws}/smart-lists", { params: { path, query: withBrand(q) } })),
+  );
+
+  server.registerTool(
+    "get_smart_list",
+    { title: "Get a smart list", description: "A smart list's rules, size and when it was last brought up to date.", inputSchema: { list_id: id }, annotations: read },
+    ({ list_id }) => call(() => gtm.GET("/v1/workspaces/{ws}/smart-lists/{id}", { params: { path: { ...path, id: list_id } } })),
+  );
+
+  server.registerTool(
+    "list_smart_list_members",
+    {
+      title: "List who is in a smart list",
+      description: "The people in a smart list now, newest to join first, with their email.",
+      inputSchema: { list_id: id, limit: limit(200), cursor },
+      annotations: read,
+    },
+    ({ list_id, ...q }) => call(() => gtm.GET("/v1/workspaces/{ws}/smart-lists/{id}/members", { params: { path: { ...path, id: list_id }, query: q } })),
+  );
+
+  server.registerTool(
+    "preview_smart_list",
+    {
+      title: "Count who rules pick",
+      description: "How many people the rules pick right now and the 10 newest, without saving. Check this before create_smart_list.",
+      inputSchema: { brand_id: smartListFields.brand_id, rules: smartListFields.rules, match: smartListFields.match },
+      annotations: read,
+    },
+    (body) => call(() => gtm.POST("/v1/workspaces/{ws}/smart-lists/preview", { params: { path }, body })),
+  );
+
   server.registerTool(
     "list_data_providers",
     {
@@ -614,18 +669,57 @@ export function createServer({ client: gtm, workspace, agency, readOnly = false,
   );
 
   server.registerTool(
+    "email_pattern",
+    {
+      title: "Company email pattern",
+      description:
+        "The address shape a company domain uses (first.last, flast, …), learned from this workspace's own leads and verification outcomes, with a confidence. Free. Nothing is shared between workspaces.",
+      inputSchema: { domain: z.string().describe("The company's email domain, e.g. acme.example.") },
+      annotations: read,
+    },
+    (q) => call(() => gtm.GET("/v1/workspaces/{ws}/email-finder/pattern", { params: { path, query: q } })),
+  );
+
+  server.registerTool(
+    "find_emails",
+    {
+      title: "Find work emails",
+      description:
+        "Propose the most likely work address for each person (name + company domain) from the learned pattern and first-party history, each with a confidence and a code (found/verified = use it, risky = your policy, not_found = skip). Free: spends nothing. Up to 50 a call. Match results by ref.",
+      inputSchema: {
+        idempotency_key: z.string().optional().describe("Repeat with the same key to get the cached result without re-spending."),
+        items: z
+          .array(
+            z.object({
+              ref: z.string().describe("Your own reference, echoed back so you can match results without relying on order."),
+              record_id: z.string().optional(),
+              first_name: z.string(),
+              last_name: z.string(),
+              domain: z.string().describe("The company's email domain, e.g. acme.example."),
+              company: z.string().optional(),
+            }),
+          )
+          .min(1)
+          .max(50),
+      },
+      annotations: read,
+    },
+    (body) => call(() => gtm.POST("/v1/workspaces/{ws}/email-finder/find", { params: { path }, body })),
+  );
+
+  server.registerTool(
     "list_suppressions",
     {
       title: "List suppressions",
       description:
-        "The opt-out list every send checks: emails and domains that are never emailed (or, for customer and partner, never cold emailed). " +
+        "The opt-out list every send checks: emails and domains that are never emailed (or, for customer, partner and blocklist, never cold emailed). " +
         "Each entry says why, how it was added (manual, automated, or ai_suggested with the AI's confidence), who added it and from which tool.",
       inputSchema: {
         kind: z.enum(["email", "domain"]).optional(),
         method: z.enum(["manual", "automated", "ai_suggested"]).optional(),
         source: z.string().optional().describe("The tool that added it, such as reply, emailbison_sync or apollo_import."),
         integration_id: z.string().uuid().optional(),
-        reason: z.enum(["unsubscribed", "bounced", "complained", "manual", "do_not_contact", "competitor", "customer", "partner", "legal"]).optional(),
+        reason: z.enum(["unsubscribed", "bounced", "complained", "manual", "do_not_contact", "competitor", "customer", "partner", "legal", "blocklist"]).optional(),
         q: z.string().optional(),
         limit: limit(500),
         cursor,
@@ -2248,6 +2342,124 @@ export function createServer({ client: gtm, workspace, agency, readOnly = false,
       annotations: { ...write, idempotentHint: true, openWorldHint: true },
     },
     () => call(() => gtm.POST("/v1/workspaces/{ws}/ads/sync", { params: { path } })),
+  );
+
+  server.registerTool(
+    "list_ad_conversion_targets",
+    {
+      title: "Where an ad account's conversions can go",
+      description:
+        "Asks the platform live: Google Ads conversion actions, Meta pixels, Microsoft offline conversion goals or Reddit's Conversions API, each with the event_types it takes. " +
+        "setup_needed lists what a person must still add on the connection (such as Reddit's Conversions API token); agents never handle keys.",
+      inputSchema: { account_id: id },
+      annotations: { ...read, openWorldHint: true },
+    },
+    (q) => call(() => gtm.GET("/v1/workspaces/{ws}/ads/conversion-targets", { params: { path, query: q } })),
+  );
+
+  server.registerTool(
+    "list_ad_conversion_rules",
+    {
+      title: "List rules that send conversions to ad platforms",
+      description: "Each rule sends one customer event to one conversion on one ad account, with what it sent, skipped and failed in the last 30 days.",
+      inputSchema: { account_id: id.optional() },
+      annotations: read,
+    },
+    (q) => callCompact(() => gtm.GET("/v1/workspaces/{ws}/ads/conversion-rules", { params: { path, query: q } })),
+  );
+
+  server.registerTool(
+    "create_ad_conversion_rule",
+    {
+      title: "Send a customer event to an ad platform as a conversion",
+      description:
+        "From now on each time the event happens, the platform hears about it server to server with the ad click id and the hashed email and phone, so its bidding learns from real outcomes. " +
+        "Pick target_id and event_type from list_ad_conversion_targets. Earlier events are never sent. Consent follows get_ad_settings.",
+      inputSchema: {
+        account_id: id,
+        event_name: z.string().min(1).max(100).describe("A customer event name, such as signed_up or order_completed."),
+        target_id: z.string().min(1).max(200),
+        event_type: z.string().max(60).optional().describe("One of the target's event_types, such as Purchase. Default the first."),
+        value_property: z.string().max(100).optional().describe("The event property that holds the value."),
+        value_unit: z.enum(["major", "minor"]).optional().describe("major: 12.50; minor: 1250 (cents). Default major."),
+        fixed_value_micros: z.number().int().min(0).optional().describe("A value for every conversion when there is no value property."),
+        currency: z.string().max(3).optional().describe("Empty: the event's currency property, then the account's."),
+        enabled: z.boolean().optional(),
+      },
+      annotations: { ...write, openWorldHint: true },
+    },
+    (body) => call(() => gtm.POST("/v1/workspaces/{ws}/ads/conversion-rules", { params: { path }, body })),
+  );
+
+  server.registerTool(
+    "update_ad_conversion_rule",
+    {
+      title: "Change or switch off a conversion rule",
+      description: "Change the event, value or currency, or set enabled false (what waits is skipped, not sent later). The account and conversion are fixed.",
+      inputSchema: {
+        id,
+        event_name: z.string().min(1).max(100).optional(),
+        value_property: z.string().max(100).optional(),
+        value_unit: z.enum(["major", "minor"]).optional(),
+        fixed_value_micros: z.number().int().min(0).optional(),
+        currency: z.string().max(3).optional(),
+        enabled: z.boolean().optional(),
+      },
+      annotations: { ...write, idempotentHint: true },
+    },
+    ({ id: rule, ...body }) => call(() => gtm.PATCH("/v1/workspaces/{ws}/ads/conversion-rules/{id}", { params: { path: { ws, id: rule } }, body })),
+  );
+
+  server.registerTool(
+    "delete_ad_conversion_rule",
+    {
+      title: "Delete a conversion rule",
+      description: "Stops sending and removes the rule and its send log. Conversions the platform already has stay there.",
+      inputSchema: { id },
+      annotations: { ...write, destructiveHint: true, idempotentHint: true },
+    },
+    ({ id: rule }) => call(() => gtm.DELETE("/v1/workspaces/{ws}/ads/conversion-rules/{id}", { params: { path: { ws, id: rule } } })),
+  );
+
+  server.registerTool(
+    "list_ad_conversion_sends",
+    {
+      title: "Conversions sent to ad platforms",
+      description:
+        "Newest first: each event a rule matched and whether it was sent (match_keys names the kinds of identifiers, never their values), skipped with the reason (no consent, nothing to match on) or failed. Page with cursor=next_cursor.",
+      inputSchema: {
+        rule_id: id.optional(),
+        record_id: id.optional(),
+        status: z.enum(["queued", "sent", "skipped", "failed"]).optional(),
+        limit: z.number().int().min(1).max(200).optional(),
+        cursor: z.string().optional(),
+      },
+      annotations: read,
+    },
+    (q) => callCompact(() => gtm.GET("/v1/workspaces/{ws}/ads/conversion-sends", { params: { path, query: q } })),
+  );
+
+  server.registerTool(
+    "get_ad_settings",
+    {
+      title: "Paid media consent setting",
+      description:
+        "consent_mode: opt_out (default) sends conversions unless the person withdrew consent for ad data; opt_in only with a yes. In the EEA, the UK and Switzerland, and when the country is unknown, a yes is always needed.",
+      inputSchema: {},
+      annotations: read,
+    },
+    () => call(() => gtm.GET("/v1/workspaces/{ws}/ads/settings", { params: { path } })),
+  );
+
+  server.registerTool(
+    "set_ad_settings",
+    {
+      title: "Change the paid media consent setting",
+      description: "Set consent_mode to opt_out or opt_in.",
+      inputSchema: { consent_mode: z.enum(["opt_out", "opt_in"]) },
+      annotations: { ...write, idempotentHint: true },
+    },
+    (body) => call(() => gtm.PUT("/v1/workspaces/{ws}/ads/settings", { params: { path }, body })),
   );
 
   server.registerTool(
@@ -4081,6 +4293,50 @@ export function createServer({ client: gtm, workspace, agency, readOnly = false,
   );
 
   server.registerTool(
+    "create_smart_list",
+    {
+      title: "Create a smart list",
+      description: "A list that fills itself from rules and stays up to date as people's records and events change. It can then be used for email, journeys and ads.",
+      inputSchema: { ...smartListFields, name: z.string().min(1).max(200) },
+      annotations: write,
+    },
+    (body) => call(() => gtm.POST("/v1/workspaces/{ws}/smart-lists", { params: { path }, body })),
+  );
+
+  server.registerTool(
+    "update_smart_list",
+    {
+      title: "Change a smart list",
+      description: "Rename it or change its rules, match or brand; changing who it picks refreshes it straight away.",
+      inputSchema: { list_id: id, ...smartListFields },
+      annotations: write,
+    },
+    ({ list_id, ...body }) => call(() => gtm.PATCH("/v1/workspaces/{ws}/smart-lists/{id}", { params: { path: { ...path, id: list_id } }, body })),
+  );
+
+  server.registerTool(
+    "refresh_smart_list",
+    {
+      title: "Refresh a smart list now",
+      description: "Bring a smart list's members up to date now instead of within 15 minutes.",
+      inputSchema: { list_id: id },
+      annotations: write,
+    },
+    ({ list_id }) => call(() => gtm.POST("/v1/workspaces/{ws}/smart-lists/{id}/refresh", { params: { path: { ...path, id: list_id } } })),
+  );
+
+  server.registerTool(
+    "delete_smart_list",
+    {
+      title: "Delete a smart list",
+      description: "Delete a smart list. The people stay; only the list goes.",
+      inputSchema: { list_id: id },
+      annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: false },
+    },
+    ({ list_id }) => call(() => gtm.DELETE("/v1/workspaces/{ws}/smart-lists/{id}", { params: { path: { ...path, id: list_id } } })),
+  );
+
+  server.registerTool(
     "create_lead_list",
     {
       title: "Create a lead list",
@@ -4644,11 +4900,11 @@ export function createServer({ client: gtm, workspace, agency, readOnly = false,
       title: "Suppress emails or domains",
       description:
         "Never email these again. Each value is an email or a domain; a domain blocks every address at it. " +
-        "reason competitor keeps a rival out of cold and marketing email; customer and partner only out of cold email. " +
+        "reason competitor keeps a rival out of cold and marketing email; customer, partner and blocklist (on a sequencer's blocklist) only out of cold email. " +
         "Up to 100,000 at once, to move a list from an old tool (give source, such as hubspot_export).",
       inputSchema: {
         values: z.array(z.string()).min(1).max(100000),
-        reason: z.enum(["unsubscribed", "bounced", "complained", "manual", "do_not_contact", "competitor", "customer", "partner", "legal"]).optional(),
+        reason: z.enum(["unsubscribed", "bounced", "complained", "manual", "do_not_contact", "competitor", "customer", "partner", "legal", "blocklist"]).optional(),
         note: z.string().max(500).optional(),
         source: z.string().regex(/^[a-z0-9._-]{1,64}$/).optional(),
         method: z.enum(["manual", "automated", "ai_suggested"]).optional(),
@@ -5536,6 +5792,21 @@ export function createServer({ client: gtm, workspace, agency, readOnly = false,
       annotations: { ...write, openWorldHint: true },
     },
     (body) => call(() => gtm.POST("/v1/workspaces/{ws}/verifications", { params: { path }, body })),
+  );
+
+  server.registerTool(
+    "verify_addresses",
+    {
+      title: "Verify addresses (waterfall)",
+      description:
+        "Check a small batch of addresses cheapest tier first (first-party history, learned pattern, free built-in checks) and roll up to this workspace's own connected verifier only when confidence stays low, returning a code and the cost per address matched by ref. That last tier spends on the workspace's own account, never Outflare's. A pending code means a slow check is running: call again to collect it. Up to 50 a call. (For bulk verification of a whole list, use verify_emails instead.)",
+      inputSchema: {
+        force: z.boolean().optional().describe("Re-check even if a recent result is cached."),
+        items: z.array(z.object({ ref: z.string(), email: z.string() })).min(1).max(50),
+      },
+      annotations: write,
+    },
+    (body) => call(() => gtm.POST("/v1/workspaces/{ws}/email-finder/verify", { params: { path }, body })),
   );
 
   const category = z.enum(["data", "verification", "mailboxes", "domains", "sending", "software", "people", "ads", "other"]);

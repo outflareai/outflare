@@ -58,41 +58,32 @@ func (s *Service) syncBlocklist(ctx context.Context, ws string, op *connectors.O
 		if err != nil {
 			return fail(err)
 		}
-		var emails, domains []leads.Suppression
+		var entries []leads.Suppression
 		for _, b := range list {
 			kind, value, err := leads.ParseSuppression(b.Value)
 			if err != nil {
 				continue // something the platform holds that isn't an address or a domain
 			}
-			if kind == "domain" {
-				domains = append(domains, leads.Suppression{Kind: kind, Value: value})
-			} else {
-				emails = append(emails, leads.Suppression{Kind: kind, Value: value})
-			}
+			entries = append(entries, leads.Suppression{Kind: kind, Value: value})
 		}
-		// An address there is someone who asked not to be emailed (or
-		// bounced): an unsubscribe, which still lets receipts through. A
-		// whole domain is a deliberate block.
-		for _, part := range []struct {
-			reason  string
-			entries []leads.Suppression
-		}{{"unsubscribed", emails}, {"do_not_contact", domains}} {
-			for start := 0; start < len(part.entries); start += pullChunk {
-				chunk := part.entries[start:min(start+pullChunk, len(part.entries))]
-				err := pgx.BeginFunc(ctx, s.Pool, func(tx pgx.Tx) error {
-					n, err := leads.Suppress(ctx, tx, ws, leads.Added{Reason: part.reason, Source: source, IntegrationID: integrationID,
-						Note: "On the " + op.Integration.Name + " blocklist"}, chunk)
-					if err != nil || n == 0 {
-						return err
-					}
-					pulled += n
-					return audit.Record(ctx, tx, audit.Event{WorkspaceID: ws, ActorType: "system", Action: "suppressions.added",
-						TargetType: "suppression", Data: map[string]any{"added": n, "reason": part.reason, "method": leads.MethodAutomated,
-							"source": source, "integration_id": integrationID}})
-				})
-				if err != nil {
-					return fail(err)
+		// Their blocklist says only "don't cold email them", for an
+		// address or a whole domain: not an unsubscribe, so receipts and
+		// marketing email still follow the person's own consent.
+		for start := 0; start < len(entries); start += pullChunk {
+			chunk := entries[start:min(start+pullChunk, len(entries))]
+			err := pgx.BeginFunc(ctx, s.Pool, func(tx pgx.Tx) error {
+				n, err := leads.Suppress(ctx, tx, ws, leads.Added{Reason: "blocklist", Source: source, IntegrationID: integrationID,
+					Note: "On the " + op.Integration.Name + " blocklist"}, chunk)
+				if err != nil || n == 0 {
+					return err
 				}
+				pulled += n
+				return audit.Record(ctx, tx, audit.Event{WorkspaceID: ws, ActorType: "system", Action: "suppressions.added",
+					TargetType: "suppression", Data: map[string]any{"added": n, "reason": "blocklist", "method": leads.MethodAutomated,
+						"source": source, "integration_id": integrationID}})
+			})
+			if err != nil {
+				return fail(err)
 			}
 		}
 		if _, err := s.Pool.Exec(ctx, `UPDATE suppression_syncs SET pulled_at = now() WHERE integration_id = $1`, integrationID); err != nil {

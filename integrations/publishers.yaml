@@ -1,0 +1,12 @@
+# Publishers whose connectors carry a trust badge other than Community.
+#
+# Only maintainers change this file (CODEOWNERS). A publisher is added as
+# verified once it has proved its domain (a DNS TXT record or
+# https://<domain>/.well-known/outflare.json) and given a security contact.
+# A manifest whose publisher id is not listed here is a Community connector.
+#
+# trust: outflare (built by Outflare) or verified.
+outflare:
+  name: Outflare
+  website: https://outflare.ai
+  trust: outflare

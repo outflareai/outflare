@@ -1295,7 +1295,7 @@ func (s *Server) recordTimeline(w http.ResponseWriter, r *http.Request) {
 // ---- Consent ----
 
 var (
-	consentChannels = []string{"email", "sms", "push", "whatsapp", "in_app"}
+	consentChannels = []string{"email", "sms", "push", "whatsapp", "in_app", "ads"}
 	consentKey      = regexp.MustCompile(`^[a-z][a-z0-9_]{1,62}$`)
 )
 

@@ -1,0 +1,73 @@
+# Reoon: https://www.reoon.com/articles/api-documentation-of-reoon-email-verifier/
+id: reoon
+name: Reoon Email Verifier
+category: email_verification
+summary: Low-cost verification with a power mode that checks the mailbox over SMTP.
+description: Verifies each address in power mode and flags catch-all, disposable, role and full mailboxes.
+website: https://www.reoon.com/email-verifier/
+docs_url: https://www.reoon.com/articles/api-documentation-of-reoon-email-verifier/
+key_url: https://emailverifier.reoon.com/api-settings/
+pricing: Pay per credit; unknown results are refunded
+publisher:
+  id: outflare
+
+base_url: https://emailverifier.reoon.com
+auth:
+  api_key:
+    fields:
+      - name: api_key
+        label: API key
+        secret: true
+        help: Reoon → API & Integrations → create an API key.
+
+test:
+  request:
+    method: GET
+    path: /api/v1/check-account-balance/
+    query:
+      key: "{{api_key}}"
+  errors:
+    - when: { path: status, not: success }
+      kind: auth
+      message: reason
+  account:
+    credits: [remaining_daily_credits, remaining_instant_credits]
+    details:
+      api_status: api_status
+
+capabilities:
+  verify:
+    request:
+      method: GET
+      path: /api/v1/verify
+      query:
+        key: "{{api_key}}"
+        email: "{{email}}"
+        mode: power
+    errors:
+      - when: { path: status, equals: error }
+        message: reason
+        kinds:
+          - { contains: credit, kind: quota }
+          - { contains: key, kind: auth }
+    result:
+      status:
+        from: status
+        values:
+          safe: deliverable
+          valid: deliverable
+          invalid: undeliverable
+          disabled: undeliverable
+          spamtrap: undeliverable
+          disposable: { status: undeliverable, disposable: true }
+          catch_all: { status: risky, catch_all: true }
+          role_account: { status: risky, role: true }
+          inbox_full: risky
+        default: unknown
+      reason: status
+      provider_status: status
+      disposable: is_disposable
+      role: is_role_account
+      catch_all: is_catch_all
+      free: is_free_email
+      score: overall_score

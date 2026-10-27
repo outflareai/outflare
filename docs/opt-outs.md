@@ -41,7 +41,7 @@ A broadcast that has not started shows its audience by basis (`audience_bases`) 
 
 `GET /v1/workspaces/{ws}/suppressions` (MCP `list_suppressions`) is the one list every send checks: every unsubscribe, bounce and complaint from any tool, and the entries people add. Each entry says:
 
-- **why** (`reason`). `unsubscribed` stops cold and marketing email but not receipts. `competitor` stops cold and marketing email. `customer` and `partner` keep people out of cold email only. `bounced`, `complained`, `manual`, `legal` and `do_not_contact` stop every email.
+- **why** (`reason`). `unsubscribed` stops cold and marketing email but not receipts. `competitor` stops cold and marketing email. `customer`, `partner` and `blocklist` (on a connected sequencer's blocklist) keep people out of cold email only. `bounced`, `complained`, `manual`, `legal` and `do_not_contact` stop every email.
 - **how** (`method`): `manual` (a person), `automated` (a bounce, an unsubscribe link, a sync) or `ai_suggested`, when the AI read a reply as an opt-out. An AI suggestion has the AI's `confidence` and the reply in `evidence`.
 - **who** (`added_by`, `added_by_type`) and **from which tool** (`source`: `web`, `api`, `mcp`, `reply`, `smtp`, `unsubscribe_link`, `email_provider`, `bounce_report`, `<connector>_sync`, `<tool>_import`, or a label you give). `integration_id` names the connection for entries read from a sequencer.
 
@@ -53,7 +53,7 @@ Add up to 100,000 emails or domains at once with `POST .../suppressions` (MCP `a
 
 When EmailBison, Instantly or Smartlead is connected, every platform sync (every five minutes) does two things:
 
-1. It reads the platform's blocklist into the opt-out list. An address comes in as `unsubscribed` and a domain as `do_not_contact`, both with source `<connector>_sync`. Smartlead's list cannot be read, but its unsubscribed leads arrive with campaign imports.
+1. It reads the platform's blocklist into the opt-out list, with reason `blocklist` and source `<connector>_sync`. A blocklist only says not to cold email someone: it isn't an unsubscribe, so it changes nobody's consent and still lets receipts and marketing email through. The Suppression page shows where each entry came from. Smartlead's list cannot be read, but its unsubscribed leads arrive with campaign imports.
 2. It writes the opt-out list to the platform's blocklist, each entry once. Entries read from that platform are not written back to it.
 
 So a campaign sent from the sequencer honours Outflare's list, and the other way round. `GET .../suppression-syncs` (MCP `list_suppression_syncs`) shows each one's counts and last error, and `PATCH .../suppression-syncs/{integration}` turns `pull` or `push` off. Nothing is ever removed from the platform's list.

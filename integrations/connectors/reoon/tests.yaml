@@ -1,0 +1,104 @@
+# Recorded answers with fake data. Run them with the engine's tests
+# (go test ./engine/internal/connectors/manifest/).
+- name: the key works and both balances are added up
+  run: test
+  creds: { api_key: test-not-a-real-key }
+  request:
+    method: GET
+    path: /api/v1/check-account-balance/
+    query: { key: test-not-a-real-key }
+  answer:
+    body: { status: success, api_status: active, remaining_daily_credits: 100, remaining_instant_credits: 2500 }
+  expect: { credits: 2600, details: { api_status: active } }
+
+- name: a refused key is an auth error
+  run: test
+  creds: { api_key: test-not-a-real-key }
+  answer:
+    body: { status: error, reason: Invalid API key }
+  expect_error: auth
+
+- name: a safe address is deliverable
+  run: verify
+  creds: { api_key: test-not-a-real-key }
+  input: { email: ana@acme.example }
+  request:
+    method: GET
+    path: /api/v1/verify
+    query: { key: test-not-a-real-key, email: ana@acme.example, mode: power }
+  answer:
+    body:
+      email: ana@acme.example
+      status: safe
+      overall_score: 98
+      is_safe_to_send: true
+      is_disposable: false
+      is_role_account: false
+      is_catch_all: false
+      is_free_email: false
+  expect:
+    email: ana@acme.example
+    status: deliverable
+    reason: safe
+    provider_status: safe
+    catch_all: false
+    disposable: false
+    role: false
+    free: false
+    score: 98
+
+- name: a disposable address is undeliverable and flagged
+  run: verify
+  creds: { api_key: test-not-a-real-key }
+  input: { email: temp@mailinator.example }
+  answer:
+    body: { status: disposable, overall_score: 0, is_disposable: false }
+  expect: { status: undeliverable, disposable: true, score: 0 }
+
+- name: a catch-all domain is risky
+  run: verify
+  creds: { api_key: test-not-a-real-key }
+  input: { email: li@northpeak.example }
+  answer:
+    body: { status: catch_all, is_catch_all: true, is_free_email: false }
+  expect: { status: risky, catch_all: true }
+
+- name: a role account is risky
+  run: verify
+  creds: { api_key: test-not-a-real-key }
+  input: { email: info@acme.example }
+  answer:
+    body: { status: role_account }
+  expect: { status: risky, role: true }
+
+- name: a full inbox is risky
+  run: verify
+  creds: { api_key: test-not-a-real-key }
+  input: { email: ana@acme.example }
+  answer:
+    body: { status: inbox_full }
+  expect: { status: risky }
+
+- name: an unknown status stays unknown
+  run: verify
+  creds: { api_key: test-not-a-real-key }
+  input: { email: ana@acme.example }
+  answer:
+    body: { status: unknown }
+  expect: { status: unknown }
+
+- name: no credits left is a quota error
+  run: verify
+  creds: { api_key: test-not-a-real-key }
+  input: { email: ana@acme.example }
+  answer:
+    body: { status: error, reason: Not enough credits }
+  expect_error: quota
+
+- name: a bad key while verifying is an auth error
+  run: verify
+  creds: { api_key: test-not-a-real-key }
+  input: { email: ana@acme.example }
+  answer:
+    body: { status: error, reason: Invalid API key }
+  expect_error: auth

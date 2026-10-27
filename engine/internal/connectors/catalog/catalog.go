@@ -1,6 +1,8 @@
 // Package catalog lists every connector the engine ships. Add a new
 // connector by appending its implementation to Available (and removing it
-// from planned if it was listed there).
+// from planned if it was listed there), or as a manifest in the
+// integrations/ folder at the root of the repository, which Available
+// loads too.
 package catalog
 
 import (
@@ -18,6 +20,7 @@ import (
 	"github.com/outflareai/outflare/engine/internal/connectors/hubspot"
 	"github.com/outflareai/outflare/engine/internal/connectors/instantly"
 	"github.com/outflareai/outflare/engine/internal/connectors/linkedin"
+	"github.com/outflareai/outflare/engine/internal/connectors/manifest"
 	"github.com/outflareai/outflare/engine/internal/connectors/models"
 	"github.com/outflareai/outflare/engine/internal/connectors/payments"
 	"github.com/outflareai/outflare/engine/internal/connectors/reddit"
@@ -26,6 +29,7 @@ import (
 	"github.com/outflareai/outflare/engine/internal/connectors/tagmanager"
 	"github.com/outflareai/outflare/engine/internal/connectors/verifiers"
 	"github.com/outflareai/outflare/engine/internal/connectors/x"
+	"github.com/outflareai/outflare/integrations"
 )
 
 // Available returns every connector that can be connected.
@@ -50,6 +54,7 @@ func Available() []c.Connector {
 	out = append(out, linkedin.All()...)
 	out = append(out, dnshosts.All()...)
 	out = append(out, tagmanager.All()...)
+	out = append(out, manifest.All(integrations.FS)...)
 	return out
 }
 

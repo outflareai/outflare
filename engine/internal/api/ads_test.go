@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -34,6 +35,17 @@ func (fakeMetaAds) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			map[string]any{"id": "9", "name": "Prospecting", "effective_status": "ACTIVE", "objective": "OUTCOME_LEADS", "daily_budget": "3000"},
 			map[string]any{"id": "10", "name": "Old test", "effective_status": "PAUSED"},
 		}}
+	case "/v24.0/act_55/adspixels":
+		out = map[string]any{"data": []any{map[string]any{"id": "777", "name": "Northpeak pixel"}}}
+	case "/v24.0/777/events":
+		var body struct {
+			Data []map[string]any `json:"data"`
+		}
+		json.NewDecoder(r.Body).Decode(&body)
+		metaSent.Lock()
+		metaSent.events = append(metaSent.events, body.Data...)
+		metaSent.Unlock()
+		out = map[string]any{"events_received": len(body.Data)}
 	case "/v24.0/act_55/insights":
 		var tr struct{ Since, Until string }
 		json.Unmarshal([]byte(r.URL.Query().Get("time_range")), &tr)
@@ -51,6 +63,12 @@ func (fakeMetaAds) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	json.NewEncoder(w).Encode(out)
+}
+
+// metaSent collects the events fakeMetaAds took through the Conversions API.
+var metaSent struct {
+	sync.Mutex
+	events []map[string]any
 }
 
 // fakeGoogleAds accepts only the developer token "dev-ok".

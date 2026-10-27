@@ -68,9 +68,12 @@ var (
 	inboxPending    = desc("inbox", "pending", "Inbox rows (browser batches) waiting for a worker.")
 	inboxOldest     = desc("inbox", "oldest_seconds", "How long the oldest waiting inbox row has waited.")
 	inboxFailed     = desc("inbox", "failed", "Inbox rows set aside after failing too often.")
+	smartLists      = desc("smart_lists", "lists", "Smart lists in every workspace.")
+	smartOldest     = desc("smart_lists", "oldest_refresh_seconds", "How long since the least recently refreshed smart list was brought up to date (since it was made, if never). Lists refresh every 15 minutes.")
+	smartFailing    = desc("smart_lists", "failing", "Smart lists whose last refresh failed.")
 	scrapeErrors    = desc("metrics", "scrape_errors", "Queries that failed in the last database scrape.")
 	scrapeDuration  = desc("metrics", "scrape_duration_seconds", "Time the last database scrape took.")
-	allDescs        = []*prometheus.Desc{poolAcquired, poolIdle, poolTotal, poolMax, poolAcquires, poolWaits, poolWaitSeconds, poolAcquireSecs, poolCanceled, queued, scheduled, oldestDue, running, dbBackends, dbMaxConns, dbLongestXact, dbLockWaits, dbSize, dbCommits, dbRollbacks, dbBlocksHit, dbBlocksRead, dbDeadlocks, dbTempBytes, tableBytes, tableDeadRows, tableSeqScans, pipeItems, pipeOldest, pipeRuns, pipeBreakers, inboxPending, inboxOldest, inboxFailed, scrapeErrors, scrapeDuration}
+	allDescs        = []*prometheus.Desc{poolAcquired, poolIdle, poolTotal, poolMax, poolAcquires, poolWaits, poolWaitSeconds, poolAcquireSecs, poolCanceled, queued, scheduled, oldestDue, running, dbBackends, dbMaxConns, dbLongestXact, dbLockWaits, dbSize, dbCommits, dbRollbacks, dbBlocksHit, dbBlocksRead, dbDeadlocks, dbTempBytes, tableBytes, tableDeadRows, tableSeqScans, pipeItems, pipeOldest, pipeRuns, pipeBreakers, inboxPending, inboxOldest, inboxFailed, smartLists, smartOldest, smartFailing, scrapeErrors, scrapeDuration}
 	gauge, counter  = prometheus.GaugeValue, prometheus.CounterValue
 )
 
@@ -170,6 +173,23 @@ func (p *Postgres) query() []prometheus.Metric {
 			add(inboxPending, gauge, float64(pending))
 			add(inboxOldest, gauge, oldest)
 			add(inboxFailed, gauge, float64(failed))
+		}
+		return nil
+	})
+	run("smart_lists", `
+		SELECT count(*),
+			coalesce(extract(epoch FROM now() - min(coalesce(refreshed_at, created_at))), 0)::float8,
+			count(*) FILTER (WHERE error_code IS NOT NULL)
+		FROM smart_lists`, func(r rowser) error {
+		for r.Next() {
+			var lists, failing int64
+			var oldest float64
+			if err := r.Scan(&lists, &oldest, &failing); err != nil {
+				return err
+			}
+			add(smartLists, gauge, float64(lists))
+			add(smartOldest, gauge, oldest)
+			add(smartFailing, gauge, float64(failing))
 		}
 		return nil
 	})

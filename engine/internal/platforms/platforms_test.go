@@ -18,6 +18,7 @@ import (
 	"github.com/outflareai/outflare/engine/internal/connectors"
 	"github.com/outflareai/outflare/engine/internal/db"
 	"github.com/outflareai/outflare/engine/internal/platforms"
+	"github.com/outflareai/outflare/engine/internal/policy"
 	"github.com/outflareai/outflare/engine/internal/secrets"
 )
 
@@ -373,11 +374,23 @@ func TestBlocklistSyncsBothWays(t *testing.T) {
 		ws).Scan(&reason, &source, &method, &from); err != nil {
 		t.Fatal(err)
 	}
-	if reason != "unsubscribed" || source != "fakeseq_sync" || method != "automated" || from != integration {
+	// Their blocklist keeps people out of cold email only: it is not an
+	// unsubscribe, so nobody's consent to marketing email changes.
+	if reason != "blocklist" || source != "fakeseq_sync" || method != "automated" || from != integration {
 		t.Fatalf("pulled entry = %s %s %s %s", reason, source, method, from)
 	}
-	if err := pool.QueryRow(ctx, `SELECT reason FROM suppressions WHERE workspace_id = $1 AND value = 'spam.example'`, ws).Scan(&reason); err != nil || reason != "do_not_contact" {
+	if err := pool.QueryRow(ctx, `SELECT reason FROM suppressions WHERE workspace_id = $1 AND value = 'spam.example'`, ws).Scan(&reason); err != nil || reason != "blocklist" {
 		t.Fatalf("pulled domain = %q, %v", reason, err)
+	}
+	var withdrawn int
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM consents WHERE workspace_id = $1`, ws).Scan(&withdrawn); err != nil || withdrawn != 0 {
+		t.Fatalf("consents = %d, %v", withdrawn, err)
+	}
+	for purpose, want := range map[string]bool{policy.PurposeCold: false, policy.PurposeLifecycle: true, policy.PurposeTransactional: true} {
+		ds, err := policy.CheckContacts(ctx, pool, ws, purpose, []string{"old@example.org"})
+		if err != nil || ds[0].Allowed != want {
+			t.Fatalf("%s = %+v, %v", purpose, ds, err)
+		}
 	}
 
 	// Nothing new either side: nothing moves.

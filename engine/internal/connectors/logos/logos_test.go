@@ -7,6 +7,8 @@ import (
 	"io/fs"
 	"strings"
 	"testing"
+
+	"github.com/outflareai/outflare/integrations"
 )
 
 func TestFilesAreSafeSVG(t *testing.T) {
@@ -14,8 +16,21 @@ func TestFilesAreSafeSVG(t *testing.T) {
 	if len(names) == 0 {
 		t.Fatal("no logos embedded")
 	}
-	for _, n := range names {
+	// Logos beside the manifests in integrations/ pass the same checks.
+	more, _ := fs.Glob(integrations.FS, "connectors/*/*.svg")
+	read := func(n string) []byte {
+		if strings.HasPrefix(n, "connectors/") {
+			b, _ := fs.ReadFile(integrations.FS, n)
+			return b
+		}
 		b, _ := files.ReadFile(n)
+		return b
+	}
+	for _, n := range append(names, more...) {
+		if strings.HasPrefix(n, "connectors/") && !strings.HasSuffix(n, "/logo.svg") && !strings.HasSuffix(n, "/logo.dark.svg") {
+			t.Errorf("%s: name it logo.svg or logo.dark.svg", n)
+		}
+		b := read(n)
 		low := strings.ToLower(string(b))
 		for _, bad := range []string{"<script", "javascript:", "onload=", "onerror=", "<foreignobject", "href=\"http"} {
 			if strings.Contains(low, bad) {
@@ -60,6 +75,20 @@ func TestGet(t *testing.T) {
 	b, ok := Get("unknown_tool", "Smartlead", false)
 	if ok || !bytes.Contains(b, []byte(">S</text>")) {
 		t.Errorf("monogram: %s", b)
+	}
+}
+
+func TestManifestLogos(t *testing.T) {
+	b, ok := Get("bouncer", "Bouncer", false)
+	want, _ := fs.ReadFile(integrations.FS, "connectors/bouncer/logo.svg")
+	if !ok || !bytes.Equal(b, want) {
+		t.Error("a manifest connector's logo comes from its folder")
+	}
+	if d, _ := Get("bouncer", "Bouncer", true); !bytes.Equal(d, want) {
+		t.Error("no logo.dark.svg falls back to logo.svg")
+	}
+	if _, ok := Get("../bouncer", "x", false); ok {
+		t.Error("ids never reach outside the connector folders")
 	}
 }
 

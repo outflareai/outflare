@@ -29,7 +29,7 @@ On every page, including in-app navigation, the snippet sends a `page` event on 
 - `properties.click_ids`: whichever ad click ids the page had (`gclid`, `gbraid`, `wbraid`, `fbclid`, `msclkid`, `li_fat_id`, `rdt_cid`, `twclid`).
 - `properties.ofc` (an Outflare campaign link) and `properties.ref` (a referral or partner code, from `ref` or `via`).
 
-`outflare.track("Signup Started", {plan: "pro"})` sends a track event. Its name must be a plain one: dotted names such as `payment.succeeded` belong to Outflare and its connectors, and a browser can't send them. A name the workspace hasn't defined arrives quarantined in the catalog, like any other. Once 100 names are waiting for approval, the browser can only send names that are already there.
+`outflare.track("Signup Started", {plan: "pro"})` sends a track event and returns its message id, which you can give an ad pixel as its event id so a conversion sent back from [Paid ads](paid-media.md#sending-conversions-back) counts once. Its name must be a plain one: dotted names such as `payment.succeeded` belong to Outflare and its connectors, and a browser can't send them. A name the workspace hasn't defined arrives quarantined in the catalog, like any other. Once 100 names are waiting for approval, the browser can only send names that are already there.
 
 ## Visits, touches and devices
 

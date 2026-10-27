@@ -66,7 +66,7 @@ export const tabNames: Record<Tab, string> = {
   projects: "Projects",
   sequences: "Sequences",
   leads: "Leads",
-  lists: "Lead lists",
+  lists: "Lists",
   suppression: "Do not contact",
   infrastructure: "Infrastructure",
   mailboxes: "Mailboxes",

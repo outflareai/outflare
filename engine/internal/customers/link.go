@@ -293,6 +293,7 @@ var Follows = []Ref{
 	{"email_broadcast_recipients", "record_id"}, {"suppressions", "record_id"},
 	{"journey_runs", "record_id"}, {"payment_subscriptions", "record_id"}, {"seo_competitors", "record_id"},
 	{"site_sessions", "record_id"}, {"site_visitors", "record_id"}, {"site_visitors", "account_id"},
+	{"ad_conversion_sends", "record_id"},
 }
 
 // Owned are the record columns a merge handles itself (identities, links,
@@ -304,6 +305,9 @@ var Owned = []Ref{
 	{"record_merge_candidates", "record_a"}, {"record_merge_candidates", "record_b"},
 	// An alert was about the record it was sent for.
 	{"visitor_alerts", "record_id"},
+	// The next refresh drops the merged record and adds the one kept, if
+	// it matches.
+	{"smart_list_members", "record_id"},
 }
 
 // Follow moves every Follows column from one record to another and

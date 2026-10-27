@@ -122,7 +122,7 @@ func SuppressedSQL(ws, email string) string {
 
 // Suppression reasons. competitor, customer and partner are people never
 // to cold email; legal is a request or a law that says so.
-var Reasons = []string{"unsubscribed", "bounced", "complained", "manual", "do_not_contact", "competitor", "customer", "partner", "legal"}
+var Reasons = []string{"unsubscribed", "bounced", "complained", "manual", "do_not_contact", "competitor", "customer", "partner", "legal", "blocklist"}
 
 // How a suppression was added.
 const (

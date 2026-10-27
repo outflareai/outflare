@@ -167,10 +167,14 @@
     send([e]);
     lastURL = location.href;
   }
+  // track returns the event's messageId: pass it to an ad pixel as its
+  // event id (Meta's eventID), so a conversion Outflare also sends back
+  // server to server is counted once.
   function track(event, properties) {
     if (!event) return;
-    var q = new URLSearchParams(location.search);
-    send([{ type: "track", event: String(event), anonymousId: anon, messageId: uuid(), properties: properties || {}, context: context(q) }]);
+    var q = new URLSearchParams(location.search), id = uuid();
+    send([{ type: "track", event: String(event), anonymousId: anon, messageId: id, properties: properties || {}, context: context(q) }]);
+    return id;
   }
 
   // Links to the site's other domains carry the visitor's id.

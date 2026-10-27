@@ -30,6 +30,7 @@ import (
 	"github.com/outflareai/outflare/engine/internal/connectors"
 	"github.com/outflareai/outflare/engine/internal/crawl"
 	"github.com/outflareai/outflare/engine/internal/domainconnect"
+	"github.com/outflareai/outflare/engine/internal/emailfind"
 	"github.com/outflareai/outflare/engine/internal/emails"
 	"github.com/outflareai/outflare/engine/internal/imports"
 	"github.com/outflareai/outflare/engine/internal/inbound"
@@ -76,6 +77,7 @@ type Server struct {
 	integrations    *connectors.Store
 	lists           *lists.Service
 	verifier        *verify.Service
+	emailFinder     *emailfind.Service
 	classifier      *classify.Classifier
 	research        *research.Service
 	vendors         *vendorsync.Service
@@ -135,6 +137,9 @@ type Options struct {
 	// Connectors and email verification; nil disables them.
 	Integrations *connectors.Store
 	Verify       *verify.Service
+	// EmailFinder proposes and verifies addresses from a workspace's learned
+	// patterns; nil turns the /email-finder endpoints off.
+	EmailFinder *emailfind.Service
 	// Classifier says what kind of email domain an address is; nil builds
 	// one on the built-in data that asks the system resolver.
 	Classifier *classify.Classifier
@@ -310,6 +315,7 @@ func NewServer(pool *pgxpool.Pool, log *slog.Logger, opts Options) *Server {
 		query:            queryState{size: opts.QueryConnections},
 		integrations:     opts.Integrations,
 		verifier:         opts.Verify,
+		emailFinder:      opts.EmailFinder,
 		classifier:       classifier,
 		research:         opts.Research,
 		lists:            opts.Lists,
@@ -381,6 +387,7 @@ func (s *Server) buildHandler() http.Handler {
 	s.routesSemanticSearch(mux)
 	s.routesAnalyticsBrands(mux)
 	s.routesAds(mux)
+	s.routesAdConversions(mux)
 	s.routesContext(mux)
 	s.routesOnboarding(mux)
 	s.routesCommunity(mux)
@@ -392,6 +399,7 @@ func (s *Server) buildHandler() http.Handler {
 	s.routesPlatforms(mux)
 	s.routesLeads(mux)
 	s.routesLists(mux)
+	s.routesSmartLists(mux)
 	s.routesSequences(mux)
 	s.routesInbox(mux)
 	s.routesInboxTags(mux)
@@ -449,6 +457,9 @@ func (s *Server) buildHandler() http.Handler {
 	s.routesTelemetry(mux)
 	s.routesAgentOAuth(mux)
 	s.routesMCP(mux)
+	if s.emailFinder != nil {
+		s.routesEmailFind(mux)
+	}
 	if s.emails != nil {
 		s.routesEmails(mux)
 		s.routesJourneys(mux)

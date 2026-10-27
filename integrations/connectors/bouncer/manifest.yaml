@@ -1,0 +1,57 @@
+# Bouncer: https://docs.usebouncer.com
+id: bouncer
+name: Bouncer
+category: email_verification
+summary: EU-hosted email verification with toxicity checks.
+description: Verifies each address and reports catch-all, disposable and role accounts, with a 0–100 score.
+website: https://www.usebouncer.com
+docs_url: https://docs.usebouncer.com
+key_url: https://app.usebouncer.com/api
+pricing: Pay per credit
+publisher:
+  id: outflare
+
+base_url: https://api.usebouncer.com
+auth:
+  api_key:
+    fields:
+      - name: api_key
+        label: API key
+        secret: true
+        help: Bouncer → API → create an API key.
+
+test:
+  request:
+    method: GET
+    path: /v1.1/credits
+    headers:
+      x-api-key: "{{api_key}}"
+  account:
+    credits: credits
+
+capabilities:
+  verify:
+    request:
+      method: GET
+      path: /v1.1/email/verify
+      query:
+        email: "{{email}}"
+        timeout: "20"
+      headers:
+        x-api-key: "{{api_key}}"
+    result:
+      status:
+        from: status
+        values:
+          deliverable: deliverable
+          undeliverable: undeliverable
+          risky: risky
+        default: unknown
+      reason: reason
+      provider_status: status
+      catch_all: domain.acceptAll
+      disposable: domain.disposable
+      free: domain.free
+      role: account.role
+      suggestion: didYouMean
+      score: score

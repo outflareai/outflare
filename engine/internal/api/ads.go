@@ -73,7 +73,13 @@ func (s *Server) adConnections(ctx context.Context, ws, id string) ([]adConnecti
 		c.Setup = []connectors.Field{}
 		if conn, ok := s.integrations.Registry.Get(c.Connector); ok && !done {
 			if n, ok := conn.(connectors.SetupNeeder); ok {
-				c.Setup = n.SetupFields()
+				// Optional fields (Reddit's conversions token) never hold
+				// the connection up; the conversions screens ask for them.
+				for _, f := range n.SetupFields() {
+					if !f.Optional {
+						c.Setup = append(c.Setup, f)
+					}
+				}
 			}
 		}
 		out = append(out, c)

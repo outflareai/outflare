@@ -147,6 +147,11 @@ type Definition struct {
 	// Older connector ids this one replaces, so saved connections and
 	// API calls that use them keep working.
 	Replaces []string `json:"-"`
+	// Who built it and how far it is trusted. Connectors written in the
+	// engine are Outflare's own; manifests in integrations/ name their
+	// publisher, and integrations/publishers.yaml says who is verified.
+	Publisher *Publisher `json:"publisher,omitempty"`
+	Trust     string     `json:"trust"`
 }
 
 // Tag is a label on a connector's catalog card.
@@ -154,6 +159,20 @@ type Tag struct {
 	Label string `json:"label"`
 	Help  string `json:"help"`
 }
+
+// Publisher is who built and looks after a connector.
+type Publisher struct {
+	ID      string `json:"id"`
+	Name    string `json:"name"`
+	Website string `json:"website,omitempty"`
+}
+
+// Trust levels, shown as a badge wherever a connector appears.
+const (
+	TrustOutflare  = "outflare"  // built by Outflare
+	TrustVerified  = "verified"  // the publisher proved its domain and passed review
+	TrustCommunity = "community" // reviewed and merged, publisher not verified
+)
 
 // Methods returns every way to connect, recommended first.
 func (d Definition) Methods() []string {
@@ -411,9 +430,13 @@ func (r *Registry) Definition(id string) (Definition, bool) {
 	return d.normal(), ok
 }
 
-// normal fills AuthMethods, so clients always get the full list.
+// normal fills AuthMethods, so clients always get the full list, and
+// marks connectors with no publisher as Outflare's own.
 func (d Definition) normal() Definition {
 	d.AuthMethods = d.Methods()
+	if d.Trust == "" {
+		d.Trust = TrustOutflare
+	}
 	return d
 }
 

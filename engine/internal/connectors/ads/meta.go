@@ -33,7 +33,8 @@ func (MetaAds) Definition() c.Definition {
 	d := def("meta_ads", "Meta Ads", "https://www.facebook.com/business/ads",
 		"https://developers.facebook.com/docs/marketing-api/insights", "https://www.facebook.com/business/help/755172054692222",
 		"Spend, clicks and conversions per campaign from your Facebook and Instagram ad accounts.",
-		"Reads every ad account a token can see, with read-only access. The simplest way: in your Meta Business Settings, Users, System users, create a system user, give it the ad accounts, and generate a token with the ads_read permission. Conversions are Meta's standard events (purchases, leads, registrations, trials, subscriptions).")
+		"Reads every ad account a token can see, with read-only access. The simplest way: in your Meta Business Settings, Users, System users, create a system user, give it the ad accounts, and generate a token with the ads_read permission. Conversions are Meta's standard events (purchases, leads, registrations, trials, subscriptions). To send conversions back through the Conversions API, also assign the system user to your pixel (Business Settings, Data sources, Datasets).")
+	d.Capabilities = append(d.Capabilities, c.CapAdsConversions)
 	d.Auth, d.AuthMethods = c.AuthAPIKey, []string{c.AuthAPIKey, c.AuthOAuth2}
 	d.Fields = []c.Field{{Name: "api_key", Label: "System user access token", Secret: true, Placeholder: "EAAB…",
 		Help: "Business Settings, Users, System users: generate a token with ads_read for the ad accounts you want to read."}}
@@ -194,4 +195,90 @@ func minorUnits(currency string) int64 {
 		return 1
 	}
 	return 100
+}
+
+// ---- conversions ----
+
+// metaEvents are Meta's standard events a rule can send as.
+var metaEvents = []string{"Purchase", "Lead", "CompleteRegistration", "StartTrial", "Subscribe", "Contact", "SubmitApplication", "Schedule"}
+
+// ConversionTargets lists the pixels (datasets) the account can use.
+func (m MetaAds) ConversionTargets(ctx context.Context, cl *c.Client, creds c.Creds, acct c.AdAccount) ([]c.ConversionTarget, error) {
+	var out []c.ConversionTarget
+	err := m.pages(ctx, cl, creds, m.base(cl)+"/act_"+esc(acct.ID)+"/adspixels?fields=id,name&limit=100", func(raw json.RawMessage) error {
+		var p struct {
+			ID   string `json:"id"`
+			Name string `json:"name"`
+		}
+		if json.Unmarshal(raw, &p) == nil && p.ID != "" {
+			out = append(out, c.ConversionTarget{ID: p.ID, Name: p.Name, EventTypes: metaEvents})
+		}
+		return nil
+	})
+	return out, err
+}
+
+// SendConversions sends server events through the Conversions API. The
+// event id matches the browser pixel's eventID, so Meta counts a
+// conversion once when both send it. Meta takes or refuses a batch whole.
+func (m MetaAds) SendConversions(ctx context.Context, cl *c.Client, creds c.Creds, acct c.AdAccount, target c.ConversionTarget, convs []c.AdConversion) ([]c.ConversionResult, error) {
+	results := make([]c.ConversionResult, len(convs))
+	var data []map[string]any
+	var sentIdx []int
+	for i, cv := range convs {
+		results[i] = c.ConversionResult{Index: cv.Index}
+		user := map[string]any{}
+		var keys []string
+		if len(cv.Emails) > 0 {
+			user["em"], keys = cv.Emails, append(keys, "email")
+		}
+		if len(cv.PhoneDigits) > 0 {
+			user["ph"], keys = cv.PhoneDigits, append(keys, "phone")
+		}
+		if cv.ExternalID != "" {
+			user["external_id"], keys = []string{cv.ExternalID}, append(keys, "external_id")
+		}
+		switch {
+		case cv.ClickIDs["fbc"] != "":
+			user["fbc"], keys = cv.ClickIDs["fbc"], append(keys, "fbc")
+		case cv.ClickIDs["fbclid"] != "":
+			at := cv.ClickTime
+			if at.IsZero() {
+				at = cv.Time
+			}
+			user["fbc"], keys = fmt.Sprintf("fb.1.%d.%s", at.UnixMilli(), cv.ClickIDs["fbclid"]), append(keys, "fbc")
+		}
+		if v := cv.ClickIDs["fbp"]; v != "" {
+			user["fbp"], keys = v, append(keys, "fbp")
+		}
+		if len(keys) == 0 {
+			results[i].Skipped, results[i].Reason = true, "no identifier or click id to match on"
+			continue
+		}
+		event := cv.EventType
+		if event == "" {
+			event = "Lead"
+		}
+		ev := map[string]any{"event_name": event, "event_time": cv.Time.Unix(), "event_id": cv.EventID,
+			"action_source": "website", "user_data": user}
+		if cv.ValueMicros != nil {
+			ev["custom_data"] = map[string]any{"value": float64(*cv.ValueMicros) / 1e6, "currency": cv.Currency}
+		}
+		results[i].MatchKeys = keys
+		data = append(data, ev)
+		sentIdx = append(sentIdx, i)
+	}
+	if len(data) == 0 {
+		return results, nil
+	}
+	var resp struct {
+		EventsReceived int `json:"events_received"`
+	}
+	if err := m.call(cl, creds).post(ctx, m.base(cl)+"/"+esc(target.ID)+"/events", map[string]any{"data": data}, &resp); err != nil {
+		return nil, err
+	}
+	for _, i := range sentIdx {
+		results[i].OK = true
+	}
+	return results, nil
 }

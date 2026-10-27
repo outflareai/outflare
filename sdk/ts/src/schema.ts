@@ -2621,6 +2621,142 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/workspaces/{ws}/smart-lists": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+            };
+            cookie?: never;
+        };
+        /**
+         * List smart lists
+         * @description Scope: customers.read. Groups of people on customer records that keep themselves up to date from rules, by name.
+         *     Lead lists (GET .../lead-lists) hold the leads someone picked or a search found; a smart list holds whoever
+         *     matches its rules now.
+         */
+        get: operations["listSmartLists"];
+        put?: never;
+        /**
+         * Create a smart list
+         * @description Scope: customers.manage. The list fills itself straight away, then stays up to date: Outflare adds people who
+         *     start matching and removes people who stop, within about 15 minutes. Check the count first with
+         *     POST .../smart-lists/preview. A brand's list holds that brand's people and those shared by every brand.
+         */
+        post: operations["createSmartList"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/workspaces/{ws}/smart-lists/preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Count who rules pick, without saving
+         * @description Scope: customers.read. How many people the rules pick right now and the 10 newest of them, so you can check a
+         *     list before saving it. Nothing is stored.
+         */
+        post: operations["previewSmartList"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/workspaces/{ws}/smart-lists/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        /**
+         * Get a smart list
+         * @description Scope: customers.read.
+         */
+        get: operations["getSmartList"];
+        put?: never;
+        post?: never;
+        /**
+         * Delete a smart list. Its people stay.
+         * @description Scope: customers.manage.
+         */
+        delete: operations["deleteSmartList"];
+        options?: never;
+        head?: never;
+        /**
+         * Change a smart list
+         * @description Scope: customers.manage. Send only what changes. Changing the rules, match or brand refreshes the members
+         *     straight away.
+         */
+        patch: operations["updateSmartList"];
+        trace?: never;
+    };
+    "/v1/workspaces/{ws}/smart-lists/{id}/members": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        /**
+         * Who is in a smart list now, newest to join first
+         * @description Scope: customers.read. As of the list's refreshed_at. Page with cursor=next_cursor.
+         */
+        get: operations["listSmartListMembers"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/workspaces/{ws}/smart-lists/{id}/refresh": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Bring a smart list's members up to date now
+         * @description Scope: customers.manage. Lists refresh on their own every 15 minutes; this does it now. Watch refreshed_at.
+         */
+        post: operations["refreshSmartList"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/workspaces/{ws}/data-providers": {
         parameters: {
             query?: never;
@@ -2832,6 +2968,85 @@ export interface paths {
          *     the reason other_brand:<handle>.
          */
         post: operations["checkRecipients"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/workspaces/{ws}/email-finder/pattern": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+            };
+            cookie?: never;
+        };
+        /**
+         * The address shape a company domain uses
+         * @description Scope: leads.read. Returns what this workspace has learned about a
+         *     domain's email pattern, from its own leads and verification outcomes,
+         *     building it on first use. Free, and shared with no other workspace.
+         */
+        get: operations["emailFinderPattern"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/workspaces/{ws}/email-finder/find": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Propose a likely work address for each person
+         * @description Scope: leads.read. For each person (name plus company domain) proposes
+         *     the most likely address from the domain's learned pattern and
+         *     first-party history, with a confidence and a code. Free: it spends
+         *     nothing. At most 50 people a call, and only this workspace's own data.
+         */
+        post: operations["emailFinderFind"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/workspaces/{ws}/email-finder/verify": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Check addresses through the verification waterfall
+         * @description Scope: leads.manage. Checks each address cheapest tier first (first-party
+         *     history, the learned pattern, the free built-in checks) and rolls up to
+         *     the workspace's own connected verifier only when confidence stays low.
+         *     That last tier spends on the workspace's own account, never Outflare's. A
+         *     slow check answers pending and runs as its own short job; re-call to
+         *     collect it. At most 50 addresses a call.
+         */
+        post: operations["emailFinderVerify"];
         delete?: never;
         options?: never;
         head?: never;
@@ -4471,6 +4686,154 @@ export interface paths {
          * @description Scope: analytics.read. Queues a sync of each connected ad platform. Syncs also run by themselves every six hours: the first reads 90 days, later ones the last 7 days, and the last 30 once a day.
          */
         post: operations["syncAds"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/workspaces/{ws}/ads/conversion-targets": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+            };
+            cookie?: never;
+        };
+        /**
+         * List where an ad account's conversions can go
+         * @description Scope: integrations.manage. Asks the platform, live: Google Ads
+         *     conversion actions that take uploaded clicks, Meta pixels (datasets),
+         *     Microsoft Advertising offline conversion goals, or Reddit's
+         *     Conversions API. `event_types` lists what a target takes as
+         *     `event_type` (Meta's Purchase or Lead), empty when the target is the
+         *     event already. `setup_needed` lists what the connection still needs
+         *     to send at all, such as Reddit's Conversions API token (add it with
+         *     PUT .../ads/connections/{integration_id}/setup).
+         */
+        get: operations["listAdConversionTargets"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/workspaces/{ws}/ads/conversion-rules": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+            };
+            cookie?: never;
+        };
+        /**
+         * List the rules that send conversions to ad platforms
+         * @description Scope: analytics.read. Each rule sends one customer event (such as signed_up) to one conversion on one ad account, with what it sent, skipped and failed in the last 30 days.
+         */
+        get: operations["listAdConversionRules"];
+        put?: never;
+        /**
+         * Send a customer event to an ad platform as a conversion
+         * @description Scope: integrations.manage. From now on, each time the event
+         *     happens, the ad platform hears about it server to server within a
+         *     few minutes, with the ad click id from the person's visits and their
+         *     hashed email and phone, so its reporting and bidding learn from real
+         *     outcomes. Events from before the rule are never sent. The event id
+         *     is the one the browser pixel sends, so the platform counts each
+         *     conversion once. Consent follows GET .../ads/settings. The target is
+         *     checked with the platform first.
+         */
+        post: operations["createAdConversionRule"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/workspaces/{ws}/ads/conversion-rules/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Delete a conversion rule
+         * @description Scope: integrations.manage. Stops sending and removes the rule with its send log. Conversions the platform already has stay there.
+         */
+        delete: operations["deleteAdConversionRule"];
+        options?: never;
+        head?: never;
+        /**
+         * Change or switch off a conversion rule
+         * @description Scope: integrations.manage. Change the event, the value or the currency, or switch the rule off (what was waiting is skipped, not sent later). The account and conversion are fixed: add a new rule instead.
+         */
+        patch: operations["updateAdConversionRule"];
+        trace?: never;
+    };
+    "/v1/workspaces/{ws}/ads/conversion-sends": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+            };
+            cookie?: never;
+        };
+        /**
+         * List the conversions sent to ad platforms
+         * @description Scope: analytics.read. Newest first: every event a rule matched and
+         *     what happened. sent reached the platform (match_keys names the kinds
+         *     of identifiers it carried, such as gclid or email, never their
+         *     values); skipped was never sent, with the reason (no consent,
+         *     nothing to match on); failed was refused, or the platform could not
+         *     be reached after five tries; queued waits for the next send, within
+         *     a few minutes.
+         */
+        get: operations["listAdConversionSends"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/workspaces/{ws}/ads/settings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+            };
+            cookie?: never;
+        };
+        /**
+         * Read the paid media settings
+         * @description Scope: analytics.read. consent_mode decides who conversions are sent for outside the EEA, the UK and Switzerland: opt_out (the default) sends unless the person withdrew consent for ad data, opt_in only when they granted it. Inside those countries, and when a person's country is unknown, a grant is always needed.
+         */
+        get: operations["getAdSettings"];
+        /**
+         * Change the paid media settings
+         * @description Scope: integrations.manage. Sets consent_mode.
+         */
+        put: operations["setAdSettings"];
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -17345,6 +17708,21 @@ export interface components {
              * @description The same logo for dark backgrounds.
              */
             logo_dark_url: string;
+            /**
+             * @description How far the connector is trusted, shown as a badge. outflare: built by Outflare. verified: its publisher proved its domain and passed review. community: reviewed and added from the integrations/ folder, publisher not verified.
+             * @enum {string}
+             */
+            trust: "outflare" | "verified" | "community";
+            publisher?: components["schemas"]["ConnectorPublisher"];
+        };
+        /** @description Who built and looks after a connector added as a manifest in the integrations/ folder. Absent for connectors written into the engine, which are Outflare's own. */
+        ConnectorPublisher: {
+            /** @example outflare */
+            id: string;
+            /** @example Outflare */
+            name: string;
+            /** Format: uri */
+            website?: string;
         };
         /**
          * @description oauth2: sign in on the provider's consent screen. api_key: paste the connector's fields. none: built in.
@@ -18145,6 +18523,86 @@ export interface components {
             last_error: string | null;
             /** Format: date-time */
             created_at: string;
+        };
+        AdConversionTarget: {
+            /** @description A Google conversion action id, a Meta pixel id, a Microsoft goal name or a Reddit account id. */
+            id: string;
+            name: string;
+            /** @description What the target takes as event_type; empty when the target is the event. */
+            event_types: string[];
+        };
+        AdConversionRule: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            ad_account_id: string;
+            /** @example google_ads */
+            connector: string;
+            /** @example order_completed */
+            event_name: string;
+            target_id: string;
+            target_name: string;
+            /** @example Purchase */
+            event_type: string;
+            value_property: string;
+            /** @enum {string} */
+            value_unit: "major" | "minor";
+            /** Format: int64 */
+            fixed_value_micros: number | null;
+            currency: string;
+            enabled: boolean;
+            /** Format: int64 */
+            sent_30d: number;
+            /** Format: int64 */
+            skipped_30d: number;
+            /** Format: int64 */
+            failed_30d: number;
+            /** Format: int64 */
+            queued: number;
+            /** Format: date-time */
+            last_sent_at: string | null;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            updated_at: string;
+        };
+        AdConversionSend: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            rule_id: string;
+            connector: string;
+            event_name: string;
+            /** Format: uuid */
+            record_id: string | null;
+            /** @description The id the platform dedupes on: the event's message id, which the browser pixel sends too. */
+            event_id: string;
+            /** Format: date-time */
+            occurred_at: string;
+            /** @enum {string} */
+            status: "queued" | "sent" | "skipped" | "failed";
+            reason: string;
+            /**
+             * @example [
+             *       "gclid",
+             *       "email"
+             *     ]
+             */
+            match_keys: string[];
+            /** Format: int64 */
+            value_micros: number | null;
+            currency: string;
+            attempts: number;
+            /** Format: date-time */
+            sent_at: string | null;
+            /** Format: date-time */
+            created_at: string;
+        };
+        AdSettings: {
+            /** @enum {string} */
+            consent_mode: "opt_out" | "opt_in";
+            /** Format: date-time */
+            updated_at: string | null;
         };
         /** @description Money in micros (millionths) of the currency. Conversions, conversion value and platform_roas are what the platform claims: never add them across platforms. */
         AdTotals: {
@@ -22141,6 +22599,81 @@ export interface components {
             /** @description Refresh on a schedule. Null refreshes only when asked. */
             refresh_every_days?: number | null;
         };
+        /**
+         * @description One test a person must pass. Set one of attribute (a field on their customer record, such as plan or
+         *     address.country), event (whether they did this customer event: exists, or not_exists; within_days limits it
+         *     to the last that many days) or in_list (whether they are a lead in this lead list: exists, or not_exists).
+         *     Attributes compare as journeys compare them: numbers as numbers, text ignoring case, dates as text.
+         */
+        SmartListRule: {
+            attribute?: string;
+            event?: string;
+            /** @description event: only the last this many days; 0 or left out is ever. */
+            within_days?: number;
+            /**
+             * Format: uuid
+             * @description A lead list's id.
+             */
+            in_list?: string;
+            /** @enum {string} */
+            op: "eq" | "neq" | "gt" | "lt" | "contains" | "exists" | "not_exists";
+            /** @description What eq, neq, gt, lt and contains compare with: text, a number or true or false. */
+            value?: unknown;
+        };
+        SmartListInput: {
+            name?: string;
+            description?: string;
+            /** @description A brand's id or handle, or null for people of every brand. */
+            brand_id?: string | null;
+            rules?: components["schemas"]["SmartListRule"][];
+            /**
+             * @description Whether a person must pass all the rules (the default) or any of them.
+             * @enum {string}
+             */
+            match?: "all" | "any";
+        };
+        SmartList: {
+            /** Format: uuid */
+            id: string;
+            name: string;
+            description: string;
+            /**
+             * Format: uuid
+             * @description Null: people of every brand.
+             */
+            brand_id: string | null;
+            rules: components["schemas"]["SmartListRule"][];
+            /** @enum {string} */
+            match: "all" | "any";
+            /** @description How many people matched at the last refresh. */
+            members: number;
+            /**
+             * Format: date-time
+             * @description When the members were last brought up to date; null until the first refresh.
+             */
+            refreshed_at: string | null;
+            /** @description Why the last refresh failed (query_timeout: the rules took too long), or null. */
+            error_code: string | null;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            updated_at: string;
+        };
+        SmartListPerson: {
+            /**
+             * Format: uuid
+             * @description The person's customer record.
+             */
+            id: string;
+            name: string;
+            /** @description Their email address, or empty. */
+            email: string;
+            /**
+             * Format: date-time
+             * @description members: when they joined the list.
+             */
+            entered_at?: string;
+        };
         LeadList: {
             /** Format: uuid */
             id: string;
@@ -22300,12 +22833,13 @@ export interface components {
         };
         /**
          * @description Why the entry is there. unsubscribed stops cold and marketing email but
-         *     not receipts; competitor stops cold and marketing email; customer and
-         *     partner keep people out of cold email only; bounced, complained,
-         *     manual, legal and do_not_contact stop every email.
+         *     not receipts; competitor stops cold and marketing email; customer,
+         *     partner and blocklist (on a connected sequencer's blocklist) keep
+         *     people out of cold email only; bounced, complained, manual, legal and
+         *     do_not_contact stop every email.
          * @enum {string}
          */
-        SuppressionReason: "unsubscribed" | "bounced" | "complained" | "manual" | "do_not_contact" | "competitor" | "customer" | "partner" | "legal";
+        SuppressionReason: "unsubscribed" | "bounced" | "complained" | "manual" | "do_not_contact" | "competitor" | "customer" | "partner" | "legal" | "blocklist";
         /**
          * @description How it was added: by a person, automatically (a bounce, an unsubscribe link, a sync), or because the AI read a reply as an opt-out.
          * @enum {string}
@@ -22410,6 +22944,84 @@ export interface components {
             allowed: boolean;
             /** @description Why it is blocked: invalid_email, suppressed_email:<reason>, suppressed_domain:<reason>, marketing_withdrawn, other_brand:<handle>, third_party_no_consent or no_consent. */
             reasons: string[];
+        };
+        /**
+         * @description The outcome of finding or verifying one address, driving what a pipeline
+         *     does next: found/verified (use it), risky (your policy), not_found or
+         *     undeliverable (skip), pending (re-call shortly), retry (retry later),
+         *     stop (can't continue; see stop_code).
+         * @enum {string}
+         */
+        EmailFindCode: "found" | "verified" | "risky" | "not_found" | "undeliverable" | "pending" | "retry" | "stop";
+        EmailPattern: {
+            /** @example acme.example */
+            domain: string;
+            /**
+             * @description The dominant local-part shape, e.g. first.last, flast, firstlast; empty when nothing is known.
+             * @example first.last
+             */
+            top_shape: string;
+            confidence: number;
+            /** @description The mailbox provider inferred from MX (google, microsoft, …), empty when unknown. */
+            provider: string;
+            /** @description The domain accepts any address, so a match proves nothing on its own. */
+            catch_all: boolean;
+            /** @description How many of the workspace's own addresses at this domain the shape was learned from. */
+            sample_size: number;
+        };
+        EmailFindCost: {
+            /** @description Provider spend in cents; 0 for the free native tiers. */
+            cents: number;
+            /** @description Provider credits or units used. */
+            units: number;
+            /** @description builtin or outflare for native work, otherwise the connector id. */
+            provider: string;
+            /** @description Which workspace connection answered, when a bring-your-own-key verifier was used. */
+            connection?: string;
+        };
+        EmailFindItemResult: {
+            /** @description The caller's own reference, echoed back so results match without relying on order. */
+            ref: string;
+            record_id?: string;
+            email?: string;
+            confidence: number;
+            code: components["schemas"]["EmailFindCode"];
+            /** @description Where the confidence came from: history, pattern or default. */
+            evidence?: string;
+            cost: components["schemas"]["EmailFindCost"];
+            /** @description An error-catalog code when code is stop. */
+            stop_code?: string;
+            /** @description Nanoseconds to wait before re-calling, set when code is pending or retry. */
+            retry_after?: number;
+        };
+        EmailFindResult: {
+            items: components["schemas"]["EmailFindItemResult"][];
+            /** @description Batch-level wait in nanoseconds, set when the whole batch is rate limited. */
+            retry_after?: number;
+        };
+        EmailFindRequest: {
+            /** @description Repeat with the same key in the same workspace to get the cached result without re-spending. */
+            idempotency_key?: string;
+            items: {
+                ref: string;
+                record_id?: string;
+                /** @example Alice */
+                first_name: string;
+                /** @example Nguyen */
+                last_name: string;
+                /** @example acme.example */
+                domain: string;
+                company?: string;
+            }[];
+        };
+        EmailVerifyRequest: {
+            /** @description Re-check even if a recent result is cached. */
+            force?: boolean;
+            items: {
+                ref: string;
+                /** @example alice.nguyen@acme.example */
+                email: string;
+            }[];
         };
         /**
          * @description automatic: the allocator assigns mailboxes itself and explains each change. suggest: it proposes changes for a person to apply.
@@ -23474,7 +24086,7 @@ export interface components {
             /** Format: uuid */
             record_id: string;
             /** @enum {string} */
-            channel: "email" | "sms" | "push" | "whatsapp" | "in_app";
+            channel: "email" | "sms" | "push" | "whatsapp" | "in_app" | "ads";
             /** @description A subscription topic's key, or empty for the whole channel. */
             topic: string;
             /** @example marketing */
@@ -23495,7 +24107,7 @@ export interface components {
         };
         ConsentInput: {
             /** @enum {string} */
-            channel: "email" | "sms" | "push" | "whatsapp" | "in_app";
+            channel: "email" | "sms" | "push" | "whatsapp" | "in_app" | "ads";
             /** @description A subscription topic's key, such as product_updates. Empty for the whole channel. */
             topic?: string;
             /** @description Default marketing. */
@@ -30101,6 +30713,299 @@ export interface operations {
             default: components["responses"]["Error"];
         };
     };
+    listSmartLists: {
+        parameters: {
+            query?: {
+                /** @description Only records of this brand: its id or handle, none for records shared by every brand, or all (the default). */
+                brand?: components["parameters"]["Brand"];
+            };
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Smart lists. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["SmartList"][];
+                    };
+                };
+            };
+            404: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    createSmartList: {
+        parameters: {
+            query?: never;
+            header?: {
+                /**
+                 * @description Makes the write safe to retry. A repeat with the same key from the same caller within 24 hours gets the first
+                 *     answer back (with `Idempotent-Replayed: true`) instead of running again. The same key for a different request
+                 *     is refused with 422 `idempotency_key_reused`; while the first is still running, 409 `idempotency_in_progress`.
+                 *     Use a new random key, such as a UUID, for each distinct write.
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SmartListInput"];
+            };
+        };
+        responses: {
+            /** @description The list. Its members fill in a few seconds. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SmartList"];
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            400: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    previewSmartList: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @description A brand's id or handle; null or left out for every brand. */
+                    brand_id?: string | null;
+                    rules?: components["schemas"]["SmartListRule"][];
+                    /**
+                     * @default all
+                     * @enum {string}
+                     */
+                    match?: "all" | "any";
+                };
+            };
+        };
+        responses: {
+            /** @description The count and a sample. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @description How many people match now. */
+                        members: number;
+                        sample: components["schemas"]["SmartListPerson"][];
+                    };
+                };
+            };
+            400: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    getSmartList: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The list. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SmartList"];
+                };
+            };
+            404: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    deleteSmartList: {
+        parameters: {
+            query?: never;
+            header?: {
+                /**
+                 * @description Makes the write safe to retry. A repeat with the same key from the same caller within 24 hours gets the first
+                 *     answer back (with `Idempotent-Replayed: true`) instead of running again. The same key for a different request
+                 *     is refused with 422 `idempotency_key_reused`; while the first is still running, 409 `idempotency_in_progress`.
+                 *     Use a new random key, such as a UUID, for each distinct write.
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            202: components["responses"]["MissionHeld"];
+            /** @description Deleted. */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    updateSmartList: {
+        parameters: {
+            query?: never;
+            header?: {
+                /**
+                 * @description Makes the write safe to retry. A repeat with the same key from the same caller within 24 hours gets the first
+                 *     answer back (with `Idempotent-Replayed: true`) instead of running again. The same key for a different request
+                 *     is refused with 422 `idempotency_key_reused`; while the first is still running, 409 `idempotency_in_progress`.
+                 *     Use a new random key, such as a UUID, for each distinct write.
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SmartListInput"];
+            };
+        };
+        responses: {
+            /** @description The list. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SmartList"];
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            400: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    listSmartListMembers: {
+        parameters: {
+            query?: {
+                limit?: number;
+                /** @description From next_before. */
+                before?: string;
+                /**
+                 * @description next_cursor from the previous page, unchanged. Every paged list takes it, so one loop pages them all:
+                 *     call, then call again with cursor=next_cursor until next_cursor is null. Cursors are opaque; don't build them.
+                 */
+                cursor?: components["parameters"]["Cursor"];
+                /**
+                 * @description Only these fields of each item, comma separated (fields=id,email,status); id always comes back.
+                 *     Paging fields stay. A field the items don't have answers 400 naming the ones they do. Any GET takes it.
+                 */
+                fields?: components["parameters"]["Fields"];
+            };
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Members. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["SmartListPerson"][];
+                        next_before?: string | null;
+                        next_cursor?: components["schemas"]["NextCursor"];
+                    };
+                };
+            };
+            400: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    refreshSmartList: {
+        parameters: {
+            query?: never;
+            header?: {
+                /**
+                 * @description Makes the write safe to retry. A repeat with the same key from the same caller within 24 hours gets the first
+                 *     answer back (with `Idempotent-Replayed: true`) instead of running again. The same key for a different request
+                 *     is refused with 422 `idempotency_key_reused`; while the first is still running, 409 `idempotency_in_progress`.
+                 *     Use a new random key, such as a UUID, for each distinct write.
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Queued. */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Queued"] | components["schemas"]["MissionHeld"];
+                };
+            };
+            404: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
     listDataProviders: {
         parameters: {
             query?: never;
@@ -30496,6 +31401,96 @@ export interface operations {
                 };
             };
             202: components["responses"]["MissionHeld"];
+            default: components["responses"]["Error"];
+        };
+    };
+    emailFinderPattern: {
+        parameters: {
+            query: {
+                /** @example acme.example */
+                domain: string;
+            };
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The learned pattern and a code saying how confident it is. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["EmailPattern"];
+                        code: components["schemas"]["EmailFindCode"];
+                    };
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    emailFinderFind: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["EmailFindRequest"];
+            };
+        };
+        responses: {
+            /** @description One result per person, matched by ref. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["EmailFindResult"];
+                    };
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    emailFinderVerify: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["EmailVerifyRequest"];
+            };
+        };
+        responses: {
+            /** @description One result per address, matched by ref. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["EmailFindResult"];
+                    };
+                };
+            };
             default: components["responses"]["Error"];
         };
     };
@@ -33440,6 +34435,335 @@ export interface operations {
                 };
             };
             503: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    listAdConversionTargets: {
+        parameters: {
+            query: {
+                account_id: string;
+            };
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The targets. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["AdConversionTarget"][];
+                        setup_needed: components["schemas"]["ConnectorField"][];
+                        /** Format: uuid */
+                        integration_id: string;
+                    };
+                };
+            };
+            400: components["responses"]["Error"];
+            422: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    listAdConversionRules: {
+        parameters: {
+            query?: {
+                account_id?: string;
+            };
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The rules. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["AdConversionRule"][];
+                    };
+                };
+            };
+            400: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    createAdConversionRule: {
+        parameters: {
+            query?: never;
+            header?: {
+                /**
+                 * @description Makes the write safe to retry. A repeat with the same key from the same caller within 24 hours gets the first
+                 *     answer back (with `Idempotent-Replayed: true`) instead of running again. The same key for a different request
+                 *     is refused with 422 `idempotency_key_reused`; while the first is still running, 409 `idempotency_in_progress`.
+                 *     Use a new random key, such as a UUID, for each distinct write.
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** Format: uuid */
+                    account_id: string;
+                    /** @example order_completed */
+                    event_name: string;
+                    /** @description From GET .../ads/conversion-targets. */
+                    target_id: string;
+                    /**
+                     * @description One of the target's event_types; default the first.
+                     * @example Purchase
+                     */
+                    event_type?: string;
+                    /**
+                     * @description The event property that holds the value.
+                     * @example total
+                     */
+                    value_property?: string;
+                    /**
+                     * @description major: 12.50; minor: 1250 (cents). Default major.
+                     * @enum {string}
+                     */
+                    value_unit?: "major" | "minor";
+                    /**
+                     * Format: int64
+                     * @description A value for every conversion, used when value_property is empty or missing.
+                     */
+                    fixed_value_micros?: number;
+                    /**
+                     * @description Empty uses the event's currency property, then the account's.
+                     * @example USD
+                     */
+                    currency?: string;
+                    enabled?: boolean;
+                };
+            };
+        };
+        responses: {
+            /** @description The rule. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdConversionRule"];
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            400: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+            422: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    deleteAdConversionRule: {
+        parameters: {
+            query?: never;
+            header?: {
+                /**
+                 * @description Makes the write safe to retry. A repeat with the same key from the same caller within 24 hours gets the first
+                 *     answer back (with `Idempotent-Replayed: true`) instead of running again. The same key for a different request
+                 *     is refused with 422 `idempotency_key_reused`; while the first is still running, 409 `idempotency_in_progress`.
+                 *     Use a new random key, such as a UUID, for each distinct write.
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            202: components["responses"]["MissionHeld"];
+            /** @description Deleted. */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            404: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    updateAdConversionRule: {
+        parameters: {
+            query?: never;
+            header?: {
+                /**
+                 * @description Makes the write safe to retry. A repeat with the same key from the same caller within 24 hours gets the first
+                 *     answer back (with `Idempotent-Replayed: true`) instead of running again. The same key for a different request
+                 *     is refused with 422 `idempotency_key_reused`; while the first is still running, 409 `idempotency_in_progress`.
+                 *     Use a new random key, such as a UUID, for each distinct write.
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    event_name?: string;
+                    value_property?: string;
+                    /** @enum {string} */
+                    value_unit?: "major" | "minor";
+                    /** Format: int64 */
+                    fixed_value_micros?: number;
+                    currency?: string;
+                    enabled?: boolean;
+                };
+            };
+        };
+        responses: {
+            /** @description The rule now. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdConversionRule"];
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            400: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    listAdConversionSends: {
+        parameters: {
+            query?: {
+                rule_id?: string;
+                record_id?: string;
+                status?: "queued" | "sent" | "skipped" | "failed";
+                limit?: number;
+                before?: string;
+                /**
+                 * @description next_cursor from the previous page, unchanged. Every paged list takes it, so one loop pages them all:
+                 *     call, then call again with cursor=next_cursor until next_cursor is null. Cursors are opaque; don't build them.
+                 */
+                cursor?: components["parameters"]["Cursor"];
+                /**
+                 * @description Only these fields of each item, comma separated (fields=id,email,status); id always comes back.
+                 *     Paging fields stay. A field the items don't have answers 400 naming the ones they do. Any GET takes it.
+                 */
+                fields?: components["parameters"]["Fields"];
+            };
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The sends. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["AdConversionSend"][];
+                        /** Format: date-time */
+                        next_before: string | null;
+                        next_cursor?: components["schemas"]["NextCursor"];
+                    };
+                };
+            };
+            400: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    getAdSettings: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The settings. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdSettings"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    setAdSettings: {
+        parameters: {
+            query?: never;
+            header?: {
+                /**
+                 * @description Makes the write safe to retry. A repeat with the same key from the same caller within 24 hours gets the first
+                 *     answer back (with `Idempotent-Replayed: true`) instead of running again. The same key for a different request
+                 *     is refused with 422 `idempotency_key_reused`; while the first is still running, 409 `idempotency_in_progress`.
+                 *     Use a new random key, such as a UUID, for each distinct write.
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @enum {string} */
+                    consent_mode: "opt_out" | "opt_in";
+                };
+            };
+        };
+        responses: {
+            /** @description The settings now. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdSettings"];
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            400: components["responses"]["Error"];
             default: components["responses"]["Error"];
         };
     };

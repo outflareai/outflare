@@ -3599,6 +3599,196 @@ paths:
         "409": { $ref: "#/components/responses/Error" }
         "202": { $ref: "#/components/responses/MissionHeld" }
         default: { $ref: "#/components/responses/Error" }
+  /v1/workspaces/{ws}/smart-lists:
+    parameters: [{ $ref: "#/components/parameters/Workspace" }]
+    get:
+      operationId: listSmartLists
+      x-outflare-access: { scope: customers.read, brand_limited: true }
+      summary: List smart lists
+      description: |
+        Scope: customers.read. Groups of people on customer records that keep themselves up to date from rules, by name.
+        Lead lists (GET .../lead-lists) hold the leads someone picked or a search found; a smart list holds whoever
+        matches its rules now.
+      tags: [lists]
+      parameters:
+        - { $ref: "#/components/parameters/Brand" }
+      responses:
+        "200":
+          description: Smart lists.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data: { type: array, items: { $ref: "#/components/schemas/SmartList" } }
+        "404": { $ref: "#/components/responses/Error" }
+        default: { $ref: "#/components/responses/Error" }
+    post:
+      operationId: createSmartList
+      x-outflare-access: { scope: customers.manage, brand_limited: true }
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      summary: Create a smart list
+      description: |
+        Scope: customers.manage. The list fills itself straight away, then stays up to date: Outflare adds people who
+        start matching and removes people who stop, within about 15 minutes. Check the count first with
+        POST .../smart-lists/preview. A brand's list holds that brand's people and those shared by every brand.
+      tags: [lists]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/SmartListInput" }
+      responses:
+        "201":
+          description: The list. Its members fill in a few seconds.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SmartList" }
+        "400": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        "202": { $ref: "#/components/responses/MissionHeld" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/workspaces/{ws}/smart-lists/preview:
+    parameters: [{ $ref: "#/components/parameters/Workspace" }]
+    post:
+      operationId: previewSmartList
+      x-outflare-access: { scope: customers.read, brand_limited: true }
+      summary: Count who rules pick, without saving
+      description: |
+        Scope: customers.read. How many people the rules pick right now and the 10 newest of them, so you can check a
+        list before saving it. Nothing is stored.
+      tags: [lists]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                brand_id: { type: [string, "null"], description: "A brand's id or handle; null or left out for every brand." }
+                rules: { type: array, maxItems: 20, items: { $ref: "#/components/schemas/SmartListRule" } }
+                match: { type: string, enum: [all, any], default: all }
+      responses:
+        "200":
+          description: The count and a sample.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [members, sample]
+                properties:
+                  members: { type: integer, description: How many people match now. }
+                  sample: { type: array, items: { $ref: "#/components/schemas/SmartListPerson" } }
+        "400": { $ref: "#/components/responses/Error" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/workspaces/{ws}/smart-lists/{id}:
+    parameters:
+      - { $ref: "#/components/parameters/Workspace" }
+      - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+    get:
+      operationId: getSmartList
+      x-outflare-access: { scope: customers.read, brand_limited: true }
+      summary: Get a smart list
+      description: "Scope: customers.read."
+      tags: [lists]
+      responses:
+        "200":
+          description: The list.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SmartList" }
+        "404": { $ref: "#/components/responses/Error" }
+        default: { $ref: "#/components/responses/Error" }
+    patch:
+      operationId: updateSmartList
+      x-outflare-access: { scope: customers.manage, brand_limited: true }
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      summary: Change a smart list
+      description: |
+        Scope: customers.manage. Send only what changes. Changing the rules, match or brand refreshes the members
+        straight away.
+      tags: [lists]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/SmartListInput" }
+      responses:
+        "200":
+          description: The list.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SmartList" }
+        "400": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        "202": { $ref: "#/components/responses/MissionHeld" }
+        default: { $ref: "#/components/responses/Error" }
+    delete:
+      operationId: deleteSmartList
+      x-outflare-access: { scope: customers.manage, brand_limited: true }
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      summary: Delete a smart list. Its people stay.
+      description: "Scope: customers.manage."
+      tags: [lists]
+      responses:
+        "204": { description: Deleted. }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "202": { $ref: "#/components/responses/MissionHeld" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/workspaces/{ws}/smart-lists/{id}/members:
+    parameters:
+      - { $ref: "#/components/parameters/Workspace" }
+      - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+    get:
+      operationId: listSmartListMembers
+      x-outflare-access: { scope: customers.read, brand_limited: true }
+      summary: Who is in a smart list now, newest to join first
+      description: "Scope: customers.read. As of the list's refreshed_at. Page with cursor=next_cursor."
+      tags: [lists]
+      parameters:
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 200, default: 50 } }
+        - { name: before, in: query, schema: { type: string }, description: From next_before. }
+        - { $ref: "#/components/parameters/Cursor" }
+        - { $ref: "#/components/parameters/Fields" }
+      responses:
+        "200":
+          description: Members.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data: { type: array, items: { $ref: "#/components/schemas/SmartListPerson" } }
+                  next_before: { type: [string, "null"] }
+                  next_cursor: { $ref: "#/components/schemas/NextCursor" }
+        "400": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/workspaces/{ws}/smart-lists/{id}/refresh:
+    parameters:
+      - { $ref: "#/components/parameters/Workspace" }
+      - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+    post:
+      operationId: refreshSmartList
+      x-outflare-access: { scope: customers.manage, brand_limited: true }
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      summary: Bring a smart list's members up to date now
+      description: "Scope: customers.manage. Lists refresh on their own every 15 minutes; this does it now. Watch refreshed_at."
+      tags: [lists]
+      responses:
+        "202":
+          description: Queued.
+          content:
+            application/json:
+              schema: { oneOf: [{ $ref: "#/components/schemas/Queued" }, { $ref: "#/components/schemas/MissionHeld" }] }
+        "404": { $ref: "#/components/responses/Error" }
+        default: { $ref: "#/components/responses/Error" }
   /v1/workspaces/{ws}/data-providers:
     parameters: [{ $ref: "#/components/parameters/Workspace" }]
     get:
@@ -3916,6 +4106,89 @@ paths:
                     type: array
                     items: { $ref: "#/components/schemas/RecipientDecision" }
         "202": { $ref: "#/components/responses/MissionHeld" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/workspaces/{ws}/email-finder/pattern:
+    parameters: [{ $ref: "#/components/parameters/Workspace" }]
+    get:
+      operationId: emailFinderPattern
+      x-outflare-access: { scope: leads.read }
+      summary: The address shape a company domain uses
+      description: |
+        Scope: leads.read. Returns what this workspace has learned about a
+        domain's email pattern, from its own leads and verification outcomes,
+        building it on first use. Free, and shared with no other workspace.
+      tags: [leads]
+      parameters:
+        - { name: domain, in: query, required: true, schema: { type: string }, example: acme.example }
+      responses:
+        "200":
+          description: The learned pattern and a code saying how confident it is.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, code]
+                properties:
+                  data: { $ref: "#/components/schemas/EmailPattern" }
+                  code: { $ref: "#/components/schemas/EmailFindCode" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/workspaces/{ws}/email-finder/find:
+    parameters: [{ $ref: "#/components/parameters/Workspace" }]
+    post:
+      operationId: emailFinderFind
+      x-outflare-access: { scope: leads.read }
+      summary: Propose a likely work address for each person
+      description: |
+        Scope: leads.read. For each person (name plus company domain) proposes
+        the most likely address from the domain's learned pattern and
+        first-party history, with a confidence and a code. Free: it spends
+        nothing. At most 50 people a call, and only this workspace's own data.
+      tags: [leads]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/EmailFindRequest" }
+      responses:
+        "200":
+          description: One result per person, matched by ref.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data: { $ref: "#/components/schemas/EmailFindResult" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/workspaces/{ws}/email-finder/verify:
+    parameters: [{ $ref: "#/components/parameters/Workspace" }]
+    post:
+      operationId: emailFinderVerify
+      x-outflare-access: { scope: leads.manage }
+      summary: Check addresses through the verification waterfall
+      description: |
+        Scope: leads.manage. Checks each address cheapest tier first (first-party
+        history, the learned pattern, the free built-in checks) and rolls up to
+        the workspace's own connected verifier only when confidence stays low.
+        That last tier spends on the workspace's own account, never Outflare's. A
+        slow check answers pending and runs as its own short job; re-call to
+        collect it. At most 50 addresses a call.
+      tags: [leads]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/EmailVerifyRequest" }
+      responses:
+        "200":
+          description: One result per address, matched by ref.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data: { $ref: "#/components/schemas/EmailFindResult" }
         default: { $ref: "#/components/responses/Error" }
   /v1/workspaces/{ws}/mailboxes/{id}/test-send:
     parameters:
@@ -6044,6 +6317,232 @@ paths:
             application/json:
               schema: { oneOf: [{ type: object, required: [queued], properties: { queued: { type: array, items: { type: string, format: uuid } } } }, { $ref: "#/components/schemas/MissionHeld" }] }
         "503": { $ref: "#/components/responses/Error" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/workspaces/{ws}/ads/conversion-targets:
+    parameters:
+      - { $ref: "#/components/parameters/Workspace" }
+    get:
+      operationId: listAdConversionTargets
+      x-outflare-access: { scope: integrations.manage }
+      summary: List where an ad account's conversions can go
+      description: |
+        Scope: integrations.manage. Asks the platform, live: Google Ads
+        conversion actions that take uploaded clicks, Meta pixels (datasets),
+        Microsoft Advertising offline conversion goals, or Reddit's
+        Conversions API. `event_types` lists what a target takes as
+        `event_type` (Meta's Purchase or Lead), empty when the target is the
+        event already. `setup_needed` lists what the connection still needs
+        to send at all, such as Reddit's Conversions API token (add it with
+        PUT .../ads/connections/{integration_id}/setup).
+      tags: [ads]
+      parameters:
+        - { name: account_id, in: query, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "200":
+          description: The targets.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, setup_needed, integration_id]
+                properties:
+                  data: { type: array, items: { $ref: "#/components/schemas/AdConversionTarget" } }
+                  setup_needed: { type: array, items: { $ref: "#/components/schemas/ConnectorField" } }
+                  integration_id: { type: string, format: uuid }
+        "400": { $ref: "#/components/responses/Error" }
+        "422": { $ref: "#/components/responses/Error" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/workspaces/{ws}/ads/conversion-rules:
+    parameters:
+      - { $ref: "#/components/parameters/Workspace" }
+    get:
+      operationId: listAdConversionRules
+      x-outflare-access: { scope: analytics.read }
+      summary: List the rules that send conversions to ad platforms
+      description: "Scope: analytics.read. Each rule sends one customer event (such as signed_up) to one conversion on one ad account, with what it sent, skipped and failed in the last 30 days."
+      tags: [ads]
+      parameters:
+        - { name: account_id, in: query, schema: { type: string, format: uuid } }
+      responses:
+        "200":
+          description: The rules.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data: { type: array, items: { $ref: "#/components/schemas/AdConversionRule" } }
+        "400": { $ref: "#/components/responses/Error" }
+        default: { $ref: "#/components/responses/Error" }
+    post:
+      operationId: createAdConversionRule
+      x-outflare-access: { scope: integrations.manage }
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      summary: Send a customer event to an ad platform as a conversion
+      description: |
+        Scope: integrations.manage. From now on, each time the event
+        happens, the ad platform hears about it server to server within a
+        few minutes, with the ad click id from the person's visits and their
+        hashed email and phone, so its reporting and bidding learn from real
+        outcomes. Events from before the rule are never sent. The event id
+        is the one the browser pixel sends, so the platform counts each
+        conversion once. Consent follows GET .../ads/settings. The target is
+        checked with the platform first.
+      tags: [ads]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [account_id, event_name, target_id]
+              properties:
+                account_id: { type: string, format: uuid }
+                event_name: { type: string, example: order_completed }
+                target_id: { type: string, description: "From GET .../ads/conversion-targets." }
+                event_type: { type: string, example: Purchase, description: "One of the target's event_types; default the first." }
+                value_property: { type: string, example: total, description: "The event property that holds the value." }
+                value_unit: { type: string, enum: [major, minor], description: "major: 12.50; minor: 1250 (cents). Default major." }
+                fixed_value_micros: { type: integer, format: int64, minimum: 0, description: "A value for every conversion, used when value_property is empty or missing." }
+                currency: { type: string, example: USD, description: "Empty uses the event's currency property, then the account's." }
+                enabled: { type: boolean }
+      responses:
+        "201":
+          description: The rule.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AdConversionRule" }
+        "400": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        "422": { $ref: "#/components/responses/Error" }
+        "202": { $ref: "#/components/responses/MissionHeld" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/workspaces/{ws}/ads/conversion-rules/{id}:
+    parameters:
+      - { $ref: "#/components/parameters/Workspace" }
+      - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+    patch:
+      operationId: updateAdConversionRule
+      x-outflare-access: { scope: integrations.manage }
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      summary: Change or switch off a conversion rule
+      description: "Scope: integrations.manage. Change the event, the value or the currency, or switch the rule off (what was waiting is skipped, not sent later). The account and conversion are fixed: add a new rule instead."
+      tags: [ads]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                event_name: { type: string }
+                value_property: { type: string }
+                value_unit: { type: string, enum: [major, minor] }
+                fixed_value_micros: { type: integer, format: int64, minimum: 0 }
+                currency: { type: string }
+                enabled: { type: boolean }
+      responses:
+        "200":
+          description: The rule now.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AdConversionRule" }
+        "400": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        "202": { $ref: "#/components/responses/MissionHeld" }
+        default: { $ref: "#/components/responses/Error" }
+    delete:
+      operationId: deleteAdConversionRule
+      x-outflare-access: { scope: integrations.manage }
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      summary: Delete a conversion rule
+      description: "Scope: integrations.manage. Stops sending and removes the rule with its send log. Conversions the platform already has stay there."
+      tags: [ads]
+      responses:
+        "204": { description: Deleted. }
+        "404": { $ref: "#/components/responses/Error" }
+        "202": { $ref: "#/components/responses/MissionHeld" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/workspaces/{ws}/ads/conversion-sends:
+    parameters:
+      - { $ref: "#/components/parameters/Workspace" }
+    get:
+      operationId: listAdConversionSends
+      x-outflare-access: { scope: analytics.read }
+      summary: List the conversions sent to ad platforms
+      description: |
+        Scope: analytics.read. Newest first: every event a rule matched and
+        what happened. sent reached the platform (match_keys names the kinds
+        of identifiers it carried, such as gclid or email, never their
+        values); skipped was never sent, with the reason (no consent,
+        nothing to match on); failed was refused, or the platform could not
+        be reached after five tries; queued waits for the next send, within
+        a few minutes.
+      tags: [ads]
+      parameters:
+        - { name: rule_id, in: query, schema: { type: string, format: uuid } }
+        - { name: record_id, in: query, schema: { type: string, format: uuid } }
+        - { name: status, in: query, schema: { type: string, enum: [queued, sent, skipped, failed] } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 200, default: 50 } }
+        - { name: before, in: query, schema: { type: string, format: date-time } }
+        - { $ref: "#/components/parameters/Cursor" }
+        - { $ref: "#/components/parameters/Fields" }
+      responses:
+        "200":
+          description: The sends.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, next_before]
+                properties:
+                  data: { type: array, items: { $ref: "#/components/schemas/AdConversionSend" } }
+                  next_before: { type: [string, "null"], format: date-time }
+                  next_cursor: { $ref: "#/components/schemas/NextCursor" }
+        "400": { $ref: "#/components/responses/Error" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/workspaces/{ws}/ads/settings:
+    parameters:
+      - { $ref: "#/components/parameters/Workspace" }
+    get:
+      operationId: getAdSettings
+      x-outflare-access: { scope: analytics.read }
+      summary: Read the paid media settings
+      description: "Scope: analytics.read. consent_mode decides who conversions are sent for outside the EEA, the UK and Switzerland: opt_out (the default) sends unless the person withdrew consent for ad data, opt_in only when they granted it. Inside those countries, and when a person's country is unknown, a grant is always needed."
+      tags: [ads]
+      responses:
+        "200":
+          description: The settings.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AdSettings" }
+        default: { $ref: "#/components/responses/Error" }
+    put:
+      operationId: setAdSettings
+      x-outflare-access: { scope: integrations.manage }
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      summary: Change the paid media settings
+      description: "Scope: integrations.manage. Sets consent_mode."
+      tags: [ads]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [consent_mode]
+              properties:
+                consent_mode: { type: string, enum: [opt_out, opt_in] }
+      responses:
+        "200":
+          description: The settings now.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AdSettings" }
+        "400": { $ref: "#/components/responses/Error" }
+        "202": { $ref: "#/components/responses/MissionHeld" }
         default: { $ref: "#/components/responses/Error" }
   /v1/workspaces/{ws}/analytics/{id}/reports/{report}:
     parameters:
@@ -20418,7 +20917,7 @@ components:
         help: { type: string }
     Connector:
       type: object
-      required: [id, name, category, summary, description, website, docs_url, auth, auth_methods, auth_options, fields, capabilities, status, configured, connected, logo_url, logo_dark_url]
+      required: [id, name, category, summary, description, website, docs_url, auth, auth_methods, auth_options, fields, capabilities, status, configured, connected, logo_url, logo_dark_url, trust]
       properties:
         id: { type: string, example: zerobounce }
         name: { type: string }
@@ -20465,6 +20964,19 @@ components:
         connected: { type: integer, description: Accounts the workspace connected (0 in the public catalog). }
         logo_url: { type: string, format: uri, description: "The company's logo as a square SVG for light backgrounds, or a monogram when there is none. Public and cacheable." }
         logo_dark_url: { type: string, format: uri, description: The same logo for dark backgrounds. }
+        trust:
+          type: string
+          enum: [outflare, verified, community]
+          description: "How far the connector is trusted, shown as a badge. outflare: built by Outflare. verified: its publisher proved its domain and passed review. community: reviewed and added from the integrations/ folder, publisher not verified."
+        publisher: { $ref: "#/components/schemas/ConnectorPublisher" }
+    ConnectorPublisher:
+      type: object
+      required: [id, name]
+      description: Who built and looks after a connector added as a manifest in the integrations/ folder. Absent for connectors written into the engine, which are Outflare's own.
+      properties:
+        id: { type: string, example: outflare }
+        name: { type: string, example: Outflare }
+        website: { type: string, format: uri }
     ConnectorAuthMethod:
       type: string
       enum: [api_key, oauth2, none]
@@ -21120,6 +21632,61 @@ components:
         last_synced_at: { type: [string, "null"], format: date-time }
         last_error: { type: [string, "null"] }
         created_at: { type: string, format: date-time }
+    AdConversionTarget:
+      type: object
+      required: [id, name, event_types]
+      properties:
+        id: { type: string, description: "A Google conversion action id, a Meta pixel id, a Microsoft goal name or a Reddit account id." }
+        name: { type: string }
+        event_types: { type: array, items: { type: string }, description: "What the target takes as event_type; empty when the target is the event." }
+    AdConversionRule:
+      type: object
+      required: [id, ad_account_id, connector, event_name, target_id, target_name, event_type, value_property, value_unit, fixed_value_micros, currency, enabled, sent_30d, skipped_30d, failed_30d, queued, last_sent_at, created_at, updated_at]
+      properties:
+        id: { type: string, format: uuid }
+        ad_account_id: { type: string, format: uuid }
+        connector: { type: string, example: google_ads }
+        event_name: { type: string, example: order_completed }
+        target_id: { type: string }
+        target_name: { type: string }
+        event_type: { type: string, example: Purchase }
+        value_property: { type: string }
+        value_unit: { type: string, enum: [major, minor] }
+        fixed_value_micros: { type: [integer, "null"], format: int64 }
+        currency: { type: string }
+        enabled: { type: boolean }
+        sent_30d: { type: integer, format: int64 }
+        skipped_30d: { type: integer, format: int64 }
+        failed_30d: { type: integer, format: int64 }
+        queued: { type: integer, format: int64 }
+        last_sent_at: { type: [string, "null"], format: date-time }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    AdConversionSend:
+      type: object
+      required: [id, rule_id, connector, event_name, record_id, event_id, occurred_at, status, reason, match_keys, value_micros, currency, attempts, sent_at, created_at]
+      properties:
+        id: { type: string, format: uuid }
+        rule_id: { type: string, format: uuid }
+        connector: { type: string }
+        event_name: { type: string }
+        record_id: { type: [string, "null"], format: uuid }
+        event_id: { type: string, description: "The id the platform dedupes on: the event's message id, which the browser pixel sends too." }
+        occurred_at: { type: string, format: date-time }
+        status: { type: string, enum: [queued, sent, skipped, failed] }
+        reason: { type: string }
+        match_keys: { type: array, items: { type: string }, example: [gclid, email] }
+        value_micros: { type: [integer, "null"], format: int64 }
+        currency: { type: string }
+        attempts: { type: integer }
+        sent_at: { type: [string, "null"], format: date-time }
+        created_at: { type: string, format: date-time }
+    AdSettings:
+      type: object
+      required: [consent_mode, updated_at]
+      properties:
+        consent_mode: { type: string, enum: [opt_out, opt_in] }
+        updated_at: { type: [string, "null"], format: date-time }
     AdTotals:
       type: object
       description: "Money in micros (millionths) of the currency. Conversions, conversion value and platform_roas are what the platform claims: never add them across platforms."
@@ -24365,6 +24932,52 @@ components:
         skip_in_sequences: { type: boolean, description: "Leave out people active in another sequence. Default true." }
         min_score: { type: integer, minimum: 0, maximum: 100, description: "Leave out people whose ICP fit is below this, before spending credits. Default 0." }
         refresh_every_days: { type: [integer, "null"], minimum: 1, maximum: 365, description: Refresh on a schedule. Null refreshes only when asked. }
+    SmartListRule:
+      type: object
+      required: [op]
+      description: |
+        One test a person must pass. Set one of attribute (a field on their customer record, such as plan or
+        address.country), event (whether they did this customer event: exists, or not_exists; within_days limits it
+        to the last that many days) or in_list (whether they are a lead in this lead list: exists, or not_exists).
+        Attributes compare as journeys compare them: numbers as numbers, text ignoring case, dates as text.
+      properties:
+        attribute: { type: string, maxLength: 200 }
+        event: { type: string, maxLength: 100 }
+        within_days: { type: integer, minimum: 0, maximum: 3650, description: "event: only the last this many days; 0 or left out is ever." }
+        in_list: { type: string, format: uuid, description: A lead list's id. }
+        op: { type: string, enum: [eq, neq, gt, lt, contains, exists, not_exists] }
+        value: { description: "What eq, neq, gt, lt and contains compare with: text, a number or true or false." }
+    SmartListInput:
+      type: object
+      properties:
+        name: { type: string, minLength: 1, maxLength: 200 }
+        description: { type: string, maxLength: 2000 }
+        brand_id: { type: [string, "null"], description: "A brand's id or handle, or null for people of every brand." }
+        rules: { type: array, maxItems: 20, items: { $ref: "#/components/schemas/SmartListRule" } }
+        match: { type: string, enum: [all, any], description: "Whether a person must pass all the rules (the default) or any of them." }
+    SmartList:
+      type: object
+      required: [id, name, description, brand_id, rules, match, members, refreshed_at, error_code, created_at, updated_at]
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+        description: { type: string }
+        brand_id: { type: [string, "null"], format: uuid, description: "Null: people of every brand." }
+        rules: { type: array, items: { $ref: "#/components/schemas/SmartListRule" } }
+        match: { type: string, enum: [all, any] }
+        members: { type: integer, description: How many people matched at the last refresh. }
+        refreshed_at: { type: [string, "null"], format: date-time, description: "When the members were last brought up to date; null until the first refresh." }
+        error_code: { type: [string, "null"], description: "Why the last refresh failed (query_timeout: the rules took too long), or null." }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    SmartListPerson:
+      type: object
+      required: [id, name, email]
+      properties:
+        id: { type: string, format: uuid, description: The person's customer record. }
+        name: { type: string }
+        email: { type: string, description: "Their email address, or empty." }
+        entered_at: { type: string, format: date-time, description: "members: when they joined the list." }
     LeadList:
       type: object
       required: [id, name, description, project_id, brand_id, kind, leads, search_integration_id, filters, enrich_integration_ids, max_leads,
@@ -24501,12 +25114,13 @@ components:
               account: { type: object, additionalProperties: true }
     SuppressionReason:
       type: string
-      enum: [unsubscribed, bounced, complained, manual, do_not_contact, competitor, customer, partner, legal]
+      enum: [unsubscribed, bounced, complained, manual, do_not_contact, competitor, customer, partner, legal, blocklist]
       description: |
         Why the entry is there. unsubscribed stops cold and marketing email but
-        not receipts; competitor stops cold and marketing email; customer and
-        partner keep people out of cold email only; bounced, complained,
-        manual, legal and do_not_contact stop every email.
+        not receipts; competitor stops cold and marketing email; customer,
+        partner and blocklist (on a connected sequencer's blocklist) keep
+        people out of cold email only; bounced, complained, manual, legal and
+        do_not_contact stop every email.
     SuppressionMethod:
       type: string
       enum: [manual, automated, ai_suggested]
@@ -24589,6 +25203,87 @@ components:
           type: array
           description: "Why it is blocked: invalid_email, suppressed_email:<reason>, suppressed_domain:<reason>, marketing_withdrawn, other_brand:<handle>, third_party_no_consent or no_consent."
           items: { type: string }
+    EmailFindCode:
+      type: string
+      description: |
+        The outcome of finding or verifying one address, driving what a pipeline
+        does next: found/verified (use it), risky (your policy), not_found or
+        undeliverable (skip), pending (re-call shortly), retry (retry later),
+        stop (can't continue; see stop_code).
+      enum: [found, verified, risky, not_found, undeliverable, pending, retry, stop]
+    EmailPattern:
+      type: object
+      required: [domain, top_shape, confidence, provider, catch_all, sample_size]
+      properties:
+        domain: { type: string, example: acme.example }
+        top_shape: { type: string, description: "The dominant local-part shape, e.g. first.last, flast, firstlast; empty when nothing is known.", example: first.last }
+        confidence: { type: integer, minimum: 0, maximum: 100 }
+        provider: { type: string, description: "The mailbox provider inferred from MX (google, microsoft, …), empty when unknown." }
+        catch_all: { type: boolean, description: "The domain accepts any address, so a match proves nothing on its own." }
+        sample_size: { type: integer, description: "How many of the workspace's own addresses at this domain the shape was learned from." }
+    EmailFindCost:
+      type: object
+      required: [cents, units, provider]
+      properties:
+        cents: { type: integer, description: "Provider spend in cents; 0 for the free native tiers." }
+        units: { type: integer, description: "Provider credits or units used." }
+        provider: { type: string, description: "builtin or outflare for native work, otherwise the connector id." }
+        connection: { type: string, description: "Which workspace connection answered, when a bring-your-own-key verifier was used." }
+    EmailFindItemResult:
+      type: object
+      required: [ref, confidence, code, cost]
+      properties:
+        ref: { type: string, description: "The caller's own reference, echoed back so results match without relying on order." }
+        record_id: { type: string }
+        email: { type: string }
+        confidence: { type: integer, minimum: 0, maximum: 100 }
+        code: { $ref: "#/components/schemas/EmailFindCode" }
+        evidence: { type: string, description: "Where the confidence came from: history, pattern or default." }
+        cost: { $ref: "#/components/schemas/EmailFindCost" }
+        stop_code: { type: string, description: "An error-catalog code when code is stop." }
+        retry_after: { type: integer, description: "Nanoseconds to wait before re-calling, set when code is pending or retry." }
+    EmailFindResult:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items: { $ref: "#/components/schemas/EmailFindItemResult" }
+        retry_after: { type: integer, description: "Batch-level wait in nanoseconds, set when the whole batch is rate limited." }
+    EmailFindRequest:
+      type: object
+      required: [items]
+      properties:
+        idempotency_key: { type: string, description: "Repeat with the same key in the same workspace to get the cached result without re-spending." }
+        items:
+          type: array
+          minItems: 1
+          maxItems: 50
+          items:
+            type: object
+            required: [ref, first_name, last_name, domain]
+            properties:
+              ref: { type: string }
+              record_id: { type: string }
+              first_name: { type: string, example: Alice }
+              last_name: { type: string, example: Nguyen }
+              domain: { type: string, example: acme.example }
+              company: { type: string }
+    EmailVerifyRequest:
+      type: object
+      required: [items]
+      properties:
+        force: { type: boolean, description: "Re-check even if a recent result is cached." }
+        items:
+          type: array
+          minItems: 1
+          maxItems: 50
+          items:
+            type: object
+            required: [ref, email]
+            properties:
+              ref: { type: string }
+              email: { type: string, example: alice.nguyen@acme.example }
     AllocationMode:
       type: string
       enum: [suggest, automatic]
@@ -25422,7 +26117,7 @@ components:
       properties:
         id: { type: string, format: uuid }
         record_id: { type: string, format: uuid }
-        channel: { type: string, enum: [email, sms, push, whatsapp, in_app] }
+        channel: { type: string, enum: [email, sms, push, whatsapp, in_app, ads] }
         topic: { type: string, description: "A subscription topic's key, or empty for the whole channel." }
         purpose: { type: string, example: marketing }
         status: { type: string, enum: [granted, withdrawn] }
@@ -25436,7 +26131,7 @@ components:
       additionalProperties: false
       required: [channel, status]
       properties:
-        channel: { type: string, enum: [email, sms, push, whatsapp, in_app] }
+        channel: { type: string, enum: [email, sms, push, whatsapp, in_app, ads] }
         topic: { type: string, description: "A subscription topic's key, such as product_updates. Empty for the whole channel." }
         purpose: { type: string, description: Default marketing. }
         status: { type: string, enum: [granted, withdrawn] }

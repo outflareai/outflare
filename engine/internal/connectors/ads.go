@@ -2,8 +2,11 @@ package connectors
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"math"
 	"strings"
+	"time"
 )
 
 // Paid media: connectors that read the workspace's own ad accounts (Google
@@ -112,4 +115,81 @@ func MicrosOf(s string) int64 {
 		return Micros(*p)
 	}
 	return 0
+}
+
+// CapAdsConversions marks a connector that implements ConversionSender.
+const CapAdsConversions = "ads.conversions"
+
+// ConversionTarget is somewhere on the platform a conversion can be sent:
+// a Google Ads conversion action, a Meta pixel, a Microsoft Advertising
+// offline conversion goal, a Reddit account's Conversions API.
+type ConversionTarget struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+	// EventTypes are the platform's event types a rule picks from (Meta
+	// Purchase, Reddit SignUp); empty when the target already is the event.
+	EventTypes []string `json:"event_types"`
+}
+
+// AdConversion is one conversion to send. Identifiers are already
+// normalised and SHA-256 hashed (hex); nothing in it is in plain text but
+// the click ids, which the platform issued.
+type AdConversion struct {
+	// EventID is what the platform dedupes on, shared with the browser
+	// pixel when there is one.
+	EventID string
+	Time    time.Time
+	// EventType is the rule's event type, for platforms that need one.
+	EventType   string
+	ValueMicros *int64
+	Currency    string
+	// ClickIDs by the tracker's names: gclid, gbraid, wbraid, fbclid, fbc,
+	// fbp, msclkid, rdt_cid, twclid, li_fat_id. ClickTime is when the
+	// click's visit started (Meta builds fbc from it).
+	ClickIDs  map[string]string
+	ClickTime time.Time
+	// Emails and Phones are hashed with HashID; Phones from E.164 with
+	// the plus, PhoneDigits without it (Meta wants digits only).
+	Emails      []string
+	Phones      []string
+	PhoneDigits []string
+	ExternalID  string
+	// ConsentGranted is true when the person granted ad_user_data; false
+	// means it was not asked where the law allows sending without it.
+	ConsentGranted bool
+	// Index is the conversion's place in the batch, echoed in results.
+	Index int
+}
+
+// ConversionResult is how the platform took one conversion.
+type ConversionResult struct {
+	Index int
+	OK    bool
+	// Skipped means it was never sent: nothing the platform can match on.
+	Skipped bool
+	Reason  string
+	// MatchKeys names the kinds of identifier that were sent.
+	MatchKeys []string
+}
+
+// ConversionSender sends conversions to an ad platform. It changes nothing
+// but the platform's conversion counts.
+type ConversionSender interface {
+	Connector
+	// ConversionTargets lists where an account's conversions can go.
+	ConversionTargets(ctx context.Context, c *Client, creds Creds, acct AdAccount) ([]ConversionTarget, error)
+	// SendConversions sends one batch to one target and says how each
+	// conversion went. An error means the whole batch was not taken.
+	SendConversions(ctx context.Context, c *Client, creds Creds, acct AdAccount, target ConversionTarget, convs []AdConversion) ([]ConversionResult, error)
+}
+
+// HashID normalises and hashes an identifier the way every platform asks:
+// trimmed, lower case, SHA-256, hex.
+func HashID(v string) string {
+	v = strings.ToLower(strings.TrimSpace(v))
+	if v == "" {
+		return ""
+	}
+	sum := sha256.Sum256([]byte(v))
+	return hex.EncodeToString(sum[:])
 }

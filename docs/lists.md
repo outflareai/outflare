@@ -1,8 +1,12 @@
-# Lead lists
+# Lists
+
+The Lists page holds two kinds of list side by side. A **lead list** is a fixed group of leads you picked, imported or found with a search, ready to add to a sequence. A **smart list** is a group of people on your customer records that keeps itself up to date from rules, such as "paid in the last 90 days" ([below](#smart-lists)).
+
+## Lead lists
 
 A lead list is a group of leads you can add to a sequence. Make one by hand (CSV, API, an agent), or let Outflare build it from a search at a data provider you already pay for. Outflare never sells or stores contact data of its own: every person comes from your own provider account, and the provider bills you directly.
 
-Everything here works the same from the web app (Lead lists), the REST API and the MCP server.
+Everything here works the same from the web app (Lists), the REST API and the MCP server.
 
 ## Connect a data provider
 
@@ -78,3 +82,41 @@ Reading lists and runs needs `leads.read`; creating, editing, running and deleti
 ## Agents
 
 MCP tools: `list_data_providers`, `preview_lead_search`, `create_lead_list`, `update_lead_list`, `run_lead_list`, `get_list_run`, `list_list_runs`, `cancel_list_run`, `list_lead_lists`, `get_lead_list`, `list_lead_list_members`, `get_lead_sources`. The tools that can spend credits are marked as reaching the outside world, so MCP clients can ask before running them.
+
+## Smart lists
+
+A smart list is a group of people on your [customer records](customers.md) that keeps itself up to date: Outflare adds people when they start matching its rules and removes them when they stop. Make one from **Lists → New list → Smart list**, pick the rules, watch the count change as you go, and save.
+
+Each rule tests one thing about a person:
+
+- **A field** on their record, such as `billing_plan` or `country`: is, is not, is more than, is less than, contains, is set or is not set. Numbers compare as numbers, text ignoring case, and dates as text (so `2026-01-01` style dates sort). For a field that holds a list, contains checks its items.
+- **An event** they did, such as `payment_succeeded`: did or didn't, ever or in the last N days. Events from the website tracker don't count, because anyone with the site key can send them.
+- **A lead list** they are in, or aren't: a fixed list can feed a smart list.
+
+A person must pass all the rules, or any of them (`match`). With no rules a list holds everyone.
+
+Only people count: not companies, merged records or archived ones. A list for one brand holds that brand's people and the people shared by every brand; a list for every brand holds everyone.
+
+Lists fill straight away when saved, and refresh on their own every 15 minutes, which also moves people in and out of time windows such as "in the last 90 days". **Refresh now** does it at once. If a refresh takes over two minutes, it stops and the list shows `query_timeout`: narrow the rules, for example with a time window on an event.
+
+```sh
+# How many people would these rules pick? Nothing is saved.
+curl -X POST "localhost:8080/v1/workspaces/$WS/smart-lists/preview" \
+  -H "Authorization: Bearer $OUTFLARE_TOKEN" -H "Content-Type: application/json" \
+  -d '{"rules": [{"attribute": "billing_plan", "op": "eq", "value": "pro"}, {"event": "payment_succeeded", "op": "exists", "within_days": 90}]}'
+
+# Save it; it fills in a few seconds
+curl -X POST "localhost:8080/v1/workspaces/$WS/smart-lists" \
+  -H "Authorization: Bearer $OUTFLARE_TOKEN" -H "Content-Type: application/json" \
+  -d '{"name": "Paying customers", "brand_id": "northpeak", "rules": [{"attribute": "billing_plan", "op": "eq", "value": "pro"},
+       {"event": "payment_succeeded", "op": "exists", "within_days": 90}]}'
+
+# Who is in it now, newest to join first
+curl "localhost:8080/v1/workspaces/$WS/smart-lists/$LIST/members" -H "Authorization: Bearer $OUTFLARE_TOKEN"
+```
+
+Reading smart lists needs `customers.read`; making, changing, refreshing and deleting them needs `customers.manage`. A token or member limited to some brands sees lists for its brands and those for every brand, but only its brands' people in them, and can only change its brands' lists. Deleting a list never deletes the people.
+
+MCP tools: `list_smart_lists`, `get_smart_list`, `list_smart_list_members`, `preview_smart_list`, `create_smart_list`, `update_smart_list`, `refresh_smart_list`, `delete_smart_list`.
+
+Coming next: sending to a smart list from email broadcasts, starting journeys when someone joins one, and switching a smart list on for each ad network.

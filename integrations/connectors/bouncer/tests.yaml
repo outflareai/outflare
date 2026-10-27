@@ -1,0 +1,82 @@
+# Recorded answers with fake data. Run them with the engine's tests
+# (go test ./engine/internal/connectors/manifest/).
+- name: the key works and credits are read
+  run: test
+  creds: { api_key: test-not-a-real-key }
+  request:
+    method: GET
+    path: /v1.1/credits
+    headers: { x-api-key: test-not-a-real-key }
+  answer:
+    body: { credits: 1200 }
+  expect: { credits: 1200 }
+
+- name: a wrong key is an auth error
+  run: test
+  creds: { api_key: test-not-a-real-key }
+  answer:
+    status: 401
+    body: { message: Unauthorized }
+  expect_error: auth
+
+- name: a deliverable address
+  run: verify
+  creds: { api_key: test-not-a-real-key }
+  input: { email: ana@acme.example }
+  request:
+    method: GET
+    path: /v1.1/email/verify
+    query: { email: ana@acme.example, timeout: "20" }
+    headers: { x-api-key: test-not-a-real-key }
+  answer:
+    body:
+      email: ana@acme.example
+      status: deliverable
+      reason: accepted_email
+      domain: { name: acme.example, acceptAll: "no", disposable: "no", free: "no" }
+      account: { role: "no", disabled: "no", fullMailbox: "no" }
+      dns: { type: MX, record: mx.acme.example }
+      provider: google.com
+      score: 100
+      toxic: unknown
+  expect:
+    email: ana@acme.example
+    status: deliverable
+    reason: accepted_email
+    provider_status: deliverable
+    catch_all: false
+    disposable: false
+    role: false
+    free: false
+    score: 100
+
+- name: a catch-all role address is risky
+  run: verify
+  creds: { api_key: test-not-a-real-key }
+  input: { email: sales@northpeak.example }
+  answer:
+    body:
+      status: risky
+      reason: low_deliverability
+      domain: { acceptAll: "yes", disposable: "no", free: "no" }
+      account: { role: "yes" }
+      didYouMean: ""
+      score: 50
+  expect: { status: risky, catch_all: true, role: true, score: 50 }
+
+- name: an unknown status stays unknown
+  run: verify
+  creds: { api_key: test-not-a-real-key }
+  input: { email: li@acme.example }
+  answer:
+    body: { status: unknown, reason: dns_error }
+  expect: { status: unknown, reason: dns_error }
+
+- name: out of credits is a quota error
+  run: verify
+  creds: { api_key: test-not-a-real-key }
+  input: { email: ana@acme.example }
+  answer:
+    status: 402
+    body: { message: Not enough credits }
+  expect_error: quota

@@ -1580,6 +1580,55 @@ class Operations(_Mixin):
             idempotency_key=idempotency_key,
         )
 
+    def create_ad_conversion_rule(
+        self,
+        *,
+        ws: str | None = None,
+        account_id: str,
+        currency: str | None = None,
+        enabled: bool | None = None,
+        event_name: str,
+        event_type: str | None = None,
+        fixed_value_micros: int | None = None,
+        target_id: str,
+        value_property: str | None = None,
+        value_unit: Literal["major", "minor"] | None = None,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Send a customer event to an ad platform as a conversion.
+
+        Scope: integrations.manage. From now on, each time the event
+        happens, the ad platform hears about it server to server within a
+        few minutes, with the ad click id from the person's visits and their
+        hashed email and phone, so its reporting and bidding learn from real
+        outcomes. Events from before the rule are never sent. The event id
+        is the one the browser pixel sends, so the platform counts each
+        conversion once. Consent follows GET .../ads/settings. The target is
+        checked with the platform first.
+
+        Needs: the integrations.manage scope.
+        POST /v1/workspaces/{ws}/ads/conversion-rules
+        """
+        return self._call(
+            "POST",
+            "/v1/workspaces/{ws}/ads/conversion-rules",
+            path={"ws": ws},
+            body={
+                "account_id": account_id,
+                "currency": currency,
+                "enabled": enabled,
+                "event_name": event_name,
+                "event_type": event_type,
+                "fixed_value_micros": fixed_value_micros,
+                "target_id": target_id,
+                "value_property": value_property,
+                "value_unit": value_unit,
+            },
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
     def create_agency_token(
         self,
         *,
@@ -3095,6 +3144,36 @@ class Operations(_Mixin):
             idempotency_key=idempotency_key,
         )
 
+    def create_smart_list(
+        self,
+        *,
+        ws: str | None = None,
+        brand_id: str | None = None,
+        description: str | None = None,
+        match: Literal["all", "any"] | None = None,
+        name: str | None = None,
+        rules: list[dict[str, Any]] | None = None,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Create a smart list.
+
+        Scope: customers.manage. The list fills itself straight away, then stays up to date: Outflare adds people who
+        start matching and removes people who stop, within about 15 minutes. Check the count first with
+        POST .../smart-lists/preview. A brand's list holds that brand's people and those shared by every brand.
+
+        Needs: the customers.manage scope.
+        POST /v1/workspaces/{ws}/smart-lists
+        """
+        return self._call(
+            "POST",
+            "/v1/workspaces/{ws}/smart-lists",
+            path={"ws": ws},
+            body={"brand_id": brand_id, "description": description, "match": match, "name": name, "rules": rules},
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
     def create_social_action(
         self,
         *,
@@ -3356,6 +3435,27 @@ class Operations(_Mixin):
         return self._call(
             "POST",
             "/v1/workspaces/{ws}/allocation/suggestions/{id}/decline",
+            path={"id": id, "ws": ws},
+            idempotency_key=idempotency_key,
+        )
+
+    def delete_ad_conversion_rule(
+        self,
+        id: str,
+        *,
+        ws: str | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Delete a conversion rule.
+
+        Scope: integrations.manage. Stops sending and removes the rule with its send log. Conversions the platform already has stay there.
+
+        Needs: the integrations.manage scope.
+        DELETE /v1/workspaces/{ws}/ads/conversion-rules/{id}
+        """
+        return self._call(
+            "DELETE",
+            "/v1/workspaces/{ws}/ads/conversion-rules/{id}",
             path={"id": id, "ws": ws},
             idempotency_key=idempotency_key,
         )
@@ -3957,6 +4057,27 @@ class Operations(_Mixin):
             idempotency_key=idempotency_key,
         )
 
+    def delete_smart_list(
+        self,
+        id: str,
+        *,
+        ws: str | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Delete a smart list. Its people stay.
+
+        Scope: customers.manage.
+
+        Needs: the customers.manage scope.
+        DELETE /v1/workspaces/{ws}/smart-lists/{id}
+        """
+        return self._call(
+            "DELETE",
+            "/v1/workspaces/{ws}/smart-lists/{id}",
+            path={"id": id, "ws": ws},
+            idempotency_key=idempotency_key,
+        )
+
     def delete_social_watch(
         self,
         id: str,
@@ -4204,6 +4325,85 @@ class Operations(_Mixin):
             idempotency_key=idempotency_key,
         )
 
+    def email_finder_find(
+        self,
+        *,
+        ws: str | None = None,
+        items: list[dict[str, Any]],
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Propose a likely work address for each person.
+
+        Scope: leads.read. For each person (name plus company domain) proposes
+        the most likely address from the domain's learned pattern and
+        first-party history, with a confidence and a code. Free: it spends
+        nothing. At most 50 people a call, and only this workspace's own data.
+
+        Needs: the leads.read scope.
+        POST /v1/workspaces/{ws}/email-finder/find
+        """
+        return self._call(
+            "POST",
+            "/v1/workspaces/{ws}/email-finder/find",
+            path={"ws": ws},
+            body={"items": items},
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
+    def email_finder_pattern(
+        self,
+        *,
+        ws: str | None = None,
+        domain: str,
+    ) -> Any:
+        """The address shape a company domain uses.
+
+        Scope: leads.read. Returns what this workspace has learned about a
+        domain's email pattern, from its own leads and verification outcomes,
+        building it on first use. Free, and shared with no other workspace.
+
+        Needs: the leads.read scope.
+        GET /v1/workspaces/{ws}/email-finder/pattern
+        """
+        return self._call(
+            "GET",
+            "/v1/workspaces/{ws}/email-finder/pattern",
+            path={"ws": ws},
+            query={"domain": domain},
+        )
+
+    def email_finder_verify(
+        self,
+        *,
+        ws: str | None = None,
+        force: bool | None = None,
+        items: list[dict[str, Any]],
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Check addresses through the verification waterfall.
+
+        Scope: leads.manage. Checks each address cheapest tier first (first-party
+        history, the learned pattern, the free built-in checks) and rolls up to
+        the workspace's own connected verifier only when confidence stays low.
+        That last tier spends on the workspace's own account, never Outflare's. A
+        slow check answers pending and runs as its own short job; re-call to
+        collect it. At most 50 addresses a call.
+
+        Needs: the leads.manage scope.
+        POST /v1/workspaces/{ws}/email-finder/verify
+        """
+        return self._call(
+            "POST",
+            "/v1/workspaces/{ws}/email-finder/verify",
+            path={"ws": ws},
+            body={"force": force, "items": items},
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
     def end_record_relationship(
         self,
         record: str,
@@ -4369,6 +4569,24 @@ class Operations(_Mixin):
                 "brand": brand,
                 "currency": currency,
             },
+        )
+
+    def get_ad_settings(
+        self,
+        *,
+        ws: str | None = None,
+    ) -> Any:
+        """Read the paid media settings.
+
+        Scope: analytics.read. consent_mode decides who conversions are sent for outside the EEA, the UK and Switzerland: opt_out (the default) sends unless the person withdrew consent for ad data, opt_in only when they granted it. Inside those countries, and when a person's country is unknown, a grant is always needed.
+
+        Needs: the analytics.read scope.
+        GET /v1/workspaces/{ws}/ads/settings
+        """
+        return self._call(
+            "GET",
+            "/v1/workspaces/{ws}/ads/settings",
+            path={"ws": ws},
         )
 
     def get_ads_summary(
@@ -6907,6 +7125,25 @@ class Operations(_Mixin):
             path={"site": site, "ws": ws},
         )
 
+    def get_smart_list(
+        self,
+        id: str,
+        *,
+        ws: str | None = None,
+    ) -> Any:
+        """Get a smart list.
+
+        Scope: customers.read.
+
+        Needs: the customers.read scope.
+        GET /v1/workspaces/{ws}/smart-lists/{id}
+        """
+        return self._call(
+            "GET",
+            "/v1/workspaces/{ws}/smart-lists/{id}",
+            path={"id": id, "ws": ws},
+        )
+
     def get_social_account(
         self,
         id: str,
@@ -7609,6 +7846,93 @@ class Operations(_Mixin):
             "GET",
             "/v1/workspaces/{ws}/ads/connections",
             path={"ws": ws},
+        )
+
+    def list_ad_conversion_rules(
+        self,
+        *,
+        ws: str | None = None,
+        account_id: str | None = None,
+    ) -> Any:
+        """List the rules that send conversions to ad platforms.
+
+        Scope: analytics.read. Each rule sends one customer event (such as signed_up) to one conversion on one ad account, with what it sent, skipped and failed in the last 30 days.
+
+        Needs: the analytics.read scope.
+        GET /v1/workspaces/{ws}/ads/conversion-rules
+        """
+        return self._call(
+            "GET",
+            "/v1/workspaces/{ws}/ads/conversion-rules",
+            path={"ws": ws},
+            query={"account_id": account_id},
+        )
+
+    def list_ad_conversion_sends(
+        self,
+        *,
+        ws: str | None = None,
+        rule_id: str | None = None,
+        record_id: str | None = None,
+        status: Literal["queued", "sent", "skipped", "failed"] | None = None,
+        limit: int | None = None,
+        before: str | None = None,
+        cursor: str | None = None,
+        fields: list[str] | None = None,
+    ) -> Any:
+        """List the conversions sent to ad platforms.
+
+        Scope: analytics.read. Newest first: every event a rule matched and
+        what happened. sent reached the platform (match_keys names the kinds
+        of identifiers it carried, such as gclid or email, never their
+        values); skipped was never sent, with the reason (no consent,
+        nothing to match on); failed was refused, or the platform could not
+        be reached after five tries; queued waits for the next send, within
+        a few minutes.
+
+        Needs: the analytics.read scope.
+        GET /v1/workspaces/{ws}/ads/conversion-sends
+        """
+        return self._call(
+            "GET",
+            "/v1/workspaces/{ws}/ads/conversion-sends",
+            path={"ws": ws},
+            query={
+                "rule_id": rule_id,
+                "record_id": record_id,
+                "status": status,
+                "limit": limit,
+                "before": before,
+                "cursor": cursor,
+                "fields": fields,
+            },
+        )
+
+    def list_ad_conversion_targets(
+        self,
+        *,
+        ws: str | None = None,
+        account_id: str,
+    ) -> Any:
+        """List where an ad account's conversions can go.
+
+        Scope: integrations.manage. Asks the platform, live: Google Ads
+        conversion actions that take uploaded clicks, Meta pixels (datasets),
+        Microsoft Advertising offline conversion goals, or Reddit's
+        Conversions API. `event_types` lists what a target takes as
+        `event_type` (Meta's Purchase or Lead), empty when the target is the
+        event already. `setup_needed` lists what the connection still needs
+        to send at all, such as Reddit's Conversions API token (add it with
+        PUT .../ads/connections/{integration_id}/setup).
+
+        Needs: the integrations.manage scope.
+        GET /v1/workspaces/{ws}/ads/conversion-targets
+        """
+        return self._call(
+            "GET",
+            "/v1/workspaces/{ws}/ads/conversion-targets",
+            path={"ws": ws},
+            query={"account_id": account_id},
         )
 
     def list_agency_clients(
@@ -10458,6 +10782,52 @@ class Operations(_Mixin):
             query={"brand": brand},
         )
 
+    def list_smart_list_members(
+        self,
+        id: str,
+        *,
+        ws: str | None = None,
+        limit: int | None = None,
+        before: str | None = None,
+        cursor: str | None = None,
+        fields: list[str] | None = None,
+    ) -> Any:
+        """Who is in a smart list now, newest to join first.
+
+        Scope: customers.read. As of the list's refreshed_at. Page with cursor=next_cursor.
+
+        Needs: the customers.read scope.
+        GET /v1/workspaces/{ws}/smart-lists/{id}/members
+        """
+        return self._call(
+            "GET",
+            "/v1/workspaces/{ws}/smart-lists/{id}/members",
+            path={"id": id, "ws": ws},
+            query={"limit": limit, "before": before, "cursor": cursor, "fields": fields},
+        )
+
+    def list_smart_lists(
+        self,
+        *,
+        ws: str | None = None,
+        brand: str | None = None,
+    ) -> Any:
+        """List smart lists.
+
+        Scope: customers.read. Groups of people on customer records that keep themselves up to date from rules, by name.
+        Lead lists (GET .../lead-lists) hold the leads someone picked or a search found; a smart list holds whoever
+        matches its rules now.
+
+        Needs: the customers.read scope.
+        GET /v1/workspaces/{ws}/smart-lists
+        """
+        return self._call(
+            "GET",
+            "/v1/workspaces/{ws}/smart-lists",
+            path={"ws": ws},
+            query={"brand": brand},
+        )
+
     def list_social_account_days(
         self,
         id: str,
@@ -11666,6 +12036,33 @@ class Operations(_Mixin):
             idempotency_key=idempotency_key,
         )
 
+    def preview_smart_list(
+        self,
+        *,
+        ws: str | None = None,
+        brand_id: str | None = None,
+        match: Literal["all", "any"] | None = None,
+        rules: list[dict[str, Any]] | None = None,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Count who rules pick, without saving.
+
+        Scope: customers.read. How many people the rules pick right now and the 10 newest of them, so you can check a
+        list before saving it. Nothing is stored.
+
+        Needs: the customers.read scope.
+        POST /v1/workspaces/{ws}/smart-lists/preview
+        """
+        return self._call(
+            "POST",
+            "/v1/workspaces/{ws}/smart-lists/preview",
+            path={"ws": ws},
+            body={"brand_id": brand_id, "match": match, "rules": rules},
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
     def publish_email_template(
         self,
         id: str,
@@ -11801,7 +12198,7 @@ class Operations(_Mixin):
         record: str,
         *,
         ws: str | None = None,
-        channel: Literal["email", "sms", "push", "whatsapp", "in_app"],
+        channel: Literal["email", "sms", "push", "whatsapp", "in_app", "ads"],
         evidence: dict[str, Any] | None = None,
         occurred_at: str | None = None,
         purpose: str | None = None,
@@ -11936,6 +12333,27 @@ class Operations(_Mixin):
         return self._call(
             "POST",
             "/v1/workspaces/{ws}/infra-plans/{id}/refresh",
+            path={"id": id, "ws": ws},
+            idempotency_key=idempotency_key,
+        )
+
+    def refresh_smart_list(
+        self,
+        id: str,
+        *,
+        ws: str | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Bring a smart list's members up to date now.
+
+        Scope: customers.manage. Lists refresh on their own every 15 minutes; this does it now. Watch refreshed_at.
+
+        Needs: the customers.manage scope.
+        POST /v1/workspaces/{ws}/smart-lists/{id}/refresh
+        """
+        return self._call(
+            "POST",
+            "/v1/workspaces/{ws}/smart-lists/{id}/refresh",
             path={"id": id, "ws": ws},
             idempotency_key=idempotency_key,
         )
@@ -13156,6 +13574,30 @@ class Operations(_Mixin):
             "/v1/workspaces/{ws}/ads/connections/{id}/setup",
             path={"id": id, "ws": ws},
             body={"values": values},
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
+    def set_ad_settings(
+        self,
+        *,
+        ws: str | None = None,
+        consent_mode: Literal["opt_out", "opt_in"],
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Change the paid media settings.
+
+        Scope: integrations.manage. Sets consent_mode.
+
+        Needs: the integrations.manage scope.
+        PUT /v1/workspaces/{ws}/ads/settings
+        """
+        return self._call(
+            "PUT",
+            "/v1/workspaces/{ws}/ads/settings",
+            path={"ws": ws},
+            body={"consent_mode": consent_mode},
             extra_body=extra_body,
             idempotency_key=idempotency_key,
         )
@@ -14402,6 +14844,43 @@ class Operations(_Mixin):
             "/v1/workspaces/{ws}/ads/accounts/{id}",
             path={"id": id, "ws": ws},
             body={"brand": brand, "sync_on": sync_on},
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
+    def update_ad_conversion_rule(
+        self,
+        id: str,
+        *,
+        ws: str | None = None,
+        currency: str | None = None,
+        enabled: bool | None = None,
+        event_name: str | None = None,
+        fixed_value_micros: int | None = None,
+        value_property: str | None = None,
+        value_unit: Literal["major", "minor"] | None = None,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Change or switch off a conversion rule.
+
+        Scope: integrations.manage. Change the event, the value or the currency, or switch the rule off (what was waiting is skipped, not sent later). The account and conversion are fixed: add a new rule instead.
+
+        Needs: the integrations.manage scope.
+        PATCH /v1/workspaces/{ws}/ads/conversion-rules/{id}
+        """
+        return self._call(
+            "PATCH",
+            "/v1/workspaces/{ws}/ads/conversion-rules/{id}",
+            path={"id": id, "ws": ws},
+            body={
+                "currency": currency,
+                "enabled": enabled,
+                "event_name": event_name,
+                "fixed_value_micros": fixed_value_micros,
+                "value_property": value_property,
+                "value_unit": value_unit,
+            },
             extra_body=extra_body,
             idempotency_key=idempotency_key,
         )
@@ -16698,6 +17177,36 @@ class Operations(_Mixin):
             "/v1/workspaces/{ws}/site-keys/{id}",
             path={"id": id, "ws": ws},
             body={"brand_id": brand_id, "name": name, "origins": origins},
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
+    def update_smart_list(
+        self,
+        id: str,
+        *,
+        ws: str | None = None,
+        brand_id: str | None = None,
+        description: str | None = None,
+        match: Literal["all", "any"] | None = None,
+        name: str | None = None,
+        rules: list[dict[str, Any]] | None = None,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Change a smart list.
+
+        Scope: customers.manage. Send only what changes. Changing the rules, match or brand refreshes the members
+        straight away.
+
+        Needs: the customers.manage scope.
+        PATCH /v1/workspaces/{ws}/smart-lists/{id}
+        """
+        return self._call(
+            "PATCH",
+            "/v1/workspaces/{ws}/smart-lists/{id}",
+            path={"id": id, "ws": ws},
+            body={"brand_id": brand_id, "description": description, "match": match, "name": name, "rules": rules},
             extra_body=extra_body,
             idempotency_key=idempotency_key,
         )

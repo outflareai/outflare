@@ -29,6 +29,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/outflareai/outflare/engine/internal/adconv"
 	"github.com/outflareai/outflare/engine/internal/adsync"
 	"github.com/outflareai/outflare/engine/internal/aivis"
 	"github.com/outflareai/outflare/engine/internal/allocation"
@@ -45,6 +46,7 @@ import (
 	"github.com/outflareai/outflare/engine/internal/db"
 	"github.com/outflareai/outflare/engine/internal/deploys"
 	"github.com/outflareai/outflare/engine/internal/digests"
+	"github.com/outflareai/outflare/engine/internal/emailfind"
 	"github.com/outflareai/outflare/engine/internal/emails"
 	"github.com/outflareai/outflare/engine/internal/eventstore"
 	"github.com/outflareai/outflare/engine/internal/experiments"
@@ -72,6 +74,7 @@ import (
 	"github.com/outflareai/outflare/engine/internal/sending"
 	"github.com/outflareai/outflare/engine/internal/seointel"
 	"github.com/outflareai/outflare/engine/internal/seosync"
+	"github.com/outflareai/outflare/engine/internal/smartlists"
 	"github.com/outflareai/outflare/engine/internal/sysmail"
 	"github.com/outflareai/outflare/engine/internal/telemetry"
 	"github.com/outflareai/outflare/engine/internal/track"
@@ -233,6 +236,10 @@ func Run(ctx context.Context, log *slog.Logger, cmd string, exts ...Extension) e
 	verifier.Register(queue)
 	lister := &lists.Service{Pool: pool, Store: integrations, Verify: verifier, Log: log}
 	lister.Register(queue)
+	// Email finding: learns each domain's address shape from the workspace's
+	// own leads and their outcomes, and runs the find/verify waterfall.
+	emailFinder := &emailfind.Service{Pool: pool, Verify: verifier, Resolver: net.DefaultResolver, Log: log}
+	emailFinder.Register(queue)
 	vendors := &vendorsync.Service{Pool: pool, Box: box, Store: integrations, Mail: mail, PublicURL: cfg.PublicURL, Log: log}
 	// Infrastructure plans buy domains and mailboxes on the customer's own
 	// Cheap Inboxes account.
@@ -262,6 +269,8 @@ func Run(ctx context.Context, log *slog.Logger, cmd string, exts ...Extension) e
 	rankChecks.Register(queue)
 	adSync := &adsync.Syncer{Pool: pool, Store: integrations, Log: log}
 	adSync.Register(queue)
+	adConv := &adconv.Sender{Pool: pool, Store: integrations, Log: log}
+	adConv.Register(queue)
 	// Research places unknown email domains by reading their homepage with
 	// the workspace's own page reader and its own AI key. Its Models comes
 	// from the API server below, so the monthly AI limit is checked in one
@@ -305,6 +314,9 @@ func Run(ctx context.Context, log *slog.Logger, cmd string, exts ...Extension) e
 	// Journeys start runs from customer events and move them through their
 	// steps, sending with the lifecycle service.
 	(&journeys.Service{Pool: pool, Emails: lifecycle, Log: log}).Register(queue)
+	// Smart lists keep their members up to date from their rules.
+	smart := &smartlists.Service{Pool: pool, Log: log}
+	smart.Register(queue)
 	// The daily or weekly digest of each workspace, emailed only through
 	// the workspace's own email provider.
 	digest := &digests.Service{Pool: pool, Emails: lifecycle, PublicURL: cfg.PublicURL, Log: log}
@@ -317,7 +329,7 @@ func Run(ctx context.Context, log *slog.Logger, cmd string, exts ...Extension) e
 	}
 	// Work that moves through stages one item at a time (docs/pipeline.md).
 	stages := pipeline.NewRunner(pool, log)
-	host := &Host{Pool: pool, Log: log, PublicURL: cfg.PublicURL, signedInDomain: cfg.SignedInCookieDomain, queue: queue, box: box, telemetry: tel, mailer: mailer, store: integrations, stages: stages}
+	host := &Host{Pool: pool, Log: log, PublicURL: cfg.PublicURL, signedInDomain: cfg.SignedInCookieDomain, queue: queue, box: box, telemetry: tel, mailer: mailer, store: integrations, emailFinder: emailFinder, stages: stages}
 	for _, ext := range exts {
 		if err := ext.Setup(ctx, host); err != nil {
 			return fmt.Errorf("extension %s: %w", ext.Name(), err)
@@ -339,7 +351,7 @@ func Run(ctx context.Context, log *slog.Logger, cmd string, exts ...Extension) e
 	}
 	apiServer := api.NewServer(pool, log, api.Options{
 		WebDir: cfg.WebDir, PublicURL: cfg.PublicURL, Mailboxes: mail, Sending: send, Inbox: syncer, OAuth: tokens, Allocation: alloc,
-		Box: box, Integrations: integrations, Verify: verifier, Imports: importer, Platforms: plat, Lists: lister, Outcomes: results, AnalyticsSync: analyticsSync, SEOSync: seoSync, AdSync: adSync, Crawl: crawler, Vendors: vendors, Inbound: liveUpdates, Telemetry: tel, Mailer: mailer, Webhooks: hooks, Emails: lifecycle, Research: researcher, RateLimit: cfg.RateLimit, Passkeys: cfg.PasskeysOn(), ClientIPHeader: cfg.ClientIPHeader,
+		Box: box, Integrations: integrations, Verify: verifier, EmailFinder: emailFinder, Imports: importer, Platforms: plat, Lists: lister, Outcomes: results, AnalyticsSync: analyticsSync, SEOSync: seoSync, AdSync: adSync, Crawl: crawler, Vendors: vendors, Inbound: liveUpdates, Telemetry: tel, Mailer: mailer, Webhooks: hooks, Emails: lifecycle, Research: researcher, RateLimit: cfg.RateLimit, Passkeys: cfg.PasskeysOn(), ClientIPHeader: cfg.ClientIPHeader,
 		PostHogKey: cfg.PostHogKey, PostHogHost: cfg.PostHogHost, MCP: mcpUpstream, PrivacyURL: cfg.PrivacyURL, TermsURL: cfg.TermsURL, CommunityLinks: cfg.CommunityLinks, CommunityXURL: cfg.CommunityXURL, SignedInCookieDomain: cfg.SignedInCookieDomain,
 		SiteInbox: true, QueryConnections: queryConnections(cfg.QueryConnections),
 		Routes: host.registerRoutes, Middleware: host.middleware, Capabilities: host.capabilities, WorkspaceRoutes: host.workspaceRoutes, MenuLinks: host.menuLinks,
@@ -461,6 +473,11 @@ func Run(ctx context.Context, log *slog.Logger, cmd string, exts ...Extension) e
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
+			smart.Run(ctx, time.Minute)
+		}()
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
 			plat.Loop(ctx, time.Minute)
 		}()
 		wg.Add(1)
@@ -570,7 +587,16 @@ func Run(ctx context.Context, log *slog.Logger, cmd string, exts ...Extension) e
 		go func() {
 			defer wg.Done()
 			rankChecks.Run(ctx)
+		}()
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
 			adSync.Run(ctx)
+		}()
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			adConv.Run(ctx)
 		}()
 		wg.Add(1)
 		go func() {

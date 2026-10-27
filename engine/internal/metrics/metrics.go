@@ -177,6 +177,16 @@ var (
 		Help: "Workspaces with meaning-based search turned on.",
 	})
 
+	// Conversions sent back to ad platforms. connector is a catalog id.
+	adConversions = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Namespace: namespace, Subsystem: "ad_conversions", Name: "total",
+		Help: "Conversions sent back to ad platforms, by connector and outcome (sent, skipped, failed).",
+	}, []string{"connector", "outcome"})
+	adConversionsOldest = prometheus.NewGauge(prometheus.GaugeOpts{
+		Namespace: namespace, Subsystem: "ad_conversions", Name: "oldest_queued_seconds",
+		Help: "How long the oldest conversion waiting to be sent has waited, as of this process's last round.",
+	})
+
 	buildInfo = prometheus.NewGaugeVec(prometheus.GaugeOpts{
 		Namespace: namespace, Name: "build_info",
 		Help: "Always 1; the labels are the running engine version and its role (OUTFLARE_ROLE).",
@@ -196,6 +206,7 @@ var own = []prometheus.Collector{
 	domainConnectLookups, domainConnectDuration,
 	queryRuns, queryDuration, queryRows,
 	semanticRuns, semanticItems, semanticDuration, semanticAvailable, semanticWorkspaces,
+	adConversions, adConversionsOldest,
 	buildInfo,
 }
 
@@ -364,3 +375,14 @@ func DomainConnectLookup(outcome string, d time.Duration) {
 	domainConnectLookups.WithLabelValues(outcome).Inc()
 	domainConnectDuration.Observe(d.Seconds())
 }
+
+// AdConversions counts what one send of a conversion rule did.
+func AdConversions(connector string, sent, skipped, failed int) {
+	adConversions.WithLabelValues(connector, "sent").Add(float64(sent))
+	adConversions.WithLabelValues(connector, "skipped").Add(float64(skipped))
+	adConversions.WithLabelValues(connector, "failed").Add(float64(failed))
+}
+
+// AdConversionsOldest records how long the oldest waiting conversion has
+// waited.
+func AdConversionsOldest(d time.Duration) { adConversionsOldest.Set(d.Seconds()) }

@@ -3762,6 +3762,259 @@
           "sort": "desc"
         }
       }
+    },
+    {
+      "type": "row",
+      "title": "Smart lists",
+      "id": 77,
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 256
+      },
+      "panels": []
+    },
+    {
+      "type": "timeseries",
+      "title": "Smart list freshness",
+      "description": "How long since the least recently refreshed smart list was brought up to date. Lists refresh every 15 minutes, so normal is under 20 minutes; failing is lists whose last refresh failed.",
+      "id": 78,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 257
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "max(outflare_smart_lists_oldest_refresh_seconds{job=\"$job\"})",
+          "legendFormat": "oldest",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          }
+        },
+        {
+          "refId": "B",
+          "expr": "max(outflare_smart_lists_failing{job=\"$job\"})",
+          "legendFormat": "failing",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "custom": {
+            "fillOpacity": 10,
+            "stacking": {
+              "mode": "none"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "mean",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Smart list refreshes",
+      "description": "Refreshes per minute by outcome, and how long one takes at the 95th percentile. A refresh is one statement over a workspace's people, stopped after two minutes.",
+      "id": 79,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 257
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (outcome) (rate(outflare_jobs_processed_total{job=\"$job\",kind=\"smart_list.refresh\"}[5m])) * 60",
+          "legendFormat": "{{outcome}}",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          }
+        },
+        {
+          "refId": "B",
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(outflare_jobs_duration_seconds_bucket{job=\"$job\",kind=\"smart_list.refresh\"}[5m])))",
+          "legendFormat": "p95 seconds",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "fillOpacity": 10,
+            "stacking": {
+              "mode": "none"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "mean",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "type": "row",
+      "title": "Paid media (conversions sent back)",
+      "id": 80,
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 265
+      },
+      "panels": []
+    },
+    {
+      "type": "timeseries",
+      "title": "Conversions sent back, by outcome",
+      "description": "Conversions per minute sent to ad platforms, by platform and outcome. Mostly sent is normal; skipped means no consent or nothing to match on, failed means the platform refused them.",
+      "id": 81,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 266
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (connector, outcome) (rate(outflare_ad_conversions_total{job=\"$job\"}[5m])) * 60",
+          "legendFormat": "{{connector}} {{outcome}}",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "fillOpacity": 10,
+            "stacking": {
+              "mode": "normal"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "mean",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Oldest conversion waiting",
+      "description": "How long the oldest queued conversion has waited. Normal is under five minutes: the sender runs every two.",
+      "id": 82,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 266
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "max(outflare_ad_conversions_oldest_queued_seconds{job=\"$job\"})",
+          "legendFormat": "oldest",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "custom": {
+            "fillOpacity": 10
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "mean",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
     }
   ]
 }

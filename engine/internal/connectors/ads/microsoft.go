@@ -35,7 +35,8 @@ func (MicrosoftAds) Definition() c.Definition {
 	d := def("microsoft_ads", "Microsoft Advertising", "https://ads.microsoft.com",
 		"https://learn.microsoft.com/advertising/guides/get-started", "https://developers.ads.microsoft.com/Account",
 		"Spend, clicks and conversions per campaign from your Microsoft Advertising (Bing) accounts.",
-		"Signs in with Microsoft and reads every Microsoft Advertising account the sign-in can see. Microsoft also asks for a developer token: get your own from the Microsoft Advertising developer portal (Account, Request token) and add it after signing in. Read-only.")
+		"Signs in with Microsoft and reads every Microsoft Advertising account the sign-in can see. Microsoft also asks for a developer token: get your own from the Microsoft Advertising developer portal (Account, Request token) and add it after signing in. It never changes your campaigns; it sends offline conversions only to the goals you choose under Paid ads.")
+	d.Capabilities = append(d.Capabilities, c.CapAdsConversions)
 	d.OAuth = &c.OAuth{
 		AuthURL:  "https://login.microsoftonline.com/common/oauth2/v2.0/authorize",
 		TokenURL: "https://login.microsoftonline.com/common/oauth2/v2.0/token",
@@ -276,4 +277,90 @@ func parseMSReport(r io.Reader) ([]c.AdDay, error) {
 			Conversions: ptrF(num(get(row, "Conversions"))), ConversionValueMicros: ptrI(c.Micros(num(get(row, "Revenue"))))})
 	}
 	return out, nil
+}
+
+// ---- conversions ----
+
+// ConversionTargets lists the account's offline conversion goals; Apply
+// takes a goal by its name.
+func (m MicrosoftAds) ConversionTargets(ctx context.Context, cl *c.Client, creds c.Creds, acct c.AdAccount) ([]c.ConversionTarget, error) {
+	var resp struct {
+		ConversionGoals []struct {
+			ID     flexInt `json:"Id"`
+			Name   string  `json:"Name"`
+			Status string  `json:"Status"`
+		} `json:"ConversionGoals"`
+	}
+	body := map[string]any{"ConversionGoalIds": nil, "ConversionGoalTypes": "OfflineConversion", "ReturnAdditionalFields": nil}
+	if err := m.scoped(cl, creds, acct).post(ctx, cl.Base("microsoft_ads.campaign", msCampaignBase)+"/ConversionGoals/QueryByIds", body, &resp); err != nil {
+		return nil, err
+	}
+	out := []c.ConversionTarget{}
+	for _, g := range resp.ConversionGoals {
+		if g.Name == "" || strings.EqualFold(g.Status, "Deleted") {
+			continue
+		}
+		out = append(out, c.ConversionTarget{ID: g.Name, Name: g.Name, EventTypes: []string{}})
+	}
+	return out, nil
+}
+
+// SendConversions applies offline conversions to a goal. Each needs the
+// Microsoft click id or, for enhanced conversions, a hashed email or phone.
+func (m MicrosoftAds) SendConversions(ctx context.Context, cl *c.Client, creds c.Creds, acct c.AdAccount, target c.ConversionTarget, convs []c.AdConversion) ([]c.ConversionResult, error) {
+	results := make([]c.ConversionResult, len(convs))
+	var rows []map[string]any
+	var sentIdx []int
+	for i, cv := range convs {
+		results[i] = c.ConversionResult{Index: cv.Index}
+		row := map[string]any{"ConversionName": target.ID, "ConversionTime": cv.Time.UTC().Format("2006-01-02T15:04:05Z")}
+		var keys []string
+		if v := cv.ClickIDs["msclkid"]; v != "" {
+			row["MicrosoftClickId"], keys = v, append(keys, "msclkid")
+		}
+		if len(cv.Emails) > 0 {
+			row["HashedEmailAddress"], keys = cv.Emails[0], append(keys, "email")
+		}
+		if len(cv.Phones) > 0 {
+			row["HashedPhoneNumber"], keys = cv.Phones[0], append(keys, "phone")
+		}
+		if len(keys) == 0 {
+			results[i].Skipped, results[i].Reason = true, "no Microsoft click id, email or phone to match on"
+			continue
+		}
+		if cv.ValueMicros != nil {
+			row["ConversionValue"] = float64(*cv.ValueMicros) / 1e6
+			row["ConversionCurrencyCode"] = cv.Currency
+		}
+		results[i].MatchKeys = keys
+		rows = append(rows, row)
+		sentIdx = append(sentIdx, i)
+	}
+	if len(rows) == 0 {
+		return results, nil
+	}
+	var resp struct {
+		PartialErrors []struct {
+			Index   *int   `json:"Index"`
+			Message string `json:"Message"`
+		} `json:"PartialErrors"`
+	}
+	if err := m.scoped(cl, creds, acct).post(ctx, cl.Base("microsoft_ads.campaign", msCampaignBase)+"/OfflineConversions/Apply",
+		map[string]any{"OfflineConversions": rows}, &resp); err != nil {
+		return nil, err
+	}
+	failed := map[int]string{}
+	for _, e := range resp.PartialErrors {
+		if e.Index != nil {
+			failed[*e.Index] = e.Message
+		}
+	}
+	for j, i := range sentIdx {
+		if msg, bad := failed[j]; bad {
+			results[i].Reason = msg
+			continue
+		}
+		results[i].OK = true
+	}
+	return results, nil
 }

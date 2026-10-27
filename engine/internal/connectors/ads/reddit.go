@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/url"
 	"strings"
+	"time"
 
 	c "github.com/outflareai/outflare/engine/internal/connectors"
 )
@@ -21,7 +22,8 @@ func (RedditAds) Definition() c.Definition {
 	d := def("reddit_ads", "Reddit Ads", "https://ads.reddit.com",
 		"https://ads-api.reddit.com/docs/v3/", "",
 		"Spend, impressions and clicks per campaign from your Reddit ad accounts.",
-		"Signs in with Reddit and reads every ad account of every business the account belongs to, with read-only access. Separate from organic Reddit, which posts and listens from your brand's own account.")
+		"Signs in with Reddit and reads every ad account of every business the account belongs to, with read-only access; add a Conversions API token to send conversions back. Separate from organic Reddit, which posts and listens from your brand's own account.")
+	d.Capabilities = append(d.Capabilities, c.CapAdsConversions)
 	d.OAuth = &c.OAuth{
 		AuthURL:   "https://www.reddit.com/api/v1/authorize",
 		TokenURL:  "https://www.reddit.com/api/v1/access_token",
@@ -182,4 +184,85 @@ func (r RedditAds) AdDays(ctx context.Context, cl *c.Client, creds c.Creds, acct
 		return nil
 	})
 	return out, err
+}
+
+// ---- conversions ----
+
+const redditConversionsBase = "https://ads-api.reddit.com/api/v2.0"
+
+// redditEvents are Reddit's tracking types a rule can send as.
+var redditEvents = []string{"SignUp", "Lead", "Purchase", "AddToCart", "ViewContent"}
+
+// SetupFields: the Conversions API takes its own access token, which the
+// workspace generates in its Reddit Ads Manager. Reading needs nothing
+// beyond the sign-in, so it is optional.
+func (RedditAds) SetupFields() []c.Field {
+	return []c.Field{{Name: "conversions_token", Label: "Conversions API access token", Secret: true, Optional: true,
+		Help: "Only to send conversions to Reddit: in Reddit Ads Manager, Events Manager, Conversions API, generate an access token."}}
+}
+
+// ConversionTargets: an account's conversions all go to one place.
+func (RedditAds) ConversionTargets(ctx context.Context, cl *c.Client, creds c.Creds, acct c.AdAccount) ([]c.ConversionTarget, error) {
+	if creds["conversions_token"] == "" {
+		return nil, c.Errf(c.ErrAuth, "Reddit needs a Conversions API access token to send conversions: add it on the connection")
+	}
+	return []c.ConversionTarget{{ID: acct.ID, Name: "Conversions API", EventTypes: redditEvents}}, nil
+}
+
+// SendConversions posts events to the Conversions API with the click id
+// and the hashed email and external id; conversion_id dedupes against the
+// pixel. Reddit takes or refuses a batch whole.
+func (r RedditAds) SendConversions(ctx context.Context, cl *c.Client, creds c.Creds, acct c.AdAccount, target c.ConversionTarget, convs []c.AdConversion) ([]c.ConversionResult, error) {
+	if creds["conversions_token"] == "" {
+		return nil, c.Errf(c.ErrAuth, "Reddit needs a Conversions API access token to send conversions: add it on the connection")
+	}
+	results := make([]c.ConversionResult, len(convs))
+	var events []map[string]any
+	var sentIdx []int
+	for i, cv := range convs {
+		results[i] = c.ConversionResult{Index: cv.Index}
+		user := map[string]any{}
+		ev := map[string]any{}
+		var keys []string
+		if v := cv.ClickIDs["rdt_cid"]; v != "" {
+			ev["click_id"], keys = v, append(keys, "rdt_cid")
+		}
+		if len(cv.Emails) > 0 {
+			user["email"], keys = cv.Emails[0], append(keys, "email")
+		}
+		if cv.ExternalID != "" {
+			user["external_id"], keys = cv.ExternalID, append(keys, "external_id")
+		}
+		if len(keys) == 0 {
+			results[i].Skipped, results[i].Reason = true, "no Reddit click id or identifier to match on"
+			continue
+		}
+		kind := cv.EventType
+		if kind == "" {
+			kind = "SignUp"
+		}
+		meta := map[string]any{"conversion_id": cv.EventID}
+		if cv.ValueMicros != nil {
+			meta["value_decimal"] = float64(*cv.ValueMicros) / 1e6
+			meta["currency"] = cv.Currency
+		}
+		ev["event_at"] = cv.Time.UTC().Format(time.RFC3339)
+		ev["event_type"] = map[string]string{"tracking_type": kind}
+		ev["event_metadata"] = meta
+		ev["user"] = user
+		results[i].MatchKeys = keys
+		events = append(events, ev)
+		sentIdx = append(sentIdx, i)
+	}
+	if len(events) == 0 {
+		return results, nil
+	}
+	u := cl.Base("reddit_ads.conversions", redditConversionsBase) + "/conversions/events/" + esc(acct.ID)
+	if err := newCall(cl, "Reddit Ads").bearer(creds["conversions_token"]).post(ctx, u, map[string]any{"test_mode": false, "events": events}, nil); err != nil {
+		return nil, err
+	}
+	for _, i := range sentIdx {
+		results[i].OK = true
+	}
+	return results, nil
 }

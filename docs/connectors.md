@@ -24,7 +24,7 @@ Credentials are sealed with the instance key (`OUTFLARE_SECRET_KEY`, AES-256-GCM
 
 | Category | Examples |
 | --- | --- |
-| `email_verification` | Built-in checks, ZeroBounce, NeverBounce, MillionVerifier, Bouncer, Reoon, Emailable, DeBounce, Hunter |
+| `email_verification` | Built-in checks, ZeroBounce, NeverBounce, MillionVerifier, Bouncer, Reoon, Emailable, DeBounce, Hunter. Bouncer and Reoon run from manifests in [`integrations/`](../integrations/README.md) |
 | `mailbox_provider` | Cheap Inboxes, Mailreef, Infraforge. Without one, upload mailboxes directly (IMAP/SMTP or CSV) |
 | `sequencer` | Instantly, Smartlead, EmailBison, PlusVibe, Apollo |
 | `data` | Apollo, People Data Labs, MoltSets, Prospeo, LeadMagic, Findymail, Hunter (email finder). Planned: Clay, ZoomInfo, Lusha and more. See [lists.md](lists.md) |
@@ -200,6 +200,15 @@ Geonode sends `extract_completed`, `batch_completed` and `crawl_completed` when 
 API: `GET`, `POST` (turn on) and `DELETE` (turn off) `/v1/workspaces/{ws}/integrations/{id}/hook`, `POST .../hook/rotate`, `PUT .../hook/signing-secret`, `GET /v1/workspaces/{ws}/hook-events` and `POST .../hook-events/{event}/replay`. A connector supports live updates when it lists the `hooks.receive` capability; [Writing a connector](#writing-a-connector) explains `connectors.Hooked`.
 
 ## Writing a connector
+
+There are two ways, and both end up in the same catalog:
+
+- **A manifest** in [`integrations/`](../integrations/README.md): a YAML file describing the service's API, no Go. Anyone can add one by pull request, and it is the way for outside developers. Manifests support email verification today; more capabilities follow.
+- **Go code** in the engine, for connectors that need more than a request and a mapping (imports, syncs, OAuth apps). The steps are below.
+
+Every catalog entry says who built it (`publisher`, for manifests) and how far it is trusted (`trust`): `outflare` for the engine's own connectors and the team's manifests, `verified` for publishers listed in `integrations/publishers.yaml`, and `community` for everyone else.
+
+To write one in Go:
 
 1. Implement `connectors.Connector` in a package under `engine/internal/connectors/` (one package per service, or one per category for small ones like `verifiers`):
 

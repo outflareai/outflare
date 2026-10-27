@@ -6,6 +6,20 @@ Each pull request that changes what Outflare does adds a change note in [changes
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-10-27
+
+### Added
+
+- Paid ads can send conversions back to Google Ads, Meta, Microsoft Advertising and Reddit: add a rule on the Paid ads page (or `POST .../ads/conversion-rules`) and each new sign-up, payment or other customer event goes to the platform with the ad click and hashed email and phone, so its bidding learns from real results. Sends follow consent: in the EEA, the UK and Switzerland only with a yes, elsewhere unless the person opted out, or only with a yes if you choose. Reddit needs your own Conversions API token. Upgrading runs migration 0210.
+- Smart lists: groups of people on your customer records that keep themselves up to date from rules, such as "plan is pro and paid in the last 90 days". They sit beside lead lists on the Lists page; pick the rules (a field, an event in the last N days, or being in a lead list), see the count as you go, and save. Outflare adds and removes people as they start and stop matching, at once on save and every 15 minutes after. API `/v1/workspaces/{ws}/smart-lists`, eight MCP tools, and Grafana panels and alerts for how fresh they are. Upgrading runs migration 0209.
+- Email finding now learns each domain's address shape (first.last, flast, and so on) from your own leads and their verification results, so it can propose a likely work address for a new name at a domain you already reach — with a confidence score and no third-party spend. Finding and verifying run as a waterfall: your own first-party history and the learned pattern come first and cost nothing, and only a low-confidence, unprovable address rolls up to your own connected verifier (Bouncer and the like), which stays on your account. Every check it runs is logged per address so the finder keeps getting more accurate over time. Upgrading runs migration 0190. The pattern is learned and used per workspace; nothing is shared between workspaces. Call it through the API (`GET .../email-finder/pattern`, `POST .../email-finder/find`, `POST .../email-finder/verify`) or the MCP tools `email_pattern`, `find_emails` and `verify_addresses`.
+- Connectors can now be added as a manifest instead of Go code: a short YAML file in the new `integrations/` folder (Apache-2.0) that names the service's https address, the key a person pastes and how its answers map onto Outflare's own types. Outflare runs it with no outside code, sends the key only to that address, and checks every manifest against recorded answers in CI. Bouncer and Reoon are the first two, with the same results as before; existing connections keep working. The catalog (`GET /v1/connectors`) now says who built each connector (`publisher`) and how far it is trusted (`trust`: `outflare`, `verified` or `community`) ([integrations/README.md](integrations/README.md)).
+
+### Fixed
+
+- The six-hourly ad sync now runs by itself again; before, ad accounts only synced when you pressed Sync now or added a developer token.
+- Entries read from a sequencer's blocklist (EmailBison, Instantly) are filed as `blocklist`, which keeps people out of cold email only. They were filed as unsubscribes and do-not-contact, which also withdrew those people's consent to marketing email; upgrading (migration 0215) relabels them and removes those withdrawals. The Suppression page shows where each entry came from.
+
 ## [0.4.0] - 2026-10-27
 
 ### Added

@@ -51,6 +51,20 @@ groups:
         annotations:
           summary: "Website event batches failed 5 times and were set aside (site_events.store_failed in the logs)."
 
+      - alert: OutflareSmartListsBehind
+        expr: max(outflare_smart_lists_oldest_refresh_seconds) > 3600
+        for: 15m
+        labels: { severity: warning }
+        annotations:
+          summary: "A smart list hasn't been brought up to date for over an hour (normal is 15 minutes): no worker is running, or smart_list.refresh jobs are failing. See smart_list.refreshed failures in the logs."
+
+      - alert: OutflareSmartListsFailing
+        expr: max(outflare_smart_lists_failing) > 0
+        for: 30m
+        labels: { severity: info }
+        annotations:
+          summary: "Some smart lists' last refresh failed, usually query_timeout (rules too broad to count in two minutes). The list shows the error; its owner can narrow the rules."
+
       - alert: OutflareJobsDying
         expr: sum by (kind) (increase(outflare_jobs_processed_total{outcome="dead"}[15m])) > 10
         labels: { severity: warning }
@@ -240,3 +254,21 @@ groups:
         labels: { severity: warning }
         annotations:
           summary: "Most embedding jobs fail; check search.embed_failed events and the engine log for the provider's error (a bad key, AI limits reached or the provider down)."
+
+      - alert: OutflareAdConversionsFailing
+        # Ad platforms refusing conversions sent back: a sign-in, token or
+        # conversion action changed at the platform.
+        expr: sum by (connector) (increase(outflare_ad_conversions_total{outcome="failed"}[30m])) > 20 and sum by (connector) (increase(outflare_ad_conversions_total{outcome="failed"}[30m])) / sum by (connector) (increase(outflare_ad_conversions_total{outcome=~"sent|failed"}[30m])) > 0.25
+        for: 15m
+        labels: { severity: warning }
+        annotations:
+          summary: "Over a quarter of conversions sent to {{ $labels.connector }} fail; the send log (Paid ads, or GET .../ads/conversion-sends?status=failed) has the platform's reason, and ad_conversions.sent failures carry the error code."
+
+      - alert: OutflareAdConversionsBehind
+        # Conversions queued but not sent: the sender loop or its jobs are
+        # not running, or a platform is unreachable.
+        expr: max(outflare_ad_conversions_oldest_queued_seconds) > 1800
+        for: 10m
+        labels: { severity: warning }
+        annotations:
+          summary: "A conversion has waited over 30 minutes to go to its ad platform; check the jobs queue for ads.conversions_send and the engine log for ad_conversions."

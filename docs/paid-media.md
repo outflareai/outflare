@@ -3,7 +3,9 @@
 Outflare reads what your ad accounts spend and what the platforms say it
 brought in, so a person, a script or an agent can ask "what did ads cost this
 month, per brand, and what did they return?" without opening six dashboards.
-This first part only reads: nothing is changed at the platform.
+It can also send conversions back: when someone the ads brought signs up or
+pays, the platform hears about it, so its bidding learns from real results.
+Outflare never changes campaigns, budgets or ads.
 
 Every connection is the workspace's own: it signs in to its own ad accounts and,
 where the platform needs one, adds its own developer token. Outflare never
@@ -67,8 +69,64 @@ All of them take `brand`. Money is in micros of the account's currency
 server has a tool for each (`list_ad_accounts`, `list_ad_campaigns`,
 `get_ads_summary`, `sync_ads`, `list_ad_connections`, `update_ad_account`).
 
+## Sending conversions back
+
+A conversion rule sends one customer event (such as `signed_up` or
+`order_completed`, from the website snippet, the API or a connected tool) to one
+conversion on one ad account:
+
+| Platform | Where it goes | Matched on | Also needs |
+| --- | --- | --- | --- |
+| Google Ads | A conversion action that takes uploaded clicks (Upload clicks) | `gclid`, `gbraid` or `wbraid`; hashed email and phone (enhanced conversions for leads) | The developer token above; the sign-in needs Google Ads access that can upload |
+| Meta Ads | A pixel (dataset), as a standard event such as Purchase or Lead | `fbc` (from `fbclid`), `fbp`, hashed email, phone and record id | The system user assigned to the pixel |
+| Microsoft Advertising | An offline conversion goal | `msclkid`; hashed email and phone | The developer token above |
+| Reddit Ads | The Conversions API, as SignUp, Lead, Purchase and so on | `rdt_cid`, hashed email and record id | The workspace's own Conversions API access token, from Reddit Ads Manager → Events Manager |
+
+How it works:
+
+- Every two minutes Outflare matches new events to the enabled rules and sends
+  them, up to 500 per call. Only events that arrive after the rule was made are
+  sent, never older ones, and only within a week of arriving.
+- The ad click comes from the event itself (`click_ids`) or from the person's
+  latest visit with that platform's click id in the 90 days before it. Email and
+  phone come from the person's record, hashed with SHA-256 before they leave;
+  nothing is sent in the clear and nothing is copied into the send log.
+- The event's message id is the conversion's id (Google's order id, Meta's and
+  Reddit's event id). On the website, `outflare.track()` returns it: pass it to
+  the browser pixel as its event id (`fbq('track', 'Purchase', {}, {eventID:
+  id})`) and the platform counts a conversion once when both send it.
+- The value comes from an event property (in major units, 12.50, or minor units,
+  1250) or a fixed value; the currency from the rule, the event's `currency`
+  property or the account's.
+- **Consent.** In the EEA, the UK and Switzerland, and whenever a person's
+  country is unknown, a conversion is sent only when they said yes to ad data
+  (a consent with channel `ads` and purpose `ad_user_data`, recorded with
+  `POST /v1/workspaces/{ws}/records/{id}/consents` when your consent banner
+  says yes). Elsewhere the workspace's setting decides: **Everyone,
+  unless they opted out** (`opt_out`, the default) or **Only people who said
+  yes** (`opt_in`). Anyone who withdrew consent is never sent.
+- Every matched event is a row in the send log: `sent` (with the kinds of
+  identifiers it carried, such as `gclid` and `email`), `skipped` with the reason
+  (no consent, nothing to match on), `failed` when the platform refused it or
+  could not be reached after five tries, or `queued`.
+
+On the **Paid ads** page, **Send conversions back** adds and switches rules,
+sets who to send for, and shows the latest sends.
+
+| Call | What it does |
+| --- | --- |
+| `GET /v1/workspaces/{ws}/ads/conversion-targets?account_id=` | Where an account's conversions can go, asked live from the platform, and any setup still needed |
+| `GET`, `POST /v1/workspaces/{ws}/ads/conversion-rules` | List rules with their last 30 days, or add one |
+| `PATCH`, `DELETE /v1/workspaces/{ws}/ads/conversion-rules/{id}` | Change, switch off or delete a rule |
+| `GET /v1/workspaces/{ws}/ads/conversion-sends` | The send log, newest first |
+| `GET`, `PUT /v1/workspaces/{ws}/ads/settings` | `consent_mode`: `opt_out` or `opt_in` |
+
+The MCP tools are `list_ad_conversion_targets`, `list_ad_conversion_rules`,
+`create_ad_conversion_rule`, `update_ad_conversion_rule`,
+`delete_ad_conversion_rule`, `list_ad_conversion_sends`, `get_ad_settings` and
+`set_ad_settings`. X and LinkedIn follow once their API access is approved.
+
 ## Coming next
 
-Sending conversions from Outflare's own customer events back to the platforms,
-syncing audiences from segments, and letting an agent change budgets behind
-mission approval are planned.
+Syncing audiences from segments, and letting an agent change budgets behind
+mission approval, are planned.

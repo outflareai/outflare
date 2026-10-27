@@ -28,6 +28,7 @@ import (
 	"github.com/outflareai/outflare/engine/internal/crawl"
 	"github.com/outflareai/outflare/engine/internal/db"
 	"github.com/outflareai/outflare/engine/internal/domainconnect"
+	"github.com/outflareai/outflare/engine/internal/emailfind"
 	"github.com/outflareai/outflare/engine/internal/imports"
 	"github.com/outflareai/outflare/engine/internal/inbox"
 	"github.com/outflareai/outflare/engine/internal/jobs"
@@ -126,6 +127,7 @@ func freshEnvWith(t *testing.T, change func(*api.Options)) *env {
 	send.Platforms = integrations
 	importer := &imports.Service{Pool: pool, Store: integrations, Log: log}
 	verifier := &verify.Service{Pool: pool, Store: integrations, Builtin: verifiers.Builtin{Resolver: dns}, Log: log}
+	finder := &emailfind.Service{Pool: pool, Verify: verifier, Resolver: dns, Log: log}
 	plat := &platforms.Service{Pool: pool, Store: integrations, Log: log}
 	plat.Register(jobs.New(pool, log))
 	ob := &outbox{}
@@ -136,7 +138,7 @@ func freshEnvWith(t *testing.T, change func(*api.Options)) *env {
 	crawler := &crawl.Service{Pool: pool, Log: log, Resolver: dns, AllowPrivate: true, StepFor: 5 * time.Second,
 		Wait: func(context.Context, time.Duration) error { return nil }, Fallback: &crawl.ConnectorFallback{Store: integrations, Pool: pool}, AfterAudit: seointel.AfterAudit}
 	opts := api.Options{Mailboxes: mail, Sending: send, Inbox: syncer, OAuth: tokens,
-		Box: box, Integrations: integrations, Verify: verifier, Classifier: &classify.Classifier{Resolver: dns}, Research: &research.Service{Pool: pool, Log: log}, Imports: importer, Platforms: plat, CNAME: dns, Mailer: ob, AnalyticsSync: async, SEOSync: seo, AdSync: ads, Crawl: crawler,
+		Box: box, Integrations: integrations, Verify: verifier, EmailFinder: finder, Classifier: &classify.Classifier{Resolver: dns}, Research: &research.Service{Pool: pool, Log: log}, Imports: importer, Platforms: plat, CNAME: dns, Mailer: ob, AnalyticsSync: async, SEOSync: seo, AdSync: ads, Crawl: crawler,
 		DomainConnect: &domainconnect.Client{HTTP: http.DefaultClient, Resolver: dns}}
 	if change != nil {
 		change(&opts)

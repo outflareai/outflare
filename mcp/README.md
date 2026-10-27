@@ -136,10 +136,14 @@ Read (always available):
 | `list_emails`, `get_email`, `get_email_recipient` | Transactional and lifecycle emails with delivery status, opens, clicks and what triggered each; one email's content and timeline; everything one address was sent |
 | `list_lead_lists`, `get_lead_list` | Lead lists with sizes, search settings and the latest build |
 | `list_lead_list_members` | A list's leads with their ICP fit score and reasons, best first |
+| `list_smart_lists`, `get_smart_list`, `list_smart_list_members`, `preview_smart_list` | Smart lists: people on customer records who match rules now (a field, an event in the last N days, being in a lead list), who is in each, and how many a set of rules would pick |
 | `list_data_providers` | Connected data providers that search, find emails or enrich, and the filters each understands |
 | `list_list_runs`, `get_list_run` | Builds, refreshes and enrichments: found, added, skipped by reason, credits spent |
 | `get_lead_sources` | Which data provider a lead came from |
 | `check_recipients` | Ask the send policy whether addresses may be emailed, without sending; with `brand`, also the cross-brand rule |
+| `email_pattern` | The address shape a company domain uses, learned from this workspace's own data, with a confidence. Free |
+| `find_emails` | Propose the most likely work address for each person (name + company domain), with a confidence and a code. Free; up to 50 a call |
+| `verify_addresses` | Check a small batch cheapest tier first, rolling up to the workspace's own verifier only when needed (billed to the workspace, never Outflare); per-address code matched by ref, up to 50 a call |
 | `list_suppressions` | The opt-out list: emails and domains never emailed, with who added each, from which tool and how |
 | `list_suppression_syncs`, `update_suppression_sync` | The opt-out list kept in step with EmailBison, Instantly and Smartlead blocklists |
 | `get_contact_rules`, `set_contact_rules` | Who may get marketing email: everyone but third-party leads, or only people who agreed |
@@ -244,6 +248,7 @@ Write (left out when `OUTFLARE_MCP_READ_ONLY=1`):
 | `preview_lead_search` | One page of a people search at a data provider, nothing saved |
 | `create_lead_list`, `update_lead_list` | A manual list, or one built from a data provider search with an email waterfall, ICP scoring, dedupe and credit caps |
 | `run_lead_list` | Build, refresh or enrich a list (spends provider credits, within the caps) |
+| `create_smart_list`, `update_smart_list`, `refresh_smart_list`, `delete_smart_list` | Make a list that keeps itself up to date from rules, change its rules, bring it up to date now, or delete it (its people stay) |
 | `cancel_list_run` | Stop a run; leads already added stay |
 | `create_sequence` | Create a draft sequence with steps (it sends nothing yet) |
 | `update_sequence` | Change settings (including optional click tracking and the unsubscribe header), or set status `active`, `paused` or `archived` |
@@ -321,6 +326,10 @@ Write (left out when `OUTFLARE_MCP_READ_ONLY=1`):
 | `list_ad_campaigns` | Campaigns ranked by spend, with platform-reported results |
 | `get_ads_summary` | Ad spend and results grouped by platform, brand, account or day |
 | `sync_ads` | Sync ad platforms now instead of within six hours |
+| `list_ad_conversion_targets` | Where an ad account's conversions can go (conversion actions, pixels, goals) |
+| `list_ad_conversion_rules`, `create_ad_conversion_rule`, `update_ad_conversion_rule`, `delete_ad_conversion_rule` | Send a customer event to an ad platform as a conversion |
+| `list_ad_conversion_sends` | What each rule sent, skipped (and why) or failed |
+| `get_ad_settings`, `set_ad_settings` | Who conversions are sent for: unless they opted out, or only with a yes |
 | `get_seo_report` | A live SEO report (overview, keywords, backlinks, links, competitors, audit) for any domain; costs money within the connection's monthly budget |
 | `update_seo_settings`, `sync_seo` | An SEO connection's domains, country, budget and weekly snapshots; take a snapshot now |
 | `list_seo_sites`, `add_seo_site`, `update_seo_site`, `delete_seo_site` | The websites OutflareBot audits: ownership, crawl settings and limits, latest crawl |
@@ -363,7 +372,7 @@ Write (left out when `OUTFLARE_MCP_READ_ONLY=1`):
 | `list_social_accounts`, `update_social_account`, `sync_social_accounts` | The brand's own X accounts, LinkedIn company pages and LinkedIn profiles, with followers and the change over 7 and 28 days; put one on a brand, pause it, or read them now |
 | `get_social_account_days`, `list_own_social_posts`, `get_social_growth` | Followers day by day, the brand's own posts with impressions, engagements and clicks, and growth per channel over a period |
 
-Tools carry MCP annotations: read tools are marked read-only, tools that delete or end something (`delete_lead`, `delete_webhook`, `delete_inbox_tag`, `delete_inbox_view`, `delete_email_domain`, `delete_email_template`, `delete_spend_entry`, `disconnect_integration`, `stop_enrollment`, `stop_mission`, `complete_mission`, `cancel_infra_plan`, `move_mailboxes`, `delete_seo_site`, `stop_crawl`, `delete_ai_cohort`, `delete_ai_prompt`, `stop_ai_run`, `delete_social_watch`, `delete_ai_fact`) are marked destructive, and the tools that cause email to go out (`update_sequence`, `enroll_leads`, `reply_to_inbox_message`, `set_warmup`, `resolve_orphaned_follow_ups`, `approve_infra_plan`, `test_webhook`, `redeliver_webhook`, `send_email`) are marked as reaching the outside world, so clients can ask before running them. So are the tools that spend data provider credits (`preview_lead_search`, `create_lead_list`, `run_lead_list`) and SEO calls (`get_seo_report`, `sync_seo`), and the tool that asks AI models on the workspace's own key (`run_ai_prompts`). Crawls and ownership checks (`start_crawl`, `verify_seo_site`) visit the site too.
+Tools carry MCP annotations: read tools are marked read-only, tools that delete or end something (`delete_lead`, `delete_smart_list`, `delete_webhook`, `delete_inbox_tag`, `delete_inbox_view`, `delete_email_domain`, `delete_email_template`, `delete_spend_entry`, `disconnect_integration`, `stop_enrollment`, `stop_mission`, `complete_mission`, `cancel_infra_plan`, `move_mailboxes`, `delete_seo_site`, `stop_crawl`, `delete_ai_cohort`, `delete_ai_prompt`, `stop_ai_run`, `delete_social_watch`, `delete_ai_fact`) are marked destructive, and the tools that cause email to go out (`update_sequence`, `enroll_leads`, `reply_to_inbox_message`, `set_warmup`, `resolve_orphaned_follow_ups`, `approve_infra_plan`, `test_webhook`, `redeliver_webhook`, `send_email`) are marked as reaching the outside world, so clients can ask before running them. So are the tools that spend data provider credits (`preview_lead_search`, `create_lead_list`, `run_lead_list`) and SEO calls (`get_seo_report`, `sync_seo`), and the tool that asks AI models on the workspace's own key (`run_ai_prompts`). Crawls and ownership checks (`start_crawl`, `verify_seo_site`) visit the site too.
 
 ### Analytics prompts and resources
 

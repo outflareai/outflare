@@ -26,7 +26,7 @@ guessed or redrawn logo.
 | gemini, mistral, openai, openrouter, xai | [Lobe Icons](https://github.com/lobehub/lobe-icons) (MIT), `@lobehub/icons-static-svg` 1.101.0: the colour marks for Gemini and Mistral, the OpenAI, OpenRouter and xAI marks in black with a white dark variant |
 | crunchbase, fathom, godaddy, hubspot, mixpanel, namecheap, reddit, simple_analytics, umami | [Simple Icons](https://simpleicons.org) (CC0), in the brand colour Simple Icons records |
 | emailable, hunter, instantly, neverbounce, peopledatalabs | The company's own website logo (symbol only) |
-| attio, bouncer, debounce, findymail, leadmagic, millionverifier, reoon, smartlead | The company's own website logo (symbol only), taken from its site in October 2026 |
+| attio, bouncer, debounce, findymail, leadmagic, millionverifier, reoon, smartlead (bouncer and reoon now live in `integrations/connectors/<id>/logo.svg`) | The company's own website logo (symbol only), taken from its site in October 2026 |
 | cal_com, chili_piper, commonroom, emailbison, fullenrich, kickbox, microsoft_clarity, moltsets, predictleads, trigify, usergems | The company's own SVG icon, favicon or pinned-tab mark from its website |
 | geonode | Geonode's official logo pack (the square symbol, `geonode-mark.svg`), in its own dark navy with a white dark variant |
 | bettercontact, bounceban, briteverify (Validity), cheapinboxes (also cheapverifier), clay, clearout, cognism, contactout, dataforseo, dropcontact, icypeas, infraforge, lusha, mailreef, pipedrive, plusvibe, prospeo, rb2b, rocketreach, savvycal, scrubby, theirstack, wiza, zerobounce, zoominfo | The company's own app icon PNG from its website, embedded (no vector published) |

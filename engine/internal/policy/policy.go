@@ -194,9 +194,9 @@ func Lets(purpose, reason string) bool {
 	}
 	switch purpose {
 	case PurposeTransactional:
-		return why == "unsubscribed" || why == MarketingWithdrawn || why == "competitor" || why == "customer" || why == "partner"
+		return why == "unsubscribed" || why == MarketingWithdrawn || why == "competitor" || why == "customer" || why == "partner" || why == "blocklist"
 	case PurposeLifecycle:
-		return why == "customer" || why == "partner"
+		return why == "customer" || why == "partner" || why == "blocklist"
 	}
 	return false
 }

@@ -3,7 +3,10 @@ package customers_test
 import (
 	"context"
 	"os"
+	"path/filepath"
+	"regexp"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -73,11 +76,51 @@ func TestEveryRecordLinkIsMerged(t *testing.T) {
 	if len(refs) < 10 {
 		t.Fatalf("found only %d record links: %v", len(refs), refs)
 	}
+	// On a schema migrated by a newer version (the migrations CI job runs
+	// the previous version's tests that way), tables this code has never
+	// heard of are the newer version's to list.
+	known, ahead := knownTables(t, pool)
 	for _, ref := range refs {
+		if ahead && !known[ref.Table] {
+			continue
+		}
 		if !slices.Contains(customers.Follows, ref) && !slices.Contains(customers.Owned, ref) {
 			t.Errorf("%s.%s points at records but is in neither customers.Follows nor customers.Owned: add it to Follows so merges move it", ref.Table, ref.Column)
 		}
 	}
+}
+
+var createTable = regexp.MustCompile(`(?i)CREATE TABLE (?:IF NOT EXISTS )?([a-z_][a-z0-9_]*)`)
+
+// knownTables returns the tables this code's migrations create, and whether
+// the database has run migrations this code doesn't have.
+func knownTables(t *testing.T, pool *pgxpool.Pool) (map[string]bool, bool) {
+	t.Helper()
+	files, err := filepath.Glob("../db/migrations/*.sql")
+	if err != nil || len(files) == 0 {
+		t.Fatalf("read migrations: %v", err)
+	}
+	known, names := map[string]bool{}, map[string]bool{}
+	for _, f := range files {
+		names[filepath.Base(f)] = true
+		b, err := os.ReadFile(f)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, m := range createTable.FindAllStringSubmatch(string(b), -1) {
+			known[strings.ToLower(m[1])] = true
+		}
+	}
+	rows, err := pool.Query(context.Background(), `SELECT name FROM schema_migrations`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ran, err := pgx.CollectRows(rows, pgx.RowTo[string])
+	if err != nil {
+		t.Fatal(err)
+	}
+	ahead := slices.ContainsFunc(ran, func(n string) bool { return !names[n] })
+	return known, ahead
 }
 
 func TestLeadsBecomePeopleAndActivityFollows(t *testing.T) {

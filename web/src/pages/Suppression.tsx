@@ -6,9 +6,18 @@ import { ago } from "../format";
 import { Search } from "lucide-react";
 import { DataTable } from "@/components/data-table";
 
-const reasons: SuppressionReason[] = ["do_not_contact", "manual", "unsubscribed", "bounced", "complained", "competitor", "customer", "partner", "legal"];
+const reasons: SuppressionReason[] = ["do_not_contact", "manual", "unsubscribed", "bounced", "complained", "competitor", "customer", "partner", "legal", "blocklist"];
 const reasonLabel: Record<SuppressionReason, string> = { do_not_contact: "Do not contact", manual: "Added by hand", unsubscribed: "Unsubscribed", bounced: "Bounced", complained: "Marked as spam",
-  competitor: "Competitor", customer: "Customer (no cold email)", partner: "Partner (no cold email)", legal: "Legal request" };
+  competitor: "Competitor", customer: "Customer (no cold email)", partner: "Partner (no cold email)", legal: "Legal request", blocklist: "On a sequencer's blocklist (no cold email)" };
+
+// Where an entry came from, in words: "EmailBison blocklist" for one read
+// from a sequencer, otherwise the tool or surface that added it.
+const sourceNames: Record<string, string> = { emailbison: "EmailBison", instantly: "Instantly", smartlead: "Smartlead" };
+function fromLabel(e: Entry): string {
+  const synced = e.source.match(/^([a-z0-9]+)_sync$/);
+  const from = synced ? `${sourceNames[synced[1]] ?? synced[1]} blocklist` : e.source.replace(/_/g, " ");
+  return e.method === "ai_suggested" ? `${from} (suggested by AI)` : from;
+}
 
 export function Suppression({ ws, canAdd, canRemove }: { ws: string; canAdd: boolean; canRemove: boolean }) {
   const [entries, setEntries] = useState<Entry[] | null>(null);
@@ -65,7 +74,7 @@ export function Suppression({ ws, canAdd, canRemove }: { ws: string; canAdd: boo
               <div className="flex items-start justify-between gap-3">
                 <div className="min-w-0">
                   <div className="font-mono text-[12px] break-all">{e.value} {e.kind === "domain" && <Badge title={`Blocks every address @${e.value}`}>Whole domain</Badge>}</div>
-                  <div className="text-xs text-muted-foreground">{reasonLabel[e.reason] ?? e.reason} · {ago(e.created_at)}{e.note && ` · ${e.note}`}</div>
+                  <div className="text-xs text-muted-foreground">{reasonLabel[e.reason] ?? e.reason} · {fromLabel(e)} · {ago(e.created_at)}{e.note && ` · ${e.note}`}</div>
                 </div>
                 {canRemove && <Button variant="danger" onClick={() => remove(e)}>Remove</Button>}
               </div>
@@ -83,6 +92,7 @@ export function Suppression({ ws, canAdd, canRemove }: { ws: string; canAdd: boo
                 ),
               },
               { id: "reason", header: "Why", accessorFn: (e) => reasonLabel[e.reason] ?? e.reason },
+              { id: "source", header: "From", accessorFn: (e) => fromLabel(e) },
               { id: "created", header: "Added", accessorFn: (e) => e.created_at, cell: ({ row: { original: e } }) => <span className="text-muted-foreground" title={new Date(e.created_at).toLocaleString()}>{ago(e.created_at)}</span> },
               {
                 id: "actions",

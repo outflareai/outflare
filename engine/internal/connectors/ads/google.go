@@ -23,7 +23,8 @@ func (GoogleAds) Definition() c.Definition {
 	d := def("google_ads", "Google Ads", "https://ads.google.com",
 		"https://developers.google.com/google-ads/api/docs/start", "https://developers.google.com/google-ads/api/docs/get-started/dev-token",
 		"Spend, clicks and conversions per campaign from your Google Ads accounts.",
-		"Signs in with Google and reads every Google Ads account the sign-in can see, including accounts under a manager account. Google also asks for a developer token: create one in your own Google Ads manager account (Admin, API Center) and add it after signing in. Read-only: nothing changes in your accounts.")
+		"Signs in with Google and reads every Google Ads account the sign-in can see, including accounts under a manager account. Google also asks for a developer token: create one in your own Google Ads manager account (Admin, API Center) and add it after signing in. It never changes your campaigns; it sends conversions only to the conversion actions you choose under Paid ads.")
+	d.Capabilities = append(d.Capabilities, c.CapAdsConversions)
 	d.OAuth = &c.OAuth{
 		AuthURL:  "https://accounts.google.com/o/oauth2/v2/auth",
 		TokenURL: "https://oauth2.googleapis.com/token",
@@ -97,6 +98,10 @@ type gaqlRow struct {
 		Status                 string  `json:"status"`
 		AdvertisingChannelType string  `json:"advertisingChannelType"`
 	} `json:"campaign"`
+	ConversionAction struct {
+		ID   flexInt `json:"id"`
+		Name string  `json:"name"`
+	} `json:"conversionAction"`
 	CampaignBudget struct {
 		AmountMicros flexInt `json:"amountMicros"`
 	} `json:"campaignBudget"`
@@ -219,4 +224,128 @@ func (g GoogleAds) AdDays(ctx context.Context, cl *c.Client, creds c.Creds, acct
 			Conversions: ptrF(float64(m.Conversions)), ConversionValueMicros: ptrI(c.Micros(float64(m.ConversionsValue)))})
 	}
 	return out, nil
+}
+
+// ---- conversions ----
+
+// ConversionTargets lists the account's enabled conversion actions that
+// take uploaded clicks (Google's "Import, from clicks" actions), which is
+// what offline and enhanced conversions for leads are sent to.
+func (g GoogleAds) ConversionTargets(ctx context.Context, cl *c.Client, creds c.Creds, acct c.AdAccount) ([]c.ConversionTarget, error) {
+	rows, err := g.search(ctx, cl, creds, acct.ID, acct.Meta["login_customer_id"],
+		"SELECT conversion_action.id, conversion_action.name FROM conversion_action WHERE conversion_action.type = 'UPLOAD_CLICKS' AND conversion_action.status = 'ENABLED'")
+	if err != nil {
+		return nil, err
+	}
+	out := make([]c.ConversionTarget, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, c.ConversionTarget{ID: fmt.Sprint(int64(r.ConversionAction.ID)), Name: r.ConversionAction.Name, EventTypes: []string{}})
+	}
+	return out, nil
+}
+
+// SendConversions uploads click conversions with partial failure on, so
+// one bad row doesn't sink the batch. A conversion carries its click id
+// when there is one, and the hashed email and phone for enhanced
+// conversions; the event id is the order id Google dedupes on.
+func (g GoogleAds) SendConversions(ctx context.Context, cl *c.Client, creds c.Creds, acct c.AdAccount, target c.ConversionTarget, convs []c.AdConversion) ([]c.ConversionResult, error) {
+	results := make([]c.ConversionResult, len(convs))
+	var body []map[string]any
+	var sentIdx []int
+	for i, cv := range convs {
+		results[i] = c.ConversionResult{Index: cv.Index}
+		row := map[string]any{
+			"conversionAction":   "customers/" + acct.ID + "/conversionActions/" + target.ID,
+			"conversionDateTime": cv.Time.UTC().Format("2006-01-02 15:04:05-07:00"),
+			"orderId":            cv.EventID,
+		}
+		var keys []string
+		for _, k := range []string{"gclid", "gbraid", "wbraid"} {
+			if v := cv.ClickIDs[k]; v != "" {
+				row[k] = v
+				keys = append(keys, k)
+				break
+			}
+		}
+		var ids []map[string]string
+		for _, e := range cv.Emails {
+			ids = append(ids, map[string]string{"hashedEmail": e})
+		}
+		if len(cv.Emails) > 0 {
+			keys = append(keys, "email")
+		}
+		for _, p := range cv.Phones {
+			ids = append(ids, map[string]string{"hashedPhoneNumber": p})
+		}
+		if len(cv.Phones) > 0 {
+			keys = append(keys, "phone")
+		}
+		if len(keys) == 0 {
+			results[i].Skipped, results[i].Reason = true, "no click id, email or phone to match on"
+			continue
+		}
+		if len(ids) > 0 {
+			row["userIdentifiers"] = ids
+		}
+		if cv.ValueMicros != nil {
+			row["conversionValue"] = float64(*cv.ValueMicros) / 1e6
+			row["currencyCode"] = cv.Currency
+		}
+		if cv.ConsentGranted {
+			row["consent"] = map[string]string{"adUserData": "GRANTED"}
+		}
+		results[i].MatchKeys = keys
+		body = append(body, row)
+		sentIdx = append(sentIdx, i)
+	}
+	if len(body) == 0 {
+		return results, nil
+	}
+	var resp struct {
+		PartialFailureError *struct {
+			Message string `json:"message"`
+			Details []struct {
+				Errors []struct {
+					Message  string `json:"message"`
+					Location struct {
+						FieldPathElements []struct {
+							FieldName string `json:"fieldName"`
+							Index     *int   `json:"index"`
+						} `json:"fieldPathElements"`
+					} `json:"location"`
+				} `json:"errors"`
+			} `json:"details"`
+		} `json:"partialFailureError"`
+	}
+	err := g.call(cl, creds, acct.Meta["login_customer_id"]).post(ctx, g.base(cl)+"/customers/"+esc(acct.ID)+":uploadClickConversions",
+		map[string]any{"conversions": body, "partialFailure": true}, &resp)
+	if err != nil {
+		return nil, err
+	}
+	failed := map[int]string{}
+	if pf := resp.PartialFailureError; pf != nil {
+		for _, d := range pf.Details {
+			for _, e := range d.Errors {
+				for _, f := range e.Location.FieldPathElements {
+					if f.FieldName == "conversions" && f.Index != nil {
+						failed[*f.Index] = e.Message
+					}
+				}
+			}
+		}
+		if len(failed) == 0 && pf.Message != "" {
+			// Google said something failed but not which: count it on all.
+			for j := range sentIdx {
+				failed[j] = pf.Message
+			}
+		}
+	}
+	for j, i := range sentIdx {
+		if msg, bad := failed[j]; bad {
+			results[i].Reason = msg
+			continue
+		}
+		results[i].OK = true
+	}
+	return results, nil
 }

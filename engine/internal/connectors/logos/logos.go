@@ -4,14 +4,20 @@
 //
 // A logo can have a dark-theme variant, svg/{id}.dark.svg, for marks that
 // are black and would vanish on a dark background.
+//
+// Connectors added as manifests keep their logo beside the manifest:
+// integrations/connectors/{id}/logo.svg (and logo.dark.svg).
 package logos
 
 import (
 	"embed"
 	"fmt"
 	"hash/fnv"
+	"io/fs"
 	"strings"
 	"unicode"
+
+	"github.com/outflareai/outflare/integrations"
 )
 
 //go:embed svg/*.svg
@@ -42,6 +48,17 @@ func Get(id, name string, dark bool) ([]byte, bool) {
 	}
 	if b, err := files.ReadFile("svg/" + file + ".svg"); err == nil {
 		return b, true
+	}
+	if !strings.ContainsAny(file, "./") {
+		dir := "connectors/" + file + "/"
+		if dark {
+			if b, err := fs.ReadFile(integrations.FS, dir+"logo.dark.svg"); err == nil {
+				return b, true
+			}
+		}
+		if b, err := fs.ReadFile(integrations.FS, dir+"logo.svg"); err == nil {
+			return b, true
+		}
 	}
 	if id == "builtin" {
 		return []byte(builtin), false

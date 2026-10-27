@@ -7,6 +7,7 @@ import { api, errorMessage } from "../api";
 import { Badge, Button, Card, ErrorText, Input, Loading, PageHeader, Stat, Stats, toast } from "../ui";
 import { ago } from "../format";
 import type { Tab } from "../App";
+import { AdConversions } from "./AdConversions";
 
 // Paid ads: spend, clicks and what each platform says it brought in, read
 // every six hours from the workspace's own ad accounts. Conversions and ROAS
@@ -93,7 +94,7 @@ export function Ads({ ws, canManage, go }: Props) {
   const header = (
     <PageHeader
       title="Paid ads"
-      description="Spend, clicks and the conversions each platform reports, from your own ad accounts, by brand. Outflare only reads: nothing changes in your ad accounts. Agents use the ads tools."
+      description="Spend, clicks and the conversions each platform reports, from your own ad accounts, by brand. Outflare never changes your campaigns; it only sends conversions back when you add a rule. Agents use the ads tools."
       action={
         <div className="flex items-center gap-2">
           <div className="flex rounded-md border" role="group" aria-label="Date range">
@@ -178,6 +179,8 @@ export function Ads({ ws, canManage, go }: Props) {
           ]}
         />
       </Card>
+
+      <AdConversions ws={ws} canManage={canManage} accounts={accounts} />
 
       <Card title="Ad accounts" description="Every account your connections can see. Give each a brand so its spend counts there, in the costs ledger too; switch one off to stop syncing it.">
         <DataTable
