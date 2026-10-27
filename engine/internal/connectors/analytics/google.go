@@ -293,7 +293,8 @@ func (SearchConsole) Sites(ctx context.Context, cl *c.Client, creds c.Creds) ([]
 		if d, ok := strings.CutPrefix(e.SiteURL, "sc-domain:"); ok {
 			name = d + " (whole domain)"
 		}
-		out = append(out, c.AnalyticsSite{ID: e.SiteURL, Name: name, URL: strings.TrimPrefix(e.SiteURL, "sc-domain:")})
+		out = append(out, c.AnalyticsSite{ID: e.SiteURL, Name: name, URL: strings.TrimPrefix(e.SiteURL, "sc-domain:"),
+			Owner: e.PermissionLevel == "siteOwner" || e.PermissionLevel == "siteFullUser"})
 	}
 	return out, nil
 }

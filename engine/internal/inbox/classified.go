@@ -29,7 +29,8 @@ type Classification struct {
 }
 
 // Classified records inbox.classified in the transaction that set the
-// label, so webhooks, the events feed and agents hear about it together.
+// label, so webhooks, the events feed and agents hear about it together,
+// and queues the reply rules for a label that needs no review.
 // The data carries ids and enums only; the reply itself is one GET away.
 func Classified(ctx context.Context, q jobs.Querier, c Classification) error {
 	group := ""
@@ -50,9 +51,16 @@ func Classified(ctx context.Context, q jobs.Querier, c Classification) error {
 	if c.Category != nil {
 		props["category"], props["group"] = *c.Category, group
 	}
-	return audit.Record(ctx, q, audit.Event{WorkspaceID: c.WorkspaceID, ActorID: c.ActorID, ActorType: actorType,
+	if err := audit.Record(ctx, q, audit.Event{WorkspaceID: c.WorkspaceID, ActorID: c.ActorID, ActorType: actorType,
 		Action: "inbox.classified", TargetType: "inbound_message", TargetID: c.InboundID, RequestID: c.RequestID,
-		Data: data, Props: props})
+		Data: data, Props: props}); err != nil {
+		return err
+	}
+	// A label someone or something is sure of runs the reply rules.
+	if c.Category == nil || c.NeedsReview {
+		return nil
+	}
+	return QueueRules(ctx, q, c.WorkspaceID, c.InboundID, *c.Category)
 }
 
 func band(c float64) string {

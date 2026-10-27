@@ -6,6 +6,12 @@ Each pull request that changes what Outflare does adds a change note in [changes
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-10-27
+
+### Added
+
+- Reply rules: once a reply has a label Outflare is sure of, it acts on it. A "not now" is snoozed until the date it gives (or 90 days), or its sequence restarts then; an out-of-office moves the lead's next email to the day after they're back; a referral or a "wrong person, talk to Sam" adds the person they name as a lead on the referrer's lists, offered as one click by default or added and enrolled automatically. Set them in the inbox under Rules, or per project or sequence through the API (`GET`/`PUT /v1/workspaces/{ws}/reply-rules`) and MCP (`get_reply_rules`, `set_reply_rules`, `add_reply_referral`). Labels the AI is unsure of wait for a person before any rule runs.
+
 ## [0.5.0] - 2026-10-27
 
 ### Added

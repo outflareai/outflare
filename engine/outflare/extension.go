@@ -12,11 +12,13 @@ import (
 	"github.com/outflareai/outflare/engine/internal/connectors"
 	"github.com/outflareai/outflare/engine/internal/emailfind"
 	"github.com/outflareai/outflare/engine/internal/jobs"
+	"github.com/outflareai/outflare/engine/internal/metrics"
 	"github.com/outflareai/outflare/engine/internal/pipeline"
 	"github.com/outflareai/outflare/engine/internal/secrets"
 	"github.com/outflareai/outflare/engine/internal/sysmail"
 	"github.com/outflareai/outflare/engine/internal/telemetry"
 	"github.com/outflareai/outflare/engine/internal/track"
+	"github.com/prometheus/client_golang/prometheus"
 )
 
 // An Extension adds to the engine without changing it: routes, middleware,
@@ -87,6 +89,11 @@ func (h *Host) EnqueueJob(ctx context.Context, kind string, payload any, idempot
 	_, err := jobs.Enqueue(ctx, h.Pool, jobs.NewJob{Kind: kind, Payload: payload, IdempotencyKey: idempotencyKey})
 	return err
 }
+
+// Metrics is the registry the engine's private metrics port serves
+// (OUTFLARE_METRICS_ADDR). An extension registers its own collectors here so
+// they reach the same Prometheus and dashboards; name them outflare_<name>_*.
+func (h *Host) Metrics() prometheus.Registerer { return metrics.Registry }
 
 // Go runs fn in the background until the engine shuts down.
 func (h *Host) Go(fn func(ctx context.Context)) {

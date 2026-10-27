@@ -383,9 +383,19 @@ func (s *Server) updateSEOSite(w http.ResponseWriter, r *http.Request) {
 		writeError(w, r, http.StatusForbidden, "forbidden", string(errSharedRecord))
 		return
 	}
+	// The start address may move within the site; another host is a site
+	// of its own.
+	var startURL *string
 	if req.URL != nil {
-		writeError(w, r, http.StatusBadRequest, "invalid_request", "url cannot change; add the new address as its own site")
-		return
+		start, host, err := s.siteAddress(*req.URL)
+		if s.allocError(w, r, err) {
+			return
+		}
+		if host != site.Host {
+			writeError(w, r, http.StatusBadRequest, "invalid_request", "url must stay on "+site.Host+"; add "+host+" as its own site")
+			return
+		}
+		startURL = &start
 	}
 	if err := req.check(site.Verified); s.allocError(w, r, err) {
 		return
@@ -405,9 +415,10 @@ func (s *Server) updateSEOSite(w http.ResponseWriter, r *http.Request) {
 		}
 		_, err := tx.Exec(ctx, `
 			UPDATE seo_sites SET brand_id = $3::uuid, max_pages = COALESCE($4, max_pages), crawl_delay_ms = COALESCE($5, crawl_delay_ms),
-				obey_robots = COALESCE($6, obey_robots), schedule = COALESCE($7, schedule), status = COALESCE($8, status), updated_at = now()
+				obey_robots = COALESCE($6, obey_robots), schedule = COALESCE($7, schedule), status = COALESCE($8, status),
+				start_url = COALESCE($9, start_url), updated_at = now()
 			WHERE id = $1 AND workspace_id = $2`,
-			site.ID, a.WorkspaceID, brand, req.MaxPages, req.CrawlDelayMS, req.ObeyRobots, req.Schedule, req.Status)
+			site.ID, a.WorkspaceID, brand, req.MaxPages, req.CrawlDelayMS, req.ObeyRobots, req.Schedule, req.Status, startURL)
 		if err != nil {
 			return err
 		}
@@ -426,7 +437,7 @@ func (s *Server) updateSEOSite(w http.ResponseWriter, r *http.Request) {
 		var fields []string
 		for name, set := range map[string]bool{"brand_id": req.BrandID.Set, "max_pages": req.MaxPages != nil,
 			"crawl_delay_ms": req.CrawlDelayMS != nil, "obey_robots": req.ObeyRobots != nil, "schedule": req.Schedule != nil,
-			"status": req.Status != nil} {
+			"status": req.Status != nil, "url": req.URL != nil} {
 			if set {
 				fields = append(fields, name)
 			}
@@ -515,7 +526,7 @@ func (s *Server) verifySEOSite(w http.ResponseWriter, r *http.Request) {
 		s.internal(w, r, err)
 		return
 	}
-	method, err := s.crawler.Check(ctx, a.Test, site.StartURL, site.Host, token)
+	method, err := s.crawler.Check(ctx, a.Test, a.WorkspaceID, site.StartURL, site.Host, token)
 	if errors.Is(err, crawl.ErrNotVerified) {
 		if _, err := s.pool.Exec(ctx, `UPDATE seo_sites SET verify_checked_at = now() WHERE id = $1`, site.ID); err != nil {
 			s.internal(w, r, err)
@@ -534,7 +545,7 @@ func (s *Server) verifySEOSite(w http.ResponseWriter, r *http.Request) {
 	}
 	err = pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
 		if _, err := tx.Exec(ctx, `
-			UPDATE seo_sites SET verified_at = COALESCE(verified_at, now()), verify_method = $2, verify_checked_at = now(), updated_at = now()
+			UPDATE seo_sites SET `+crawl.ProvedDefaults()+`, verified_at = COALESCE(verified_at, now()), verify_method = $2, verify_checked_at = now(), updated_at = now()
 			WHERE id = $1`, site.ID, method); err != nil {
 			return err
 		}
@@ -890,4 +901,43 @@ func (s *Server) getCrawlPage(w http.ResponseWriter, r *http.Request) {
 		in = []crawlLinkView{}
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"page": page, "links_out": out, "links_in": in})
+}
+
+// searchConsoleOwns reports whether one of the workspace's Search Console
+// connections owns a property covering host, which proves the site
+// without a DNS record, file or tag.
+func (s *Server) searchConsoleOwns(ctx context.Context, ws, host string) (bool, error) {
+	rows, err := s.pool.Query(ctx, `SELECT id FROM integrations WHERE workspace_id = $1 AND connector = 'google_search_console' AND status = 'connected' ORDER BY created_at`, ws)
+	if err != nil {
+		return false, err
+	}
+	ids, err := pgx.CollectRows(rows, pgx.RowTo[string])
+	if err != nil {
+		return false, err
+	}
+	var errs []error
+	for _, id := range ids {
+		o, err := s.integrations.Open(ctx, s.pool, ws, id)
+		if err != nil {
+			errs = append(errs, err)
+			continue
+		}
+		c, _ := s.integrations.Registry.Get(o.Integration.Connector)
+		reader, ok := c.(connectors.AnalyticsReader)
+		if !ok {
+			continue
+		}
+		sites, err := s.sites(ctx, o, reader, true)
+		if err != nil {
+			_ = s.integrations.Checked(ctx, s.pool, ws, id, nil, err)
+			errs = append(errs, err)
+			continue
+		}
+		for _, site := range sites {
+			if site.Owner && crawl.SearchConsoleCovers(site.ID, host) {
+				return true, nil
+			}
+		}
+	}
+	return false, errors.Join(errs...)
 }

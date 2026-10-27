@@ -83,11 +83,14 @@ func (s *Server) routesSiteKeys(mux *http.ServeMux) {
 }
 
 type siteKeyView struct {
-	ID                string     `json:"id"`
-	Name              string     `json:"name"`
-	Key               string     `json:"key"`
-	BrandID           *string    `json:"brand_id"`
-	Origins           []string   `json:"origins"`
+	ID      string   `json:"id"`
+	Name    string   `json:"name"`
+	Key     string   `json:"key"`
+	BrandID *string  `json:"brand_id"`
+	Origins []string `json:"origins"`
+	// Query parameters left out of page addresses, on top of the ones
+	// always dropped (site_params.go).
+	ExcludedParams    []string   `json:"excluded_params"`
 	PreviousExpiresAt *time.Time `json:"previous_expires_at"`
 	EventsToday       int        `json:"events_today"`
 	BotsToday         int        `json:"bots_today"`
@@ -103,6 +106,8 @@ type siteKeyInput struct {
 	Name    *string   `json:"name"`
 	BrandID *string   `json:"brand_id"`
 	Origins *[]string `json:"origins"`
+	// Query parameters to leave out of page addresses.
+	ExcludedParams *[]string `json:"excluded_params"`
 }
 
 func newSiteKey() string {
@@ -141,7 +146,7 @@ func (s *Server) siteSnippet(key string, origins []string) string {
 
 func (s *Server) loadSiteKeys(ctx context.Context, ws string, id *string) ([]siteKeyView, error) {
 	rows, err := s.pool.Query(ctx, `
-		SELECT k.id::text, k.name, k.key, k.brand_id::text, k.origins, CASE WHEN k.previous_expires_at > now() THEN k.previous_expires_at END,
+		SELECT k.id::text, k.name, k.key, k.brand_id::text, k.origins, k.excluded_params, CASE WHEN k.previous_expires_at > now() THEN k.previous_expires_at END,
 			coalesce((SELECT d.events FROM site_key_days d WHERE d.key_id = k.id AND d.day = current_date), 0),
 			coalesce((SELECT d.bots FROM site_key_days d WHERE d.key_id = k.id AND d.day = current_date), 0),
 			k.created_at, k.last_used_at, k.rotated_at, k.proxy_secret_at
@@ -152,7 +157,7 @@ func (s *Server) loadSiteKeys(ctx context.Context, ws string, id *string) ([]sit
 	}
 	list, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (siteKeyView, error) {
 		var v siteKeyView
-		err := row.Scan(&v.ID, &v.Name, &v.Key, &v.BrandID, &v.Origins, &v.PreviousExpiresAt, &v.EventsToday, &v.BotsToday, &v.CreatedAt, &v.LastUsedAt, &v.RotatedAt, &v.ProxySecretAt)
+		err := row.Scan(&v.ID, &v.Name, &v.Key, &v.BrandID, &v.Origins, &v.ExcludedParams, &v.PreviousExpiresAt, &v.EventsToday, &v.BotsToday, &v.CreatedAt, &v.LastUsedAt, &v.RotatedAt, &v.ProxySecretAt)
 		v.Snippet = s.siteSnippet(v.Key, v.Origins)
 		return v, err
 	})
@@ -323,6 +328,13 @@ func (s *Server) createSiteKey(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	excluded := []string{}
+	if req.ExcludedParams != nil {
+		var err error
+		if excluded, err = cleanExcludedParams(*req.ExcludedParams); s.allocError(w, r, err) {
+			return
+		}
+	}
 	if s.allocError(w, r, s.siteKeyBrand(ctx, a.WorkspaceID, req.BrandID)) {
 		return
 	}
@@ -335,11 +347,11 @@ func (s *Server) createSiteKey(w http.ResponseWriter, r *http.Request) {
 		if n >= maxSiteKeys {
 			return errInvalid("a workspace can have at most 20 site keys; one key can serve several origins")
 		}
-		if err := tx.QueryRow(ctx, `INSERT INTO site_keys (workspace_id, brand_id, name, key, origins, created_by) VALUES ($1, $2, $3, $4, $5, $6) RETURNING id::text`,
-			a.WorkspaceID, req.BrandID, name, newSiteKey(), origins, nullIfEmpty(a.ActorID)).Scan(&id); err != nil {
+		if err := tx.QueryRow(ctx, `INSERT INTO site_keys (workspace_id, brand_id, name, key, origins, excluded_params, created_by) VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id::text`,
+			a.WorkspaceID, req.BrandID, name, newSiteKey(), origins, excluded, nullIfEmpty(a.ActorID)).Scan(&id); err != nil {
 			return err
 		}
-		return record(ctx, tx, &a.principal, a.WorkspaceID, "site_key.created", "site_key", id, map[string]any{"brand_id": req.BrandID, "origins": len(origins)})
+		return record(ctx, tx, &a.principal, a.WorkspaceID, "site_key.created", "site_key", id, map[string]any{"brand_id": req.BrandID, "origins": len(origins), "excluded_params": len(excluded)})
 	})
 	if s.allocError(w, r, err) {
 		return
@@ -363,7 +375,7 @@ func (s *Server) updateSiteKey(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ctx := r.Context()
-	name, brand, origins := cur.Name, cur.BrandID, cur.Origins
+	name, brand, origins, excluded := cur.Name, cur.BrandID, cur.Origins, cur.ExcludedParams
 	if req.Name != nil {
 		if name = strings.TrimSpace(*req.Name); name == "" || len(name) > 100 {
 			writeError(w, r, http.StatusBadRequest, "invalid_request", "name must be 1 to 100 characters")
@@ -376,6 +388,12 @@ func (s *Server) updateSiteKey(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	if req.ExcludedParams != nil {
+		var err error
+		if excluded, err = cleanExcludedParams(*req.ExcludedParams); s.allocError(w, r, err) {
+			return
+		}
+	}
 	if req.BrandID != nil {
 		if s.allocError(w, r, s.siteKeyBrand(ctx, a.WorkspaceID, req.BrandID)) {
 			return
@@ -383,11 +401,11 @@ func (s *Server) updateSiteKey(w http.ResponseWriter, r *http.Request) {
 		brand = req.BrandID
 	}
 	err := pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
-		if _, err := tx.Exec(ctx, `UPDATE site_keys SET name = $3, brand_id = $4, origins = $5 WHERE id = $1 AND workspace_id = $2`,
-			cur.ID, a.WorkspaceID, name, brand, origins); err != nil {
+		if _, err := tx.Exec(ctx, `UPDATE site_keys SET name = $3, brand_id = $4, origins = $5, excluded_params = $6 WHERE id = $1 AND workspace_id = $2`,
+			cur.ID, a.WorkspaceID, name, brand, origins, excluded); err != nil {
 			return err
 		}
-		return record(ctx, tx, &a.principal, a.WorkspaceID, "site_key.updated", "site_key", cur.ID, map[string]any{"brand_id": brand, "origins": len(origins)})
+		return record(ctx, tx, &a.principal, a.WorkspaceID, "site_key.updated", "site_key", cur.ID, map[string]any{"brand_id": brand, "origins": len(origins), "excluded_params": len(excluded)})
 	})
 	if s.allocError(w, r, err) {
 		return
@@ -477,6 +495,8 @@ type siteKeyRow struct {
 	id, workspaceID string
 	brandID         *string
 	origins         []string
+	// Query parameters the site leaves out of page addresses.
+	excludedParams []string
 	// The hash of the key's proxy secret, when it has one.
 	proxyHash []byte
 }
@@ -516,9 +536,9 @@ func (s *Server) siteEvents(w http.ResponseWriter, r *http.Request) {
 	}
 	var k siteKeyRow
 	if strings.HasPrefix(in.Key, auth.PrefixSiteKey) && len(in.Key) <= 100 {
-		err = s.pool.QueryRow(ctx, `SELECT id::text, workspace_id::text, brand_id::text, origins, proxy_secret_hash FROM site_keys
+		err = s.pool.QueryRow(ctx, `SELECT id::text, workspace_id::text, brand_id::text, origins, excluded_params, proxy_secret_hash FROM site_keys
 			WHERE revoked_at IS NULL AND (key = $1 OR (previous_key = $1 AND previous_expires_at > now()))`, in.Key).
-			Scan(&k.id, &k.workspaceID, &k.brandID, &k.origins, &k.proxyHash)
+			Scan(&k.id, &k.workspaceID, &k.brandID, &k.origins, &k.excludedParams, &k.proxyHash)
 		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 			s.internal(w, r, err)
 			return
@@ -619,7 +639,7 @@ func (s *Server) siteEvents(w http.ResponseWriter, r *http.Request) {
 func (s *Server) queueSiteBatch(ctx context.Context, k siteKeyRow, ua string, batch []json.RawMessage) (accepted, rejected int, anon string, err error) {
 	keep := make([]json.RawMessage, 0, len(batch))
 	for _, raw := range batch {
-		m, _, err := siteMessage(raw, ua)
+		m, _, err := siteMessage(raw, ua, k.excludedParams)
 		if err != nil {
 			rejected++
 			continue
@@ -664,7 +684,7 @@ func (s *Server) storeSiteBatch(ctx context.Context, tx pgx.Tx, k siteKeyRow, ua
 	}
 	totals := ingestTotals{names: map[string]*seenName{}}
 	for _, raw := range batch {
-		m, token, err := siteMessage(raw, ua)
+		m, token, err := siteMessage(raw, ua, k.excludedParams)
 		if err == nil && m.text("type") == "track" {
 			name, _ := eventNameFor(m.text("event"))
 			if !known[name] {
@@ -794,8 +814,8 @@ func browserNames(ctx context.Context, tx pgx.Tx, ws string) (map[string]bool, i
 // an anonymous id, its properties and the page and campaign it came from.
 // A userId, traits and the browser's clock are dropped: the browser cannot
 // say who someone is, and its time is not trusted.
-func siteMessage(raw json.RawMessage, ua string) (eventMessage, string, error) {
-	m, err := siteMessageOf(raw, ua)
+func siteMessage(raw json.RawMessage, ua string, excluded []string) (eventMessage, string, error) {
+	m, err := siteMessageOf(raw, ua, excluded)
 	if err != nil {
 		return nil, "", err
 	}
@@ -813,7 +833,7 @@ func siteMessage(raw json.RawMessage, ua string) (eventMessage, string, error) {
 }
 
 // siteMessageOf is siteMessage before the click token is taken out.
-func siteMessageOf(raw json.RawMessage, ua string) (eventMessage, error) {
+func siteMessageOf(raw json.RawMessage, ua string, excluded []string) (eventMessage, error) {
 	var m eventMessage
 	if err := json.Unmarshal(raw, &m); err != nil {
 		return nil, errInvalid("each event is an object")
@@ -868,7 +888,7 @@ func siteMessageOf(raw json.RawMessage, ua string) (eventMessage, error) {
 	}
 	pick("page", sitePage, 2000)
 	if page, ok := ctxOut["page"].(map[string]any); ok {
-		cleanPage(page)
+		cleanPage(page, excluded)
 	}
 	pick("campaign", siteCampaign, 500)
 	for _, f := range []string{"locale", "timezone"} {
@@ -901,40 +921,23 @@ func siteMessageOf(raw json.RawMessage, ua string) (eventMessage, error) {
 	return out, nil
 }
 
-// keptParam reports the query parameters kept from a page's address: the
-// campaign tags, click ids and referral codes. Anything else, such as a
-// sign-in token or an email address, never reaches the workspace's data.
-func keptParam(k string) bool {
-	return strings.HasPrefix(k, "utm_") || slices.Contains(siteClickIDs, k) || k == "ofc" || k == "ref" || k == "via"
-}
-
-// cleanQuery keeps only the parameters siteParam allows.
-func cleanQuery(raw string) string {
-	q, err := url.ParseQuery(strings.TrimPrefix(raw, "?"))
-	if err != nil {
-		return ""
-	}
-	for k := range q {
-		if !keptParam(k) {
-			delete(q, k)
-		}
-	}
-	return q.Encode()
-}
-
-// cleanPage strips a page event's addresses: the page's own keeps only the
-// parameters above, and the referrer only its origin and path.
-func cleanPage(page map[string]any) {
+// cleanPage strips a page event's addresses: the page's own keeps the
+// parameters keptParam allows (site_params.go), and the referrer, another
+// site's address, only its origin and path. The page's host is kept on its
+// own, for reports by site.
+func cleanPage(page map[string]any, excluded []string) {
+	delete(page, "host")
 	if v, ok := page["url"].(string); ok {
 		if u, err := url.Parse(v); err == nil && u.Host != "" {
-			u.RawQuery, u.Fragment, u.User = cleanQuery(u.RawQuery), "", nil
+			u.RawQuery, u.Fragment, u.User = cleanQuery(u.RawQuery, excluded), "", nil
 			page["url"] = u.String()
+			page["host"] = strings.ToLower(u.Hostname())
 		} else {
 			delete(page, "url")
 		}
 	}
 	if v, ok := page["search"].(string); ok {
-		if q := cleanQuery(v); q != "" {
+		if q := cleanQuery(v, excluded); q != "" {
 			page["search"] = "?" + q
 		} else {
 			delete(page, "search")

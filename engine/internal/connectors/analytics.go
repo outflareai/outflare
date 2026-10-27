@@ -38,6 +38,9 @@ type AnalyticsSite struct {
 	ID   string `json:"id"`
 	Name string `json:"name"`
 	URL  string `json:"url,omitempty"`
+	// Owner: the connected account owns the site at the provider (a
+	// verified owner or full user in Search Console), which proves it.
+	Owner bool `json:"owner,omitempty"`
 }
 
 // AnalyticsQuery asks for one report. From and To are inclusive dates

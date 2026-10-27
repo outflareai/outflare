@@ -149,7 +149,7 @@ function Sites({ ws, canManage, onOpen, go }: Props) {
           ]}
         />
       )}
-      {canManage && <AddSite ws={ws} onAdded={onOpen} />}
+      {canManage && <AddSite ws={ws} taken={sites.map((s) => s.host)} onAdded={onOpen} />}
     </div>
   );
 }
@@ -173,36 +173,68 @@ function IssueCounts({ crawl }: { crawl: Crawl }) {
   );
 }
 
-function AddSite({ ws, onAdded }: { ws: string; onAdded: (id: string) => void }) {
-  const [url, setUrl] = useState("");
+const bare = (h: string) => h.toLowerCase().replace(/^https?:\/\//, "").replace(/\/.*$/, "").replace(/^www\./, "");
+
+// proofNames says how a site was proved, in words.
+const proofNames: Record<string, string> = {
+  search_console: "your Search Console connection",
+  tracking: "the Outflare tracking tag on its home page",
+  dns: "a DNS record",
+  meta: "a meta tag",
+  file: "a file",
+  test: "test mode",
+};
+
+function AddSite({ ws, taken, onAdded }: { ws: string; taken: string[]; onAdded: (id: string) => void }) {
+  const brand = useBrand(ws).brand;
+  // The selected brand's first website not audited yet, filled in for you.
+  const suggested = brand ? [brand.website, ...brand.domains].map((d) => d?.trim()).find((d) => d && !taken.some((t) => bare(t) === bare(d))) ?? "" : "";
+  const [url, setUrl] = useState(suggested);
   const [schedule, setSchedule] = useState<"off" | "daily" | "weekly">("weekly");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
-  const brand = useBrand(ws).brand;
+  useEffect(() => setUrl(suggested), [suggested]);
 
   async function add(e: FormEvent) {
     e.preventDefault();
     setBusy(true);
+    setError("");
     const address = /^https?:\/\//i.test(url.trim()) ? url.trim() : `https://${url.trim()}`;
     const { data, error } = await api.POST("/v1/workspaces/{ws}/seo-sites", { params: { path: { ws } }, body: { url: address, schedule, ...(brand ? { brand_id: brand.id } : {}) } });
     if (error || !data) {
       setBusy(false);
       return setError(errorMessage(error));
     }
-    // The first crawl starts straight away, within the unproved limits.
-    const crawl = await api.POST("/v1/workspaces/{ws}/seo-sites/{site}/crawls", { params: { path: { ws, site: data.id } } });
+    const path = { params: { path: { ws, site: data.id } } };
+    // Look for a proof you already have (Search Console, the tracking tag)
+    // before the first crawl, so it runs with the proved limits.
+    const proof = await api.POST("/v1/workspaces/{ws}/seo-sites/{site}/verify", path);
+    const proved = proof.data && "verified" in proof.data && proof.data.verified ? proof.data.verify_method : null;
+    const crawl = await api.POST("/v1/workspaces/{ws}/seo-sites/{site}/crawls", path);
     setBusy(false);
     if (crawl.error) toast(errorMessage(crawl.error), "error");
-    else toast(`Added ${data.host}. The first crawl has started.`);
+    else if (proved) toast(`Added ${data.host}, proved yours through ${proofNames[proved] ?? proved}. The first crawl has started.`);
+    else toast(`Added ${data.host}. The first crawl has started; prove it's yours to crawl every page.`);
     onAdded(data.id);
   }
 
+  const forBrand = brand && suggested && url === suggested;
   return (
-    <Card title="Add a site" description="Its pages are read as OutflareBot, which obeys robots.txt and slows down when the site struggles.">
+    <Card
+      title={forBrand ? `Audit ${brand.name}'s website` : "Add a site"}
+      description={forBrand ? `We filled in ${brand.name}'s website. Change the address if the site to audit is somewhere else.` : "Its pages are read as OutflareBot, which obeys robots.txt and slows down when the site struggles."}
+    >
       <form onSubmit={add} className="flex flex-wrap items-end gap-2">
         <label className="min-w-64 flex-1 space-y-1 text-[13px]">
           <span className="font-medium">Address</span>
-          <input className={`${field} w-full`} placeholder="https://www.example.com" value={url} onChange={(e) => setUrl(e.target.value)} required />
+          <span className="relative block">
+            <input className={`${field} w-full pr-8`} placeholder="https://www.example.com" value={url} onChange={(e) => setUrl(e.target.value)} required />
+            {url && (
+              <button type="button" aria-label="Clear the address" className="absolute top-1/2 right-2 -translate-y-1/2 text-muted-foreground hover:text-foreground" onClick={() => setUrl("")}>
+                ×
+              </button>
+            )}
+          </span>
         </label>
         <label className="space-y-1 text-[13px]">
           <span className="font-medium">Crawl</span>
@@ -214,6 +246,9 @@ function AddSite({ ws, onAdded }: { ws: string; onAdded: (id: string) => void })
         </label>
         <Button type="submit" disabled={busy || !url.trim()}>{busy ? "Adding…" : "Add and crawl"}</Button>
       </form>
+      <p className="mt-2 text-[12px] text-muted-foreground">
+        Outflare checks right away whether you've already proved it's yours: a Search Console connection that owns the site, or the Outflare tracking tag on its home page.
+      </p>
       <ErrorText>{error}</ErrorText>
     </Card>
   );
@@ -287,7 +322,7 @@ function Site({ ws, canManage, open, onOpen, go }: Props) {
     const { data, error } = await api.POST("/v1/workspaces/{ws}/seo-sites/{site}/verify", path);
     setChecking(false);
     if (error) return toast(errorMessage(error), "error");
-    if (data && "verified" in data && data.verified) toast(`${site!.host} is proved yours.`);
+    if (data && "verified" in data && data.verified) toast(`${site!.host} is proved yours, through ${proofNames[data.verify_method ?? ""] ?? "its proof"}. Crawls can now read up to ${(10000).toLocaleString()} pages.`);
     else toast("No proof found yet. DNS changes can take a few minutes to show.", "error");
     load();
   }
@@ -308,7 +343,7 @@ function Site({ ws, canManage, open, onOpen, go }: Props) {
     <div className="space-y-6">
       <PageHeader
         back={back}
-        title={<><span className="break-all font-mono">{site.host}</span>{site.verified ? <Badge tone="green">✓ Proved yours</Badge> : <Badge>Not proved</Badge>}<BrandBadge id={site.brand_id} /></>}
+        title={<><span className="break-all font-mono">{site.host}</span>{site.verified ? <Badge tone="green" title={site.verify_method ? `Proved through ${proofNames[site.verify_method] ?? site.verify_method}` : undefined}>✓ Proved yours</Badge> : <Badge>Not proved</Badge>}<BrandBadge id={site.brand_id} /></>}
         description={<>Starts at <span className="font-mono">{site.start_url}</span> · up to {plural(site.max_pages, "page")} · {site.schedule === "off" ? "crawled by hand" : `crawled ${site.schedule}`}</>}
         action={canManage && (busy ? <Button variant="ghost" onClick={stop}>Stop crawl</Button> : <Button onClick={crawl}>Crawl now</Button>)}
       />
@@ -317,38 +352,54 @@ function Site({ ws, canManage, open, onOpen, go }: Props) {
       {!last && <Empty title="Not crawled yet">{canManage ? "Crawl now to get its first audit." : "Its first crawl will show here."}</Empty>}
 
       {!site.verified && (
-        <Card title="Prove you own it" description={`Proved sites are crawled up to ${(10000).toLocaleString()} pages, faster, may audit pages their own robots.txt hides, and can read pages a firewall blocks through your Geonode connection. Add any one of these, then check.`}>
-          <div className="mb-4">
-            <DNSWays ws={ws} page="audits" item={site.id} approval={{ kind: "seo_site", id: site.id }} connections={site.dns_connections} canManage={canManage} reload={load}
-              records={proofRecord} run={site.dns_install} {...dnsHelp(site.host, proofRecord, "so Outflare can confirm the site is ours")}
-              used={(way, how) => track("ui.dns_one_click_used", { where: "seo_site", way, how })}
-              manual={<>Add any one of the proofs below where {site.host} is managed, then press Check.</>}
-              intro={<>Quickest: connect the Cloudflare account {site.host} is on.</>}
-              after="Then Outflare looks for it every minute until the site is proved."
-              onAdd={async (integration) => {
-                const { data, error } = await api.POST("/v1/workspaces/{ws}/seo-sites/{site}/dns", { ...path, body: { integration_id: integration } });
-                return { error, held: heldByMission(data) };
-              }} />
-          </div>
-          <p className="mb-2 text-[13px] text-muted-foreground">Or add any one of these yourself:</p>
-          <ul className="space-y-3 text-[13px]">
+        <Card title="Prove you own it" description={`Proved sites are crawled up to ${(10000).toLocaleString()} pages, faster, may audit pages their own robots.txt hides, and can read pages a firewall blocks through your Geonode connection.`}>
+          <ol className="space-y-4 text-[13px]">
             <li>
-              <div className="font-medium">A DNS record</div>
-              <div className="text-muted-foreground">A TXT record on <span className="font-mono">{site.verification.dns_name}</span>:</div>
-              <Code text={site.verification.dns_value} />
+              <div className="font-medium">1. Use what you already have</div>
+              <p className="text-muted-foreground">
+                Outflare looks for either of these, with nothing to add: a{" "}
+                <button className="underline hover:text-foreground" onClick={() => go("connectors")}>Google Search Console connection</button> that owns {site.host}, or the{" "}
+                <button className="underline hover:text-foreground" onClick={() => go("tracking")}>Outflare tracking tag</button> on its home page.
+              </p>
+              {canManage && <div className="mt-2"><Button onClick={verify} disabled={checking}>{checking ? "Checking…" : "Check now"}</Button></div>}
             </li>
             <li>
-              <div className="font-medium">A meta tag</div>
-              <div className="text-muted-foreground">In the head of the start page:</div>
-              <Code text={site.verification.meta_tag} />
+              <div className="mb-2 font-medium">2. Or add a DNS record</div>
+              <DNSWays ws={ws} page="audits" item={site.id} approval={{ kind: "seo_site", id: site.id }} connections={site.dns_connections} canManage={canManage} reload={load}
+                records={proofRecord} run={site.dns_install} {...dnsHelp(site.host, proofRecord, "so Outflare can confirm the site is ours")}
+                used={(way, how) => track("ui.dns_one_click_used", { where: "seo_site", way, how })}
+                manual={<>Add the record below where {site.host} is managed, then press Check now.</>}
+                intro={<>Quickest: connect the Cloudflare account {site.host} is on, and Outflare adds the record for you.</>}
+                after="Then Outflare looks for it every minute until the site is proved."
+                onAdd={async (integration) => {
+                  const { data, error } = await api.POST("/v1/workspaces/{ws}/seo-sites/{site}/dns", { ...path, body: { integration_id: integration } });
+                  return { error, held: heldByMission(data) };
+                }} />
             </li>
             <li>
-              <div className="font-medium">A file</div>
-              <div className="text-muted-foreground">At <span className="font-mono break-all">{site.verification.file_url}</span>, holding:</div>
-              <Code text={site.verification.file_body} />
+              <details>
+                <summary className="cursor-pointer font-medium">3. Or add a proof by hand</summary>
+                <ul className="mt-2 space-y-3">
+                  <li>
+                    <div className="font-medium">A DNS record</div>
+                    <div className="text-muted-foreground">A TXT record on <span className="font-mono">{site.verification.dns_name}</span>:</div>
+                    <Code text={site.verification.dns_value} />
+                  </li>
+                  <li>
+                    <div className="font-medium">A meta tag</div>
+                    <div className="text-muted-foreground">In the head of the start page:</div>
+                    <Code text={site.verification.meta_tag} />
+                  </li>
+                  <li>
+                    <div className="font-medium">A file</div>
+                    <div className="text-muted-foreground">At <span className="font-mono break-all">{site.verification.file_url}</span>, holding:</div>
+                    <Code text={site.verification.file_body} />
+                  </li>
+                </ul>
+                {canManage && <div className="mt-3"><Button variant="ghost" onClick={verify} disabled={checking}>{checking ? "Checking…" : "Check now"}</Button></div>}
+              </details>
             </li>
-          </ul>
-          {canManage && <div className="mt-4"><Button variant="ghost" onClick={verify} disabled={checking}>{checking ? "Checking…" : "Check now"}</Button></div>}
+          </ol>
         </Card>
       )}
 
@@ -368,6 +419,11 @@ function Site({ ws, canManage, open, onOpen, go }: Props) {
       {canManage && (
         <Card title="Settings">
           <div className="flex flex-wrap items-end gap-4 text-[13px]">
+            <label className="min-w-64 flex-1 space-y-1">
+              <span className="font-medium">Start address</span>
+              <input key={site.start_url} className={`${field} w-full`} defaultValue={site.start_url} onBlur={(e) => e.target.value.trim() && e.target.value.trim() !== site.start_url && patch({ url: e.target.value.trim() })} />
+              <span className="block text-[12px] text-muted-foreground">Where crawls start, on {site.host}</span>
+            </label>
             <label className="space-y-1">
               <span className="font-medium">Crawl</span>
               <select className={`${field} w-full`} value={site.schedule} onChange={(e) => patch({ schedule: e.target.value })}>

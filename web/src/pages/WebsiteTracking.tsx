@@ -22,10 +22,16 @@ const scriptStep = (s: Setup | null) => s?.steps.find((x) => x.id === "site_scri
 /**
  * Analytics → Website tracking: put Outflare's script on a brand's site in
  * three steps (get it, add it, see the first visit), the same steps as the
- * brand's setup, so finishing here ticks it off there too.
+ * brand's setup, so finishing here ticks it off there too. Below them, the
+ * script itself: copy it, change which sites it records, and clear out
+ * any spare one.
  */
 export function WebsiteTracking({ ws, canManage, go }: { ws: string; canManage: boolean; go: (t: Tab) => void }) {
   const { brand, active, loaded } = useBrand(ws);
+  // The guided steps and the script settings below each change what the
+  // other shows (a script made, sites edited), so each change reloads both.
+  const [version, setVersion] = useState(0);
+  const changed = () => setVersion((v) => v + 1);
   const header = (
     <PageHeader
       title="Website tracking"
@@ -37,24 +43,17 @@ export function WebsiteTracking({ ws, canManage, go }: { ws: string; canManage: 
     <div className="space-y-6">
       {header}
       {active.length === 0 ? (
-        <Card title="Your site" description="Add your site, paste its script into every page's <head>, then open the site once. The key shows events today as soon as the first visit arrives.">
-          <SiteKeysCard ws={ws} canManage={canManage} />
-        </Card>
+        <SiteKeysCard ws={ws} canManage={canManage} />
       ) : brand ? (
-        <TrackingFlow key={brand.handle} ws={ws} brand={brand.handle} brandID={brand.id} canManage={canManage} go={go} />
+        <>
+          <TrackingFlow key={brand.handle} ws={ws} brand={brand.handle} brandID={brand.id} canManage={canManage} go={go} version={version} onChange={changed} />
+          <SiteKeysCard ws={ws} canManage={canManage} version={version} onChange={changed} hideEmpty />
+        </>
       ) : (
-        <BrandList ws={ws} />
-      )}
-      {active.length > 0 && (
-        <details className="group rounded-lg border bg-card">
-          <summary className="flex cursor-pointer items-center justify-between px-4 py-3 text-[13px] font-medium">
-            Keys, allowed sites and proxy
-            <Icon name="chevron" className="size-4 text-muted-foreground transition-transform group-open:rotate-90" />
-          </summary>
-          <div className="border-t p-4">
-            <SiteKeysCard ws={ws} canManage={canManage} />
-          </div>
-        </details>
+        <>
+          <BrandList ws={ws} />
+          <SiteKeysCard ws={ws} canManage={canManage} hideEmpty />
+        </>
       )}
     </div>
   );
@@ -102,7 +101,7 @@ function StageLabel({ stage }: { stage?: Stage }) {
 // One brand: get the script, add it to the site (one click through Tag
 // Manager, a developer, an AI coding tool or by hand), then wait for the
 // first visit and say so.
-function TrackingFlow({ ws, brand, brandID, canManage, go }: { ws: string; brand: string; brandID: string; canManage: boolean; go: (t: Tab) => void }) {
+function TrackingFlow({ ws, brand, brandID, canManage, go, version, onChange }: { ws: string; brand: string; brandID: string; canManage: boolean; go: (t: Tab) => void; version: number; onChange: () => void }) {
   const [setup, setSetup] = useState<Setup | null>(null);
   const [catalog, setCatalog] = useState<Connector[]>([]);
   const [error, setError] = useState("");
@@ -120,6 +119,9 @@ function TrackingFlow({ ws, brand, brandID, canManage, go }: { ws: string; brand
     void load();
     api.GET("/v1/workspaces/{ws}/connectors", { params: { path: { ws } } }).then(({ data }) => setCatalog(data?.data ?? []));
   }, [load]);
+  useEffect(() => {
+    if (version > 0) void load();
+  }, [version]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const step = scriptStep(setup);
   const stage = stageOf(step);
@@ -146,7 +148,7 @@ function TrackingFlow({ ws, brand, brandID, canManage, go }: { ws: string; brand
   return (
     <ol className="divide-y rounded-lg border bg-card">
       <Stage n={1} title="Get your script" done={stage !== "none"} current={stage === "none"}>
-        <InstallStep ws={ws} brand={brand} step={step} install={step.install} canManage={canManage} catalog={catalog} onChange={(d) => (d ? setSetup(d) : void load())} back="tracking" />
+        <InstallStep ws={ws} brand={brand} step={step} install={step.install} canManage={canManage} catalog={catalog} onChange={(d) => { if (d) setSetup(d); else void load(); onChange(); }} back="tracking" />
       </Stage>
       <Stage n={2} title={`Add it to ${site ? site.replace(/^https?:\/\//, "") : "your site"}`} done={stage === "receiving"} current={stage === "waiting"}>
         {stage !== "none" && <InstallStep ws={ws} brand={brand} step={step} install={step.install} canManage={canManage} catalog={catalog} onChange={(d) => (d ? setSetup(d) : void load())} back="tracking" />}

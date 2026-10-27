@@ -78,6 +78,20 @@ func LimitsFor(verified bool) Limits {
 	return Limits{MaxPages: 100, MinDelayMS: 2000}
 }
 
+// ProvedDefaults is the SET clause a site's first proof adds: a site
+// still on the unproved limits moves to the proved defaults (every page up
+// to the proved maximum, about one page a second). Settings someone chose
+// stay as they are.
+func ProvedDefaults() string {
+	u, p := LimitsFor(false), LimitsFor(true)
+	return fmt.Sprintf(`max_pages = CASE WHEN verified_at IS NULL AND max_pages = %d THEN %d ELSE max_pages END,
+		crawl_delay_ms = CASE WHEN verified_at IS NULL AND crawl_delay_ms = %d THEN %d ELSE crawl_delay_ms END`,
+		u.MaxPages, p.MaxPages, u.MinDelayMS, provedDelayMS)
+}
+
+// provedDelayMS is the pause between requests on a proved site by default.
+const provedDelayMS = 1000
+
 // Errors StartRun returns.
 var (
 	ErrRunning   = errors.New("a crawl of this site is already running")
@@ -106,6 +120,9 @@ type Service struct {
 	// AfterAudit runs in the transaction that stores a crawl's audit, so
 	// other checks of the site's pages (keyword targets) see the crawl.
 	AfterAudit func(ctx context.Context, tx pgx.Tx, ws, siteID, runID string) error
+	// Owns checks a proof through the workspace's own connections (a
+	// Search Console property it owns); nil skips it.
+	Owns func(ctx context.Context, ws, host string) (bool, error)
 }
 
 // Register adds the crawl job handler.
@@ -140,14 +157,44 @@ func (s *Service) wait(ctx context.Context, d time.Duration) error {
 
 // Check looks for a proof that the workspace owns a site. A test
 // workspace's sites always pass, as method "test", without a lookup.
-func (s *Service) Check(ctx context.Context, test bool, startURL, host, token string) (string, error) {
+func (s *Service) Check(ctx context.Context, test bool, ws, startURL, host, token string) (string, error) {
 	if test {
 		return "test", nil
 	}
 	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
-	return Verify(ctx, s.fetcher(false), s.Resolver, startURL, host, token)
+	// The tracking tag proves the site with any of the workspace's keys,
+	// including one just rotated out.
+	var keys []string
+	if err := s.Pool.QueryRow(ctx, `
+		SELECT coalesce(array_agg(k), '{}') FROM (
+			SELECT key k FROM site_keys WHERE workspace_id = $1 AND revoked_at IS NULL
+			UNION ALL SELECT previous_key FROM site_keys WHERE workspace_id = $1 AND revoked_at IS NULL AND previous_expires_at > now()
+		) x`, ws).Scan(&keys); err != nil {
+		return "", err
+	}
+	method, err := Verify(ctx, s.fetcher(false), s.Resolver, startURL, host, token, keys)
+	if !errors.Is(err, ErrNotVerified) || s.Owns == nil {
+		return method, err
+	}
+	owns, oerr := s.Owns(ctx, ws, host)
+	if owns {
+		return "search_console", nil
+	}
+	if oerr != nil {
+		return "", &ProofCheckError{Err: oerr}
+	}
+	return "", ErrNotVerified
 }
+
+// ProofCheckError says no proof was found, but a connection that might
+// hold one could not be asked. It is ErrNotVerified too.
+type ProofCheckError struct{ Err error }
+
+func (e *ProofCheckError) Error() string {
+	return "no proof found; could not ask Search Console: " + e.Err.Error()
+}
+func (e *ProofCheckError) Unwrap() []error { return []error{ErrNotVerified, e.Err} }
 
 // CheckSite checks a site's address can be crawled from this install.
 func (s *Service) CheckSite(raw string) error { return CheckURL(raw, s.AllowPrivate) }
@@ -369,9 +416,15 @@ func (s *Service) begin(ctx context.Context, r *run) (bool, error) {
 	// A proof can be taken down; check it again now and then, and crawl
 	// as anyone else would when it is gone.
 	if r.verifiedAt != nil && (r.checkedAt == nil || time.Since(*r.checkedAt) > reverifyAfter) {
-		method, err := s.Check(ctx, r.test, r.startURL, r.host, r.token)
+		method, err := s.Check(ctx, r.test, r.ws, r.startURL, r.host, r.token)
 		if err == nil {
 			_, err = s.Pool.Exec(ctx, `UPDATE seo_sites SET verify_checked_at = now(), verify_method = $2 WHERE id = $1`, r.siteID, method)
+		} else if pe := (*ProofCheckError)(nil); errors.As(err, &pe) || !errors.Is(err, ErrNotVerified) {
+			// Could not look (Search Console unreachable): keep the proof and
+			// look again next time.
+			track.Fail(ctx, s.Log, track.Event{Name: "seo_site.proof_check_failed", WorkspaceID: r.ws, ActorType: "system", Surface: "job",
+				Props: map[string]any{"site_id": r.siteID}}, "connector_unavailable", err)
+			err = nil
 		} else {
 			lim := LimitsFor(false)
 			r.maxPages, r.delayMS, r.obey = min(r.maxPages, lim.MaxPages), max(r.delayMS, lim.MinDelayMS), true

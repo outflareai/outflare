@@ -2591,7 +2591,8 @@ export function createServer({ client: gtm, workspace, agency, readOnly = false,
     {
       title: "Check that the user owns a site",
       description:
-        "Looks now for the site's DNS TXT record, meta tag or file (the site's verification field says what to add). " +
+        "Looks now for a proof: a connected Google Search Console that owns the site, the workspace's Outflare tracking tag on its home page, " +
+        "or the DNS TXT record, meta tag or file in the site's verification field. " +
         "verification_failed means none is there yet: tell the user what to add, then try again.",
       inputSchema: { site_id: id },
       annotations: { ...write, openWorldHint: true },
@@ -5130,6 +5131,51 @@ export function createServer({ client: gtm, workspace, agency, readOnly = false,
   );
 
   server.registerTool(
+    "get_reply_rules",
+    {
+      title: "Get the reply rules",
+      description:
+        "What Outflare does once a reply has a label it is sure of: snooze a not_now until its date or restart the sequence, move the next email past an out_of_office, add the person a referral or wrong_person names. Returns the defaults, the actions each label can take, and the sets saved for the workspace, a project or a sequence (the most specific wins, label by label).",
+      annotations: read,
+    },
+    () => call(() => gtm.GET("/v1/workspaces/{ws}/reply-rules", { params: { path } })),
+  );
+
+  const replyRule = z.object({
+    action: z.string().describe("One of the label's actions from get_reply_rules."),
+    days: z.number().int().min(1).max(730).optional().describe("not_now only: days to wait when the reply gives no date (default 90)."),
+    sequence_id: id.optional().describe("add_and_enroll only: the sequence to enrol the person in."),
+  });
+
+  server.registerTool(
+    "set_reply_rules",
+    {
+      title: "Save reply rules",
+      description:
+        "Replaces the rules for the workspace (no ids), a project (project_id) or a sequence (sequence_id). Labels left out follow the next set up; empty rules remove the set. Every action can be undone.",
+      inputSchema: {
+        project_id: id.optional(),
+        sequence_id: id.optional(),
+        rules: z.record(z.enum(["not_now", "out_of_office", "referral", "wrong_person"]), replyRule),
+      },
+      annotations: { ...write, idempotentHint: true },
+    },
+    (body) => call(() => gtm.PUT("/v1/workspaces/{ws}/reply-rules", { params: { path }, body })),
+  );
+
+  server.registerTool(
+    "add_reply_referral",
+    {
+      title: "Add the person a reply refers you to",
+      description:
+        "Adds the address a referral reply names (details.referral_email) as a lead on the referrer's lists, marked referred_by, and with sequence_id enrols them unless they opted out. Fails with no_referral when the reply names no address.",
+      inputSchema: { message_id: id, sequence_id: id.optional() },
+      annotations: write,
+    },
+    ({ message_id, ...body }) => call(() => gtm.POST("/v1/workspaces/{ws}/inbox/{id}/referral", { params: { path: { ws, id: message_id } }, body })),
+  );
+
+  server.registerTool(
     "reply_to_inbox_message",
     {
       title: "Reply to a received message",
@@ -5370,11 +5416,14 @@ export function createServer({ client: gtm, workspace, agency, readOnly = false,
       description:
         "Makes a public key for one website's tracking snippet and returns the script tag to paste into the site's <head>. The key only adds anonymous page " +
         "views and track events: it reads nothing and opens nothing else, so it can sit in the page. origins (https://example.com, https://*.example.com) " +
-        "filters stray traffic; brand_id gives the site's events a brand.",
+        "filters stray traffic; brand_id gives the site's events a brand. One key per brand covers every page and subdomain: to add a domain, " +
+        "update the brand's key's origins instead of making another. Page addresses keep their query string; excluded_params (plan, fb_*) leaves " +
+        "parameters out, and sign-in tokens, passwords, codes and email addresses are always left out.",
       inputSchema: {
         name: z.string().min(1).max(100).describe("Usually the site's domain."),
         brand_id: id.optional(),
         origins: z.array(z.string()).max(20).optional(),
+        excluded_params: z.array(z.string().max(100)).max(50).optional(),
       },
       annotations: write,
     },
@@ -5385,8 +5434,16 @@ export function createServer({ client: gtm, workspace, agency, readOnly = false,
     "update_site_key",
     {
       title: "Change a website tracking key",
-      description: "Renames a site key, gives it a brand, or changes the origins it takes events from (an empty list takes any).",
-      inputSchema: { site_key_id: id, name: z.string().min(1).max(100).optional(), brand_id: id.optional(), origins: z.array(z.string()).max(20).optional() },
+      description:
+        "Renames a site key, gives it a brand, changes the origins it takes events from (an empty list takes any), or the query parameters it " +
+        "leaves out of page addresses (excluded_params: names such as plan, or prefixes such as fb_*).",
+      inputSchema: {
+        site_key_id: id,
+        name: z.string().min(1).max(100).optional(),
+        brand_id: id.optional(),
+        origins: z.array(z.string()).max(20).optional(),
+        excluded_params: z.array(z.string().max(100)).max(50).optional(),
+      },
       annotations: write,
     },
     ({ site_key_id, ...body }) => call(() => gtm.PATCH("/v1/workspaces/{ws}/site-keys/{id}", { params: { path: { ws, id: site_key_id } }, body })),

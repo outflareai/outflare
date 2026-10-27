@@ -26,9 +26,16 @@ Mozilla/5.0 (compatible; OutflareBot/1.0; +https://outflare.ai/bot/)
 
 A site is a website a workspace audits: `POST /v1/workspaces/$WS/seo-sites` with its `url`. It belongs to the brand whose domains include its host, unless `brand_id` says otherwise.
 
-Until you prove you own a site, a crawl reads at most 100 pages, waits at least 2 seconds between requests and always obeys robots.txt. A site you have proved may crawl up to 10,000 pages, as fast as one request every 250 ms, and may set `obey_robots: false` to audit pages its own robots.txt hides from crawlers. That choice applies only to that site. Each site's `limits` say what it may ask for now.
+Until you prove you own a site, a crawl reads at most 100 pages, waits at least 2 seconds between requests and always obeys robots.txt. A site you have proved may crawl up to 10,000 pages, as fast as one request every 250 ms, and may set `obey_robots: false` to audit pages its own robots.txt hides from crawlers. That choice applies only to that site. Each site's `limits` say what it may ask for now. The first proof moves a site still on the unproved limits to the proved defaults: up to 10,000 pages, about one request a second. Limits you set yourself stay as they are.
 
-To prove a site, add any one of the proofs in its `verification` field, then `POST .../seo-sites/{site}/verify`:
+Most sites are proved with nothing to add. `POST .../seo-sites/{site}/verify` (and **Add and crawl** in the app, before the first crawl) looks for:
+
+| Proof | What it needs |
+| --- | --- |
+| Search Console | A connected Google Search Console account that is an owner or full user of a property covering the site: a domain property (`sc-domain:example.com`) covers the domain and its subdomains, a URL-prefix property its own host. |
+| Tracking tag | The workspace's Outflare tracking tag (`<script src=".../site.js" data-key="ofk_...">`, from Analytics → Tracking) on the start page. |
+
+`verify_method` says which one matched (`search_console` or `tracking`). Otherwise add any one of the proofs in its `verification` field, then verify:
 
 | Proof | What to add |
 | --- | --- |
@@ -38,7 +45,7 @@ To prove a site, add any one of the proofs in its `verification` field, then `PO
 
 With a Cloudflare connection (sign in, or an API token with Zone > DNS > Edit), **Prove you own it** adds the TXT record in one click: `POST .../seo-sites/{site}/dns` with one of the site's `dns_connections` (MCP `add_seo_site_dns`). It only adds the record, then looks for it every minute until the site is proved; `dns_install` on the site says how it went.
 
-The check runs while you wait, and answers `409 verification_failed` with the proofs when it finds none. Outflare checks a proved site again every 30 days, before a crawl; if the proof is gone, the site drops back to the lower limits and an audit event `seo_site.unverified` says so. A test workspace's sites pass without a check, and its crawls read a small simulated site.
+The check runs while you wait, and answers `409 verification_failed` with the proofs when it finds none. Outflare checks a proved site again every 30 days, before a crawl (a Search Console that can't be reached then keeps the proof until the next check); if the proof is gone, the site drops back to the lower limits and an audit event `seo_site.unverified` says so. A test workspace's sites pass without a check, and its crawls read a small simulated site.
 
 ## Crawls
 

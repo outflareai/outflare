@@ -9,9 +9,37 @@
 #
 # Packages whose tests use TEST_DATABASE_URL share one database, so they run
 # one at a time (-p 1); the others run in parallel.
+#
+# A test that fails is run once more on its own. If it passes then, the part
+# passes and the test's name is written to $FLAKY_FILE (when set) so CI can
+# file it; a second failure, a build failure or a panic fails the part.
 set -eu
 cd "$(dirname "$0")/.."
 api=./engine/internal/api
+log=$(mktemp)
+trap 'rm -f "$log" "$log.rc"' EXIT
+
+# run_tests <go test args...>: go test, retrying failed tests once.
+run_tests() {
+	(
+		if go test -race -count=1 "$@" 2>&1; then echo 0 >"$log.rc"; else echo $? >"$log.rc"; fi
+	) | tee "$log"
+	[ "$(cat "$log.rc")" = 0 ] && return 0
+	# Top-level failed tests, grouped by the package line that follows them.
+	failed=$(awk '/^--- FAIL: /{t = t (t ? "|" : "") $3} /^FAIL\t/{ if (t) print $2, t; t = "" }' "$log")
+	if [ -z "$failed" ] || grep -qE '^panic:|\[build failed\]|\[setup failed\]' "$log"; then
+		return 1
+	fi
+	echo "Re-running the failed tests once:" >&2
+	echo "$failed" >&2
+	echo "$failed" | while read -r pkg tests; do
+		go test -race -count=1 -p 1 -run "^($tests)\$" "$pkg" || exit 1
+	done || return 1
+	if [ -n "${FLAKY_FILE:-}" ]; then
+		echo "$failed" >>"$FLAKY_FILE"
+	fi
+	echo "The failed tests passed when re-run; reported as flaky." >&2
+}
 
 case "${1:?usage: scripts/test-shard.sh api <i> <n> | rest}" in
 api)
@@ -24,7 +52,7 @@ api)
 		echo "api part $i of $n has no tests" >&2
 		exit 1
 	fi
-	go test -race -count=1 -run "^($tests)\$" "$api"
+	run_tests -run "^($tests)\$" "$api"
 	;;
 rest)
 	db=$(grep -rl TEST_DATABASE_URL --include='*_test.go' engine scripts |
@@ -33,10 +61,10 @@ rest)
 		awk -v db="$db" 'BEGIN { n = split(db, a, "\n"); for (k = 1; k <= n; k++) skip[a[k]] = 1 } !skip[$0]')
 	if [ -n "$db" ]; then
 		# shellcheck disable=SC2086
-		go test -race -count=1 -p 1 $db
+		run_tests -p 1 $db
 	fi
 	# shellcheck disable=SC2086
-	go test -race -count=1 $others
+	run_tests $others
 	;;
 *)
 	echo "unknown part: $1" >&2

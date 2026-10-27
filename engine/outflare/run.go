@@ -279,6 +279,7 @@ func Run(ctx context.Context, log *slog.Logger, cmd string, exts ...Extension) e
 	researcher.Register(queue)
 	labeller := &inbox.Labeller{Pool: pool, Log: log}
 	labeller.Register(queue)
+	(&inbox.Rules{Pool: pool, Log: log}).Register(queue)
 	linker := &customers.Linker{Pool: pool}
 	linker.Register(queue)
 	hooks := &webhooks.Service{Pool: pool, Box: box, Log: log, AllowPrivate: cfg.WebhooksAllowPrivate}

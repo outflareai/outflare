@@ -14,6 +14,9 @@ import (
 
 	"github.com/outflareai/outflare/engine/internal/api"
 	"github.com/outflareai/outflare/engine/internal/connectors"
+	"github.com/outflareai/outflare/engine/internal/metrics"
+	"github.com/prometheus/client_golang/prometheus"
+	dto "github.com/prometheus/client_model/go"
 )
 
 func TestHostWiresRoutesMiddlewareAndCapabilities(t *testing.T) {
@@ -114,5 +117,21 @@ func TestCredsAreRedacted(t *testing.T) {
 	slog.New(slog.NewTextHandler(&buf, nil)).Info("x", "creds", creds)
 	if strings.Contains(buf.String(), "not-a-real") || !strings.Contains(buf.String(), "api_key") {
 		t.Fatalf("log: %s", buf.String())
+	}
+}
+
+func TestMetricsRegistersOnTheEnginesRegistry(t *testing.T) {
+	g := prometheus.NewGauge(prometheus.GaugeOpts{Name: "outflare_test_extension_gauge", Help: "test"})
+	if err := (&Host{}).Metrics().Register(g); err != nil {
+		t.Fatal(err)
+	}
+	defer metrics.Registry.Unregister(g)
+	g.Set(3)
+	families, err := metrics.Registry.Gather()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.ContainsFunc(families, func(f *dto.MetricFamily) bool { return f.GetName() == "outflare_test_extension_gauge" }) {
+		t.Fatal("the extension's gauge is not on the engine's registry")
 	}
 }

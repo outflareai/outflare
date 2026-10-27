@@ -103,6 +103,8 @@ export type UiEvent =
   | "ui.setup_step_opened" // a setup step expanded (step, status)
   | "ui.tracking_opened" // Analytics → Website tracking shown (brands, receiving: whether the picked brand's script has sent a visit)
   | "ui.tracking_verified" // the guided install saw the brand's first visit while the page was open (brand_id)
+  | "ui.site_key_duplicates_shown" // Website tracking listed spare scripts for a brand (extra: how many)
+  | "ui.site_key_second_asked" // Add a site when the brand already has a script, and what they chose (choice: edit, second, cancel)
   | "ui.setup_method_used" // a way to do an install step picked (step, method: gtm, dns, developer, ai, manual; how: copied, email, claude, chatgpt)
   | "ui.logs_filtered" // a filter on the Logs page changed (filter: which one)
   | "ui.logs_live_toggled" // Live on the Logs page turned on or off (on)

@@ -938,7 +938,7 @@ func (s *Server) checkBrandSetup(w http.ResponseWriter, r *http.Request) {
 // verifySetupSite looks for a site's proof and records it when found. p is
 // who asked; nil is the background check.
 func (s *Server) verifySetupSite(ctx context.Context, ws string, site *setupSite, test bool, p *principal) (bool, error) {
-	method, err := s.crawler.Check(ctx, test, site.startURL, site.host, site.token)
+	method, err := s.crawler.Check(ctx, test, ws, site.startURL, site.host, site.token)
 	if errors.Is(err, crawl.ErrNotVerified) {
 		_, err := s.pool.Exec(ctx, `UPDATE seo_sites SET verify_checked_at = now() WHERE id = $1`, site.id)
 		return false, err
@@ -948,7 +948,7 @@ func (s *Server) verifySetupSite(ctx context.Context, ws string, site *setupSite
 	}
 	err = pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
 		tag, err := tx.Exec(ctx, `
-			UPDATE seo_sites SET verified_at = now(), verify_method = $2, verify_checked_at = now(), verify_watch_until = NULL, updated_at = now()
+			UPDATE seo_sites SET `+crawl.ProvedDefaults()+`, verified_at = now(), verify_method = $2, verify_checked_at = now(), verify_watch_until = NULL, updated_at = now()
 			WHERE id = $1 AND verified_at IS NULL`, site.id, method)
 		if err != nil || tag.RowsAffected() == 0 {
 			return err

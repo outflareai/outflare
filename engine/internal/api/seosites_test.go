@@ -111,6 +111,12 @@ func TestSEOSitesVerifyAndCrawl(t *testing.T) {
 		t.Fatalf("verified: %v", s)
 	}
 	owner.must(200, "PATCH", base+"/seo-sites/"+id, map[string]any{"max_pages": 1000, "crawl_delay_ms": 250, "schedule": "weekly"})
+	// The start address moves within the site, never to another host.
+	owner.must(400, "PATCH", base+"/seo-sites/"+id, map[string]any{"url": "https://example.com/"})
+	if s := owner.must(200, "PATCH", base+"/seo-sites/"+id, map[string]any{"url": site.URL + "/b"}); s["start_url"] != site.URL+"/b" {
+		t.Fatalf("start moved: %v", s)
+	}
+	owner.must(200, "PATCH", base+"/seo-sites/"+id, map[string]any{"url": site.URL + "/"})
 
 	// One crawl at a time.
 	run := owner.must(202, "POST", base+"/seo-sites/"+id+"/crawls", nil)
@@ -505,5 +511,38 @@ func TestFixesFollowCrawls(t *testing.T) {
 		if !seen[name] {
 			t.Errorf("no %s event", name)
 		}
+	}
+}
+
+func TestSEOSiteProvedByTrackingTag(t *testing.T) {
+	e := freshEnv(t)
+	owner, ws := setupOwner(t, e.h)
+	base := "/v1/workspaces/" + ws
+
+	var key atomic.Value
+	key.Store("")
+	site := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/" {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "text/html")
+		io.WriteString(w, `<html><head><script async src="https://app.example.com/site.js" data-key="`+key.Load().(string)+`"></script></head><body>Hi</body></html>`)
+	}))
+	defer site.Close()
+
+	id := owner.must(201, "POST", base+"/seo-sites", map[string]any{"url": site.URL})["id"].(string)
+	// Another workspace's tag proves nothing.
+	key.Store("ofk_not_this_workspace")
+	owner.must(409, "POST", base+"/seo-sites/"+id+"/verify", nil)
+	// This workspace's tracking tag on the start page does.
+	key.Store(owner.must(201, "POST", base+"/site-keys", map[string]any{"name": "Website"})["key"].(string))
+	s := owner.must(200, "POST", base+"/seo-sites/"+id+"/verify", nil)
+	if s["verified"] != true || s["verify_method"] != "tracking" {
+		t.Fatalf("tracking proof: %v", s)
+	}
+	// The first proof moves the unproved limits to the proved defaults.
+	if s["max_pages"] != 10000.0 || s["crawl_delay_ms"] != 1000.0 {
+		t.Fatalf("proved defaults: %v %v", s["max_pages"], s["crawl_delay_ms"])
 	}
 }

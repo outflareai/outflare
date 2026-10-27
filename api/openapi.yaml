@@ -4966,6 +4966,115 @@ paths:
         "202": { $ref: "#/components/responses/MissionHeld" }
         "404": { $ref: "#/components/responses/Error" }
         default: { $ref: "#/components/responses/Error" }
+  /v1/workspaces/{ws}/reply-rules:
+    parameters: [{ $ref: "#/components/parameters/Workspace" }]
+    get:
+      operationId: getReplyRules
+      x-outflare-access: { scope: inbox.read }
+      summary: List the reply rules
+      description: |
+        Scope inbox.read. What Outflare does when a reply gets a label it is
+        sure of (rules, a person, or the AI at 80% or more): the defaults,
+        the actions each label can take, and the sets saved for the
+        workspace, a project or a sequence. For a reply, the sequence's set
+        wins over its project's, which wins over the workspace's, label by
+        label; labels no set names follow the defaults.
+      tags: [inbox]
+      responses:
+        "200":
+          description: The rules.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [defaults, actions, data]
+                properties:
+                  defaults: { $ref: "#/components/schemas/ReplyRules" }
+                  actions:
+                    type: object
+                    description: The actions each label can take, the default first.
+                    additionalProperties: { type: array, items: { type: string } }
+                    example: { not_now: [snooze, restart, nothing], out_of_office: [reschedule, nothing], referral: [suggest, add, add_and_enroll], wrong_person: [suggest, add, add_and_enroll] }
+                  data: { type: array, items: { $ref: "#/components/schemas/ReplyRuleSet" } }
+        default: { $ref: "#/components/responses/Error" }
+    put:
+      operationId: setReplyRules
+      x-outflare-access: { scope: inbox.manage }
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      summary: Save the reply rules for the workspace, a project or a sequence
+      description: |
+        Scope inbox.manage. Replaces the set for the workspace (no ids), a
+        project (project_id) or a sequence (sequence_id). Labels left out
+        follow the next set up; an empty rules object removes the set and
+        answers {"cleared": true}. Every action can be undone: a snoozed
+        reply can be woken, a restarted or enrolled lead stopped.
+      tags: [inbox]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [rules]
+              properties:
+                project_id: { type: string, format: uuid }
+                sequence_id: { type: string, format: uuid }
+                rules: { $ref: "#/components/schemas/ReplyRules" }
+      responses:
+        "200":
+          description: The saved set, or cleared true when an empty set removed it.
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - { $ref: "#/components/schemas/ReplyRuleSet" }
+                  - type: object
+                    required: [cleared]
+                    properties:
+                      cleared: { type: boolean }
+        "202": { $ref: "#/components/responses/MissionHeld" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/workspaces/{ws}/inbox/{id}/referral:
+    parameters:
+      - { $ref: "#/components/parameters/Workspace" }
+      - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+    post:
+      operationId: addReplyReferral
+      x-outflare-access: { scope: inbox.manage, brand_limited: true }
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      summary: Add the person a reply refers you to as a lead
+      description: |
+        Scope inbox.manage. Adds the address the reply names (details.referral_email)
+        as a lead on the referrer's lists, with referred_by set, and with
+        sequence_id enrols them unless they are on the opt-out list. 422
+        no_referral when the reply names no address.
+      tags: [inbox]
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                sequence_id: { type: string, format: uuid }
+      responses:
+        "200":
+          description: The lead.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [lead_id, email, created, enrolled]
+                properties:
+                  lead_id: { type: string, format: uuid }
+                  email: { type: string, format: email }
+                  created: { type: boolean, description: False when the lead already existed. }
+                  enrolled: { type: boolean }
+        "202": { $ref: "#/components/responses/MissionHeld" }
+        "404": { $ref: "#/components/responses/Error" }
+        "422": { $ref: "#/components/responses/Error" }
+        default: { $ref: "#/components/responses/Error" }
   /v1/workspaces/{ws}/inbox/{id}/reply:
     parameters:
       - { $ref: "#/components/parameters/Workspace" }
@@ -6885,7 +6994,7 @@ paths:
       x-outflare-access: { scope: seo.manage, brand_limited: true }
       parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
       summary: Change an SEO site's settings
-      description: "Scope: seo.manage. Send only what changes, within the site's `limits`. `obey_robots: false` audits pages your own robots.txt hides from crawlers, and is only for a site you have proved you own. A crawl already running keeps the settings it started with."
+      description: "Scope: seo.manage. Send only what changes, within the site's `limits`. `obey_robots: false` audits pages your own robots.txt hides from crawlers, and is only for a site you have proved you own. `url` moves where crawls start, on the same host; another host is a site of its own. A crawl already running keeps the settings it started with."
       tags: [seo]
       requestBody:
         required: true
@@ -6934,10 +7043,13 @@ paths:
       parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
       summary: Check that you own a site
       description: |
-        Scope: seo.manage. Looks now for any one of the site's proofs (see
-        `verification`): a DNS TXT record, a meta tag in the start page's
-        head, or a file on the site. Found, the site is verified and its
-        limits rise. Not found answers 409 `verification_failed`, whose
+        Scope: seo.manage. Looks now for any one of the site's proofs: a
+        Google Search Console connection of the workspace that owns a
+        property covering the site, the workspace's Outflare tracking tag on
+        the start page, or one added from `verification` (a DNS TXT record,
+        a meta tag in the start page's head, or a file on the site). Found,
+        the site is verified, its limits rise, and a site still on the
+        unproved limits moves to the proved defaults. Not found answers 409 `verification_failed`, whose
         message lists the proofs. Outflare checks a verified site again
         every 30 days and lowers its limits if the proof is gone. A test
         workspace's sites pass without a check.
@@ -14664,8 +14776,10 @@ paths:
         Public: the site key (ofk_) in the body is the authority. What the tracking snippet (/site.js) sends: page views
         and track events on a visitor's anonymousId, with context.page, context.campaign (the utm_ tags) and, on page
         views, properties.click_ids, ofc and ref, exactly as the landing page had them. A userId, traits and timestamps
-        are ignored: the browser cannot say who someone is. Query strings keep only the campaign tags, click ids, ofc, ref
-        and via, and the referrer only its origin and path. Track names must be plain (Signup Started): dotted names are
+        are ignored: the browser cannot say who someone is. Page addresses keep their query string except the parameters
+        the key's excluded_params lists and those always left out (sign-in tokens, passwords, codes, session ids, and any
+        value that is an email address); context.page.host is the page's host. The referrer keeps only its origin and
+        path. Track names must be plain (Signup Started): dotted names are
         Outflare's own. Your own product links the visitor to a person by sending
         identify with userId and the same anonymousId to POST .../customer-events. Each event joins a visit (a session:
         30 minutes without an event, or a new campaign, starts another), whose id is in context.sessionId; a person's
@@ -21226,13 +21340,14 @@ components:
         not_companies: { type: array, maxItems: 1000, items: { type: string } }
     SiteKey:
       type: object
-      required: [id, name, key, brand_id, origins, previous_expires_at, events_today, bots_today, created_at, last_used_at, rotated_at, proxy_secret_at, snippet]
+      required: [id, name, key, brand_id, origins, excluded_params, previous_expires_at, events_today, bots_today, created_at, last_used_at, rotated_at, proxy_secret_at, snippet]
       properties:
         id: { type: string, format: uuid }
         name: { type: string, description: Usually the site's domain. }
         key: { type: string, description: "The public key (ofk_). It only writes browser events.", example: ofk_test_not_a_real_key }
         brand_id: { type: [string, "null"], format: uuid, description: The brand whose site it is; its events get this brand. }
         origins: { type: array, items: { type: string }, description: "Origins events are taken from. A bare domain (example.com) is stored as https://*.example.com, which takes the site and every subdomain; https://app.example.com (or http://localhost:3000) takes that exact origin, port included. A whole domain is https on the default port; list other ports exactly. Empty: any. A filter against stray traffic, not a lock." }
+        excluded_params: { type: array, items: { type: string }, description: "Query parameters left out of the page addresses this site records, by name (any case), or every name starting with a prefix that ends in * (fb_*). Every other parameter is kept. Sign-in tokens, passwords, codes, session ids and any value that is an email address are always left out, whatever this lists." }
         previous_expires_at: { type: [string, "null"], format: date-time, description: Until when the value before the last rotation still works. }
         events_today: { type: integer, description: Events taken today (UTC). }
         bots_today: { type: integer, description: "Requests from bots, crawlers and scripts today (UTC): counted, not stored." }
@@ -21248,6 +21363,7 @@ components:
         name: { type: string, maxLength: 100 }
         brand_id: { type: [string, "null"], format: uuid }
         origins: { type: array, maxItems: 20, items: { type: string } }
+        excluded_params: { type: array, maxItems: 50, items: { type: string, maxLength: 100 }, description: "Query parameters to leave out of page addresses, such as plan or fb_*." }
     ConnectionHook:
       type: object
       description: A connection's live updates, its own webhook address.
@@ -22186,7 +22302,7 @@ components:
         obey_robots: { type: boolean, description: "false audits pages the site's robots.txt hides; only for a verified site." }
         verified: { type: boolean, description: Whether this workspace has proved it owns the site. }
         verified_at: { type: [string, "null"], format: date-time }
-        verify_method: { type: [string, "null"], enum: [dns, meta, file, test, null] }
+        verify_method: { type: [string, "null"], enum: [dns, meta, file, test, search_console, tracking, null], description: "How the site was proved: a DNS record, meta tag or file, a Search Console connection that owns it (search_console), or the workspace's Outflare tracking tag on its start page (tracking)." }
         verify_checked_at: { type: [string, "null"], format: date-time }
         verification:
           type: object
@@ -26684,6 +26800,39 @@ components:
         color: { type: string, enum: [gray, red, orange, amber, green, teal, blue, violet, pink] }
         replies: { type: integer, description: Replies with this tag. }
         created_at: { type: string, format: date-time }
+    ReplyRule:
+      type: object
+      required: [action]
+      additionalProperties: false
+      properties:
+        action: { type: string, description: "One of the label's actions (see actions in GET .../reply-rules).", example: snooze }
+        days: { type: integer, minimum: 1, maximum: 730, description: "not_now only: how long to wait when the reply gives no date. Default 90." }
+        sequence_id: { type: string, format: uuid, description: "add_and_enroll only: the sequence to enrol the person in." }
+    ReplyRules:
+      type: object
+      description: |
+        A rule per label. not_now: snooze (default; the reply comes back to
+        the open inbox on the date it gives, else after days), restart (the
+        sequence it stopped picks up again then) or nothing. out_of_office:
+        reschedule (default; the lead's next email waits until the day
+        after the return date the AI read) or nothing. referral and
+        wrong_person: suggest (default; the inbox offers to add the person),
+        add (a lead on the referrer's lists) or add_and_enroll.
+      properties:
+        not_now: { $ref: "#/components/schemas/ReplyRule" }
+        out_of_office: { $ref: "#/components/schemas/ReplyRule" }
+        referral: { $ref: "#/components/schemas/ReplyRule" }
+        wrong_person: { $ref: "#/components/schemas/ReplyRule" }
+      additionalProperties: false
+    ReplyRuleSet:
+      type: object
+      required: [id, project_id, sequence_id, rules, updated_at]
+      properties:
+        id: { type: string, format: uuid }
+        project_id: { type: [string, "null"], format: uuid, description: Set for a project's set. }
+        sequence_id: { type: [string, "null"], format: uuid, description: Set for a sequence's set. }
+        rules: { $ref: "#/components/schemas/ReplyRules" }
+        updated_at: { type: string, format: date-time }
     InboxView:
       type: object
       required: [id, name, shared, filters, position, created_at, updated_at]

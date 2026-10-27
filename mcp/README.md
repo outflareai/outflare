@@ -259,6 +259,8 @@ Write (left out when `OUTFLARE_MCP_READ_ONLY=1`):
 | `triage_inbox_message` | Label a reply, assign it, snooze it, mark it done, tag it or flag it for review |
 | `create_inbox_tag`, `update_inbox_tag`, `delete_inbox_tag` | Add, rename, recolour or delete a reply tag (renaming changes it on every reply) |
 | `create_inbox_view`, `update_inbox_view`, `delete_inbox_view` | Save, change or delete a named set of inbox filters |
+| `get_reply_rules`, `set_reply_rules` | What happens when a reply gets a label (snooze or restart a not now, move past an out-of-office, add a referral), for the workspace, a project or a sequence |
+| `add_reply_referral` | Add the person a reply refers you to as a lead, and optionally enrol them |
 | `list_members` | Workspace members and their user ids, for assigning replies |
 | `list_roles` | The workspace's roles and what each one allows |
 | `reply_to_inbox_message` | Reply now, from the same mailbox and in the same thread |

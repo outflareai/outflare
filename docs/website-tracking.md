@@ -24,7 +24,7 @@ The quickest way is **Analytics → Website tracking** (the same step as **Compa
 
 On every page, including in-app navigation, the snippet sends a `page` event on the visitor's random `anonymousId` with:
 
-- `context.page`: the URL, path, query string, referrer and title. Outflare keeps only the campaign tags, click ids, `ofc`, `ref` and `via` from the URL and query string, and only the origin and path from the referrer, so a sign-in token or an `?email=` in an address never reaches your data.
+- `context.page`: the URL, host, path, query string, referrer and title. The URL and query string keep every parameter, so reports can filter on any of them, except the ones the site key's `excluded_params` lists (names such as `plan`, or prefixes such as `fb_*`) and the ones always left out: sign-in tokens, passwords, codes, session ids, signatures, and any value that is an email address or a signed token. So a sign-in link or an `?email=` in an address never reaches your data. The referrer, another site's address, keeps only its origin and path.
 - `context.campaign`: the `utm_source`, `utm_medium`, `utm_campaign` (as `name`), `utm_term`, `utm_content` and `utm_id` tags.
 - `properties.click_ids`: whichever ad click ids the page had (`gclid`, `gbraid`, `wbraid`, `fbclid`, `msclkid`, `li_fat_id`, `rdt_cid`, `twclid`).
 - `properties.ofc` (an Outflare campaign link) and `properties.ref` (a referral or partner code, from `ref` or `via`).

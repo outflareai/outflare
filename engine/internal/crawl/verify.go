@@ -67,8 +67,9 @@ func dnsHost(host string) string {
 var ErrNotVerified = errors.New("no proof of ownership found")
 
 // Verify looks for any proof that the workspace owns host, and returns the
-// method that matched: dns, meta or file.
-func Verify(ctx context.Context, f Fetcher, dns TXTResolver, startURL, host, token string) (string, error) {
+// method that matched: dns, meta, file, or tracking when the start page
+// carries the workspace's Outflare tracking tag with one of siteKeys.
+func Verify(ctx context.Context, f Fetcher, dns TXTResolver, startURL, host, token string, siteKeys []string) (string, error) {
 	want := VerifyName + "=" + token
 	if dns != nil {
 		for _, name := range []string{dnsHost(host), host} {
@@ -106,10 +107,48 @@ func Verify(ctx context.Context, f Fetcher, dns TXTResolver, startURL, host, tok
 			if strings.TrimSpace(ParsePage(base, resp.Body).Meta[VerifyName]) == token {
 				return "meta", nil
 			}
+			if HasTrackingTag(resp.Body, siteKeys) {
+				return "tracking", nil
+			}
 		}
 		break
 	}
 	return "", ErrNotVerified
+}
+
+// HasTrackingTag reports whether a page carries Outflare's tracking tag
+// with one of keys. Only the site's owner can put it there, so it proves
+// the site like the meta tag does.
+func HasTrackingTag(body []byte, keys []string) bool {
+	page := string(body)
+	if !strings.Contains(page, "/site.js") {
+		return false
+	}
+	for _, k := range keys {
+		if k != "" && (strings.Contains(page, `data-key="`+k+`"`) || strings.Contains(page, `data-key='`+k+`'`)) {
+			return true
+		}
+	}
+	return false
+}
+
+// SearchConsoleCovers reports whether a Search Console property covers
+// host: a domain property (sc-domain:example.com) covers the domain and
+// its subdomains, a URL-prefix property its own host only.
+func SearchConsoleCovers(property, host string) bool {
+	h := strings.ToLower(host)
+	if i := strings.LastIndexByte(h, ':'); i >= 0 && !strings.Contains(h[i:], "]") {
+		h = h[:i]
+	}
+	if d, ok := strings.CutPrefix(strings.ToLower(property), "sc-domain:"); ok {
+		d = strings.TrimSuffix(d, ".")
+		return d != "" && (h == d || strings.HasSuffix(h, "."+d))
+	}
+	u, err := url.Parse(property)
+	if err != nil || u.Hostname() == "" {
+		return false
+	}
+	return strings.EqualFold(u.Hostname(), h)
 }
 
 // SameSite reports whether two hosts are the same site, allowing for a

@@ -98,7 +98,7 @@ func (s *Server) drainWorkspaceInbox(ctx context.Context, ws string) (int, error
 		if err := tx.QueryRow(ctx, `SELECT pg_try_advisory_xact_lock(hashtext('site_event_inbox'), hashtext($1))`, ws).Scan(&mine); err != nil || !mine {
 			return err
 		}
-		rows, err := tx.Query(ctx, `SELECT i.id, i.key_id::text, k.brand_id::text, k.origins, i.user_agent, i.batch, i.received_at, i.attempts
+		rows, err := tx.Query(ctx, `SELECT i.id, i.key_id::text, k.brand_id::text, k.origins, k.excluded_params, i.user_agent, i.batch, i.received_at, i.attempts
 			FROM site_event_inbox i JOIN site_keys k ON k.id = i.key_id
 			WHERE i.workspace_id = $1 AND i.failed_at IS NULL ORDER BY i.id LIMIT $2`, ws, inboxPass)
 		if err != nil {
@@ -116,7 +116,7 @@ func (s *Server) drainWorkspaceInbox(ctx context.Context, ws string) (int, error
 		for rows.Next() {
 			var r row
 			r.key.workspaceID = ws
-			if err := rows.Scan(&r.id, &r.key.id, &r.key.brandID, &r.key.origins, &r.ua, &r.batch, &r.at, &r.attempts); err != nil {
+			if err := rows.Scan(&r.id, &r.key.id, &r.key.brandID, &r.key.origins, &r.key.excludedParams, &r.ua, &r.batch, &r.at, &r.attempts); err != nil {
 				rows.Close()
 				return err
 			}

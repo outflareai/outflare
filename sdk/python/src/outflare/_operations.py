@@ -454,6 +454,34 @@ class Operations(_Mixin):
             idempotency_key=idempotency_key,
         )
 
+    def add_reply_referral(
+        self,
+        id: str,
+        *,
+        ws: str | None = None,
+        sequence_id: str | None = None,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Add the person a reply refers you to as a lead.
+
+        Scope inbox.manage. Adds the address the reply names (details.referral_email)
+        as a lead on the referrer's lists, with referred_by set, and with
+        sequence_id enrols them unless they are on the opt-out list. 422
+        no_referral when the reply names no address.
+
+        Needs: the inbox.manage scope.
+        POST /v1/workspaces/{ws}/inbox/{id}/referral
+        """
+        return self._call(
+            "POST",
+            "/v1/workspaces/{ws}/inbox/{id}/referral",
+            path={"id": id, "ws": ws},
+            body={"sequence_id": sequence_id},
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
     def add_sending_domain(
         self,
         *,
@@ -3097,6 +3125,7 @@ class Operations(_Mixin):
         *,
         ws: str | None = None,
         brand_id: str | None = None,
+        excluded_params: list[str] | None = None,
         name: str | None = None,
         origins: list[str] | None = None,
         extra_body: dict[str, Any] | None = None,
@@ -3115,7 +3144,7 @@ class Operations(_Mixin):
             "POST",
             "/v1/workspaces/{ws}/site-keys",
             path={"ws": ws},
-            body={"brand_id": brand_id, "name": name, "origins": origins},
+            body={"brand_id": brand_id, "excluded_params": excluded_params, "name": name, "origins": origins},
             extra_body=extra_body,
             idempotency_key=idempotency_key,
         )
@@ -6596,6 +6625,29 @@ class Operations(_Mixin):
             "GET",
             "/v1/workspaces/{ws}/catalog/types/{type}",
             path={"type": type, "ws": ws},
+        )
+
+    def get_reply_rules(
+        self,
+        *,
+        ws: str | None = None,
+    ) -> Any:
+        """List the reply rules.
+
+        Scope inbox.read. What Outflare does when a reply gets a label it is
+        sure of (rules, a person, or the AI at 80% or more): the defaults,
+        the actions each label can take, and the sets saved for the
+        workspace, a project or a sequence. For a reply, the sequence's set
+        wins over its project's, which wins over the workspace's, label by
+        label; labels no set names follow the defaults.
+
+        Needs: the inbox.read scope.
+        GET /v1/workspaces/{ws}/reply-rules
+        """
+        return self._call(
+            "GET",
+            "/v1/workspaces/{ws}/reply-rules",
+            path={"ws": ws},
         )
 
     def get_semantic_search(
@@ -13524,8 +13576,10 @@ class Operations(_Mixin):
         Public: the site key (ofk_) in the body is the authority. What the tracking snippet (/site.js) sends: page views
         and track events on a visitor's anonymousId, with context.page, context.campaign (the utm_ tags) and, on page
         views, properties.click_ids, ofc and ref, exactly as the landing page had them. A userId, traits and timestamps
-        are ignored: the browser cannot say who someone is. Query strings keep only the campaign tags, click ids, ofc, ref
-        and via, and the referrer only its origin and path. Track names must be plain (Signup Started): dotted names are
+        are ignored: the browser cannot say who someone is. Page addresses keep their query string except the parameters
+        the key's excluded_params lists and those always left out (sign-in tokens, passwords, codes, session ids, and any
+        value that is an email address); context.page.host is the page's host. The referrer keeps only its origin and
+        path. Track names must be plain (Signup Started): dotted names are
         Outflare's own. Your own product links the visitor to a person by sending
         identify with userId and the same anonymousId to POST .../customer-events. Each event joins a visit (a session:
         30 minutes without an event, or a new campaign, starts another), whose id is in context.sessionId; a person's
@@ -13756,6 +13810,36 @@ class Operations(_Mixin):
             "/v1/workspaces/{ws}/seo-sites/{site}/targets",
             path={"site": site, "ws": ws},
             body={"keyword": keyword, "secondary": secondary, "status": status, "url": url},
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
+    def set_reply_rules(
+        self,
+        *,
+        ws: str | None = None,
+        project_id: str | None = None,
+        rules: dict[str, Any],
+        sequence_id: str | None = None,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Save the reply rules for the workspace, a project or a sequence.
+
+        Scope inbox.manage. Replaces the set for the workspace (no ids), a
+        project (project_id) or a sequence (sequence_id). Labels left out
+        follow the next set up; an empty rules object removes the set and
+        answers {"cleared": true}. Every action can be undone: a snoozed
+        reply can be woken, a restarted or enrolled lead stopped.
+
+        Needs: the inbox.manage scope.
+        PUT /v1/workspaces/{ws}/reply-rules
+        """
+        return self._call(
+            "PUT",
+            "/v1/workspaces/{ws}/reply-rules",
+            path={"ws": ws},
+            body={"project_id": project_id, "rules": rules, "sequence_id": sequence_id},
             extra_body=extra_body,
             idempotency_key=idempotency_key,
         )
@@ -17040,7 +17124,7 @@ class Operations(_Mixin):
     ) -> Any:
         """Change an SEO site's settings.
 
-        Scope: seo.manage. Send only what changes, within the site's `limits`. `obey_robots: false` audits pages your own robots.txt hides from crawlers, and is only for a site you have proved you own. A crawl already running keeps the settings it started with.
+        Scope: seo.manage. Send only what changes, within the site's `limits`. `obey_robots: false` audits pages your own robots.txt hides from crawlers, and is only for a site you have proved you own. `url` moves where crawls start, on the same host; another host is a site of its own. A crawl already running keeps the settings it started with.
 
         Needs: the seo.manage scope.
         PATCH /v1/workspaces/{ws}/seo-sites/{site}
@@ -17160,6 +17244,7 @@ class Operations(_Mixin):
         *,
         ws: str | None = None,
         brand_id: str | None = None,
+        excluded_params: list[str] | None = None,
         name: str | None = None,
         origins: list[str] | None = None,
         extra_body: dict[str, Any] | None = None,
@@ -17176,7 +17261,7 @@ class Operations(_Mixin):
             "PATCH",
             "/v1/workspaces/{ws}/site-keys/{id}",
             path={"id": id, "ws": ws},
-            body={"brand_id": brand_id, "name": name, "origins": origins},
+            body={"brand_id": brand_id, "excluded_params": excluded_params, "name": name, "origins": origins},
             extra_body=extra_body,
             idempotency_key=idempotency_key,
         )
@@ -17802,10 +17887,13 @@ class Operations(_Mixin):
     ) -> Any:
         """Check that you own a site.
 
-        Scope: seo.manage. Looks now for any one of the site's proofs (see
-        `verification`): a DNS TXT record, a meta tag in the start page's
-        head, or a file on the site. Found, the site is verified and its
-        limits rise. Not found answers 409 `verification_failed`, whose
+        Scope: seo.manage. Looks now for any one of the site's proofs: a
+        Google Search Console connection of the workspace that owns a
+        property covering the site, the workspace's Outflare tracking tag on
+        the start page, or one added from `verification` (a DNS TXT record,
+        a meta tag in the start page's head, or a file on the site). Found,
+        the site is verified, its limits rise, and a site still on the
+        unproved limits moves to the proved defaults. Not found answers 409 `verification_failed`, whose
         message lists the proofs. Outflare checks a verified site again
         every 30 days and lowers its limits if the proof is gone. A test
         workspace's sites pass without a check.

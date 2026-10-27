@@ -110,6 +110,7 @@ export function Inbox({ ws, canManage, open, setOpen, onRead }: Props) {
   const [views, setViews] = useState<InboxView[]>([]);
   const [view, setView] = useState<InboxView | null>(null);
   const [managingTags, setManagingTags] = useState(false);
+  const [managingRules, setManagingRules] = useState(false);
 
   const { query: brandQuery } = useBrand(ws);
   const load = useCallback(async () => {
@@ -204,6 +205,7 @@ export function Inbox({ ws, canManage, open, setOpen, onRead }: Props) {
                   ]}
                 />
                 {canManage && <Button variant="ghost" onClick={() => setManagingTags(true)}>Tags</Button>}
+                {canManage && <Button variant="ghost" onClick={() => setManagingRules(true)}>Rules</Button>}
               </div>
             }
           >
@@ -295,6 +297,7 @@ export function Inbox({ ws, canManage, open, setOpen, onRead }: Props) {
         )}
       </div>
       {managingTags && <TagsDialog ws={ws} tags={tags} onChange={() => { loadTags(); load(); }} onClose={() => setManagingTags(false)} />}
+      {managingRules && <RulesDialog ws={ws} onClose={() => setManagingRules(false)} />}
     </div>
   );
 }
@@ -337,6 +340,11 @@ function Conversation({ ws, id, canManage, members, tags, onBack, onChange, onRe
     load();
   }
 
+  async function addReferral() {
+    const { data, error } = await api.POST("/v1/workspaces/{ws}/inbox/{id}/referral", { params: { path }, body: {} });
+    if (error) return toast(errorMessage(error), "error");
+    toast(data.created ? `Added ${data.email} as a lead, referred by this reply.` : `${data.email} was already a lead; marked as referred by this reply.`);
+  }
   async function markUnread() {
     await api.PATCH("/v1/workspaces/{ws}/inbox/{id}", { params: { path }, body: { read: false } });
     onChange();
@@ -422,6 +430,11 @@ function Conversation({ ws, id, canManage, members, tags, onBack, onChange, onRe
               </div>
             ))}
           </dl>
+        )}
+        {canManage && !msg.needs_review && (msg.category === "referral" || msg.category === "wrong_person") && typeof msg.details?.referral_email === "string" && (
+          <div className="mb-4">
+            <Button variant="ghost" onClick={addReferral}>Add {String(msg.details.referral_name || msg.details.referral_email)} as a lead</Button>
+          </div>
         )}
         {msg.needs_review && (
           <div className="mb-4 flex flex-wrap items-center justify-between gap-2 rounded-md bg-amber-50 p-2 text-sm text-amber-900 dark:bg-amber-950 dark:text-amber-200">
@@ -543,6 +556,121 @@ function TagsDialog({ ws, tags, onChange, onClose }: { ws: string; tags: InboxTa
           <Button disabled={!name.trim()}>Add tag</Button>
         </form>
         <ErrorText>{error}</ErrorText>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+// What each rule action does, in words.
+const ruleChoices: Record<string, { id: string; label: string }[]> = {
+  not_now: [
+    { id: "snooze", label: "Snooze the reply until then" },
+    { id: "restart", label: "Restart the sequence then" },
+    { id: "nothing", label: "Do nothing" },
+  ],
+  out_of_office: [
+    { id: "reschedule", label: "Wait until the day after they're back" },
+    { id: "nothing", label: "Keep the sequence as it is" },
+  ],
+  referral: [
+    { id: "suggest", label: "Offer to add them (one click)" },
+    { id: "add", label: "Add them as a lead" },
+    { id: "add_and_enroll", label: "Add them and enrol in a sequence" },
+  ],
+}
+ruleChoices.wrong_person = ruleChoices.referral;
+
+const ruleLabels: Record<string, string> = {
+  not_now: "Not now",
+  out_of_office: "Out of office",
+  referral: "Referral",
+  wrong_person: "Wrong person, names someone else",
+};
+
+type ReplyRule = { action: string; days?: number; sequence_id?: string };
+
+function RulesDialog({ ws, onClose }: { ws: string; onClose: () => void }) {
+  const [rules, setRules] = useState<Record<string, ReplyRule> | null>(null);
+  const [overrides, setOverrides] = useState(0);
+  const [sequences, setSequences] = useState<{ id: string; name: string }[]>([]);
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    Promise.all([
+      api.GET("/v1/workspaces/{ws}/reply-rules", { params: { path: { ws } } }),
+      api.GET("/v1/workspaces/{ws}/sequences", { params: { path: { ws } } }),
+    ]).then(([r, q]) => {
+      if (r.error) return setError(errorMessage(r.error));
+      const own = r.data.data.find((s) => !s.project_id && !s.sequence_id);
+      setRules({ ...(r.data.defaults as Record<string, ReplyRule>), ...((own?.rules ?? {}) as Record<string, ReplyRule>) });
+      setOverrides(r.data.data.length - (own ? 1 : 0));
+      if (q.data) setSequences(q.data.data.filter((s) => s.status !== "archived").map((s) => ({ id: s.id, name: s.name })));
+    });
+  }, [ws]);
+
+  function change(label: string, r: Partial<ReplyRule>) {
+    setRules((rs) => {
+      const next = { ...rs!, [label]: { ...rs![label], ...r } };
+      if (next[label].action !== "add_and_enroll") delete next[label].sequence_id;
+      return next;
+    });
+  }
+
+  async function save(e: FormEvent) {
+    e.preventDefault();
+    setBusy(true);
+    const body = Object.fromEntries(Object.entries(rules!).map(([l, r]) => [l, l === "not_now" ? r : { action: r.action, ...(r.sequence_id ? { sequence_id: r.sequence_id } : {}) }]));
+    const { error } = await api.PUT("/v1/workspaces/{ws}/reply-rules", { params: { path: { ws } }, body: { rules: body } });
+    setBusy(false);
+    if (error) return setError(errorMessage(error));
+    toast("Reply rules saved.");
+    onClose();
+  }
+
+  return (
+    <Dialog open onOpenChange={(o) => !o && onClose()}>
+      <DialogContent className="sm:max-w-lg">
+        <DialogHeader>
+          <DialogTitle>Reply rules</DialogTitle>
+          <DialogDescription>
+            What happens once a reply has a label Outflare is sure of. Labels the AI is unsure of wait for you first, and everything here can be undone.
+          </DialogDescription>
+        </DialogHeader>
+        {!rules ? (
+          error ? <ErrorText>{error}</ErrorText> : <Loading />
+        ) : (
+          <form onSubmit={save} className="space-y-4 text-sm">
+            {Object.keys(ruleLabels).map((l) => (
+              <div key={l} className="space-y-1.5">
+                <label className="font-medium" htmlFor={`rule-${l}`}>{ruleLabels[l]}</label>
+                <div className="flex flex-wrap gap-2">
+                  <select id={`rule-${l}`} className={`${field} min-w-0 flex-1`} value={rules[l]?.action} onChange={(e) => change(l, { action: e.target.value })}>
+                    {ruleChoices[l].map((c) => <option key={c.id} value={c.id}>{c.label}</option>)}
+                  </select>
+                  {l === "not_now" && rules[l]?.action !== "nothing" && (
+                    <span className="flex items-center gap-1.5 text-muted-foreground">
+                      <input aria-label="Days to wait" type="number" min={1} max={730} className={`${field} w-20`} value={rules[l]?.days ?? 90} onChange={(e) => change(l, { days: Number(e.target.value) })} />
+                      days if no date
+                    </span>
+                  )}
+                  {rules[l]?.action === "add_and_enroll" && (
+                    <select aria-label={`Sequence for ${ruleLabels[l]}`} className={`${field} min-w-0 flex-1`} value={rules[l]?.sequence_id ?? ""} onChange={(e) => change(l, { sequence_id: e.target.value })}>
+                      <option value="" disabled>Pick a sequence</option>
+                      {sequences.map((q) => <option key={q.id} value={q.id}>{q.name}</option>)}
+                    </select>
+                  )}
+                </div>
+              </div>
+            ))}
+            {overrides > 0 && <p className="text-[12px] text-muted-foreground">{overrides === 1 ? "A project or sequence has" : `${overrides} projects or sequences have`} its own rules too, set through the API or MCP, and those win for their replies.</p>}
+            <ErrorText>{error}</ErrorText>
+            <div className="flex justify-end gap-2">
+              <Button type="button" variant="ghost" onClick={onClose}>Cancel</Button>
+              <Button disabled={busy}>{busy ? "Saving…" : "Save rules"}</Button>
+            </div>
+          </form>
+        )}
       </DialogContent>
     </Dialog>
   );

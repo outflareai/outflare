@@ -57,6 +57,11 @@ func TestSiteKeyCapturesVisitsRawAndOnlyWrites(t *testing.T) {
 	owner.must(400, "POST", base+"/site-keys", map[string]any{"name": "Acme", "origins": []string{"https://acme.example/pricing"}})
 	k := owner.must(201, "POST", base+"/site-keys", map[string]any{"name": "acme.example", "origins": []string{"https://acme.example", "https://*.acme.example"}})
 	key := k["key"].(string)
+	// The site leaves out its own experiment parameters.
+	owner.must(400, "PATCH", base+"/site-keys/"+k["id"].(string), map[string]any{"excluded_params": []string{"no spaces"}})
+	if k := owner.must(200, "PATCH", base+"/site-keys/"+k["id"].(string), map[string]any{"excluded_params": []string{"exp_*", "exp_*", "variant"}}); len(k["excluded_params"].([]any)) != 2 {
+		t.Fatalf("excluded_params: %v", k)
+	}
 	if !strings.HasPrefix(key, "ofk_") || !strings.Contains(k["snippet"].(string), `data-key="`+key+`"`) {
 		t.Fatalf("key: %v", k)
 	}
@@ -67,8 +72,8 @@ func TestSiteKeyCapturesVisitsRawAndOnlyWrites(t *testing.T) {
 		"timestamp":  "2020-01-01T00:00:00Z",
 		"properties": map[string]any{"click_ids": map[string]any{"gclid": "g-1", "evil": "x"}, "ref": "PARTNER1", "ofc": "c-1"},
 		"context": map[string]any{
-			"page": map[string]any{"url": "https://www.acme.example/welcome?utm_source=google&gclid=g-1&token=secret-1#x", "path": "/welcome",
-				"search": "?utm_source=google&gclid=g-1&email=ann%40acme.example", "referrer": "https://search.example/results?q=ann%40acme.example"},
+			"page": map[string]any{"url": "https://www.acme.example/welcome?utm_source=google&gclid=g-1&token=secret-1&plan=pro&exp_hero=b&Variant=2&u=ann%40acme.example#x", "path": "/welcome",
+				"search": "?utm_source=google&gclid=g-1&email=ann%40acme.example&plan=pro&code=abc&exp_hero=b", "referrer": "https://search.example/results?q=ann%40acme.example"},
 			"campaign": map[string]any{"source": "google", "medium": "cpc", "name": "launch"},
 			"ip":       "198.51.100.7",
 		}}
@@ -98,9 +103,9 @@ func TestSiteKeyCapturesVisitsRawAndOnlyWrites(t *testing.T) {
 		t.Fatalf("properties: %v", props)
 	}
 	page := ctxObj["page"].(map[string]any)
-	if page["url"] != "https://www.acme.example/welcome?gclid=g-1&utm_source=google" || page["search"] != "?gclid=g-1&utm_source=google" ||
-		page["referrer"] != "https://search.example/results" {
-		t.Fatalf("addresses kept more than campaign tags: %v", page)
+	if page["url"] != "https://www.acme.example/welcome?gclid=g-1&plan=pro&utm_source=google" || page["search"] != "?gclid=g-1&plan=pro&utm_source=google" ||
+		page["referrer"] != "https://search.example/results" || page["host"] != "www.acme.example" {
+		t.Fatalf("addresses kept a token, an email address or an excluded parameter: %v", page)
 	}
 	if ctxObj["campaign"].(map[string]any)["source"] != "google" || ctxObj["ip"] != nil {
 		t.Fatalf("context: %v", ctxObj)
@@ -164,7 +169,7 @@ func TestSiteKeyCapturesVisitsRawAndOnlyWrites(t *testing.T) {
 	}
 	var audits int
 	_ = e.pool.QueryRow(ctx, `SELECT count(*) FROM audit_events WHERE workspace_id = $1 AND action LIKE 'site_key.%'`, ws).Scan(&audits)
-	if audits != 4 {
+	if audits != 5 {
 		t.Fatalf("site_key audits: %d", audits)
 	}
 }

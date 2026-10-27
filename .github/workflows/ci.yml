@@ -17,12 +17,52 @@ permissions:
   contents: read
 
 jobs:
+  # On main, a commit whose files are exactly a commit CI already passed on
+  # (a batch fast-forwarded to main, or a merge of a pull request that was
+  # current with main, whose head is its second parent) isn't tested again:
+  # every job below is skipped and the run counts as passed.
+  same-files:
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: read # finds the earlier run
+    outputs:
+      tested: ${{ steps.tree.outputs.tested }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+          fetch-depth: 2
+      - name: Already tested?
+        id: tree
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tree=$(git rev-parse HEAD^{tree})
+          for c in HEAD HEAD^2; do
+            sha=$(git rev-parse -q --verify "$c^{commit}" 2>/dev/null) || continue
+            [ "$(git rev-parse "$sha^{tree}")" = "$tree" ] || continue
+            ok=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs?head_sha=$sha&status=success&per_page=50" \
+              --jq "[.workflow_runs[] | select(.path == \".github/workflows/ci.yml\" and .id != $GITHUB_RUN_ID)] | length" || echo 0)
+            if [ "$ok" -gt 0 ]; then
+              echo "CI already passed on ${sha::7}, which has exactly these files; skipping."
+              echo "tested=true" >> "$GITHUB_OUTPUT"; exit 0
+            fi
+          done
+
   # The tests run in three parts side by side, each with its own database
   # (scripts/test-shard.sh): the API package split in two, and everything
   # else. One job took 6-8 minutes; each part takes about half that.
   engine:
+    needs: same-files
+    # Runs when same-files is skipped (pull requests) or fails.
+    if: ${{ !cancelled() && needs.same-files.outputs.tested != 'true' }}
     name: engine (${{ matrix.name }})
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write # files a test that only passed when re-run
     strategy:
       fail-fast: false
       matrix:
@@ -72,9 +112,34 @@ jobs:
       - name: Tests (${{ matrix.name }})
         env:
           PART: ${{ matrix.part }}
+          FLAKY_FILE: ${{ runner.temp }}/flaky.txt
         run: scripts/test-shard.sh $PART
+      # A test that failed and then passed on its own re-run (test-shard.sh)
+      # doesn't fail the check, but gets an issue so it is fixed, not ignored.
+      - name: File flaky tests
+        env:
+          FLAKY_FILE: ${{ runner.temp }}/flaky.txt
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          [ -s "$FLAKY_FILE" ] || exit 0
+          while read -r pkg tests; do
+            for t in $(echo "$tests" | tr '|' ' '); do
+              title="Flaky test: $t (${pkg#github.com/outflareai/outflare/})"
+              echo "::warning::$title passed only when re-run."
+              n=$(gh issue list --state open --search "\"$title\" in:title" --json number,title --jq "map(select(.title == \"$title\")) | .[0].number // empty" || true)
+              body="Failed, then passed when re-run on its own, in $RUN_URL (commit $GITHUB_SHA)."
+              if [ -n "$n" ]; then gh issue comment "$n" --body "$body" || true
+              else gh issue create --title "$title" --body "$body The check passed, so nothing was blocked; please make the test reliable. Never skip it." || true
+              fi
+            done
+          done <"$FLAKY_FILE"
 
   web-and-sdk:
+    needs: same-files
+    # Runs when same-files is skipped (pull requests) or fails.
+    if: ${{ !cancelled() && needs.same-files.outputs.tested != 'true' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
@@ -96,6 +161,9 @@ jobs:
   # the image is only rebuilt when what goes into it changes. main always
   # builds it.
   docker:
+    needs: same-files
+    # Runs when same-files is skipped (pull requests) or fails.
+    if: ${{ !cancelled() && needs.same-files.outputs.tested != 'true' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
@@ -115,6 +183,9 @@ jobs:
         run: docker build -t outflare:ci .
 
   python-sdk:
+    needs: same-files
+    # Runs when same-files is skipped (pull requests) or fails.
+    if: ${{ !cancelled() && needs.same-files.outputs.tested != 'true' }}
     runs-on: ubuntu-latest
     defaults:
       run:

@@ -3550,6 +3550,69 @@ export interface paths {
         patch: operations["updateInboxView"];
         trace?: never;
     };
+    "/v1/workspaces/{ws}/reply-rules": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+            };
+            cookie?: never;
+        };
+        /**
+         * List the reply rules
+         * @description Scope inbox.read. What Outflare does when a reply gets a label it is
+         *     sure of (rules, a person, or the AI at 80% or more): the defaults,
+         *     the actions each label can take, and the sets saved for the
+         *     workspace, a project or a sequence. For a reply, the sequence's set
+         *     wins over its project's, which wins over the workspace's, label by
+         *     label; labels no set names follow the defaults.
+         */
+        get: operations["getReplyRules"];
+        /**
+         * Save the reply rules for the workspace, a project or a sequence
+         * @description Scope inbox.manage. Replaces the set for the workspace (no ids), a
+         *     project (project_id) or a sequence (sequence_id). Labels left out
+         *     follow the next set up; an empty rules object removes the set and
+         *     answers {"cleared": true}. Every action can be undone: a snoozed
+         *     reply can be woken, a restarted or enrolled lead stopped.
+         */
+        put: operations["setReplyRules"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/workspaces/{ws}/inbox/{id}/referral": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Add the person a reply refers you to as a lead
+         * @description Scope inbox.manage. Adds the address the reply names (details.referral_email)
+         *     as a lead on the referrer's lists, with referred_by set, and with
+         *     sequence_id enrols them unless they are on the opt-out list. 422
+         *     no_referral when the reply names no address.
+         */
+        post: operations["addReplyReferral"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/workspaces/{ws}/inbox/{id}/reply": {
         parameters: {
             query?: never;
@@ -5091,7 +5154,7 @@ export interface paths {
         head?: never;
         /**
          * Change an SEO site's settings
-         * @description Scope: seo.manage. Send only what changes, within the site's `limits`. `obey_robots: false` audits pages your own robots.txt hides from crawlers, and is only for a site you have proved you own. A crawl already running keeps the settings it started with.
+         * @description Scope: seo.manage. Send only what changes, within the site's `limits`. `obey_robots: false` audits pages your own robots.txt hides from crawlers, and is only for a site you have proved you own. `url` moves where crawls start, on the same host; another host is a site of its own. A crawl already running keeps the settings it started with.
          */
         patch: operations["updateSEOSite"];
         trace?: never;
@@ -5111,10 +5174,13 @@ export interface paths {
         put?: never;
         /**
          * Check that you own a site
-         * @description Scope: seo.manage. Looks now for any one of the site's proofs (see
-         *     `verification`): a DNS TXT record, a meta tag in the start page's
-         *     head, or a file on the site. Found, the site is verified and its
-         *     limits rise. Not found answers 409 `verification_failed`, whose
+         * @description Scope: seo.manage. Looks now for any one of the site's proofs: a
+         *     Google Search Console connection of the workspace that owns a
+         *     property covering the site, the workspace's Outflare tracking tag on
+         *     the start page, or one added from `verification` (a DNS TXT record,
+         *     a meta tag in the start page's head, or a file on the site). Found,
+         *     the site is verified, its limits rise, and a site still on the
+         *     unproved limits moves to the proved defaults. Not found answers 409 `verification_failed`, whose
          *     message lists the proofs. Outflare checks a verified site again
          *     every 30 days and lowers its limits if the proof is gone. A test
          *     workspace's sites pass without a check.
@@ -11152,8 +11218,10 @@ export interface paths {
          * @description Public: the site key (ofk_) in the body is the authority. What the tracking snippet (/site.js) sends: page views
          *     and track events on a visitor's anonymousId, with context.page, context.campaign (the utm_ tags) and, on page
          *     views, properties.click_ids, ofc and ref, exactly as the landing page had them. A userId, traits and timestamps
-         *     are ignored: the browser cannot say who someone is. Query strings keep only the campaign tags, click ids, ofc, ref
-         *     and via, and the referrer only its origin and path. Track names must be plain (Signup Started): dotted names are
+         *     are ignored: the browser cannot say who someone is. Page addresses keep their query string except the parameters
+         *     the key's excluded_params lists and those always left out (sign-in tokens, passwords, codes, session ids, and any
+         *     value that is an email address); context.page.host is the page's host. The referrer keeps only its origin and
+         *     path. Track names must be plain (Signup Started): dotted names are
          *     Outflare's own. Your own product links the visitor to a person by sending
          *     identify with userId and the same anonymousId to POST .../customer-events. Each event joins a visit (a session:
          *     30 minutes without an event, or a new campaign, starts another), whose id is in context.sessionId; a person's
@@ -18024,6 +18092,8 @@ export interface components {
             brand_id: string | null;
             /** @description Origins events are taken from. A bare domain (example.com) is stored as https://*.example.com, which takes the site and every subdomain; https://app.example.com (or http://localhost:3000) takes that exact origin, port included. A whole domain is https on the default port; list other ports exactly. Empty: any. A filter against stray traffic, not a lock. */
             origins: string[];
+            /** @description Query parameters left out of the page addresses this site records, by name (any case), or every name starting with a prefix that ends in * (fb_*). Every other parameter is kept. Sign-in tokens, passwords, codes, session ids and any value that is an email address are always left out, whatever this lists. */
+            excluded_params: string[];
             /**
              * Format: date-time
              * @description Until when the value before the last rotation still works.
@@ -18052,6 +18122,8 @@ export interface components {
             /** Format: uuid */
             brand_id?: string | null;
             origins?: string[];
+            /** @description Query parameters to leave out of page addresses, such as plan or fb_*. */
+            excluded_params?: string[];
         };
         /** @description A connection's live updates, its own webhook address. */
         ConnectionHook: {
@@ -19195,8 +19267,11 @@ export interface components {
             verified: boolean;
             /** Format: date-time */
             verified_at: string | null;
-            /** @enum {string|null} */
-            verify_method: "dns" | "meta" | "file" | "test" | null;
+            /**
+             * @description How the site was proved: a DNS record, meta tag or file, a Search Console connection that owns it (search_console), or the workspace's Outflare tracking tag on its start page (tracking).
+             * @enum {string|null}
+             */
+            verify_method: "dns" | "meta" | "file" | "test" | "search_console" | "tracking" | null;
             /** Format: date-time */
             verify_checked_at: string | null;
             /** @description The three ways to prove you own the site; any one is enough. */
@@ -24935,6 +25010,52 @@ export interface components {
             replies: number;
             /** Format: date-time */
             created_at: string;
+        };
+        ReplyRule: {
+            /**
+             * @description One of the label's actions (see actions in GET .../reply-rules).
+             * @example snooze
+             */
+            action: string;
+            /** @description not_now only: how long to wait when the reply gives no date. Default 90. */
+            days?: number;
+            /**
+             * Format: uuid
+             * @description add_and_enroll only: the sequence to enrol the person in.
+             */
+            sequence_id?: string;
+        };
+        /**
+         * @description A rule per label. not_now: snooze (default; the reply comes back to
+         *     the open inbox on the date it gives, else after days), restart (the
+         *     sequence it stopped picks up again then) or nothing. out_of_office:
+         *     reschedule (default; the lead's next email waits until the day
+         *     after the return date the AI read) or nothing. referral and
+         *     wrong_person: suggest (default; the inbox offers to add the person),
+         *     add (a lead on the referrer's lists) or add_and_enroll.
+         */
+        ReplyRules: {
+            not_now?: components["schemas"]["ReplyRule"];
+            out_of_office?: components["schemas"]["ReplyRule"];
+            referral?: components["schemas"]["ReplyRule"];
+            wrong_person?: components["schemas"]["ReplyRule"];
+        };
+        ReplyRuleSet: {
+            /** Format: uuid */
+            id: string;
+            /**
+             * Format: uuid
+             * @description Set for a project's set.
+             */
+            project_id: string | null;
+            /**
+             * Format: uuid
+             * @description Set for a sequence's set.
+             */
+            sequence_id: string | null;
+            rules: components["schemas"]["ReplyRules"];
+            /** Format: date-time */
+            updated_at: string;
         };
         InboxView: {
             /** Format: uuid */
@@ -32631,6 +32752,156 @@ export interface operations {
             };
             202: components["responses"]["MissionHeld"];
             404: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    getReplyRules: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The rules. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        defaults: components["schemas"]["ReplyRules"];
+                        /**
+                         * @description The actions each label can take, the default first.
+                         * @example {
+                         *       "not_now": [
+                         *         "snooze",
+                         *         "restart",
+                         *         "nothing"
+                         *       ],
+                         *       "out_of_office": [
+                         *         "reschedule",
+                         *         "nothing"
+                         *       ],
+                         *       "referral": [
+                         *         "suggest",
+                         *         "add",
+                         *         "add_and_enroll"
+                         *       ],
+                         *       "wrong_person": [
+                         *         "suggest",
+                         *         "add",
+                         *         "add_and_enroll"
+                         *       ]
+                         *     }
+                         */
+                        actions: {
+                            [key: string]: string[];
+                        };
+                        data: components["schemas"]["ReplyRuleSet"][];
+                    };
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    setReplyRules: {
+        parameters: {
+            query?: never;
+            header?: {
+                /**
+                 * @description Makes the write safe to retry. A repeat with the same key from the same caller within 24 hours gets the first
+                 *     answer back (with `Idempotent-Replayed: true`) instead of running again. The same key for a different request
+                 *     is refused with 422 `idempotency_key_reused`; while the first is still running, 409 `idempotency_in_progress`.
+                 *     Use a new random key, such as a UUID, for each distinct write.
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** Format: uuid */
+                    project_id?: string;
+                    /** Format: uuid */
+                    sequence_id?: string;
+                    rules: components["schemas"]["ReplyRules"];
+                };
+            };
+        };
+        responses: {
+            /** @description The saved set, or cleared true when an empty set removed it. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReplyRuleSet"] | {
+                        cleared: boolean;
+                    };
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            default: components["responses"]["Error"];
+        };
+    };
+    addReplyReferral: {
+        parameters: {
+            query?: never;
+            header?: {
+                /**
+                 * @description Makes the write safe to retry. A repeat with the same key from the same caller within 24 hours gets the first
+                 *     answer back (with `Idempotent-Replayed: true`) instead of running again. The same key for a different request
+                 *     is refused with 422 `idempotency_key_reused`; while the first is still running, 409 `idempotency_in_progress`.
+                 *     Use a new random key, such as a UUID, for each distinct write.
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": {
+                    /** Format: uuid */
+                    sequence_id?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The lead. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** Format: uuid */
+                        lead_id: string;
+                        /** Format: email */
+                        email: string;
+                        /** @description False when the lead already existed. */
+                        created: boolean;
+                        enrolled: boolean;
+                    };
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            404: components["responses"]["Error"];
+            422: components["responses"]["Error"];
             default: components["responses"]["Error"];
         };
     };

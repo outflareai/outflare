@@ -341,6 +341,9 @@ func NewServer(pool *pgxpool.Pool, log *slog.Logger, opts Options) *Server {
 	s.logs = &logWriter{s: s}
 	s.watchSocialConnections()
 	s.watchPageReaders()
+	if s.crawler != nil && s.crawler.Owns == nil && s.integrations != nil {
+		s.crawler.Owns = s.searchConsoleOwns
+	}
 	if s.seoSyncer != nil && s.seoSyncer.Store != nil {
 		s.seoSyncer.Watch()
 	}
@@ -403,6 +406,7 @@ func (s *Server) buildHandler() http.Handler {
 	s.routesSequences(mux)
 	s.routesInbox(mux)
 	s.routesInboxTags(mux)
+	s.routesReplyRules(mux)
 	s.routesOAuth(mux)
 	s.routesStats(mux)
 	s.routesDomains(mux)
