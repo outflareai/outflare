@@ -6,6 +6,12 @@ Each pull request that changes what Outflare does adds a change note in [changes
 
 ## [Unreleased]
 
+## [0.10.0] - 2026-10-28
+
+### Changed
+
+- Tracking domain setup is clearer: each domain shows its steps and whose turn it is, and updates on its own. Domains on Cloudflare get a reminder to set the record to DNS only (grey cloud) and a link to the common mistakes.
+
 ## [0.9.0] - 2026-10-28
 
 ### Added

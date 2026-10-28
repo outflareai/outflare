@@ -80,7 +80,10 @@ func Verify(ctx context.Context, r CNAMEResolver, domain, target string) error {
 	}
 	got := strings.ToLower(strings.TrimSuffix(cname, "."))
 	if got == domain {
-		return errors.New(domain + " has no CNAME record; add one pointing to " + target)
+		// A record behind Cloudflare's proxy answers with addresses, not
+		// its CNAME, which is the most common way to land here.
+		return errors.New(domain + " has no CNAME record; add one pointing to " + target +
+			" (if its DNS is on Cloudflare, set the record to DNS only, the grey cloud, then check again in 5 minutes)")
 	}
 	if got != strings.ToLower(target) {
 		return errors.New(domain + " points to " + got + ", not " + target)

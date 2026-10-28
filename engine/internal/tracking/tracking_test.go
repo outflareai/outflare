@@ -1,6 +1,9 @@
 package tracking
 
 import (
+	"context"
+	"net"
+	"strings"
 	"testing"
 	"time"
 )
@@ -35,5 +38,29 @@ func TestLinksAndBots(t *testing.T) {
 	}
 	if LikelyBot("Mozilla/5.0 (Macintosh) Safari/605", now.Add(-time.Hour), now) {
 		t.Error("person flagged")
+	}
+}
+
+type cnames map[string]string
+
+func (c cnames) LookupCNAME(_ context.Context, host string) (string, error) {
+	if v, ok := c[host]; ok {
+		return v, nil
+	}
+	return "", &net.DNSError{Err: "no such host", Name: host, IsNotFound: true}
+}
+
+func TestVerify(t *testing.T) {
+	r := cnames{"links.acme.example": "domains.outflare.test.", "proxied.acme.example": "proxied.acme.example."}
+	ctx := context.Background()
+	if err := Verify(ctx, r, "links.acme.example", "domains.outflare.test"); err != nil {
+		t.Fatal(err)
+	}
+	// Behind Cloudflare's proxy the CNAME is hidden: say how to fix it.
+	if err := Verify(ctx, r, "proxied.acme.example", "domains.outflare.test"); err == nil || !strings.Contains(err.Error(), "DNS only") {
+		t.Fatalf("proxied: %v", err)
+	}
+	if err := Verify(ctx, r, "missing.acme.example", "domains.outflare.test"); err == nil || !strings.Contains(err.Error(), "no DNS record") {
+		t.Fatalf("missing: %v", err)
 	}
 }

@@ -11,6 +11,8 @@ import { health as sharedHealth, mailboxStatus } from "@/lib/status";
 import { track } from "@/lib/analytics";
 import { dnsHelp, DNSWays, heldByMission, takeDNSFocus, type DNSRow } from "@/components/dns-one-click";
 import { takeConnectOutcome } from "./Connectors";
+import { Icon } from "../icons";
+import { cn } from "@/lib/utils";
 
 type Health = SendingDomain["health"];
 
@@ -284,6 +286,7 @@ function trackingToast(t: TrackingDomain) {
 function TrackingDomains({ ws, canManage }: { ws: string; canManage: boolean }) {
   const [list, setList] = useState<TrackingDomain[]>();
   const [target, setTarget] = useState("");
+  const fallback = window.location.host;
   const [domain, setDomain] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState("");
@@ -296,6 +299,14 @@ function TrackingDomains({ ws, canManage }: { ws: string; canManage: boolean }) 
       setTarget(data.target);
     }
   }, [ws]);
+  // Outflare re-checks DNS and the certificate on its own; keep the page
+  // current while a domain is on its way.
+  const settling = list?.some((t) => !trackingReady(t) && t.https_status !== "failed");
+  useEffect(() => {
+    if (!settling) return;
+    const id = setInterval(load, 20_000);
+    return () => clearInterval(id);
+  }, [settling, load]);
   useEffect(() => {
     load();
   }, [load]);
@@ -340,7 +351,7 @@ function TrackingDomains({ ws, canManage }: { ws: string; canManage: boolean }) 
     <Card title="Tracking domain" description="Optional. Unsubscribe links, and click links on sequences that track clicks, use your own domain instead of this server's address.">
       {list === undefined ? <Loading /> : (
         <div className="space-y-3 text-sm">
-          {list.length === 0 && <p className="text-muted-foreground">None yet. Links use {target}.</p>}
+          {list.length === 0 && <p className="text-muted-foreground">None yet. Links use {fallback}.</p>}
           {list.map((t) => (
             <div key={t.id} className="space-y-2 rounded-md border p-3">
               <div className="flex flex-wrap items-center gap-2">
@@ -354,18 +365,16 @@ function TrackingDomains({ ws, canManage }: { ws: string; canManage: boolean }) 
                   </span>
                 )}
               </div>
-              {t.status === "verified" && t.https_status === "pending" && (
-                <p className="text-xs text-muted-foreground">It points here. Its HTTPS certificate is on the way, usually within a few minutes; until then links use {target}.</p>
-              )}
-              {t.status === "verified" && t.https_status === "failed" && (
-                <p className="text-xs text-muted-foreground">{t.https_error || "Its HTTPS certificate couldn't be issued."} Links use {target} until it is; press Check now to try again.</p>
-              )}
+              <TrackingSteps t={t} fallback={fallback} />
               {t.status !== "verified" && (
                 <>
-                  {t.error && <p className="text-xs text-muted-foreground">{t.error}</p>}
                   <div className="flex flex-wrap items-center gap-2 rounded bg-muted/50 px-2 py-1.5 font-mono text-xs">
                     <span className="text-muted-foreground">CNAME</span> <span>{t.domain}</span> <span className="text-muted-foreground">→</span> <span>{t.target}</span> <Copy text={t.target} />
                   </div>
+                  <p className="text-xs text-muted-foreground">
+                    On Cloudflare, set Proxy status to DNS only (the grey cloud), or the record can't be seen. After changing it, wait 5 minutes before you check again.{" "}
+                    <a className="underline" href="https://outflare.ai/docs/guides/tracking-domains/#common-mistakes" target="_blank" rel="noreferrer" onClick={() => track("ui.docs_opened", { tab: "domains", from: "tracking_cname" })}>Common mistakes</a>
+                  </p>
                   <TrackingDNS ws={ws} t={t} canManage={canManage} reload={load} />
                 </>
               )}
@@ -585,6 +594,60 @@ function SendingDNS({ ws, d, canManage, reload }: { ws: string; d: SendingDomain
         return { error, held: heldByMission(data) };
       }} />
   );
+}
+
+type TrackingStep = { label: string; detail: ReactNode; state: "done" | "now" | "waiting" | "failed" | "todo" };
+
+// Where a tracking domain is on its way to being used, step by step, and
+// whether the next move is the person's or Outflare's.
+function trackingSteps(t: TrackingDomain, fallback: string): TrackingStep[] {
+  const found = t.status === "verified";
+  const https = t.https_status;
+  const steps: TrackingStep[] = [
+    found
+      ? { label: "Add the DNS record", detail: <>{t.domain} points to {t.target}.</>, state: "done" }
+      : t.status === "failed"
+        ? { label: "Add the DNS record", detail: <>It stopped pointing here: {t.error || "the record is missing"}. Fix the record below, then press Check now.</>, state: "failed" }
+        : { label: "Add the DNS record", detail: <>Your turn: add the record below.{t.error && <> Last check: {t.error}</>}</>, state: "now" },
+    found
+      ? { label: "Outflare finds it", detail: "Found.", state: "done" }
+      : { label: "Outflare finds it", detail: "Outflare checks on its own over the next hour, or press Check now once the record is added.", state: "todo" },
+  ];
+  if (https !== null) {
+    steps.push(https === "active"
+      ? { label: "HTTPS certificate", detail: "Issued.", state: "done" }
+      : https === "failed"
+        ? { label: "HTTPS certificate", detail: <>{t.https_error || "It couldn't be issued."} Press Check now to try again.</>, state: "failed" }
+        : { label: "HTTPS certificate", detail: "Nothing to do: it's being issued, usually within a few minutes. This page updates on its own.", state: "waiting" });
+  }
+  steps.push(trackingReady(t)
+    ? { label: "In use", detail: <>New emails' links use {t.domain}.</>, state: "done" }
+    : { label: "In use", detail: <>Until then, links use {fallback}, so nothing breaks.</>, state: "todo" });
+  return steps;
+}
+
+function TrackingSteps({ t, fallback }: { t: TrackingDomain; fallback: string }) {
+  return (
+    <ol className="space-y-1.5">
+      {trackingSteps(t, fallback).map((s, i) => (
+        <li key={s.label} className="flex gap-2.5">
+          <TrackingStepMark state={s.state} n={i + 1} />
+          <div className="min-w-0">
+            <p className={cn("text-[13px] font-medium", s.state === "todo" && "text-muted-foreground")}>{s.label}</p>
+            <p className="text-xs text-muted-foreground">{s.detail}</p>
+          </div>
+        </li>
+      ))}
+    </ol>
+  );
+}
+
+function TrackingStepMark({ state, n }: { state: TrackingStep["state"]; n: number }) {
+  const box = "mt-0.5 flex size-5 shrink-0 items-center justify-center rounded-full";
+  if (state === "done") return <span className={cn(box, "bg-green-600 text-white dark:bg-green-500")}><Icon name="check" className="size-3" /></span>;
+  if (state === "failed") return <span className={cn(box, "bg-destructive text-white")}><Icon name="x" className="size-3" /></span>;
+  if (state === "waiting") return <span className={cn(box, "border-2 border-blue-500 border-t-transparent motion-safe:animate-spin")} aria-label="In progress" />;
+  return <span className={cn(box, "border font-mono text-[10px]", state === "now" ? "border-blue-500 text-blue-600 dark:text-blue-400" : "text-muted-foreground")}>{n}</span>;
 }
 
 // The ways to add a tracking domain's CNAME.
