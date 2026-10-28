@@ -12,6 +12,7 @@ import (
 
 	"github.com/outflareai/outflare/engine/internal/audit"
 	c "github.com/outflareai/outflare/engine/internal/connectors"
+	"github.com/outflareai/outflare/engine/internal/customers"
 	"github.com/outflareai/outflare/engine/internal/leads"
 	"github.com/outflareai/outflare/engine/internal/outcomes"
 	"github.com/outflareai/outflare/engine/internal/usagelimits"
@@ -694,7 +695,9 @@ func (r *runner) enrich(ctx context.Context) error {
 			continue
 		}
 		l := leadFor(merged)
-		if _, err := r.s.Pool.Exec(ctx, `
+		// What the provider found goes on the lead and its person.
+		if err := pgx.BeginFunc(ctx, r.s.Pool, func(tx pgx.Tx) error {
+			if _, err := tx.Exec(ctx, `
 			UPDATE leads SET
 				first_name = CASE WHEN first_name = '' THEN $3 ELSE first_name END,
 				last_name = CASE WHEN last_name = '' THEN $4 ELSE last_name END,
@@ -706,7 +709,12 @@ func (r *runner) enrich(ctx context.Context) error {
 				custom = $10::jsonb || custom,
 				updated_at = now()
 			WHERE workspace_id = $1 AND id = $2`,
-			r.ws, x.id, l.FirstName, l.LastName, l.Title, l.Company, l.Phone, l.LinkedInURL, l.Website, l.Custom); err != nil {
+				r.ws, x.id, l.FirstName, l.LastName, l.Title, l.Company, l.Phone, l.LinkedInURL, l.Website, l.Custom); err != nil {
+				return err
+			}
+			_, err := customers.SyncLeads(ctx, tx, r.ws, []string{x.id})
+			return err
+		}); err != nil {
 			return err
 		}
 		r.run.Enriched++

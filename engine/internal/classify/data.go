@@ -184,3 +184,15 @@ func (in *Intel) lookup(d Domain) match {
 	}
 	return m
 }
+
+// MailboxProvider reports whether domain belongs to a mailbox or alias
+// service (Gmail, iCloud, a relay, a disposable domain) rather than to the
+// company its people work at, so two people on it never share a company.
+func (in *Intel) MailboxProvider(domain string) bool {
+	d, err := ParseDomain(domain)
+	if err != nil {
+		return false
+	}
+	m := in.lookup(d)
+	return m.provider != nil || m.listed != nil
+}

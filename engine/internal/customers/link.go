@@ -207,6 +207,11 @@ func LinkLeads(ctx context.Context, tx pgx.Tx, workspaceID string, ids []string,
 			return 0, err
 		}
 	}
+	// A person who was already here gets what the lead knows, and every
+	// person the lead's company and phone.
+	if _, err := SyncLeads(ctx, tx, workspaceID, leadIDs); err != nil {
+		return 0, err
+	}
 	return len(leadIDs), nil
 }
 
@@ -293,7 +298,7 @@ var Follows = []Ref{
 	{"email_broadcast_recipients", "record_id"}, {"suppressions", "record_id"},
 	{"journey_runs", "record_id"}, {"payment_subscriptions", "record_id"}, {"seo_competitors", "record_id"},
 	{"site_sessions", "record_id"}, {"site_visitors", "record_id"}, {"site_visitors", "account_id"},
-	{"ad_conversion_sends", "record_id"},
+	{"ad_conversion_sends", "record_id"}, {"attribution_conversions", "record_id"},
 }
 
 // Owned are the record columns a merge handles itself (identities, links,

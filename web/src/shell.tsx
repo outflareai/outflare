@@ -45,6 +45,7 @@ export const tabNames: Record<Tab, string> = {
   reports: "Sending reports",
   analytics: "Website analytics",
   links: "Campaign links",
+  channels: "Channels",
   tracking: "Website tracking",
   flags: "Feature flags",
   seo: "Rankings & backlinks",
@@ -141,6 +142,7 @@ export const tabBlurbs: Record<Tab, string> = {
   analytics: "Visitors, top pages, traffic sources and conversions from the analytics tools on your website.",
   tracking: "Outflare's own snippet for your websites: the script tag to paste, and whether each site is sending visits.",
   flags: "Turn things on for some visitors, or split them between versions to see which works better.",
+  channels: "Visits, sign-ups, revenue and cost for every channel, credited the same way in every report.",
   links: "Tag every link with one channel, source and campaign, so each visit, lead and sale is credited to the right place.",
   "seo-overview": "Is each brand growing in search: branded search, visitors, domain rating and links, with their trends.",
   experiments: "Did a change help? Hold back a matched group of pages and measure the difference from Search Console.",
@@ -209,6 +211,7 @@ export const tabDocs: Partial<Record<Tab, string>> = {
   analytics: "/docs/integrations/analytics/",
   experiments: "/docs/guides/seo-experiments/",
   links: "/docs/guides/campaign-links/",
+  channels: "/docs/guides/attribution/",
   tracking: "/docs/guides/website-tracking/",
   flags: "/docs/guides/feature-flags/",
   seo: "/docs/integrations/seo/",
@@ -262,7 +265,7 @@ export const modules: Module[] = [
   { id: "reviews", label: "Reviews", icon: "reviews", tabs: ["reviews"] },
   { id: "ads", label: "Paid ads", icon: "ads", tabs: ["ads"] },
   // Partners goes here when its pages land.
-  { id: "analytics", label: "Analytics", icon: "reports", tabs: ["outcomes", "analytics", "tracking", "flags", "links"] },
+  { id: "analytics", label: "Analytics", icon: "reports", tabs: ["channels", "outcomes", "analytics", "tracking", "flags", "links"] },
   // Playbooks: recipes that use every module above, from playbooks/ in the repository.
   { id: "playbooks", label: "Playbooks", icon: "playbooks", tabs: ["playbooks"] },
   // The company hub: what Outflare knows about the business, for every module.
@@ -903,6 +906,8 @@ function callFor(tab: Tab, ws: string, item?: string): Call {
       return { title: "Website tracking keys and their snippets", path: "/v1/workspaces/{ws}/site-keys", params: base, mcp: "list_site_keys", ask: "Is our website snippet installed and sending visits on every site?", scope: "customers.read" };
     case "flags":
       return { title: "Feature flags", path: "/v1/workspaces/{ws}/flags", params: base, mcp: "list_flags", ask: "Set up a test of a new pricing headline on half of our visitors, shown only on the pricing page.", scope: "analytics.read" };
+    case "channels":
+      return { title: "Visits, conversions, revenue and cost per channel", path: "/v1/workspaces/{ws}/attribution/channels", params: base, mcp: "get_attribution_channels", ask: "Which channel brought the most revenue this month, and what did each sign-up cost us per channel?", scope: "analytics.read" };
     case "links":
       return { title: "Campaign links", path: "/v1/workspaces/{ws}/tracking-campaigns", params: base, query: { status: "active" }, mcp: "list_tracking_campaigns", ask: "Make a tagged link for our spring launch on LinkedIn ads, pointing at the pricing page.", scope: "analytics.read" };
     case "inbox":

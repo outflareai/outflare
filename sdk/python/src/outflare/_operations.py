@@ -5402,6 +5402,77 @@ class Operations(_Mixin):
             query={"site": site, "from": from_, "to": to, "limit": limit, "fresh": fresh},
         )
 
+    def get_attribution_campaigns(
+        self,
+        *,
+        ws: str | None = None,
+        channel: str | None = None,
+        from_: str | None = None,
+        to: str | None = None,
+        model: Literal["last_non_direct", "first_touch", "linear", "position", "time_decay"] | None = None,
+        brand: str | None = None,
+    ) -> Any:
+        """Drill a channel down to its sources and campaigns.
+
+        Scope: analytics.read. Visits, conversions and revenue per channel, source and campaign, most conversions first, at most 500 rows. tracking_campaign_id and campaign_name are set for visits from an Outflare campaign link.
+
+        Needs: the analytics.read scope.
+        GET /v1/workspaces/{ws}/attribution/campaigns
+        """
+        return self._call(
+            "GET",
+            "/v1/workspaces/{ws}/attribution/campaigns",
+            path={"ws": ws},
+            query={"channel": channel, "from": from_, "to": to, "model": model, "brand": brand},
+        )
+
+    def get_attribution_channels(
+        self,
+        *,
+        ws: str | None = None,
+        from_: str | None = None,
+        to: str | None = None,
+        model: Literal["last_non_direct", "first_touch", "linear", "position", "time_decay"] | None = None,
+        brand: str | None = None,
+    ) -> Any:
+        """Visits, conversions, revenue and cost for every channel.
+
+        Scope: analytics.read. One row per channel, always in the same order:
+        website visits that arrived from it, the conversions and revenue
+        credited to it under the model, and the spend recorded against it.
+        Conversions are shares, so they can be fractional under the shared
+        models. Revenue is payments net of refunds, per currency. Spend with
+        no channel is in unallocated_cost. pending_visits are visits not
+        classified yet (within a minute or two).
+
+        Needs: the analytics.read scope.
+        GET /v1/workspaces/{ws}/attribution/channels
+        """
+        return self._call(
+            "GET",
+            "/v1/workspaces/{ws}/attribution/channels",
+            path={"ws": ws},
+            query={"from": from_, "to": to, "model": model, "brand": brand},
+        )
+
+    def get_attribution_settings(
+        self,
+        *,
+        ws: str | None = None,
+    ) -> Any:
+        """Get how conversions are credited to channels.
+
+        Scope: analytics.read. The default model reports use (last non-direct touch unless changed), how many days before a conversion a visit can get credit (90), and which customer events count as conversions.
+
+        Needs: the analytics.read scope.
+        GET /v1/workspaces/{ws}/attribution/settings
+        """
+        return self._call(
+            "GET",
+            "/v1/workspaces/{ws}/attribution/settings",
+            path={"ws": ws},
+        )
+
     def get_backlinks_summary(
         self,
         *,
@@ -9027,6 +9098,48 @@ class Operations(_Mixin):
             "GET",
             "/v1/workspaces/{ws}/api-tokens",
             path={"ws": ws},
+        )
+
+    def list_attribution_conversions(
+        self,
+        *,
+        ws: str | None = None,
+        name: str | None = None,
+        channel: str | None = None,
+        record_id: str | None = None,
+        from_: str | None = None,
+        to: str | None = None,
+        model: Literal["last_non_direct", "first_touch", "linear", "position", "time_decay"] | None = None,
+        brand: str | None = None,
+        limit: int | None = None,
+        before: str | None = None,
+        cursor: str | None = None,
+        fields: list[str] | None = None,
+    ) -> Any:
+        """List credited conversions and who got the credit.
+
+        Scope: analytics.read. Newest first. Each conversion lists the visits credited under the model, with their channel and weight; a conversion with no visit before it is credited to direct.
+
+        Needs: the analytics.read scope.
+        GET /v1/workspaces/{ws}/attribution/conversions
+        """
+        return self._call(
+            "GET",
+            "/v1/workspaces/{ws}/attribution/conversions",
+            path={"ws": ws},
+            query={
+                "name": name,
+                "channel": channel,
+                "record_id": record_id,
+                "from": from_,
+                "to": to,
+                "model": model,
+                "brand": brand,
+                "limit": limit,
+                "before": before,
+                "cursor": cursor,
+                "fields": fields,
+            },
         )
 
     def list_audit_events(
@@ -16590,6 +16703,32 @@ class Operations(_Mixin):
                 "name": name,
                 "scopes": scopes,
             },
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
+    def update_attribution_settings(
+        self,
+        *,
+        ws: str | None = None,
+        conversion_events: list[str] | None = None,
+        lookback_days: int | None = None,
+        model: Literal["last_non_direct", "first_touch", "linear", "position", "time_decay"] | None = None,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Change the default model, the lookback or which events count.
+
+        Scope: analytics.manage. Every model's credits are kept, so changing the model only changes what reports show by default. Changing the lookback or the events credits every conversion again in the background, within a few minutes.
+
+        Needs: the analytics.manage scope.
+        PATCH /v1/workspaces/{ws}/attribution/settings
+        """
+        return self._call(
+            "PATCH",
+            "/v1/workspaces/{ws}/attribution/settings",
+            path={"ws": ws},
+            body={"conversion_events": conversion_events, "lookback_days": lookback_days, "model": model},
             extra_body=extra_body,
             idempotency_key=idempotency_key,
         )

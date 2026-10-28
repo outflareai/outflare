@@ -15,6 +15,7 @@ import (
 
 	"github.com/outflareai/outflare/engine/internal/allocation"
 	"github.com/outflareai/outflare/engine/internal/auth"
+	"github.com/outflareai/outflare/engine/internal/customers"
 	"github.com/outflareai/outflare/engine/internal/leads"
 	"github.com/outflareai/outflare/engine/internal/mailbox"
 	"github.com/outflareai/outflare/engine/internal/missions"
@@ -888,6 +889,10 @@ func (s *Server) previewSequence(w http.ResponseWriter, r *http.Request) {
 		if _, ok := vars[k]; !ok {
 			vars[k] = v
 		}
+	}
+	if err := customers.PersonVars(r.Context(), s.pool, l.ID, vars); err != nil {
+		s.internal(w, r, err)
+		return
 	}
 	type rendered struct {
 		Position int      `json:"position"`

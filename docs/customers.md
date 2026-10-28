@@ -45,6 +45,8 @@ Connect Attio and import it once with `POST .../integrations/{id}/crm-imports`: 
 
 Every lead is a person record. A new lead joins the person who already has its email, or gets a record of its own with origin `prospect`, its email as an unverified identity (so it never claims an address someone proves they own), its lead id as an `outflare.lead` identity, and its name, job title and LinkedIn as attributes. `record_id` on a lead links to it. Imports of up to 1,000 leads are linked as they land; bigger ones, and leads from before this, are linked by the `customers.link` job within moments.
 
+A lead's details live on its person. Whenever a lead is added, imported, edited or enriched, its first and last name, job title and LinkedIn are copied to the person's fields, its phone becomes an unverified phone identity, and its company becomes the person's company (found or added by the website's domain, or the email's when that is a company's own, never a personal mailbox such as Gmail). They are written with the source `import`: they fill what is empty and update what a lead set before, but never replace a value a person typed, a CRM sync or enrichment set. The `customers.lead_fields` job copies what older leads know. Cold email's merge tags read the person back, so a correction made on the record (a job title, a first name) is what goes out, and the person's other text fields work as merge tags by their field key.
+
 Cold email, replies, meetings and deals carry the person's `record_id` too: from their lead, or else from the person who has the address (a reply's sender, a meeting's attendee). Lifecycle email to one address links to its verified owner. Merging two records moves all of it to the one kept.
 
 ## Identities

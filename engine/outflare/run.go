@@ -35,6 +35,7 @@ import (
 	"github.com/outflareai/outflare/engine/internal/allocation"
 	"github.com/outflareai/outflare/engine/internal/analyticsync"
 	"github.com/outflareai/outflare/engine/internal/api"
+	"github.com/outflareai/outflare/engine/internal/attribution"
 	"github.com/outflareai/outflare/engine/internal/blobs"
 	"github.com/outflareai/outflare/engine/internal/config"
 	"github.com/outflareai/outflare/engine/internal/connectors"
@@ -283,6 +284,7 @@ func Run(ctx context.Context, log *slog.Logger, cmd string, exts ...Extension) e
 	(&inbox.Rules{Pool: pool, Log: log}).Register(queue)
 	linker := &customers.Linker{Pool: pool}
 	linker.Register(queue)
+	(&customers.LeadFields{Pool: pool}).Register(queue)
 	hooks := &webhooks.Service{Pool: pool, Box: box, Log: log, AllowPrivate: cfg.WebhooksAllowPrivate}
 	hooks.Register(queue)
 	crawler := &crawl.Service{Pool: pool, Log: log, Resolver: net.DefaultResolver, AllowPrivate: cfg.CrawlAllowPrivate,
@@ -504,6 +506,12 @@ func Run(ctx context.Context, log *slog.Logger, cmd string, exts ...Extension) e
 		go func() {
 			defer wg.Done()
 			apiServer.RunSocial(ctx, time.Minute)
+		}()
+		// Each visit's channel, and the credit for each conversion.
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			(&attribution.Runner{Pool: pool, Log: log}).Run(ctx, time.Minute)
 		}()
 		wg.Add(1)
 		go func() {

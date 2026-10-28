@@ -144,6 +144,7 @@ var Catalog = []Event{
 	// Customer records
 	{"record.created", "customers", "A person, company or other record was created: by hand, an import, a lead, a sign-up or product events. data has type and origin."},
 	{"record.bulk_created", "customers", "Many records were created at once (a lead import or unsubscribes from another sequencer). data has type, origin, via and count."},
+	{"record.bulk_updated", "customers", "Many people were updated at once from their leads (an import, an enrichment run). data has type, via and count."},
 	{"record.updated", "customers", "A record's name, origin, brand or attributes changed. data.type is its record type; GET .../records/{id}/history has what changed."},
 	{"record.merged", "customers", "Two records were merged into one. The target is the record kept; data.from_id is the merged one and data has counts of what moved."},
 	{"identity.verified", "customers", "Someone proved they own an email or phone, so it now claims that address for their record."},

@@ -2265,6 +2265,87 @@ export function createServer({ client: gtm, workspace, agency, readOnly = false,
     ({ campaign, ...body }) => call(() => gtm.POST("/v1/workspaces/{ws}/tracking-campaigns/{id}/links", { params: { path: { ws, id: campaign } }, body })),
   );
 
+  const attributionModel = z
+    .enum(["last_non_direct", "first_touch", "linear", "position", "time_decay"])
+    .optional()
+    .describe("Which model's credits to read; the workspace's default when left out. position is 40% first, 40% last, 20% the rest.");
+  const attributionDay = z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional();
+  const attributionRange = {
+    from: attributionDay.describe("First day, such as 2026-09-27. Default: 27 days before to."),
+    to: attributionDay.describe("Last day. Default: today."),
+    model: attributionModel,
+    brand: z.string().optional().describe("A brand's id or handle."),
+  };
+
+  server.registerTool(
+    "get_attribution_settings",
+    {
+      title: "Get attribution settings",
+      description: "The default attribution model reports use, how many days before a conversion a visit can get credit, and which customer events count as conversions.",
+      inputSchema: {},
+      annotations: read,
+    },
+    () => call(() => gtm.GET("/v1/workspaces/{ws}/attribution/settings", { params: { path } })),
+  );
+
+  server.registerTool(
+    "update_attribution_settings",
+    {
+      title: "Change attribution settings",
+      description:
+        "Change the default model, the lookback or which customer events count as conversions. Every model's credits are kept, so the model only changes what reports show by default; " +
+        "a new lookback or event list credits every conversion again in the background.",
+      inputSchema: {
+        model: attributionModel,
+        lookback_days: z.number().int().min(1).max(365).optional(),
+        conversion_events: z.array(z.string().max(100)).min(1).max(20).optional().describe("Customer event names, such as signed_up or payment.succeeded."),
+      },
+      annotations: write,
+    },
+    (body) => call(() => gtm.PATCH("/v1/workspaces/{ws}/attribution/settings", { params: { path }, body })),
+  );
+
+  server.registerTool(
+    "get_attribution_channels",
+    {
+      title: "Channel report",
+      description:
+        "For every channel: website visits, conversions and revenue credited to it under the model, and the spend recorded against it. Conversions can be fractional under shared models; revenue is net of refunds, per currency.",
+      inputSchema: attributionRange,
+      annotations: read,
+    },
+    (query) => call(() => gtm.GET("/v1/workspaces/{ws}/attribution/channels", { params: { path, query } })),
+  );
+
+  server.registerTool(
+    "get_attribution_campaigns",
+    {
+      title: "Campaign report",
+      description: "Drill a channel down to its sources and campaigns: visits, conversions and revenue each, most conversions first.",
+      inputSchema: { channel: z.string().optional().describe("Such as paid_ads, seo or direct."), ...attributionRange },
+      annotations: read,
+    },
+    (query) => call(() => gtm.GET("/v1/workspaces/{ws}/attribution/campaigns", { params: { path, query } })),
+  );
+
+  server.registerTool(
+    "list_attribution_conversions",
+    {
+      title: "List credited conversions",
+      description: "Sign-ups, payments and refunds newest first, each with the visits that got the credit under the model, their channel and weight.",
+      inputSchema: {
+        name: z.string().optional().describe("Only this customer event, such as signed_up."),
+        channel: z.string().optional().describe("Only conversions this channel got credit for."),
+        record_id: z.string().uuid().optional(),
+        ...attributionRange,
+        limit: z.number().int().min(1).max(200).optional(),
+        cursor: z.string().optional().describe("next_cursor from the previous page."),
+      },
+      annotations: read,
+    },
+    (query) => call(() => gtm.GET("/v1/workspaces/{ws}/attribution/conversions", { params: { path, query } })),
+  );
+
   const adConnector = z.enum(["google_ads", "meta_ads", "microsoft_ads", "reddit_ads", "x_ads", "linkedin_ads"]).optional();
   const adDay = z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional();
 

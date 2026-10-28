@@ -4368,6 +4368,108 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/workspaces/{ws}/attribution/settings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+            };
+            cookie?: never;
+        };
+        /**
+         * Get how conversions are credited to channels
+         * @description Scope: analytics.read. The default model reports use (last non-direct touch unless changed), how many days before a conversion a visit can get credit (90), and which customer events count as conversions.
+         */
+        get: operations["getAttributionSettings"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Change the default model, the lookback or which events count
+         * @description Scope: analytics.manage. Every model's credits are kept, so changing the model only changes what reports show by default. Changing the lookback or the events credits every conversion again in the background, within a few minutes.
+         */
+        patch: operations["updateAttributionSettings"];
+        trace?: never;
+    };
+    "/v1/workspaces/{ws}/attribution/channels": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+            };
+            cookie?: never;
+        };
+        /**
+         * Visits, conversions, revenue and cost for every channel
+         * @description Scope: analytics.read. One row per channel, always in the same order:
+         *     website visits that arrived from it, the conversions and revenue
+         *     credited to it under the model, and the spend recorded against it.
+         *     Conversions are shares, so they can be fractional under the shared
+         *     models. Revenue is payments net of refunds, per currency. Spend with
+         *     no channel is in unallocated_cost. pending_visits are visits not
+         *     classified yet (within a minute or two).
+         */
+        get: operations["getAttributionChannels"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/workspaces/{ws}/attribution/campaigns": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+            };
+            cookie?: never;
+        };
+        /**
+         * Drill a channel down to its sources and campaigns
+         * @description Scope: analytics.read. Visits, conversions and revenue per channel, source and campaign, most conversions first, at most 500 rows. tracking_campaign_id and campaign_name are set for visits from an Outflare campaign link.
+         */
+        get: operations["getAttributionCampaigns"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/workspaces/{ws}/attribution/conversions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+            };
+            cookie?: never;
+        };
+        /**
+         * List credited conversions and who got the credit
+         * @description Scope: analytics.read. Newest first. Each conversion lists the visits credited under the model, with their channel and weight; a conversion with no visit before it is credited to direct.
+         */
+        get: operations["listAttributionConversions"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/workspaces/{ws}/analytics": {
         parameters: {
             query?: never;
@@ -16533,6 +16635,23 @@ export interface webhooks {
         patch?: never;
         trace?: never;
     };
+    "record.bulk_updated": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Many people were updated at once from their leads (an import, an enrichment run). data has type, via and count. */
+        post: operations["webhook_record_bulk_updated"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "record.updated": {
         parameters: {
             query?: never;
@@ -17520,7 +17639,7 @@ export interface components {
              */
             id: string;
             /** @enum {string} */
-            type: "lead.replied" | "lead.unsubscribed" | "inbox.replied" | "inbox.updated" | "inbox.classified" | "lead.bounced" | "mailbox.auto_paused" | "lead.created" | "lead.updated" | "lead.deleted" | "leads.imported" | "suppressions.added" | "suppression.removed" | "lead_list.created" | "lead_list.leads_added" | "lead_list.run_started" | "lead_list.build_done" | "lead_list.build_failed" | "lead_list.refresh_done" | "lead_list.refresh_failed" | "lead_list.enrich_done" | "lead_list.enrich_failed" | "import.done" | "import.failed" | "sequence.created" | "sequence.updated" | "sequence.activated" | "sequence.paused" | "sequence.archived" | "sequence.deleted" | "sequence.steps_updated" | "sequence.leads_enrolled" | "enrollment.stopped" | "mailbox.imported" | "mailbox.updated" | "mailbox.paused" | "mailbox.resumed" | "mailbox.stage_changed" | "mailbox.deleted" | "domain.added" | "domain.paused" | "domain.resumed" | "domain.removed" | "email.queued" | "email.sent" | "email.delivered" | "email.bounced" | "email.complained" | "email.failed" | "email.suppressed" | "email.cancelled" | "email.unsubscribed" | "email.opened" | "email.clicked" | "email.preferences_changed" | "email_domain.verified" | "email_domain.verification_failed" | "email_provider.events_failed" | "email_template.published" | "meeting.created" | "meeting.updated" | "meeting.deleted" | "deal.created" | "deal.updated" | "deal.deleted" | "spend.recorded" | "integration.connected" | "integration.updated" | "integration.disconnected" | "connect_request.created" | "deploy.detected" | "deploy.failed" | "digest.ready" | "ai_budget.warned" | "ai_budget.reached" | "connection_limit.warned" | "connection_limit.reached" | "experiment.started" | "experiment.concluded" | "project.created" | "project.updated" | "project.deleted" | "mission.created" | "mission.updated" | "mission.submitted" | "mission.approved" | "mission.paused" | "mission.resumed" | "mission.stopped" | "mission.completed" | "mission.action_held" | "mission.action_approved" | "mission.action_rejected" | "infra.plan_created" | "infra.plan_approved" | "infra.ordered" | "infra.order_failed" | "infra.domains_bought" | "infra.mailbox_joined" | "infra.plan_warming" | "infra.plan_ready" | "infra.plan_cancelled" | "fix.found" | "fix.updated" | "fix.started" | "fix.verify_requested" | "fix.confirmed" | "fix.reopened" | "record.created" | "record.bulk_created" | "record.updated" | "record.merged" | "identity.verified" | "identity.closed" | "relationship.added" | "relationship.ended" | "consent.granted" | "consent.withdrawn" | "consent.bulk_withdrawn" | "brand.created" | "brand.updated" | "email_broadcast.created" | "email_broadcast.started" | "email_broadcast.sent" | "email_broadcast.failed" | "email_broadcast.cancelled" | "journey.created" | "journey.updated" | "journey_run.entered" | "journey_run.exited" | "brand_setup.installed" | "brand_setup.install_failed" | "install.issue_opened" | "install.issue_resolved" | "seo_site.created" | "seo_site.verified" | "seo_site.unverified" | "seo_site.deleted" | "crawl.started" | "crawl.stopped" | "crawl.done" | "social_action.drafted" | "social_action.approved" | "social_action.rejected" | "social_action.done" | "social_action.failed" | "review.posted" | "review.replied" | "review.reply_drafted" | "review_momentum.changed" | "alert.raised" | "visitor.became_hot" | "workspace.updated" | "webhook.test";
+            type: "lead.replied" | "lead.unsubscribed" | "inbox.replied" | "inbox.updated" | "inbox.classified" | "lead.bounced" | "mailbox.auto_paused" | "lead.created" | "lead.updated" | "lead.deleted" | "leads.imported" | "suppressions.added" | "suppression.removed" | "lead_list.created" | "lead_list.leads_added" | "lead_list.run_started" | "lead_list.build_done" | "lead_list.build_failed" | "lead_list.refresh_done" | "lead_list.refresh_failed" | "lead_list.enrich_done" | "lead_list.enrich_failed" | "import.done" | "import.failed" | "sequence.created" | "sequence.updated" | "sequence.activated" | "sequence.paused" | "sequence.archived" | "sequence.deleted" | "sequence.steps_updated" | "sequence.leads_enrolled" | "enrollment.stopped" | "mailbox.imported" | "mailbox.updated" | "mailbox.paused" | "mailbox.resumed" | "mailbox.stage_changed" | "mailbox.deleted" | "domain.added" | "domain.paused" | "domain.resumed" | "domain.removed" | "email.queued" | "email.sent" | "email.delivered" | "email.bounced" | "email.complained" | "email.failed" | "email.suppressed" | "email.cancelled" | "email.unsubscribed" | "email.opened" | "email.clicked" | "email.preferences_changed" | "email_domain.verified" | "email_domain.verification_failed" | "email_provider.events_failed" | "email_template.published" | "meeting.created" | "meeting.updated" | "meeting.deleted" | "deal.created" | "deal.updated" | "deal.deleted" | "spend.recorded" | "integration.connected" | "integration.updated" | "integration.disconnected" | "connect_request.created" | "deploy.detected" | "deploy.failed" | "digest.ready" | "ai_budget.warned" | "ai_budget.reached" | "connection_limit.warned" | "connection_limit.reached" | "experiment.started" | "experiment.concluded" | "project.created" | "project.updated" | "project.deleted" | "mission.created" | "mission.updated" | "mission.submitted" | "mission.approved" | "mission.paused" | "mission.resumed" | "mission.stopped" | "mission.completed" | "mission.action_held" | "mission.action_approved" | "mission.action_rejected" | "infra.plan_created" | "infra.plan_approved" | "infra.ordered" | "infra.order_failed" | "infra.domains_bought" | "infra.mailbox_joined" | "infra.plan_warming" | "infra.plan_ready" | "infra.plan_cancelled" | "fix.found" | "fix.updated" | "fix.started" | "fix.verify_requested" | "fix.confirmed" | "fix.reopened" | "record.created" | "record.bulk_created" | "record.bulk_updated" | "record.updated" | "record.merged" | "identity.verified" | "identity.closed" | "relationship.added" | "relationship.ended" | "consent.granted" | "consent.withdrawn" | "consent.bulk_withdrawn" | "brand.created" | "brand.updated" | "email_broadcast.created" | "email_broadcast.started" | "email_broadcast.sent" | "email_broadcast.failed" | "email_broadcast.cancelled" | "journey.created" | "journey.updated" | "journey_run.entered" | "journey_run.exited" | "brand_setup.installed" | "brand_setup.install_failed" | "install.issue_opened" | "install.issue_resolved" | "seo_site.created" | "seo_site.verified" | "seo_site.unverified" | "seo_site.deleted" | "crawl.started" | "crawl.stopped" | "crawl.done" | "social_action.drafted" | "social_action.approved" | "social_action.rejected" | "social_action.done" | "social_action.failed" | "review.posted" | "review.replied" | "review.reply_drafted" | "review_momentum.changed" | "alert.raised" | "visitor.became_hot" | "workspace.updated" | "webhook.test";
             /** Format: date-time */
             created_at: string;
             /** Format: uuid */
@@ -18260,6 +18379,117 @@ export interface components {
             medium: string;
             /** @description The usual utm_source values, most common first. Any other source is allowed. */
             sources: string[];
+        };
+        /**
+         * @description last_non_direct: the last visit that wasn't direct gets it all. first_touch: the first visit. linear: shared evenly. position: 40% first, 40% last, 20% shared by the rest. time_decay: shared, halving for every week before the conversion. Direct visits get credit only when there is nothing else.
+         * @enum {string}
+         */
+        AttributionModel: "last_non_direct" | "first_touch" | "linear" | "position" | "time_decay";
+        AttributionSettings: {
+            model: components["schemas"]["AttributionModel"];
+            /** @description How many days before a conversion a visit can get credit. */
+            lookback_days: number;
+            /** @description Customer events that count as conversions. With payment.succeeded, refunds are taken off its revenue. */
+            conversion_events: string[];
+            models: components["schemas"]["AttributionModel"][];
+            /**
+             * Format: date-time
+             * @description When every past conversion was last credited; null while that is running.
+             */
+            backfilled_at: string | null;
+            /** Format: date-time */
+            updated_at: string;
+        };
+        AttributionSettingsInput: {
+            model?: components["schemas"]["AttributionModel"];
+            lookback_days?: number;
+            conversion_events?: string[];
+        };
+        Money: {
+            currency: string;
+            /** Format: int64 */
+            amount_cents: number;
+        };
+        AttributionChannelRow: {
+            channel: string;
+            label: string;
+            visits: number;
+            /** @description Credited conversions; refunds are not counted. */
+            conversions: number;
+            by_event: {
+                [key: string]: number;
+            };
+            revenue: components["schemas"]["Money"][];
+            cost: components["schemas"]["Money"][];
+        };
+        AttributionChannels: {
+            model: components["schemas"]["AttributionModel"];
+            /** Format: date */
+            from: string;
+            /** Format: date */
+            to: string;
+            lookback_days: number;
+            conversion_events: string[];
+            pending_visits: number;
+            data: components["schemas"]["AttributionChannelRow"][];
+            unallocated_cost: components["schemas"]["Money"][];
+        };
+        AttributionCampaignRow: {
+            channel: string;
+            label: string;
+            source: string;
+            campaign: string;
+            /** Format: uuid */
+            tracking_campaign_id: string | null;
+            campaign_name: string;
+            visits: number;
+            conversions: number;
+            by_event: {
+                [key: string]: number;
+            };
+            revenue: components["schemas"]["Money"][];
+        };
+        AttributionCredit: {
+            channel: string;
+            source: string;
+            campaign: string;
+            /** Format: uuid */
+            tracking_campaign_id: string | null;
+            /**
+             * Format: uuid
+             * @description The website visit; null when no visit came before the conversion.
+             */
+            session_id: string | null;
+            /** Format: date-time */
+            touch_at: string | null;
+            /** @description What decided the channel: ofc, ref, click_id, utm, referrer or none. */
+            tag_method: string;
+            weight: number;
+        };
+        AttributionConversion: {
+            /** Format: uuid */
+            event_id: string;
+            name: string;
+            /** Format: uuid */
+            record_id: string | null;
+            /** Format: uuid */
+            brand_id: string | null;
+            /** Format: date-time */
+            occurred_at: string;
+            /**
+             * Format: int64
+             * @description Negative for a refund.
+             */
+            value_cents: number | null;
+            currency: string;
+            /** @description Visits in the lookback before it. */
+            touches: number;
+            /**
+             * @description How visits were tied to it: the person's record, the browser's anonymous id, or nothing.
+             * @enum {string}
+             */
+            matched_by: "record" | "anonymous" | "none";
+            credits: components["schemas"]["AttributionCredit"][];
         };
         TrackingCampaign: {
             /** Format: uuid */
@@ -27628,6 +27858,12 @@ export interface components {
         };
     };
     parameters: {
+        /** @description First day, such as 2026-09-27. Default: 27 days before to. */
+        AttributionFrom: string;
+        /** @description Last day, such as 2026-10-24. Default: today. */
+        AttributionTo: string;
+        /** @description Which model's credits to read. Default: the workspace's (GET .../attribution/settings). */
+        AttributionModel: components["schemas"]["AttributionModel"];
         /** @description Only records of this brand: its id or handle, none for records shared by every brand, or all (the default). */
         Brand: string;
         /**
@@ -36189,6 +36425,205 @@ export interface operations {
                 };
             };
             202: components["responses"]["MissionHeld"];
+            400: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    getAttributionSettings: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The settings. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AttributionSettings"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    updateAttributionSettings: {
+        parameters: {
+            query?: never;
+            header?: {
+                /**
+                 * @description Makes the write safe to retry. A repeat with the same key from the same caller within 24 hours gets the first
+                 *     answer back (with `Idempotent-Replayed: true`) instead of running again. The same key for a different request
+                 *     is refused with 422 `idempotency_key_reused`; while the first is still running, 409 `idempotency_in_progress`.
+                 *     Use a new random key, such as a UUID, for each distinct write.
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AttributionSettingsInput"];
+            };
+        };
+        responses: {
+            /** @description The settings. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AttributionSettings"];
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            400: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    getAttributionChannels: {
+        parameters: {
+            query?: {
+                /** @description First day, such as 2026-09-27. Default: 27 days before to. */
+                from?: components["parameters"]["AttributionFrom"];
+                /** @description Last day, such as 2026-10-24. Default: today. */
+                to?: components["parameters"]["AttributionTo"];
+                /** @description Which model's credits to read. Default: the workspace's (GET .../attribution/settings). */
+                model?: components["parameters"]["AttributionModel"];
+                /** @description Only records of this brand: its id or handle, none for records shared by every brand, or all (the default). */
+                brand?: components["parameters"]["Brand"];
+            };
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The channels. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AttributionChannels"];
+                };
+            };
+            400: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    getAttributionCampaigns: {
+        parameters: {
+            query?: {
+                /** @description Only this channel, such as paid_ads or direct. */
+                channel?: string;
+                /** @description First day, such as 2026-09-27. Default: 27 days before to. */
+                from?: components["parameters"]["AttributionFrom"];
+                /** @description Last day, such as 2026-10-24. Default: today. */
+                to?: components["parameters"]["AttributionTo"];
+                /** @description Which model's credits to read. Default: the workspace's (GET .../attribution/settings). */
+                model?: components["parameters"]["AttributionModel"];
+                /** @description Only records of this brand: its id or handle, none for records shared by every brand, or all (the default). */
+                brand?: components["parameters"]["Brand"];
+            };
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The campaigns. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        model: string;
+                        /** Format: date */
+                        from: string;
+                        /** Format: date */
+                        to: string;
+                        data: components["schemas"]["AttributionCampaignRow"][];
+                    };
+                };
+            };
+            400: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    listAttributionConversions: {
+        parameters: {
+            query?: {
+                /** @description Only this customer event, such as signed_up. */
+                name?: string;
+                /** @description Only conversions this channel got credit for. */
+                channel?: string;
+                record_id?: string;
+                /** @description First day, such as 2026-09-27. Default: 27 days before to. */
+                from?: components["parameters"]["AttributionFrom"];
+                /** @description Last day, such as 2026-10-24. Default: today. */
+                to?: components["parameters"]["AttributionTo"];
+                /** @description Which model's credits to read. Default: the workspace's (GET .../attribution/settings). */
+                model?: components["parameters"]["AttributionModel"];
+                /** @description Only records of this brand: its id or handle, none for records shared by every brand, or all (the default). */
+                brand?: components["parameters"]["Brand"];
+                limit?: number;
+                before?: string;
+                /**
+                 * @description next_cursor from the previous page, unchanged. Every paged list takes it, so one loop pages them all:
+                 *     call, then call again with cursor=next_cursor until next_cursor is null. Cursors are opaque; don't build them.
+                 */
+                cursor?: components["parameters"]["Cursor"];
+                /**
+                 * @description Only these fields of each item, comma separated (fields=id,email,status); id always comes back.
+                 *     Paging fields stay. A field the items don't have answers 400 naming the ones they do. Any GET takes it.
+                 */
+                fields?: components["parameters"]["Fields"];
+            };
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The conversions. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        model: string;
+                        data: components["schemas"]["AttributionConversion"][];
+                        /** Format: date-time */
+                        next_before: string | null;
+                        next_cursor?: components["schemas"]["NextCursor"];
+                    };
+                };
+            };
             400: components["responses"]["Error"];
             404: components["responses"]["Error"];
             default: components["responses"]["Error"];
@@ -56832,6 +57267,28 @@ export interface operations {
         };
     };
     webhook_record_bulk_created: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["WebhookEvent"];
+            };
+        };
+        responses: {
+            /** @description Any 2xx answer means received; anything else is retried. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    webhook_record_bulk_updated: {
         parameters: {
             query?: never;
             header?: never;

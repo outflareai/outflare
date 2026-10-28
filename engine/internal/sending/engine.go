@@ -16,6 +16,7 @@ import (
 
 	"github.com/outflareai/outflare/engine/internal/audit"
 	"github.com/outflareai/outflare/engine/internal/connectors"
+	"github.com/outflareai/outflare/engine/internal/customers"
 	"github.com/outflareai/outflare/engine/internal/jobs"
 	"github.com/outflareai/outflare/engine/internal/leads"
 	"github.com/outflareai/outflare/engine/internal/mailbox"
@@ -464,6 +465,9 @@ func (e *Engine) prepare(ctx context.Context, tx pgx.Tx, enrollmentID string, sk
 		if _, standard := vars[k]; !standard {
 			vars[k] = v
 		}
+	}
+	if err := customers.PersonVars(ctx, tx, en.LeadID, vars); err != nil {
+		return nil, en, err
 	}
 	subject := stepSubject
 	if subject == "" && en.ThreadSubject != nil {

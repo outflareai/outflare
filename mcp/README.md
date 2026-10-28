@@ -331,6 +331,9 @@ Write (left out when `OUTFLARE_MCP_READ_ONLY=1`):
 | `list_tracking_campaigns`, `get_tracking_campaign` | Campaigns with their tags, ofc code, landing link and link count; look one up by its ofc code |
 | `create_tracking_campaign`, `update_tracking_campaign` | Make a campaign (channel, source, utm_campaign, ofc code), or rename, rebrand or archive it |
 | `list_tracking_links`, `create_tracking_link` | Tagged links in a campaign; make one for any page, with content and term |
+| `get_attribution_settings`, `update_attribution_settings` | The default attribution model (last non-direct touch), the lookback and which events count as conversions |
+| `get_attribution_channels`, `get_attribution_campaigns` | Visits, conversions, revenue and cost per channel, and per source and campaign, under any of the five models |
+| `list_attribution_conversions` | Credited sign-ups, payments and refunds with the visits that got the credit |
 | `list_ad_connections` | List connected ad platforms and what each still needs |
 | `list_ad_accounts` | List ad accounts with currency, brand and sync status |
 | `update_ad_account` | Set an ad account's brand, or switch its sync |

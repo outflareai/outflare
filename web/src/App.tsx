@@ -49,6 +49,7 @@ import { Analytics } from "./pages/Analytics";
 import { WebsiteTracking } from "./pages/WebsiteTracking";
 import { Flags } from "./pages/Flags";
 import { CampaignLinks } from "./pages/CampaignLinks";
+import { Channels } from "./pages/Channels";
 import { IdealCustomers } from "./pages/IdealCustomers";
 import { Agency } from "./pages/Agency";
 import { LeadFinder } from "./pages/LeadFinder";
@@ -523,6 +524,7 @@ function Shell({ me, onSignOut, onReload }: { me: Me; onSignOut: () => void; onR
         {ready && ws && tab === "setup" && <BrandSetup key={ws.id} ws={ws.id} canManage={isAdmin} go={setTab} />}
         {ready && ws && tab === "get-started" && !isAdmin && <p className="text-sm text-muted-foreground">An owner or admin of {ws.name} sets this up.</p>}
         {ready && ws && tab === "flags" && <Flags key={ws.id} ws={ws.id} canManage={can("analytics.manage")} go={setTab} />}
+        {ready && ws && tab === "channels" && <Channels key={ws.id} ws={ws.id} canManage={can("analytics.manage")} go={setTab} />}
         {ready && ws && tab === "links" && <CampaignLinks key={ws.id} ws={ws.id} canManage={writer} />}
         {ready && ws && tab === "tracking" && <WebsiteTracking key={ws.id} ws={ws.id} canManage={isAdmin} go={setTab} />}
         {ready && ws && tab === "ideal-customers" && <IdealCustomers key={ws.id} ws={ws.id} canManage={writer} />}

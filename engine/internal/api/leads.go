@@ -15,6 +15,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/outflareai/outflare/engine/internal/auth"
+	"github.com/outflareai/outflare/engine/internal/customers"
 	"github.com/outflareai/outflare/engine/internal/leads"
 	"github.com/outflareai/outflare/engine/internal/policy"
 )
@@ -394,7 +395,7 @@ func (s *Server) updateLead(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	set := map[string]string{}
-	var unset []string
+	unset := []string{} // never null: removing nothing keeps custom as it is
 	for k, v := range req.Custom {
 		key := leads.NormaliseKey(k)
 		if key == "" {
@@ -424,6 +425,9 @@ func (s *Server) updateLead(w http.ResponseWriter, r *http.Request) {
 		}
 		if tag.RowsAffected() == 0 {
 			return errNotFound
+		}
+		if _, err := customers.SyncLeads(ctx, tx, a.WorkspaceID, []string{id}); err != nil {
+			return err
 		}
 		return record(ctx, tx, &a.principal, a.WorkspaceID, "lead.updated", "lead", id, nil)
 	})

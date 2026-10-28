@@ -96,8 +96,17 @@ func Import(ctx context.Context, tx pgx.Tx, workspaceID, source string, listID *
 		if _, err := customers.LinkLeads(ctx, tx, workspaceID, ids, len(ids)); err != nil {
 			return res, err
 		}
-	} else if _, err := jobs.Enqueue(ctx, tx, jobs.NewJob{Kind: customers.JobLink, WorkspaceID: &workspaceID}); err != nil {
-		return res, err
+		// Leads that were already people bring their new details over.
+		if _, err := customers.SyncLeads(ctx, tx, workspaceID, ids); err != nil {
+			return res, err
+		}
+	} else {
+		if _, err := jobs.Enqueue(ctx, tx, jobs.NewJob{Kind: customers.JobLink, WorkspaceID: &workspaceID}); err != nil {
+			return res, err
+		}
+		if _, err := jobs.Enqueue(ctx, tx, jobs.NewJob{Kind: customers.JobLeadFields, WorkspaceID: &workspaceID}); err != nil {
+			return res, err
+		}
 	}
 	err = tx.QueryRow(ctx, `
 		SELECT count(*) FROM lead_import i

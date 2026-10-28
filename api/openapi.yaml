@@ -6014,6 +6014,141 @@ paths:
         "404": { $ref: "#/components/responses/Error" }
         "202": { $ref: "#/components/responses/MissionHeld" }
         default: { $ref: "#/components/responses/Error" }
+  /v1/workspaces/{ws}/attribution/settings:
+    parameters:
+      - { $ref: "#/components/parameters/Workspace" }
+    get:
+      operationId: getAttributionSettings
+      x-outflare-access: { scope: analytics.read }
+      summary: Get how conversions are credited to channels
+      description: "Scope: analytics.read. The default model reports use (last non-direct touch unless changed), how many days before a conversion a visit can get credit (90), and which customer events count as conversions."
+      tags: [analytics]
+      responses:
+        "200":
+          description: The settings.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AttributionSettings" }
+        default: { $ref: "#/components/responses/Error" }
+    patch:
+      operationId: updateAttributionSettings
+      x-outflare-access: { scope: analytics.manage }
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      summary: Change the default model, the lookback or which events count
+      description: "Scope: analytics.manage. Every model's credits are kept, so changing the model only changes what reports show by default. Changing the lookback or the events credits every conversion again in the background, within a few minutes."
+      tags: [analytics]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/AttributionSettingsInput" }
+      responses:
+        "200":
+          description: The settings.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AttributionSettings" }
+        "400": { $ref: "#/components/responses/Error" }
+        "202": { $ref: "#/components/responses/MissionHeld" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/workspaces/{ws}/attribution/channels:
+    parameters:
+      - { $ref: "#/components/parameters/Workspace" }
+    get:
+      operationId: getAttributionChannels
+      x-outflare-access: { scope: analytics.read }
+      summary: Visits, conversions, revenue and cost for every channel
+      description: |
+        Scope: analytics.read. One row per channel, always in the same order:
+        website visits that arrived from it, the conversions and revenue
+        credited to it under the model, and the spend recorded against it.
+        Conversions are shares, so they can be fractional under the shared
+        models. Revenue is payments net of refunds, per currency. Spend with
+        no channel is in unallocated_cost. pending_visits are visits not
+        classified yet (within a minute or two).
+      tags: [analytics]
+      parameters:
+        - { $ref: "#/components/parameters/AttributionFrom" }
+        - { $ref: "#/components/parameters/AttributionTo" }
+        - { $ref: "#/components/parameters/AttributionModel" }
+        - { $ref: "#/components/parameters/Brand" }
+      responses:
+        "200":
+          description: The channels.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AttributionChannels" }
+        "400": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/workspaces/{ws}/attribution/campaigns:
+    parameters:
+      - { $ref: "#/components/parameters/Workspace" }
+    get:
+      operationId: getAttributionCampaigns
+      x-outflare-access: { scope: analytics.read }
+      summary: Drill a channel down to its sources and campaigns
+      description: "Scope: analytics.read. Visits, conversions and revenue per channel, source and campaign, most conversions first, at most 500 rows. tracking_campaign_id and campaign_name are set for visits from an Outflare campaign link."
+      tags: [analytics]
+      parameters:
+        - { name: channel, in: query, description: "Only this channel, such as paid_ads or direct.", schema: { type: string } }
+        - { $ref: "#/components/parameters/AttributionFrom" }
+        - { $ref: "#/components/parameters/AttributionTo" }
+        - { $ref: "#/components/parameters/AttributionModel" }
+        - { $ref: "#/components/parameters/Brand" }
+      responses:
+        "200":
+          description: The campaigns.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [model, from, to, data]
+                properties:
+                  model: { type: string }
+                  from: { type: string, format: date }
+                  to: { type: string, format: date }
+                  data: { type: array, items: { $ref: "#/components/schemas/AttributionCampaignRow" } }
+        "400": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/workspaces/{ws}/attribution/conversions:
+    parameters:
+      - { $ref: "#/components/parameters/Workspace" }
+    get:
+      operationId: listAttributionConversions
+      x-outflare-access: { scope: analytics.read }
+      summary: List credited conversions and who got the credit
+      description: "Scope: analytics.read. Newest first. Each conversion lists the visits credited under the model, with their channel and weight; a conversion with no visit before it is credited to direct."
+      tags: [analytics]
+      parameters:
+        - { name: name, in: query, description: "Only this customer event, such as signed_up.", schema: { type: string } }
+        - { name: channel, in: query, description: "Only conversions this channel got credit for.", schema: { type: string } }
+        - { name: record_id, in: query, schema: { type: string, format: uuid } }
+        - { $ref: "#/components/parameters/AttributionFrom" }
+        - { $ref: "#/components/parameters/AttributionTo" }
+        - { $ref: "#/components/parameters/AttributionModel" }
+        - { $ref: "#/components/parameters/Brand" }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 200, default: 50 } }
+        - { name: before, in: query, schema: { type: string, format: date-time } }
+        - { $ref: "#/components/parameters/Cursor" }
+        - { $ref: "#/components/parameters/Fields" }
+      responses:
+        "200":
+          description: The conversions.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [model, data, next_before]
+                properties:
+                  model: { type: string }
+                  data: { type: array, items: { $ref: "#/components/schemas/AttributionConversion" } }
+                  next_before: { type: [string, "null"], format: date-time }
+                  next_cursor: { $ref: "#/components/schemas/NextCursor" }
+        "400": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        default: { $ref: "#/components/responses/Error" }
   /v1/workspaces/{ws}/analytics:
     parameters:
       - { $ref: "#/components/parameters/Workspace" }
@@ -20504,6 +20639,18 @@ webhooks:
             schema: { $ref: "#/components/schemas/WebhookEvent" }
       responses:
         "200": { description: Any 2xx answer means received; anything else is retried. }
+  record.bulk_updated:
+    post:
+      operationId: webhook_record_bulk_updated
+      summary: "Many people were updated at once from their leads (an import, an enrichment run). data has type, via and count."
+      tags: [webhooks]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/WebhookEvent" }
+      responses:
+        "200": { description: Any 2xx answer means received; anything else is retried. }
   record.updated:
     post:
       operationId: webhook_record_updated
@@ -21035,6 +21182,21 @@ components:
       in: cookie
       name: outflare_session
   parameters:
+    AttributionFrom:
+      name: from
+      in: query
+      description: "First day, such as 2026-09-27. Default: 27 days before to."
+      schema: { type: string, format: date }
+    AttributionTo:
+      name: to
+      in: query
+      description: "Last day, such as 2026-10-24. Default: today."
+      schema: { type: string, format: date }
+    AttributionModel:
+      name: model
+      in: query
+      description: "Which model's credits to read. Default: the workspace's (GET .../attribution/settings)."
+      schema: { $ref: "#/components/schemas/AttributionModel" }
     Brand:
       name: brand
       in: query
@@ -21400,7 +21562,7 @@ components:
       required: [id, type, created_at, workspace_id, actor, target, request_id, data]
       properties:
         id: { type: string, description: "Unique per event, and the webhook-id header. Use it to ignore repeats.", example: evt_48213 }
-        type: { type: string, enum: [lead.replied, lead.unsubscribed, inbox.replied, inbox.updated, inbox.classified, lead.bounced, mailbox.auto_paused, lead.created, lead.updated, lead.deleted, leads.imported, suppressions.added, suppression.removed, lead_list.created, lead_list.leads_added, lead_list.run_started, lead_list.build_done, lead_list.build_failed, lead_list.refresh_done, lead_list.refresh_failed, lead_list.enrich_done, lead_list.enrich_failed, import.done, import.failed, sequence.created, sequence.updated, sequence.activated, sequence.paused, sequence.archived, sequence.deleted, sequence.steps_updated, sequence.leads_enrolled, enrollment.stopped, mailbox.imported, mailbox.updated, mailbox.paused, mailbox.resumed, mailbox.stage_changed, mailbox.deleted, domain.added, domain.paused, domain.resumed, domain.removed, email.queued, email.sent, email.delivered, email.bounced, email.complained, email.failed, email.suppressed, email.cancelled, email.unsubscribed, email.opened, email.clicked, email.preferences_changed, email_domain.verified, email_domain.verification_failed, email_provider.events_failed, email_template.published, meeting.created, meeting.updated, meeting.deleted, deal.created, deal.updated, deal.deleted, spend.recorded, integration.connected, integration.updated, integration.disconnected, connect_request.created, deploy.detected, deploy.failed, digest.ready, ai_budget.warned, ai_budget.reached, connection_limit.warned, connection_limit.reached, experiment.started, experiment.concluded, project.created, project.updated, project.deleted, mission.created, mission.updated, mission.submitted, mission.approved, mission.paused, mission.resumed, mission.stopped, mission.completed, mission.action_held, mission.action_approved, mission.action_rejected, infra.plan_created, infra.plan_approved, infra.ordered, infra.order_failed, infra.domains_bought, infra.mailbox_joined, infra.plan_warming, infra.plan_ready, infra.plan_cancelled, fix.found, fix.updated, fix.started, fix.verify_requested, fix.confirmed, fix.reopened, record.created, record.bulk_created, record.updated, record.merged, identity.verified, identity.closed, relationship.added, relationship.ended, consent.granted, consent.withdrawn, consent.bulk_withdrawn, brand.created, brand.updated, email_broadcast.created, email_broadcast.started, email_broadcast.sent, email_broadcast.failed, email_broadcast.cancelled, journey.created, journey.updated, journey_run.entered, journey_run.exited, brand_setup.installed, brand_setup.install_failed, install.issue_opened, install.issue_resolved, seo_site.created, seo_site.verified, seo_site.unverified, seo_site.deleted, crawl.started, crawl.stopped, crawl.done, social_action.drafted, social_action.approved, social_action.rejected, social_action.done, social_action.failed, review.posted, review.replied, review.reply_drafted, review_momentum.changed, alert.raised, visitor.became_hot, workspace.updated, webhook.test] }
+        type: { type: string, enum: [lead.replied, lead.unsubscribed, inbox.replied, inbox.updated, inbox.classified, lead.bounced, mailbox.auto_paused, lead.created, lead.updated, lead.deleted, leads.imported, suppressions.added, suppression.removed, lead_list.created, lead_list.leads_added, lead_list.run_started, lead_list.build_done, lead_list.build_failed, lead_list.refresh_done, lead_list.refresh_failed, lead_list.enrich_done, lead_list.enrich_failed, import.done, import.failed, sequence.created, sequence.updated, sequence.activated, sequence.paused, sequence.archived, sequence.deleted, sequence.steps_updated, sequence.leads_enrolled, enrollment.stopped, mailbox.imported, mailbox.updated, mailbox.paused, mailbox.resumed, mailbox.stage_changed, mailbox.deleted, domain.added, domain.paused, domain.resumed, domain.removed, email.queued, email.sent, email.delivered, email.bounced, email.complained, email.failed, email.suppressed, email.cancelled, email.unsubscribed, email.opened, email.clicked, email.preferences_changed, email_domain.verified, email_domain.verification_failed, email_provider.events_failed, email_template.published, meeting.created, meeting.updated, meeting.deleted, deal.created, deal.updated, deal.deleted, spend.recorded, integration.connected, integration.updated, integration.disconnected, connect_request.created, deploy.detected, deploy.failed, digest.ready, ai_budget.warned, ai_budget.reached, connection_limit.warned, connection_limit.reached, experiment.started, experiment.concluded, project.created, project.updated, project.deleted, mission.created, mission.updated, mission.submitted, mission.approved, mission.paused, mission.resumed, mission.stopped, mission.completed, mission.action_held, mission.action_approved, mission.action_rejected, infra.plan_created, infra.plan_approved, infra.ordered, infra.order_failed, infra.domains_bought, infra.mailbox_joined, infra.plan_warming, infra.plan_ready, infra.plan_cancelled, fix.found, fix.updated, fix.started, fix.verify_requested, fix.confirmed, fix.reopened, record.created, record.bulk_created, record.bulk_updated, record.updated, record.merged, identity.verified, identity.closed, relationship.added, relationship.ended, consent.granted, consent.withdrawn, consent.bulk_withdrawn, brand.created, brand.updated, email_broadcast.created, email_broadcast.started, email_broadcast.sent, email_broadcast.failed, email_broadcast.cancelled, journey.created, journey.updated, journey_run.entered, journey_run.exited, brand_setup.installed, brand_setup.install_failed, install.issue_opened, install.issue_resolved, seo_site.created, seo_site.verified, seo_site.unverified, seo_site.deleted, crawl.started, crawl.stopped, crawl.done, social_action.drafted, social_action.approved, social_action.rejected, social_action.done, social_action.failed, review.posted, review.replied, review.reply_drafted, review_momentum.changed, alert.raised, visitor.became_hot, workspace.updated, webhook.test] }
         created_at: { type: string, format: date-time }
         workspace_id: { type: string, format: uuid }
         actor: { $ref: "#/components/schemas/WebhookRef" }
@@ -22052,6 +22214,95 @@ components:
         label: { type: string }
         medium: { type: string, description: The utm_medium every link in the channel gets. }
         sources: { type: array, items: { type: string }, description: "The usual utm_source values, most common first. Any other source is allowed." }
+    AttributionModel:
+      type: string
+      description: "last_non_direct: the last visit that wasn't direct gets it all. first_touch: the first visit. linear: shared evenly. position: 40% first, 40% last, 20% shared by the rest. time_decay: shared, halving for every week before the conversion. Direct visits get credit only when there is nothing else."
+      enum: [last_non_direct, first_touch, linear, position, time_decay]
+    AttributionSettings:
+      type: object
+      required: [model, lookback_days, conversion_events, models, backfilled_at, updated_at]
+      properties:
+        model: { $ref: "#/components/schemas/AttributionModel" }
+        lookback_days: { type: integer, minimum: 1, maximum: 365, description: "How many days before a conversion a visit can get credit." }
+        conversion_events: { type: array, items: { type: string }, description: "Customer events that count as conversions. With payment.succeeded, refunds are taken off its revenue." }
+        models: { type: array, items: { $ref: "#/components/schemas/AttributionModel" } }
+        backfilled_at: { type: [string, "null"], format: date-time, description: "When every past conversion was last credited; null while that is running." }
+        updated_at: { type: string, format: date-time }
+    AttributionSettingsInput:
+      type: object
+      properties:
+        model: { $ref: "#/components/schemas/AttributionModel" }
+        lookback_days: { type: integer, minimum: 1, maximum: 365 }
+        conversion_events: { type: array, minItems: 1, maxItems: 20, items: { type: string } }
+    Money:
+      type: object
+      required: [currency, amount_cents]
+      properties:
+        currency: { type: string }
+        amount_cents: { type: integer, format: int64 }
+    AttributionChannelRow:
+      type: object
+      required: [channel, label, visits, conversions, by_event, revenue, cost]
+      properties:
+        channel: { type: string }
+        label: { type: string }
+        visits: { type: integer }
+        conversions: { type: number, description: "Credited conversions; refunds are not counted." }
+        by_event: { type: object, additionalProperties: { type: number } }
+        revenue: { type: array, items: { $ref: "#/components/schemas/Money" } }
+        cost: { type: array, items: { $ref: "#/components/schemas/Money" } }
+    AttributionChannels:
+      type: object
+      required: [model, from, to, lookback_days, conversion_events, pending_visits, data, unallocated_cost]
+      properties:
+        model: { $ref: "#/components/schemas/AttributionModel" }
+        from: { type: string, format: date }
+        to: { type: string, format: date }
+        lookback_days: { type: integer }
+        conversion_events: { type: array, items: { type: string } }
+        pending_visits: { type: integer }
+        data: { type: array, items: { $ref: "#/components/schemas/AttributionChannelRow" } }
+        unallocated_cost: { type: array, items: { $ref: "#/components/schemas/Money" } }
+    AttributionCampaignRow:
+      type: object
+      required: [channel, label, source, campaign, tracking_campaign_id, campaign_name, visits, conversions, by_event, revenue]
+      properties:
+        channel: { type: string }
+        label: { type: string }
+        source: { type: string }
+        campaign: { type: string }
+        tracking_campaign_id: { type: [string, "null"], format: uuid }
+        campaign_name: { type: string }
+        visits: { type: integer }
+        conversions: { type: number }
+        by_event: { type: object, additionalProperties: { type: number } }
+        revenue: { type: array, items: { $ref: "#/components/schemas/Money" } }
+    AttributionCredit:
+      type: object
+      required: [channel, source, campaign, tracking_campaign_id, session_id, touch_at, tag_method, weight]
+      properties:
+        channel: { type: string }
+        source: { type: string }
+        campaign: { type: string }
+        tracking_campaign_id: { type: [string, "null"], format: uuid }
+        session_id: { type: [string, "null"], format: uuid, description: "The website visit; null when no visit came before the conversion." }
+        touch_at: { type: [string, "null"], format: date-time }
+        tag_method: { type: string, description: "What decided the channel: ofc, ref, click_id, utm, referrer or none." }
+        weight: { type: number }
+    AttributionConversion:
+      type: object
+      required: [event_id, name, record_id, brand_id, occurred_at, value_cents, currency, touches, matched_by, credits]
+      properties:
+        event_id: { type: string, format: uuid }
+        name: { type: string }
+        record_id: { type: [string, "null"], format: uuid }
+        brand_id: { type: [string, "null"], format: uuid }
+        occurred_at: { type: string, format: date-time }
+        value_cents: { type: [integer, "null"], format: int64, description: "Negative for a refund." }
+        currency: { type: string }
+        touches: { type: integer, description: "Visits in the lookback before it." }
+        matched_by: { type: string, enum: [record, anonymous, none], description: "How visits were tied to it: the person's record, the browser's anonymous id, or nothing." }
+        credits: { type: array, items: { $ref: "#/components/schemas/AttributionCredit" } }
     TrackingCampaign:
       type: object
       required: [id, name, slug, code, channel, source, medium, brand_id, object_kind, object_id, landing_url, landing_link, status, links, created_at, updated_at]

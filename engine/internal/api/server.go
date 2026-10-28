@@ -485,6 +485,7 @@ func (s *Server) buildHandler() http.Handler {
 	s.routesAgencies(mux)
 	s.routesTracking(mux)
 	s.routesCampaignLinks(mux)
+	s.routesAttribution(mux)
 	s.routesCustomerProfiles(mux)
 	s.routesVerification(mux)
 	s.routesClassify(mux)
