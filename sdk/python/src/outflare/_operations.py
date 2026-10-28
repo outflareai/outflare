@@ -248,6 +248,35 @@ class Operations(_Mixin):
             idempotency_key=idempotency_key,
         )
 
+    def add_coverage(
+        self,
+        *,
+        ws: str | None = None,
+        brand_id: str,
+        title: str | None = None,
+        url: str,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Add coverage.
+
+        Scope: seo.manage. Keeps an article the news watch missed as a
+        brand's coverage, on its outlet's company record (a prospect
+        company when the workspace has none), and records mention.found.
+        An article already kept for the brand comes back as it is.
+
+        Needs: the seo.manage scope.
+        POST /v1/workspaces/{ws}/coverage
+        """
+        return self._call(
+            "POST",
+            "/v1/workspaces/{ws}/coverage",
+            path={"ws": ws},
+            body={"brand_id": brand_id, "title": title, "url": url},
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
     def add_email_provider_domain(
         self,
         *,
@@ -1580,6 +1609,76 @@ class Operations(_Mixin):
             idempotency_key=idempotency_key,
         )
 
+    def check_link_prospect(
+        self,
+        prospect: str,
+        *,
+        ws: str | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Check a prospect's page.
+
+        Scope: seo.manage. Queues OutflareBot's check of the page, at most once
+        an hour, obeying robots.txt and crawl opt-outs. The check finds:
+        - whether the page is up, gone or redirected elsewhere;
+        - whether it links to the site already (`links_to_us`, with the links);
+        - which of its first 50 outbound links are broken, with the Internet
+          Archive's closest snapshot of up to 10 of them;
+        - with the workspace's own AI: what kind of page it is, its topic, its
+          author, how well it fits the site (`fit`, which adds up to 15 points
+          to the score either way) and which of the site's pages to offer;
+          without AI, the page sharing the most words is suggested;
+        - who to contact: addresses at the website's domain on the page and
+          on up to two of its contact, about or write-for-us pages, and the
+          author's likely address from the free email finder. Contacts become
+          person records on the website's company.
+
+        A page to pitch that links already, or is gone, is excluded
+        (`links_to_us`, `page_gone`). An empty `target_url` takes the
+        suggested page. The result is the prospect's `check` and `contacts`,
+        and link_prospect.checked. Free apart from the AI read.
+
+        Needs: the seo.manage scope.
+        POST /v1/workspaces/{ws}/link-prospects/{prospect}/check
+        """
+        return self._call(
+            "POST",
+            "/v1/workspaces/{ws}/link-prospects/{prospect}/check",
+            path={"prospect": prospect, "ws": ws},
+            idempotency_key=idempotency_key,
+        )
+
+    def check_link_prospects(
+        self,
+        *,
+        ws: str | None = None,
+        again: bool | None = None,
+        limit: int | None = None,
+        site_id: str,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Check prospects' pages.
+
+        Scope: seo.manage. Queues OutflareBot's check of up to `limit`
+        (default and most 100) of a site's prospects to pitch, best first:
+        those never checked, or all of them with `again`. Each page is checked
+        at most once an hour. See POST .../link-prospects/{id}/check for what
+        a check does. The page reader uses the workspace's own AI when one is
+        connected (tool link_page_reading on the AI usage page).
+
+        Needs: the seo.manage scope.
+        POST /v1/workspaces/{ws}/link-prospects/check
+        """
+        return self._call(
+            "POST",
+            "/v1/workspaces/{ws}/link-prospects/check",
+            path={"ws": ws},
+            body={"again": again, "limit": limit, "site_id": site_id},
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
     def check_rankings(
         self,
         site: str,
@@ -2137,9 +2236,11 @@ class Operations(_Mixin):
         *,
         ws: str | None = None,
         business_model: str | None = None,
+        colors: dict[str, Any] | None = None,
         domains: list[str] | None = None,
         handle: str | None = None,
         links: list[dict[str, Any]] | None = None,
+        logo_url: str | None = None,
         name: str | None = None,
         platforms: list[Literal["web", "ios", "android", "tv", "desktop", "console", "extension", "api"]] | None = None,
         revenue_models: list[str] | None = None,
@@ -2161,9 +2262,11 @@ class Operations(_Mixin):
             path={"ws": ws},
             body={
                 "business_model": business_model,
+                "colors": colors,
                 "domains": domains,
                 "handle": handle,
                 "links": links,
+                "logo_url": logo_url,
                 "name": name,
                 "platforms": platforms,
                 "revenue_models": revenue_models,
@@ -3125,6 +3228,53 @@ class Operations(_Mixin):
                 "plan": plan,
                 "project_id": project_id,
                 "token_id": token_id,
+            },
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
+    def create_news_search(
+        self,
+        *,
+        ws: str | None = None,
+        brand_id: str | None = None,
+        check_every_hours: int | None = None,
+        locale: str | None = None,
+        name: str | None = None,
+        purpose: Literal["topic", "coverage"] | None = None,
+        query: str,
+        status: Literal["active", "paused"] | None = None,
+        time_range: Literal["day", "week", "month"] | None = None,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Save a news search.
+
+        Scope: seo.manage. Saves a search the news watch runs on its
+        schedule through the workspace's own web search connection
+        (Geonode), and queues its first run. Each run is one search on
+        that connection, booked in the spend ledger within its usage
+        limits. A `coverage` search needs `brand_id`; the articles it finds
+        that name every word of the query, and aren't on the brand's own
+        website, become the brand's coverage. A workspace keeps at most
+        200 searches (409 `conflict`).
+
+        Needs: the seo.manage scope.
+        POST /v1/workspaces/{ws}/news-searches
+        """
+        return self._call(
+            "POST",
+            "/v1/workspaces/{ws}/news-searches",
+            path={"ws": ws},
+            body={
+                "brand_id": brand_id,
+                "check_every_hours": check_every_hours,
+                "locale": locale,
+                "name": name,
+                "purpose": purpose,
+                "query": query,
+                "status": status,
+                "time_range": time_range,
             },
             extra_body=extra_body,
             idempotency_key=idempotency_key,
@@ -4463,6 +4613,27 @@ class Operations(_Mixin):
             idempotency_key=idempotency_key,
         )
 
+    def delete_news_search(
+        self,
+        search: str,
+        *,
+        ws: str | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Delete a news search.
+
+        Scope: seo.manage. Articles only it found go too; coverage stays.
+
+        Needs: the seo.manage scope.
+        DELETE /v1/workspaces/{ws}/news-searches/{search}
+        """
+        return self._call(
+            "DELETE",
+            "/v1/workspaces/{ws}/news-searches/{search}",
+            path={"search": search, "ws": ws},
+            idempotency_key=idempotency_key,
+        )
+
     def delete_o_auth_connection(
         self,
         id: str,
@@ -5371,6 +5542,25 @@ class Operations(_Mixin):
             path={"test": test, "ws": ws},
         )
 
+    def get_ab_test_ai_run(
+        self,
+        run: str,
+        *,
+        ws: str | None = None,
+    ) -> Any:
+        """Get an A/B test AI run.
+
+        Scope: analytics.read. Poll until status is ready (output holds the answer) or failed (error says why, in words).
+
+        Needs: the analytics.read scope.
+        GET /v1/workspaces/{ws}/ab-test-ai-runs/{run}
+        """
+        return self._call(
+            "GET",
+            "/v1/workspaces/{ws}/ab-test-ai-runs/{run}",
+            path={"run": run, "ws": ws},
+        )
+
     def get_ab_test_results(
         self,
         test: str,
@@ -6187,6 +6377,28 @@ class Operations(_Mixin):
             "/v1/connectors/{id}/logo.svg",
             path={"id": id},
             query={"theme": theme, "v": v},
+        )
+
+    def get_consent_banner(
+        self,
+        id: str,
+        *,
+        ws: str | None = None,
+    ) -> Any:
+        """Get a site's consent banner.
+
+        Scope: customers.read. The cookie consent banner the site key's script (/site.js) shows: the rule for each region,
+        the laws and frameworks it follows, the categories it asks about, how it looks and what it says. Until it is
+        first saved (saved false), config is the defaults and the site shows no banner. look is the logo and colours the
+        brand preset uses when the banner sets none: the key's brand's, else the company's.
+
+        Needs: the customers.read scope.
+        GET /v1/workspaces/{ws}/site-keys/{id}/consent-banner
+        """
+        return self._call(
+            "GET",
+            "/v1/workspaces/{ws}/site-keys/{id}/consent-banner",
+            path={"id": id, "ws": ws},
         )
 
     def get_contact_rules(
@@ -7424,6 +7636,25 @@ class Operations(_Mixin):
             path={"id": id, "action": action, "ws": ws},
         )
 
+    def get_news_search(
+        self,
+        search: str,
+        *,
+        ws: str | None = None,
+    ) -> Any:
+        """Get a news search.
+
+        Scope: seo.read.
+
+        Needs: the seo.read scope.
+        GET /v1/workspaces/{ws}/news-searches/{search}
+        """
+        return self._call(
+            "GET",
+            "/v1/workspaces/{ws}/news-searches/{search}",
+            path={"search": search, "ws": ws},
+        )
+
     def get_onboarding(
         self,
         *,
@@ -8138,6 +8369,29 @@ class Operations(_Mixin):
             "/v1/workspaces/{ws}/seo-sites/{site}/cannibalisation",
             path={"site": site, "ws": ws},
             query={"limit": limit},
+        )
+
+    def get_site_consent_banner(
+        self,
+        *,
+        key: str,
+        lang: str | None = None,
+    ) -> Any:
+        """Get a site's consent banner for a visitor.
+
+        Public: the site key (ofk_) is the authority. What the tracking script asks on a visitor's first page and again
+        every few minutes: the key's banner settings, with its words in the visitor's language (lang; the workspace's
+        own texts, else Outflare's in that language, else English) and the look filled in. enabled is false when the
+        workspace hasn't turned the banner on. country is the visitor's country when the site's own proxy, holding the
+        key's proxy secret, passes it in X-Outflare-Country; otherwise empty and the script goes by the browser's time
+        zone. 6,000 requests a minute per key. Nothing is stored.
+
+        GET /v1/site/consent
+        """
+        return self._call(
+            "GET",
+            "/v1/site/consent",
+            query={"key": key, "lang": lang},
         )
 
     def get_site_conversions(
@@ -9094,6 +9348,28 @@ class Operations(_Mixin):
             "/v1/workspaces/{ws}/records/duplicates/{candidate}/link",
             path={"candidate": candidate, "ws": ws},
             idempotency_key=idempotency_key,
+        )
+
+    def list_ab_test_ai_runs(
+        self,
+        *,
+        ws: str | None = None,
+        brand: str | None = None,
+        kind: Literal["suggest", "versions", "summary"] | None = None,
+        test: str | None = None,
+    ) -> Any:
+        """List A/B test AI runs.
+
+        Scope: analytics.read. The latest 50 AI runs, newest first. A brand's runs include those for no brand.
+
+        Needs: the analytics.read scope.
+        GET /v1/workspaces/{ws}/ab-test-ai-runs
+        """
+        return self._call(
+            "GET",
+            "/v1/workspaces/{ws}/ab-test-ai-runs",
+            path={"ws": ws},
+            query={"brand": brand, "kind": kind, "test": test},
         )
 
     def list_ab_tests(
@@ -10085,6 +10361,42 @@ class Operations(_Mixin):
             "/v1/workspaces/{ws}/connectors",
             path={"ws": ws},
             query={"category": category},
+        )
+
+    def list_coverage(
+        self,
+        *,
+        ws: str | None = None,
+        brand: str | None = None,
+        status: str | None = None,
+        record_id: str | None = None,
+        limit: int | None = None,
+        offset: int | None = None,
+        fields: list[str] | None = None,
+        cursor: str | None = None,
+    ) -> Any:
+        """List coverage.
+
+        Scope: seo.read. Articles that mention a brand, newest first, each
+        on its outlet's company record (`record_id`). Leaves out
+        `dismissed` items unless `status` asks for them.
+
+        Needs: the seo.read scope.
+        GET /v1/workspaces/{ws}/coverage
+        """
+        return self._call(
+            "GET",
+            "/v1/workspaces/{ws}/coverage",
+            path={"ws": ws},
+            query={
+                "brand": brand,
+                "status": status,
+                "record_id": record_id,
+                "limit": limit,
+                "offset": offset,
+                "fields": fields,
+                "cursor": cursor,
+            },
         )
 
     def list_crawl_issues(
@@ -11892,6 +12204,67 @@ class Operations(_Mixin):
             "/v1/workspaces/{ws}/missions",
             path={"ws": ws},
             query={"brand": brand, "status": status, "project_id": project_id},
+        )
+
+    def list_news_articles(
+        self,
+        *,
+        ws: str | None = None,
+        brand: str | None = None,
+        search_id: str | None = None,
+        since: str | None = None,
+        limit: int | None = None,
+        offset: int | None = None,
+        fields: list[str] | None = None,
+        cursor: str | None = None,
+    ) -> Any:
+        """List news articles.
+
+        Scope: seo.read. Articles the news searches found, newest first,
+        each once however many searches found it. `brand` keeps those
+        found by the brand's searches. Reads only what is stored, so it
+        costs nothing.
+
+        Needs: the seo.read scope.
+        GET /v1/workspaces/{ws}/news-articles
+        """
+        return self._call(
+            "GET",
+            "/v1/workspaces/{ws}/news-articles",
+            path={"ws": ws},
+            query={
+                "brand": brand,
+                "search_id": search_id,
+                "since": since,
+                "limit": limit,
+                "offset": offset,
+                "fields": fields,
+                "cursor": cursor,
+            },
+        )
+
+    def list_news_searches(
+        self,
+        *,
+        ws: str | None = None,
+        brand: str | None = None,
+        purpose: Literal["topic", "coverage"] | None = None,
+    ) -> Any:
+        """List news searches.
+
+        Scope: seo.read. The news watch's saved searches, newest first:
+        `topic` searches follow a subject and the journalists who write
+        about it, `coverage` searches look for a brand and keep what they
+        find as its coverage.
+
+        Needs: the seo.read scope.
+        GET /v1/workspaces/{ws}/news-searches
+        """
+        return self._call(
+            "GET",
+            "/v1/workspaces/{ws}/news-searches",
+            path={"ws": ws},
+            query={"brand": brand, "purpose": purpose},
         )
 
     def list_o_auth_connections(
@@ -13834,6 +14207,36 @@ class Operations(_Mixin):
             idempotency_key=idempotency_key,
         )
 
+    def plan_ab_test(
+        self,
+        *,
+        ws: str | None = None,
+        flag: str,
+        goal: dict[str, Any],
+        min_effect: float | None = None,
+        page: str | None = None,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Plan an A/B test.
+
+        Scope: analytics.read. How long a test of a flag is likely to take, before it starts: from the last 28 days of
+        page views (on page, when given) and the goal's rate among those visitors, the flag's rollout and split, and
+        the same sequential test the results use. Each row is the visitors per version, and weeks, until the result is
+        typically safe to stop if the change truly moves the goal by that much. Nothing is stored.
+
+        Needs: the analytics.read scope.
+        POST /v1/workspaces/{ws}/ab-tests/plan
+        """
+        return self._call(
+            "POST",
+            "/v1/workspaces/{ws}/ab-tests/plan",
+            path={"ws": ws},
+            body={"flag": flag, "goal": goal, "min_effect": min_effect, "page": page},
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
     def plan_mission(
         self,
         *,
@@ -14328,6 +14731,55 @@ class Operations(_Mixin):
             idempotency_key=idempotency_key,
         )
 
+    def read_review_page(
+        self,
+        id: str,
+        *,
+        ws: str | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Read a review page now.
+
+        Scope: social.manage. Reads one active review page now through the
+        workspace's own page reader (Geonode, on its own key), such as one
+        whose last read failed, instead of waiting for its next try. A
+        page that shows no reviews is read again in a browser. Answers
+        connector_needed (409) with no page reader, and conflict (409) for
+        a paused or removed page.
+
+        Needs: the social.manage scope.
+        POST /v1/workspaces/{ws}/reviews/pages/{id}/read
+        """
+        return self._call(
+            "POST",
+            "/v1/workspaces/{ws}/reviews/pages/{id}/read",
+            path={"id": id, "ws": ws},
+            idempotency_key=idempotency_key,
+        )
+
+    def reask_consent_banner(
+        self,
+        id: str,
+        *,
+        ws: str | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Ask a site's visitors again.
+
+        Scope: customers.manage. Raises consent_version, such as after the site starts using a new kind of cookie: visitors
+        whose choice was made on an older version see the banner again where their region's rule is opt_in. Records
+        consent_banner.reasked.
+
+        Needs: the customers.manage scope.
+        POST /v1/workspaces/{ws}/site-keys/{id}/consent-banner/reask
+        """
+        return self._call(
+            "POST",
+            "/v1/workspaces/{ws}/site-keys/{id}/consent-banner/reask",
+            path={"id": id, "ws": ws},
+            idempotency_key=idempotency_key,
+        )
+
     def receive_connection_hook(
         self,
         token: str,
@@ -14377,12 +14829,44 @@ class Operations(_Mixin):
             idempotency_key=idempotency_key,
         )
 
+    def reclaim_link_prospects(
+        self,
+        *,
+        ws: str | None = None,
+        days: int | None = None,
+        min_rating: float | None = None,
+        site_id: str,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Add lost links as prospects to win back.
+
+        Scope: seo.manage. Adds the site's links lost in the last `days`
+        (default 90) as `reclaim` prospects, strongest first, at most 500:
+        the page that dropped the link, our page it linked to as the page to
+        offer, and the backlink, anchor and the provider's lost reason as
+        evidence. Links marked to disavow or with a toxic spam score are left
+        out, and pages already listed are kept as they are. Free: the links
+        are already stored.
+
+        Needs: the seo.manage scope.
+        POST /v1/workspaces/{ws}/link-prospects/reclaim
+        """
+        return self._call(
+            "POST",
+            "/v1/workspaces/{ws}/link-prospects/reclaim",
+            path={"ws": ws},
+            body={"days": days, "min_rating": min_rating, "site_id": site_id},
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
     def record_consent(
         self,
         record: str,
         *,
         ws: str | None = None,
-        channel: Literal["email", "sms", "push", "whatsapp", "in_app", "ads"],
+        channel: Literal["email", "sms", "push", "whatsapp", "in_app", "ads", "web"],
         evidence: dict[str, Any] | None = None,
         occurred_at: str | None = None,
         purpose: str | None = None,
@@ -15517,6 +16001,30 @@ class Operations(_Mixin):
             idempotency_key=idempotency_key,
         )
 
+    def run_news_search(
+        self,
+        search: str,
+        *,
+        ws: str | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Run a news search now.
+
+        Scope: seo.manage. Queues a run now, whatever its schedule (one a
+        minute at most). It costs one search on the workspace's web search
+        connection; 409 `connector_needed` when there is none. The run's
+        outcome shows on the search (`last_checked_at`, `last_error_code`).
+
+        Needs: the seo.manage scope.
+        POST /v1/workspaces/{ws}/news-searches/{search}/run
+        """
+        return self._call(
+            "POST",
+            "/v1/workspaces/{ws}/news-searches/{search}/run",
+            path={"search": search, "ws": ws},
+            idempotency_key=idempotency_key,
+        )
+
     def run_outcome_sync(
         self,
         id: str,
@@ -15745,6 +16253,59 @@ class Operations(_Mixin):
             "/v1/workspaces/{ws}/test/send-now",
             path={"ws": ws},
             body={"sequence_id": sequence_id},
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
+    def send_site_consent(
+        self,
+        *,
+        action: Literal["accept_all", "reject_all", "custom", "opt_out", "gpc", "api"],
+        analytics: bool | None = None,
+        anonymousId: str,
+        consent_version: int | None = None,
+        gpc: bool | None = None,
+        key: str,
+        lang: str | None = None,
+        marketing: bool | None = None,
+        path: str | None = None,
+        preferences: bool | None = None,
+        region: Literal["eea", "us", "other"] | None = None,
+        version: int | None = None,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Keep a visitor's consent choice.
+
+        Public: the site key (ofk_) in the body is the authority. What the script sends when a visitor makes or changes
+        a choice on the banner, or the site's own code calls outflare.consent. Each category the banner asks about
+        becomes a consent (channel web, purpose analytics, marketing or preferences, source consent_banner), and
+        marketing also sets Google Consent Mode's ad purposes (channel ads: ad_storage, ad_user_data,
+        ad_personalization), which ad send-back reads. Each is kept on the visitor's record when they are known, and
+        on their anonymousId until identify joins it to their record. evidence says what they were shown: the banner's
+        version and consent version, the region, the action, Global Privacy Control, the language and page. The answer
+        sets the of_consent cookie (and of_aid when analytics is allowed) on the site's domain, which browsers keep
+        when the request came through the site's own domain. Send the JSON as text/plain to skip the CORS preflight.
+
+        POST /v1/site/consent
+        """
+        return self._call(
+            "POST",
+            "/v1/site/consent",
+            body={
+                "action": action,
+                "analytics": analytics,
+                "anonymousId": anonymousId,
+                "consent_version": consent_version,
+                "gpc": gpc,
+                "key": key,
+                "lang": lang,
+                "marketing": marketing,
+                "path": path,
+                "preferences": preferences,
+                "region": region,
+                "version": version,
+            },
             extra_body=extra_body,
             idempotency_key=idempotency_key,
         )
@@ -16844,6 +17405,60 @@ class Operations(_Mixin):
             idempotency_key=idempotency_key,
         )
 
+    def suggest_ab_tests(
+        self,
+        *,
+        ws: str | None = None,
+        brand_id: str | None = None,
+        count: int | None = None,
+        goal: dict[str, Any] | None = None,
+        notes: str | None = None,
+        page: str | None = None,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Suggest A/B tests with AI.
+
+        Scope: analytics.manage. The workspace's own AI model proposes tests from the site's busiest pages and the
+        goals visitors reach over the last 28 days, the brand's context and the tests already run. Each suggestion
+        comes with the engine's own plan for its page and goal (weeks, the lift findable in 8 weeks, a warning).
+        Nothing is created: a person makes the flag and the test. 409 connector_needed without an AI model.
+
+        Needs: the analytics.manage scope.
+        POST /v1/workspaces/{ws}/ab-tests/suggestions
+        """
+        return self._call(
+            "POST",
+            "/v1/workspaces/{ws}/ab-tests/suggestions",
+            path={"ws": ws},
+            body={"brand_id": brand_id, "count": count, "goal": goal, "notes": notes, "page": page},
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
+    def summarize_ab_test(
+        self,
+        test: str,
+        *,
+        ws: str | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Summarise a test with AI.
+
+        Scope: analytics.manage. The workspace's own AI model puts a running or finished test's results into plain
+        English with next steps. The recommendation (ship, keep_control, fix_split, extend, stop, wait) and its reason
+        come from the engine, not the AI. 409 for a draft, or connector_needed without an AI model.
+
+        Needs: the analytics.manage scope.
+        POST /v1/workspaces/{ws}/ab-tests/{test}/summary
+        """
+        return self._call(
+            "POST",
+            "/v1/workspaces/{ws}/ab-tests/{test}/summary",
+            path={"test": test, "ws": ws},
+            idempotency_key=idempotency_key,
+        )
+
     def supplier_webhook(
         self,
         id: str,
@@ -17014,6 +17629,30 @@ class Operations(_Mixin):
             idempotency_key=idempotency_key,
         )
 
+    def sync_social_account(
+        self,
+        id: str,
+        *,
+        ws: str | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Read a social account now.
+
+        Scope: social.manage. Reads one active account now, such as one
+        whose last read failed, instead of waiting for its next try (a
+        failed read is tried again the same day on its own). Answers
+        conflict (409) for a paused or disconnected account.
+
+        Needs: the social.manage scope.
+        POST /v1/workspaces/{ws}/social/accounts/{id}/sync
+        """
+        return self._call(
+            "POST",
+            "/v1/workspaces/{ws}/social/accounts/{id}/sync",
+            path={"id": id, "ws": ws},
+            idempotency_key=idempotency_key,
+        )
+
     def sync_social_accounts(
         self,
         *,
@@ -17024,8 +17663,8 @@ class Operations(_Mixin):
 
         Scope: social.manage. Queues a read of every X and LinkedIn
         connection now: it finds new pages and profiles and reads the
-        accounts that are due. Answers connector_needed (409) when none is
-        connected.
+        accounts that are due, and those whose last read failed. Answers
+        connector_needed (409) when none is connected.
 
         Needs: the social.manage scope.
         POST /v1/workspaces/{ws}/social/accounts/sync
@@ -17824,9 +18463,11 @@ class Operations(_Mixin):
         *,
         ws: str | None = None,
         business_model: str | None = None,
+        colors: dict[str, Any] | None = None,
         domains: list[str] | None = None,
         handle: str | None = None,
         links: list[dict[str, Any]] | None = None,
+        logo_url: str | None = None,
         name: str | None = None,
         platforms: list[Literal["web", "ios", "android", "tv", "desktop", "console", "extension", "api"]] | None = None,
         revenue_models: list[str] | None = None,
@@ -17848,9 +18489,11 @@ class Operations(_Mixin):
             path={"brand": brand, "ws": ws},
             body={
                 "business_model": business_model,
+                "colors": colors,
                 "domains": domains,
                 "handle": handle,
                 "links": links,
+                "logo_url": logo_url,
                 "name": name,
                 "platforms": platforms,
                 "revenue_models": revenue_models,
@@ -17995,6 +18638,66 @@ class Operations(_Mixin):
             idempotency_key=idempotency_key,
         )
 
+    def update_consent_banner(
+        self,
+        id: str,
+        *,
+        ws: str | None = None,
+        categories: dict[str, Any] | None = None,
+        colors: dict[str, Any] | None = None,
+        custom_css: str | None = None,
+        custom_html: str | None = None,
+        enabled: bool | None = None,
+        frameworks: dict[str, Any] | None = None,
+        layout: Literal["bar", "box", "modal"] | None = None,
+        logo_url: str | None = None,
+        policy_url: str | None = None,
+        position: Literal["bottom", "top", "bottom_left", "bottom_right", "center"] | None = None,
+        reask_after_days: int | None = None,
+        regions: dict[str, Any] | None = None,
+        reopen_button: bool | None = None,
+        show_logo: bool | None = None,
+        texts: dict[str, Any] | None = None,
+        theme: Literal["light", "dark", "brand"] | None = None,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Change a site's consent banner.
+
+        Scope: customers.manage. Fields left out keep their value (the defaults, on a banner never saved); texts is
+        replaced language by language. Set enabled true to show it. Changing custom_html or custom_css also needs
+        workspace.manage, since they run on the website. Asking about a category the banner didn't ask about before
+        raises consent_version, so visitors are asked again. Records consent_banner.updated (or .enabled, .disabled).
+
+        Needs: the customers.manage scope.
+        PUT /v1/workspaces/{ws}/site-keys/{id}/consent-banner
+        """
+        return self._call(
+            "PUT",
+            "/v1/workspaces/{ws}/site-keys/{id}/consent-banner",
+            path={"id": id, "ws": ws},
+            body={
+                "categories": categories,
+                "colors": colors,
+                "custom_css": custom_css,
+                "custom_html": custom_html,
+                "enabled": enabled,
+                "frameworks": frameworks,
+                "layout": layout,
+                "logo_url": logo_url,
+                "policy_url": policy_url,
+                "position": position,
+                "reask_after_days": reask_after_days,
+                "regions": regions,
+                "reopen_button": reopen_button,
+                "show_logo": show_logo,
+                "texts": texts,
+                "theme": theme,
+            },
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
     def update_contact_rules(
         self,
         *,
@@ -18025,8 +18728,10 @@ class Operations(_Mixin):
         ws: str | None = None,
         about: str | None = None,
         brands: str | None = None,
+        colors: dict[str, Any] | None = None,
         company: str | None = None,
         goals: str | None = None,
+        logo_url: str | None = None,
         notes: str | None = None,
         onboarding_dismissed: bool | None = None,
         rules: str | None = None,
@@ -18055,8 +18760,10 @@ class Operations(_Mixin):
             body={
                 "about": about,
                 "brands": brands,
+                "colors": colors,
                 "company": company,
                 "goals": goals,
+                "logo_url": logo_url,
                 "notes": notes,
                 "onboarding_dismissed": onboarding_dismissed,
                 "rules": rules,
@@ -18064,6 +18771,35 @@ class Operations(_Mixin):
                 "voice": voice,
                 "website": website,
             },
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
+    def update_coverage(
+        self,
+        coverage: str,
+        *,
+        ws: str | None = None,
+        linked: bool | None = None,
+        status: Literal["new", "confirmed", "dismissed"] | None = None,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Confirm or dismiss coverage.
+
+        Scope: seo.manage. `status` confirms or dismisses it, or moves it
+        back to `new`; each move records coverage.<status> (reopened for
+        `new`). `linked` says whether the article links to the brand's
+        site.
+
+        Needs: the seo.manage scope.
+        PATCH /v1/workspaces/{ws}/coverage/{coverage}
+        """
+        return self._call(
+            "PATCH",
+            "/v1/workspaces/{ws}/coverage/{coverage}",
+            path={"coverage": coverage, "ws": ws},
+            body={"linked": linked, "status": status},
             extra_body=extra_body,
             idempotency_key=idempotency_key,
         )
@@ -18947,7 +19683,7 @@ class Operations(_Mixin):
         prospect: str,
         *,
         ws: str | None = None,
-        excluded_reason: Literal["links_to_us", "competitor", "customer", "partner", "opted_out", "spam"] | None = None,
+        excluded_reason: str | None = None,
         note: str | None = None,
         stage: str | None = None,
         target_url: str | None = None,
@@ -19197,6 +19933,43 @@ class Operations(_Mixin):
             "/v1/workspaces/{ws}/digest-settings/me",
             path={"ws": ws},
             body={"email": email},
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
+    def update_news_search(
+        self,
+        search: str,
+        *,
+        ws: str | None = None,
+        check_every_hours: int | None = None,
+        locale: str | None = None,
+        name: str | None = None,
+        query: str | None = None,
+        status: Literal["active", "paused"] | None = None,
+        time_range: Literal["day", "week", "month"] | None = None,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Change a news search.
+
+        Scope: seo.manage. Its brand and purpose stay as they are. A new `check_every_hours` counts from the last run.
+
+        Needs: the seo.manage scope.
+        PATCH /v1/workspaces/{ws}/news-searches/{search}
+        """
+        return self._call(
+            "PATCH",
+            "/v1/workspaces/{ws}/news-searches/{search}",
+            path={"search": search, "ws": ws},
+            body={
+                "check_every_hours": check_every_hours,
+                "locale": locale,
+                "name": name,
+                "query": query,
+                "status": status,
+                "time_range": time_range,
+            },
             extra_body=extra_body,
             idempotency_key=idempotency_key,
         )
@@ -20644,6 +21417,35 @@ class Operations(_Mixin):
         return self._call(
             "GET",
             "/v1/whoami",
+        )
+
+    def write_ab_test_versions(
+        self,
+        *,
+        ws: str | None = None,
+        count: int | None = None,
+        fields: list[str] | None = None,
+        flag: str,
+        prompt: str,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Write test versions with AI.
+
+        Scope: analytics.manage. The workspace's own AI model writes new versions of a flag's content from a prompt,
+        in the brand's voice, with a key and a one-line rationale each. They are proposals: a person reviews them and
+        adds them to the flag (PATCH .../flags/{flag}). 409 connector_needed without an AI model.
+
+        Needs: the analytics.manage scope.
+        POST /v1/workspaces/{ws}/ab-tests/versions
+        """
+        return self._call(
+            "POST",
+            "/v1/workspaces/{ws}/ab-tests/versions",
+            path={"ws": ws},
+            body={"count": count, "fields": fields, "flag": flag, "prompt": prompt},
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
         )
 
     def write_fix_ticket(

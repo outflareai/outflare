@@ -119,7 +119,9 @@ type Server struct {
 	siteVisitorLimit *rateLimiter
 	// siteFlagLimit caps the website script's flag requests per key.
 	siteFlagLimit *rateLimiter
-	flagCache     flagCache
+	// siteConsentLimit caps the consent banner's requests per key.
+	siteConsentLimit *rateLimiter
+	flagCache        flagCache
 	// Which hosts are tracking domains, for trackingHostsOnly.
 	trackingHosts trackingHostCache
 	mcp           *MCPUpstream
@@ -318,6 +320,7 @@ func NewServer(pool *pgxpool.Pool, log *slog.Logger, opts Options) *Server {
 		siteKeyLimit:     &rateLimiter{name: "site_key", limit: 6000, window: time.Minute},
 		siteVisitorLimit: &rateLimiter{name: "site_visitor", limit: 600, window: time.Minute},
 		siteFlagLimit:    &rateLimiter{name: "site_flags", limit: 6000, window: time.Minute},
+		siteConsentLimit: &rateLimiter{name: "site_consent", limit: 6000, window: time.Minute},
 		siteInbox:        opts.SiteInbox,
 		inboxWake:        make(chan struct{}, 1),
 		mcp:              opts.MCP,
@@ -458,6 +461,7 @@ func (s *Server) buildHandler() http.Handler {
 	s.routesSEOSearch(mux)
 	s.routesCompetitors(mux)
 	s.routesLinkProspects(mux)
+	s.routesNews(mux)
 	s.routesLinkReads(mux)
 	s.routesDigests(mux)
 	s.routesSEOTargets(mux)
@@ -482,8 +486,10 @@ func (s *Server) buildHandler() http.Handler {
 	s.routesPayments(mux)
 	s.routesConnectionHooks(mux)
 	s.routesSiteKeys(mux)
+	s.routesConsentBanner(mux)
 	s.routesFlags(mux)
 	s.routesABTests(mux)
+	s.routesABTestAI(mux)
 	s.routesVisitors(mux)
 	s.routesHealth(mux)
 	s.routesReports(mux)

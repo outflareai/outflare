@@ -8865,6 +8865,135 @@ paths:
         "404": { $ref: "#/components/responses/Error" }
         "202": { $ref: "#/components/responses/MissionHeld" }
         default: { $ref: "#/components/responses/Error" }
+  /v1/workspaces/{ws}/link-prospects/reclaim:
+    parameters: [{ $ref: "#/components/parameters/Workspace" }]
+    post:
+      operationId: reclaimLinkProspects
+      x-outflare-access: { scope: seo.manage, brand_limited: true }
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      summary: Add lost links as prospects to win back
+      description: |
+        Scope: seo.manage. Adds the site's links lost in the last `days`
+        (default 90) as `reclaim` prospects, strongest first, at most 500:
+        the page that dropped the link, our page it linked to as the page to
+        offer, and the backlink, anchor and the provider's lost reason as
+        evidence. Links marked to disavow or with a toxic spam score are left
+        out, and pages already listed are kept as they are. Free: the links
+        are already stored.
+      tags: [seo]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [site_id]
+              properties:
+                site_id: { type: string, format: uuid }
+                days: { type: integer, minimum: 1, maximum: 365, default: 90 }
+                min_rating: { type: number, minimum: 0, maximum: 100, description: "Leave out weaker linking sites." }
+      responses:
+        "200":
+          description: What was added.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [added, existing, excluded]
+                properties:
+                  added: { type: integer }
+                  existing: { type: integer }
+                  excluded: { type: integer }
+        "400": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "202": { $ref: "#/components/responses/MissionHeld" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/workspaces/{ws}/link-prospects/check:
+    parameters: [{ $ref: "#/components/parameters/Workspace" }]
+    post:
+      operationId: checkLinkProspects
+      x-outflare-access: { scope: seo.manage, brand_limited: true }
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      summary: Check prospects' pages
+      description: |
+        Scope: seo.manage. Queues OutflareBot's check of up to `limit`
+        (default and most 100) of a site's prospects to pitch, best first:
+        those never checked, or all of them with `again`. Each page is checked
+        at most once an hour. See POST .../link-prospects/{id}/check for what
+        a check does. The page reader uses the workspace's own AI when one is
+        connected (tool link_page_reading on the AI usage page).
+      tags: [seo]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [site_id]
+              properties:
+                site_id: { type: string, format: uuid }
+                again: { type: boolean, description: "Check pages checked before too." }
+                limit: { type: integer, minimum: 1, maximum: 100 }
+      responses:
+        "202":
+          description: "Queued, with how many. Inside a mission, a MissionHeld answer when the call was held for approval or dry-run instead."
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - type: object
+                    required: [queued, count]
+                    properties:
+                      queued: { type: boolean }
+                      count: { type: integer }
+                  - { $ref: "#/components/schemas/MissionHeld" }
+        "400": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/workspaces/{ws}/link-prospects/{prospect}/check:
+    parameters:
+      - { $ref: "#/components/parameters/Workspace" }
+      - { name: prospect, in: path, required: true, schema: { type: string, format: uuid } }
+    post:
+      operationId: checkLinkProspect
+      x-outflare-access: { scope: seo.manage, brand_limited: true }
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      summary: Check a prospect's page
+      description: |
+        Scope: seo.manage. Queues OutflareBot's check of the page, at most once
+        an hour, obeying robots.txt and crawl opt-outs. The check finds:
+        - whether the page is up, gone or redirected elsewhere;
+        - whether it links to the site already (`links_to_us`, with the links);
+        - which of its first 50 outbound links are broken, with the Internet
+          Archive's closest snapshot of up to 10 of them;
+        - with the workspace's own AI: what kind of page it is, its topic, its
+          author, how well it fits the site (`fit`, which adds up to 15 points
+          to the score either way) and which of the site's pages to offer;
+          without AI, the page sharing the most words is suggested;
+        - who to contact: addresses at the website's domain on the page and
+          on up to two of its contact, about or write-for-us pages, and the
+          author's likely address from the free email finder. Contacts become
+          person records on the website's company.
+
+        A page to pitch that links already, or is gone, is excluded
+        (`links_to_us`, `page_gone`). An empty `target_url` takes the
+        suggested page. The result is the prospect's `check` and `contacts`,
+        and link_prospect.checked. Free apart from the AI read.
+      tags: [seo]
+      responses:
+        "202":
+          description: "Queued. Inside a mission, a MissionHeld answer when the call was held for approval or dry-run instead."
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - { $ref: "#/components/schemas/Queued" }
+                  - { $ref: "#/components/schemas/MissionHeld" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        default: { $ref: "#/components/responses/Error" }
   /v1/workspaces/{ws}/link-prospects/{prospect}:
     parameters:
       - { $ref: "#/components/parameters/Workspace" }
@@ -8932,6 +9061,307 @@ paths:
       tags: [seo]
       responses:
         "204": { description: Deleted. }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "202": { $ref: "#/components/responses/MissionHeld" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/workspaces/{ws}/news-searches:
+    parameters: [{ $ref: "#/components/parameters/Workspace" }]
+    get:
+      operationId: listNewsSearches
+      x-outflare-access: { scope: seo.read, brand_limited: true }
+      summary: List news searches
+      description: |
+        Scope: seo.read. The news watch's saved searches, newest first:
+        `topic` searches follow a subject and the journalists who write
+        about it, `coverage` searches look for a brand and keep what they
+        find as its coverage.
+      tags: [seo]
+      parameters:
+        - { $ref: "#/components/parameters/Brand" }
+        - { name: purpose, in: query, schema: { $ref: "#/components/schemas/NewsSearchPurpose" } }
+      responses:
+        "200":
+          description: News searches.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data: { type: array, items: { $ref: "#/components/schemas/NewsSearch" } }
+        "400": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        default: { $ref: "#/components/responses/Error" }
+    post:
+      operationId: createNewsSearch
+      x-outflare-access: { scope: seo.manage, brand_limited: true }
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      summary: Save a news search
+      description: |
+        Scope: seo.manage. Saves a search the news watch runs on its
+        schedule through the workspace's own web search connection
+        (Geonode), and queues its first run. Each run is one search on
+        that connection, booked in the spend ledger within its usage
+        limits. A `coverage` search needs `brand_id`; the articles it finds
+        that name every word of the query, and aren't on the brand's own
+        website, become the brand's coverage. A workspace keeps at most
+        200 searches (409 `conflict`).
+      tags: [seo]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [query]
+              properties:
+                query: { type: string, minLength: 1, maxLength: 500, examples: ["residential proxies"] }
+                name: { type: string, maxLength: 200, description: "Defaults to the query." }
+                purpose: { $ref: "#/components/schemas/NewsSearchPurpose" }
+                brand_id: { type: string, description: "A brand's id or handle. Needed for a coverage search; empty for a shared topic." }
+                locale: { type: string, maxLength: 10, description: "A language code (en) or tag (en-GB); empty for the provider's default." }
+                time_range: { $ref: "#/components/schemas/NewsTimeRange" }
+                check_every_hours: { type: integer, minimum: 6, maximum: 168, default: 24 }
+                status: { $ref: "#/components/schemas/NewsSearchStatus" }
+      responses:
+        "201":
+          description: The news search.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/NewsSearch" }
+        "400": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        "202": { $ref: "#/components/responses/MissionHeld" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/workspaces/{ws}/news-searches/{search}:
+    parameters:
+      - { $ref: "#/components/parameters/Workspace" }
+      - { name: search, in: path, required: true, schema: { type: string, format: uuid } }
+    get:
+      operationId: getNewsSearch
+      x-outflare-access: { scope: seo.read, brand_limited: true }
+      summary: Get a news search
+      description: "Scope: seo.read."
+      tags: [seo]
+      responses:
+        "200":
+          description: The news search.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/NewsSearch" }
+        "404": { $ref: "#/components/responses/Error" }
+        default: { $ref: "#/components/responses/Error" }
+    patch:
+      operationId: updateNewsSearch
+      x-outflare-access: { scope: seo.manage, brand_limited: true }
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      summary: Change a news search
+      description: "Scope: seo.manage. Its brand and purpose stay as they are. A new `check_every_hours` counts from the last run."
+      tags: [seo]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              minProperties: 1
+              properties:
+                query: { type: string, minLength: 1, maxLength: 500 }
+                name: { type: string, maxLength: 200 }
+                locale: { type: string, maxLength: 10 }
+                time_range: { $ref: "#/components/schemas/NewsTimeRange" }
+                check_every_hours: { type: integer, minimum: 6, maximum: 168 }
+                status: { $ref: "#/components/schemas/NewsSearchStatus" }
+      responses:
+        "200":
+          description: The news search.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/NewsSearch" }
+        "400": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "202": { $ref: "#/components/responses/MissionHeld" }
+        default: { $ref: "#/components/responses/Error" }
+    delete:
+      operationId: deleteNewsSearch
+      x-outflare-access: { scope: seo.manage, brand_limited: true }
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      summary: Delete a news search
+      description: "Scope: seo.manage. Articles only it found go too; coverage stays."
+      tags: [seo]
+      responses:
+        "204": { description: Deleted. }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "202": { $ref: "#/components/responses/MissionHeld" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/workspaces/{ws}/news-searches/{search}/run:
+    parameters:
+      - { $ref: "#/components/parameters/Workspace" }
+      - { name: search, in: path, required: true, schema: { type: string, format: uuid } }
+    post:
+      operationId: runNewsSearch
+      x-outflare-access: { scope: seo.manage, brand_limited: true }
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      summary: Run a news search now
+      description: |
+        Scope: seo.manage. Queues a run now, whatever its schedule (one a
+        minute at most). It costs one search on the workspace's web search
+        connection; 409 `connector_needed` when there is none. The run's
+        outcome shows on the search (`last_checked_at`, `last_error_code`).
+      tags: [seo]
+      responses:
+        "202":
+          description: Queued.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [queued]
+                properties:
+                  queued: { type: boolean }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/workspaces/{ws}/news-articles:
+    parameters: [{ $ref: "#/components/parameters/Workspace" }]
+    get:
+      operationId: listNewsArticles
+      x-outflare-access: { scope: seo.read, brand_limited: true }
+      summary: List news articles
+      description: |
+        Scope: seo.read. Articles the news searches found, newest first,
+        each once however many searches found it. `brand` keeps those
+        found by the brand's searches. Reads only what is stored, so it
+        costs nothing.
+      tags: [seo]
+      parameters:
+        - { $ref: "#/components/parameters/Brand" }
+        - { name: search_id, in: query, schema: { type: string, format: uuid } }
+        - { name: since, in: query, description: "Only articles first seen at or after this time.", schema: { type: string, format: date-time } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 200, default: 50 } }
+        - { name: offset, in: query, schema: { type: integer, minimum: 0 } }
+        - { $ref: "#/components/parameters/Fields" }
+        - { $ref: "#/components/parameters/Cursor" }
+      responses:
+        "200":
+          description: News articles.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, total, next_offset, next_cursor]
+                properties:
+                  data: { type: array, items: { $ref: "#/components/schemas/NewsArticle" } }
+                  total: { type: integer }
+                  next_offset: { type: [integer, "null"] }
+                  next_cursor: { $ref: "#/components/schemas/NextCursor" }
+        "400": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/workspaces/{ws}/coverage:
+    parameters: [{ $ref: "#/components/parameters/Workspace" }]
+    get:
+      operationId: listCoverage
+      x-outflare-access: { scope: seo.read, brand_limited: true }
+      summary: List coverage
+      description: |
+        Scope: seo.read. Articles that mention a brand, newest first, each
+        on its outlet's company record (`record_id`). Leaves out
+        `dismissed` items unless `status` asks for them.
+      tags: [seo]
+      parameters:
+        - { $ref: "#/components/parameters/Brand" }
+        - { name: status, in: query, description: "One status, or several separated by commas.", schema: { type: string, examples: ["new,confirmed"] } }
+        - { name: record_id, in: query, description: "An outlet's company record.", schema: { type: string, format: uuid } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 200, default: 50 } }
+        - { name: offset, in: query, schema: { type: integer, minimum: 0 } }
+        - { $ref: "#/components/parameters/Fields" }
+        - { $ref: "#/components/parameters/Cursor" }
+      responses:
+        "200":
+          description: Coverage.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, total, next_offset, next_cursor]
+                properties:
+                  data: { type: array, items: { $ref: "#/components/schemas/Coverage" } }
+                  total: { type: integer }
+                  next_offset: { type: [integer, "null"] }
+                  next_cursor: { $ref: "#/components/schemas/NextCursor" }
+        "400": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        default: { $ref: "#/components/responses/Error" }
+    post:
+      operationId: addCoverage
+      x-outflare-access: { scope: seo.manage, brand_limited: true }
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      summary: Add coverage
+      description: |
+        Scope: seo.manage. Keeps an article the news watch missed as a
+        brand's coverage, on its outlet's company record (a prospect
+        company when the workspace has none), and records mention.found.
+        An article already kept for the brand comes back as it is.
+      tags: [seo]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [brand_id, url]
+              properties:
+                brand_id: { type: string, description: "A brand's id or handle." }
+                url: { type: string, maxLength: 2048, examples: ["https://news.example.org/2026/10/story"] }
+                title: { type: string, maxLength: 500 }
+      responses:
+        "200":
+          description: The coverage item.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Coverage" }
+        "400": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "202": { $ref: "#/components/responses/MissionHeld" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/workspaces/{ws}/coverage/{coverage}:
+    parameters:
+      - { $ref: "#/components/parameters/Workspace" }
+      - { name: coverage, in: path, required: true, schema: { type: string, format: uuid } }
+    patch:
+      operationId: updateCoverage
+      x-outflare-access: { scope: seo.manage, brand_limited: true }
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      summary: Confirm or dismiss coverage
+      description: |
+        Scope: seo.manage. `status` confirms or dismisses it, or moves it
+        back to `new`; each move records coverage.<status> (reopened for
+        `new`). `linked` says whether the article links to the brand's
+        site.
+      tags: [seo]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              minProperties: 1
+              properties:
+                status: { $ref: "#/components/schemas/CoverageStatus" }
+                linked: { type: boolean }
+      responses:
+        "200":
+          description: The coverage item.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Coverage" }
+        "400": { $ref: "#/components/responses/Error" }
         "403": { $ref: "#/components/responses/Error" }
         "404": { $ref: "#/components/responses/Error" }
         "202": { $ref: "#/components/responses/MissionHeld" }
@@ -11220,6 +11650,39 @@ paths:
         "404": { $ref: "#/components/responses/Error" }
         "409": { $ref: "#/components/responses/Error" }
         default: { $ref: "#/components/responses/Error" }
+  /v1/workspaces/{ws}/reviews/pages/{id}/read:
+    parameters:
+      - { $ref: "#/components/parameters/Workspace" }
+      - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+    post:
+      operationId: readReviewPage
+      x-outflare-access: { scope: social.manage, brand_limited: true }
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      summary: Read a review page now
+      description: |
+        Scope: social.manage. Reads one active review page now through the
+        workspace's own page reader (Geonode, on its own key), such as one
+        whose last read failed, instead of waiting for its next try. A
+        page that shows no reviews is read again in a browser. Answers
+        connector_needed (409) with no page reader, and conflict (409) for
+        a paused or removed page.
+      tags: [reviews]
+      responses:
+        "202":
+          description: Queued, or held in a mission.
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - type: object
+                    required: [queued]
+                    properties:
+                      queued: { type: boolean, const: true }
+                  - { $ref: "#/components/schemas/MissionHeld" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        default: { $ref: "#/components/responses/Error" }
   /v1/workspaces/{ws}/reviews/pages/{id}/days:
     parameters:
       - { $ref: "#/components/parameters/Workspace" }
@@ -11463,8 +11926,8 @@ paths:
       description: |
         Scope: social.manage. Queues a read of every X and LinkedIn
         connection now: it finds new pages and profiles and reads the
-        accounts that are due. Answers connector_needed (409) when none is
-        connected.
+        accounts that are due, and those whose last read failed. Answers
+        connector_needed (409) when none is connected.
       tags: [social]
       responses:
         "202":
@@ -11527,6 +11990,37 @@ paths:
               schema: { $ref: "#/components/schemas/SocialAccount" }
         "202": { $ref: "#/components/responses/MissionHeld" }
         "400": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/workspaces/{ws}/social/accounts/{id}/sync:
+    parameters:
+      - { $ref: "#/components/parameters/Workspace" }
+      - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+    post:
+      operationId: syncSocialAccount
+      x-outflare-access: { scope: social.manage, brand_limited: true }
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      summary: Read a social account now
+      description: |
+        Scope: social.manage. Reads one active account now, such as one
+        whose last read failed, instead of waiting for its next try (a
+        failed read is tried again the same day on its own). Answers
+        conflict (409) for a paused or disconnected account.
+      tags: [social]
+      responses:
+        "202":
+          description: Queued, or held in a mission.
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - type: object
+                    required: [queued]
+                    properties:
+                      queued: { type: boolean, const: true }
+                  - { $ref: "#/components/schemas/MissionHeld" }
         "403": { $ref: "#/components/responses/Error" }
         "404": { $ref: "#/components/responses/Error" }
         "409": { $ref: "#/components/responses/Error" }
@@ -16833,6 +17327,71 @@ paths:
         "204": { description: Removed. }
         "202": { $ref: "#/components/responses/MissionHeld" }
         default: { $ref: "#/components/responses/Error" }
+  /v1/workspaces/{ws}/site-keys/{id}/consent-banner:
+    parameters:
+      - { $ref: "#/components/parameters/Workspace" }
+      - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+    get:
+      operationId: getConsentBanner
+      x-outflare-access: { scope: customers.read }
+      summary: Get a site's consent banner
+      description: |
+        Scope: customers.read. The cookie consent banner the site key's script (/site.js) shows: the rule for each region,
+        the laws and frameworks it follows, the categories it asks about, how it looks and what it says. Until it is
+        first saved (saved false), config is the defaults and the site shows no banner. look is the logo and colours the
+        brand preset uses when the banner sets none: the key's brand's, else the company's.
+      tags: [records]
+      responses:
+        "200":
+          description: The banner.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ConsentBanner" }
+        default: { $ref: "#/components/responses/Error" }
+    put:
+      operationId: updateConsentBanner
+      x-outflare-access: { scope: customers.manage }
+      summary: Change a site's consent banner
+      description: |
+        Scope: customers.manage. Fields left out keep their value (the defaults, on a banner never saved); texts is
+        replaced language by language. Set enabled true to show it. Changing custom_html or custom_css also needs
+        workspace.manage, since they run on the website. Asking about a category the banner didn't ask about before
+        raises consent_version, so visitors are asked again. Records consent_banner.updated (or .enabled, .disabled).
+      tags: [records]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ConsentBannerInput" }
+      responses:
+        "200":
+          description: The banner.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ConsentBanner" }
+        "202": { $ref: "#/components/responses/MissionHeld" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/workspaces/{ws}/site-keys/{id}/consent-banner/reask:
+    parameters:
+      - { $ref: "#/components/parameters/Workspace" }
+      - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+    post:
+      operationId: reaskConsentBanner
+      x-outflare-access: { scope: customers.manage }
+      summary: Ask a site's visitors again
+      description: |
+        Scope: customers.manage. Raises consent_version, such as after the site starts using a new kind of cookie: visitors
+        whose choice was made on an older version see the banner again where their region's rule is opt_in. Records
+        consent_banner.reasked.
+      tags: [records]
+      responses:
+        "200":
+          description: The banner.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ConsentBanner" }
+        "202": { $ref: "#/components/responses/MissionHeld" }
+        default: { $ref: "#/components/responses/Error" }
   /v1/workspaces/{ws}/visitors:
     parameters: [{ $ref: "#/components/parameters/Workspace" }]
     get:
@@ -17052,6 +17611,86 @@ paths:
       responses:
         "204": { description: Allowed. }
         default: { $ref: "#/components/responses/Error" }
+  /v1/site/consent:
+    get:
+      operationId: getSiteConsentBanner
+      summary: Get a site's consent banner for a visitor
+      description: |
+        Public: the site key (ofk_) is the authority. What the tracking script asks on a visitor's first page and again
+        every few minutes: the key's banner settings, with its words in the visitor's language (lang; the workspace's
+        own texts, else Outflare's in that language, else English) and the look filled in. enabled is false when the
+        workspace hasn't turned the banner on. country is the visitor's country when the site's own proxy, holding the
+        key's proxy secret, passes it in X-Outflare-Country; otherwise empty and the script goes by the browser's time
+        zone. 6,000 requests a minute per key. Nothing is stored.
+      tags: [records]
+      parameters:
+        - { name: key, in: query, required: true, schema: { type: string }, example: ofk_test_not_a_real_key }
+        - { name: lang, in: query, required: false, schema: { type: string }, description: "The visitor's navigator.language, such as de-AT." }
+        - { name: X-Outflare-Proxy, in: header, required: false, schema: { type: string }, description: "The key's proxy secret (ofp_), sent only by the site's own proxy." }
+        - { name: X-Outflare-Country, in: header, required: false, schema: { type: string }, description: "The visitor's country (ISO 3166-1 alpha-2), from the site's own proxy. Used only with a valid X-Outflare-Proxy." }
+      responses:
+        "200":
+          description: The banner.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SiteConsentBanner" }
+        default: { $ref: "#/components/responses/Error" }
+    post:
+      operationId: sendSiteConsent
+      summary: Keep a visitor's consent choice
+      description: |
+        Public: the site key (ofk_) in the body is the authority. What the script sends when a visitor makes or changes
+        a choice on the banner, or the site's own code calls outflare.consent. Each category the banner asks about
+        becomes a consent (channel web, purpose analytics, marketing or preferences, source consent_banner), and
+        marketing also sets Google Consent Mode's ad purposes (channel ads: ad_storage, ad_user_data,
+        ad_personalization), which ad send-back reads. Each is kept on the visitor's record when they are known, and
+        on their anonymousId until identify joins it to their record. evidence says what they were shown: the banner's
+        version and consent version, the region, the action, Global Privacy Control, the language and page. The answer
+        sets the of_consent cookie (and of_aid when analytics is allowed) on the site's domain, which browsers keep
+        when the request came through the site's own domain. Send the JSON as text/plain to skip the CORS preflight.
+      tags: [records]
+      requestBody:
+        required: true
+        content:
+          text/plain:
+            schema: { type: string }
+          application/json:
+            schema:
+              type: object
+              required: [key, anonymousId, action]
+              properties:
+                key: { type: string, example: ofk_test_not_a_real_key }
+                anonymousId: { type: string, minLength: 8, maxLength: 64 }
+                analytics: { type: boolean }
+                marketing: { type: boolean }
+                preferences: { type: boolean }
+                action: { type: string, enum: [accept_all, reject_all, custom, opt_out, gpc, api] }
+                region: { type: string, enum: [eea, us, other] }
+                gpc: { type: boolean, description: The browser sent Global Privacy Control. }
+                version: { type: integer, description: The banner version the visitor saw. }
+                consent_version: { type: integer, description: The consent version the visitor saw. }
+                lang: { type: string }
+                path: { type: string, description: "The page's path, without its query." }
+      responses:
+        "200":
+          description: Kept.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [recorded, choice_id]
+                properties:
+                  recorded: { type: integer, description: Consents kept. }
+                  choice_id: { type: string, description: "The choice's id, in each consent's evidence." }
+        default: { $ref: "#/components/responses/Error" }
+    options:
+      operationId: sendSiteConsentPreflight
+      summary: CORS preflight for consent choices
+      description: "Public. Any origin may send; the key, not the page, is checked."
+      tags: [records]
+      responses:
+        "204": { description: Allowed. }
+        default: { $ref: "#/components/responses/Error" }
   /v1/workspaces/{ws}/flags:
     parameters: [{ $ref: "#/components/parameters/Workspace" }]
     get:
@@ -17230,6 +17869,161 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/ABTest" }
         "202": { $ref: "#/components/responses/MissionHeld" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/workspaces/{ws}/ab-tests/plan:
+    parameters: [{ $ref: "#/components/parameters/Workspace" }]
+    post:
+      operationId: planABTest
+      x-outflare-access: { scope: analytics.read }
+      summary: Plan an A/B test
+      description: |
+        Scope: analytics.read. How long a test of a flag is likely to take, before it starts: from the last 28 days of
+        page views (on page, when given) and the goal's rate among those visitors, the flag's rollout and split, and
+        the same sequential test the results use. Each row is the visitors per version, and weeks, until the result is
+        typically safe to stop if the change truly moves the goal by that much. Nothing is stored.
+      tags: [ab-tests]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [flag, goal]
+              properties:
+                flag: { type: string, description: "The flag's id or key." }
+                goal: { $ref: "#/components/schemas/ABTestGoal" }
+                page: { type: string, maxLength: 500, description: "Count only visitors of this path (or /docs/* for a section): the page the test changes." }
+                min_effect: { type: number, minimum: 0.01, maximum: 1, description: "Default 0.25." }
+      responses:
+        "200":
+          description: The plan.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ABTestPlan" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/workspaces/{ws}/ab-tests/suggestions:
+    parameters: [{ $ref: "#/components/parameters/Workspace" }]
+    post:
+      operationId: suggestABTests
+      x-outflare-access: { scope: analytics.manage }
+      summary: Suggest A/B tests with AI
+      description: |
+        Scope: analytics.manage. The workspace's own AI model proposes tests from the site's busiest pages and the
+        goals visitors reach over the last 28 days, the brand's context and the tests already run. Each suggestion
+        comes with the engine's own plan for its page and goal (weeks, the lift findable in 8 weeks, a warning).
+        Nothing is created: a person makes the flag and the test. 409 connector_needed without an AI model.
+      tags: [ab-tests]
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                brand_id: { type: [string, "null"], format: uuid, description: "Use this brand's context (voice, audience, goals)." }
+                page: { type: string, maxLength: 500, description: "Only pages under this path, such as /pricing or /docs/*." }
+                goal: { $ref: "#/components/schemas/ABTestGoal" }
+                count: { type: integer, minimum: 1, maximum: 5, description: "Default 3." }
+                notes: { type: string, maxLength: 2000, description: "What to focus on, in your words." }
+      responses:
+        "202":
+          description: The run, queued. Poll GET .../ab-test-ai-runs/{run} until it is ready or failed.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ABTestAIRun" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/workspaces/{ws}/ab-tests/versions:
+    parameters: [{ $ref: "#/components/parameters/Workspace" }]
+    post:
+      operationId: writeABTestVersions
+      x-outflare-access: { scope: analytics.manage }
+      summary: Write test versions with AI
+      description: |
+        Scope: analytics.manage. The workspace's own AI model writes new versions of a flag's content from a prompt,
+        in the brand's voice, with a key and a one-line rationale each. They are proposals: a person reviews them and
+        adds them to the flag (PATCH .../flags/{flag}). 409 connector_needed without an AI model.
+      tags: [ab-tests]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [flag, prompt]
+              properties:
+                flag: { type: string, description: "The flag's id or key." }
+                prompt: { type: string, maxLength: 2000, example: "A shorter, more urgent headline for agencies" }
+                count: { type: integer, minimum: 1, maximum: 4, description: "Default 2." }
+                fields: { type: array, maxItems: 8, items: { type: string, pattern: "^[a-z][a-z0-9_]{0,39}$" }, description: "The content fields to write, such as headline and cta. Default: the text fields the flag's versions already carry, or headline." }
+      responses:
+        "202":
+          description: The run, queued. Poll GET .../ab-test-ai-runs/{run} until it is ready or failed.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ABTestAIRun" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/workspaces/{ws}/ab-tests/{test}/summary:
+    parameters:
+      - { $ref: "#/components/parameters/Workspace" }
+      - { name: test, in: path, required: true, schema: { type: string, format: uuid } }
+    post:
+      operationId: summarizeABTest
+      x-outflare-access: { scope: analytics.manage }
+      summary: Summarise a test with AI
+      description: |
+        Scope: analytics.manage. The workspace's own AI model puts a running or finished test's results into plain
+        English with next steps. The recommendation (ship, keep_control, fix_split, extend, stop, wait) and its reason
+        come from the engine, not the AI. 409 for a draft, or connector_needed without an AI model.
+      tags: [ab-tests]
+      responses:
+        "202":
+          description: The run, queued. Poll GET .../ab-test-ai-runs/{run} until it is ready or failed.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ABTestAIRun" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/workspaces/{ws}/ab-test-ai-runs:
+    parameters: [{ $ref: "#/components/parameters/Workspace" }]
+    get:
+      operationId: listABTestAIRuns
+      x-outflare-access: { scope: analytics.read }
+      summary: List A/B test AI runs
+      description: "Scope: analytics.read. The latest 50 AI runs, newest first. A brand's runs include those for no brand."
+      parameters:
+        - { $ref: "#/components/parameters/Brand" }
+        - { name: kind, in: query, required: false, schema: { type: string, enum: [suggest, versions, summary] } }
+        - { name: test, in: query, required: false, schema: { type: string, format: uuid } }
+      tags: [ab-tests]
+      responses:
+        "200":
+          description: Runs.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data: { type: array, items: { $ref: "#/components/schemas/ABTestAIRun" } }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/workspaces/{ws}/ab-test-ai-runs/{run}:
+    parameters:
+      - { $ref: "#/components/parameters/Workspace" }
+      - { name: run, in: path, required: true, schema: { type: string, format: uuid } }
+    get:
+      operationId: getABTestAIRun
+      x-outflare-access: { scope: analytics.read }
+      summary: Get an A/B test AI run
+      description: "Scope: analytics.read. Poll until status is ready (output holds the answer) or failed (error says why, in words)."
+      tags: [ab-tests]
+      responses:
+        "200":
+          description: The run.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ABTestAIRun" }
         default: { $ref: "#/components/responses/Error" }
   /v1/workspaces/{ws}/ab-tests/{test}:
     parameters:
@@ -22454,6 +23248,18 @@ webhooks:
             schema: { $ref: "#/components/schemas/WebhookEvent" }
       responses:
         "200": { description: Any 2xx answer means received; anything else is retried. }
+  link_prospect.checked:
+    post:
+      operationId: webhook_link_prospect_checked
+      summary: "OutflareBot checked a link prospect's page. data has site_id, brand_id, record_id, status (up, gone, redirected, blocked, opted_out, unreachable, failed), links_to_us, broken (how many broken outbound links), fit (0 to 100, or null without AI), score, contacts (how many new) and error_code; GET the prospect for the check."
+      tags: [webhooks]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/WebhookEvent" }
+      responses:
+        "200": { description: Any 2xx answer means received; anything else is retried. }
   link_prospect.excluded:
     post:
       operationId: webhook_link_prospect_excluded
@@ -23113,7 +23919,7 @@ components:
       required: [id, type, created_at, workspace_id, actor, target, request_id, data]
       properties:
         id: { type: string, description: "Unique per event, and the webhook-id header. Use it to ignore repeats.", example: evt_48213 }
-        type: { type: string, enum: [lead.replied, lead.unsubscribed, inbox.replied, inbox.updated, inbox.classified, lead.bounced, mailbox.auto_paused, lead.created, lead.updated, lead.deleted, leads.imported, suppressions.added, suppression.removed, lead_list.created, lead_list.leads_added, lead_list.run_started, lead_list.build_done, lead_list.build_failed, lead_list.refresh_done, lead_list.refresh_failed, lead_list.enrich_done, lead_list.enrich_failed, import.done, import.failed, sequence.created, sequence.updated, sequence.activated, sequence.paused, sequence.archived, sequence.deleted, sequence.steps_updated, sequence.leads_enrolled, enrollment.stopped, mailbox.imported, mailbox.updated, mailbox.paused, mailbox.resumed, mailbox.stage_changed, mailbox.deleted, domain.added, domain.paused, domain.resumed, domain.removed, email.queued, email.sent, email.delivered, email.bounced, email.complained, email.failed, email.suppressed, email.cancelled, email.unsubscribed, email.opened, email.clicked, email.preferences_changed, email_domain.verified, email_domain.verification_failed, email_provider.events_failed, email_template.published, meeting.created, meeting.updated, meeting.deleted, deal.created, deal.updated, deal.deleted, spend.recorded, integration.connected, integration.updated, integration.disconnected, connect_request.created, deploy.detected, deploy.failed, digest.ready, ai_budget.warned, ai_budget.reached, connection_limit.warned, connection_limit.reached, experiment.started, experiment.concluded, project.created, project.updated, project.deleted, mission.created, mission.updated, mission.submitted, mission.approved, mission.paused, mission.resumed, mission.stopped, mission.completed, mission.action_held, mission.action_approved, mission.action_rejected, infra.plan_created, infra.plan_approved, infra.ordered, infra.order_failed, infra.domains_bought, infra.mailbox_joined, infra.plan_warming, infra.plan_ready, infra.plan_cancelled, fix.found, fix.updated, fix.started, fix.verify_requested, fix.confirmed, fix.reopened, record.created, record.bulk_created, record.bulk_updated, record.updated, record.merged, identity.verified, identity.closed, relationship.added, relationship.ended, consent.granted, consent.withdrawn, consent.bulk_withdrawn, brand.created, brand.updated, email_broadcast.created, email_broadcast.started, email_broadcast.sent, email_broadcast.failed, email_broadcast.cancelled, journey.created, journey.updated, journey_run.entered, journey_run.exited, rule.created, rule.updated, rule.activated, rule.paused, rule.archived, rule.fired, brand_setup.installed, brand_setup.install_failed, install.issue_opened, install.issue_resolved, seo_site.created, seo_site.verified, seo_site.unverified, seo_site.deleted, crawl.started, crawl.stopped, crawl.done, backlink.new, backlink.lost, backlink.regained, competitor.page_removed, link_prospect.found, link_prospect.excluded, link_prospect.pitched, link_prospect.replied, link_prospect.agreed, link_prospect.live, link_prospect.declined, link_prospect.removed, link_prospect.reopened, link_prospect.updated, link_prospect.deleted, social_action.drafted, social_action.approved, social_action.rejected, social_action.done, social_action.failed, review.posted, review.replied, review.reply_drafted, review_momentum.changed, alert.raised, visitor.became_hot, workspace.updated, webhook.test] }
+        type: { type: string, enum: [lead.replied, lead.unsubscribed, inbox.replied, inbox.updated, inbox.classified, lead.bounced, mailbox.auto_paused, lead.created, lead.updated, lead.deleted, leads.imported, suppressions.added, suppression.removed, lead_list.created, lead_list.leads_added, lead_list.run_started, lead_list.build_done, lead_list.build_failed, lead_list.refresh_done, lead_list.refresh_failed, lead_list.enrich_done, lead_list.enrich_failed, import.done, import.failed, sequence.created, sequence.updated, sequence.activated, sequence.paused, sequence.archived, sequence.deleted, sequence.steps_updated, sequence.leads_enrolled, enrollment.stopped, mailbox.imported, mailbox.updated, mailbox.paused, mailbox.resumed, mailbox.stage_changed, mailbox.deleted, domain.added, domain.paused, domain.resumed, domain.removed, email.queued, email.sent, email.delivered, email.bounced, email.complained, email.failed, email.suppressed, email.cancelled, email.unsubscribed, email.opened, email.clicked, email.preferences_changed, email_domain.verified, email_domain.verification_failed, email_provider.events_failed, email_template.published, meeting.created, meeting.updated, meeting.deleted, deal.created, deal.updated, deal.deleted, spend.recorded, integration.connected, integration.updated, integration.disconnected, connect_request.created, deploy.detected, deploy.failed, digest.ready, ai_budget.warned, ai_budget.reached, connection_limit.warned, connection_limit.reached, experiment.started, experiment.concluded, project.created, project.updated, project.deleted, mission.created, mission.updated, mission.submitted, mission.approved, mission.paused, mission.resumed, mission.stopped, mission.completed, mission.action_held, mission.action_approved, mission.action_rejected, infra.plan_created, infra.plan_approved, infra.ordered, infra.order_failed, infra.domains_bought, infra.mailbox_joined, infra.plan_warming, infra.plan_ready, infra.plan_cancelled, fix.found, fix.updated, fix.started, fix.verify_requested, fix.confirmed, fix.reopened, record.created, record.bulk_created, record.bulk_updated, record.updated, record.merged, identity.verified, identity.closed, relationship.added, relationship.ended, consent.granted, consent.withdrawn, consent.bulk_withdrawn, brand.created, brand.updated, email_broadcast.created, email_broadcast.started, email_broadcast.sent, email_broadcast.failed, email_broadcast.cancelled, journey.created, journey.updated, journey_run.entered, journey_run.exited, rule.created, rule.updated, rule.activated, rule.paused, rule.archived, rule.fired, brand_setup.installed, brand_setup.install_failed, install.issue_opened, install.issue_resolved, seo_site.created, seo_site.verified, seo_site.unverified, seo_site.deleted, crawl.started, crawl.stopped, crawl.done, backlink.new, backlink.lost, backlink.regained, competitor.page_removed, link_prospect.found, link_prospect.checked, link_prospect.excluded, link_prospect.pitched, link_prospect.replied, link_prospect.agreed, link_prospect.live, link_prospect.declined, link_prospect.removed, link_prospect.reopened, link_prospect.updated, link_prospect.deleted, social_action.drafted, social_action.approved, social_action.rejected, social_action.done, social_action.failed, review.posted, review.replied, review.reply_drafted, review_momentum.changed, alert.raised, visitor.became_hot, workspace.updated, webhook.test] }
         created_at: { type: string, format: date-time }
         workspace_id: { type: string, format: uuid }
         actor: { $ref: "#/components/schemas/WebhookRef" }
@@ -24902,7 +25708,7 @@ components:
         path: { type: string, maxLength: 500, description: "For kind page: a path such as /thanks; a trailing * matches every page under it (/docs/*).", example: /thanks }
     ABTest:
       type: object
-      required: [id, flag_id, flag_key, brand_id, name, hypothesis, status, control, goals, min_effect, started_at, ended_at, decision, created_at, updated_at]
+      required: [id, flag_id, flag_key, brand_id, name, hypothesis, status, control, goals, min_effect, baselines, started_at, ended_at, decision, created_at, updated_at]
       properties:
         id: { type: string, format: uuid }
         flag_id: { type: string, format: uuid }
@@ -24914,6 +25720,7 @@ components:
         control: { type: string, description: The flag variant the others are compared with. }
         goals: { type: array, items: { $ref: "#/components/schemas/ABTestGoal" }, description: The first is the one the test is judged on. }
         min_effect: { type: number, minimum: 0.01, maximum: 1, description: "The smallest relative change worth detecting: 0.25 is +25%. The always-valid p-value is tuned to find changes of about this size." }
+        baselines: { type: [array, "null"], items: { type: number }, description: "Each goal's conversion rate on the site over the 28 days before the test started, which fixes the test's tuning for its whole life; 0 for a goal with too little history (its live control rate is used). Null before the test starts." }
         started_at: { type: [string, "null"], format: date-time }
         ended_at: { type: [string, "null"], format: date-time }
         decision: { type: string, description: 'The variant chosen when it ended; "" for none.' }
@@ -24933,6 +25740,65 @@ components:
           minimum: 0.01
           maximum: 1
           description: "The smallest relative change worth detecting, such as 0.1 (+10%) for a busy site or 0.5 (+50%) for a bold change. Default 0.25. Smaller finds small changes but needs more visitors; fixed once the test starts."
+    ABTestPlan:
+      type: object
+      required: [flag_id, page, window_days, traffic, plan, warning]
+      properties:
+        flag_id: { type: string, format: uuid }
+        page: { type: string }
+        window_days: { type: integer, example: 28 }
+        traffic:
+          type: object
+          required: [visitors, converted]
+          properties:
+            visitors: { type: integer, description: Visitors with a page view in the window. }
+            converted: { type: integer, description: Of them, those who reached the goal after their first view. }
+        plan:
+          type: object
+          required: [baseline, weekly_visitors, weekly_per_version, min_effect, rows, detectable_4_weeks, detectable_8_weeks, weeks]
+          properties:
+            baseline: { type: number, description: The goal's rate among those visitors. }
+            weekly_visitors: { type: number, description: "Visitors a week the flag reaches (its rollout applied)." }
+            weekly_per_version: { type: number, description: "Visitors a week of the smallest version, which the comparison waits on." }
+            min_effect: { type: number }
+            rows:
+              type: array
+              items:
+                type: object
+                required: [lift, visitors_per_version, weeks]
+                properties:
+                  lift: { type: number, description: "A true lift, such as 0.1 for +10%." }
+                  visitors_per_version: { type: integer, description: "Typical visitors per version before it is safe to stop; 0 when over 50 million." }
+                  weeks: { type: number }
+            detectable_4_weeks: { type: number, description: "The smallest lift likely to be safe to stop within 4 weeks; 0 when even +300% would take longer." }
+            detectable_8_weeks: { type: number }
+            weeks: { type: number, description: "Weeks the test is likely to need if the change moves the goal by min_effect; 0 when it can't be planned." }
+        warning: { type: string, description: 'Why the plan can''t work or will take over 8 weeks, in words; "" when it looks fine.' }
+    ABTestAIRun:
+      type: object
+      required: [id, kind, status, test_id, flag_id, brand_id, input, output, error, model, created_at, finished_at]
+      properties:
+        id: { type: string, format: uuid }
+        kind: { type: string, enum: [suggest, versions, summary] }
+        status: { type: string, enum: [queued, running, ready, failed] }
+        test_id: { type: [string, "null"], format: uuid }
+        flag_id: { type: [string, "null"], format: uuid }
+        brand_id: { type: [string, "null"], format: uuid }
+        input: { type: object, additionalProperties: true, description: What was asked. }
+        output:
+          description: |
+            The answer once ready, by kind. suggest: {suggestions: [{title, hypothesis, page, change, goal, versions: [{key,
+            description}], weeks, detectable_8_weeks, weekly_visitors, baseline, warning}]}, where the plan numbers come from
+            the engine. versions: {flag_key, fields, versions: [{key, content: {field: text}, rationale}]}. summary:
+            {recommendation, reason, winner, headline, summary, next_steps, computed_at}, where recommendation and reason
+            come from the engine.
+          oneOf:
+            - { type: object, additionalProperties: true }
+            - { type: "null" }
+        error: { type: string, description: 'Why it failed, in words; "" otherwise.' }
+        model: { type: string, description: The model that answered. }
+        created_at: { type: string, format: date-time }
+        finished_at: { type: [string, "null"], format: date-time }
     ABTestArm:
       type: object
       required: [variant, visitors, conversions]
@@ -24947,9 +25813,9 @@ components:
         variant: { type: string }
         chance_to_beat: { type: number, minimum: 0, maximum: 1, description: "The chance this version's true rate is above the control's (Bayesian)." }
         lift: { type: number, description: "Relative change of its rate over the control's: 0.18 is +18%." }
-        lift_low: { type: number, description: Low end of the 95% range of the lift. }
-        lift_high: { type: number, description: High end of the 95% range of the lift. }
-        p_value: { type: number, minimum: 0, maximum: 1, description: "Always-valid p-value: below 0.05 it is safe to stop, however often you looked." }
+        lift_low: { type: number, description: "Low end of the always-valid 95% range of the lift: from the same test as p_value, so the range leaves out 0 exactly when p_value is under 0.05. 0 with lift_high 0 while there is no evidence yet." }
+        lift_high: { type: number, description: High end of the always-valid 95% range of the lift. }
+        p_value: { type: number, minimum: 0, maximum: 1, description: "Always-valid p-value, the lowest over the test's daily looks: below 0.05 it is safe to stop, however often you looked, and it never rises again." }
     ABTestResults:
       type: object
       required: [test_id, status, control, winner, result]
@@ -24972,6 +25838,16 @@ components:
                   goal: { $ref: "#/components/schemas/ABTestGoal" }
                   arms: { type: array, items: { $ref: "#/components/schemas/ABTestArm" } }
                   comparisons: { type: [array, "null"], items: { $ref: "#/components/schemas/ABTestComparison" }, description: Each version against the control. }
+                  baseline: { type: number, description: "The control rate the test was tuned with; 0 when none was recorded." }
+                  days:
+                    type: array
+                    description: "First goal only: the cumulative arms at the end of each day (UTC) that saw a visitor join or convert; the last is today so far."
+                    items:
+                      type: object
+                      required: [date, arms]
+                      properties:
+                        date: { type: string, format: date }
+                        arms: { type: array, items: { $ref: "#/components/schemas/ABTestArm" } }
             sample_ratio_p: { type: number, description: "The chance of a split this uneven by luck." }
             sample_ratio_mismatch: { type: boolean, description: "True when sample_ratio_p is under 0.001: something (a redirect, a cache, bots) is breaking the split, so there is no winner." }
             min_effect: { type: number, description: The smallest change the p-values were tuned to detect. }
@@ -26755,7 +27631,8 @@ components:
       type: object
       description: A brand's page on a review platform, from its links, read once a day through the workspace's own page reader.
       required: [id, brand_id, platform, external_id, url, name, status, score, review_count, score_change_28d, review_count_change_28d,
-        outflare_score, momentum, reviews_kept, unanswered_negative, last_read_at, next_read_at, last_error, backfilled_at, created_at, updated_at]
+        outflare_score, momentum, reviews_kept, unanswered_negative, last_read_at, next_read_at, last_error, last_error_code, failures, last_failed_at,
+        backfilled_at, created_at, updated_at]
       properties:
         id: { type: string, format: uuid }
         brand_id: { type: [string, "null"], format: uuid }
@@ -26774,7 +27651,21 @@ components:
         unanswered_negative: { type: integer, description: Negative reviews from the last 90 days without a reply. }
         last_read_at: { type: [string, "null"], format: date-time }
         next_read_at: { type: string, format: date-time }
-        last_error: { type: [string, "null"], description: Why the last read failed; tried again the next day. }
+        last_error: { type: [string, "null"], description: "Why the last read failed, in words; null once a read works." }
+        last_error_code:
+          type: [string, "null"]
+          description: >-
+            Why the last read failed, in a word: blocked (the site showed a bot check, also in a browser),
+            page_not_found (check the address in the brand's links), not_a_review_page (the site answered but
+            showed no reviews; Outflare looks into these), save_failed (Outflare's side), or the page reader's own
+            (connector_auth, connector_quota, connector_unavailable, connector_invalid). New codes may be added.
+        failures:
+          type: integer
+          minimum: 0
+          description: >-
+            How many reads in a row failed. A failed read is tried again the same day: after 15 minutes, then 1
+            and 2 hours, then every 4 hours (the next day when only a person can fix it: the address).
+        last_failed_at: { type: [string, "null"], format: date-time, description: When a read last failed. }
         backfilled_at: { type: [string, "null"], format: date-time, description: When the first read took the page's earlier reviews. }
         created_at: { type: string, format: date-time }
         updated_at: { type: string, format: date-time }
@@ -26887,7 +27778,8 @@ components:
       type: object
       description: A page or profile of the brand's own, reached through the workspace's own connection.
       required: [id, channel, kind, brand_id, integration_id, external_id, handle, name, url, avatar_url, status, followers, following, posts,
-        followers_change_1d, followers_change_7d, followers_change_28d, last_synced_at, next_sync_at, last_error, created_at, updated_at]
+        followers_change_1d, followers_change_7d, followers_change_28d, last_synced_at, next_sync_at, last_error, last_error_code, failures,
+        last_failed_at, created_at, updated_at]
       properties:
         id: { type: string, format: uuid }
         channel: { $ref: "#/components/schemas/SocialAccountChannel" }
@@ -26908,7 +27800,21 @@ components:
         followers_change_28d: { type: [integer, "null"] }
         last_synced_at: { type: [string, "null"], format: date-time }
         next_sync_at: { type: string, format: date-time }
-        last_error: { type: [string, "null"] }
+        last_error: { type: [string, "null"], description: "Why the last read failed, in words; null once a read works." }
+        last_error_code:
+          type: [string, "null"]
+          description: >-
+            Why the last read failed, in a word: blocked (the site showed a bot check), page_not_found,
+            invalid_address (check the link), no_follower_count (the page showed no count: a login wall, a
+            suspended account, or the site changed its page), save_failed (Outflare's side), or the connection's
+            own (connector_auth, connector_quota, connector_unavailable, connector_invalid). New codes may be added.
+        failures:
+          type: integer
+          minimum: 0
+          description: >-
+            How many reads in a row failed. A failed read is tried again the same day: after 15 minutes, then 1
+            and 2 hours, then every 4 hours (the next regular read when only a person can fix it: the address).
+        last_failed_at: { type: [string, "null"], format: date-time, description: When a read last failed. }
         created_at: { type: string, format: date-time }
         updated_at: { type: string, format: date-time }
     SocialAccountDay:
@@ -27597,6 +28503,50 @@ components:
               spam_score: { type: [integer, "null"] }
               title: { type: string }
               first_seen: { type: string }
+    LinkPageCheck:
+      type: object
+      required: [status, http_status, final_url, redirect_to, title, author, lang, noindex, word_count, links_to_us, our_links, outbound, broken, page_kind, topic, fit, fit_reason, ai_error, suggested_target, suggested_reason, error_code, checked_at]
+      properties:
+        status: { type: string, enum: [up, gone, redirected, blocked, opted_out, unreachable, failed] }
+        http_status: { type: [integer, "null"] }
+        final_url: { type: string }
+        redirect_to: { type: string, description: "Where it redirects off the site, when it does." }
+        title: { type: string }
+        author: { type: string }
+        lang: { type: string }
+        noindex: { type: boolean }
+        word_count: { type: integer }
+        links_to_us: { type: boolean }
+        our_links:
+          type: array
+          items:
+            type: object
+            required: [url, anchor, nofollow]
+            properties:
+              url: { type: string }
+              anchor: { type: string }
+              nofollow: { type: boolean }
+        outbound: { type: integer, description: "Links to other sites." }
+        broken:
+          type: array
+          items:
+            type: object
+            required: [url, status, anchor, archive_url, archived_at]
+            properties:
+              url: { type: string }
+              status: { type: integer, description: "0 when the site didn't answer." }
+              anchor: { type: string }
+              archive_url: { type: string, description: "The Internet Archive's closest snapshot, or empty." }
+              archived_at: { type: string }
+        page_kind: { type: string, description: "resource_list, article, listicle, review, news, forum, directory, product, homepage or other; empty without AI." }
+        topic: { type: string }
+        fit: { type: [integer, "null"], description: "0 to 100: how well it fits the site, by the workspace's AI." }
+        fit_reason: { type: string }
+        ai_error: { type: [string, "null"], description: "Why the AI didn't read it: no_ai, ai_unavailable or ai_failed." }
+        suggested_target: { type: string, description: "The site's page that fits best." }
+        suggested_reason: { type: string }
+        error_code: { type: [string, "null"], description: "crawl_opted_out, robots_disallowed, site_unreachable or internal." }
+        checked_at: { type: string, format: date-time }
     LinkProspectMethod:
       type: string
       enum: [competitor_gap, broken_link, reclaim, competitor_dead_page, resource_page, asset, unlinked_mention, partner, manual]
@@ -27606,10 +28556,10 @@ components:
       enum: [prospect, excluded, pitched, replied, agreed, live, declined, removed]
     LinkProspectExcludedReason:
       type: string
-      enum: [links_to_us, competitor, customer, partner, opted_out, spam]
+      enum: [links_to_us, competitor, customer, partner, opted_out, spam, page_gone]
     LinkProspect:
       type: object
-      required: [id, site_id, brand_id, record_id, page_url, domain, method, target_url, evidence, domain_rating, traffic, spam_score, score, score_factors, stage, excluded_reason, stage_changed_at, pitched_at, agreed_at, live_at, ended_at, source, note, created_at, updated_at]
+      required: [id, site_id, brand_id, record_id, page_url, domain, method, target_url, evidence, domain_rating, traffic, spam_score, score, score_factors, stage, excluded_reason, stage_changed_at, pitched_at, agreed_at, live_at, ended_at, source, note, created_at, updated_at, check, contacts]
       properties:
         id: { type: string, format: uuid }
         site_id: { type: string, format: uuid, description: "The SEO site that would get the link." }
@@ -27644,6 +28594,87 @@ components:
         note: { type: string }
         created_at: { type: string, format: date-time }
         updated_at: { type: string, format: date-time }
+        check:
+          description: OutflareBot's latest check of the page (POST .../link-prospects/{id}/check), or null.
+          oneOf:
+            - { $ref: "#/components/schemas/LinkPageCheck" }
+            - { type: "null" }
+        contacts:
+          type: array
+          description: Who to write to there, the surest first. Each is a person record on the website's company.
+          items:
+            type: object
+            required: [record_id, name, email, source, confidence]
+            properties:
+              record_id: { type: string, format: uuid }
+              name: { type: string }
+              email: { type: [string, "null"] }
+              source: { type: string, enum: [author, page, contact_page] }
+              confidence: { type: integer, minimum: 0, maximum: 100 }
+    NewsSearchPurpose:
+      type: string
+      enum: [topic, coverage]
+      description: "topic: a subject to follow. coverage: a brand, whose articles become its coverage."
+    NewsTimeRange:
+      type: string
+      enum: [day, week, month]
+      description: How far back each run looks.
+    NewsSearchStatus:
+      type: string
+      enum: [active, paused]
+    CoverageStatus:
+      type: string
+      enum: [new, confirmed, dismissed]
+    NewsSearch:
+      type: object
+      required: [id, brand_id, name, query, purpose, locale, time_range, check_every_hours, status, last_checked_at, next_check_at, last_error_code, articles, created_at, updated_at]
+      properties:
+        id: { type: string, format: uuid }
+        brand_id: { type: [string, "null"], description: "The brand it is for; null for a shared topic." }
+        name: { type: string }
+        query: { type: string }
+        purpose: { $ref: "#/components/schemas/NewsSearchPurpose" }
+        locale: { type: string }
+        time_range: { $ref: "#/components/schemas/NewsTimeRange" }
+        check_every_hours: { type: integer }
+        status: { $ref: "#/components/schemas/NewsSearchStatus" }
+        last_checked_at: { type: [string, "null"], format: date-time }
+        next_check_at: { type: string, format: date-time }
+        last_error_code: { type: [string, "null"], description: "Why the last run failed, such as connector_needed or usage_limit_reached; null when it worked.", examples: [connector_needed] }
+        articles: { type: integer, description: "Articles it has found." }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    NewsArticle:
+      type: object
+      required: [id, url, domain, title, snippet, search_ids, first_seen_at, last_seen_at]
+      properties:
+        id: { type: string, format: uuid }
+        url: { type: string }
+        domain: { type: string, description: "The outlet's website, without www." }
+        title: { type: string }
+        snippet: { type: string }
+        search_ids: { type: array, items: { type: string, format: uuid }, description: "The searches that found it, first first." }
+        first_seen_at: { type: string, format: date-time }
+        last_seen_at: { type: string, format: date-time }
+    Coverage:
+      type: object
+      required: [id, brand_id, article_id, url, domain, title, snippet, record_id, search_id, status, linked, source, found_at, status_changed_at, updated_at]
+      properties:
+        id: { type: string, format: uuid }
+        brand_id: { type: string, format: uuid }
+        article_id: { type: string, format: uuid }
+        url: { type: string }
+        domain: { type: string, description: "The outlet's website, without www." }
+        title: { type: string }
+        snippet: { type: string }
+        record_id: { type: string, format: uuid, description: "The outlet's company record." }
+        search_id: { type: [string, "null"], description: "The search that found it." }
+        status: { $ref: "#/components/schemas/CoverageStatus" }
+        linked: { type: [boolean, "null"], description: "Whether the article links to the brand's site; null until checked." }
+        source: { type: string, enum: [news_watch, manual] }
+        found_at: { type: string, format: date-time }
+        status_changed_at: { type: string, format: date-time }
+        updated_at: { type: [string, "null"], format: date-time }
     SEOCompetitor:
       type: object
       required: [id, site_id, brand_id, host, name, aliases, status, source, common_keywords, record_id, title, description, pages, checked_at, check_error, numbers, created_at, updated_at]
@@ -27942,7 +28973,7 @@ components:
             type: object
             required: [task, name, description, model, price, price_source, custom]
             properties:
-              task: { type: string, enum: [plan, turn, check_in, reply_labelling, classify_domain, ai_visibility, social_replies, social_posts, email_verification, fix_tickets, review_replies] }
+              task: { type: string, enum: [plan, turn, check_in, reply_labelling, classify_domain, ai_visibility, social_replies, social_posts, email_verification, fix_tickets, review_replies, link_page_reading, ab_tests] }
               name: { type: string }
               description: { type: string }
               model: { type: [string, "null"], description: Null when no model can run yet. }
@@ -29737,7 +30768,7 @@ components:
         updated_at: { type: string, format: date-time }
     CompanyContext:
       type: object
-      required: [company, website, about, goals, voice, rules, notes, brands, version, updated_at, updated_by, missing, ask_for_missing]
+      required: [company, website, about, goals, voice, rules, notes, brands, logo_url, colors, version, updated_at, updated_by, missing, ask_for_missing]
       properties:
         company: { type: string, description: The company's name. }
         website: { type: string, description: "Its main site, such as acme-com.example." }
@@ -29747,6 +30778,8 @@ components:
         rules: { type: string, description: Things never to do. }
         notes: { type: string, description: "Everything else, in Markdown: proof points, competitors, past results." }
         brands: { type: string, description: "How the company's brands relate to each other, for a company that markets more than one. Each brand's own context is at GET /brands/{brand}/context." }
+        logo_url: { type: string, description: "The company's logo (https), or empty. The consent banner's brand preset shows it." }
+        colors: { $ref: "#/components/schemas/LookColors" }
         version: { type: integer, description: Bumped on every real change. }
         updated_at: { type: [string, "null"], format: date-time }
         updated_by: { type: [string, "null"], description: Who changed it last. }
@@ -30040,6 +31073,8 @@ components:
         rules: { type: string, maxLength: 4000 }
         notes: { type: string, maxLength: 100000 }
         brands: { type: string, maxLength: 4000 }
+        logo_url: { type: string, maxLength: 2000, description: "An https address of the company's logo; empty clears it." }
+        colors: { $ref: "#/components/schemas/LookColors" }
         version: { type: integer, description: The version you read; the edit fails with 409 context_changed if the context changed since. }
         onboarding_dismissed: { type: boolean, description: True stops agents asking for the missing fields; false asks again. }
     WorkspaceContext:
@@ -30576,11 +31611,12 @@ components:
         record_id: { type: string, format: uuid, description: "Whose item it is: the record itself or, on a company's timeline, one of its people." }
     Consent:
       type: object
-      required: [id, record_id, channel, topic, purpose, status, source, evidence, occurred_at, created_by, created_at]
+      required: [id, record_id, anonymous_id, channel, topic, purpose, status, source, evidence, occurred_at, created_by, created_at]
       properties:
         id: { type: string, format: uuid }
         record_id: { type: string, format: uuid }
-        channel: { type: string, enum: [email, sms, push, whatsapp, in_app, ads] }
+        anonymous_id: { type: [string, "null"], description: "The browser the choice was made in, for a choice made on the site's consent banner (source consent_banner) before the person was known." }
+        channel: { type: string, enum: [email, sms, push, whatsapp, in_app, ads, web], description: "web: the consent banner's categories (purpose analytics, marketing or preferences); ads: ad data (purpose ad_storage, ad_user_data or ad_personalization)." }
         topic: { type: string, description: "A subscription topic's key, or empty for the whole channel." }
         purpose: { type: string, example: marketing }
         status: { type: string, enum: [granted, withdrawn] }
@@ -30594,7 +31630,7 @@ components:
       additionalProperties: false
       required: [channel, status]
       properties:
-        channel: { type: string, enum: [email, sms, push, whatsapp, in_app, ads] }
+        channel: { type: string, enum: [email, sms, push, whatsapp, in_app, ads, web] }
         topic: { type: string, description: "A subscription topic's key, such as product_updates. Empty for the whole channel." }
         purpose: { type: string, description: Default marketing. }
         status: { type: string, enum: [granted, withdrawn] }
@@ -30603,7 +31639,7 @@ components:
         occurred_at: { type: string, format: date-time, description: Default now. }
     Brand:
       type: object
-      required: [id, name, handle, website, domains, platforms, links, status, business_model, revenue_models, context_version, counts, created_at, updated_at]
+      required: [id, name, handle, website, domains, platforms, links, status, business_model, revenue_models, logo_url, colors, context_version, counts, created_at, updated_at]
       properties:
         id: { type: string, format: uuid }
         name: { type: string, example: Repocket }
@@ -30615,6 +31651,8 @@ components:
         status: { type: string, enum: [active, archived], description: "archived: hidden from pickers; its records are kept." }
         business_model: { type: [string, "null"], example: b2b_saas_self_serve, description: "What the brand does: a model id from GET /v1/business-models; null until picked." }
         revenue_models: { type: array, items: { type: string }, example: [subscription], description: "How its customers pay: ids from GET /v1/business-models." }
+        logo_url: { type: string, description: "The brand's own logo (https) where it differs from the company's; empty for the company's." }
+        colors: { $ref: "#/components/schemas/LookColors" }
         context_version: { type: integer, description: The brand context's version. }
         counts:
           type: object
@@ -30679,6 +31717,152 @@ components:
         status: { type: string, enum: [active, archived], description: Updates only. }
         business_model: { type: string, description: "A model id from GET /v1/business-models; empty clears it. Changing it records brand.business_model_changed." }
         revenue_models: { type: array, items: { type: string }, description: "Ids from GET /v1/business-models; replaces the list." }
+        logo_url: { type: string, maxLength: 2000, description: "An https address of the brand's own logo; empty for the company's." }
+        colors: { $ref: "#/components/schemas/LookColors" }
+    ConsentBanner:
+      type: object
+      required: [site_key_id, config, version, consent_version, saved, look, updated_at]
+      properties:
+        site_key_id: { type: string, format: uuid }
+        config: { $ref: "#/components/schemas/ConsentBannerConfig" }
+        version: { type: integer, description: "Goes up on every save; 0 until first saved. Each choice records it." }
+        consent_version: { type: integer, description: "Goes up when visitors are to be asked again." }
+        saved: { type: boolean, description: "False until first saved: config is then the defaults and no banner shows." }
+        look:
+          type: object
+          required: [logo_url, colors]
+          description: "The logo and colours the brand preset uses when config sets none: the key's brand's, else the company's (Company hub)."
+          properties:
+            logo_url: { type: string }
+            colors: { $ref: "#/components/schemas/LookColors" }
+        updated_at: { type: [string, "null"], format: date-time }
+    ConsentBannerConfig:
+      type: object
+      required: [enabled, regions, frameworks, categories, layout, position, theme, colors, show_logo, logo_url, reopen_button, policy_url, reask_after_days, texts, custom_css, custom_html]
+      properties:
+        enabled: { type: boolean, description: "Whether the site shows the banner. Off, the script keeps its data-consent behaviour, and a site's own banner can still call outflare.consent." }
+        regions: { $ref: "#/components/schemas/ConsentBannerRegions" }
+        frameworks: { $ref: "#/components/schemas/ConsentBannerFrameworks" }
+        categories: { $ref: "#/components/schemas/ConsentBannerCategories" }
+        layout: { type: string, enum: [bar, box, modal], description: "bar: across the page; box: a card in a corner; modal: in the middle, over the page." }
+        position: { type: string, enum: [bottom, top, bottom_left, bottom_right, center] }
+        theme: { type: string, enum: [light, dark, brand], description: "brand: the colours below, else the brand's or the company's." }
+        colors: { $ref: "#/components/schemas/LookColors" }
+        show_logo: { type: boolean }
+        logo_url: { type: string, description: "The logo shown; empty for the brand's or the company's." }
+        reopen_button: { type: boolean, description: "A small button, once the visitor chose, to change their mind. Links with data-outflare-consent-open do the same." }
+        policy_url: { type: string, description: "The cookie policy the banner links to: an https address or a path on the site; empty for none." }
+        reask_after_days: { type: integer, minimum: 0, maximum: 730, description: "After this many days an opt-in choice is asked again; 0 for never. Default 365." }
+        texts:
+          type: object
+          description: "The banner's words by language (en, de, pt-br). Any left empty come from Outflare's own, in the visitor's language where it has them (en, de, fr, es, it, nl, pt), else English."
+          additionalProperties: { $ref: "#/components/schemas/ConsentBannerTexts" }
+        custom_css: { type: string, maxLength: 20480, description: "Added after the preset's styles, inside the banner." }
+        custom_html: { type: string, maxLength: 20480, description: "Replaces the banner's markup. Buttons with data-of-consent=accept, reject, customize or save and checkboxes with data-of-category=analytics, marketing or preferences work as in the presets, and any element can call outflare.consent()." }
+    ConsentBannerInput:
+      type: object
+      additionalProperties: false
+      description: "Any fields of ConsentBannerConfig; those left out keep their value."
+      properties:
+        enabled: { type: boolean }
+        regions: { $ref: "#/components/schemas/ConsentBannerRegions" }
+        frameworks: { $ref: "#/components/schemas/ConsentBannerFrameworks" }
+        categories: { $ref: "#/components/schemas/ConsentBannerCategories" }
+        layout: { type: string, enum: [bar, box, modal] }
+        position: { type: string, enum: [bottom, top, bottom_left, bottom_right, center] }
+        theme: { type: string, enum: [light, dark, brand] }
+        colors: { $ref: "#/components/schemas/LookColors" }
+        show_logo: { type: boolean }
+        logo_url: { type: string, maxLength: 2000 }
+        reopen_button: { type: boolean }
+        policy_url: { type: string, maxLength: 2000 }
+        reask_after_days: { type: integer, minimum: 0, maximum: 730 }
+        texts: { type: object, additionalProperties: { $ref: "#/components/schemas/ConsentBannerTexts" } }
+        custom_css: { type: string, maxLength: 20480 }
+        custom_html: { type: string, maxLength: 20480 }
+    ConsentBannerRegions:
+      type: object
+      description: |
+        The rule for visitors in each region. opt_in: optional categories stay off until the visitor accepts (GDPR,
+        UK GDPR, the Swiss FADP). opt_out: on until the visitor opts out of the sale or sharing of their data, with the
+        banner saying so once (US state laws such as the CCPA). notice: on, with the banner saying so once. none: on,
+        no banner. Defaults: eea opt_in, us opt_out, other none.
+      properties:
+        eea: { type: string, enum: [opt_in, opt_out, notice, none], description: "The EEA, the UK and Switzerland." }
+        us: { type: string, enum: [opt_in, opt_out, notice, none] }
+        other: { type: string, enum: [opt_in, opt_out, notice, none] }
+    ConsentBannerFrameworks:
+      type: object
+      description: "The signals the banner follows and sets, each on by default. IAB TCF v2.2 isn't supported yet: it needs Outflare registered with IAB Europe as a CMP, and can be added if a publisher needs it."
+      properties:
+        gpc: { type: boolean, description: "Honour Global Privacy Control: no marketing for browsers that send it, unless the visitor turns it on." }
+        google_consent_mode: { type: boolean, description: "Set Google Consent Mode v2 (ad_storage, ad_user_data, ad_personalization, analytics_storage, and the preferences storages) through gtag." }
+        meta: { type: boolean, description: "fbq('consent', 'grant' or 'revoke') with marketing." }
+        tiktok: { type: boolean, description: "ttq.holdConsent, grantConsent and revokeConsent with marketing." }
+        microsoft: { type: boolean, description: "Microsoft UET consent mode (ad_storage) with marketing." }
+    ConsentBannerCategories:
+      type: object
+      description: "The categories the banner asks about. Necessary is always on and always shown."
+      properties:
+        analytics: { type: boolean }
+        marketing: { type: boolean }
+        preferences: { type: boolean }
+    ConsentBannerTexts:
+      type: object
+      description: "The banner's words in one language; empty ones come from Outflare's own."
+      properties:
+        title: { type: string }
+        body: { type: string }
+        accept: { type: string }
+        reject: { type: string }
+        customize: { type: string }
+        save: { type: string }
+        policy: { type: string, description: The cookie policy link. }
+        settings: { type: string, description: The button that opens the banner again. }
+        opt_out: { type: string, description: "The reject button where the rule is opt_out: Do not sell or share my personal information." }
+        ok: { type: string, description: "The button that closes a notice." }
+        necessary: { type: string }
+        necessary_desc: { type: string }
+        analytics: { type: string }
+        analytics_desc: { type: string }
+        marketing: { type: string }
+        marketing_desc: { type: string }
+        preferences: { type: string }
+        preferences_desc: { type: string }
+        always_on: { type: string }
+        gpc_honoured: { type: string }
+        opt_out_confirmation: { type: string }
+    SiteConsentBanner:
+      type: object
+      required: [enabled, version, consent_version, country, regions, frameworks, categories, layout, position, theme, colors, logo_url, reopen_button, policy_url, reask_after_days, lang, texts, custom_css, custom_html]
+      properties:
+        enabled: { type: boolean }
+        version: { type: integer }
+        consent_version: { type: integer }
+        country: { type: string, description: "The visitor's country from the site's own proxy, or empty." }
+        regions: { $ref: "#/components/schemas/ConsentBannerRegions" }
+        frameworks: { $ref: "#/components/schemas/ConsentBannerFrameworks" }
+        categories: { $ref: "#/components/schemas/ConsentBannerCategories" }
+        layout: { type: string, enum: [bar, box, modal] }
+        position: { type: string, enum: [bottom, top, bottom_left, bottom_right, center] }
+        theme: { type: string, enum: [light, dark, brand] }
+        colors: { $ref: "#/components/schemas/LookColors" }
+        logo_url: { type: string, description: "The logo to show, or empty for none." }
+        reopen_button: { type: boolean }
+        policy_url: { type: string }
+        reask_after_days: { type: integer }
+        lang: { type: string, description: The language of texts. }
+        texts: { $ref: "#/components/schemas/ConsentBannerTexts" }
+        custom_css: { type: string }
+        custom_html: { type: string }
+    LookColors:
+      type: object
+      required: [primary, background, text]
+      description: "Hex colours (#rgb or #rrggbb), each empty for none. A brand's win over the company's where set; the consent banner's brand preset uses them."
+      properties:
+        primary: { type: string, example: "#1d4ed8", description: Buttons and links. }
+        background: { type: string, example: "#ffffff", description: "Panels, such as the consent banner." }
+        text: { type: string, example: "#111827", description: Text on the background. }
     BusinessModels:
       type: object
       required: [groups, models, revenue_models]

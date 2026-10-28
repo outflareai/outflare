@@ -105,6 +105,7 @@ export type UiEvent =
   | "ui.tracking_verified" // the guided install saw the brand's first visit while the page was open (brand_id)
   | "ui.site_key_duplicates_shown" // Website tracking listed spare scripts for a brand (extra: how many)
   | "ui.site_key_second_asked" // Add a site when the brand already has a script, and what they chose (choice: edit, second, cancel)
+  | "ui.consent_banner_opened" // a site's consent banner settings opened on Website tracking (site_key_id)
   | "ui.setup_method_used" // a way to do an install step picked (step, method: gtm, dns, developer, ai, manual; how: copied, email, claude, chatgpt)
   | "ui.indexability_filtered" // a site's indexability report filtered by verdict or issue (filter, value: the verdict or issue id, or all)
   | "ui.logs_filtered" // a filter on the Logs page changed (filter: which one)

@@ -6,6 +6,24 @@ Each pull request that changes what Outflare does adds a change note in [changes
 
 ## [Unreleased]
 
+## [0.21.0] - 2026-10-28
+
+### Added
+
+- News watch: save news searches that run on a schedule through your own Geonode account, follow a topic and who writes about it, and keep every article about your brand as its coverage, on the outlet's company record, to confirm or dismiss.
+- Consent banner: the website script now shows your cookie consent banner itself. It follows each region's law (ask first in Europe, opt-out in the US), Global Privacy Control, Google Consent Mode v2 and the Meta, TikTok and Microsoft signals, holds back tags until they're allowed, and keeps each visitor's choice as a consent that joins their record when they sign up.
+- Link building checks each prospect's page for you: whether it's up, whether it already links to you, which of its links are broken (with what the Internet Archive kept), what your own AI makes of it, which of your pages to offer, and who to contact. Lost links can be added as prospects to win back in one click.
+
+### Changed
+
+- A/B tests: see how long a test will take on your real traffic before you start it, get test ideas and new versions of your copy from your own AI model, and a plain-English summary of results. The lift range now always agrees with "safe to stop", and a chart shows each version day by day.
+- Companies added by a tool, such as an extension finding companies, now record which tool added them, like people already do.
+- CRM → Lead finder shows how far each run has got, step by step: how many companies are waiting, being read, judged or reviewed, which were set aside and why, and which step is slowest. A run that pauses (at its page or AI limit, or for a connection to fix) says why, and Resume carries it on, raising the limit first if needed.
+
+### Fixed
+
+- Review pages, social profiles and rank checks that fail to read are now tried again the same day (after 15 minutes, then 1, 2 and every 4 hours), so day-by-day numbers have no gaps. Review pages showing a bot check are read again in a browser. Each says why its last read failed, with a Try again button.
+
 ## [0.20.0] - 2026-10-28
 
 ### Changed

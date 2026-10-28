@@ -13,6 +13,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/outflareai/outflare/engine/internal/auth"
+	"github.com/outflareai/outflare/engine/internal/linkbuild"
 	"github.com/outflareai/outflare/engine/internal/seosync"
 )
 
@@ -26,6 +27,9 @@ func (s *Server) routesLinkProspects(mux *http.ServeMux) {
 	read, manage := auth.ScopeSEORead, auth.ScopeSEOManage
 	mux.HandleFunc("GET /v1/workspaces/{ws}/link-prospects", s.inBrand(read, s.listLinkProspects))
 	mux.HandleFunc("POST /v1/workspaces/{ws}/link-prospects", s.inBrand(manage, s.addLinkProspects))
+	mux.HandleFunc("POST /v1/workspaces/{ws}/link-prospects/reclaim", s.inBrand(manage, s.reclaimLinkProspects))
+	mux.HandleFunc("POST /v1/workspaces/{ws}/link-prospects/check", s.inBrand(manage, s.checkLinkProspects))
+	mux.HandleFunc("POST /v1/workspaces/{ws}/link-prospects/{prospect}/check", s.inBrand(manage, s.checkLinkProspect))
 	mux.HandleFunc("GET /v1/workspaces/{ws}/link-prospects/{prospect}", s.inBrand(read, s.getLinkProspect))
 	mux.HandleFunc("PATCH /v1/workspaces/{ws}/link-prospects/{prospect}", s.inBrand(manage, s.updateLinkProspect))
 	mux.HandleFunc("DELETE /v1/workspaces/{ws}/link-prospects/{prospect}", s.inBrand(manage, s.deleteLinkProspect))
@@ -57,18 +61,30 @@ type linkProspectView struct {
 	Note           string                `json:"note"`
 	CreatedAt      time.Time             `json:"created_at"`
 	UpdatedAt      time.Time             `json:"updated_at"`
+	// Check is OutflareBot's latest check of the page, or null; Contacts
+	// who to write to there (person records), the surest first.
+	Check    json.RawMessage `json:"check"`
+	Contacts json.RawMessage `json:"contacts"`
 }
 
 const linkProspectCols = `p.id::text, p.site_id::text, p.brand_id::text, p.record_id::text, p.page_url, p.method, p.target_url, p.evidence,
 	p.domain_rating, p.traffic, p.spam_score, p.score, p.score_factors, p.stage, p.excluded_reason, p.stage_changed_at,
-	p.pitched_at, p.agreed_at, p.live_at, p.ended_at, p.source, p.note, p.created_at, p.updated_at`
+	p.pitched_at, p.agreed_at, p.live_at, p.ended_at, p.source, p.note, p.created_at, p.updated_at,
+	(SELECT to_jsonb(c) - 'prospect_id' - 'workspace_id' FROM link_page_checks c WHERE c.prospect_id = p.id),
+	COALESCE((SELECT jsonb_agg(jsonb_build_object('record_id', k.record_id, 'name', r.name, 'source', k.source, 'confidence', k.confidence,
+		'email', (SELECT i.value FROM record_identities i WHERE i.record_id = k.record_id AND i.namespace = 'email' AND i.valid_to IS NULL
+			ORDER BY i.verified DESC, i.created_at LIMIT 1)) ORDER BY k.confidence DESC, k.found_at)
+		FROM link_prospect_contacts k JOIN records r ON r.id = k.record_id WHERE k.prospect_id = p.id), '[]'::jsonb)`
 
 func scanLinkProspect(row pgx.Row) (linkProspectView, error) {
 	var v linkProspectView
 	var factors []byte
 	err := row.Scan(&v.ID, &v.SiteID, &v.BrandID, &v.RecordID, &v.PageURL, &v.Method, &v.TargetURL, &v.Evidence,
 		&v.DomainRating, &v.Traffic, &v.SpamScore, &v.Score, &factors, &v.Stage, &v.ExcludedReason, &v.StageChangedAt,
-		&v.PitchedAt, &v.AgreedAt, &v.LiveAt, &v.EndedAt, &v.Source, &v.Note, &v.CreatedAt, &v.UpdatedAt)
+		&v.PitchedAt, &v.AgreedAt, &v.LiveAt, &v.EndedAt, &v.Source, &v.Note, &v.CreatedAt, &v.UpdatedAt, &v.Check, &v.Contacts)
+	if v.Check == nil {
+		v.Check = json.RawMessage("null")
+	}
 	_, v.Domain = seosync.ProspectPage(v.PageURL)
 	v.ScoreFactors = []seosync.ScoreFactor{}
 	_ = json.Unmarshal(factors, &v.ScoreFactors)
@@ -341,6 +357,161 @@ func (s *Server) addLinkProspects(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"data": data, "added": res.Added, "existing": res.Existing, "excluded": res.Excluded})
+}
+
+// reclaimLinkProspects adds a site's recently lost links as prospects to
+// win back. Free: the links are already stored.
+func (s *Server) reclaimLinkProspects(w http.ResponseWriter, r *http.Request) {
+	a := accessFrom(r.Context())
+	var in struct {
+		SiteID    string   `json:"site_id"`
+		Days      *int     `json:"days"`
+		MinRating *float64 `json:"min_rating"`
+	}
+	if !decode(w, r, &in) {
+		return
+	}
+	req := seosync.ReclaimRequest{Days: 90}
+	if in.Days != nil {
+		req.Days = *in.Days
+	}
+	if in.MinRating != nil {
+		req.MinRating = *in.MinRating
+	}
+	switch {
+	case !validUUID(in.SiteID):
+		writeError(w, r, http.StatusBadRequest, "invalid_request", "site_id is an SEO site's id")
+		return
+	case req.Days < 1 || req.Days > 365:
+		writeError(w, r, http.StatusBadRequest, "invalid_request", "days is 1 to 365")
+		return
+	case req.MinRating < 0 || req.MinRating > 100:
+		writeError(w, r, http.StatusBadRequest, "invalid_request", "min_rating is 0 to 100")
+		return
+	}
+	ctx := r.Context()
+	sites, err := s.loadSEOSites(ctx, a.WorkspaceID, &in.SiteID, brandSel{in: a.Brands})
+	if err != nil {
+		s.internal(w, r, err)
+		return
+	}
+	if len(sites) != 1 {
+		writeError(w, r, http.StatusNotFound, "not_found", "site not found")
+		return
+	}
+	site := seosync.ProspectSite{ID: sites[0].ID, BrandID: sites[0].BrandID, Host: sites[0].Host}
+	if !a.writes(nil, site.BrandID) {
+		writeError(w, r, http.StatusForbidden, "forbidden", string(errSharedRecord))
+		return
+	}
+	var res seosync.ProspectsAdded
+	err = pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
+		var err error
+		res, err = seosync.ReclaimProspects(ctx, tx, a.WorkspaceID, site, req, actorRef(a), s.prospectRecorder(a))
+		return err
+	})
+	if s.allocError(w, r, err) {
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"added": res.Added, "existing": res.Existing, "excluded": res.Excluded})
+}
+
+// checkLinkProspect queues OutflareBot's check of one prospect's page,
+// at most once an hour.
+func (s *Server) checkLinkProspect(w http.ResponseWriter, r *http.Request) {
+	a := accessFrom(r.Context())
+	p, ok := s.linkProspectFor(w, r, a)
+	if !ok {
+		return
+	}
+	if !a.writes(nil, p.BrandID) {
+		writeError(w, r, http.StatusForbidden, "forbidden", string(errSharedRecord))
+		return
+	}
+	ctx := r.Context()
+	err := pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
+		if _, err := linkbuild.StartCheck(ctx, tx, a.WorkspaceID, p.ID, time.Now()); err != nil {
+			return err
+		}
+		data := map[string]any{"site_id": p.SiteID, "record_id": p.RecordID, "method": p.Method, "count": 1}
+		return recordWithProps(ctx, tx, &a.principal, a.WorkspaceID, "link_prospect.check_requested", "link_prospect", p.ID, data, data)
+	})
+	if s.allocError(w, r, err) {
+		return
+	}
+	writeJSON(w, http.StatusAccepted, map[string]any{"queued": true})
+}
+
+// maxChecksQueued is how many prospects one call checks.
+const maxChecksQueued = 100
+
+// checkLinkProspects queues checks of a site's prospects: by default those
+// to pitch that were never checked, best first.
+func (s *Server) checkLinkProspects(w http.ResponseWriter, r *http.Request) {
+	a := accessFrom(r.Context())
+	var in struct {
+		SiteID string `json:"site_id"`
+		Again  bool   `json:"again"`
+		Limit  int    `json:"limit"`
+	}
+	if !decode(w, r, &in) {
+		return
+	}
+	if !validUUID(in.SiteID) {
+		writeError(w, r, http.StatusBadRequest, "invalid_request", "site_id is an SEO site's id")
+		return
+	}
+	if in.Limit == 0 {
+		in.Limit = maxChecksQueued
+	}
+	if in.Limit < 1 || in.Limit > maxChecksQueued {
+		writeError(w, r, http.StatusBadRequest, "invalid_request", "limit is 1 to "+strconv.Itoa(maxChecksQueued))
+		return
+	}
+	ctx := r.Context()
+	sites, err := s.loadSEOSites(ctx, a.WorkspaceID, &in.SiteID, brandSel{in: a.Brands})
+	if err != nil {
+		s.internal(w, r, err)
+		return
+	}
+	if len(sites) != 1 {
+		writeError(w, r, http.StatusNotFound, "not_found", "site not found")
+		return
+	}
+	if !a.writes(nil, sites[0].BrandID) {
+		writeError(w, r, http.StatusForbidden, "forbidden", string(errSharedRecord))
+		return
+	}
+	queued := 0
+	err = pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
+		rows, err := tx.Query(ctx, `SELECT p.id::text FROM link_prospects p
+			WHERE p.workspace_id = $1 AND p.site_id = $2 AND p.stage = 'prospect'
+			  AND ($3 OR NOT EXISTS (SELECT 1 FROM link_page_checks c WHERE c.prospect_id = p.id))
+			ORDER BY p.score DESC, p.created_at LIMIT $4`, a.WorkspaceID, in.SiteID, in.Again, in.Limit)
+		if err != nil {
+			return err
+		}
+		ids, err := pgx.CollectRows(rows, pgx.RowTo[string])
+		if err != nil {
+			return err
+		}
+		now := time.Now()
+		for _, id := range ids {
+			ok, err := linkbuild.StartCheck(ctx, tx, a.WorkspaceID, id, now)
+			if err != nil {
+				return err
+			}
+			if ok {
+				queued++
+			}
+		}
+		data := map[string]any{"site_id": in.SiteID, "count": queued}
+		return recordWithProps(ctx, tx, &a.principal, a.WorkspaceID, "link_prospect.check_requested", "seo_site", in.SiteID, data, data)
+	})
+	if s.allocError(w, r, err) {
+		return
+	}
+	writeJSON(w, http.StatusAccepted, map[string]any{"queued": true, "count": queued})
 }
 
 // uniqueIDs keeps the first of each id, in order.

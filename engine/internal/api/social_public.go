@@ -81,12 +81,12 @@ func (p publicProfiles) SocialAccounts(context.Context, *connectors.Client, conn
 }
 
 // SocialStats reads the profile page. A page with no follower count (a
-// login wall, a suspended account) is a refusal, kept on the account and
-// tried again the next day, never a zero.
+// bot check, a login wall, a suspended account) is a refusal kept on the
+// account and tried again the same day (retry.After), never a zero.
 func (p publicProfiles) SocialStats(ctx context.Context, cl *connectors.Client, creds connectors.Creds, a connectors.SocialAccount) (connectors.SocialStats, error) {
 	pub, ok := sociallinks.PublicProfile(p.channel, a.URL)
 	if !ok {
-		return connectors.SocialStats{}, connectors.Errf(connectors.ErrInvalid, "%s is not a profile Outflare can read", a.URL)
+		return connectors.SocialStats{}, readFailed(readInvalidAddress, "%s is not a profile Outflare can read", a.URL)
 	}
 	// Pages that draw their counts with scripts need them run; the JSON
 	// answers (GitHub, Reddit, Discord) don't.
@@ -95,12 +95,15 @@ func (p publicProfiles) SocialStats(ctx context.Context, cl *connectors.Client, 
 	if err != nil {
 		return connectors.SocialStats{}, err
 	}
-	if page.Status == 404 {
-		return connectors.SocialStats{}, connectors.Errf(connectors.ErrInvalid, "there is no public profile at %s", pub.URL)
+	if page.Status == 404 || page.Status == 410 {
+		return connectors.SocialStats{}, readFailed(readNotFound, "there is no public profile at %s", pub.URL)
 	}
 	prof, ok := sociallinks.ReadProfile(p.channel, page.HTML)
 	if !ok {
-		return connectors.SocialStats{}, connectors.Errf(connectors.ErrInvalid, "the profile page showed no follower count")
+		if page.Blocked() {
+			return connectors.SocialStats{}, readFailed(readBlocked, "the site showed a bot check instead of the profile; Outflare tries again later today")
+		}
+		return connectors.SocialStats{}, readFailed(readNoCount, "the profile page showed no follower count")
 	}
 	return connectors.SocialStats{Followers: prof.Followers, Following: prof.Following, Posts: prof.Posts, Name: prof.Name, AvatarURL: prof.AvatarURL}, nil
 }

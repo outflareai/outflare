@@ -26,16 +26,21 @@ type Comparison struct {
 	// Chance this version's true rate is above the control's (Bayesian,
 	// with a flat Beta(1,1) prior on each).
 	ChanceToBeat float64 `json:"chance_to_beat"`
-	// Relative lift of the observed rate over the control's, and a 95%
-	// range for it.
+	// Relative lift of the observed rate over the control's, and an
+	// always-valid 95% range for it: the same sequential test as PValue,
+	// inverted, so the range excludes 0 exactly when PValue is under 0.05.
 	Lift     float64 `json:"lift"`
 	LiftLow  float64 `json:"lift_low"`
 	LiftHigh float64 `json:"lift_high"`
 	// An always-valid p-value (mSPRT): it stays honest however often the
 	// results are looked at, so people may check every day and stop when
-	// it is low, unlike a classic p-value.
+	// it is low, unlike a classic p-value. It is the lowest over the
+	// test's daily looks, so it never rises again.
 	PValue float64 `json:"p_value"`
 }
+
+// Alpha is the false-winner rate the always-valid test and range keep to.
+const Alpha = 0.05
 
 // DefaultMinEffect is the smallest relative change a test looks for when
 // it doesn't say: +25% of the control's rate. MinEffectLow and
@@ -46,21 +51,67 @@ const (
 	MinEffectHigh    = 1.0
 )
 
-// Compare sets each arm against the first (the control). minEffect is the
-// smallest relative change worth detecting (SequentialP); 0 means
-// DefaultMinEffect.
+// Compare sets each arm against the first (the control) at one look.
+// minEffect is the smallest relative change worth detecting (SequentialP);
+// 0 means DefaultMinEffect.
 func Compare(arms []Arm, minEffect float64) []Comparison {
-	if len(arms) < 2 {
+	return CompareSeries([][]Arm{arms}, minEffect, 0)
+}
+
+// CompareSeries sets each version against the control over a test's looks:
+// the cumulative arms at the end of each day, control first, the last one
+// being now. The chance to beat and the lift come from the last look; the
+// p-value is the lowest over the looks and the range their intersection,
+// as an always-valid test allows (Johari et al. 2017), so neither moves
+// back once the evidence is in.
+//
+// baseline is the control's expected rate, recorded when the test started,
+// which fixes the mixing spread (minEffect × baseline) for the whole test.
+// 0 means none was recorded: each look then uses its own control rate,
+// which is only approximately valid at small counts.
+func CompareSeries(looks [][]Arm, minEffect, baseline float64) []Comparison {
+	if len(looks) == 0 || len(looks[len(looks)-1]) < 2 {
 		return nil
 	}
-	c := arms[0]
-	out := make([]Comparison, 0, len(arms)-1)
-	for _, a := range arms[1:] {
-		cmp := Comparison{Variant: a.Variant, ChanceToBeat: ChanceToBeat(c, a), PValue: SequentialP(c, a, minEffect)}
-		cmp.Lift, cmp.LiftLow, cmp.LiftHigh = Lift(c, a)
+	last := looks[len(looks)-1]
+	c := last[0]
+	out := make([]Comparison, 0, len(last)-1)
+	for i, a := range last[1:] {
+		cmp := Comparison{Variant: a.Variant, ChanceToBeat: ChanceToBeat(c, a), PValue: 1}
+		cmp.Lift, _, _ = Lift(c, a)
+		lo, hi := math.Inf(-1), math.Inf(1)
+		for _, look := range looks {
+			if len(look) <= i+1 {
+				continue
+			}
+			p, h, ok := sequential(look[0], look[i+1], tau(minEffect, baseline, look[0]))
+			if !ok {
+				continue
+			}
+			cmp.PValue = math.Min(cmp.PValue, p)
+			d := look[i+1].Rate() - look[0].Rate()
+			if nl, nh := math.Max(lo, d-h), math.Min(hi, d+h); nl <= nh {
+				lo, hi = nl, nh
+			}
+		}
+		if pa := c.Rate(); pa > 0 && !math.IsInf(lo, 0) && !math.IsInf(hi, 0) {
+			cmp.LiftLow, cmp.LiftHigh = lo/pa, hi/pa
+		}
 		out = append(out, cmp)
 	}
 	return out
+}
+
+// tau is the mixing spread of the sequential test: minEffect times the
+// recorded baseline, or the look's own control rate without one.
+func tau(minEffect, baseline float64, control Arm) float64 {
+	if minEffect <= 0 {
+		minEffect = DefaultMinEffect
+	}
+	if baseline <= 0 {
+		baseline = control.Rate()
+	}
+	return math.Max(minEffect*baseline, 0.001)
 }
 
 // ChanceToBeat is P(rate_b > rate_a) with Beta(1+conversions,
@@ -121,27 +172,31 @@ func Lift(a, b Arm) (lift, low, high float64) {
 // inference", 2017) for a difference in two rates, with a normal mixing
 // distribution whose spread is minEffect times the control's rate: the
 // test is most sensitive to changes of about that relative size (0 means
-// DefaultMinEffect). It is
-// computed from the current totals, not the running minimum over every
-// look, so it can rise again a little; storing the minimum per test is a
-// next step.
+// DefaultMinEffect). This is one look; CompareSeries keeps the lowest
+// over a test's daily looks.
 func SequentialP(a, b Arm, minEffect float64) float64 {
+	p, _, _ := sequential(a, b, tau(minEffect, 0, a))
+	return p
+}
+
+// sequential is the mSPRT at one look with mixing spread t: its p-value,
+// and the half-width h of the always-valid 95% range for the difference in
+// rates, from inverting the same test (the differences it doesn't reject).
+// ok is false when the look carries no evidence yet.
+func sequential(a, b Arm, t float64) (p, h float64, ok bool) {
 	if a.Visitors < 2 || b.Visitors < 2 {
-		return 1
+		return 1, 0, false
 	}
 	pa, pb := a.Rate(), b.Rate()
 	v := pa*(1-pa)/float64(a.Visitors) + pb*(1-pb)/float64(b.Visitors)
 	if v == 0 {
-		return 1
+		return 1, 0, false
 	}
-	if minEffect <= 0 {
-		minEffect = DefaultMinEffect
-	}
-	tau := math.Max(minEffect*pa, 0.001)
-	t2 := tau * tau
+	t2 := t * t
 	d := pb - pa
 	logL := 0.5*math.Log(v/(v+t2)) + t2*d*d/(2*v*(v+t2))
-	return clamp01(math.Exp(-logL))
+	h = math.Sqrt((math.Log(1/Alpha) + 0.5*math.Log((v+t2)/v)) * 2 * v * (v + t2) / t2)
+	return clamp01(math.Exp(-logL)), h, true
 }
 
 // SampleRatioP is the chance of a split at least this uneven if visitors

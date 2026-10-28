@@ -65,6 +65,20 @@ groups:
         annotations:
           summary: "Deciding feature flags takes over 250 ms at the 95th percentile, so pages wait longer to show their variant. Check the database pool and the Feature flags row."
 
+      - alert: OutflareConsentBannerFailing
+        expr: sum(rate(outflare_site_consent_requests_total{outcome="error"}[5m])) / clamp_min(sum(rate(outflare_site_consent_requests_total[5m])), 1e-9) > 0.02
+        for: 10m
+        labels: { severity: warning }
+        annotations:
+          summary: "Over 2% of consent banner requests fail: sites can't load their banner's settings, or visitors' choices aren't being kept as consents. Look for errors on GET and POST /v1/site/consent in the logs (usually the database)."
+
+      - alert: OutflareConsentBannerSlow
+        expr: histogram_quantile(0.95, sum by (le) (rate(outflare_site_consent_request_seconds_bucket[5m]))) > 0.5
+        for: 15m
+        labels: { severity: warning }
+        annotations:
+          summary: "Consent banner requests take over 500 ms at the 95th percentile, so the banner shows late on a visitor's first page. Check the database pool and the Consent banner row."
+
       - alert: OutflareABResultsSlow
         expr: histogram_quantile(0.95, sum by (le) (rate(outflare_ab_results_seconds_bucket[30m]))) > 10
         for: 30m
@@ -337,6 +351,65 @@ groups:
         annotations:
           summary: "Over half of review page reads fail: a review site may have changed its page or started blocking reads; check the review_page.read_failed events by platform and error code."
 
+      - alert: OutflareNewsSearchesOverdue
+        # Searches are queued every minute once due; one an hour late
+        # means the scheduler or the news.run jobs are stuck.
+        expr: max(outflare_news_search_overdue_seconds) > 3600
+        for: 15m
+        labels: { severity: warning }
+        annotations:
+          summary: "A news search is over an hour past its time; check the news.run jobs and the engine log for news.scheduler_failed."
+
+      - alert: OutflareNewsSearchRunsFailing
+        # Missing connections and usage limits are the workspace's to fix,
+        # so only provider and internal failures count.
+        expr: sum(rate(outflare_news_search_runs_total{outcome=~"connector_error|internal"}[6h])) / sum(rate(outflare_news_search_runs_total[6h])) > 0.5 and sum(increase(outflare_news_search_runs_total[6h])) > 20
+        for: 1h
+        labels: { severity: warning }
+        annotations:
+          summary: "Over half of news search runs fail with a provider or internal error; check the news_search.run_failed events by error code and the engine log."
+      - alert: OutflareReviewPagesStuck
+        # A page that failed 3 reads in a row, retries in a browser included,
+        # with an error Outflare has to fix: the site changed its page (the
+        # parser in engine/internal/reviews/parse.go), it blocks the page
+        # reader even in a browser, or the read couldn't be saved. Errors a
+        # workspace fixes itself (its key, quota, a wrong address) show on
+        # its Reviews page instead and don't alert.
+        expr: sum by (platform, code) (outflare_reviews_stuck_pages{code=~"not_a_review_page|blocked|save_failed|unknown"}) > 0
+        for: 30m
+        labels: { severity: warning }
+        annotations:
+          summary: "Review pages on {{ $labels.platform }} keep failing ({{ $labels.code }}) after retries; check the review_page.read_failed events and the engine log for that platform, then fix the parser (engine/internal/reviews) or how the page is read."
+
+      - alert: OutflareReviewSavesFailing
+        # A page was read but what it showed couldn't be kept: a bug, not
+        # the site.
+        expr: sum(increase(outflare_reviews_page_reads_total{outcome="save_failed"}[1h])) > 0
+        for: 5m
+        labels: { severity: warning }
+        annotations:
+          summary: "Review page reads were fetched but couldn't be saved in the last hour; search the engine log for review_page.read_failed with error_code save_failed."
+
+      - alert: OutflareSocialAccountsStuck
+        # An account that failed 3 reads in a row, same-day retries included,
+        # with an error Outflare has to fix: the profile page changed (the
+        # parser in engine/internal/sociallinks), the site blocks the page
+        # reader, or the read couldn't be saved. Errors a workspace fixes
+        # itself (its key, credits, a wrong address) show on its Social page
+        # instead and don't alert. Each missed day is a gap in follower growth.
+        expr: sum by (channel, code) (outflare_social_stuck_accounts{code=~"blocked|no_follower_count|save_failed|unknown"}) > 0
+        for: 30m
+        labels: { severity: warning }
+        annotations:
+          summary: "Social accounts on {{ $labels.channel }} keep failing ({{ $labels.code }}) after retries; check the social_account.sync_failed events and the engine log for that channel, then fix the profile parser (engine/internal/sociallinks) or how the page is read."
+
+      - alert: OutflareSocialReadsFailing
+        expr: sum(rate(outflare_social_account_reads_total{outcome!="success"}[6h])) / sum(rate(outflare_social_account_reads_total[6h])) > 0.5 and sum(increase(outflare_social_account_reads_total[6h])) > 20
+        for: 1h
+        labels: { severity: warning }
+        annotations:
+          summary: "Over half of social account reads fail: a channel may have changed its profile page or started blocking reads; check the social_account.sync_failed events by channel and error code."
+
       - alert: OutflareSocialPostsOverdue
         # Approved posts go out within a minute or two of their time; one
         # 10 minutes late means the social scheduler or the social.publish
@@ -362,3 +435,19 @@ groups:
         labels: { severity: warning }
         annotations:
           summary: "Over half of link reads (who links to a page) fail: Ahrefs or DataForSEO may be failing or have changed their links API; check link_reads.weekly_failed events and api.called for readLinks by error code."
+
+      - alert: OutflareLinkPageChecksFailing
+        # Other people's sites being down, gone or blocking OutflareBot is
+        # normal; failed is a check that broke.
+        expr: sum(rate(outflare_seo_link_page_checks_total{status="failed"}[6h])) / sum(rate(outflare_seo_link_page_checks_total[6h])) > 0.5 and sum(increase(outflare_seo_link_page_checks_total[6h])) > 20
+        for: 1h
+        labels: { severity: warning }
+        annotations:
+          summary: "Over half of link prospect page checks fail: check link_prospect.check_failed in the engine log and the link_prospects.check jobs."
+
+      - alert: OutflareArchiveLookupsFailing
+        expr: sum(rate(outflare_seo_archive_lookups_total{outcome="error"}[6h])) / sum(rate(outflare_seo_archive_lookups_total[6h])) > 0.5 and sum(increase(outflare_seo_archive_lookups_total[6h])) > 20
+        for: 1h
+        labels: { severity: info }
+        annotations:
+          summary: "Over half of Internet Archive lookups fail: archive.org may be down or refusing; page checks go on without snapshots."

@@ -193,6 +193,7 @@ var Catalog = []Event{
 	{"competitor.page_removed", "seo", "A page is gone from a tracked competitor's sitemaps (at most 50 a look). Sites still linking to it may link to yours instead. data has site_id, competitor_id, url and removed (how many went in this look)."},
 	// Link building
 	{"link_prospect.found", "link_building", "A page that could link to an SEO site was added to the link prospects list. data has site_id, brand_id, record_id (the website's company), method, score, stage (prospect, or excluded with excluded_reason) and source."},
+	{"link_prospect.checked", "link_building", "OutflareBot checked a link prospect's page. data has site_id, brand_id, record_id, status (up, gone, redirected, blocked, opted_out, unreachable, failed), links_to_us, broken (how many broken outbound links), fit (0 to 100, or null without AI), score, contacts (how many new) and error_code; GET the prospect for the check."},
 	{"link_prospect.excluded", "link_building", "A person or agent took a link prospect out of outreach. data has excluded_reason and was."},
 	{"link_prospect.pitched", "link_building", "A link prospect was pitched. No other prospect on the same website can be pitched until this one ends."},
 	{"link_prospect.replied", "link_building", "The website answered the pitch for a link prospect."},

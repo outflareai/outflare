@@ -252,6 +252,11 @@ export function registerContextTools(
         rules: z.string().max(4000).optional().describe("Things never to do."),
         notes: z.string().max(100000).optional().describe("Everything else, in Markdown: proof points, competitors, past results."),
         brands: z.string().max(4000).optional().describe("How the company's brands relate to each other. Each brand's own context goes in update_brand_context."),
+        logo_url: z.string().max(2000).optional().describe("An https address of the company's logo; empty clears it. The consent banner shows it."),
+        colors: z
+          .object({ primary: z.string(), background: z.string(), text: z.string() })
+          .optional()
+          .describe("The company's colours, as hex such as #1d4ed8; empty for none."),
         version: z.number().int().optional().describe("context.version from get_context."),
         onboarding_dismissed: z.boolean().optional().describe("True when the person does not want to be asked for the missing fields."),
       },

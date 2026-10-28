@@ -16,6 +16,7 @@ import (
 	"math"
 	"net/url"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -25,6 +26,7 @@ import (
 	"github.com/outflareai/outflare/engine/internal/connectors"
 	"github.com/outflareai/outflare/engine/internal/jobs"
 	"github.com/outflareai/outflare/engine/internal/outcomes"
+	"github.com/outflareai/outflare/engine/internal/retry"
 	"github.com/outflareai/outflare/engine/internal/seointel"
 	"github.com/outflareai/outflare/engine/internal/seosync"
 	"github.com/outflareai/outflare/engine/internal/track"
@@ -89,7 +91,7 @@ func (s *Service) Run(ctx context.Context) {
 	t := time.NewTicker(time.Hour)
 	defer t.Stop()
 	for {
-		if err := s.tick(ctx); err != nil && ctx.Err() == nil {
+		if _, err := s.QueueDue(ctx); err != nil && ctx.Err() == nil {
 			track.Fail(ctx, s.Log, track.Event{Name: "rank.schedule_failed", ActorType: "system", Surface: "job"}, "internal", fmt.Errorf("ranks: schedule checks: %w", err))
 		}
 		select {
@@ -100,25 +102,43 @@ func (s *Service) Run(ctx context.Context) {
 	}
 }
 
-func (s *Service) tick(ctx context.Context) error {
-	rows, err := s.Pool.Query(ctx, `SELECT DISTINCT t.workspace_id::text, t.site_id::text FROM tracked_keywords t
+// QueueDue queues a check of each site with due keywords, and reports how
+// many it queued. A keyword whose
+// check failed is due again after retry.After, so its day still gets a
+// position: the job's key carries the latest failure, so each retry is a
+// new job, while a day with no failures stays one job.
+func (s *Service) QueueDue(ctx context.Context) (int, error) {
+	rows, err := s.Pool.Query(ctx, `SELECT t.workspace_id::text, t.site_id::text,
+			COALESCE(max(extract(epoch FROM t.last_failed_at)) FILTER (WHERE t.failures > 0), 0)::bigint FROM tracked_keywords t
 		JOIN seo_sites ss ON ss.id = t.site_id AND ss.status = 'active'
-		WHERE t.status = 'active' AND `+due)
+		WHERE t.status = 'active' AND `+due+`
+		  AND (t.failures = 0 OR t.last_failed_at IS NULL OR t.last_failed_at <= now() - `+retry.SQL("t.failures")+`)
+		GROUP BY 1, 2`)
 	if err != nil {
-		return err
+		return 0, err
 	}
-	type site struct{ ws, id string }
-	list, err := pgx.CollectRows(rows, pgx.RowToStructByPos[site])
-	if err != nil {
-		return err
+	type site struct {
+		ws, id string
+		failed int64
+	}
+	var list []site
+	var x site
+	if _, err := pgx.ForEachRow(rows, []any{&x.ws, &x.id, &x.failed}, func() error { list = append(list, x); return nil }); err != nil {
+		return 0, err
 	}
 	day := s.now().UTC().Format(time.DateOnly)
+	n := 0
 	for _, x := range list {
-		if _, err := Enqueue(ctx, s.Pool, x.ws, x.id, false, "ranks:"+x.id+":"+day); err != nil {
-			return err
+		key := "ranks:" + x.id + ":" + day
+		if x.failed > 0 {
+			key += ":retry:" + strconv.FormatInt(x.failed, 10)
 		}
+		if _, err := Enqueue(ctx, s.Pool, x.ws, x.id, false, key); err != nil {
+			return n, err
+		}
+		n++
 	}
-	return nil
+	return n, nil
 }
 
 func (s *Service) job(ctx context.Context, job jobs.Job) error {
@@ -275,7 +295,8 @@ func (s *Service) fail(ctx context.Context, ws string, list []tracked, err error
 		ids[i] = t.id
 	}
 	res.Failed += len(list)
-	_, dbErr := s.Pool.Exec(ctx, `UPDATE tracked_keywords SET last_error = $3 WHERE workspace_id = $1 AND id = ANY($2::uuid[])`, ws, ids, err.Error())
+	_, dbErr := s.Pool.Exec(ctx, `UPDATE tracked_keywords SET last_error = $3, failures = failures + 1, last_failed_at = now()
+		WHERE workspace_id = $1 AND id = ANY($2::uuid[])`, ws, ids, err.Error())
 	if dbErr != nil {
 		return dbErr
 	}
@@ -360,7 +381,7 @@ func (s *Service) checkWith(ctx context.Context, ws, siteID, host, integrationID
 					integration_id = EXCLUDED.integration_id, checked_at = now()
 				RETURNING 1
 			)
-			UPDATE tracked_keywords SET last_checked_at = now(), last_error = NULL WHERE id = $2 AND workspace_id = $1`,
+			UPDATE tracked_keywords SET last_checked_at = now(), last_error = NULL, failures = 0 WHERE id = $2 AND workspace_id = $1`,
 			ws, t.id, day, pos, page, Depth, out.Engine, raw, out.Cost.USD, o.ID)
 		if err != nil {
 			return err

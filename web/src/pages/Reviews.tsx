@@ -6,6 +6,7 @@ import { PlatformIcon } from "@/components/platform-icon";
 import { api, errorMessage } from "../api";
 import { Badge, Button, Card, confirmAction, ErrorText, field, Loading, PageHeader, Stat, Stats, toast } from "../ui";
 import { ago } from "../format";
+import { readWhy, retryIn } from "@/lib/read-failures";
 import type { Tab } from "../App";
 
 // Reviews: each brand's Trustpilot, G2, Capterra and Google pages, from its
@@ -267,10 +268,32 @@ function YourPages({ ws, brands, pages, canRead, canManage, go, onChange }: {
     onChange();
   }
 
+  async function retry(p: ReviewPage) {
+    setBusy(p.id);
+    const { error } = await api.POST("/v1/workspaces/{ws}/reviews/pages/{id}/read", { params: { path: { ws, id: p.id } } });
+    setBusy("");
+    if (error) return toast(errorMessage(error), "error");
+    toast("Reading it again now. This takes a minute.");
+    setTimeout(onChange, 15000);
+  }
+
   // How a confirmed page is going: its score, or what reading it needs.
   function status(b: Brand, url: string) {
     const p = pages.find((x) => x.brand_id === b.id && short(x.url).toLowerCase() === short(url).toLowerCase()) ?? pages.find((x) => short(x.url).toLowerCase() === short(url).toLowerCase());
     if (p?.status === "paused") return <span className="flex items-center gap-2"><Badge>Paused</Badge>{canManage && <Button variant="ghost" onClick={() => pause(p)}>Resume</Button>}</span>;
+    // A failed read shows, also when an earlier one worked.
+    if (p?.last_error) {
+      const why = readWhy(p.last_error_code, p.last_error);
+      return (
+        <span className="flex flex-wrap items-center gap-2">
+          <span className="text-amber-700 dark:text-amber-300" title={p.last_error}>
+            {p.last_read_at ? `Last read ${ago(p.last_read_at)}; the latest read failed.` : "Couldn't read it yet."} {why}
+            {p.failures > 1 && ` ${p.failures} tries so far.`} Trying again {retryIn(p.next_read_at)}.
+          </span>
+          {canManage && canRead && <Button variant="ghost" disabled={busy === p.id} onClick={() => retry(p)}>{busy === p.id ? "Reading…" : "Try again"}</Button>}
+        </span>
+      );
+    }
     if (p?.last_read_at && (p.score !== null || p.review_count !== null)) {
       return (
         <span className="flex items-center gap-2 text-muted-foreground">
@@ -282,7 +305,6 @@ function YourPages({ ws, brands, pages, canRead, canManage, go, onChange }: {
         </span>
       );
     }
-    if (p?.last_error) return <span className="text-amber-700 dark:text-amber-300" title={p.last_error}>Couldn't read it yet. Tried again tomorrow.</span>;
     if (canRead) return <span className="text-muted-foreground">First read within a few minutes</span>;
     return <span className="text-muted-foreground">Waiting for Geonode</span>;
   }

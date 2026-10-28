@@ -179,8 +179,13 @@ picker). Geonode searches from the keyword's country with Google's own
 location setting and in that country's language, on desktop or an Android
 phone. When Geonode stops before the 10th page and the site was not in the
 pages that came back, the check counts as incomplete (its `last_error` says
-so) and runs again next time, rather than recording the site as outside the
+so) and runs again, rather than recording the site as outside the
 top 100. The pages that came back are still paid.
+
+A check that fails (an outage, a refused key, an incomplete answer, a spent
+budget) is tried again the same day, so the day still gets a position:
+after 15 minutes, then 1 and 2 hours, then every 4 hours until one works.
+A retry only spends again when the connection answers.
 
 Each tracked keyword shows the site's latest position (null when it is not in
 the top 100), the page that ranks, the position at the check before, the

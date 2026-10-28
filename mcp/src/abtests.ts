@@ -74,7 +74,82 @@ export function registerABTestTools(
     ({ test }) => call(() => gtm.GET("/v1/workspaces/{ws}/ab-tests/{test}/results", { params: { path: { ...path(), test } } })),
   );
 
+  server.registerTool(
+    "plan_ab_test",
+    {
+      title: "Plan an A/B test",
+      description:
+        "How long a test of a flag is likely to take before it starts: from the last 28 days of traffic (on one page if given) and the goal's rate. Gives visitors per version and weeks for true lifts of +5% to +50%, the smallest lift findable in 4 and 8 weeks, and a warning when it won't finish in 8 weeks. Nothing is stored.",
+      inputSchema: {
+        flag: z.string().min(1).describe("The flag's id or key."),
+        goal: goal.describe("The goal the test would be judged on."),
+        page: z.string().max(500).optional().describe("The page the test changes, such as /pricing, or /docs/* for a section."),
+        min_effect: z.number().min(0.01).max(1).optional().describe("Default 0.25 (+25%)."),
+      },
+      annotations: read,
+    },
+    (body) => call(() => gtm.POST("/v1/workspaces/{ws}/ab-tests/plan", { params: { path: path() }, body: body as never })),
+  );
+
+  server.registerTool(
+    "get_ab_test_ai_run",
+    {
+      title: "Get an A/B test AI run",
+      description: "A run from suggest_ab_tests, write_ab_test_versions or summarize_ab_test. Poll until status is ready (output holds the answer) or failed (error says why).",
+      inputSchema: { run: z.string().uuid() },
+      annotations: read,
+    },
+    ({ run }) => call(() => gtm.GET("/v1/workspaces/{ws}/ab-test-ai-runs/{run}", { params: { path: { ...path(), run } } })),
+  );
+
   if (readOnly) return;
+
+  server.registerTool(
+    "suggest_ab_tests",
+    {
+      title: "Suggest A/B tests with AI",
+      description:
+        "The workspace's own AI model proposes tests from the site's busiest pages, the goals visitors reach, the brand's context and past tests, each with the engine's plan (weeks, findable lift, warning). Returns a queued run: read it with get_ab_test_ai_run. Nothing is created.",
+      inputSchema: {
+        brand_id: z.string().nullable().optional().describe("Use this brand's context (an id from list_brands)."),
+        page: z.string().max(500).optional().describe("Only pages under this path."),
+        goal: goal.optional().describe("Judge every suggestion on this goal."),
+        count: z.number().int().min(1).max(5).optional(),
+        notes: z.string().max(2000).optional().describe("What to focus on."),
+      },
+      annotations: { ...write, openWorldHint: true },
+    },
+    (body) => call(() => gtm.POST("/v1/workspaces/{ws}/ab-tests/suggestions", { params: { path: path() }, body: body as never })),
+  );
+
+  server.registerTool(
+    "write_ab_test_versions",
+    {
+      title: "Write test versions with AI",
+      description:
+        "The workspace's own AI model writes new versions of a flag's content from a prompt, in the brand's voice. Returns a queued run (get_ab_test_ai_run); the versions are proposals: add the ones the person approves to the flag with update_flag.",
+      inputSchema: {
+        flag: z.string().min(1).describe("The flag's id or key."),
+        prompt: z.string().min(1).max(2000).describe('What to change and for whom, such as "a shorter, more urgent headline for agencies".'),
+        count: z.number().int().min(1).max(4).optional(),
+        fields: z.array(z.string().regex(/^[a-z][a-z0-9_]{0,39}$/)).max(8).optional().describe("Content fields to write, such as headline and cta. Default: those the flag's versions carry."),
+      },
+      annotations: { ...write, openWorldHint: true },
+    },
+    (body) => call(() => gtm.POST("/v1/workspaces/{ws}/ab-tests/versions", { params: { path: path() }, body: body as never })),
+  );
+
+  server.registerTool(
+    "summarize_ab_test",
+    {
+      title: "Summarise a test with AI",
+      description:
+        "The workspace's own AI model puts a running or finished test's results into plain English with next steps. The recommendation (ship, keep_control, fix_split, extend, stop, wait) comes from the engine. Returns a queued run: read it with get_ab_test_ai_run.",
+      inputSchema: { test: testRef },
+      annotations: { ...write, openWorldHint: true },
+    },
+    ({ test }) => call(() => gtm.POST("/v1/workspaces/{ws}/ab-tests/{test}/summary", { params: { path: { ...path(), test } } })),
+  );
 
   server.registerTool(
     "create_ab_test",

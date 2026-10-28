@@ -750,7 +750,7 @@ func releaseClickBrowser(ctx context.Context, tx pgx.Tx, a *access, c *catalog, 
 		rec, anonID); err != nil {
 		return false, err
 	}
-	for _, t := range []string{"customer_events", "site_sessions"} {
+	for _, t := range []string{"customer_events", "site_sessions", "consents"} {
 		if _, err := tx.Exec(ctx, `UPDATE `+t+` SET record_id = NULL WHERE workspace_id = $1 AND anonymous_id = $2 AND record_id = $3`,
 			a.WorkspaceID, anonID, rec); err != nil {
 			return false, err
@@ -766,11 +766,16 @@ func releaseClickBrowser(ctx context.Context, tx pgx.Tx, a *access, c *catalog, 
 	return true, recomputeTouches(ctx, tx, a, c, rec)
 }
 
-// backfill gives a person the events and website visits their anonymousId
-// had before anyone knew who they were, and works out their first and last
-// touch from those visits.
+// backfill gives a person the events, website visits and consent choices
+// their anonymousId had before anyone knew who they were, and works out
+// their first and last touch from those visits.
 func backfill(ctx context.Context, tx pgx.Tx, a *access, c *catalog, rec, anonID string) error {
 	if _, err := tx.Exec(ctx, `UPDATE customer_events SET record_id = $3 WHERE workspace_id = $1 AND anonymous_id = $2 AND record_id IS NULL`,
+		a.WorkspaceID, anonID, rec); err != nil {
+		return err
+	}
+	// Choices made on the site's consent banner.
+	if _, err := tx.Exec(ctx, `UPDATE consents SET record_id = $3 WHERE workspace_id = $1 AND anonymous_id = $2 AND record_id IS NULL`,
 		a.WorkspaceID, anonID, rec); err != nil {
 		return err
 	}
@@ -1307,25 +1312,27 @@ func (s *Server) recordTimeline(w http.ResponseWriter, r *http.Request) {
 // ---- Consent ----
 
 var (
-	consentChannels = []string{"email", "sms", "push", "whatsapp", "in_app", "ads"}
+	consentChannels = []string{"email", "sms", "push", "whatsapp", "in_app", "ads", "web"}
 	consentKey      = regexp.MustCompile(`^[a-z][a-z0-9_]{1,62}$`)
 )
 
 type consentView struct {
-	ID         string         `json:"id"`
-	RecordID   string         `json:"record_id"`
-	Channel    string         `json:"channel"`
-	Topic      string         `json:"topic"`
-	Purpose    string         `json:"purpose"`
-	Status     string         `json:"status"`
-	Source     string         `json:"source"`
-	Evidence   map[string]any `json:"evidence"`
-	OccurredAt time.Time      `json:"occurred_at"`
-	CreatedBy  *string        `json:"created_by"`
-	CreatedAt  time.Time      `json:"created_at"`
+	ID       string `json:"id"`
+	RecordID string `json:"record_id"`
+	// The browser a consent banner choice was made in.
+	AnonymousID *string        `json:"anonymous_id"`
+	Channel     string         `json:"channel"`
+	Topic       string         `json:"topic"`
+	Purpose     string         `json:"purpose"`
+	Status      string         `json:"status"`
+	Source      string         `json:"source"`
+	Evidence    map[string]any `json:"evidence"`
+	OccurredAt  time.Time      `json:"occurred_at"`
+	CreatedBy   *string        `json:"created_by"`
+	CreatedAt   time.Time      `json:"created_at"`
 }
 
-const consentColumns = `k.id::text, k.record_id::text, k.channel, k.topic, k.purpose, k.status, k.source, k.evidence, k.occurred_at, k.created_by::text, k.created_at`
+const consentColumns = `k.id::text, k.record_id::text, k.anonymous_id, k.channel, k.topic, k.purpose, k.status, k.source, k.evidence, k.occurred_at, k.created_by::text, k.created_at`
 
 func (s *Server) listConsents(w http.ResponseWriter, r *http.Request) {
 	a := accessFrom(r.Context())
@@ -1374,7 +1381,7 @@ func (s *Server) addConsent(w http.ResponseWriter, r *http.Request) {
 	}
 	switch {
 	case !slices.Contains(consentChannels, in.Channel):
-		writeError(w, r, http.StatusBadRequest, "invalid_request", "channel is email, sms, push, whatsapp or in_app")
+		writeError(w, r, http.StatusBadRequest, "invalid_request", "channel is email, sms, push, whatsapp, in_app, ads or web")
 		return
 	case in.Topic != "" && !consentKey.MatchString(in.Topic):
 		writeError(w, r, http.StatusBadRequest, "invalid_request", "topic is a topic's key, such as product_updates, or empty for the whole channel")

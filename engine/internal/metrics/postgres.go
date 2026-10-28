@@ -75,12 +75,16 @@ var (
 	rulesTimersDue  = desc("rules", "timers_due", "Absence timers of active rules that ran out and wait to be handled. Normally 0 or close to it: they are handled every minute.")
 	rulesOldestDue  = desc("rules", "oldest_due_seconds", "How long the longest-waiting absence timer of an active rule has been due. Normally under two minutes.")
 	reviewPages     = desc("reviews", "pages", "Review pages being read, by platform and state (ok, failing: the last read failed).", "platform", "state")
+	reviewStuck     = desc("reviews", "stuck_pages", "Active review pages whose last 3 or more reads failed, retries included, by platform and the last error code.", "platform", "code")
+	socialStuck     = desc("social", "stuck_accounts", "Active social accounts whose last 3 or more reads failed, retries included, by channel and the last error code.", "channel", "code")
 	reviewOldest    = desc("reviews", "oldest_read_seconds", "How long since the least recently read active review page was read (or added, if never read), by platform.", "platform")
 	socialScheduled = desc("social", "publications_scheduled", "Approved posts waiting to go out, by channel and state (due: its time has come, later: scheduled ahead).", "channel", "state")
 	socialOverdue   = desc("social", "publication_overdue_seconds", "How long past its time the most overdue approved post is, by channel. Posts go out within a minute or two of their time.", "channel")
 	scrapeErrors    = desc("metrics", "scrape_errors", "Queries that failed in the last database scrape.")
 	scrapeDuration  = desc("metrics", "scrape_duration_seconds", "Time the last database scrape took.")
-	allDescs        = []*prometheus.Desc{poolAcquired, poolIdle, poolTotal, poolMax, poolAcquires, poolWaits, poolWaitSeconds, poolAcquireSecs, poolCanceled, queued, scheduled, oldestDue, running, dbBackends, dbMaxConns, dbLongestXact, dbLockWaits, dbSize, dbCommits, dbRollbacks, dbBlocksHit, dbBlocksRead, dbDeadlocks, dbTempBytes, tableBytes, tableDeadRows, tableSeqScans, pipeItems, pipeOldest, pipeRuns, pipeBreakers, inboxPending, inboxOldest, inboxFailed, smartLists, smartOldest, smartFailing, rulesActive, rulesTimersDue, rulesOldestDue, reviewPages, reviewOldest, socialScheduled, socialOverdue, scrapeErrors, scrapeDuration}
+	newsSearches    = desc("news", "searches", "Active news searches, by state (ok, failing: the last run failed).", "state")
+	newsOverdue     = desc("news", "search_overdue_seconds", "How long past its time the most overdue active news search is. Searches are queued every few minutes, so this stays near 0.")
+	allDescs        = []*prometheus.Desc{poolAcquired, poolIdle, poolTotal, poolMax, poolAcquires, poolWaits, poolWaitSeconds, poolAcquireSecs, poolCanceled, queued, scheduled, oldestDue, running, dbBackends, dbMaxConns, dbLongestXact, dbLockWaits, dbSize, dbCommits, dbRollbacks, dbBlocksHit, dbBlocksRead, dbDeadlocks, dbTempBytes, tableBytes, tableDeadRows, tableSeqScans, pipeItems, pipeOldest, pipeRuns, pipeBreakers, inboxPending, inboxOldest, inboxFailed, smartLists, smartOldest, smartFailing, rulesActive, rulesTimersDue, rulesOldestDue, reviewPages, reviewStuck, socialStuck, reviewOldest, newsSearches, newsOverdue, socialScheduled, socialOverdue, scrapeErrors, scrapeDuration}
 	gauge, counter  = prometheus.GaugeValue, prometheus.CounterValue
 )
 
@@ -300,6 +304,50 @@ func (p *Postgres) query() []prometheus.Metric {
 		}
 		for platform, age := range oldest {
 			add(reviewOldest, gauge, age, platform)
+		}
+		return nil
+	})
+	run("news_searches", `
+		SELECT CASE WHEN last_error_code IS NULL THEN 'ok' ELSE 'failing' END, count(*),
+			coalesce(max(extract(epoch FROM now() - next_check_at)) FILTER (WHERE next_check_at <= now()), 0)::float8
+		FROM news_searches WHERE status = 'active' GROUP BY 1`, func(r rowser) error {
+		overdue := 0.0
+		for r.Next() {
+			var state string
+			var n int64
+			var age float64
+			if err := r.Scan(&state, &n, &age); err != nil {
+				return err
+			}
+			add(newsSearches, gauge, float64(n), state)
+			overdue = max(overdue, age)
+		}
+		add(newsOverdue, gauge, overdue)
+		return nil
+	})
+	run("social_accounts_stuck", `
+		SELECT channel, coalesce(last_error_code, 'unknown'), count(*)
+		FROM social_accounts WHERE status = 'active' AND failures >= 3 GROUP BY 1, 2`, func(r rowser) error {
+		for r.Next() {
+			var channel, code string
+			var n int64
+			if err := r.Scan(&channel, &code, &n); err != nil {
+				return err
+			}
+			add(socialStuck, gauge, float64(n), channel, code)
+		}
+		return nil
+	})
+	run("review_pages_stuck", `
+		SELECT platform, coalesce(last_error_code, 'unknown'), count(*)
+		FROM review_pages WHERE status = 'active' AND failures >= 3 GROUP BY 1, 2`, func(r rowser) error {
+		for r.Next() {
+			var platform, code string
+			var n int64
+			if err := r.Scan(&platform, &code, &n); err != nil {
+				return err
+			}
+			add(reviewStuck, gauge, float64(n), platform, code)
 		}
 		return nil
 	})

@@ -85,6 +85,8 @@ location /ofx/ {
 
 A Cloudflare Worker sets the same two headers, taking the address from `CF-Connecting-IP`. A plain Next.js rewrite can't add headers, so use middleware there. If your site sits behind a CDN, take the address from the CDN's own header (such as `CF-Connecting-IP`), never from the first `X-Forwarded-For` entry, which the browser can set. Outflare takes the address only when the secret matches and it is a public address, and otherwise uses the connecting address. With a proxy secret, each visitor's address can send up to 600 requests a minute. A new secret replaces the old one at once, and `DELETE .../proxy-secret` removes it.
 
+With the secret, the proxy can also pass the visitor's country in `X-Outflare-Country` (two letters, such as `DE`), from its CDN's geolocation (`CF-IPCountry` on Cloudflare, `x-vercel-ip-country` on Vercel). The [consent banner](consent-banner.md) then picks the region's rule by country instead of the browser's time zone.
+
 ## Sites on more than one domain
 
 A visitor who goes from `northpeak.example` to `northpeak-app.example` would get a new id on the second. List the domains in `data-domains` and links between them carry the visitor's id (`_ofa`, valid for two minutes so a shared link doesn't join its readers), which the snippet on the other side takes and removes from the address. It takes the id only when the visitor came from another listed domain (the browser's referrer), so a copied link posted somewhere else starts a new visitor; keep the default referrer policy, or at least `strict-origin-when-cross-origin`, on those pages:
@@ -116,5 +118,7 @@ With consent, the snippet keeps the visitor's id in a first-party cookie, `of_ai
 - `data-consent="granted"` is for sites whose own banner asks first and only loads the snippet afterwards.
 
 Without consent, the campaign tags a visitor landed with are on that first page's visit only. If they sign up later, on another visit or another domain, Outflare can't join the two. On a site without a consent banner, keep the landing page's `utm_*`, click ids, `ref` and `ofc` (for example in the sign-up form or its URL) and send them with the sign-up `identify`: the tags in `context.campaign` and the click ids in `properties.click_ids`, as the snippet does. The sign-up is then credited even when the visits can't be joined.
+
+To have Outflare show the banner itself, with region rules, Google Consent Mode and the ad platforms' consent signals, turn on the [consent banner](consent-banner.md) for the site key. `outflare.consent()` then also takes categories (`{analytics: true, marketing: false}`), and every choice is kept as the visitor's consent.
 
 `outflare.reset()` gives the visitor a new id, for example on sign-out on a shared computer. Nothing is sent to Outflare's own analytics. The events stay in your workspace with the rest of your customer data.

@@ -44,7 +44,8 @@ func CompanyDomain(s string) string {
 }
 
 // EnsureCompanies returns the company record for each domain, adding
-// prospect companies (of brand, nil for shared) for those nobody has. The
+// prospect companies (of brand, nil for shared) for those nobody has, with
+// via as the tool they came from (records.acquired_via). The
 // domain is added unverified, so it never claims a domain a company record
 // already proves. Run it in the same transaction as what it is for.
 func EnsureCompanies(ctx context.Context, tx pgx.Tx, workspaceID string, brand *string, via string, companies []Company) (map[string]string, error) {
@@ -119,8 +120,8 @@ func EnsureCompanies(ctx context.Context, tx pgx.Tx, workspaceID string, brand *
 		WITH todo AS MATERIALIZED (
 			SELECT gen_random_uuid() AS id, d, n, a::jsonb AS a, s::jsonb AS s FROM unnest($2::text[], $3::text[], $4::text[], $5::text[]) AS t(d, n, a, s)
 		), made AS (
-			INSERT INTO records (id, workspace_id, record_type, brand_id, name, attributes, attribute_sources, origin)
-			SELECT id, $1, 'account', $6, n, a, s, 'prospect' FROM todo
+			INSERT INTO records (id, workspace_id, record_type, brand_id, name, attributes, attribute_sources, origin, acquired_via)
+			SELECT id, $1, 'account', $6, n, a, s, 'prospect', left($7, 64) FROM todo
 		), ids AS (
 			INSERT INTO record_identities (workspace_id, record_id, namespace, value, verified, source)
 			SELECT $1, id, 'domain', d, false, $7 FROM todo

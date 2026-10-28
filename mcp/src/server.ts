@@ -3388,7 +3388,7 @@ export function createServer({ client: gtm, workspace, agency, readOnly = false,
       title: "List the brand's social accounts",
       description:
         "The X accounts, LinkedIn company pages and LinkedIn profiles the workspace's own connections reach, with followers now, the change over 7 and 28 days, " +
-        "when each was last read and any error. Outflare reads them every day (X once, LinkedIn twice).",
+        "when each was last read and why the last read failed (last_error_code, failures in a row). Outflare reads them every day (X once, LinkedIn twice), and tries a failed read again the same day.",
       inputSchema: { channel: socialAccountChannel.optional(), status: z.enum(["active", "paused", "disconnected"]).optional(), brand: socialBrand },
       annotations: read,
     },
@@ -3415,6 +3415,19 @@ export function createServer({ client: gtm, workspace, agency, readOnly = false,
       annotations: write,
     },
     () => call(() => gtm.POST("/v1/workspaces/{ws}/social/accounts/sync", { params: { path: { ws } } })),
+  );
+
+  server.registerTool(
+    "sync_social_account",
+    {
+      title: "Read one social account now",
+      description:
+        "Queue a read of one account now, such as one whose last read failed (list_social_accounts shows last_error_code and failures), instead of waiting for its next try. " +
+        "A failed read is also tried again the same day on its own.",
+      inputSchema: { account_id: id },
+      annotations: write,
+    },
+    ({ account_id }) => call(() => gtm.POST("/v1/workspaces/{ws}/social/accounts/{id}/sync", { params: { path: { ws, id: account_id } } })),
   );
 
   server.registerTool(
@@ -3644,7 +3657,7 @@ export function createServer({ client: gtm, workspace, agency, readOnly = false,
       title: "The brand's review pages",
       description:
         "The brand's Trustpilot, G2, Capterra and Google review pages (from its links), with each site's own score and count, Outflare's score and momentum, " +
-        "when each was last read and any error. Add or remove one with the brand's links (add_brand_link, or update_brand's links).",
+        "when each was last read and why the last read failed (last_error_code, failures in a row). Add or remove one with the brand's links (add_brand_link, or update_brand's links).",
       inputSchema: { brand: socialBrand, platform: reviewPlatform.optional(), status: z.enum(["active", "paused", "removed"]).optional() },
       annotations: read,
     },
@@ -3660,6 +3673,19 @@ export function createServer({ client: gtm, workspace, agency, readOnly = false,
       annotations: write,
     },
     () => call(() => gtm.POST("/v1/workspaces/{ws}/reviews/pages/sync", { params: { path: { ws } } })),
+  );
+
+  server.registerTool(
+    "read_review_page",
+    {
+      title: "Read one review page now",
+      description:
+        "Queue a read of one review page now, such as one whose last read failed (list_review_pages shows last_error_code and failures), instead of waiting for its next try. " +
+        "A page that shows no reviews is read again in a browser.",
+      inputSchema: { page_id: id },
+      annotations: write,
+    },
+    ({ page_id }) => call(() => gtm.POST("/v1/workspaces/{ws}/reviews/pages/{id}/read", { params: { path: { ws, id: page_id } } })),
   );
 
   server.registerTool(
@@ -4214,6 +4240,197 @@ export function createServer({ client: gtm, workspace, agency, readOnly = false,
     },
     ({ prospect_id }) =>
       call(() => gtm.DELETE("/v1/workspaces/{ws}/link-prospects/{prospect}", { params: { path: { ws, prospect: prospect_id } } })),
+  );
+
+  const newsPurpose = z.enum(["topic", "coverage"]);
+  const newsTimeRange = z.enum(["day", "week", "month"]);
+
+  server.registerTool(
+    "list_news_searches",
+    {
+      title: "List news searches",
+      description:
+        "The news watch's saved searches: topic searches follow a subject and who writes about it, coverage searches look for a brand and keep what they find as its coverage. " +
+        "last_error_code says why the last run failed (connector_needed: no web search connection; usage_limit_reached: the connection's limit).",
+      inputSchema: {
+        purpose: newsPurpose.optional(),
+        brand: z.string().max(100).optional().describe("A brand's id or handle, or none for shared topics."),
+      },
+      annotations: read,
+    },
+    (query) => call(() => gtm.GET("/v1/workspaces/{ws}/news-searches", { params: { path: { ws }, query } })),
+  );
+
+  server.registerTool(
+    "create_news_search",
+    {
+      title: "Save a news search",
+      description:
+        "Saves a search the news watch runs on a schedule (every 24 hours by default) through the workspace's own web search connection (Geonode), and queues its first run. " +
+        "Each run costs one search on that connection, within its usage limits. A coverage search needs brand_id; articles that name every word of its query, and aren't on the brand's own site, become the brand's coverage. " +
+        "Then list_news_articles and list_coverage.",
+      inputSchema: {
+        query: z.string().min(1).max(500),
+        name: z.string().max(200).optional(),
+        purpose: newsPurpose.optional().describe("topic (default) or coverage."),
+        brand_id: z.string().max(100).optional().describe("A brand's id or handle; needed for a coverage search."),
+        locale: z.string().max(10).optional().describe("A language code (en) or tag (en-GB)."),
+        time_range: newsTimeRange.optional().describe("How far back each run looks; week by default."),
+        check_every_hours: z.number().int().min(6).max(168).optional(),
+        status: z.enum(["active", "paused"]).optional(),
+      },
+      annotations: write,
+    },
+    (body) => call(() => gtm.POST("/v1/workspaces/{ws}/news-searches", { params: { path: { ws } }, body })),
+  );
+
+  server.registerTool(
+    "update_news_search",
+    {
+      title: "Change a news search",
+      description: "Changes a search's query, name, locale, time_range, schedule or status (active or paused). Its brand and purpose stay.",
+      inputSchema: {
+        search_id: id,
+        query: z.string().min(1).max(500).optional(),
+        name: z.string().max(200).optional(),
+        locale: z.string().max(10).optional(),
+        time_range: newsTimeRange.optional(),
+        check_every_hours: z.number().int().min(6).max(168).optional(),
+        status: z.enum(["active", "paused"]).optional(),
+      },
+      annotations: { ...write, idempotentHint: true },
+    },
+    ({ search_id, ...body }) =>
+      call(() => gtm.PATCH("/v1/workspaces/{ws}/news-searches/{search}", { params: { path: { ws, search: search_id } }, body })),
+  );
+
+  server.registerTool(
+    "delete_news_search",
+    {
+      title: "Delete a news search",
+      description: "Deletes a search and the articles only it found. Coverage it found stays.",
+      inputSchema: { search_id: id },
+      annotations: { ...write, destructiveHint: true },
+    },
+    ({ search_id }) => call(() => gtm.DELETE("/v1/workspaces/{ws}/news-searches/{search}", { params: { path: { ws, search: search_id } } })),
+  );
+
+  server.registerTool(
+    "run_news_search",
+    {
+      title: "Run a news search now",
+      description:
+        "Queues a run now, whatever the schedule. Costs one search on the workspace's web search connection; fails with connector_needed when there is none. " +
+        "The result shows on the search (last_checked_at, last_error_code) and in list_news_articles a minute later.",
+      inputSchema: { search_id: id },
+      annotations: write,
+    },
+    ({ search_id }) => call(() => gtm.POST("/v1/workspaces/{ws}/news-searches/{search}/run", { params: { path: { ws, search: search_id } } })),
+  );
+
+  server.registerTool(
+    "list_news_articles",
+    {
+      title: "List news articles",
+      description: "Articles the news searches found, newest first, each once with the searches that found it. Reads what is stored, so it costs nothing.",
+      inputSchema: {
+        search_id: id.optional(),
+        since: z.string().optional().describe("Only articles first seen at or after this time, like 2026-10-28T00:00:00Z."),
+        brand: z.string().max(100).optional().describe("A brand's id or handle: articles its searches found."),
+        limit: z.number().int().min(1).max(200).optional(),
+        cursor: z.string().optional().describe("next_cursor from the previous page."),
+      },
+      annotations: read,
+    },
+    (query) => call(() => gtm.GET("/v1/workspaces/{ws}/news-articles", { params: { path: { ws }, query } })),
+  );
+
+  server.registerTool(
+    "list_coverage",
+    {
+      title: "List coverage",
+      description:
+        "Articles that mention a brand, newest first, each on its outlet's company record (record_id). Leaves out dismissed items unless status asks for them; " +
+        "status takes several separated by commas. linked is null until someone checks whether the article links to the brand.",
+      inputSchema: {
+        status: z.string().max(50).optional().describe("new, confirmed or dismissed; several separated by commas."),
+        record_id: id.optional().describe("An outlet's company record."),
+        brand: z.string().max(100).optional().describe("A brand's id or handle."),
+        limit: z.number().int().min(1).max(200).optional(),
+        cursor: z.string().optional().describe("next_cursor from the previous page."),
+      },
+      annotations: read,
+    },
+    (query) => call(() => gtm.GET("/v1/workspaces/{ws}/coverage", { params: { path: { ws }, query } })),
+  );
+
+  server.registerTool(
+    "add_coverage",
+    {
+      title: "Add coverage",
+      description: "Keeps an article the news watch missed as a brand's coverage, on its outlet's company record. An article on the brand's own website is refused.",
+      inputSchema: {
+        brand_id: z.string().max(100).describe("A brand's id or handle."),
+        url: z.string().max(2048),
+        title: z.string().max(500).optional(),
+      },
+      annotations: write,
+    },
+    (body) => call(() => gtm.POST("/v1/workspaces/{ws}/coverage", { params: { path: { ws } }, body })),
+  );
+
+  server.registerTool(
+    "update_coverage",
+    {
+      title: "Confirm or dismiss coverage",
+      description: "status confirms or dismisses a coverage item, or moves it back to new. linked says whether the article links to the brand's site.",
+      inputSchema: {
+        coverage_id: id,
+        status: z.enum(["new", "confirmed", "dismissed"]).optional(),
+        linked: z.boolean().optional(),
+      },
+      annotations: { ...write, idempotentHint: true },
+    },
+    ({ coverage_id, ...body }) =>
+      call(() => gtm.PATCH("/v1/workspaces/{ws}/coverage/{coverage}", { params: { path: { ws, coverage: coverage_id } }, body })),
+  );
+
+  server.registerTool(
+    "reclaim_link_prospects",
+    {
+      title: "Add lost links as prospects to win back",
+      description:
+        "Adds an SEO site's links lost in the last days (default 90) as reclaim prospects: the page that dropped the link, the site's page it linked to as the page to offer, and the lost reason as evidence. " +
+        "Free. Then check_link_prospects to see which pages are still up and who to contact.",
+      inputSchema: { site_id: id, days: z.number().int().min(1).max(365).optional(), min_rating: z.number().min(0).max(100).optional() },
+      annotations: write,
+    },
+    (body) => call(() => gtm.POST("/v1/workspaces/{ws}/link-prospects/reclaim", { params: { path: { ws } }, body })),
+  );
+
+  server.registerTool(
+    "check_link_prospects",
+    {
+      title: "Check prospects' pages",
+      description:
+        "Queues OutflareBot's check of up to 100 of a site's prospects to pitch (never checked ones, or all with again): is the page up, does it link to the site already, which outbound links are broken (with Internet Archive snapshots), " +
+        "what the workspace's AI makes of it (kind, topic, fit, our page to offer) and who to contact. Pages that already link or are gone are excluded. Free apart from the AI read. Then list_link_prospects; each has check and contacts.",
+      inputSchema: { site_id: id, again: z.boolean().optional(), limit: z.number().int().min(1).max(100).optional() },
+      annotations: write,
+    },
+    (body) => call(() => gtm.POST("/v1/workspaces/{ws}/link-prospects/check", { params: { path: { ws } }, body })),
+  );
+
+  server.registerTool(
+    "check_link_prospect",
+    {
+      title: "Check one prospect's page",
+      description: "Queues OutflareBot's check of one prospect's page, at most once an hour, as check_link_prospects does. Read the result with list_link_prospects (check, contacts).",
+      inputSchema: { prospect_id: id },
+      annotations: write,
+    },
+    ({ prospect_id }) =>
+      call(() => gtm.POST("/v1/workspaces/{ws}/link-prospects/{prospect}/check", { params: { path: { ws, prospect: prospect_id } } })),
   );
 
   server.registerTool(
@@ -6468,6 +6685,82 @@ export function createServer({ client: gtm, workspace, agency, readOnly = false,
       annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: false },
     },
     ({ site_key_id }) => call(() => gtm.DELETE("/v1/workspaces/{ws}/site-keys/{id}", { params: { path: { ws, id: site_key_id } } })),
+  );
+
+  const bannerRule = z.enum(["opt_in", "opt_out", "notice", "none"]);
+  server.registerTool(
+    "get_consent_banner",
+    {
+      title: "Get a website's consent banner",
+      description:
+        "The cookie consent banner a site key's script shows: the rule per region (eea covers the EEA, UK and Switzerland; us; other), the frameworks " +
+        "it follows (Global Privacy Control, Google Consent Mode v2, Meta, TikTok, Microsoft), the categories it asks about, its look and " +
+        "words. saved false means it was never set up and the site shows no banner. look is the brand's or company's logo and colours it starts from.",
+      inputSchema: { site_key_id: id },
+      annotations: read,
+    },
+    ({ site_key_id }) => call(() => gtm.GET("/v1/workspaces/{ws}/site-keys/{id}/consent-banner", { params: { path: { ws, id: site_key_id } } })),
+  );
+
+  server.registerTool(
+    "update_consent_banner",
+    {
+      title: "Change a website's consent banner",
+      description:
+        "Turns the site's cookie consent banner on (enabled) and sets it up. Fields left out keep their value; every law and framework is on by " +
+        "default. Rules per region: opt_in asks first (GDPR), opt_out shows a 'Do not sell or share' choice (US state laws), notice only informs, " +
+        "none shows nothing. IAB TCF isn't supported. Asking about a new category asks every " +
+        "visitor again. custom_html and custom_css run on the website and need workspace.manage. texts are the banner's words per language " +
+        "(en, de, pt-br); empty ones come from Outflare's own.",
+      inputSchema: {
+        site_key_id: id,
+        enabled: z.boolean().optional(),
+        regions: z.object({ eea: bannerRule.optional(), us: bannerRule.optional(), other: bannerRule.optional() }).optional(),
+        frameworks: z
+          .object({
+            gpc: z.boolean().optional(),
+            google_consent_mode: z.boolean().optional(),
+            meta: z.boolean().optional(),
+            tiktok: z.boolean().optional(),
+            microsoft: z.boolean().optional(),
+          })
+          .optional(),
+        categories: z.object({ analytics: z.boolean().optional(), marketing: z.boolean().optional(), preferences: z.boolean().optional() }).optional(),
+        layout: z.enum(["bar", "box", "modal"]).optional(),
+        position: z.enum(["bottom", "top", "bottom_left", "bottom_right", "center"]).optional(),
+        theme: z.enum(["light", "dark", "brand"]).optional(),
+        colors: z.object({ primary: z.string(), background: z.string(), text: z.string() }).optional().describe("Hex colours; empty for the theme's."),
+        show_logo: z.boolean().optional(),
+        logo_url: z.string().max(2000).optional(),
+        reopen_button: z.boolean().optional(),
+        policy_url: z.string().max(2000).optional().describe("The cookie policy: an https address or a path such as /cookies."),
+        reask_after_days: z.number().int().min(0).max(730).optional(),
+        texts: z.record(z.string(), z.record(z.string(), z.string())).optional(),
+        custom_css: z.string().max(20480).optional(),
+        custom_html: z.string().max(20480).optional(),
+      },
+      annotations: write,
+    },
+    ({ site_key_id, ...body }) =>
+      call(() =>
+        gtm.PUT("/v1/workspaces/{ws}/site-keys/{id}/consent-banner", {
+          params: { path: { ws, id: site_key_id } },
+          body,
+        }),
+      ),
+  );
+
+  server.registerTool(
+    "reask_consent_banner",
+    {
+      title: "Ask a website's visitors for consent again",
+      description:
+        "Raises the banner's consent version, so visitors whose choice is older see the banner again where their region's rule asks first. Use it " +
+        "after the site starts using a new kind of cookie. Confirm with the user first.",
+      inputSchema: { site_key_id: id },
+      annotations: write,
+    },
+    ({ site_key_id }) => call(() => gtm.POST("/v1/workspaces/{ws}/site-keys/{id}/consent-banner/reask", { params: { path: { ws, id: site_key_id } } })),
   );
 
   server.registerTool(

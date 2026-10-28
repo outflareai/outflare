@@ -4,6 +4,7 @@ Thanks for helping build Outflare.
 
 ## Before you start
 
+- Ask questions and share ideas in [Discussions](https://github.com/outflareai/outflare/discussions).
 - Open an issue for anything larger than a small fix, so we can agree on the approach first.
 - Read [AGENTS.md](AGENTS.md). It describes the architecture and conventions for humans and coding agents alike.
 
@@ -13,7 +14,10 @@ Contributions require agreeing to the [Contributor License Agreement](CLA.md). Y
 
 ## Pull requests
 
-Outflare's maintainers work in a private repository, and each release is published here as one commit. Pull requests here are welcome all the same: a maintainer brings yours into that repository with you credited as its author, it goes through the same checks as everyone's, and it ships in the next release. Your pull request is closed with a link to that release.
+Outflare's maintainers work in a private repository, and each release is published here as one commit. Pull requests here are welcome all the same. Once you've signed the CLA, a maintainer reviews yours and labels it `accepted`. Its changes are then copied into that repository as one commit with you as co-author, go through the same checks as everyone's, and ship in the next release. The release commit here lists you as co-author (by your GitHub username and noreply address), and your pull request is closed with a link to the release.
+
+- Change only files that are in this repository, and nothing under `.github/`. A maintainer makes workflow changes.
+- Pushing after your pull request is accepted takes it back for review: a maintainer looks at the new commits and accepts it again.
 
 - Keep each PR focused on one change.
 - `make test` and `pnpm -r build` must pass, and `pytest` in `sdk/python` if you change the Python SDK. CI runs all three.

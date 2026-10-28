@@ -36,6 +36,7 @@ func (s *Server) routesABTests(mux *http.ServeMux) {
 	read, manage := auth.ScopeAnalyticsRead, auth.ScopeAnalyticsManage
 	mux.HandleFunc("GET /v1/workspaces/{ws}/ab-tests", s.inWorkspace(read, s.listABTests))
 	mux.HandleFunc("POST /v1/workspaces/{ws}/ab-tests", s.inWorkspace(manage, s.createABTest))
+	mux.HandleFunc("POST /v1/workspaces/{ws}/ab-tests/plan", s.inWorkspace(read, s.planABTest))
 	mux.HandleFunc("GET /v1/workspaces/{ws}/ab-tests/{test}", s.inWorkspace(read, s.getABTest))
 	mux.HandleFunc("PATCH /v1/workspaces/{ws}/ab-tests/{test}", s.inWorkspace(manage, s.updateABTest))
 	mux.HandleFunc("POST /v1/workspaces/{ws}/ab-tests/{test}/start", s.inWorkspace(manage, s.startABTest))
@@ -54,6 +55,7 @@ type abTestView struct {
 	Control    string          `json:"control"`
 	Goals      []abtests.Goal  `json:"goals"`
 	MinEffect  float64         `json:"min_effect"`
+	Baselines  []float64       `json:"baselines"`
 	StartedAt  *time.Time      `json:"started_at"`
 	EndedAt    *time.Time      `json:"ended_at"`
 	Decision   string          `json:"decision"`
@@ -71,7 +73,7 @@ type abTestInput struct {
 	MinEffect  *float64        `json:"min_effect"`
 }
 
-const abTestCols = `t.id::text, t.flag_id::text, f.key, t.brand_id::text, t.name, t.hypothesis, t.status, t.control, t.goals, t.min_effect,
+const abTestCols = `t.id::text, t.flag_id::text, f.key, t.brand_id::text, t.name, t.hypothesis, t.status, t.control, t.goals, t.min_effect, t.baselines,
 	t.started_at, t.ended_at, t.decision, t.created_at, t.updated_at, t.result`
 
 func loadABTests(ctx context.Context, q abtests.Querier, ws, where string, args ...any) ([]abTestView, error) {
@@ -83,7 +85,7 @@ func loadABTests(ctx context.Context, q abtests.Querier, ws, where string, args 
 	list, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (abTestView, error) {
 		var v abTestView
 		var goals []byte
-		if err := row.Scan(&v.ID, &v.FlagID, &v.FlagKey, &v.BrandID, &v.Name, &v.Hypothesis, &v.Status, &v.Control, &goals, &v.MinEffect,
+		if err := row.Scan(&v.ID, &v.FlagID, &v.FlagKey, &v.BrandID, &v.Name, &v.Hypothesis, &v.Status, &v.Control, &goals, &v.MinEffect, &v.Baselines,
 			&v.StartedAt, &v.EndedAt, &v.Decision, &v.CreatedAt, &v.UpdatedAt, &v.result); err != nil {
 			return v, err
 		}
@@ -420,13 +422,30 @@ func (s *Server) startABTest(w http.ResponseWriter, r *http.Request) {
 			}
 			turnedOn = true
 		}
-		if _, err := tx.Exec(ctx, `UPDATE ab_tests SET status = 'running', started_at = now(), updated_at = now() WHERE id = $1 AND workspace_id = $2`,
-			t.ID, a.WorkspaceID); err != nil {
+		// Record each goal's recent rate on the site, so the sequential
+		// test keeps one tuning for the test's whole life.
+		now := time.Now()
+		baselines, recorded := make([]float64, len(t.Goals)), 0
+		for i, g := range t.Goals {
+			tr, err := abtests.ReadTraffic(ctx, tx, a.WorkspaceID, g, "", now.Add(-abtests.TrafficWindow), now)
+			if err != nil {
+				return err
+			}
+			if baselines[i] = abtests.Baseline(tr); baselines[i] > 0 {
+				recorded++
+			}
+		}
+		var stored any
+		if recorded > 0 {
+			stored, _ = json.Marshal(baselines)
+		}
+		if _, err := tx.Exec(ctx, `UPDATE ab_tests SET status = 'running', started_at = now(), baselines = $3, updated_at = now() WHERE id = $1 AND workspace_id = $2`,
+			t.ID, a.WorkspaceID, stored); err != nil {
 			return err
 		}
 		t.Status = "running"
 		data := abAuditData(*t)
-		data["variants"], data["flag_turned_on"] = len(f.Variants), turnedOn
+		data["variants"], data["flag_turned_on"], data["baselines_recorded"] = len(f.Variants), turnedOn, recorded
 		return recordWithProps(ctx, tx, &a.principal, a.WorkspaceID, "ab_test.started", "ab_test", t.ID, data, data)
 	})
 	if turnedOn {
@@ -484,7 +503,7 @@ func (s *Server) abResults(ctx context.Context, q abtests.Querier, ws string, t 
 	start := time.Now()
 	ctx, cancel := context.WithTimeout(ctx, abResultsTimeout)
 	defer cancel()
-	spec := abtests.Spec{FlagKey: f.Key, Control: t.Control, Goals: t.Goals, MinEffect: t.MinEffect, To: to}
+	spec := abtests.Spec{FlagKey: f.Key, Control: t.Control, Goals: t.Goals, MinEffect: t.MinEffect, Baselines: t.Baselines, To: to}
 	if t.StartedAt != nil {
 		spec.From = *t.StartedAt
 	}
@@ -533,4 +552,76 @@ func (s *Server) abTestResults(w http.ResponseWriter, r *http.Request) {
 		"test_id": t.ID, "status": t.Status, "control": t.Control,
 		"winner": abtests.Winner(res, t.Control), "result": res,
 	})
+}
+
+// planABTest says how long a test of a flag is likely to take, from the
+// last 28 days of the site's traffic and the goal's rate, before anyone
+// starts it.
+func (s *Server) planABTest(w http.ResponseWriter, r *http.Request) {
+	a := accessFrom(r.Context())
+	var in struct {
+		Flag      string       `json:"flag"`
+		Goal      abtests.Goal `json:"goal"`
+		Page      string       `json:"page"`
+		MinEffect float64      `json:"min_effect"`
+	}
+	if !decode(w, r, &in) {
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), abResultsTimeout)
+	defer cancel()
+	f, err := s.abFlag(ctx, nil, a.WorkspaceID, in.Flag)
+	if s.abWriteError(w, r, err) {
+		return
+	}
+	if !a.sees(nil, f.BrandID) {
+		writeError(w, r, http.StatusNotFound, "not_found", "flag not found: use its id or key")
+		return
+	}
+	in.Page = strings.TrimSpace(in.Page)
+	switch {
+	case abtests.CheckGoals([]abtests.Goal{in.Goal}) != "":
+		writeError(w, r, http.StatusBadRequest, "invalid_request", abtests.CheckGoals([]abtests.Goal{in.Goal}))
+		return
+	case in.Page != "" && abtests.CheckGoals([]abtests.Goal{{Kind: "page", Path: in.Page}}) != "":
+		writeError(w, r, http.StatusBadRequest, "invalid_request", "page is a path such as /pricing, or /docs/* for every page under /docs")
+		return
+	case in.MinEffect != 0 && (in.MinEffect < abtests.MinEffectLow || in.MinEffect > abtests.MinEffectHigh):
+		writeError(w, r, http.StatusBadRequest, "invalid_request", "min_effect is from 0.01 (+1%) to 1 (+100%), such as 0.25")
+		return
+	}
+	now := time.Now()
+	tr, err := abtests.ReadTraffic(ctx, s.pool, a.WorkspaceID, in.Goal, in.Page, now.Add(-abtests.TrafficWindow), now)
+	if err != nil {
+		s.internal(w, r, err)
+		return
+	}
+	weights := make([]int, len(f.Variants))
+	for i, v := range f.Variants {
+		weights[i] = v.Weight
+	}
+	weekly := float64(tr.Visitors) / 4 * float64(f.Rollout) / 100
+	plan := abtests.MakePlan(tr.Rate(), weekly, weights, in.MinEffect)
+	writeJSON(w, http.StatusOK, map[string]any{
+		"flag_id": f.ID, "page": in.Page, "window_days": 28, "traffic": tr, "plan": plan, "warning": planWarning(f, tr, plan),
+	})
+}
+
+// planWarning says in words when a plan can't work or will take too long.
+func planWarning(f flagView, tr abtests.Traffic, p abtests.Plan) string {
+	switch {
+	case len(f.Variants) < 2:
+		return "The flag has one version: give it at least two before planning a test."
+	case tr.Visitors == 0:
+		return "No page views in the last 28 days, so there's nothing to plan from. Check the website script is installed."
+	case tr.Converted == 0:
+		return "No visitor reached this goal in the last 28 days, so a test of it can't find a winner yet. Pick a goal people already reach."
+	case p.Weeks == 0 || p.Weeks > 8:
+		if p.Detectable8Weeks == 0 {
+			return "At this traffic, even a very large change is unlikely to be safe to stop within 8 weeks. Test a busier page or an earlier goal."
+		}
+		return fmt.Sprintf("At this traffic, a change of +%.0f%% is unlikely to be safe to stop within 8 weeks. Only changes of about +%.0f%% or more will show in that time.",
+			p.MinEffect*100, p.Detectable8Weeks*100)
+	}
+	return ""
 }

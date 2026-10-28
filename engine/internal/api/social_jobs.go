@@ -46,6 +46,8 @@ func (s *Server) registerSocialJobs(q *jobs.Queue) {
 	s.registerSocialPublishJobs(q)
 	s.registerBrandLinkJobs(q)
 	s.registerReviewJobs(q)
+	s.registerABTestJobs(q)
+	s.registerNewsJobs(q)
 }
 
 // enqueueSocialCheck queues a check of a watch; key keeps it to one per
@@ -72,6 +74,9 @@ func (s *Server) RunSocial(ctx context.Context, every time.Duration) {
 		}
 		if _, err := s.QueueDueReviewReads(ctx); err != nil && ctx.Err() == nil {
 			track.Fail(ctx, s.log, track.Event{Name: "reviews.scheduler_failed", ActorType: "system", Surface: "system"}, "internal", err)
+		}
+		if _, err := s.QueueDueNewsSearches(ctx); err != nil && ctx.Err() == nil {
+			track.Fail(ctx, s.log, track.Event{Name: "news.scheduler_failed", ActorType: "system", Surface: "system"}, "internal", err)
 		}
 		select {
 		case <-ctx.Done():

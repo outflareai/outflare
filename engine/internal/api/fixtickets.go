@@ -16,6 +16,7 @@ import (
 	"github.com/outflareai/outflare/engine/internal/auth"
 	"github.com/outflareai/outflare/engine/internal/crawl"
 	"github.com/outflareai/outflare/engine/internal/jobs"
+	"github.com/outflareai/outflare/engine/internal/linkbuild"
 	"github.com/outflareai/outflare/engine/internal/llm"
 	"github.com/outflareai/outflare/engine/internal/track"
 )
@@ -34,6 +35,8 @@ const (
 	jobFixTicketWrite = "fix_ticket.write"
 	// taskFixTickets is the AI task that writes briefs.
 	taskFixTickets = "fix_tickets"
+	// taskLinkPages is the link building page reader's AI task.
+	taskLinkPages = linkbuild.PageReadTask
 	// fixTicketEstimateCents is what one brief may cost, for the budget
 	// check before it is written.
 	fixTicketEstimateCents = 10

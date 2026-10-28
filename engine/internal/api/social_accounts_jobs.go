@@ -11,6 +11,8 @@ import (
 	"github.com/outflareai/outflare/engine/internal/audit"
 	"github.com/outflareai/outflare/engine/internal/connectors"
 	"github.com/outflareai/outflare/engine/internal/jobs"
+	"github.com/outflareai/outflare/engine/internal/metrics"
+	"github.com/outflareai/outflare/engine/internal/retry"
 	"github.com/outflareai/outflare/engine/internal/sociallinks"
 	"github.com/outflareai/outflare/engine/internal/track"
 )
@@ -86,7 +88,8 @@ func (s *Server) socialMetricsConnectors() (all, readers []string) {
 }
 
 // QueueDueSocialSyncs queues a sync for each connection with an account
-// that is due, for each connection with no accounts yet (twice a day), and
+// that is due (every hour, so a failed read is tried again the same day),
+// for each connection with no accounts yet (twice a day), and
 // for each page reader in a workspace whose brands link to a profile (every
 // hour, so a profile no read has started for yet, such as one linked
 // before its channel could be read, starts within the hour; a sync reads
@@ -102,7 +105,7 @@ func (s *Server) QueueDueSocialSyncs(ctx context.Context) (int, error) {
 	n := 0
 	err := pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
 		rows, err := tx.Query(ctx, `
-			SELECT DISTINCT a.workspace_id::text, a.integration_id::text, false FROM social_accounts a
+			SELECT DISTINCT a.workspace_id::text, a.integration_id::text, true FROM social_accounts a
 			JOIN integrations i ON i.id = a.integration_id AND i.workspace_id = a.workspace_id
 			WHERE a.status = 'active' AND a.next_sync_at <= now() AND i.status = 'connected'
 			UNION
@@ -169,11 +172,20 @@ func (s *Server) SyncSocialAccounts(ctx context.Context, ws, integrationID strin
 		k := connectors.KindOf(err)
 		return k == connectors.ErrUnavailable || k == connectors.ErrQuota
 	}
+	// failAll keeps a failure of the whole connection on its accounts; the
+	// ones that were due are tried again the same day (retry.After).
 	failAll := func(err error) error {
 		ev.Name = "social_account.sync_failed"
-		track.Fail(ctx, s.log, ev, "connector_"+connectors.KindOf(err), err)
-		if _, uerr := s.pool.Exec(ctx, `UPDATE social_accounts SET last_error = $3, updated_at = now() WHERE workspace_id = $1 AND integration_id = $2`,
-			ws, integrationID, truncate(err.Error(), 500)); uerr != nil {
+		code := readCode(err)
+		track.Fail(ctx, s.log, ev, code, err)
+		// Accounts already marked by their own read aren't due any more,
+		// so they aren't counted twice.
+		if _, uerr := s.pool.Exec(ctx, `UPDATE social_accounts SET last_error = $3, last_error_code = $4, updated_at = now(),
+			last_failed_at = CASE WHEN status = 'active' AND next_sync_at <= now() + interval '1 minute' THEN now() ELSE last_failed_at END,
+			failures = CASE WHEN status = 'active' AND next_sync_at <= now() + interval '1 minute' THEN failures + 1 ELSE failures END,
+			next_sync_at = CASE WHEN status = 'active' AND next_sync_at <= now() + interval '1 minute' THEN now() + `+retry.SQL("failures + 1")+` ELSE next_sync_at END
+			WHERE workspace_id = $1 AND integration_id = $2`,
+			ws, integrationID, truncate(err.Error(), 500), code); uerr != nil {
 			return uerr
 		}
 		if retryable(err) {
@@ -238,33 +250,39 @@ func (s *Server) syncSocialChannel(ctx context.Context, ws string, o *connectors
 	if err := s.saveSocialAccounts(ctx, ws, o.ID, channel, found, brands); err != nil {
 		return err
 	}
-	rows, err := s.pool.Query(ctx, `SELECT id::text, external_id, kind, handle, url FROM social_accounts
+	rows, err := s.pool.Query(ctx, `SELECT id::text, external_id, kind, handle, url, failures FROM social_accounts
 		WHERE workspace_id = $1 AND integration_id = $2 AND channel = $3 AND status = 'active' AND next_sync_at <= now() + interval '1 minute'`, ws, o.ID, channel)
 	if err != nil {
 		return err
 	}
 	type acct struct {
-		id string
-		a  connectors.SocialAccount
+		id       string
+		a        connectors.SocialAccount
+		failures int
 	}
 	var due []acct
 	var x acct
-	if _, err := pgx.ForEachRow(rows, []any{&x.id, &x.a.ExternalID, &x.a.Kind, &x.a.Handle, &x.a.URL}, func() error { due = append(due, x); return nil }); err != nil {
+	if _, err := pgx.ForEachRow(rows, []any{&x.id, &x.a.ExternalID, &x.a.Kind, &x.a.Handle, &x.a.URL, &x.failures}, func() error { due = append(due, x); return nil }); err != nil {
 		return err
 	}
 	posts, synced := 0, 0
-	var lastErr error
+	var lastErr, broken error
 	for _, d := range due {
-		n, err := s.syncSocialAccount(ctx, ws, d.id, channel, m, o, d.a)
+		n, err := s.syncSocialAccount(ctx, ws, d.id, channel, m, o, d.a, d.failures)
 		if err != nil {
+			metrics.SocialAccountRead(channel, readOutcome(readCode(err)))
 			lastErr = err
+			if errors.As(err, new(*socialSaveError)) {
+				broken = err
+			}
 			if !retryable(err) {
 				// One account refused (a page the person no longer
-				// administers): keep reading the others.
+				// administers, a bot check): keep reading the others.
 				continue
 			}
 			return failAll(err)
 		}
+		metrics.SocialAccountRead(channel, "success")
 		posts += n
 		synced++
 	}
@@ -272,8 +290,10 @@ func (s *Server) syncSocialChannel(ctx context.Context, ws string, o *connectors
 	ev.Props["duration_ms"] = time.Since(start).Milliseconds()
 	if lastErr != nil {
 		ev.Name = "social_account.sync_failed"
-		track.Fail(ctx, s.log, ev, "connector_"+connectors.KindOf(lastErr), lastErr)
-		return nil
+		track.Fail(ctx, s.log, ev, readCode(lastErr), lastErr)
+		// A read Outflare couldn't save is its own to fix: the job fails
+		// too, and shows in job.failed.
+		return broken
 	}
 	track.Emit(ctx, ev)
 	return nil
@@ -342,15 +362,22 @@ func (s *Server) saveSocialAccounts(ctx context.Context, ws, integrationID, chan
 }
 
 // syncSocialAccount reads one account's counts and its own recent posts,
-// and reports how many posts it read.
-func (s *Server) syncSocialAccount(ctx context.Context, ws, id, channel string, m connectors.SocialMetrics, o *connectors.Opened, a connectors.SocialAccount) (int, error) {
+// and reports how many posts it read. A failed read is kept on the account
+// and tried again the same day (retry.After), so its day has a count,
+// unless only a person can fix it (a wrong address).
+func (s *Server) syncSocialAccount(ctx context.Context, ws, id, channel string, m connectors.SocialMetrics, o *connectors.Opened, a connectors.SocialAccount, failures int) (int, error) {
 	fail := func(err error) (int, error) {
-		_, uerr := s.pool.Exec(ctx, `UPDATE social_accounts SET last_error = $3, updated_at = now(),
-			next_sync_at = CASE WHEN $4 THEN next_sync_at ELSE now() + make_interval(secs => $5) END
+		code := readCode(err)
+		wait := retry.After(failures + 1)
+		if waitsForPerson(code) {
+			wait = socialSyncInterval(channel)
+		}
+		_, uerr := s.pool.Exec(ctx, `UPDATE social_accounts SET last_error = $3, last_error_code = $4, last_failed_at = now(), failures = failures + 1,
+			next_sync_at = now() + make_interval(secs => $5), updated_at = now()
 			WHERE workspace_id = $1 AND id = $2`,
-			ws, id, truncate(err.Error(), 500), connectors.KindOf(err) == connectors.ErrUnavailable, socialSyncInterval(channel).Seconds())
+			ws, id, truncate(err.Error(), 500), code, wait.Seconds())
 		if uerr != nil {
-			return 0, uerr
+			return 0, &socialSaveError{uerr}
 		}
 		return 0, err
 	}
@@ -364,7 +391,8 @@ func (s *Server) syncSocialAccount(ctx context.Context, ws, id, channel string, 
 	}
 	err = pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
 		if _, err := tx.Exec(ctx, `UPDATE social_accounts SET followers = COALESCE($3, followers), following = COALESCE($4, following),
-			posts = COALESCE($5, posts), last_synced_at = now(), last_error = NULL, next_sync_at = now() + make_interval(secs => $6),
+			posts = COALESCE($5, posts), last_synced_at = now(), last_error = NULL, last_error_code = NULL, failures = 0,
+			next_sync_at = now() + make_interval(secs => $6),
 			name = COALESCE(NULLIF($7, ''), name), avatar_url = COALESCE(NULLIF($8, ''), avatar_url), updated_at = now()
 			WHERE workspace_id = $1 AND id = $2`, ws, id, st.Followers, st.Following, st.Posts, socialSyncInterval(channel).Seconds(),
 			truncate(st.Name, 300), truncate(st.AvatarURL, 1000)); err != nil {
@@ -401,5 +429,22 @@ func (s *Server) syncSocialAccount(ctx context.Context, ws, id, channel string, 
 		}
 		return nil
 	})
-	return len(posts), err
+	if err != nil {
+		return fail(&socialSaveError{err})
+	}
+	return len(posts), nil
+}
+
+// socialSaveError is an account read that couldn't be saved: Outflare's
+// side, not the channel's.
+type socialSaveError struct{ err error }
+
+func (e *socialSaveError) Error() string {
+	return "saving a social account's read failed: " + e.err.Error()
+}
+
+// Unwrap gives an invalid connector error, so one account's failure
+// doesn't stop the others or mark the connection down.
+func (e *socialSaveError) Unwrap() []error {
+	return []error{e.err, &readFailure{readSaveFailed, connectors.Errf(connectors.ErrInvalid, "%s", e.Error())}}
 }

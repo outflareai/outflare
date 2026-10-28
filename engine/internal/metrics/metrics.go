@@ -110,6 +110,21 @@ var (
 		Help: "Lookups of a workspace's flags, by result (hit: from memory, miss: read from Postgres).",
 	}, []string{"result"})
 
+	// The consent banner in the website script: its settings asked for on
+	// a visitor's first page, and the choices visitors make.
+	consentRequests = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Namespace: namespace, Subsystem: "site_consent", Name: "requests_total",
+		Help: "Consent banner requests from websites, by endpoint (config, choice) and outcome (ok, refused, error).",
+	}, []string{"endpoint", "outcome"})
+	consentDuration = prometheus.NewHistogramVec(prometheus.HistogramOpts{
+		Namespace: namespace, Subsystem: "site_consent", Name: "request_seconds",
+		Help: "Time to answer a consent banner request, by endpoint.", Buckets: requestBuckets,
+	}, []string{"endpoint"})
+	consentChoices = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Namespace: namespace, Subsystem: "site_consent", Name: "choices_total",
+		Help: "Consent choices kept, by action (accept_all, reject_all, custom, opt_out, gpc, api) and region (eea, us, other).",
+	}, []string{"action", "region"})
+
 	// AI calls made with workspaces' own keys. Labels are the provider and
 	// the tool (a fixed task id), never a workspace or a model a person
 	// typed.
@@ -218,8 +233,14 @@ var (
 	// page reader.
 	reviewReads = prometheus.NewCounterVec(prometheus.CounterOpts{
 		Namespace: namespace, Subsystem: "reviews", Name: "page_reads_total",
-		Help: "Review page reads, by platform and outcome (success, not_a_review_page, connector_error).",
+		Help: "Review page reads, by platform and outcome (success, blocked, page_not_found, not_a_review_page, save_failed, connector_error).",
 	}, []string{"platform", "outcome"})
+	// Social accounts: reading followers of connected accounts and of the
+	// public profiles in brand links.
+	socialReads = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Namespace: namespace, Subsystem: "social", Name: "account_reads_total",
+		Help: "Social account reads, by channel and outcome (success, blocked, page_not_found, invalid_address, no_follower_count, save_failed, connector_error).",
+	}, []string{"channel", "outcome"})
 	reviewsFound = prometheus.NewCounterVec(prometheus.CounterOpts{
 		Namespace: namespace, Subsystem: "reviews", Name: "new_total",
 		Help: "Reviews kept for the first time, by platform (a page's first read included).",
@@ -238,6 +259,26 @@ var (
 		Help: "Reads of who links to a page or domain, by reason (requested, dead_page) and outcome (success, budget_reached, connector_auth, invalid_request, provider_error, internal).",
 	}, []string{"reason", "outcome"})
 
+	// News watch: saved news searches run through the workspace's own
+	// web search connection.
+	newsRuns = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Namespace: namespace, Subsystem: "news", Name: "search_runs_total",
+		Help: "News search runs, by purpose (topic, coverage) and outcome (success, connector_needed, usage_limit_reached, connector_error, internal).",
+	}, []string{"purpose", "outcome"})
+	newsFound = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Namespace: namespace, Subsystem: "news", Name: "found_total",
+		Help: "What news search runs kept for the first time, by kind (article: a new article in the workspace, coverage: a new coverage item for a brand).",
+	}, []string{"kind"})
+
+	linkPageChecks = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Namespace: namespace, Subsystem: "seo", Name: "link_page_checks_total",
+		Help: "OutflareBot's checks of link prospects' pages, by status (up, gone, redirected, blocked, opted_out, unreachable, failed).",
+	}, []string{"status"})
+	archiveLookups = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Namespace: namespace, Subsystem: "seo", Name: "archive_lookups_total",
+		Help: "Internet Archive lookups of broken links, by outcome (found, none, error).",
+	}, []string{"outcome"})
+
 	buildInfo = prometheus.NewGaugeVec(prometheus.GaugeOpts{
 		Namespace: namespace, Name: "build_info",
 		Help: "Always 1; the labels are the running engine version and its role (OUTFLARE_ROLE).",
@@ -251,6 +292,7 @@ var own = []prometheus.Collector{
 	jobsDone, jobDuration, jobWait, jobsActive, jobsReaped, workers,
 	siteEvents, inboxEvents, inboxBatch,
 	flagRequests, flagDuration, flagCache, abResults, abResultsDuration,
+	consentRequests, consentDuration, consentChoices,
 	pipelineItems, pipelineCodes, pipelineBatch, pipelineBatchSize, pipelineWait, pipelineLimitWaits, pipelineLimitReports,
 	aiCalls, aiTokens, aiCost, aiBudgetAlerts,
 	connectionLimitAlerts, connectionLimitStops,
@@ -260,8 +302,9 @@ var own = []prometheus.Collector{
 	ruleEvaluations,
 	semanticRuns, semanticItems, semanticDuration, semanticAvailable, semanticWorkspaces,
 	adConversions, adConversionsOldest,
-	reviewReads, reviewsFound, linkReads,
+	reviewReads, reviewsFound, socialReads, linkReads, linkPageChecks, archiveLookups,
 	socialPublishes,
+	newsRuns, newsFound,
 	buildInfo,
 }
 
@@ -340,6 +383,16 @@ func SiteEventsReceived(accepted, rejected int) {
 
 // SiteEventsCapped counts browser events turned away by a daily limit.
 func SiteEventsCapped(n int) { siteEvents.WithLabelValues("capped").Add(float64(n)) }
+
+// SiteConsentRequest records one consent banner request: its endpoint
+// (config, choice), outcome (ok, refused, error) and time.
+func SiteConsentRequest(endpoint, outcome string, d time.Duration) {
+	consentRequests.WithLabelValues(endpoint, outcome).Inc()
+	consentDuration.WithLabelValues(endpoint).Observe(d.Seconds())
+}
+
+// SiteConsentChoice counts one visitor's consent choice kept.
+func SiteConsentChoice(action, region string) { consentChoices.WithLabelValues(action, region).Inc() }
 
 // InboxStored records one inbox row a worker finished: how many of its
 // events were stored and rejected, or failed when the row failed.
@@ -452,8 +505,19 @@ func HookEvent(connector, result string, lag time.Duration) {
 	}
 }
 
+// SocialAccountRead records one read of a social account and its outcome.
+func SocialAccountRead(channel, outcome string) {
+	socialReads.WithLabelValues(channel, outcome).Inc()
+}
+
 // LinkRead records one read of who links to a page or domain.
 func LinkRead(reason, outcome string) { linkReads.WithLabelValues(reason, outcome).Inc() }
+
+// LinkPageCheck records one check of a link prospect's page.
+func LinkPageCheck(status string) { linkPageChecks.WithLabelValues(status).Inc() }
+
+// ArchiveLookup records one Internet Archive lookup.
+func ArchiveLookup(outcome string) { archiveLookups.WithLabelValues(outcome).Inc() }
 
 // ReviewPageRead records one read of a review page: its outcome and how
 // many reviews it kept for the first time.
@@ -461,6 +525,18 @@ func ReviewPageRead(platform, outcome string, added int) {
 	reviewReads.WithLabelValues(platform, outcome).Inc()
 	if added > 0 {
 		reviewsFound.WithLabelValues(platform).Add(float64(added))
+	}
+}
+
+// NewsSearchRun records one run of a news search: its outcome, and the
+// articles and coverage items it kept for the first time.
+func NewsSearchRun(purpose, outcome string, articles, coverage int) {
+	newsRuns.WithLabelValues(purpose, outcome).Inc()
+	if articles > 0 {
+		newsFound.WithLabelValues("article").Add(float64(articles))
+	}
+	if coverage > 0 {
+		newsFound.WithLabelValues("coverage").Add(float64(coverage))
 	}
 }
 

@@ -21,6 +21,14 @@ With [Geonode](connectors.md) connected, Outflare searches the web for the brand
 
 Outflare reads each active page once a day through the workspace's own page reader (Geonode), and straight away when the page is added. The first read takes the page's history, up to 25 pages of reviews; later reads take the newest and stop at the first review already kept. Each read costs Geonode tokens on your own account: one per page of reviews read, so about one a day per site once the history is in. With no page reader connected, nothing is read and the page says which connection to add.
 
+When a read fails, Outflare says why on the Reviews page and tries again on its own:
+
+- A page that shows no reviews (often a bot check, or a page built by its script) is read again in a browser straight away. If that works, later reads of the page start in a browser.
+- After that, a failed read is tried again the same day, so the day's numbers still come in: after 15 minutes, then 1 and 2 hours, then every 4 hours until one works. Only a wrong address (`page_not_found`) waits for the next day's read, since a person has to fix it.
+- **Try again** on the page (or `POST /v1/workspaces/{ws}/reviews/pages/{id}/read`, the `read_review_page` MCP tool) reads it now.
+
+The page's `last_error_code` says why: `blocked` (the site showed a bot check, also in a browser), `page_not_found` (check the address in the brand's links), `not_a_review_page` (the site answered but showed no reviews or rating: it may have changed its page), `save_failed`, or the page reader's own `connector_*` code. `failures` counts the reads in a row that failed. Pages that keep failing with an error Outflare has to fix raise the `OutflareReviewPagesStuck` alert ([monitoring](monitoring.md)).
+
 A page that shows no rating and no reviews (a challenge page, a login wall, a wrong address) is an error on the page, never zero reviews. For Google, the place's rating and count are read reliably; individual reviews are read as far as the public page shows them, and signing in to Google Business Profile for every review comes later.
 
 Pause a page to keep it and its reviews but stop reading it. Taking the link off the brand marks the page removed and keeps its reviews.

@@ -299,7 +299,8 @@ var Follows = []Ref{
 	{"journey_runs", "record_id"}, {"payment_subscriptions", "record_id"}, {"seo_competitors", "record_id"},
 	{"site_sessions", "record_id"}, {"site_visitors", "record_id"}, {"site_visitors", "account_id"},
 	{"ad_conversion_sends", "record_id"}, {"attribution_conversions", "record_id"}, {"link_prospects", "record_id"},
-	{"rule_firings", "record_id"},
+	{"rule_firings", "record_id"}, {"coverage", "record_id"},
+	{"link_prospect_contacts", "record_id"},
 }
 
 // Owned are the record columns a merge handles itself (identities, links,

@@ -4530,8 +4530,8 @@
     },
     {
       "type": "row",
-      "title": "Reviews (review pages read daily)",
-      "id": 87,
+      "title": "Consent banner",
+      "id": 115,
       "collapsed": false,
       "gridPos": {
         "h": 1,
@@ -4543,8 +4543,177 @@
     },
     {
       "type": "timeseries",
+      "title": "Consent banner requests, by endpoint and outcome",
+      "description": "Requests per minute from websites' consent banners: config is the script asking for the banner's settings (on a visitor's first page, then every few minutes), choice is a visitor's choice being kept. Mostly ok is normal; refused is a bad key, origin or body, error is a failure to read or write Postgres.",
+      "id": 116,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 0,
+        "y": 309
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (endpoint, outcome) (rate(outflare_site_consent_requests_total{job=\"$job\"}[5m])) * 60",
+          "legendFormat": "{{endpoint}} {{outcome}}",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "fillOpacity": 10,
+            "stacking": {
+              "mode": "normal"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "mean",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Consent banner request time (p95)",
+      "description": "How long the consent endpoints take at the 95th percentile. Normal is well under 100 ms; the banner waits for config on a visitor's first page.",
+      "id": 117,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 8,
+        "y": 309
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "histogram_quantile(0.95, sum by (le, endpoint) (rate(outflare_site_consent_request_seconds_bucket{job=\"$job\"}[5m])))",
+          "legendFormat": "{{endpoint}}",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "custom": {
+            "fillOpacity": 10
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "mean",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Consent choices, by action and region",
+      "description": "Visitors' choices kept per minute: accept_all, reject_all, custom (per category), opt_out (US 'Do not sell or share'), gpc and api (the site's own code). A sudden drop to zero while page views go on means the banner stopped showing or sending.",
+      "id": 118,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 309
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (action, region) (rate(outflare_site_consent_choices_total{job=\"$job\"}[5m])) * 60",
+          "legendFormat": "{{action}} {{region}}",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "fillOpacity": 10,
+            "stacking": {
+              "mode": "normal"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "mean",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "type": "row",
+      "title": "Reviews (review pages read daily)",
+      "id": 87,
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 317
+      },
+      "panels": []
+    },
+    {
+      "type": "timeseries",
       "title": "Review page reads by outcome",
-      "description": "Reads of brands' review pages through each workspace's own page reader, by platform and outcome. Normal: mostly success; not_a_review_page means the site showed a challenge or a wrong address, connector_error that the page reader failed.",
+      "description": "Reads of brands' review pages through each workspace's own page reader, by platform and outcome. Normal: mostly success. A failed read is retried in a browser at once, then the same day after 15 minutes, 1 and 2 hours, then every 4 hours. blocked: the site showed a bot check; page_not_found: a wrong address; not_a_review_page: the site answered but the parser found nothing (it may have changed its page); save_failed: a bug; connector_error: the page reader failed.",
       "id": 88,
       "datasource": {
         "type": "prometheus",
@@ -4554,7 +4723,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 309
+        "y": 318
       },
       "targets": [
         {
@@ -4604,7 +4773,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 309
+        "y": 318
       },
       "targets": [
         {
@@ -4654,7 +4823,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 317
+        "y": 326
       },
       "targets": [
         {
@@ -4704,7 +4873,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 317
+        "y": 326
       },
       "targets": [
         {
@@ -4742,23 +4911,10 @@
       }
     },
     {
-      "type": "row",
-      "title": "Social publishing (the brand's own posts)",
-      "id": 92,
-      "collapsed": false,
-      "gridPos": {
-        "h": 1,
-        "w": 24,
-        "x": 0,
-        "y": 317
-      },
-      "panels": []
-    },
-    {
       "type": "timeseries",
-      "title": "Posts by outcome",
-      "description": "Posts the publish job tried per hour, by channel and outcome. Normal is all published; failed means the channel refused a post or did not answer (each one is listed with its reason under Social); retried is a rate limit before anything was posted.",
-      "id": 93,
+      "title": "Review pages stuck failing",
+      "description": "Active review pages whose last 3 or more reads failed, same-day retries in a browser included, by platform and error code. Normal: none. blocked means the site shows a bot check even in a browser, not_a_review_page that the site changed its page, save_failed a bug; page_not_found and connector_* are the workspace's to fix and show on its Reviews page.",
+      "id": 103,
       "datasource": {
         "type": "prometheus",
         "uid": "${datasource}"
@@ -4767,7 +4923,183 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 318
+        "y": 334
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (platform, code) (outflare_reviews_stuck_pages{job=\"$job\"})",
+          "legendFormat": "{{platform}} {{code}}",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "fillOpacity": 10
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "mean",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "type": "row",
+      "title": "Social accounts (followers read daily)",
+      "id": 104,
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 342
+      },
+      "panels": []
+    },
+    {
+      "type": "timeseries",
+      "title": "Social account reads by outcome",
+      "description": "Reads of social accounts' followers (X and LinkedIn connections, and public profiles through each workspace's own page reader), by channel and outcome. Normal: mostly success. A failed read is tried again the same day after 15 minutes, 1 and 2 hours, then every 4 hours. blocked: a bot check; no_follower_count: the page showed no count (private, suspended, or the site changed); page_not_found or invalid_address: a wrong link; save_failed: a bug; connector_error: the connection failed.",
+      "id": 105,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 343
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (channel, outcome) (rate(outflare_social_account_reads_total{job=\"$job\"}[1h]))",
+          "legendFormat": "{{channel}} {{outcome}}",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps",
+          "custom": {
+            "fillOpacity": 10
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "mean",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Social accounts stuck failing",
+      "description": "Active social accounts whose last 3 or more reads failed, same-day retries included, by channel and error code. Normal: none. blocked, no_follower_count and save_failed are Outflare's to fix (they alert); the others are the workspace's and show on its Social page.",
+      "id": 106,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 343
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (channel, code) (outflare_social_stuck_accounts{job=\"$job\"})",
+          "legendFormat": "{{channel}} {{code}}",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "fillOpacity": 10
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "mean",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "type": "row",
+      "title": "Social publishing (the brand's own posts)",
+      "id": 109,
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 351
+      },
+      "panels": []
+    },
+    {
+      "type": "timeseries",
+      "title": "Posts by outcome",
+      "description": "Posts the publish job tried per hour, by channel and outcome. Normal is all published; failed means the channel refused a post or did not answer (each one is listed with its reason under Social); retried is a rate limit before anything was posted.",
+      "id": 110,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 352
       },
       "targets": [
         {
@@ -4817,7 +5149,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 318
+        "y": 352
       },
       "targets": [
         {
@@ -4867,7 +5199,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 326
+        "y": 360
       },
       "targets": [
         {
@@ -4913,7 +5245,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 334
+        "y": 368
       },
       "panels": []
     },
@@ -4930,7 +5262,7 @@
         "h": 8,
         "w": 24,
         "x": 0,
-        "y": 335
+        "y": 369
       },
       "targets": [
         {
@@ -4946,6 +5278,278 @@
       "fieldConfig": {
         "defaults": {
           "unit": "reqps",
+          "custom": {
+            "fillOpacity": 10
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "mean",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Link prospect page checks by status",
+      "description": "OutflareBot's checks of link prospects' pages, per hour, by what it found. Normal: mostly up, some gone, blocked or unreachable (other people's sites). failed rising means checks are breaking: look for link_prospect.check_failed in the log.",
+      "id": 107,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 377
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (status) (rate(outflare_seo_link_page_checks_total{job=\"$job\"}[1h]))",
+          "legendFormat": "{{status}}",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps",
+          "custom": {
+            "fillOpacity": 10
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "mean",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Internet Archive lookups by outcome",
+      "description": "Lookups of broken links in the Internet Archive, per hour. Normal: found and none; error rising means archive.org is slow or down, and checks go on without snapshots.",
+      "id": 108,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 377
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (outcome) (rate(outflare_seo_archive_lookups_total{job=\"$job\"}[1h]))",
+          "legendFormat": "{{outcome}}",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps",
+          "custom": {
+            "fillOpacity": 10
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "mean",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "type": "row",
+      "title": "News watch (saved news searches, on workspaces' own web search connections)",
+      "id": 111,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 385
+      },
+      "collapsed": false,
+      "panels": []
+    },
+    {
+      "type": "timeseries",
+      "title": "News search runs by outcome",
+      "description": "Runs of saved news searches through each workspace's own web search connection, by purpose and outcome. Normal: mostly success; connector_needed means a workspace has searches but no web search connection, usage_limit_reached that its connection hit a limit, connector_error that the provider failed.",
+      "id": 112,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 386
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (purpose, outcome) (rate(outflare_news_search_runs_total{job=\"$job\"}[1h]))",
+          "legendFormat": "{{purpose}} {{outcome}}",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps",
+          "custom": {
+            "fillOpacity": 10
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "mean",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "News searches and what they find",
+      "description": "Active news searches by state (failing: the last run failed), and the articles and coverage items runs keep for the first time per hour. Normal: few failing searches; finds rise and fall with the news.",
+      "id": 113,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 386
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (state) (outflare_news_searches{job=\"$job\"})",
+          "legendFormat": "searches {{state}}",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          }
+        },
+        {
+          "refId": "B",
+          "expr": "sum by (kind) (increase(outflare_news_found_total{job=\"$job\"}[1h]))",
+          "legendFormat": "new {{kind}} per hour",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "fillOpacity": 10
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "mean",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Most overdue news search",
+      "description": "How long past its time the most overdue active news search is. Searches are queued every minute, so this stays near 0; it climbing means the scheduler or the news.run jobs are stuck.",
+      "id": 114,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 394
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "max(outflare_news_search_overdue_seconds{job=\"$job\"})",
+          "legendFormat": "overdue",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
           "custom": {
             "fillOpacity": 10
           }

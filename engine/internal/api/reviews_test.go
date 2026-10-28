@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"sync"
 	"testing"
@@ -20,6 +21,10 @@ type fakeReviewSite struct {
 	mu      sync.Mutex
 	reviews []map[string]any
 	fetches []string
+	// rendered are the fetches asked to run the page in a browser. g2 is
+	// a G2 page shown only in a browser (a bot check otherwise).
+	rendered []string
+	g2       string
 }
 
 func (f *fakeReviewSite) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -32,8 +37,9 @@ func (f *fakeReviewSite) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req struct {
-		URL   string `json:"url"`
-		Query string `json:"query"`
+		URL    string `json:"url"`
+		Query  string `json:"query"`
+		Render bool   `json:"render_js"`
 	}
 	json.NewDecoder(r.Body).Decode(&req)
 	switch r.URL.Path {
@@ -52,16 +58,25 @@ func (f *fakeReviewSite) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		json.NewEncoder(w).Encode(map[string]any{"data": map[string]any{"engine": "google", "results": results}, "tokens_charged": 1})
 	case "/v1/extract":
 		f.fetches = append(f.fetches, req.URL)
-		page := `<html><title>Just a moment...</title></html>`
+		if req.Render {
+			f.rendered = append(f.rendered, req.URL)
+		}
+		page, status := `<html><title>Just a moment...</title></html>`, 403
+		switch {
+		case strings.HasPrefix(req.URL, "https://www.g2.com/products/northpeak/") && req.Render && f.g2 != "":
+			page, status = f.g2, 200
+		case strings.HasPrefix(req.URL, "https://www.capterra.com/p/404/"):
+			page, status = `<html><title>Page not found</title></html>`, 404
+		}
 		if strings.HasPrefix(req.URL, "https://www.trustpilot.com/review/northpeak.example") {
 			data, _ := json.Marshal(map[string]any{"props": map[string]any{"pageProps": map[string]any{
 				"businessUnit": map[string]any{"displayName": "Northpeak", "trustScore": 4.4, "numberOfReviews": 1284},
 				"reviews":      f.reviews,
 				"filters":      map[string]any{"pagination": map[string]any{"currentPage": 1, "totalPages": 65}},
 			}}})
-			page = `<html><body><script id="__NEXT_DATA__" type="application/json">` + string(data) + `</script></body></html>`
+			page, status = `<html><body><script id="__NEXT_DATA__" type="application/json">`+string(data)+`</script></body></html>`, 200
 		}
-		json.NewEncoder(w).Encode(map[string]any{"data": map[string]any{"html": page}, "metadata": map[string]any{"http_status": 200, "url": req.URL}, "tokens_charged": 1})
+		json.NewEncoder(w).Encode(map[string]any{"data": map[string]any{"html": page}, "metadata": map[string]any{"http_status": status, "url": req.URL}, "tokens_charged": 1})
 	default:
 		http.NotFound(w, r)
 	}
@@ -303,5 +318,113 @@ func TestReviewsFindReadScoreAndDraft(t *testing.T) {
 		if count[name] != want {
 			t.Errorf("%s: %d events, want %d (%v)", name, count[name], want, count)
 		}
+	}
+}
+
+// A page behind a bot check is read again in a browser at once, and later
+// reads start that way; a page that keeps failing waits longer each time,
+// says why, and can be read again on demand.
+func TestReviewPageReadRetries(t *testing.T) {
+	got := track.Capture(t)
+	e := freshEnv(t)
+	owner, ws := setupOwner(t, e.h)
+	base := "/v1/workspaces/" + ws
+	ctx := context.Background()
+	g2, err := os.ReadFile("../reviews/testdata/g2.html")
+	if err != nil {
+		t.Fatal(err)
+	}
+	site := &fakeReviewSite{g2: string(g2)}
+	srv := httptest.NewServer(site)
+	t.Cleanup(srv.Close)
+	e.integrations.Client.BaseURLs["geonode"] = srv.URL
+
+	owner.must(201, "POST", base+"/brands", map[string]any{"name": "Northpeak", "handle": "northpeak", "website": "https://northpeak.example", "links": []map[string]any{
+		{"kind": "g2", "url": "https://www.g2.com/products/northpeak/reviews"},
+		{"kind": "capterra", "url": "https://www.capterra.com/p/123456/Northpeak/reviews/"},
+		{"kind": "capterra", "url": "https://www.capterra.com/p/404/Gone/reviews/"},
+	}})
+	gn := owner.must(201, "POST", base+"/integrations", map[string]any{"connector": "geonode", "credentials": map[string]string{"api_key": "gn-key"}})["id"].(string)
+	if err := e.srv.ReadReviewPages(ctx, ws, gn); err != nil {
+		t.Fatal(err)
+	}
+	pages := map[string]map[string]any{}
+	for _, x := range owner.must(200, "GET", base+"/reviews/pages", nil)["data"].([]any) {
+		x := x.(map[string]any)
+		pages[x["external_id"].(string)] = x
+	}
+	g2p, blocked, gone := pages["northpeak"], pages["123456"], pages["404"]
+	if g2p == nil || blocked == nil || gone == nil {
+		t.Fatalf("pages: %v", pages)
+	}
+	// G2 showed a bot check, then its reviews in a browser.
+	if g2p["last_error"] != nil || g2p["score"] == nil || g2p["failures"] != 0.0 || g2p["last_read_at"] == nil {
+		t.Fatalf("g2 page: %v", g2p)
+	}
+	var render bool
+	e.pool.QueryRow(ctx, `SELECT render_js FROM review_pages WHERE id = $1`, g2p["id"]).Scan(&render)
+	if !render {
+		t.Fatal("the g2 page should be read in a browser from now on")
+	}
+	// Capterra blocks in a browser too: tried again in 15 minutes.
+	next, _ := time.Parse(time.RFC3339Nano, blocked["next_read_at"].(string))
+	if blocked["last_error_code"] != "blocked" || blocked["failures"] != 1.0 || blocked["last_failed_at"] == nil ||
+		time.Until(next) < 10*time.Minute || time.Until(next) > 20*time.Minute {
+		t.Fatalf("blocked page: %v", blocked)
+	}
+	// A missing page isn't read in a browser and waits a day: a person fixes it.
+	next, _ = time.Parse(time.RFC3339Nano, gone["next_read_at"].(string))
+	if gone["last_error_code"] != "page_not_found" || time.Until(next) < 23*time.Hour {
+		t.Fatalf("missing page: %v", gone)
+	}
+	for _, u := range site.rendered {
+		if strings.Contains(u, "/p/404/") {
+			t.Fatalf("a missing page was read again in a browser: %v", site.rendered)
+		}
+	}
+
+	// Each failure waits longer (2 hours after the third), still the same
+	// day; a person can read it again now.
+	for i := 0; i < 2; i++ {
+		owner.must(202, "POST", base+"/reviews/pages/"+blocked["id"].(string)+"/read", nil)
+		if err := e.srv.ReadReviewPages(ctx, ws, gn); err != nil {
+			t.Fatal(err)
+		}
+	}
+	p := owner.must(200, "GET", base+"/reviews/pages?platform=capterra", nil)["data"].([]any)
+	for _, x := range p {
+		x := x.(map[string]any)
+		if x["id"] != blocked["id"] {
+			continue
+		}
+		next, _ := time.Parse(time.RFC3339Nano, x["next_read_at"].(string))
+		if x["failures"] != 3.0 || time.Until(next) < 90*time.Minute || time.Until(next) > 150*time.Minute {
+			t.Fatalf("after three failures: %v", x)
+		}
+	}
+
+	// Who can't manage, can't ask; a paused page isn't read.
+	tok := owner.must(201, "POST", base+"/api-tokens", map[string]any{"name": "Reader", "scopes": []string{"social.read"}})["token"].(string)
+	(&client{t: t, h: e.h, bearer: tok}).must(403, "POST", base+"/reviews/pages/"+g2p["id"].(string)+"/read", nil)
+	owner.must(200, "PATCH", base+"/reviews/pages/"+gone["id"].(string), map[string]any{"status": "paused"})
+	owner.must(409, "POST", base+"/reviews/pages/"+gone["id"].(string)+"/read", nil)
+	owner.must(404, "POST", base+"/reviews/pages/00000000-0000-0000-0000-000000000000/read", nil)
+
+	codes := map[string]int{}
+	retried := 0
+	for _, ev := range got() {
+		switch ev.Name {
+		case "review_page.read_failed":
+			codes[ev.ErrorCode]++
+		case "review_page.read":
+			if ev.Props["rendered_retry"] == true {
+				retried++
+			}
+		case "review_page.read_requested":
+			codes["requested"]++
+		}
+	}
+	if codes["blocked"] != 3 || codes["page_not_found"] != 1 || codes["requested"] != 2 || retried != 1 {
+		t.Fatalf("events: %v, rendered retries %d", codes, retried)
 	}
 }

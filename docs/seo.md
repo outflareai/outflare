@@ -338,6 +338,37 @@ pages (add their linking sites as prospects in one click), a domain's most
 linked pages and the settings. Outflare never offers or agrees to pay for a
 link.
 
+### Checking prospects
+
+OutflareBot checks a prospect's page (`POST /link-prospects/{id}/check`, or
+up to 100 at a time with `POST /link-prospects/check`; MCP
+`check_link_prospects`), at most once an hour, obeying robots.txt and crawl
+opt-outs. It reads the page and at most two of the site's contact, about or
+write-for-us pages, and each outbound link once. The prospect's `check` says:
+
+- **Up or not**: up, gone (404 or 410), redirected to another site, blocked
+  by robots.txt, opted out or unreachable.
+- **Links to us**: whether it links to the site already, with the links.
+- **Broken links**: which of its first 50 outbound links are gone or don't
+  answer, with the Internet Archive's closest snapshot of up to 10, so you
+  know what the dead page said.
+- **The AI's read**, with the workspace's own AI key (the tool "Link page
+  reading" on the AI usage page, with its own limit): what kind of page it is,
+  its topic, its author, how well it fits the site (`fit`, 0 to 100, which
+  moves the score up to 15 points either way) and which of the site's pages
+  to offer. Without AI, the page sharing the most words is suggested.
+- **Contacts**: addresses at the website's own domain on the page and its
+  contact pages, and the author's likely address from the free email finder.
+  Each becomes a person record on the website's company.
+
+A page to pitch that already links, or is gone, is excluded (`links_to_us`,
+`page_gone`). An empty page to offer takes the suggestion.
+
+**Winning back lost links.** `POST /link-prospects/reclaim` (MCP
+`reclaim_link_prospects`) adds the links you lost in the last 90 days as
+prospects, with the page they linked to as the page to offer. It's free;
+check them next to see which pages are still up and who to ask.
+
 ### Link reads
 
 Who links to a page or domain that isn't yours: a competitor's page that

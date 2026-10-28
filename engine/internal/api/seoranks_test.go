@@ -117,6 +117,29 @@ func TestRankTracking(t *testing.T) {
 		time.Sleep(50 * time.Millisecond)
 	}
 
+	// A failed check is tried again the same day, after a wait, as a new
+	// job each time it fails again.
+	svc := &ranks.Service{Pool: e.pool, Store: e.integrations, Log: slog.New(slog.NewTextHandler(io.Discard, nil))}
+	retries := func() int {
+		var n int
+		e.pool.QueryRow(context.Background(), `SELECT count(*) FROM jobs WHERE kind = $1 AND workspace_id = $2 AND idempotency_key LIKE '%:retry:%'`, ranks.JobCheck, ws).Scan(&n)
+		return n
+	}
+	var failures int
+	e.pool.QueryRow(context.Background(), `SELECT max(failures) FROM tracked_keywords WHERE workspace_id = $1`, ws).Scan(&failures)
+	if n, err := svc.QueueDue(context.Background()); err != nil || failures < 1 || retries() != 0 {
+		t.Fatalf("retried before the wait: queued %d, %v, failures %d, retries %d", n, err, failures, retries())
+	}
+	e.pool.Exec(context.Background(), `UPDATE tracked_keywords SET last_failed_at = now() - interval '20 minutes' WHERE workspace_id = $1 AND failures = 1`, ws)
+	for range 2 {
+		if _, err := svc.QueueDue(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if retries() != 1 {
+		t.Fatalf("retry jobs after the wait: %d", retries())
+	}
+
 	// Another workspace sees none of it.
 	ows := owner.must(201, "POST", "/v1/workspaces", map[string]any{"name": "Other"})["id"].(string)
 	owner.must(404, "GET", "/v1/workspaces/"+ows+"/seo-sites/"+site+"/rankings", nil)

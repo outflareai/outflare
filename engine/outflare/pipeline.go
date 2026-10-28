@@ -3,6 +3,7 @@ package outflare
 import (
 	"context"
 
+	"github.com/outflareai/outflare/engine/internal/companysteps"
 	"github.com/outflareai/outflare/engine/internal/pipeline"
 )
 
@@ -50,6 +51,26 @@ func (h *Host) Pipeline() *Pipeline { return &Pipeline{h} }
 // Register adds a stage. Call it in Setup; it panics on a bad stage.
 // Stages run in worker processes.
 func (p *Pipeline) Register(s Stage) { p.h.stages.Register(s) }
+
+// CompanySteps is a feature's use of the engine's shared steps for
+// companies (docs/pipeline.md, "Shared steps for companies"): known,
+// contact_rules and add_to_crm, for items whose ref is a company's domain.
+type CompanySteps = companysteps.Config
+
+// The shared company steps, in order: send an item to StepKnown.
+const (
+	StepKnown        = companysteps.Known
+	StepContactRules = companysteps.ContactRules
+	StepAddToCRM     = companysteps.AddToCRM
+)
+
+// RegisterCompanySteps adds the shared company steps to c.Pipeline. Call
+// it in Setup; it panics on a Config missing Via or a callback.
+func (p *Pipeline) RegisterCompanySteps(c CompanySteps) {
+	for _, s := range companysteps.Stages(p.h.Pool, c) {
+		p.Register(s)
+	}
+}
 
 // OnSettled runs fn when a run of pipeline has nothing waiting or being
 // worked on. It may run more than once for a run; make it idempotent.

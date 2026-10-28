@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"errors"
+	"fmt"
 	"slices"
 	"strconv"
 	"strings"
@@ -14,6 +15,7 @@ import (
 	"github.com/outflareai/outflare/engine/internal/connectors"
 	"github.com/outflareai/outflare/engine/internal/jobs"
 	"github.com/outflareai/outflare/engine/internal/metrics"
+	"github.com/outflareai/outflare/engine/internal/retry"
 	"github.com/outflareai/outflare/engine/internal/reviews"
 	"github.com/outflareai/outflare/engine/internal/track"
 )
@@ -218,10 +220,20 @@ type dueReviewPage struct {
 	id, platform, url string
 	brand             *string
 	backfilled        bool
+	// failures is how many reads in a row failed; renderJS that the page
+	// only showed its reviews once read in a browser.
+	failures int
+	renderJS bool
 }
 
+// A review page read that found no reviews or rating on a page that wasn't
+// a bot check: the site may have changed its page (read_failures.go).
+const reviewNotAPage = "not_a_review_page"
+
 // ReadReviewPages reads the review pages that are due through one page
-// reader. One page's failure doesn't stop the others; an outage is retried.
+// reader. One page's failure doesn't stop the others. An outage is retried
+// with the job, and a failure Outflare has to fix (a page it couldn't
+// save) fails the job so it shows in job.failed too.
 func (s *Server) ReadReviewPages(ctx context.Context, ws, integrationID string) error {
 	if s.integrations == nil {
 		return nil
@@ -229,14 +241,14 @@ func (s *Server) ReadReviewPages(ctx context.Context, ws, integrationID string) 
 	if err := s.syncReviewPages(ctx, ws); err != nil {
 		return err
 	}
-	rows, err := s.pool.Query(ctx, `SELECT id::text, platform, url, brand_id::text, backfilled_at IS NOT NULL FROM review_pages
+	rows, err := s.pool.Query(ctx, `SELECT id::text, platform, url, brand_id::text, backfilled_at IS NOT NULL, failures, render_js FROM review_pages
 		WHERE workspace_id = $1 AND status = 'active' AND next_read_at <= now() + interval '1 minute' ORDER BY next_read_at LIMIT 200`, ws)
 	if err != nil {
 		return err
 	}
 	var due []dueReviewPage
 	var d dueReviewPage
-	if _, err := pgx.ForEachRow(rows, []any{&d.id, &d.platform, &d.url, &d.brand, &d.backfilled}, func() error { due = append(due, d); return nil }); err != nil {
+	if _, err := pgx.ForEachRow(rows, []any{&d.id, &d.platform, &d.url, &d.brand, &d.backfilled, &d.failures, &d.renderJS}, func() error { due = append(due, d); return nil }); err != nil {
 		return err
 	}
 	if len(due) == 0 {
@@ -258,79 +270,147 @@ func (s *Server) ReadReviewPages(ctx context.Context, ws, integrationID string) 
 	if !ok {
 		return nil
 	}
-	var outage error
+	var outage, broken error
 	for _, p := range due {
-		if err := s.readReviewPage(ctx, ws, o, f, p); err != nil {
-			k := connectors.KindOf(err)
-			if k == connectors.ErrUnavailable || k == connectors.ErrQuota {
-				outage = err
-				if k == connectors.ErrQuota {
-					break
-				}
+		err := s.readReviewPage(ctx, ws, o, f, p)
+		if err == nil {
+			continue
+		}
+		var bug *reviewBug
+		if errors.As(err, &bug) {
+			broken = err
+			continue
+		}
+		k := connectors.KindOf(err)
+		if k == connectors.ErrUnavailable || k == connectors.ErrQuota {
+			outage = err
+			if k == connectors.ErrQuota {
+				break
 			}
 		}
 	}
-	return outage
+	if outage != nil {
+		return outage
+	}
+	return broken
+}
+
+// reviewBug is a read that failed on Outflare's side, not the site's.
+type reviewBug struct{ err error }
+
+func (e *reviewBug) Error() string { return "saving a review page's read failed: " + e.err.Error() }
+func (e *reviewBug) Unwrap() error { return e.err }
+
+// fetchReviewPage reads one page of reviews and parses it. A first page
+// that shows no reviews is read again in a browser, once, when it wasn't
+// already: sites behind a bot check, and pages built by their script,
+// often show their reviews that way. It reports whether the browser read
+// was the one that worked.
+func fetchReviewPage(ctx context.Context, o *connectors.Opened, f connectors.PageFetcher, platform, url string, render, retry bool, now time.Time) (reviews.Read, connectors.FetchedPage, bool, float64, error) {
+	res, err := f.FetchPage(ctx, o.Client, o.Creds, url, render)
+	cost := res.Cost.Units
+	var r reviews.Read
+	if err == nil {
+		r = reviews.Parse(platform, res.HTML, now)
+	}
+	k := connectors.KindOf(err)
+	if !retry || render || r.Found() || (err != nil && k != connectors.ErrUnavailable) || res.Status == 404 || res.Status == 410 {
+		return r, res, false, cost, err
+	}
+	res2, err2 := f.FetchPage(ctx, o.Client, o.Creds, url, true)
+	cost += res2.Cost.Units
+	if err2 != nil {
+		if err != nil {
+			return r, res, false, cost, err
+		}
+		return r, res, false, cost, nil // the first answer says more
+	}
+	r2 := reviews.Parse(platform, res2.HTML, now)
+	if !r2.Found() && err == nil {
+		return r, res, false, cost, nil
+	}
+	return r2, res2, r2.Found(), cost, nil
 }
 
 // readReviewPage reads one review page and keeps what it found.
 func (s *Server) readReviewPage(ctx context.Context, ws string, o *connectors.Opened, f connectors.PageFetcher, p dueReviewPage) error {
 	start := time.Now()
 	ev := track.Event{Name: "review_page.read", WorkspaceID: ws, ActorType: "system", Surface: "job",
-		Props: map[string]any{"page_id": p.id, "platform": p.platform, "backfill": !p.backfilled}}
+		Props: map[string]any{"page_id": p.id, "platform": p.platform, "backfill": !p.backfilled, "failures": p.failures}}
 	page, _ := reviews.ParsePage(p.url)
 	page.Platform = p.platform
 	limit := reviewDailyPages
 	if !p.backfilled {
 		limit = reviewBackfillPages
 	}
+	render := reviews.RenderJS(p.platform) || p.renderJS
 	var first reviews.Read
 	var found []reviews.Review
 	tokens := 0.0
 	known, seen := map[string]bool{}, map[string]bool{}
+	// fail keeps why the read failed on the page and when it is tried
+	// again (retry.After), so the day's numbers come in the same day.
+	fail := func(code string, err error) error {
+		ev.Name = "review_page.read_failed"
+		ev.Props["tokens"] = tokens
+		ev.Props["render_js"] = render
+		ev.Props["duration_ms"] = time.Since(start).Milliseconds()
+		track.Fail(ctx, s.log, ev, code, err)
+		metrics.ReviewPageRead(p.platform, readOutcome(code), 0)
+		wait := retry.After(p.failures + 1)
+		if waitsForPerson(code) {
+			wait = reviewReadEvery
+		}
+		_, uerr := s.pool.Exec(ctx, `UPDATE review_pages SET last_error = $3, last_error_code = $4, last_failed_at = now(), failures = failures + 1,
+			next_read_at = now() + make_interval(secs => $5), updated_at = now()
+			WHERE workspace_id = $1 AND id = $2`, ws, p.id, truncate(err.Error(), 500), code, wait.Seconds())
+		if uerr != nil {
+			return &reviewBug{uerr}
+		}
+		switch {
+		case code == readSaveFailed:
+			return &reviewBug{err}
+		case strings.HasPrefix(code, "connector_"):
+			return err // the page reader's own failure: an outage stops the round
+		}
+		return nil // the page's own failure, kept on it above
+	}
 	if p.backfilled {
 		rows, err := s.pool.Query(ctx, `SELECT external_id FROM reviews WHERE page_id = $1 ORDER BY posted_at DESC LIMIT 500`, p.id)
 		if err != nil {
-			return err
+			return fail(readSaveFailed, err)
 		}
 		ids, err := pgx.CollectRows(rows, pgx.RowTo[string])
 		if err != nil {
-			return err
+			return fail(readSaveFailed, err)
 		}
 		for _, id := range ids {
 			known[id] = true
 		}
 	}
-	fail := func(code string, err error) error {
-		ev.Name = "review_page.read_failed"
-		ev.Props["tokens"] = tokens
-		track.Fail(ctx, s.log, ev, code, err)
-		if code != "not_a_review_page" {
-			code = "connector_error"
-		}
-		metrics.ReviewPageRead(p.platform, code, 0)
-		_, uerr := s.pool.Exec(ctx, `UPDATE review_pages SET last_error = $3, updated_at = now(),
-			next_read_at = CASE WHEN $4 THEN now() + interval '1 hour' ELSE now() + make_interval(secs => $5) END
-			WHERE workspace_id = $1 AND id = $2`, ws, p.id, truncate(err.Error(), 500), connectors.KindOf(err) == connectors.ErrUnavailable, reviewReadEvery.Seconds())
-		if uerr != nil {
-			return uerr
-		}
-		return err
-	}
 	now := time.Now()
+	rendered := false
 	for n := 1; n <= limit; n++ {
-		res, err := f.FetchPage(ctx, o.Client, o.Creds, reviews.PageURL(page, n), reviews.RenderJS(p.platform))
-		tokens += res.Cost.Units
+		r, res, viaBrowser, cost, err := fetchReviewPage(ctx, o, f, p.platform, reviews.PageURL(page, n), render, n == 1, now)
+		tokens += cost
+		if n == 1 && viaBrowser {
+			render, rendered = true, true
+		}
 		if err != nil {
 			if n > 1 {
 				break // keep what the first pages gave
 			}
 			return fail("connector_"+connectors.KindOf(err), err)
 		}
-		r := reviews.Parse(p.platform, res.HTML, now)
 		if n == 1 {
 			if !r.Found() {
-				return fail("not_a_review_page", errors.New("the page didn't show any reviews or a rating: it may be behind a login or a challenge, or the address may be wrong"))
+				switch {
+				case res.Status == 404 || res.Status == 410:
+					return fail(readNotFound, fmt.Errorf("the review site says this page doesn't exist (HTTP %d): check the address in the brand's links", res.Status))
+				case res.Blocked():
+					return fail(readBlocked, errors.New("the review site showed a bot check instead of the page, also when read in a browser; Outflare tries again later"))
+				}
+				return fail(reviewNotAPage, errors.New("the page didn't show any reviews or a rating: the site may have changed how its page looks, or the address may be wrong"))
 			}
 			first = r
 		}
@@ -353,12 +433,14 @@ func (s *Server) readReviewPage(ctx context.Context, ws string, o *connectors.Op
 			break
 		}
 	}
+	p.renderJS = render
 	added, replied, err := s.saveReviews(ctx, ws, p, first, found, !p.backfilled)
 	if err != nil {
-		return err
+		return fail(readSaveFailed, err)
 	}
 	metrics.ReviewPageRead(p.platform, "success", added)
 	ev.Props["reviews"], ev.Props["new"], ev.Props["replies"], ev.Props["tokens"] = len(found), added, replied, tokens
+	ev.Props["render_js"], ev.Props["rendered_retry"] = render, rendered
 	ev.Props["duration_ms"] = time.Since(start).Milliseconds()
 	track.Emit(ctx, ev)
 	return nil
@@ -434,9 +516,9 @@ func (s *Server) saveReviews(ctx context.Context, ws string, p dueReviewPage, he
 			}
 		}
 		if _, err := tx.Exec(ctx, `UPDATE review_pages SET score = COALESCE($3, score), review_count = COALESCE($4, review_count),
-			name = COALESCE(NULLIF($5, ''), name), last_read_at = now(), last_error = NULL, backfilled_at = COALESCE(backfilled_at, now()),
-			next_read_at = now() + make_interval(secs => $6), updated_at = now()
-			WHERE workspace_id = $1 AND id = $2`, ws, p.id, head.Score, head.Count, truncate(head.Name, 300), reviewReadEvery.Seconds()); err != nil {
+			name = COALESCE(NULLIF($5, ''), name), last_read_at = now(), last_error = NULL, last_error_code = NULL, failures = 0,
+			render_js = $7, backfilled_at = COALESCE(backfilled_at, now()), next_read_at = now() + make_interval(secs => $6), updated_at = now()
+			WHERE workspace_id = $1 AND id = $2`, ws, p.id, head.Score, head.Count, truncate(head.Name, 300), reviewReadEvery.Seconds(), p.renderJS); err != nil {
 			return err
 		}
 		if backfill {

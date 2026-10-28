@@ -490,10 +490,14 @@ func Consent(ctx context.Context, q jobs.Querier, ws string, recordID, anonID *s
 	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 		return false, false, "", err
 	}
+	// The person's latest choice, or, for a visitor nobody has identified
+	// yet, the one their browser made on the site's consent banner.
 	status := ""
-	if recordID != nil {
-		err = q.QueryRow(ctx, `SELECT status FROM consents WHERE workspace_id = $1 AND record_id = $2 AND channel = 'ads'
-			AND purpose = 'ad_user_data' AND topic = '' ORDER BY occurred_at DESC, created_at DESC LIMIT 1`, ws, *recordID).Scan(&status)
+	if recordID != nil || anonID != nil {
+		err = q.QueryRow(ctx, `SELECT status FROM consents WHERE workspace_id = $1 AND channel = 'ads'
+			AND purpose = 'ad_user_data' AND topic = ''
+			AND (record_id = $2 OR ($2::uuid IS NULL AND $3::text IS NOT NULL AND anonymous_id = $3))
+			ORDER BY occurred_at DESC, created_at DESC LIMIT 1`, ws, recordID, anonID).Scan(&status)
 		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 			return false, false, "", err
 		}

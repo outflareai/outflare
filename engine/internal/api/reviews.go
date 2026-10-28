@@ -30,6 +30,7 @@ func (s *Server) routesReviews(mux *http.ServeMux) {
 	mux.HandleFunc("GET /v1/workspaces/{ws}/reviews/pages", s.inBrand(read, s.listReviewPages))
 	mux.HandleFunc("POST /v1/workspaces/{ws}/reviews/pages/sync", s.inBrand(manage, s.syncReviewPagesNow))
 	mux.HandleFunc("PATCH /v1/workspaces/{ws}/reviews/pages/{id}", s.inBrand(manage, s.updateReviewPage))
+	mux.HandleFunc("POST /v1/workspaces/{ws}/reviews/pages/{id}/read", s.inBrand(manage, s.readReviewPageNow))
 	mux.HandleFunc("GET /v1/workspaces/{ws}/reviews/pages/{id}/days", s.inBrand(read, s.listReviewPageDays))
 	mux.HandleFunc("GET /v1/workspaces/{ws}/reviews/{id}", s.inBrand(read, s.getReview))
 	mux.HandleFunc("POST /v1/workspaces/{ws}/reviews/{id}/draft", s.inBrand(manage, s.draftReviewReply))
@@ -64,10 +65,15 @@ type reviewPageView struct {
 	LastReadAt    *time.Time       `json:"last_read_at"`
 	NextReadAt    time.Time        `json:"next_read_at"`
 	LastError     *string          `json:"last_error"`
-	BackfilledAt  *time.Time       `json:"backfilled_at"`
-	CreatedAt     time.Time        `json:"created_at"`
-	UpdatedAt     time.Time        `json:"updated_at"`
-	ratings       []reviews.Rated  `json:"-"`
+	// Why the last read failed in a word, when it did, how many reads in a
+	// row failed, and when.
+	LastErrorCode *string         `json:"last_error_code"`
+	Failures      int             `json:"failures"`
+	LastFailedAt  *time.Time      `json:"last_failed_at"`
+	BackfilledAt  *time.Time      `json:"backfilled_at"`
+	CreatedAt     time.Time       `json:"created_at"`
+	UpdatedAt     time.Time       `json:"updated_at"`
+	ratings       []reviews.Rated `json:"-"`
 }
 
 const reviewPageSelect = `
@@ -79,13 +85,13 @@ const reviewPageSelect = `
 		(SELECT count(*) FROM reviews r WHERE r.page_id = p.id AND r.state = 'live')::int,
 		(SELECT count(*) FROM reviews r WHERE r.page_id = p.id AND r.state = 'live' AND r.sentiment = 'negative' AND r.replied_at IS NULL
 			AND r.posted_at > now() - interval '90 days')::int,
-		p.last_read_at, p.next_read_at, p.last_error, p.backfilled_at, p.created_at, p.updated_at
+		p.last_read_at, p.next_read_at, p.last_error, p.last_error_code, p.failures, p.last_failed_at, p.backfilled_at, p.created_at, p.updated_at
 	FROM review_pages p WHERE p.workspace_id = $1`
 
 func scanReviewPage(row pgx.Row) (reviewPageView, error) {
 	var v reviewPageView
 	err := row.Scan(&v.ID, &v.BrandID, &v.Platform, &v.ExternalID, &v.URL, &v.Name, &v.Status, &v.Score, &v.ReviewCount,
-		&v.ScoreChange28d, &v.CountChange28d, &v.Kept, &v.Unanswered, &v.LastReadAt, &v.NextReadAt, &v.LastError, &v.BackfilledAt, &v.CreatedAt, &v.UpdatedAt)
+		&v.ScoreChange28d, &v.CountChange28d, &v.Kept, &v.Unanswered, &v.LastReadAt, &v.NextReadAt, &v.LastError, &v.LastErrorCode, &v.Failures, &v.LastFailedAt, &v.BackfilledAt, &v.CreatedAt, &v.UpdatedAt)
 	if v.ScoreChange28d != nil {
 		c := math.Round(*v.ScoreChange28d*100) / 100
 		v.ScoreChange28d = &c
@@ -269,6 +275,49 @@ func (s *Server) syncReviewPagesNow(w http.ResponseWriter, r *http.Request) {
 			return err
 		}
 		return record(ctx, tx, &a.principal, a.WorkspaceID, "review_pages.read_requested", "workspace", a.WorkspaceID, map[string]any{})
+	})
+	if err != nil {
+		s.internal(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusAccepted, map[string]any{"queued": true})
+}
+
+// readReviewPageNow reads one review page now, such as one whose last read
+// failed, instead of waiting for its next try.
+func (s *Server) readReviewPageNow(w http.ResponseWriter, r *http.Request) {
+	a := accessFrom(r.Context())
+	cur, ok := s.findReviewPage(w, r, a, r.PathValue("id"))
+	if !ok {
+		return
+	}
+	if !a.writes(nil, cur.BrandID) {
+		writeError(w, r, http.StatusForbidden, "forbidden", string(errSharedRecord))
+		return
+	}
+	if cur.Status != "active" {
+		writeError(w, r, http.StatusConflict, "conflict", "this page is "+cur.Status+"; resume it to read it")
+		return
+	}
+	ctx := r.Context()
+	readers, err := s.pageReaders(ctx, s.pool, a.WorkspaceID)
+	if err != nil {
+		s.internal(w, r, err)
+		return
+	}
+	if len(readers) == 0 {
+		writeError(w, r, http.StatusConflict, "connector_needed", "connect Geonode first: review pages are read with your own Geonode key")
+		return
+	}
+	err = pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
+		if _, err := tx.Exec(ctx, `UPDATE review_pages SET next_read_at = now(), updated_at = now() WHERE workspace_id = $1 AND id = $2`, a.WorkspaceID, cur.ID); err != nil {
+			return err
+		}
+		if err := s.enqueueReviewRead(ctx, tx, a.WorkspaceID, "page:"+cur.ID+":"+newID()); err != nil {
+			return err
+		}
+		return record(ctx, tx, &a.principal, a.WorkspaceID, "review_page.read_requested", "review_page", cur.ID,
+			map[string]any{"platform": cur.Platform, "failures": cur.Failures, "last_error_code": deref(cur.LastErrorCode)})
 	})
 	if err != nil {
 		s.internal(w, r, err)

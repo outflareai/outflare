@@ -122,7 +122,7 @@ export function registerBrandTools(server: McpServer, gtm: MissionClient, worksp
     "update_brand",
     {
       title: "Edit or archive a brand",
-      description: "Changes a brand's name, handle, website, domains, platforms, links (app store listings, socials, docs), business model or how its customers pay. status archived hides it from pickers and keeps its records; brands are never deleted.",
+      description: "Changes a brand's name, handle, website, domains, platforms, links (app store listings, socials, docs), business model, how its customers pay, or its own logo and colours. status archived hides it from pickers and keeps its records; brands are never deleted.",
       inputSchema: {
         brand: brandRef,
         name: z.string().min(1).max(100).optional(),
@@ -134,6 +134,11 @@ export function registerBrandTools(server: McpServer, gtm: MissionClient, worksp
         status: z.enum(["active", "archived"]).optional(),
         business_model: z.string().max(60).optional().describe("What the brand does: a model id from list_business_models; empty clears it."),
         revenue_models: z.array(z.string()).max(10).optional().describe("How its customers pay: ids from list_business_models. Replaces the list."),
+        logo_url: z.string().max(2000).optional().describe("The brand's own logo (https) where it differs from the company's; empty for the company's."),
+        colors: z
+          .object({ primary: z.string(), background: z.string(), text: z.string() })
+          .optional()
+          .describe("The brand's own colours, as hex; empty for the company's."),
       },
       annotations: { ...write, idempotentHint: true },
     },

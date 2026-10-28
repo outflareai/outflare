@@ -6,6 +6,7 @@ import { track } from "@/lib/analytics";
 import { ask, Badge, Button, Card, confirmAction, ErrorText, Input, Menu, toast } from "../ui";
 import { Snippet } from "./Tokens";
 import { ago, plural } from "../format";
+import { ConsentBannerEditor } from "./ConsentBanner";
 
 type SiteKey = components["schemas"]["SiteKey"];
 
@@ -46,6 +47,8 @@ export function SiteKeysCard({ ws, canManage, version = 0, onChange, hideEmpty =
   const [keys, setKeys] = useState<SiteKey[] | null>(null);
   const [adding, setAdding] = useState(false);
   const [editing, setEditing] = useState<string | null>(null);
+  // The script whose consent banner is open.
+  const [banner, setBanner] = useState<string | null>(null);
   const [error, setError] = useState("");
   // A proxy secret just made, shown once.
   const [proxy, setProxy] = useState<{ id: string; secret: string } | null>(null);
@@ -162,8 +165,10 @@ export function SiteKeysCard({ ws, canManage, version = 0, onChange, hideEmpty =
                     Sites: {sitesLine(k)} · {plural(k.events_today, "event")} today{k.bots_today ? ` (${plural(k.bots_today, "bot request")} left out)` : ""} · {k.last_used_at ? `last visit ${ago(k.last_used_at)}` : "no visits yet"}
                   </div>
                 </div>
+                {!canManage && !isExtra(k) && <Button variant="ghost" onClick={() => setBanner(banner === k.id ? null : k.id)}>Consent banner</Button>}
                 {canManage && (
                   <div className="flex gap-1">
+                    {!isExtra(k) && <Button variant="ghost" onClick={() => setBanner(banner === k.id ? null : k.id)}>Consent banner</Button>}
                     {isExtra(k) ? (
                       <Button variant="ghost" onClick={() => remove(k)}>Delete</Button>
                     ) : (
@@ -181,6 +186,7 @@ export function SiteKeysCard({ ws, canManage, version = 0, onChange, hideEmpty =
                   </div>
                 )}
               </div>
+              {banner === k.id && <ConsentBannerEditor ws={ws} keyID={k.id} name={k.name} canManage={canManage} onDone={() => setBanner(null)} />}
               {!isExtra(k) && <Snippet title="Paste into <head>" code={k.snippet} />}
               {proxy?.id === k.id && (
                 <Snippet title="Proxy secret: shown once. Your proxy sends it in X-Outflare-Proxy, with the visitor's address in X-Outflare-Client-IP. Never put it in a page." code={proxy.secret} />

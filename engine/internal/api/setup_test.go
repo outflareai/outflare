@@ -112,7 +112,7 @@ func TestBrandSetupChecklist(t *testing.T) {
 	}
 
 	// The first visit ticks it off, and the script's version is kept.
-	b2, _ := json.Marshal(map[string]any{"key": key, "v": "3", "batch": []any{map[string]any{"type": "page", "anonymousId": "a-1", "messageId": "m-1",
+	b2, _ := json.Marshal(map[string]any{"key": key, "v": "4", "batch": []any{map[string]any{"type": "page", "anonymousId": "a-1", "messageId": "m-1",
 		"context": map[string]any{"page": map[string]any{"url": "https://northpeak.example/", "path": "/"}}}}})
 	req := httptest.NewRequest("POST", "/v1/site/events", strings.NewReader(string(b2)))
 	req.Header.Set("Content-Type", "text/plain")
@@ -123,7 +123,7 @@ func TestBrandSetupChecklist(t *testing.T) {
 		t.Fatalf("site event: %d %s", rec.Code, rec.Body)
 	}
 	var version string
-	if err := e.pool.QueryRow(context.Background(), `SELECT script_version FROM site_keys WHERE key = $1`, key).Scan(&version); err != nil || version != "3" {
+	if err := e.pool.QueryRow(context.Background(), `SELECT script_version FROM site_keys WHERE key = $1`, key).Scan(&version); err != nil || version != "4" {
 		t.Fatalf("script version %q %v", version, err)
 	}
 	o = owner.must(200, "GET", setup, nil)
@@ -179,7 +179,7 @@ func TestBrandSetupChecklist(t *testing.T) {
 
 	// Install health: nothing wrong yet, with what was looked at.
 	h := owner.must(200, "GET", base+"/install-health?brand="+b["handle"].(string), nil)
-	if len(h["checks"].([]any)) != 0 || h["checked"].(map[string]any)["site_keys"] != 1.0 || h["latest"].(map[string]any)["site_script"] != "3" {
+	if len(h["checks"].([]any)) != 0 || h["checked"].(map[string]any)["site_keys"] != 1.0 || h["latest"].(map[string]any)["site_script"] != "4" {
 		t.Fatalf("health: %v", h)
 	}
 }

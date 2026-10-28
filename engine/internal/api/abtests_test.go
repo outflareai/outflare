@@ -2,6 +2,7 @@ package api_test
 
 import (
 	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/outflareai/outflare/engine/internal/track"
@@ -51,10 +52,44 @@ func TestABTests(t *testing.T) {
 	sw := owner.must(201, "POST", base+"/ab-tests", map[string]any{"flag": "chat-widget", "goals": signup})
 	owner.must(409, "POST", base+"/ab-tests/"+sw["id"].(string)+"/start", nil)
 
-	// Starting turns the flag on.
+	// The last 28 days: 800 visitors, 10% of them signed up.
+	if _, err := e.pool.Exec(t.Context(), `
+		INSERT INTO customer_events (workspace_id, kind, name, anonymous_id, properties, context, occurred_at)
+		SELECT $1::uuid, 'page', 'page.viewed', 'hist-' || i, '{}'::jsonb, jsonb_build_object('page', jsonb_build_object('path', CASE WHEN i % 2 = 0 THEN '/pricing' ELSE '/blog/post' END)), now() - interval '3 days'
+		FROM generate_series(1, 800) i
+		UNION ALL
+		SELECT $1::uuid, 'track', 'signup_started', 'hist-' || i, '{}'::jsonb, '{}'::jsonb, now() - interval '2 days' FROM generate_series(1, 800) i WHERE i % 10 = 0`, ws); err != nil {
+		t.Fatal(err)
+	}
+	// Planning: how long a test of the hero flag would take.
+	owner.must(400, "POST", base+"/ab-tests/plan", map[string]any{"flag": "hero", "goal": map[string]any{"kind": "event", "name": "Signup"}})
+	owner.must(400, "POST", base+"/ab-tests/plan", map[string]any{"flag": "hero", "goal": signup[0], "min_effect": 3})
+	owner.must(400, "POST", base+"/ab-tests/plan", map[string]any{"flag": "nope", "goal": signup[0]})
+	plan := owner.must(200, "POST", base+"/ab-tests/plan", map[string]any{"flag": "hero", "goal": signup[0]})
+	tr, pl := plan["traffic"].(map[string]any), plan["plan"].(map[string]any)
+	if tr["visitors"] != 800.0 || tr["converted"] != 80.0 || pl["baseline"] != 0.1 || pl["weekly_visitors"] != 200.0 || len(pl["rows"].([]any)) != 4 {
+		t.Fatalf("plan: %v", plan)
+	}
+	// 100 visitors a week per version can't find +25% in 8 weeks.
+	if pl["weeks"].(float64) <= 8 || plan["warning"] == "" || pl["detectable_8_weeks"].(float64) <= 0.25 {
+		t.Fatalf("plan should warn: %v", plan)
+	}
+	onPricing := owner.must(200, "POST", base+"/ab-tests/plan", map[string]any{"flag": "hero", "goal": signup[0], "page": "/pricing", "min_effect": 0.5})
+	if onPricing["traffic"].(map[string]any)["visitors"] != 400.0 || onPricing["plan"].(map[string]any)["min_effect"] != 0.5 {
+		t.Fatalf("plan on /pricing: %v", onPricing)
+	}
+	nobody := owner.must(200, "POST", base+"/ab-tests/plan", map[string]any{"flag": "hero", "goal": map[string]any{"kind": "event", "name": "demo_booked"}})
+	if !strings.Contains(nobody["warning"].(string), "No visitor reached this goal") {
+		t.Fatalf("no conversions: %v", nobody)
+	}
+
+	// Starting turns the flag on, and records each goal's recent rate.
 	ab = owner.must(200, "POST", base+"/ab-tests/"+id+"/start", nil)
 	if ab["status"] != "running" || ab["started_at"] == nil {
 		t.Fatalf("started: %v", ab)
+	}
+	if b, _ := ab["baselines"].([]any); len(b) != 2 || b[0] != 0.1 || b[1] != 0.0 {
+		t.Fatalf("baselines: %v", ab["baselines"])
 	}
 	if f := owner.must(200, "GET", base+"/flags/hero", nil); f["status"] != "on" {
 		t.Fatalf("flag not turned on: %v", f)

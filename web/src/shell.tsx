@@ -59,6 +59,7 @@ export const tabNames: Record<Tab, string> = {
   backlinks: "Backlinks",
   competitors: "Competitors",
   "link-building": "Link building",
+  news: "News watch",
   reddit: "Reddit",
   social: "Accounts",
   reviews: "Reviews",
@@ -138,6 +139,7 @@ export const tabBlurbs: Record<Tab, string> = {
   journeys: "Flows an event starts: send an email, wait, branch on what people did, exit.",
   providers: "Amazon SES, Postmark or Resend, connected step by step, and the domains you send from.",
   "link-building": "Pages that could link to your site, from every way of earning links, followed until the link is live; one website pitched at a time.",
+  news: "Saved news searches on your own Geonode: follow a topic and who writes about it, and keep every article about your brand as its coverage.",
   allocation: "Which mailbox sends for which sequence, and which sequences are short of mailboxes.",
   senders: "Who your mailboxes send as, and which team owns which senders and sequences.",
   outcomes: "Meetings and deals your outreach produced, what they cost, and the cost of each.",
@@ -262,7 +264,7 @@ export type Module = { id: string; label: string; icon: IconName; tabs: Tab[] };
 export const modules: Module[] = [
   { id: "crm", label: "CRM", icon: "leads", tabs: ["leads", "lists", "lead-finder", "email-finder", "suppression"] },
   { id: "visitors", label: "Visitors", icon: "visitors", tabs: ["visitors"] },
-  { id: "outreach", label: "Outreach", icon: "sequences", tabs: ["sequences", "link-building", "allocation", "reports"] },
+  { id: "outreach", label: "Outreach", icon: "sequences", tabs: ["sequences", "link-building", "news", "allocation", "reports"] },
   { id: "deliverability", label: "Deliverability", icon: "mailboxes", tabs: ["infrastructure", "mailboxes", "domains", "warmup", "servers", "senders"] },
   { id: "lifecycle", label: "Lifecycle", icon: "lifecycle", tabs: ["lifecycle", "broadcasts", "journeys", "templates", "topics", "emails", "providers"] },
   { id: "seo", label: "SEO", icon: "seo", tabs: ["seo-overview", "audits", "fixes", "experiments", "keywords", "seo", "backlinks", "ai-visibility", "competitors"] },
@@ -281,7 +283,7 @@ const allModules = modules;
 
 // Pages that work for someone kept to some brands. The others need every
 // brand (the API answers 403), so they are hidden from them.
-const brandTabs: readonly Tab[] = ["overview", "seo-overview", "audits", "fixes", "experiments", "keywords", "ai-visibility", "backlinks", "competitors", "link-building", "reddit", "social", "reviews", "ads", "visitors", "tracking", "flags", "ab-tests", "inbox", "projects", "sequences", "leads", "lists", "lead-finder", "suppression", "mailboxes", "domains", "company", "brands", "setup", "ideal-customers", "members", "account", "instance"];
+const brandTabs: readonly Tab[] = ["overview", "seo-overview", "audits", "fixes", "experiments", "keywords", "ai-visibility", "backlinks", "competitors", "link-building", "news", "reddit", "social", "reviews", "ads", "visitors", "tracking", "flags", "ab-tests", "inbox", "projects", "sequences", "leads", "lists", "lead-finder", "suppression", "mailboxes", "domains", "company", "brands", "setup", "ideal-customers", "members", "account", "instance"];
 export const canOpen = (ws: Workspace | undefined, t: Tab) => !ws?.brand_ids?.length || brandTabs.includes(t);
 
 // The sidebar keeps two things. Pins are kept in this browser for the
@@ -891,6 +893,8 @@ function callFor(tab: Tab, ws: string, item?: string): Call {
       return { title: "Sites you compete with", path: "/v1/workspaces/{ws}/seo-competitors", params: base, query: { status: "tracked" }, mcp: "list_seo_competitors", ask: "What did my tracked competitors publish this month, and whose domain rating is rising?", scope: "seo.read" };
     case "link-building":
       return { title: "Pages that could link to you", path: "/v1/workspaces/{ws}/link-prospects", params: base, mcp: "list_link_prospects", ask: "Which competitor pages died this month, who links to them, and which of those sites should we ask first?", scope: "seo.read" };
+    case "news":
+      return { title: "Coverage of your brands", path: "/v1/workspaces/{ws}/coverage", params: base, mcp: "list_coverage", ask: "What was written about us this week, which outlets covered us without a link, and which topics should we comment on?", scope: "seo.read" };
     case "backlinks":
       return { title: "Links to your sites", path: "/v1/workspaces/{ws}/backlinks", params: base, query: { status: "live" }, mcp: "list_backlinks", ask: "Which strong links did we lose this month, and where did our new links come from?", scope: "seo.read" };
     case "reddit":

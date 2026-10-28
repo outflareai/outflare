@@ -60,6 +60,7 @@ import (
 	"github.com/outflareai/outflare/engine/internal/infra"
 	"github.com/outflareai/outflare/engine/internal/jobs"
 	"github.com/outflareai/outflare/engine/internal/journeys"
+	"github.com/outflareai/outflare/engine/internal/linkbuild"
 	"github.com/outflareai/outflare/engine/internal/lists"
 	"github.com/outflareai/outflare/engine/internal/mailbox"
 	"github.com/outflareai/outflare/engine/internal/mcphost"
@@ -292,6 +293,9 @@ func Run(ctx context.Context, log *slog.Logger, cmd string, exts ...Extension) e
 		Fallback: &crawl.ConnectorFallback{Store: integrations, Pool: pool, Ledger: pool}, AfterAudit: seointel.AfterAudit,
 		AfterCrawl: indexability.AfterCrawl}
 	crawler.Register(queue)
+	// Link building: OutflareBot's checks of link prospects' pages.
+	linkChecker := &linkbuild.Service{Pool: pool, Log: log, Crawl: crawler, Emails: emailFinder}
+	linkChecker.Register(queue)
 	// Production deploys of the websites a workspace watches on GitHub or
 	// Vercel, which fix re-checks and experiments start from.
 	deployWatch := &deploys.Service{Pool: pool, Store: integrations, Log: log}
@@ -370,6 +374,7 @@ func Run(ctx context.Context, log *slog.Logger, cmd string, exts ...Extension) e
 	host.server = apiServer
 	researcher.Models = apiServer.AIModels()
 	labeller.Models = apiServer.AIModels()
+	linkChecker.Models = apiServer.AIModels()
 	visibility.Models = apiServer.AIVisibilityModels()
 	// The API server's own background work, such as CRM imports into
 	// customer records.

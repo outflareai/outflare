@@ -13,6 +13,7 @@ import { BrandBadge } from "@/components/brand-badge";
 import { DataTable } from "@/components/data-table";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import type { Tab } from "@/lib/paths";
+import { DayChart, PlanPanel, SuggestPanel, SummaryPanel, VersionsPanel } from "./ABTestsAI";
 
 type Props = { ws: string; canManage: boolean; go: (t: Tab) => void };
 
@@ -37,9 +38,13 @@ export function ABTests({ ws, canManage, go }: Props) {
   const [tests, setTests] = useState<ABTest[] | null>(null);
   const [flags, setFlags] = useState<Flag[]>([]);
   const [open, setOpen] = useState<ABTest | null>(null);
-  const [creating, setCreating] = useState<string | null>(null);
+  const [creating, setCreating] = useState<{ flag: string; seed?: Seed } | null>(null);
+  const [suggesting, setSuggesting] = useState(false);
   const [error, setError] = useState("");
 
+  const loadFlags = useCallback(() => {
+    api.GET("/v1/workspaces/{ws}/flags", { params: { path: { ws }, query } }).then(({ data }) => setFlags(data?.data ?? []));
+  }, [ws, query.brand]); // eslint-disable-line react-hooks/exhaustive-deps
   const load = useCallback(async () => {
     const { data, error } = await api.GET("/v1/workspaces/{ws}/ab-tests", { params: { path: { ws }, query } });
     if (error) setError(errorMessage(error));
@@ -48,20 +53,25 @@ export function ABTests({ ws, canManage, go }: Props) {
   }, [ws, query.brand]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
     load();
-    api.GET("/v1/workspaces/{ws}/flags", { params: { path: { ws }, query } }).then(({ data }) => setFlags(data?.data ?? []));
-    if (pendingFlag !== null && canManage) setCreating(pendingFlag);
+    loadFlags();
+    if (pendingFlag !== null && canManage) setCreating({ flag: pendingFlag });
     pendingFlag = null;
-  }, [load, ws, canManage]);
+  }, [load, loadFlags, canManage]);
 
   const splits = flags.filter((f) => f.variants.length > 1);
-  const newTest = () => setCreating("");
+  const newTest = () => setCreating({ flag: "" });
 
   return (
     <div className="space-y-6">
       <PageHeader
         title="A/B tests"
         description="Pick a feature flag with two or more versions, say what counts as success, and see which version wins. The numbers stay honest however often you check."
-        action={canManage && <Button onClick={newTest}>New test</Button>}
+        action={canManage && (
+          <div className="flex gap-2">
+            <Button variant="ghost" onClick={() => setSuggesting(true)}>Suggest tests</Button>
+            <Button onClick={newTest}>New test</Button>
+          </div>
+        )}
       />
       <ErrorText>{error}</ErrorText>
       {tests === null ? (
@@ -105,9 +115,22 @@ export function ABTests({ ws, canManage, go }: Props) {
           ]}
         />
       )}
-      {open && <TestSheet ws={ws} test={open} flag={flags.find((f) => f.id === open.flag_id)} canManage={canManage} onClose={() => setOpen(null)} onChanged={load} />}
+      {open && <TestSheet ws={ws} test={open} flag={flags.find((f) => f.id === open.flag_id)} canManage={canManage} onClose={() => setOpen(null)} onChanged={load} onFlagChanged={loadFlags} />}
       {creating !== null && (
-        <NewTestSheet ws={ws} flags={splits} flag={creating} go={go} onClose={() => setCreating(null)} onSaved={(t) => { setCreating(null); load(); setOpen(t); }} />
+        <NewTestSheet ws={ws} flags={splits} flag={creating.flag} seed={creating.seed} go={go} onClose={() => setCreating(null)} onSaved={(t) => { setCreating(null); load(); setOpen(t); }} onFlagChanged={loadFlags} />
+      )}
+      {suggesting && (
+        <Sheet open onOpenChange={(o) => !o && setSuggesting(false)}>
+          <SheetContent className="w-full overflow-y-auto sm:max-w-xl">
+            <SheetHeader>
+              <SheetTitle>Suggest tests</SheetTitle>
+              <SheetDescription>Ideas from your own AI model, with how long each would take on your traffic.</SheetDescription>
+            </SheetHeader>
+            <div className="px-4 pb-6">
+              <SuggestPanel ws={ws} onUse={(seed) => { setSuggesting(false); setCreating({ flag: "", seed }); }} />
+            </div>
+          </SheetContent>
+        </Sheet>
       )}
     </div>
   );
@@ -170,15 +193,18 @@ function EffectPicker({ value, onChange }: { value: number; onChange: (v: number
   );
 }
 
-function NewTestSheet({ ws, flags, flag: initial, go, onClose, onSaved }: { ws: string; flags: Flag[]; flag: string; go: (t: Tab) => void; onClose: () => void; onSaved: (t: ABTest) => void }) {
+type Seed = { name: string; hypothesis: string; goal: ABTestGoal };
+
+function NewTestSheet({ ws, flags, flag: initial, seed, go, onClose, onSaved, onFlagChanged }: { ws: string; flags: Flag[]; flag: string; seed?: Seed; go: (t: Tab) => void; onClose: () => void; onSaved: (t: ABTest) => void; onFlagChanged: () => void }) {
   const events = useEvents(ws);
   const [flagKey, setFlagKey] = useState(initial || flags[0]?.key || "");
   const flag = flags.find((f) => f.key === flagKey);
   const [control, setControl] = useState("");
-  const [name, setName] = useState("");
-  const [hypothesis, setHypothesis] = useState("");
-  const [goals, setGoals] = useState<ABTestGoal[]>([{ kind: "event", name: "" }]);
+  const [name, setName] = useState(seed?.name ?? "");
+  const [hypothesis, setHypothesis] = useState(seed?.hypothesis ?? "");
+  const [goals, setGoals] = useState<ABTestGoal[]>([seed?.goal ?? { kind: "event", name: "" }]);
   const [minEffect, setMinEffect] = useState(0.25);
+  const [writing, setWriting] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
 
@@ -225,12 +251,21 @@ function NewTestSheet({ ws, flags, flag: initial, go, onClose, onSaved }: { ws: 
               </select>
               <span className="mt-1 block text-[12px] text-muted-foreground">The control: usually what visitors see today.</span>
             </label>
+            {flag && (writing ? (
+              <div className="space-y-2 rounded-md border p-3">
+                <span className="block font-medium">New versions with AI</span>
+                <VersionsPanel ws={ws} flag={flag} onAdded={onFlagChanged} />
+              </div>
+            ) : (
+              <Button type="button" variant="ghost" onClick={() => setWriting(true)}>Write more versions with AI</Button>
+            ))}
             <div className="space-y-2">
               <span className="block font-medium">Goals</span>
               <GoalsEditor goals={goals} setGoals={setGoals} events={events} />
               <p className="text-[12px] text-muted-foreground">A visitor converts when they reach a goal after seeing their version. The first goal decides the winner; the rest are watched alongside it. Goals can't change once the test starts.</p>
             </div>
             <EffectPicker value={minEffect} onChange={setMinEffect} />
+            <PlanPanel ws={ws} flag={flagKey} goal={goals[0]} minEffect={minEffect} />
             <label className="block">
               <span className="mb-1 block font-medium">Name <span className="font-normal text-muted-foreground">(optional)</span></span>
               <input className={`${field} w-full`} maxLength={200} placeholder={flag?.name} value={name} onChange={(e) => setName(e.target.value)} />
@@ -273,7 +308,7 @@ export function verdict(r: ABTestResults, names: (v: string) => string): { text:
   };
 }
 
-function TestSheet({ ws, test, flag, canManage, onClose, onChanged }: { ws: string; test: ABTest; flag?: Flag; canManage: boolean; onClose: () => void; onChanged: () => void }) {
+function TestSheet({ ws, test, flag, canManage, onClose, onChanged, onFlagChanged }: { ws: string; test: ABTest; flag?: Flag; canManage: boolean; onClose: () => void; onChanged: () => void; onFlagChanged: () => void }) {
   const events = useEvents(ws);
   const [results, setResults] = useState<ABTestResults | null>(null);
   const [error, setError] = useState("");
@@ -356,6 +391,13 @@ function TestSheet({ ws, test, flag, canManage, onClose, onChanged }: { ws: stri
                 {canManage ? <GoalsEditor goals={goals} setGoals={setGoals} events={events} /> : <p className="font-mono">{test.goals.map(goalText).join(", ")}</p>}
               </div>
               {canManage ? <EffectPicker value={minEffect} onChange={setMinEffect} /> : <p>Tuned to find changes of {signed(test.min_effect)} or more.</p>}
+              <PlanPanel ws={ws} flag={test.flag_id} goal={goals[0]} minEffect={minEffect} />
+              {canManage && flag && (
+                <div className="space-y-2 rounded-md border p-3">
+                  <span className="block font-medium">New versions with AI</span>
+                  <VersionsPanel ws={ws} flag={flag} onAdded={onFlagChanged} />
+                </div>
+              )}
               <p className="text-muted-foreground">Make sure the pages read the flag (<span className="font-mono">outflare.flag("{test.flag_key}")</span>, or <span className="font-mono">data-flags</span> and its class), so visitors join when they see their version.</p>
               {canManage && (
                 <div className="flex gap-2 border-t pt-4">
@@ -368,6 +410,12 @@ function TestSheet({ ws, test, flag, canManage, onClose, onChanged }: { ws: stri
           ) : (
             <>
               {v && v.text && <div className={`rounded-md border px-3 py-2 ${toneClass[v.tone]}`}>{v.text}</div>}
+              {canManage && <SummaryPanel ws={ws} testID={test.id} />}
+              {results.result.goals[0]?.days && results.result.goals[0].days.length > 1 && (
+                <Card title={`${goalText(results.result.goals[0].goal)} rate, day by day`}>
+                  <DayChart days={results.result.goals[0].days} control={test.control} />
+                </Card>
+              )}
               {results.result.goals.map((g, gi) => (
                 <Card key={gi} title={gi === 0 ? `Judged on ${goalText(g.goal)}` : goalText(g.goal)}>
                   <GoalTable arms={g.arms} comparisons={g.comparisons ?? []} control={test.control} names={names} />
@@ -418,12 +466,14 @@ function GoalTable({ arms, comparisons, control, names }: { arms: ABTestResults[
             <th className="py-1 pr-3 text-right font-normal">Converted</th>
             <th className="py-1 pr-3 text-right font-normal">Rate</th>
             <th className="py-1 pr-3 text-right font-normal">Chance to beat</th>
-            <th className="py-1 pr-3 text-right font-normal">Lift (95% range)</th>
+            <th className="py-1 pr-3 text-right font-normal" title="The range stays honest however often you look, and leaves out 0 exactly when the result is safe to stop.">Lift (95% range)</th>
             <th className="py-1 font-normal"></th>
           </tr>
         </thead>
         <tbody>
-          {arms.map((a) => {
+          {arms.map((a, _i, all) => {
+            // With no conversions anywhere, a chance is only the prior.
+            const noneConverted = all.every((x) => x.conversions === 0);
             const c = comparisons.find((x) => x.variant === a.variant);
             const rate = a.visitors ? a.conversions / a.visitors : 0;
             return (
@@ -432,8 +482,8 @@ function GoalTable({ arms, comparisons, control, names }: { arms: ABTestResults[
                 <td className="py-1.5 pr-3 text-right">{a.visitors.toLocaleString()}</td>
                 <td className="py-1.5 pr-3 text-right">{a.conversions.toLocaleString()}</td>
                 <td className="py-1.5 pr-3 text-right">{pct(rate)}</td>
-                <td className="py-1.5 pr-3 text-right">{a.variant === control || !c ? "—" : chance(c.chance_to_beat)}</td>
-                <td className="py-1.5 pr-3 text-right">{a.variant === control || !c || (c.lift === 0 && c.lift_low === 0) ? "—" : `${signed(c.lift)} (${signed(c.lift_low)} to ${signed(c.lift_high)})`}</td>
+                <td className="py-1.5 pr-3 text-right">{a.variant === control || !c || noneConverted ? "—" : chance(c.chance_to_beat)}</td>
+                <td className="py-1.5 pr-3 text-right">{a.variant === control || !c || a.visitors === 0 ? "—" : c.lift_low === 0 && c.lift_high === 0 ? `${signed(c.lift)} (range not yet)` : `${signed(c.lift)} (${signed(c.lift_low)} to ${signed(c.lift_high)})`}</td>
                 <td className="py-1.5">{c && c.p_value < 0.05 && <Badge tone={c.lift >= 0 ? "green" : "amber"} title={`Always-valid p-value ${c.p_value.toFixed(3)}: safe to stop, however often you looked.`}>Safe to stop</Badge>}</td>
               </tr>
             );

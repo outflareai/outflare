@@ -2,6 +2,7 @@ package abtests
 
 import (
 	"math"
+	"math/rand/v2"
 	"testing"
 )
 
@@ -109,4 +110,99 @@ func TestSequentialPMinEffect(t *testing.T) {
 	if p10, p50 := SequentialP(ctl, small, 0.1), SequentialP(ctl, small, 0.5); p50 <= p10 {
 		t.Errorf("+10%%: tuned for +50%% p = %v, should be over +10%%'s %v", p50, p10)
 	}
+}
+
+// The range and the p-value come from the same test, so the range leaves
+// out zero exactly when the result is safe to stop, at every look.
+func TestRangeMatchesPValue(t *testing.T) {
+	rng := rand.New(rand.NewPCG(7, 11))
+	for range 300 {
+		var looks [][]Arm
+		ctl, b := Arm{Variant: "control"}, Arm{Variant: "b"}
+		rate := 0.02 + rng.Float64()*0.08
+		lift := (rng.Float64() - 0.3) * 0.6
+		for range 1 + rng.IntN(20) {
+			n := int64(50 + rng.IntN(400))
+			ctl.Visitors, b.Visitors = ctl.Visitors+n, b.Visitors+n
+			ctl.Conversions += binomial(rng, n, rate)
+			b.Conversions += binomial(rng, n, rate*(1+lift))
+			looks = append(looks, []Arm{ctl, b})
+		}
+		c := CompareSeries(looks, 0.25, rate)[0]
+		if ctl.Conversions == 0 || c.LiftLow == 0 && c.LiftHigh == 0 {
+			continue
+		}
+		excludes := c.LiftLow > 0 || c.LiftHigh < 0
+		if excludes != (c.PValue < Alpha) {
+			t.Fatalf("range %.3f..%.3f but p = %.4f (%+v)", c.LiftLow, c.LiftHigh, c.PValue, looks[len(looks)-1])
+		}
+	}
+}
+
+// The p-value is the lowest over the looks: it never rises again.
+func TestPValueNeverRises(t *testing.T) {
+	looks := [][]Arm{
+		{{Visitors: 2000, Conversions: 80}, {Visitors: 2000, Conversions: 150}},
+		{{Visitors: 4000, Conversions: 200}, {Visitors: 4000, Conversions: 215}},
+	}
+	first := CompareSeries(looks[:1], 0.25, 0.04)[0].PValue
+	both := CompareSeries(looks, 0.25, 0.04)[0].PValue
+	if both != first || first >= Alpha {
+		t.Fatalf("first look p = %v, after the second = %v", first, both)
+	}
+}
+
+// A/A simulation: both versions are the same, people look every day and
+// stop at the first winner. The full rule (chance to beat and the
+// always-valid p, either direction) must call a false winner at most about
+// 5% of the time, at the small counts a marketing site sees.
+func TestAAFalseWinners(t *testing.T) {
+	if testing.Short() {
+		t.Skip("simulation")
+	}
+	rng := rand.New(rand.NewPCG(2026, 10))
+	// live: no baseline recorded, so each look tunes with its own control
+	// rate (tests started before baselines were kept).
+	for _, tc := range []struct {
+		rate  float64
+		daily int64
+		live  bool
+	}{{0.01, 200, false}, {0.03, 200, false}, {0.05, 1000, false}, {0.02, 5000, false}, {0.01, 200, true}, {0.03, 200, true}} {
+		const sims, days = 200, 35
+		base := tc.rate
+		if tc.live {
+			base = 0
+		}
+		wins := 0
+		for range sims {
+			ctl, b := Arm{Variant: "control"}, Arm{Variant: "b"}
+			var looks [][]Arm
+			for range days {
+				ctl.Visitors, b.Visitors = ctl.Visitors+tc.daily, b.Visitors+tc.daily
+				ctl.Conversions += binomial(rng, tc.daily, tc.rate)
+				b.Conversions += binomial(rng, tc.daily, tc.rate)
+				looks = append(looks, []Arm{ctl, b})
+				c := CompareSeries(looks, 0.25, base)[0]
+				if c.PValue < Alpha && (c.ChanceToBeat >= 0.95 || c.ChanceToBeat <= 0.05) {
+					wins++
+					break
+				}
+			}
+		}
+		if got := float64(wins) / sims; got > 0.07 {
+			t.Errorf("rate %.2f, %d a day, live %v: false winners %.1f%%, want about 5%% or less", tc.rate, tc.daily, tc.live, got*100)
+		} else {
+			t.Logf("rate %.2f, %d a day, live %v: false winners %.1f%%", tc.rate, tc.daily, tc.live, got*100)
+		}
+	}
+}
+
+func binomial(rng *rand.Rand, n int64, p float64) int64 {
+	var k int64
+	for range n {
+		if rng.Float64() < p {
+			k++
+		}
+	}
+	return k
 }

@@ -27,6 +27,14 @@ var simPages = map[string]struct {
 	"/about":     {200, `<html><head><title>About</title></head><body><a href="/">Home</a></body></html>`, "text/html"},
 	"/blog/":     {200, `<html><head><title>Blog</title><meta name="robots" content="noindex"></head><body><a href="/">Home</a></body></html>`, "text/html"},
 	"/old-about": {301, "", "text/html"},
+	// For link building: a resource page that links to example.com, one
+	// that doesn't, a broken link on both, and addresses to contact.
+	"/resources": {200, `<html lang="en"><head><title>Hiking gear resources</title><meta name="author" content="Jo Rivers"></head><body>` +
+		`<h1>Best hiking gear resources</h1><a href="https://www.example.com/guide">A guide</a> <a href="https://tools.example/old-tool">Old tool</a> ` +
+		`<a href="/contact">Contact us</a> <a href="mailto:jo@{host}">Email Jo</a></body></html>`, "text/html"},
+	"/links": {200, `<html lang="en"><head><title>Hiking pricing links</title></head><body><h1>Hiking pricing</h1>` +
+		`<a href="https://tools.example/old-tool">Old tool</a> <a href="/contact">Contact us</a></body></html>`, "text/html"},
+	"/contact": {200, `<html><head><title>Contact</title></head><body><a href="mailto:editor@{host}">Editor</a> <a href="mailto:someone@elsewhere.example">Elsewhere</a></body></html>`, "text/html"},
 }
 
 func (Simulated) Fetch(_ context.Context, raw string) (*Response, error) {
@@ -45,6 +53,6 @@ func (Simulated) Fetch(_ context.Context, raw string) (*Response, error) {
 	if p.status == 301 {
 		h.Set("Location", base+"/about")
 	}
-	body := []byte(strings.ReplaceAll(p.body, "{base}", base))
+	body := []byte(strings.NewReplacer("{base}", base, "{host}", strings.TrimPrefix(u.Hostname(), "www.")).Replace(p.body))
 	return &Response{URL: raw, Status: p.status, Header: h, Body: body, Duration: time.Millisecond}, nil
 }

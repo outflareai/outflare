@@ -152,3 +152,34 @@ func TestLinkProspectsAddScoreAndPitch(t *testing.T) {
 		}
 	}
 }
+
+func TestReclaimProspects(t *testing.T) {
+	e := freshEnv(t)
+	owner, ws := setupOwner(t, e.h)
+	base := "/v1/workspaces/" + ws
+	siteID := owner.must(201, "POST", base+"/seo-sites", map[string]any{"url": "https://www.example.com/"})["id"].(string)
+	// Lost links: a recent one (its site still links elsewhere), one lost
+	// long ago, one marked to disavow and a toxic one; and a live link.
+	if _, err := e.pool.Exec(context.Background(), `INSERT INTO backlinks (workspace_id, site_id, source_url, target_url, source_domain, source_rating, status, lost_at, review, spam_score) VALUES
+		($1, $2, 'https://blog.example.org/tools', 'https://example.com/guide', 'blog.example.org', 50, 'lost', now() - interval '10 days', '', 5),
+		($1, $2, 'https://blog.example.org/home', 'https://example.com/', 'blog.example.org', 50, 'live', NULL, '', 5),
+		($1, $2, 'https://old.example.org/a', 'https://example.com/', 'old.example.org', 70, 'lost', now() - interval '200 days', '', 5),
+		($1, $2, 'https://bad.example.org/a', 'https://example.com/', 'bad.example.org', 70, 'lost', now() - interval '5 days', 'disavow', 5),
+		($1, $2, 'https://spam.example.org/a', 'https://example.com/', 'spam.example.org', 70, 'lost', now() - interval '5 days', '', 90)`, ws, siteID); err != nil {
+		t.Fatal(err)
+	}
+	res := owner.must(200, "POST", base+"/link-prospects/reclaim", map[string]any{"site_id": siteID})
+	if res["added"].(float64) != 1 || res["excluded"].(float64) != 0 {
+		t.Fatalf("reclaim: %v", res)
+	}
+	p := owner.must(200, "GET", base+"/link-prospects?method=reclaim", nil)["data"].([]any)[0].(map[string]any)
+	if p["page_url"] != "https://blog.example.org/tools" || p["target_url"] != "https://example.com/guide" || p["stage"] != "prospect" || p["source"] != "reclaim" ||
+		p["evidence"].(map[string]any)["backlink_id"] == nil {
+		t.Fatalf("prospect: %v", p)
+	}
+	// Running it again adds nothing new; a wider window finds the old one.
+	if again := owner.must(200, "POST", base+"/link-prospects/reclaim", map[string]any{"site_id": siteID, "days": 365}); again["added"].(float64) != 1 || again["existing"].(float64) != 1 {
+		t.Fatalf("again: %v", again)
+	}
+	owner.must(400, "POST", base+"/link-prospects/reclaim", map[string]any{"site_id": siteID, "days": 0})
+}

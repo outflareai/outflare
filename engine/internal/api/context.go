@@ -63,7 +63,11 @@ type contextView struct {
 	Notes   string `json:"notes"`
 	// How the workspace's brands relate to each other, for companies that
 	// market more than one.
-	Brands    string     `json:"brands"`
+	Brands string `json:"brands"`
+	// The company's logo and colours, which the consent banner and
+	// anything else on brand start from.
+	LogoURL   string     `json:"logo_url"`
+	Colors    lookColors `json:"colors"`
 	Version   int        `json:"version"`
 	UpdatedAt *time.Time `json:"updated_at"`
 	UpdatedBy *string    `json:"updated_by"`
@@ -103,11 +107,11 @@ func (s *Server) loadContext(ctx context.Context, ws string) (contextView, error
 	v := contextView{Version: 1}
 	var dismissed *time.Time
 	err := s.pool.QueryRow(ctx, `
-		SELECT c.company, c.website, c.about, c.goals, c.voice, c.rules, c.notes, c.brands, c.version,
+		SELECT c.company, c.website, c.about, c.goals, c.voice, c.rules, c.notes, c.brands, c.logo_url, c.colors, c.version,
 		       c.updated_at, ac.display_name, c.onboarding_dismissed_at
 		FROM workspace_context c LEFT JOIN actors ac ON ac.id = c.updated_by
 		WHERE c.workspace_id = $1`, ws,
-	).Scan(&v.Company, &v.Website, &v.About, &v.Goals, &v.Voice, &v.Rules, &v.Notes, &v.Brands, &v.Version,
+	).Scan(&v.Company, &v.Website, &v.About, &v.Goals, &v.Voice, &v.Rules, &v.Notes, &v.Brands, &v.LogoURL, &v.Colors, &v.Version,
 		&v.UpdatedAt, &v.UpdatedBy, &dismissed)
 	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 		return v, err
@@ -362,6 +366,9 @@ type contextInput struct {
 	Rules   *string `json:"rules"`
 	Notes   *string `json:"notes"`
 	Brands  *string `json:"brands"`
+	// The company's logo (https, "" for none) and colours.
+	LogoURL *string     `json:"logo_url"`
+	Colors  *lookColors `json:"colors"`
 	// The version the edit was made against. When set and the context has
 	// changed since, the update fails with 409 instead of overwriting.
 	Version *int `json:"version"`
@@ -391,6 +398,16 @@ func (s *Server) updateContext(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
+	if req.LogoURL != nil {
+		logo, err := cleanLogoURL(*req.LogoURL)
+		if s.allocError(w, r, err) {
+			return
+		}
+		req.LogoURL = &logo
+	}
+	if req.Colors != nil && s.allocError(w, r, req.Colors.clean()) {
+		return
+	}
 	if req.Website != nil {
 		*req.Website = strings.TrimSuffix(strings.TrimPrefix(strings.TrimPrefix(*req.Website, "https://"), "http://"), "/")
 	}
@@ -403,9 +420,9 @@ func (s *Server) updateContext(w http.ResponseWriter, r *http.Request) {
 		}
 		var cur contextView
 		err := tx.QueryRow(ctx, `
-			SELECT company, website, about, goals, voice, rules, notes, brands, version
+			SELECT company, website, about, goals, voice, rules, notes, brands, logo_url, colors, version
 			FROM workspace_context WHERE workspace_id = $1 FOR UPDATE`, a.WorkspaceID,
-		).Scan(&cur.Company, &cur.Website, &cur.About, &cur.Goals, &cur.Voice, &cur.Rules, &cur.Notes, &cur.Brands, &cur.Version)
+		).Scan(&cur.Company, &cur.Website, &cur.About, &cur.Goals, &cur.Voice, &cur.Rules, &cur.Notes, &cur.Brands, &cur.LogoURL, &cur.Colors, &cur.Version)
 		if err != nil {
 			return err
 		}
@@ -413,6 +430,12 @@ func (s *Server) updateContext(w http.ResponseWriter, r *http.Request) {
 			if p := req.field(f.key); p != nil && *p != *cur.field(f.key) {
 				changed = append(changed, f.key)
 			}
+		}
+		if req.LogoURL != nil && *req.LogoURL != cur.LogoURL {
+			changed = append(changed, "logo_url")
+		}
+		if req.Colors != nil && *req.Colors != cur.Colors {
+			changed = append(changed, "colors")
 		}
 		if req.Version != nil && *req.Version != cur.Version && len(changed) > 0 {
 			return errStaleBrief
@@ -422,7 +445,7 @@ func (s *Server) updateContext(w http.ResponseWriter, r *http.Request) {
 			UPDATE workspace_context SET
 				company = COALESCE($2, company), website = COALESCE($3, website), about = COALESCE($4, about),
 				goals = COALESCE($5, goals), voice = COALESCE($6, voice), rules = COALESCE($7, rules), notes = COALESCE($8, notes),
-				brands = COALESCE($12, brands),
+				brands = COALESCE($12, brands), logo_url = COALESCE($13, logo_url), colors = COALESCE($14, colors),
 				version = version + CASE WHEN $9 THEN 1 ELSE 0 END,
 				onboarding_dismissed_at = CASE WHEN $10::boolean IS NULL THEN onboarding_dismissed_at
 				                               WHEN $10 THEN COALESCE(onboarding_dismissed_at, now()) END,
@@ -430,7 +453,7 @@ func (s *Server) updateContext(w http.ResponseWriter, r *http.Request) {
 				updated_by = CASE WHEN $9 THEN $11::uuid ELSE updated_by END
 			WHERE workspace_id = $1`,
 			a.WorkspaceID, req.Company, req.Website, req.About, req.Goals, req.Voice, req.Rules, req.Notes,
-			bump, req.OnboardingDismissed, a.ActorID, req.Brands)
+			bump, req.OnboardingDismissed, a.ActorID, req.Brands, req.LogoURL, req.Colors)
 		if err != nil || (!bump && req.OnboardingDismissed == nil) {
 			return err
 		}

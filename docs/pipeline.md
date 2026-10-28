@@ -37,6 +37,18 @@ Codes are error codes from the API's catalog where one fits (`connector_needed`,
 
 When a run has nothing waiting or being worked on, the pipeline's `OnSettled` function runs, where the feature finishes the run or asks for a review. It can run more than once for a run, so it must be idempotent.
 
+## Shared steps for companies
+
+A feature whose items are companies (the item's ref is the company's domain) can add the engine's own steps to its pipeline with `Host.Pipeline().RegisterCompanySteps`, and send items to the first one, `known`:
+
+| Step | What it does | Outcomes |
+| --- | --- | --- |
+| `known` | The workspace already has a company record with that domain: links the item to it | Skip `already_known`; otherwise on to `contact_rules` |
+| `contact_rules` | Checks the domain against the opt-out list for cold email. Opt-outs and bounces stop it; a competitor, customer or partner entry only warns | Skip `opted_out` or `bounced`; otherwise on to `add_to_crm` |
+| `add_to_crm` | Adds the company as a prospect record (`EnsureCompanies`), with the feature as `acquired_via`, and links the item to it with any warnings | Done, or on to the feature's next step |
+
+The feature says which company an item is (`Company`, with the brand to add it for) and records the outcome in its own data (`Linked`, in the transaction that adds or finds the record, and `Stopped`). Every outcome is counted in the run's summaries and metrics like any other stage.
+
 ## Limits and breakers
 
 `Limits` hold a rate limit and a circuit breaker per outside account (`integration:<id>`, `ai:<workspace>`), shared by every worker through `pipeline_limits`:

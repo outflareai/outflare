@@ -191,7 +191,7 @@ func TestAISettings(t *testing.T) {
 	for _, v := range s["tasks"].([]any) {
 		byTask[v.(map[string]any)["task"].(string)] = v.(map[string]any)
 	}
-	if byTask["plan"]["model"] != "gpt-test" || byTask["check_in"]["model"] != "gpt-other" || byTask["check_in"]["custom"] != true || byTask["reply_labelling"]["model"] != "gpt-test" || len(byTask) != 11 {
+	if byTask["plan"]["model"] != "gpt-test" || byTask["check_in"]["model"] != "gpt-other" || byTask["check_in"]["custom"] != true || byTask["reply_labelling"]["model"] != "gpt-test" || len(byTask) != 13 {
 		t.Errorf("tasks = %v", s["tasks"])
 	}
 	// Saving without task_models keeps them.

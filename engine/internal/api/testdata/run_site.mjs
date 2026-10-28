@@ -4,9 +4,16 @@
 // answers to each post in turn (a number, or "error" for a network error).
 // With flags (the answer to /v1/site/flags) it also asks for flags, as with
 // data-flags, and prints what onFlags gave and the classes on <html>;
-// stored is what sessionStorage held from an earlier page. With quiet, no
-// onFlags callback reads the flags; read lists flags to read with
-// outflare.flag once they arrive. tracked lists the track events sent.
+// stored is what sessionStorage held from an earlier page.
+// banner is the answer to GET /v1/site/consent (the consent banner's
+// settings); without it the site has none. cookie is document.cookie from
+// an earlier page, gpc the browser's Global Privacy Control, calls are
+// outflare methods to call once the page loaded ([name, ...args]), and
+// held are scripts kept back for consent (data-category). It also prints
+// the choices sent, Consent Mode's dataLayer, Microsoft's uetq, the calls
+// Meta's fbq got, the scripts let through and the cookies left.
+// With quiet, no onFlags callback reads the flags; read lists flags to read
+// with outflare.flag once they arrive. tracked lists the track events sent.
 import { readFileSync } from "node:fs";
 import vm from "node:vm";
 
@@ -20,8 +27,9 @@ const loc = {
   get pathname() { return new URL(href).pathname; },
   get search() { return new URL(href).search; },
 };
-const attrs = { "data-key": "ofk_test_not_a_real_key", "data-consent": "granted", "data-domains": opt.domains || "" };
+const attrs = { "data-key": "ofk_test_not_a_real_key", "data-consent": opt.consent || "granted", "data-domains": opt.domains || "" };
 if (opt.flags && !opt.noTag) attrs["data-flags"] = "";
+if (opt.bannerOff) attrs["data-banner"] = "off";
 const classes = new Set(opt.htmlClass ? [opt.htmlClass] : []);
 const storage = new Map(Object.entries(opt.stored || {}));
 const sessionStorage = {
@@ -29,12 +37,38 @@ const sessionStorage = {
   setItem: (k, v) => storage.set(k, String(v)),
   removeItem: (k) => storage.delete(k),
 };
+// A cookie jar that behaves like document.cookie: setting one name keeps
+// the others, and max-age=0 removes it. Domains are ignored.
+const jar = new Map((opt.cookie || "").split(/;\s*/).filter(Boolean).map((c) => c.split("=")));
+const ran = [];
+const held = (opt.held || []).map((h) => {
+  const a = { type: "text/plain", "data-category": h.category, ...(h.src ? { src: h.src } : {}) };
+  const el = {
+    tagName: "SCRIPT", text: h.text || "", src: h.src || "",
+    get attributes() { return Object.entries(a).map(([name, value]) => ({ name, value })); },
+    getAttribute: (k) => a[k] ?? null,
+    setAttribute: (k, v) => { a[k] = v; },
+    parentNode: { replaceChild: (n) => ran.push(n.src || n.text) },
+  };
+  return el;
+});
 const document = {
   currentScript: { src: "https://app.outflare.example/site.js", getAttribute: (k) => attrs[k] ?? null },
   referrer: opt.referrer || "",
   title: "",
-  cookie: opt.cookie || "",
+  get cookie() { return [...jar].map(([k, v]) => k + "=" + v).join("; "); },
+  set cookie(c) {
+    const [pair, ...rest] = c.split(";");
+    const [k, v] = pair.split("=");
+    if (rest.some((r) => r.trim() === "max-age=0")) jar.delete(k.trim());
+    else jar.set(k.trim(), v);
+  },
   addEventListener() {},
+  querySelectorAll: (q) => (q.includes("data-category") ? held.filter((h) => h.getAttribute("type") === "text/plain" && h.getAttribute("data-of-loaded") === null) : []),
+  createElement: () => {
+    const n = { attrs: {}, setAttribute(k, v) { n.attrs[k] = v; } };
+    return n;
+  },
   documentElement: { classList: { add: (c) => classes.add(c), remove: (c) => classes.delete(c) } },
 };
 const history = {
@@ -46,8 +80,18 @@ let posts = 0;
 const statuses = opt.statuses || [200];
 const timers = [];
 let flagAsks = 0;
+const choices = [];
+let bannerAsks = 0;
 const tracked = [];
 const fetch = (url, init) => {
+  if (url.includes("/v1/site/consent")) {
+    if (init && init.method === "POST") {
+      choices.push(JSON.parse(init.body));
+      return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve({}) });
+    }
+    bannerAsks++;
+    return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve(opt.banner || { enabled: false }) });
+  }
   if (url.endsWith("/v1/site/events")) {
     for (const e of JSON.parse(init.body).batch) if (e.type === "track") tracked.push({ event: e.event, properties: e.properties });
   }
@@ -58,13 +102,19 @@ const fetch = (url, init) => {
   const answer = statuses[Math.min(posts++, statuses.length - 1)];
   return answer === "error" ? Promise.reject(new TypeError("network")) : Promise.resolve({ status: answer });
 };
+const fbq = [];
 const window = { addEventListener() {}, crypto: globalThis.crypto, fetch };
+if (opt.fbq) window.fbq = (...a) => fbq.push(a);
 const ctx = vm.createContext({
   window, document, history, location: loc, URL, URLSearchParams, Intl, Date, Math, JSON, Array,
-  navigator: { language: "en", sendBeacon: () => true },
+  navigator: { language: opt.language || "en", sendBeacon: () => true, globalPrivacyControl: !!opt.gpc },
   crypto: globalThis.crypto, fetch, setTimeout: (f) => timers.push(f), sessionStorage,
 });
 vm.runInContext(readFileSync(file, "utf8"), ctx);
+// Let the banner's settings arrive before acting like the visitor.
+for (let i = 0; i < 5; i++) await new Promise((r) => setImmediate(r));
+let state = null;
+for (const [name, ...args] of opt.calls || []) state = window.outflare[name](...args);
 let got = null;
 if (opt.flags && !opt.quiet) window.outflare.onFlags((f) => { got = { flags: { ...f }, payload: window.outflare.flagPayload("hero") }; });
 for (const k of opt.read || []) window.outflare.onFlags(() => window.outflare.flag(k));
@@ -73,4 +123,6 @@ for (let i = 0; i < 10; i++) {
   await new Promise((r) => setImmediate(r));
   while (timers.length) timers.shift()();
 }
-console.log(JSON.stringify({ anon: window.outflare.anonymousId(), href, posts, flagAsks, got, classes: [...classes].sort(), tracked, stored: Object.fromEntries(storage) }));
+console.log(JSON.stringify({ anon: window.outflare.anonymousId(), href, posts, flagAsks, got, classes: [...classes].sort(), tracked, stored: Object.fromEntries(storage),
+  choices, bannerAsks, state, consent: window.outflare.consent(), dataLayer: (window.dataLayer || []).map((a) => [...a]), uetq: window.uetq || null, fbq, ran,
+  cookies: Object.fromEntries(jar) }));

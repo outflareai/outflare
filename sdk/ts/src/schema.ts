@@ -6413,6 +6413,105 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/workspaces/{ws}/link-prospects/reclaim": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Add lost links as prospects to win back
+         * @description Scope: seo.manage. Adds the site's links lost in the last `days`
+         *     (default 90) as `reclaim` prospects, strongest first, at most 500:
+         *     the page that dropped the link, our page it linked to as the page to
+         *     offer, and the backlink, anchor and the provider's lost reason as
+         *     evidence. Links marked to disavow or with a toxic spam score are left
+         *     out, and pages already listed are kept as they are. Free: the links
+         *     are already stored.
+         */
+        post: operations["reclaimLinkProspects"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/workspaces/{ws}/link-prospects/check": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Check prospects' pages
+         * @description Scope: seo.manage. Queues OutflareBot's check of up to `limit`
+         *     (default and most 100) of a site's prospects to pitch, best first:
+         *     those never checked, or all of them with `again`. Each page is checked
+         *     at most once an hour. See POST .../link-prospects/{id}/check for what
+         *     a check does. The page reader uses the workspace's own AI when one is
+         *     connected (tool link_page_reading on the AI usage page).
+         */
+        post: operations["checkLinkProspects"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/workspaces/{ws}/link-prospects/{prospect}/check": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                prospect: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Check a prospect's page
+         * @description Scope: seo.manage. Queues OutflareBot's check of the page, at most once
+         *     an hour, obeying robots.txt and crawl opt-outs. The check finds:
+         *     - whether the page is up, gone or redirected elsewhere;
+         *     - whether it links to the site already (`links_to_us`, with the links);
+         *     - which of its first 50 outbound links are broken, with the Internet
+         *       Archive's closest snapshot of up to 10 of them;
+         *     - with the workspace's own AI: what kind of page it is, its topic, its
+         *       author, how well it fits the site (`fit`, which adds up to 15 points
+         *       to the score either way) and which of the site's pages to offer;
+         *       without AI, the page sharing the most words is suggested;
+         *     - who to contact: addresses at the website's domain on the page and
+         *       on up to two of its contact, about or write-for-us pages, and the
+         *       author's likely address from the free email finder. Contacts become
+         *       person records on the website's company.
+         *
+         *     A page to pitch that links already, or is gone, is excluded
+         *     (`links_to_us`, `page_gone`). An empty `target_url` takes the
+         *     suggested page. The result is the prospect's `check` and `contacts`,
+         *     and link_prospect.checked. Free apart from the AI read.
+         */
+        post: operations["checkLinkProspect"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/workspaces/{ws}/link-prospects/{prospect}": {
         parameters: {
             query?: never;
@@ -6451,6 +6550,187 @@ export interface paths {
          *     link_prospect.<stage> (reopened for `prospect`).
          */
         patch: operations["updateLinkProspect"];
+        trace?: never;
+    };
+    "/v1/workspaces/{ws}/news-searches": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+            };
+            cookie?: never;
+        };
+        /**
+         * List news searches
+         * @description Scope: seo.read. The news watch's saved searches, newest first:
+         *     `topic` searches follow a subject and the journalists who write
+         *     about it, `coverage` searches look for a brand and keep what they
+         *     find as its coverage.
+         */
+        get: operations["listNewsSearches"];
+        put?: never;
+        /**
+         * Save a news search
+         * @description Scope: seo.manage. Saves a search the news watch runs on its
+         *     schedule through the workspace's own web search connection
+         *     (Geonode), and queues its first run. Each run is one search on
+         *     that connection, booked in the spend ledger within its usage
+         *     limits. A `coverage` search needs `brand_id`; the articles it finds
+         *     that name every word of the query, and aren't on the brand's own
+         *     website, become the brand's coverage. A workspace keeps at most
+         *     200 searches (409 `conflict`).
+         */
+        post: operations["createNewsSearch"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/workspaces/{ws}/news-searches/{search}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                search: string;
+            };
+            cookie?: never;
+        };
+        /**
+         * Get a news search
+         * @description Scope: seo.read.
+         */
+        get: operations["getNewsSearch"];
+        put?: never;
+        post?: never;
+        /**
+         * Delete a news search
+         * @description Scope: seo.manage. Articles only it found go too; coverage stays.
+         */
+        delete: operations["deleteNewsSearch"];
+        options?: never;
+        head?: never;
+        /**
+         * Change a news search
+         * @description Scope: seo.manage. Its brand and purpose stay as they are. A new `check_every_hours` counts from the last run.
+         */
+        patch: operations["updateNewsSearch"];
+        trace?: never;
+    };
+    "/v1/workspaces/{ws}/news-searches/{search}/run": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                search: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Run a news search now
+         * @description Scope: seo.manage. Queues a run now, whatever its schedule (one a
+         *     minute at most). It costs one search on the workspace's web search
+         *     connection; 409 `connector_needed` when there is none. The run's
+         *     outcome shows on the search (`last_checked_at`, `last_error_code`).
+         */
+        post: operations["runNewsSearch"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/workspaces/{ws}/news-articles": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+            };
+            cookie?: never;
+        };
+        /**
+         * List news articles
+         * @description Scope: seo.read. Articles the news searches found, newest first,
+         *     each once however many searches found it. `brand` keeps those
+         *     found by the brand's searches. Reads only what is stored, so it
+         *     costs nothing.
+         */
+        get: operations["listNewsArticles"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/workspaces/{ws}/coverage": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+            };
+            cookie?: never;
+        };
+        /**
+         * List coverage
+         * @description Scope: seo.read. Articles that mention a brand, newest first, each
+         *     on its outlet's company record (`record_id`). Leaves out
+         *     `dismissed` items unless `status` asks for them.
+         */
+        get: operations["listCoverage"];
+        put?: never;
+        /**
+         * Add coverage
+         * @description Scope: seo.manage. Keeps an article the news watch missed as a
+         *     brand's coverage, on its outlet's company record (a prospect
+         *     company when the workspace has none), and records mention.found.
+         *     An article already kept for the brand comes back as it is.
+         */
+        post: operations["addCoverage"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/workspaces/{ws}/coverage/{coverage}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                coverage: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Confirm or dismiss coverage
+         * @description Scope: seo.manage. `status` confirms or dismisses it, or moves it
+         *     back to `new`; each move records coverage.<status> (reopened for
+         *     `new`). `linked` says whether the article links to the brand's
+         *     site.
+         */
+        patch: operations["updateCoverage"];
         trace?: never;
     };
     "/v1/workspaces/{ws}/seo-sites/{site}/cannibalisation": {
@@ -8113,6 +8393,35 @@ export interface paths {
         patch: operations["updateReviewPage"];
         trace?: never;
     };
+    "/v1/workspaces/{ws}/reviews/pages/{id}/read": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Read a review page now
+         * @description Scope: social.manage. Reads one active review page now through the
+         *     workspace's own page reader (Geonode, on its own key), such as one
+         *     whose last read failed, instead of waiting for its next try. A
+         *     page that shows no reviews is read again in a browser. Answers
+         *     connector_needed (409) with no page reader, and conflict (409) for
+         *     a paused or removed page.
+         */
+        post: operations["readReviewPage"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/workspaces/{ws}/reviews/pages/{id}/days": {
         parameters: {
             query?: never;
@@ -8328,8 +8637,8 @@ export interface paths {
          * Read social accounts now
          * @description Scope: social.manage. Queues a read of every X and LinkedIn
          *     connection now: it finds new pages and profiles and reads the
-         *     accounts that are due. Answers connector_needed (409) when none is
-         *     connected.
+         *     accounts that are due, and those whose last read failed. Answers
+         *     connector_needed (409) when none is connected.
          */
         post: operations["syncSocialAccounts"];
         delete?: never;
@@ -8367,6 +8676,33 @@ export interface paths {
          *     connection reaches it again.
          */
         patch: operations["updateSocialAccount"];
+        trace?: never;
+    };
+    "/v1/workspaces/{ws}/social/accounts/{id}/sync": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Read a social account now
+         * @description Scope: social.manage. Reads one active account now, such as one
+         *     whose last read failed, instead of waiting for its next try (a
+         *     failed read is tried again the same day on its own). Answers
+         *     conflict (409) for a paused or disconnected account.
+         */
+        post: operations["syncSocialAccount"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
         trace?: never;
     };
     "/v1/workspaces/{ws}/social/accounts/{id}/days": {
@@ -12633,6 +12969,66 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/workspaces/{ws}/site-keys/{id}/consent-banner": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        /**
+         * Get a site's consent banner
+         * @description Scope: customers.read. The cookie consent banner the site key's script (/site.js) shows: the rule for each region,
+         *     the laws and frameworks it follows, the categories it asks about, how it looks and what it says. Until it is
+         *     first saved (saved false), config is the defaults and the site shows no banner. look is the logo and colours the
+         *     brand preset uses when the banner sets none: the key's brand's, else the company's.
+         */
+        get: operations["getConsentBanner"];
+        /**
+         * Change a site's consent banner
+         * @description Scope: customers.manage. Fields left out keep their value (the defaults, on a banner never saved); texts is
+         *     replaced language by language. Set enabled true to show it. Changing custom_html or custom_css also needs
+         *     workspace.manage, since they run on the website. Asking about a category the banner didn't ask about before
+         *     raises consent_version, so visitors are asked again. Records consent_banner.updated (or .enabled, .disabled).
+         */
+        put: operations["updateConsentBanner"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/workspaces/{ws}/site-keys/{id}/consent-banner/reask": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Ask a site's visitors again
+         * @description Scope: customers.manage. Raises consent_version, such as after the site starts using a new kind of cookie: visitors
+         *     whose choice was made on an older version see the banner again where their region's rule is opt_in. Records
+         *     consent_banner.reasked.
+         */
+        post: operations["reaskConsentBanner"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/workspaces/{ws}/visitors": {
         parameters: {
             query?: never;
@@ -12812,6 +13208,47 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/site/consent": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get a site's consent banner for a visitor
+         * @description Public: the site key (ofk_) is the authority. What the tracking script asks on a visitor's first page and again
+         *     every few minutes: the key's banner settings, with its words in the visitor's language (lang; the workspace's
+         *     own texts, else Outflare's in that language, else English) and the look filled in. enabled is false when the
+         *     workspace hasn't turned the banner on. country is the visitor's country when the site's own proxy, holding the
+         *     key's proxy secret, passes it in X-Outflare-Country; otherwise empty and the script goes by the browser's time
+         *     zone. 6,000 requests a minute per key. Nothing is stored.
+         */
+        get: operations["getSiteConsentBanner"];
+        put?: never;
+        /**
+         * Keep a visitor's consent choice
+         * @description Public: the site key (ofk_) in the body is the authority. What the script sends when a visitor makes or changes
+         *     a choice on the banner, or the site's own code calls outflare.consent. Each category the banner asks about
+         *     becomes a consent (channel web, purpose analytics, marketing or preferences, source consent_banner), and
+         *     marketing also sets Google Consent Mode's ad purposes (channel ads: ad_storage, ad_user_data,
+         *     ad_personalization), which ad send-back reads. Each is kept on the visitor's record when they are known, and
+         *     on their anonymousId until identify joins it to their record. evidence says what they were shown: the banner's
+         *     version and consent version, the region, the action, Global Privacy Control, the language and page. The answer
+         *     sets the of_consent cookie (and of_aid when analytics is allowed) on the site's domain, which browsers keep
+         *     when the request came through the site's own domain. Send the JSON as text/plain to skip the CORS preflight.
+         */
+        post: operations["sendSiteConsent"];
+        delete?: never;
+        /**
+         * CORS preflight for consent choices
+         * @description Public. Any origin may send; the key, not the page, is checked.
+         */
+        options: operations["sendSiteConsentPreflight"];
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/workspaces/{ws}/flags": {
         parameters: {
             query?: never;
@@ -12928,6 +13365,156 @@ export interface paths {
          *     as a draft: start it to measure. At most 500 tests per workspace.
          */
         post: operations["createABTest"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/workspaces/{ws}/ab-tests/plan": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Plan an A/B test
+         * @description Scope: analytics.read. How long a test of a flag is likely to take, before it starts: from the last 28 days of
+         *     page views (on page, when given) and the goal's rate among those visitors, the flag's rollout and split, and
+         *     the same sequential test the results use. Each row is the visitors per version, and weeks, until the result is
+         *     typically safe to stop if the change truly moves the goal by that much. Nothing is stored.
+         */
+        post: operations["planABTest"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/workspaces/{ws}/ab-tests/suggestions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Suggest A/B tests with AI
+         * @description Scope: analytics.manage. The workspace's own AI model proposes tests from the site's busiest pages and the
+         *     goals visitors reach over the last 28 days, the brand's context and the tests already run. Each suggestion
+         *     comes with the engine's own plan for its page and goal (weeks, the lift findable in 8 weeks, a warning).
+         *     Nothing is created: a person makes the flag and the test. 409 connector_needed without an AI model.
+         */
+        post: operations["suggestABTests"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/workspaces/{ws}/ab-tests/versions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Write test versions with AI
+         * @description Scope: analytics.manage. The workspace's own AI model writes new versions of a flag's content from a prompt,
+         *     in the brand's voice, with a key and a one-line rationale each. They are proposals: a person reviews them and
+         *     adds them to the flag (PATCH .../flags/{flag}). 409 connector_needed without an AI model.
+         */
+        post: operations["writeABTestVersions"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/workspaces/{ws}/ab-tests/{test}/summary": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                test: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Summarise a test with AI
+         * @description Scope: analytics.manage. The workspace's own AI model puts a running or finished test's results into plain
+         *     English with next steps. The recommendation (ship, keep_control, fix_split, extend, stop, wait) and its reason
+         *     come from the engine, not the AI. 409 for a draft, or connector_needed without an AI model.
+         */
+        post: operations["summarizeABTest"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/workspaces/{ws}/ab-test-ai-runs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+            };
+            cookie?: never;
+        };
+        /**
+         * List A/B test AI runs
+         * @description Scope: analytics.read. The latest 50 AI runs, newest first. A brand's runs include those for no brand.
+         */
+        get: operations["listABTestAIRuns"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/workspaces/{ws}/ab-test-ai-runs/{run}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                run: string;
+            };
+            cookie?: never;
+        };
+        /**
+         * Get an A/B test AI run
+         * @description Scope: analytics.read. Poll until status is ready (output holds the answer) or failed (error says why, in words).
+         */
+        get: operations["getABTestAIRun"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -18245,6 +18832,23 @@ export interface webhooks {
         patch?: never;
         trace?: never;
     };
+    "link_prospect.checked": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** OutflareBot checked a link prospect's page. data has site_id, brand_id, record_id, status (up, gone, redirected, blocked, opted_out, unreachable, failed), links_to_us, broken (how many broken outbound links), fit (0 to 100, or null without AI), score, contacts (how many new) and error_code; GET the prospect for the check. */
+        post: operations["webhook_link_prospect_checked"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "link_prospect.excluded": {
         parameters: {
             query?: never;
@@ -18875,7 +19479,7 @@ export interface components {
              */
             id: string;
             /** @enum {string} */
-            type: "lead.replied" | "lead.unsubscribed" | "inbox.replied" | "inbox.updated" | "inbox.classified" | "lead.bounced" | "mailbox.auto_paused" | "lead.created" | "lead.updated" | "lead.deleted" | "leads.imported" | "suppressions.added" | "suppression.removed" | "lead_list.created" | "lead_list.leads_added" | "lead_list.run_started" | "lead_list.build_done" | "lead_list.build_failed" | "lead_list.refresh_done" | "lead_list.refresh_failed" | "lead_list.enrich_done" | "lead_list.enrich_failed" | "import.done" | "import.failed" | "sequence.created" | "sequence.updated" | "sequence.activated" | "sequence.paused" | "sequence.archived" | "sequence.deleted" | "sequence.steps_updated" | "sequence.leads_enrolled" | "enrollment.stopped" | "mailbox.imported" | "mailbox.updated" | "mailbox.paused" | "mailbox.resumed" | "mailbox.stage_changed" | "mailbox.deleted" | "domain.added" | "domain.paused" | "domain.resumed" | "domain.removed" | "email.queued" | "email.sent" | "email.delivered" | "email.bounced" | "email.complained" | "email.failed" | "email.suppressed" | "email.cancelled" | "email.unsubscribed" | "email.opened" | "email.clicked" | "email.preferences_changed" | "email_domain.verified" | "email_domain.verification_failed" | "email_provider.events_failed" | "email_template.published" | "meeting.created" | "meeting.updated" | "meeting.deleted" | "deal.created" | "deal.updated" | "deal.deleted" | "spend.recorded" | "integration.connected" | "integration.updated" | "integration.disconnected" | "connect_request.created" | "deploy.detected" | "deploy.failed" | "digest.ready" | "ai_budget.warned" | "ai_budget.reached" | "connection_limit.warned" | "connection_limit.reached" | "experiment.started" | "experiment.concluded" | "project.created" | "project.updated" | "project.deleted" | "mission.created" | "mission.updated" | "mission.submitted" | "mission.approved" | "mission.paused" | "mission.resumed" | "mission.stopped" | "mission.completed" | "mission.action_held" | "mission.action_approved" | "mission.action_rejected" | "infra.plan_created" | "infra.plan_approved" | "infra.ordered" | "infra.order_failed" | "infra.domains_bought" | "infra.mailbox_joined" | "infra.plan_warming" | "infra.plan_ready" | "infra.plan_cancelled" | "fix.found" | "fix.updated" | "fix.started" | "fix.verify_requested" | "fix.confirmed" | "fix.reopened" | "record.created" | "record.bulk_created" | "record.bulk_updated" | "record.updated" | "record.merged" | "identity.verified" | "identity.closed" | "relationship.added" | "relationship.ended" | "consent.granted" | "consent.withdrawn" | "consent.bulk_withdrawn" | "brand.created" | "brand.updated" | "email_broadcast.created" | "email_broadcast.started" | "email_broadcast.sent" | "email_broadcast.failed" | "email_broadcast.cancelled" | "journey.created" | "journey.updated" | "journey_run.entered" | "journey_run.exited" | "rule.created" | "rule.updated" | "rule.activated" | "rule.paused" | "rule.archived" | "rule.fired" | "brand_setup.installed" | "brand_setup.install_failed" | "install.issue_opened" | "install.issue_resolved" | "seo_site.created" | "seo_site.verified" | "seo_site.unverified" | "seo_site.deleted" | "crawl.started" | "crawl.stopped" | "crawl.done" | "backlink.new" | "backlink.lost" | "backlink.regained" | "competitor.page_removed" | "link_prospect.found" | "link_prospect.excluded" | "link_prospect.pitched" | "link_prospect.replied" | "link_prospect.agreed" | "link_prospect.live" | "link_prospect.declined" | "link_prospect.removed" | "link_prospect.reopened" | "link_prospect.updated" | "link_prospect.deleted" | "social_action.drafted" | "social_action.approved" | "social_action.rejected" | "social_action.done" | "social_action.failed" | "review.posted" | "review.replied" | "review.reply_drafted" | "review_momentum.changed" | "alert.raised" | "visitor.became_hot" | "workspace.updated" | "webhook.test";
+            type: "lead.replied" | "lead.unsubscribed" | "inbox.replied" | "inbox.updated" | "inbox.classified" | "lead.bounced" | "mailbox.auto_paused" | "lead.created" | "lead.updated" | "lead.deleted" | "leads.imported" | "suppressions.added" | "suppression.removed" | "lead_list.created" | "lead_list.leads_added" | "lead_list.run_started" | "lead_list.build_done" | "lead_list.build_failed" | "lead_list.refresh_done" | "lead_list.refresh_failed" | "lead_list.enrich_done" | "lead_list.enrich_failed" | "import.done" | "import.failed" | "sequence.created" | "sequence.updated" | "sequence.activated" | "sequence.paused" | "sequence.archived" | "sequence.deleted" | "sequence.steps_updated" | "sequence.leads_enrolled" | "enrollment.stopped" | "mailbox.imported" | "mailbox.updated" | "mailbox.paused" | "mailbox.resumed" | "mailbox.stage_changed" | "mailbox.deleted" | "domain.added" | "domain.paused" | "domain.resumed" | "domain.removed" | "email.queued" | "email.sent" | "email.delivered" | "email.bounced" | "email.complained" | "email.failed" | "email.suppressed" | "email.cancelled" | "email.unsubscribed" | "email.opened" | "email.clicked" | "email.preferences_changed" | "email_domain.verified" | "email_domain.verification_failed" | "email_provider.events_failed" | "email_template.published" | "meeting.created" | "meeting.updated" | "meeting.deleted" | "deal.created" | "deal.updated" | "deal.deleted" | "spend.recorded" | "integration.connected" | "integration.updated" | "integration.disconnected" | "connect_request.created" | "deploy.detected" | "deploy.failed" | "digest.ready" | "ai_budget.warned" | "ai_budget.reached" | "connection_limit.warned" | "connection_limit.reached" | "experiment.started" | "experiment.concluded" | "project.created" | "project.updated" | "project.deleted" | "mission.created" | "mission.updated" | "mission.submitted" | "mission.approved" | "mission.paused" | "mission.resumed" | "mission.stopped" | "mission.completed" | "mission.action_held" | "mission.action_approved" | "mission.action_rejected" | "infra.plan_created" | "infra.plan_approved" | "infra.ordered" | "infra.order_failed" | "infra.domains_bought" | "infra.mailbox_joined" | "infra.plan_warming" | "infra.plan_ready" | "infra.plan_cancelled" | "fix.found" | "fix.updated" | "fix.started" | "fix.verify_requested" | "fix.confirmed" | "fix.reopened" | "record.created" | "record.bulk_created" | "record.bulk_updated" | "record.updated" | "record.merged" | "identity.verified" | "identity.closed" | "relationship.added" | "relationship.ended" | "consent.granted" | "consent.withdrawn" | "consent.bulk_withdrawn" | "brand.created" | "brand.updated" | "email_broadcast.created" | "email_broadcast.started" | "email_broadcast.sent" | "email_broadcast.failed" | "email_broadcast.cancelled" | "journey.created" | "journey.updated" | "journey_run.entered" | "journey_run.exited" | "rule.created" | "rule.updated" | "rule.activated" | "rule.paused" | "rule.archived" | "rule.fired" | "brand_setup.installed" | "brand_setup.install_failed" | "install.issue_opened" | "install.issue_resolved" | "seo_site.created" | "seo_site.verified" | "seo_site.unverified" | "seo_site.deleted" | "crawl.started" | "crawl.stopped" | "crawl.done" | "backlink.new" | "backlink.lost" | "backlink.regained" | "competitor.page_removed" | "link_prospect.found" | "link_prospect.checked" | "link_prospect.excluded" | "link_prospect.pitched" | "link_prospect.replied" | "link_prospect.agreed" | "link_prospect.live" | "link_prospect.declined" | "link_prospect.removed" | "link_prospect.reopened" | "link_prospect.updated" | "link_prospect.deleted" | "social_action.drafted" | "social_action.approved" | "social_action.rejected" | "social_action.done" | "social_action.failed" | "review.posted" | "review.replied" | "review.reply_drafted" | "review_momentum.changed" | "alert.raised" | "visitor.became_hot" | "workspace.updated" | "webhook.test";
             /** Format: date-time */
             created_at: string;
             /** Format: uuid */
@@ -21133,6 +21737,8 @@ export interface components {
             goals: components["schemas"]["ABTestGoal"][];
             /** @description The smallest relative change worth detecting: 0.25 is +25%. The always-valid p-value is tuned to find changes of about this size. */
             min_effect: number;
+            /** @description Each goal's conversion rate on the site over the 28 days before the test started, which fixes the test's tuning for its whole life; 0 for a goal with too little history (its live control rate is used). Null before the test starts. */
+            baselines: number[] | null;
             /** Format: date-time */
             started_at: string | null;
             /** Format: date-time */
@@ -21156,6 +21762,78 @@ export interface components {
             /** @description The smallest relative change worth detecting, such as 0.1 (+10%) for a busy site or 0.5 (+50%) for a bold change. Default 0.25. Smaller finds small changes but needs more visitors; fixed once the test starts. */
             min_effect?: number;
         };
+        ABTestPlan: {
+            /** Format: uuid */
+            flag_id: string;
+            page: string;
+            /** @example 28 */
+            window_days: number;
+            traffic: {
+                /** @description Visitors with a page view in the window. */
+                visitors: number;
+                /** @description Of them */
+                converted: number;
+            };
+            plan: {
+                /** @description The goal's rate among those visitors. */
+                baseline: number;
+                /** @description Visitors a week the flag reaches (its rollout applied). */
+                weekly_visitors: number;
+                /** @description Visitors a week of the smallest version, which the comparison waits on. */
+                weekly_per_version: number;
+                min_effect: number;
+                rows: {
+                    /** @description A true lift, such as 0.1 for +10%. */
+                    lift: number;
+                    /** @description Typical visitors per version before it is safe to stop; 0 when over 50 million. */
+                    visitors_per_version: number;
+                    weeks: number;
+                }[];
+                /** @description The smallest lift likely to be safe to stop within 4 weeks; 0 when even +300% would take longer. */
+                detectable_4_weeks: number;
+                detectable_8_weeks: number;
+                /** @description Weeks the test is likely to need if the change moves the goal by min_effect; 0 when it can't be planned. */
+                weeks: number;
+            };
+            /** @description Why the plan can't work or will take over 8 weeks, in words; "" when it looks fine. */
+            warning: string;
+        };
+        ABTestAIRun: {
+            /** Format: uuid */
+            id: string;
+            /** @enum {string} */
+            kind: "suggest" | "versions" | "summary";
+            /** @enum {string} */
+            status: "queued" | "running" | "ready" | "failed";
+            /** Format: uuid */
+            test_id: string | null;
+            /** Format: uuid */
+            flag_id: string | null;
+            /** Format: uuid */
+            brand_id: string | null;
+            /** @description What was asked. */
+            input: {
+                [key: string]: unknown;
+            };
+            /**
+             * @description The answer once ready, by kind. suggest: {suggestions: [{title, hypothesis, page, change, goal, versions: [{key,
+             *     description}], weeks, detectable_8_weeks, weekly_visitors, baseline, warning}]}, where the plan numbers come from
+             *     the engine. versions: {flag_key, fields, versions: [{key, content: {field: text}, rationale}]}. summary:
+             *     {recommendation, reason, winner, headline, summary, next_steps, computed_at}, where recommendation and reason
+             *     come from the engine.
+             */
+            output: {
+                [key: string]: unknown;
+            } | null;
+            /** @description Why it failed, in words; "" otherwise. */
+            error: string;
+            /** @description The model that answered. */
+            model: string;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            finished_at: string | null;
+        };
         ABTestArm: {
             variant: string;
             /** @description Visitors shown this version since the test started. */
@@ -21169,11 +21847,11 @@ export interface components {
             chance_to_beat: number;
             /** @description Relative change of its rate over the control's: 0.18 is +18%. */
             lift: number;
-            /** @description Low end of the 95% range of the lift. */
+            /** @description Low end of the always-valid 95% range of the lift: from the same test as p_value, so the range leaves out 0 exactly when p_value is under 0.05. 0 with lift_high 0 while there is no evidence yet. */
             lift_low: number;
-            /** @description High end of the 95% range of the lift. */
+            /** @description High end of the always-valid 95% range of the lift. */
             lift_high: number;
-            /** @description Always-valid p-value: below 0.05 it is safe to stop, however often you looked. */
+            /** @description Always-valid p-value, the lowest over the test's daily looks: below 0.05 it is safe to stop, however often you looked, and it never rises again. */
             p_value: number;
         };
         ABTestResults: {
@@ -21192,6 +21870,14 @@ export interface components {
                     arms: components["schemas"]["ABTestArm"][];
                     /** @description Each version against the control. */
                     comparisons: components["schemas"]["ABTestComparison"][] | null;
+                    /** @description The control rate the test was tuned with; 0 when none was recorded. */
+                    baseline?: number;
+                    /** @description First goal only: the cumulative arms at the end of each day (UTC) that saw a visitor join or convert; the last is today so far. */
+                    days?: {
+                        /** Format: date */
+                        date: string;
+                        arms: components["schemas"]["ABTestArm"][];
+                    }[];
                 }[];
                 /** @description The chance of a split this uneven by luck. */
                 sample_ratio_p: number;
@@ -23421,8 +24107,17 @@ export interface components {
             last_read_at: string | null;
             /** Format: date-time */
             next_read_at: string;
-            /** @description Why the last read failed; tried again the next day. */
+            /** @description Why the last read failed, in words; null once a read works. */
             last_error: string | null;
+            /** @description Why the last read failed, in a word: blocked (the site showed a bot check, also in a browser), page_not_found (check the address in the brand's links), not_a_review_page (the site answered but showed no reviews; Outflare looks into these), save_failed (Outflare's side), or the page reader's own (connector_auth, connector_quota, connector_unavailable, connector_invalid). New codes may be added. */
+            last_error_code: string | null;
+            /** @description How many reads in a row failed. A failed read is tried again the same day: after 15 minutes, then 1 and 2 hours, then every 4 hours (the next day when only a person can fix it: the address). */
+            failures: number;
+            /**
+             * Format: date-time
+             * @description When a read last failed.
+             */
+            last_failed_at: string | null;
             /**
              * Format: date-time
              * @description When the first read took the page's earlier reviews.
@@ -23602,7 +24297,17 @@ export interface components {
             last_synced_at: string | null;
             /** Format: date-time */
             next_sync_at: string;
+            /** @description Why the last read failed, in words; null once a read works. */
             last_error: string | null;
+            /** @description Why the last read failed, in a word: blocked (the site showed a bot check), page_not_found, invalid_address (check the link), no_follower_count (the page showed no count: a login wall, a suspended account, or the site changed its page), save_failed (Outflare's side), or the connection's own (connector_auth, connector_quota, connector_unavailable, connector_invalid). New codes may be added. */
+            last_error_code: string | null;
+            /** @description How many reads in a row failed. A failed read is tried again the same day: after 15 minutes, then 1 and 2 hours, then every 4 hours (the next regular read when only a person can fix it: the address). */
+            failures: number;
+            /**
+             * Format: date-time
+             * @description When a read last failed.
+             */
+            last_failed_at: string | null;
             /** Format: date-time */
             created_at: string;
             /** Format: date-time */
@@ -24462,6 +25167,51 @@ export interface components {
                 first_seen: string;
             }[];
         };
+        LinkPageCheck: {
+            /** @enum {string} */
+            status: "up" | "gone" | "redirected" | "blocked" | "opted_out" | "unreachable" | "failed";
+            http_status: number | null;
+            final_url: string;
+            /** @description Where it redirects off the site, when it does. */
+            redirect_to: string;
+            title: string;
+            author: string;
+            lang: string;
+            noindex: boolean;
+            word_count: number;
+            links_to_us: boolean;
+            our_links: {
+                url: string;
+                anchor: string;
+                nofollow: boolean;
+            }[];
+            /** @description Links to other sites. */
+            outbound: number;
+            broken: {
+                url: string;
+                /** @description 0 when the site didn't answer. */
+                status: number;
+                anchor: string;
+                /** @description The Internet Archive's closest snapshot, or empty. */
+                archive_url: string;
+                archived_at: string;
+            }[];
+            /** @description resource_list, article, listicle, review, news, forum, directory, product, homepage or other; empty without AI. */
+            page_kind: string;
+            topic: string;
+            /** @description 0 to 100: how well it fits the site, by the workspace's AI. */
+            fit: number | null;
+            fit_reason: string;
+            /** @description Why the AI didn't read it: no_ai, ai_unavailable or ai_failed. */
+            ai_error: string | null;
+            /** @description The site's page that fits best. */
+            suggested_target: string;
+            suggested_reason: string;
+            /** @description crawl_opted_out, robots_disallowed, site_unreachable or internal. */
+            error_code: string | null;
+            /** Format: date-time */
+            checked_at: string;
+        };
         /**
          * @description How it was found: links competitors have (competitor_gap), a broken link on the page (broken_link), a lost link or a link to our broken page (reclaim), a link to a competitor's dead page (competitor_dead_page), a resource page, promoting a piece of content (asset), a mention without a link (unlinked_mention), a partner or customer, or by hand.
          * @enum {string}
@@ -24470,7 +25220,7 @@ export interface components {
         /** @enum {string} */
         LinkProspectStage: "prospect" | "excluded" | "pitched" | "replied" | "agreed" | "live" | "declined" | "removed";
         /** @enum {string} */
-        LinkProspectExcludedReason: "links_to_us" | "competitor" | "customer" | "partner" | "opted_out" | "spam";
+        LinkProspectExcludedReason: "links_to_us" | "competitor" | "customer" | "partner" | "opted_out" | "spam" | "page_gone";
         LinkProspect: {
             /** Format: uuid */
             id: string;
@@ -24539,6 +25289,106 @@ export interface components {
             created_at: string;
             /** Format: date-time */
             updated_at: string;
+            /** @description OutflareBot's latest check of the page (POST .../link-prospects/{id}/check), or null. */
+            check: components["schemas"]["LinkPageCheck"] | null;
+            /** @description Who to write to there, the surest first. Each is a person record on the website's company. */
+            contacts: {
+                /** Format: uuid */
+                record_id: string;
+                name: string;
+                email: string | null;
+                /** @enum {string} */
+                source: "author" | "page" | "contact_page";
+                confidence: number;
+            }[];
+        };
+        /**
+         * @description topic: a subject to follow. coverage: a brand, whose articles become its coverage.
+         * @enum {string}
+         */
+        NewsSearchPurpose: "topic" | "coverage";
+        /**
+         * @description How far back each run looks.
+         * @enum {string}
+         */
+        NewsTimeRange: "day" | "week" | "month";
+        /** @enum {string} */
+        NewsSearchStatus: "active" | "paused";
+        /** @enum {string} */
+        CoverageStatus: "new" | "confirmed" | "dismissed";
+        NewsSearch: {
+            /** Format: uuid */
+            id: string;
+            /** @description The brand it is for; null for a shared topic. */
+            brand_id: string | null;
+            name: string;
+            query: string;
+            purpose: components["schemas"]["NewsSearchPurpose"];
+            locale: string;
+            time_range: components["schemas"]["NewsTimeRange"];
+            check_every_hours: number;
+            status: components["schemas"]["NewsSearchStatus"];
+            /** Format: date-time */
+            last_checked_at: string | null;
+            /** Format: date-time */
+            next_check_at: string;
+            /**
+             * @description Why the last run failed, such as connector_needed or usage_limit_reached; null when it worked.
+             * @example connector_needed
+             */
+            last_error_code: string | null;
+            /** @description Articles it has found. */
+            articles: number;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            updated_at: string;
+        };
+        NewsArticle: {
+            /** Format: uuid */
+            id: string;
+            url: string;
+            /** @description The outlet's website, without www. */
+            domain: string;
+            title: string;
+            snippet: string;
+            /** @description The searches that found it, first first. */
+            search_ids: string[];
+            /** Format: date-time */
+            first_seen_at: string;
+            /** Format: date-time */
+            last_seen_at: string;
+        };
+        Coverage: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            brand_id: string;
+            /** Format: uuid */
+            article_id: string;
+            url: string;
+            /** @description The outlet's website, without www. */
+            domain: string;
+            title: string;
+            snippet: string;
+            /**
+             * Format: uuid
+             * @description The outlet's company record.
+             */
+            record_id: string;
+            /** @description The search that found it. */
+            search_id: string | null;
+            status: components["schemas"]["CoverageStatus"];
+            /** @description Whether the article links to the brand's site; null until checked. */
+            linked: boolean | null;
+            /** @enum {string} */
+            source: "news_watch" | "manual";
+            /** Format: date-time */
+            found_at: string;
+            /** Format: date-time */
+            status_changed_at: string;
+            /** Format: date-time */
+            updated_at: string | null;
         };
         SEOCompetitor: {
             /** Format: uuid */
@@ -24840,7 +25690,7 @@ export interface components {
             /** @description Each task the AI model does and the model it uses now. */
             tasks: {
                 /** @enum {string} */
-                task: "plan" | "turn" | "check_in" | "reply_labelling" | "classify_domain" | "ai_visibility" | "social_replies" | "social_posts" | "email_verification" | "fix_tickets" | "review_replies";
+                task: "plan" | "turn" | "check_in" | "reply_labelling" | "classify_domain" | "ai_visibility" | "social_replies" | "social_posts" | "email_verification" | "fix_tickets" | "review_replies" | "link_page_reading" | "ab_tests";
                 name: string;
                 description: string;
                 /** @description Null when no model can run yet. */
@@ -27166,6 +28016,9 @@ export interface components {
             notes: string;
             /** @description How the company's brands relate to each other, for a company that markets more than one. Each brand's own context is at GET /brands/{brand}/context. */
             brands: string;
+            /** @description The company's logo (https), or empty. The consent banner's brand preset shows it. */
+            logo_url: string;
+            colors: components["schemas"]["LookColors"];
             /** @description Bumped on every real change. */
             version: number;
             /** Format: date-time */
@@ -27455,6 +28308,9 @@ export interface components {
             rules?: string;
             notes?: string;
             brands?: string;
+            /** @description An https address of the company's logo; empty clears it. */
+            logo_url?: string;
+            colors?: components["schemas"]["LookColors"];
             /** @description The version you read; the edit fails with 409 context_changed if the context changed since. */
             version?: number;
             /** @description True stops agents asking for the missing fields; false asks again. */
@@ -28154,8 +29010,13 @@ export interface components {
             id: string;
             /** Format: uuid */
             record_id: string;
-            /** @enum {string} */
-            channel: "email" | "sms" | "push" | "whatsapp" | "in_app" | "ads";
+            /** @description The browser the choice was made in, for a choice made on the site's consent banner (source consent_banner) before the person was known. */
+            anonymous_id: string | null;
+            /**
+             * @description web: the consent banner's categories (purpose analytics, marketing or preferences); ads: ad data (purpose ad_storage, ad_user_data or ad_personalization).
+             * @enum {string}
+             */
+            channel: "email" | "sms" | "push" | "whatsapp" | "in_app" | "ads" | "web";
             /** @description A subscription topic's key, or empty for the whole channel. */
             topic: string;
             /** @example marketing */
@@ -28176,7 +29037,7 @@ export interface components {
         };
         ConsentInput: {
             /** @enum {string} */
-            channel: "email" | "sms" | "push" | "whatsapp" | "in_app" | "ads";
+            channel: "email" | "sms" | "push" | "whatsapp" | "in_app" | "ads" | "web";
             /** @description A subscription topic's key, such as product_updates. Empty for the whole channel. */
             topic?: string;
             /** @description Default marketing. */
@@ -28235,6 +29096,9 @@ export interface components {
              *     ]
              */
             revenue_models: string[];
+            /** @description The brand's own logo (https) where it differs from the company's; empty for the company's. */
+            logo_url: string;
+            colors: components["schemas"]["LookColors"];
             /** @description The brand context's version. */
             context_version: number;
             counts: {
@@ -28334,6 +29198,197 @@ export interface components {
             business_model?: string;
             /** @description Ids from GET /v1/business-models; replaces the list. */
             revenue_models?: string[];
+            /** @description An https address of the brand's own logo; empty for the company's. */
+            logo_url?: string;
+            colors?: components["schemas"]["LookColors"];
+        };
+        ConsentBanner: {
+            /** Format: uuid */
+            site_key_id: string;
+            config: components["schemas"]["ConsentBannerConfig"];
+            /** @description Goes up on every save; 0 until first saved. Each choice records it. */
+            version: number;
+            /** @description Goes up when visitors are to be asked again. */
+            consent_version: number;
+            /** @description False until first saved: config is then the defaults and no banner shows. */
+            saved: boolean;
+            /** @description The logo and colours the brand preset uses when config sets none: the key's brand's, else the company's (Company hub). */
+            look: {
+                logo_url: string;
+                colors: components["schemas"]["LookColors"];
+            };
+            /** Format: date-time */
+            updated_at: string | null;
+        };
+        ConsentBannerConfig: {
+            /** @description Whether the site shows the banner. Off, the script keeps its data-consent behaviour, and a site's own banner can still call outflare.consent. */
+            enabled: boolean;
+            regions: components["schemas"]["ConsentBannerRegions"];
+            frameworks: components["schemas"]["ConsentBannerFrameworks"];
+            categories: components["schemas"]["ConsentBannerCategories"];
+            /**
+             * @description bar: across the page; box: a card in a corner; modal: in the middle, over the page.
+             * @enum {string}
+             */
+            layout: "bar" | "box" | "modal";
+            /** @enum {string} */
+            position: "bottom" | "top" | "bottom_left" | "bottom_right" | "center";
+            /**
+             * @description brand: the colours below, else the brand's or the company's.
+             * @enum {string}
+             */
+            theme: "light" | "dark" | "brand";
+            colors: components["schemas"]["LookColors"];
+            show_logo: boolean;
+            /** @description The logo shown; empty for the brand's or the company's. */
+            logo_url: string;
+            /** @description A small button, once the visitor chose, to change their mind. Links with data-outflare-consent-open do the same. */
+            reopen_button: boolean;
+            /** @description The cookie policy the banner links to: an https address or a path on the site; empty for none. */
+            policy_url: string;
+            /** @description After this many days an opt-in choice is asked again; 0 for never. Default 365. */
+            reask_after_days: number;
+            /** @description The banner's words by language (en, de, pt-br). Any left empty come from Outflare's own, in the visitor's language where it has them (en, de, fr, es, it, nl, pt), else English. */
+            texts: {
+                [key: string]: components["schemas"]["ConsentBannerTexts"];
+            };
+            /** @description Added after the preset's styles, inside the banner. */
+            custom_css: string;
+            /** @description Replaces the banner's markup. Buttons with data-of-consent=accept, reject, customize or save and checkboxes with data-of-category=analytics, marketing or preferences work as in the presets, and any element can call outflare.consent(). */
+            custom_html: string;
+        };
+        /** @description Any fields of ConsentBannerConfig; those left out keep their value. */
+        ConsentBannerInput: {
+            enabled?: boolean;
+            regions?: components["schemas"]["ConsentBannerRegions"];
+            frameworks?: components["schemas"]["ConsentBannerFrameworks"];
+            categories?: components["schemas"]["ConsentBannerCategories"];
+            /** @enum {string} */
+            layout?: "bar" | "box" | "modal";
+            /** @enum {string} */
+            position?: "bottom" | "top" | "bottom_left" | "bottom_right" | "center";
+            /** @enum {string} */
+            theme?: "light" | "dark" | "brand";
+            colors?: components["schemas"]["LookColors"];
+            show_logo?: boolean;
+            logo_url?: string;
+            reopen_button?: boolean;
+            policy_url?: string;
+            reask_after_days?: number;
+            texts?: {
+                [key: string]: components["schemas"]["ConsentBannerTexts"];
+            };
+            custom_css?: string;
+            custom_html?: string;
+        };
+        /**
+         * @description The rule for visitors in each region. opt_in: optional categories stay off until the visitor accepts (GDPR,
+         *     UK GDPR, the Swiss FADP). opt_out: on until the visitor opts out of the sale or sharing of their data, with the
+         *     banner saying so once (US state laws such as the CCPA). notice: on, with the banner saying so once. none: on,
+         *     no banner. Defaults: eea opt_in, us opt_out, other none.
+         */
+        ConsentBannerRegions: {
+            /**
+             * @description The EEA, the UK and Switzerland.
+             * @enum {string}
+             */
+            eea?: "opt_in" | "opt_out" | "notice" | "none";
+            /** @enum {string} */
+            us?: "opt_in" | "opt_out" | "notice" | "none";
+            /** @enum {string} */
+            other?: "opt_in" | "opt_out" | "notice" | "none";
+        };
+        /** @description The signals the banner follows and sets, each on by default. IAB TCF v2.2 isn't supported yet: it needs Outflare registered with IAB Europe as a CMP, and can be added if a publisher needs it. */
+        ConsentBannerFrameworks: {
+            /** @description Honour Global Privacy Control: no marketing for browsers that send it, unless the visitor turns it on. */
+            gpc?: boolean;
+            /** @description Set Google Consent Mode v2 (ad_storage, ad_user_data, ad_personalization, analytics_storage, and the preferences storages) through gtag. */
+            google_consent_mode?: boolean;
+            /** @description fbq('consent', 'grant' or 'revoke') with marketing. */
+            meta?: boolean;
+            /** @description ttq.holdConsent, grantConsent and revokeConsent with marketing. */
+            tiktok?: boolean;
+            /** @description Microsoft UET consent mode (ad_storage) with marketing. */
+            microsoft?: boolean;
+        };
+        /** @description The categories the banner asks about. Necessary is always on and always shown. */
+        ConsentBannerCategories: {
+            analytics?: boolean;
+            marketing?: boolean;
+            preferences?: boolean;
+        };
+        /** @description The banner's words in one language; empty ones come from Outflare's own. */
+        ConsentBannerTexts: {
+            title?: string;
+            body?: string;
+            accept?: string;
+            reject?: string;
+            customize?: string;
+            save?: string;
+            /** @description The cookie policy link. */
+            policy?: string;
+            /** @description The button that opens the banner again. */
+            settings?: string;
+            /** @description The reject button where the rule is opt_out: Do not sell or share my personal information. */
+            opt_out?: string;
+            /** @description The button that closes a notice. */
+            ok?: string;
+            necessary?: string;
+            necessary_desc?: string;
+            analytics?: string;
+            analytics_desc?: string;
+            marketing?: string;
+            marketing_desc?: string;
+            preferences?: string;
+            preferences_desc?: string;
+            always_on?: string;
+            gpc_honoured?: string;
+            opt_out_confirmation?: string;
+        };
+        SiteConsentBanner: {
+            enabled: boolean;
+            version: number;
+            consent_version: number;
+            /** @description The visitor's country from the site's own proxy, or empty. */
+            country: string;
+            regions: components["schemas"]["ConsentBannerRegions"];
+            frameworks: components["schemas"]["ConsentBannerFrameworks"];
+            categories: components["schemas"]["ConsentBannerCategories"];
+            /** @enum {string} */
+            layout: "bar" | "box" | "modal";
+            /** @enum {string} */
+            position: "bottom" | "top" | "bottom_left" | "bottom_right" | "center";
+            /** @enum {string} */
+            theme: "light" | "dark" | "brand";
+            colors: components["schemas"]["LookColors"];
+            /** @description The logo to show, or empty for none. */
+            logo_url: string;
+            reopen_button: boolean;
+            policy_url: string;
+            reask_after_days: number;
+            /** @description The language of texts. */
+            lang: string;
+            texts: components["schemas"]["ConsentBannerTexts"];
+            custom_css: string;
+            custom_html: string;
+        };
+        /** @description Hex colours (#rgb or #rrggbb), each empty for none. A brand's win over the company's where set; the consent banner's brand preset uses them. */
+        LookColors: {
+            /**
+             * @description Buttons and links.
+             * @example #1d4ed8
+             */
+            primary: string;
+            /**
+             * @description Panels, such as the consent banner.
+             * @example #ffffff
+             */
+            background: string;
+            /**
+             * @description Text on the background.
+             * @example #111827
+             */
+            text: string;
         };
         BusinessModels: {
             groups: {
@@ -42049,6 +43104,140 @@ export interface operations {
             default: components["responses"]["Error"];
         };
     };
+    reclaimLinkProspects: {
+        parameters: {
+            query?: never;
+            header?: {
+                /**
+                 * @description Makes the write safe to retry. A repeat with the same key from the same caller within 24 hours gets the first
+                 *     answer back (with `Idempotent-Replayed: true`) instead of running again. The same key for a different request
+                 *     is refused with 422 `idempotency_key_reused`; while the first is still running, 409 `idempotency_in_progress`.
+                 *     Use a new random key, such as a UUID, for each distinct write.
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** Format: uuid */
+                    site_id: string;
+                    /** @default 90 */
+                    days?: number;
+                    /** @description Leave out weaker linking sites. */
+                    min_rating?: number;
+                };
+            };
+        };
+        responses: {
+            /** @description What was added. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        added: number;
+                        existing: number;
+                        excluded: number;
+                    };
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            400: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    checkLinkProspects: {
+        parameters: {
+            query?: never;
+            header?: {
+                /**
+                 * @description Makes the write safe to retry. A repeat with the same key from the same caller within 24 hours gets the first
+                 *     answer back (with `Idempotent-Replayed: true`) instead of running again. The same key for a different request
+                 *     is refused with 422 `idempotency_key_reused`; while the first is still running, 409 `idempotency_in_progress`.
+                 *     Use a new random key, such as a UUID, for each distinct write.
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** Format: uuid */
+                    site_id: string;
+                    /** @description Check pages checked before too. */
+                    again?: boolean;
+                    limit?: number;
+                };
+            };
+        };
+        responses: {
+            /** @description Queued, with how many. Inside a mission, a MissionHeld answer when the call was held for approval or dry-run instead. */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        queued: boolean;
+                        count: number;
+                    } | components["schemas"]["MissionHeld"];
+                };
+            };
+            400: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    checkLinkProspect: {
+        parameters: {
+            query?: never;
+            header?: {
+                /**
+                 * @description Makes the write safe to retry. A repeat with the same key from the same caller within 24 hours gets the first
+                 *     answer back (with `Idempotent-Replayed: true`) instead of running again. The same key for a different request
+                 *     is refused with 422 `idempotency_key_reused`; while the first is still running, 409 `idempotency_in_progress`.
+                 *     Use a new random key, such as a UUID, for each distinct write.
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                prospect: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Queued. Inside a mission, a MissionHeld answer when the call was held for approval or dry-run instead. */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Queued"] | components["schemas"]["MissionHeld"];
+                };
+            };
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
     getLinkProspect: {
         parameters: {
             query?: never;
@@ -42154,6 +43343,426 @@ export interface operations {
             403: components["responses"]["Error"];
             404: components["responses"]["Error"];
             409: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    listNewsSearches: {
+        parameters: {
+            query?: {
+                /** @description Only records of this brand: its id or handle, none for records shared by every brand, or all (the default). */
+                brand?: components["parameters"]["Brand"];
+                purpose?: components["schemas"]["NewsSearchPurpose"];
+            };
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description News searches. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["NewsSearch"][];
+                    };
+                };
+            };
+            400: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    createNewsSearch: {
+        parameters: {
+            query?: never;
+            header?: {
+                /**
+                 * @description Makes the write safe to retry. A repeat with the same key from the same caller within 24 hours gets the first
+                 *     answer back (with `Idempotent-Replayed: true`) instead of running again. The same key for a different request
+                 *     is refused with 422 `idempotency_key_reused`; while the first is still running, 409 `idempotency_in_progress`.
+                 *     Use a new random key, such as a UUID, for each distinct write.
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @example residential proxies */
+                    query: string;
+                    /** @description Defaults to the query. */
+                    name?: string;
+                    purpose?: components["schemas"]["NewsSearchPurpose"];
+                    /** @description A brand's id or handle. Needed for a coverage search; empty for a shared topic. */
+                    brand_id?: string;
+                    /** @description A language code (en) or tag (en-GB); empty for the provider's default. */
+                    locale?: string;
+                    time_range?: components["schemas"]["NewsTimeRange"];
+                    /** @default 24 */
+                    check_every_hours?: number;
+                    status?: components["schemas"]["NewsSearchStatus"];
+                };
+            };
+        };
+        responses: {
+            /** @description The news search. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NewsSearch"];
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            400: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    getNewsSearch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                search: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The news search. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NewsSearch"];
+                };
+            };
+            404: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    deleteNewsSearch: {
+        parameters: {
+            query?: never;
+            header?: {
+                /**
+                 * @description Makes the write safe to retry. A repeat with the same key from the same caller within 24 hours gets the first
+                 *     answer back (with `Idempotent-Replayed: true`) instead of running again. The same key for a different request
+                 *     is refused with 422 `idempotency_key_reused`; while the first is still running, 409 `idempotency_in_progress`.
+                 *     Use a new random key, such as a UUID, for each distinct write.
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                search: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            202: components["responses"]["MissionHeld"];
+            /** @description Deleted. */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    updateNewsSearch: {
+        parameters: {
+            query?: never;
+            header?: {
+                /**
+                 * @description Makes the write safe to retry. A repeat with the same key from the same caller within 24 hours gets the first
+                 *     answer back (with `Idempotent-Replayed: true`) instead of running again. The same key for a different request
+                 *     is refused with 422 `idempotency_key_reused`; while the first is still running, 409 `idempotency_in_progress`.
+                 *     Use a new random key, such as a UUID, for each distinct write.
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                search: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    query?: string;
+                    name?: string;
+                    locale?: string;
+                    time_range?: components["schemas"]["NewsTimeRange"];
+                    check_every_hours?: number;
+                    status?: components["schemas"]["NewsSearchStatus"];
+                };
+            };
+        };
+        responses: {
+            /** @description The news search. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NewsSearch"];
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            400: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    runNewsSearch: {
+        parameters: {
+            query?: never;
+            header?: {
+                /**
+                 * @description Makes the write safe to retry. A repeat with the same key from the same caller within 24 hours gets the first
+                 *     answer back (with `Idempotent-Replayed: true`) instead of running again. The same key for a different request
+                 *     is refused with 422 `idempotency_key_reused`; while the first is still running, 409 `idempotency_in_progress`.
+                 *     Use a new random key, such as a UUID, for each distinct write.
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                search: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Queued. */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        queued: boolean;
+                    };
+                };
+            };
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    listNewsArticles: {
+        parameters: {
+            query?: {
+                /** @description Only records of this brand: its id or handle, none for records shared by every brand, or all (the default). */
+                brand?: components["parameters"]["Brand"];
+                search_id?: string;
+                /** @description Only articles first seen at or after this time. */
+                since?: string;
+                limit?: number;
+                offset?: number;
+                /**
+                 * @description Only these fields of each item, comma separated (fields=id,email,status); id always comes back.
+                 *     Paging fields stay. A field the items don't have answers 400 naming the ones they do. Any GET takes it.
+                 */
+                fields?: components["parameters"]["Fields"];
+                /**
+                 * @description next_cursor from the previous page, unchanged. Every paged list takes it, so one loop pages them all:
+                 *     call, then call again with cursor=next_cursor until next_cursor is null. Cursors are opaque; don't build them.
+                 */
+                cursor?: components["parameters"]["Cursor"];
+            };
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description News articles. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["NewsArticle"][];
+                        total: number;
+                        next_offset: number | null;
+                        next_cursor: components["schemas"]["NextCursor"];
+                    };
+                };
+            };
+            400: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    listCoverage: {
+        parameters: {
+            query?: {
+                /** @description Only records of this brand: its id or handle, none for records shared by every brand, or all (the default). */
+                brand?: components["parameters"]["Brand"];
+                /** @description One status, or several separated by commas. */
+                status?: string;
+                /** @description An outlet's company record. */
+                record_id?: string;
+                limit?: number;
+                offset?: number;
+                /**
+                 * @description Only these fields of each item, comma separated (fields=id,email,status); id always comes back.
+                 *     Paging fields stay. A field the items don't have answers 400 naming the ones they do. Any GET takes it.
+                 */
+                fields?: components["parameters"]["Fields"];
+                /**
+                 * @description next_cursor from the previous page, unchanged. Every paged list takes it, so one loop pages them all:
+                 *     call, then call again with cursor=next_cursor until next_cursor is null. Cursors are opaque; don't build them.
+                 */
+                cursor?: components["parameters"]["Cursor"];
+            };
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Coverage. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["Coverage"][];
+                        total: number;
+                        next_offset: number | null;
+                        next_cursor: components["schemas"]["NextCursor"];
+                    };
+                };
+            };
+            400: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    addCoverage: {
+        parameters: {
+            query?: never;
+            header?: {
+                /**
+                 * @description Makes the write safe to retry. A repeat with the same key from the same caller within 24 hours gets the first
+                 *     answer back (with `Idempotent-Replayed: true`) instead of running again. The same key for a different request
+                 *     is refused with 422 `idempotency_key_reused`; while the first is still running, 409 `idempotency_in_progress`.
+                 *     Use a new random key, such as a UUID, for each distinct write.
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @description A brand's id or handle. */
+                    brand_id: string;
+                    /** @example https://news.example.org/2026/10/story */
+                    url: string;
+                    title?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The coverage item. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Coverage"];
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            400: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    updateCoverage: {
+        parameters: {
+            query?: never;
+            header?: {
+                /**
+                 * @description Makes the write safe to retry. A repeat with the same key from the same caller within 24 hours gets the first
+                 *     answer back (with `Idempotent-Replayed: true`) instead of running again. The same key for a different request
+                 *     is refused with 422 `idempotency_key_reused`; while the first is still running, 409 `idempotency_in_progress`.
+                 *     Use a new random key, such as a UUID, for each distinct write.
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                coverage: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    status?: components["schemas"]["CoverageStatus"];
+                    linked?: boolean;
+                };
+            };
+        };
+        responses: {
+            /** @description The coverage item. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Coverage"];
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            400: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
             default: components["responses"]["Error"];
         };
     };
@@ -45309,6 +46918,45 @@ export interface operations {
             default: components["responses"]["Error"];
         };
     };
+    readReviewPage: {
+        parameters: {
+            query?: never;
+            header?: {
+                /**
+                 * @description Makes the write safe to retry. A repeat with the same key from the same caller within 24 hours gets the first
+                 *     answer back (with `Idempotent-Replayed: true`) instead of running again. The same key for a different request
+                 *     is refused with 422 `idempotency_key_reused`; while the first is still running, 409 `idempotency_in_progress`.
+                 *     Use a new random key, such as a UUID, for each distinct write.
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Queued, or held in a mission. */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @constant */
+                        queued: true;
+                    } | components["schemas"]["MissionHeld"];
+                };
+            };
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
     listReviewPageDays: {
         parameters: {
             query?: {
@@ -45680,6 +47328,45 @@ export interface operations {
             };
             202: components["responses"]["MissionHeld"];
             400: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    syncSocialAccount: {
+        parameters: {
+            query?: never;
+            header?: {
+                /**
+                 * @description Makes the write safe to retry. A repeat with the same key from the same caller within 24 hours gets the first
+                 *     answer back (with `Idempotent-Replayed: true`) instead of running again. The same key for a different request
+                 *     is refused with 422 `idempotency_key_reused`; while the first is still running, 409 `idempotency_in_progress`.
+                 *     Use a new random key, such as a UUID, for each distinct write.
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Queued, or held in a mission. */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @constant */
+                        queued: true;
+                    } | components["schemas"]["MissionHeld"];
+                };
+            };
             403: components["responses"]["Error"];
             404: components["responses"]["Error"];
             409: components["responses"]["Error"];
@@ -53002,6 +54689,87 @@ export interface operations {
             default: components["responses"]["Error"];
         };
     };
+    getConsentBanner: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The banner. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsentBanner"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    updateConsentBanner: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ConsentBannerInput"];
+            };
+        };
+        responses: {
+            /** @description The banner. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsentBanner"];
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            default: components["responses"]["Error"];
+        };
+    };
+    reaskConsentBanner: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The banner. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsentBanner"];
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            default: components["responses"]["Error"];
+        };
+    };
     listVisitors: {
         parameters: {
             query?: {
@@ -53288,6 +55056,107 @@ export interface operations {
             default: components["responses"]["Error"];
         };
     };
+    getSiteConsentBanner: {
+        parameters: {
+            query: {
+                /** @example ofk_test_not_a_real_key */
+                key: string;
+                /** @description The visitor's navigator.language, such as de-AT. */
+                lang?: string;
+            };
+            header?: {
+                /** @description The key's proxy secret (ofp_), sent only by the site's own proxy. */
+                "X-Outflare-Proxy"?: string;
+                /** @description The visitor's country (ISO 3166-1 alpha-2), from the site's own proxy. Used only with a valid X-Outflare-Proxy. */
+                "X-Outflare-Country"?: string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The banner. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SiteConsentBanner"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    sendSiteConsent: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "text/plain": string;
+                "application/json": {
+                    /** @example ofk_test_not_a_real_key */
+                    key: string;
+                    anonymousId: string;
+                    analytics?: boolean;
+                    marketing?: boolean;
+                    preferences?: boolean;
+                    /** @enum {string} */
+                    action: "accept_all" | "reject_all" | "custom" | "opt_out" | "gpc" | "api";
+                    /** @enum {string} */
+                    region?: "eea" | "us" | "other";
+                    /** @description The browser sent Global Privacy Control. */
+                    gpc?: boolean;
+                    /** @description The banner version the visitor saw. */
+                    version?: number;
+                    /** @description The consent version the visitor saw. */
+                    consent_version?: number;
+                    lang?: string;
+                    /** @description The page's path, without its query. */
+                    path?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description Kept. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @description Consents kept. */
+                        recorded: number;
+                        /** @description The choice's id, in each consent's evidence. */
+                        choice_id: string;
+                    };
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    sendSiteConsentPreflight: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Allowed. */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            default: components["responses"]["Error"];
+        };
+    };
     listFlags: {
         parameters: {
             query?: {
@@ -53533,6 +55402,201 @@ export interface operations {
                 };
             };
             202: components["responses"]["MissionHeld"];
+            default: components["responses"]["Error"];
+        };
+    };
+    planABTest: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @description The flag's id or key. */
+                    flag: string;
+                    goal: components["schemas"]["ABTestGoal"];
+                    /** @description Count only visitors of this path (or /docs/* for a section): the page the test changes. */
+                    page?: string;
+                    /** @description Default 0.25. */
+                    min_effect?: number;
+                };
+            };
+        };
+        responses: {
+            /** @description The plan. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ABTestPlan"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    suggestABTests: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": {
+                    /**
+                     * Format: uuid
+                     * @description Use this brand's context (voice, audience, goals).
+                     */
+                    brand_id?: string | null;
+                    /** @description Only pages under this path, such as /pricing or /docs/*. */
+                    page?: string;
+                    goal?: components["schemas"]["ABTestGoal"];
+                    /** @description Default 3. */
+                    count?: number;
+                    /** @description What to focus on, in your words. */
+                    notes?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The run, queued. Poll GET .../ab-test-ai-runs/{run} until it is ready or failed. */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ABTestAIRun"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    writeABTestVersions: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @description The flag's id or key. */
+                    flag: string;
+                    /** @example A shorter, more urgent headline for agencies */
+                    prompt: string;
+                    /** @description Default 2. */
+                    count?: number;
+                    /** @description The content fields to write, such as headline and cta. Default: the text fields the flag's versions already carry, or headline. */
+                    fields?: string[];
+                };
+            };
+        };
+        responses: {
+            /** @description The run, queued. Poll GET .../ab-test-ai-runs/{run} until it is ready or failed. */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ABTestAIRun"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    summarizeABTest: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                test: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The run, queued. Poll GET .../ab-test-ai-runs/{run} until it is ready or failed. */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ABTestAIRun"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    listABTestAIRuns: {
+        parameters: {
+            query?: {
+                /** @description Only records of this brand: its id or handle, none for records shared by every brand, or all (the default). */
+                brand?: components["parameters"]["Brand"];
+                kind?: "suggest" | "versions" | "summary";
+                test?: string;
+            };
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Runs. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["ABTestAIRun"][];
+                    };
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    getABTestAIRun: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                run: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The run. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ABTestAIRun"];
+                };
+            };
             default: components["responses"]["Error"];
         };
     };
@@ -61716,6 +63780,28 @@ export interface operations {
         };
     };
     webhook_link_prospect_found: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["WebhookEvent"];
+            };
+        };
+        responses: {
+            /** @description Any 2xx answer means received; anything else is retried. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    webhook_link_prospect_checked: {
         parameters: {
             query?: never;
             header?: never;

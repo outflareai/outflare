@@ -725,8 +725,16 @@ var siteCookieRe = regexp.MustCompile(`^[A-Za-z0-9-]{8,64}$`)
 // the site forwards, or its own subdomain); sent straight to Outflare it
 // is ignored, and the snippet's own cookie stands.
 func setSiteCookie(w http.ResponseWriter, origin, anon string) {
+	if siteCookieRe.MatchString(anon) {
+		setSiteDomainCookie(w, origin, "of_aid", anon)
+	}
+}
+
+// setSiteDomainCookie sets a year-long cookie on the widest domain of the
+// page's origin, for the site's own subdomains to share.
+func setSiteDomainCookie(w http.ResponseWriter, origin, name, value string) {
 	u, err := url.Parse(origin)
-	if err != nil || u.Hostname() == "" || !siteCookieRe.MatchString(anon) {
+	if err != nil || u.Hostname() == "" {
 		return
 	}
 	host := u.Hostname()
@@ -734,7 +742,7 @@ func setSiteCookie(w http.ResponseWriter, origin, anon string) {
 	if err != nil {
 		domain = host
 	}
-	http.SetCookie(w, &http.Cookie{Name: "of_aid", Value: anon, Path: "/", Domain: domain, MaxAge: 365 * 24 * 3600,
+	http.SetCookie(w, &http.Cookie{Name: name, Value: value, Path: "/", Domain: domain, MaxAge: 365 * 24 * 3600,
 		Secure: u.Scheme == "https", SameSite: http.SameSiteLaxMode})
 }
 

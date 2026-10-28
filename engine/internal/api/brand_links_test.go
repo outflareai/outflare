@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/outflareai/outflare/engine/internal/track"
 )
@@ -172,6 +173,28 @@ func TestBrandLinkDiscoveryAndPublicXFollowers(t *testing.T) {
 	}
 	if gp == nil || gp["followers"] != nil || gp["last_error"] == nil {
 		t.Fatalf("ghostpeak: %v", gp)
+	}
+	// It says why, and is tried again in 15 minutes, not tomorrow, so
+	// today's count still comes in.
+	next, _ := time.Parse(time.RFC3339Nano, gp["next_sync_at"].(string))
+	if gp["last_error_code"] != "no_follower_count" || gp["failures"] != 1.0 || gp["last_failed_at"] == nil ||
+		time.Until(next) < 10*time.Minute || time.Until(next) > 20*time.Minute {
+		t.Fatalf("ghostpeak's retry: %v", gp)
+	}
+	// Read now reads it again at once, as does Try again on the account.
+	owner.must(202, "POST", base+"/social/accounts/sync", nil)
+	var due bool
+	e.pool.QueryRow(ctx, `SELECT next_sync_at <= now() FROM social_accounts WHERE id = $1`, gp["id"]).Scan(&due)
+	if !due {
+		t.Fatal("read now should read the failed account again")
+	}
+	owner.must(202, "POST", base+"/social/accounts/"+gp["id"].(string)+"/sync", nil)
+	owner.must(404, "POST", base+"/social/accounts/00000000-0000-0000-0000-000000000000/sync", nil)
+	if err := e.srv.SyncSocialAccounts(ctx, ws, gn); err != nil {
+		t.Fatal(err)
+	}
+	if again := owner.must(200, "GET", base+"/social/accounts/"+gp["id"].(string), nil); again["failures"] != 2.0 {
+		t.Fatalf("second try: %v", again)
 	}
 	// Every public profile in the links is read the same way, such as a
 	// YouTube channel's subscribers.

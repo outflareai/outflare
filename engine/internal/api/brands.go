@@ -117,6 +117,10 @@ type brandRecord struct {
 	// /v1/business-models; null and [] until picked in brand setup.
 	BusinessModel *string  `json:"business_model"`
 	RevenueModels []string `json:"revenue_models"`
+	// The brand's own logo and colours where they differ from the
+	// company's; "" for the company's.
+	LogoURL string     `json:"logo_url"`
+	Colors  lookColors `json:"colors"`
 	// The brand context's version; 1 until it is first saved.
 	ContextVersion int         `json:"context_version"`
 	Counts         brandCounts `json:"counts"`
@@ -129,6 +133,7 @@ type brandRecord struct {
 func (s *Server) loadBrands(ctx context.Context, ws string, id *string, status string) ([]brandRecord, error) {
 	rows, err := s.pool.Query(ctx, `
 		SELECT b.id, b.name, b.handle, b.website, b.domains, b.platforms, b.links, b.status, NULLIF(b.business_model, ''), b.revenue_models,
+		       b.logo_url, b.colors,
 		       COALESCE((SELECT version FROM brand_context WHERE brand_id = b.id), 1),
 		       (SELECT count(*) FROM projects WHERE brand_id = b.id AND status <> 'archived')::int,
 		       (SELECT count(*) FROM sending_domains WHERE brand_id = b.id)::int,
@@ -146,7 +151,7 @@ func (s *Server) loadBrands(ctx context.Context, ws string, id *string, status s
 	}
 	return pgx.CollectRows(rows, func(row pgx.CollectableRow) (brandRecord, error) {
 		var v brandRecord
-		err := row.Scan(&v.ID, &v.Name, &v.Handle, &v.Website, &v.Domains, &v.Platforms, &v.Links, &v.Status, &v.BusinessModel, &v.RevenueModels, &v.ContextVersion,
+		err := row.Scan(&v.ID, &v.Name, &v.Handle, &v.Website, &v.Domains, &v.Platforms, &v.Links, &v.Status, &v.BusinessModel, &v.RevenueModels, &v.LogoURL, &v.Colors, &v.ContextVersion,
 			&v.Counts.Projects, &v.Counts.Domains, &v.Counts.Mailboxes, &v.Counts.LeadLists, &v.Counts.Sequences,
 			&v.Counts.ActiveSequences, &v.CreatedAt, &v.UpdatedAt)
 		return v, err
@@ -298,6 +303,9 @@ type brandInput struct {
 	// "" clears it.
 	BusinessModel *string   `json:"business_model"`
 	RevenueModels *[]string `json:"revenue_models"`
+	// The brand's own logo and colours; "" for the company's.
+	LogoURL *string     `json:"logo_url"`
+	Colors  *lookColors `json:"colors"`
 }
 
 // hostOf turns "https://www.Repocket.com/pricing" into "repocket.com".
@@ -333,7 +341,7 @@ func handleProblem(h string) string {
 // brand's handle is the part of the app's URLs after the workspace, before
 // the page, so it can't be one of them. TestBrandHandlesAreNotPages keeps
 // the two lists the same.
-var pageNames = []string{"overview", "get-started", "setup", "ai", "ai-usage", "tools", "reports", "analytics", "tracking", "links", "seo", "seo-overview", "audits", "fixes", "experiments", "keywords", "ai-visibility", "backlinks", "competitors", "reddit", "social", "ads", "visitors", "inbox", "missions", "playbooks", "outcomes", "projects", "sequences", "link-building", "infrastructure", "mailboxes", "domains", "warmup", "servers", "allocation", "lifecycle", "emails", "broadcasts", "journeys", "templates", "topics", "providers", "leads", "lists", "suppression", "company", "brands", "ideal-customers", "workspace", "members", "alerts", "digests", "senders", "connectors", "webhooks", "tokens", "logs", "audit", "agency", "instance", "account", "email-finder", "lead-finder", "reviews", "flags", "channels", "ab-tests"}
+var pageNames = []string{"overview", "get-started", "setup", "ai", "ai-usage", "tools", "reports", "analytics", "tracking", "links", "seo", "seo-overview", "audits", "fixes", "experiments", "keywords", "ai-visibility", "backlinks", "competitors", "reddit", "social", "ads", "visitors", "inbox", "missions", "playbooks", "outcomes", "projects", "sequences", "link-building", "news", "infrastructure", "mailboxes", "domains", "warmup", "servers", "allocation", "lifecycle", "emails", "broadcasts", "journeys", "templates", "topics", "providers", "leads", "lists", "suppression", "company", "brands", "ideal-customers", "workspace", "members", "alerts", "digests", "senders", "connectors", "webhooks", "tokens", "logs", "audit", "agency", "instance", "account", "email-finder", "lead-finder", "reviews", "flags", "channels", "ab-tests"}
 
 // handleFrom makes a handle from a brand's name: "Repocket Games" becomes
 // "repocket-games".
@@ -352,6 +360,18 @@ func handleFrom(name string) string {
 }
 
 func (in *brandInput) validate() error {
+	if in.LogoURL != nil {
+		logo, err := cleanLogoURL(*in.LogoURL)
+		if err != nil {
+			return err
+		}
+		in.LogoURL = &logo
+	}
+	if in.Colors != nil {
+		if err := in.Colors.clean(); err != nil {
+			return err
+		}
+	}
 	if in.BusinessModel != nil {
 		*in.BusinessModel = strings.TrimSpace(*in.BusinessModel)
 		if _, ok := brands.ModelByID(*in.BusinessModel); *in.BusinessModel != "" && !ok {
@@ -511,9 +531,9 @@ func (s *Server) createBrand(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		err := tx.QueryRow(ctx, `
-			INSERT INTO brands (workspace_id, name, handle, website, domains, platforms, links, created_by, business_model, revenue_models)
-			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, COALESCE($9, ''), COALESCE($10, '{}'::text[])) RETURNING id`,
-			a.WorkspaceID, *req.Name, handle, website, domains, platforms, links, a.ActorID, req.BusinessModel, req.RevenueModels).Scan(&id)
+			INSERT INTO brands (workspace_id, name, handle, website, domains, platforms, links, created_by, business_model, revenue_models, logo_url, colors)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, COALESCE($9, ''), COALESCE($10, '{}'::text[]), COALESCE($11, ''), COALESCE($12, '{}'::jsonb)) RETURNING id`,
+			a.WorkspaceID, *req.Name, handle, website, domains, platforms, links, a.ActorID, req.BusinessModel, req.RevenueModels, req.LogoURL, req.Colors).Scan(&id)
 		if err != nil {
 			return brandUnique(err)
 		}
@@ -576,9 +596,11 @@ func (s *Server) updateBrand(w http.ResponseWriter, r *http.Request) {
 			UPDATE brands SET name = COALESCE($3, name), handle = COALESCE($4, handle), website = COALESCE($5, website),
 				domains = COALESCE($6, domains), platforms = COALESCE($7, platforms), status = COALESCE($8, status),
 				links = COALESCE($9, links), business_model = COALESCE($10, business_model), revenue_models = COALESCE($11, revenue_models),
+				logo_url = COALESCE($12, logo_url), colors = COALESCE($13, colors),
 				updated_at = now()
 			WHERE id = $1 AND workspace_id = $2`,
-			b.ID, a.WorkspaceID, req.Name, req.Handle, req.Website, domains, req.Platforms, req.Status, req.Links, req.BusinessModel, req.RevenueModels)
+			b.ID, a.WorkspaceID, req.Name, req.Handle, req.Website, domains, req.Platforms, req.Status, req.Links, req.BusinessModel, req.RevenueModels,
+			req.LogoURL, req.Colors)
 		if err != nil {
 			return brandUnique(err)
 		}
@@ -616,7 +638,8 @@ func (s *Server) updateBrand(w http.ResponseWriter, r *http.Request) {
 		var fields []string
 		for name, set := range map[string]bool{"name": req.Name != nil, "handle": req.Handle != nil, "website": req.Website != nil,
 			"domains": req.Domains != nil, "platforms": req.Platforms != nil, "links": req.Links != nil,
-			"business_model": req.BusinessModel != nil, "revenue_models": req.RevenueModels != nil} {
+			"business_model": req.BusinessModel != nil, "revenue_models": req.RevenueModels != nil,
+			"logo_url": req.LogoURL != nil, "colors": req.Colors != nil} {
 			if set {
 				fields = append(fields, name)
 			}

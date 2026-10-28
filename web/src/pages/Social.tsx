@@ -8,6 +8,7 @@ import { PlatformIcon } from "@/components/platform-icon";
 import { api, errorMessage } from "../api";
 import { Badge, Button, Card, confirmAction, ErrorText, field, Loading, PageHeader, Stat, Stats, toast } from "../ui";
 import { ago } from "../format";
+import { readWhy, retryIn } from "@/lib/read-failures";
 import type { Tab } from "../App";
 import { Publishing } from "./SocialPublishing";
 
@@ -415,6 +416,15 @@ function YourAccounts({ ws, brands, accounts, conns, canManage, go, signIn, onCh
     loadFound();
   }
 
+  async function retry(a: SocialAccount) {
+    setBusy(a.id);
+    const { error } = await api.POST("/v1/workspaces/{ws}/social/accounts/{id}/sync", { params: { path: { ws, id: a.id } } });
+    setBusy("");
+    if (error) return toast(errorMessage(error), "error");
+    toast("Reading it again now. This takes a minute.");
+    setTimeout(onChange, 15000);
+  }
+
   // How a confirmed profile is going: its followers, or what reading it needs.
   function status(kind: SocialKind, url: string) {
     if (notPublic(kind, url)) {
@@ -422,6 +432,19 @@ function YourAccounts({ ws, brands, accounts, conns, canManage, go, signIn, onCh
     }
     const id = profileID(kind, url);
     const a = accounts.find((x) => x.channel === kind && x.status !== "disconnected" && (x.external_id.toLowerCase() === id || x.handle.toLowerCase() === id.split("/").pop()?.replace(/^@/, "")));
+    // A failed read shows, also when an earlier one worked: today's count
+    // is still to come.
+    if (a?.last_error && a.status === "active") {
+      return (
+        <span className="flex flex-wrap items-center gap-2">
+          <span className="text-amber-700 dark:text-amber-300" title={a.last_error}>
+            {a.last_synced_at && a.followers !== null ? `${n(a.followers)} ${unit[kind] ?? "followers"}, read ${ago(a.last_synced_at)}; the latest read failed.` : "Couldn't read it yet."}{" "}
+            {readWhy(a.last_error_code, a.last_error)}{a.failures > 1 && ` ${a.failures} tries so far.`} Trying again {retryIn(a.next_sync_at)}.
+          </span>
+          {canManage && <Button variant="ghost" disabled={busy === a.id} onClick={() => retry(a)}>{busy === a.id ? "Reading…" : "Try again"}</Button>}
+        </span>
+      );
+    }
     if (a?.last_synced_at && a.followers !== null) {
       return (
         <span className="text-muted-foreground">
@@ -431,7 +454,6 @@ function YourAccounts({ ws, brands, accounts, conns, canManage, go, signIn, onCh
         </span>
       );
     }
-    if (a?.last_error) return <span className="text-amber-700 dark:text-amber-300" title={a.last_error}>Couldn't read it yet. Tried again tomorrow.</span>;
     if (canRead(kind)) return <span className="text-muted-foreground">First read within a few minutes</span>;
     return <span className="text-muted-foreground">Waiting for Geonode</span>;
   }

@@ -104,6 +104,8 @@ export function Company({ ws, canManage }: { ws: string; canManage: boolean }) {
 
       <ContextCard ws={ws} context={data.context} canManage={canManage} onSaved={load} />
 
+      <LookCard ws={ws} context={data.context} canManage={canManage} onSaved={load} />
+
       <Card
         title={<span className="flex items-center gap-2">Memories <Badge>{data.memory_count}</Badge></span>}
         description="Short facts, preferences and decisions people and agents saved as they worked. Pinned ones go into every conversation; agents search the rest. Correct or forget anything that is wrong."
@@ -258,6 +260,55 @@ function ContextCard({ ws, context: c, canManage, onSaved }: { ws: string; conte
             {dirty && !error && <span className="text-xs text-amber-700 dark:text-amber-400">Unsaved changes</span>}
           </div>
         )}
+      </form>
+    </Card>
+  );
+}
+
+// The company's logo and colours, which the consent banner's brand look
+// (and anything else on brand) starts from. A brand can have its own.
+function LookCard({ ws, context: c, canManage, onSaved }: { ws: string; context: CompanyContext; canManage: boolean; onSaved: () => void }) {
+  const [logo, setLogo] = useState(c.logo_url);
+  const [colors, setColors] = useState(c.colors);
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
+  useEffect(() => {
+    setLogo(c.logo_url);
+    setColors(c.colors);
+  }, [c.logo_url, c.colors]);
+  const dirty = logo !== c.logo_url || JSON.stringify(colors) !== JSON.stringify(c.colors);
+
+  async function save(e: FormEvent) {
+    e.preventDefault();
+    setBusy(true);
+    setError("");
+    const { error } = await api.PATCH("/v1/workspaces/{ws}/context", { params: { path: { ws } }, body: { logo_url: logo.trim(), colors } });
+    setBusy(false);
+    if (error) return setError(errorMessage(error));
+    toast("Saved.");
+    onSaved();
+  }
+
+  const labels = { primary: "Main colour", background: "Background", text: "Text" } as const;
+  const placeholders = { primary: "#1d4ed8", background: "#ffffff", text: "#111827" } as const;
+  return (
+    <Card title="Logo and colours" description="Your website's consent banner uses these in its brand look. A brand that looks different can have its own: ask your agent, or set logo_url and colors on the brand through the API.">
+      <form onSubmit={save} className="space-y-3">
+        <fieldset disabled={!canManage} className="space-y-3">
+          <Input label="Logo" value={logo} onChange={(e) => setLogo(e.target.value)} placeholder="https://northpeak.example/logo.svg" hint="The https address of an image, such as an SVG or PNG on your site." />
+          <div className="grid gap-3 sm:grid-cols-3">
+            {(Object.keys(labels) as (keyof typeof labels)[]).map((k) => (
+              <div key={k} className="flex items-end gap-2">
+                <div className="flex-1">
+                  <Input label={labels[k]} value={colors[k]} onChange={(e) => setColors({ ...colors, [k]: e.target.value })} placeholder={placeholders[k]} />
+                </div>
+                <span aria-hidden className="mb-1 size-6 shrink-0 rounded border" style={{ background: /^#([0-9a-f]{3}){1,2}$/i.test(colors[k]) ? colors[k] : "transparent" }} />
+              </div>
+            ))}
+          </div>
+        </fieldset>
+        <ErrorText>{error}</ErrorText>
+        {canManage && <Button type="submit" disabled={busy || !dirty}>{busy ? "Saving…" : "Save"}</Button>}
       </form>
     </Card>
   );

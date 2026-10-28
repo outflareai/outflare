@@ -148,4 +148,27 @@ func TestResults(t *testing.T) {
 	if res.SampleRatio {
 		t.Errorf("4 vs 3 is not a mismatch: p = %v", res.SampleRatioP)
 	}
+	// Everything happened on 1 October: one daily look, for the first goal
+	// only, ending where the totals are.
+	if d := res.Goals[0].Days; len(d) != 1 || d[0].Date != "2026-10-01" || d[0].Arms[1].Conversions != 2 || res.Goals[1].Days != nil {
+		t.Errorf("days = %+v", res.Goals[0].Days)
+	}
+
+	// Traffic for the planner: visitors with a page view, and those who
+	// reached the goal after their first one.
+	page("p0", "/", 0)
+	add(ws, "p0", "signup_started", at(1), `{}`, `{}`)
+	signup := abtests.Goal{Kind: "event", Name: "signup_started"}
+	for _, tc := range []struct {
+		page                string
+		visitors, converted int64
+	}{{"", 3, 1}, {"/docs/*", 1, 0}, {"/", 1, 1}} {
+		tr, err := abtests.ReadTraffic(ctx, pool, ws, signup, tc.page, start, at(48))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if tr.Visitors != tc.visitors || tr.Converted != tc.converted {
+			t.Errorf("traffic on %q = %+v, want %d/%d", tc.page, tr, tc.converted, tc.visitors)
+		}
+	}
 }

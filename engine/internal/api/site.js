@@ -22,6 +22,25 @@
 // you call outflare.consent(true). data-consent="required" asks it of everyone;
 // "granted" if your own banner already asked before loading this.
 //
+// Consent banner: turned on for the site key in Outflare (Website tracking),
+// this script shows the cookie banner itself, with the rule for the
+// visitor's region (ask first in the EEA, the UK and Switzerland; opt-out
+// in the US), Global Privacy Control, the categories (analytics, marketing,
+// preferences) and the look chosen there. It sets Google Consent Mode v2
+// and the Meta, TikTok and Microsoft consent signals, and loads scripts and
+// iframes kept back until their category is allowed:
+//
+//   <script type="text/plain" data-category="marketing" src="https://..."></script>
+//   <iframe data-category="marketing" data-src="https://..."></iframe>
+//
+// outflare.consent() gives the visitor's choices; outflare.consent(true),
+// (false) or ({analytics: true, marketing: false}) sets them, from your own
+// banner too. outflare.showConsent() (or any element with
+// data-outflare-consent-open) opens the banner again, and
+// outflare.onConsent(fn) runs fn(choices) now and on every change. Each
+// choice is kept in Outflare as the visitor's consent, and joins their
+// record when they sign up. data-banner="off" keeps the banner off.
+//
 // Feature flags and A/B tests: with data-flags on the tag (or the first
 // call to outflare.flag), the script asks for the visitor's variants.
 // outflare.onFlags(fn) runs fn once they are known; outflare.flag("key")
@@ -47,7 +66,7 @@
   if (!script) return;
   var key = script.getAttribute("data-key") || "";
   // Sent with every batch, so Outflare can tell a site running an old copy.
-  var VERSION = "3";
+  var VERSION = "4";
   // Events go where the script came from: a path the site forwards keeps
   // its prefix.
   var src = new URL(script.src, location.href);
@@ -56,7 +75,7 @@
   if (navigator.webdriver) return;
   var domains = (script.getAttribute("data-domains") || "").split(/[\s,]+/).filter(Boolean).map(function (d) { return d.toLowerCase().replace(/^www\./, ""); });
   var mode = script.getAttribute("data-consent") || "auto";
-  var COOKIE = "of_aid", YEAR = 31536000;
+  var COOKIE = "of_aid", CHOICE = "of_consent", YEAR = 31536000;
   var clickIDs = ["gclid", "gbraid", "wbraid", "fbclid", "msclkid", "li_fat_id", "rdt_cid", "twclid"];
 
   function needsConsent() {
@@ -68,7 +87,10 @@
     return /^Europe\//.test(tz) || /^Atlantic\/(Reykjavik|Canary|Madeira|Azores|Faroe)$/.test(tz) ||
       /^(Africa\/Ceuta|Asia\/Nicosia|Asia\/Famagusta|Arctic\/Longyearbyen)$/.test(tz);
   }
-  var consented = !needsConsent();
+  // The visitor's choices by category; analytics is what keeps their id in
+  // a cookie. Worked out below, once the banner's settings are known.
+  var CATS = ["analytics", "marketing", "preferences"];
+  var cats = {}, consented = false;
 
   function uuid() {
     if (w.crypto && crypto.randomUUID) return crypto.randomUUID();
@@ -77,25 +99,25 @@
       return (c === "x" ? r : (r & 3) | 8).toString(16);
     });
   }
-  function readCookie() {
-    var m = d.cookie.match(/(?:^|;\s*)of_aid=([A-Za-z0-9-]{8,64})/);
+  function readCookie(name, re) {
+    var m = d.cookie.match(new RegExp("(?:^|;\\s*)" + (name || COOKIE) + "=(" + (re || "[A-Za-z0-9-]{8,64}") + ")"));
     return m ? m[1] : "";
   }
-  // The cookie goes on the widest domain that takes it, so www and app
-  // subdomains share one id. Without consent there is no cookie at all: the
+  // A cookie goes on the widest domain that takes it, so www and app
+  // subdomains share it. Without consent there is no id cookie at all: the
   // id lives only in this page, and in-app navigation keeps it.
-  function writeCookie(id) {
+  function setCookie(name, value, keep) {
     var parts = location.hostname.split("."), attrs = "; path=/; SameSite=Lax" + (location.protocol === "https:" ? "; Secure" : "");
-    attrs += "; max-age=" + (consented ? YEAR : 0);
+    attrs += "; max-age=" + (keep ? YEAR : 0);
     for (var i = Math.max(parts.length - 2, 0); i >= 0; i--) {
       var domain = parts.slice(i).join(".");
-      d.cookie = COOKIE + "=" + id + attrs + (i < parts.length - 1 ? "; domain=" + domain : "");
-      if (consented ? readCookie() === id : !readCookie()) return;
+      d.cookie = name + "=" + value + attrs + (i < parts.length - 1 ? "; domain=" + domain : "");
+      if (keep ? readCookie(name, "[^;]*") === value : !readCookie(name, "[^;]*")) return;
     }
   }
-  // A cookie already there was set with consent.
+  function writeCookie(id) { setCookie(COOKIE, id, consented); }
+  // An id cookie already there was set with consent.
   var stored = readCookie();
-  if (stored) consented = true;
   var anon = stored || uuid();
   // A link from one of the site's other domains carries the visitor's id,
   // valid for two minutes so a shared link doesn't merge its readers. It
@@ -123,7 +145,65 @@
       history.replaceState(history.state, "", there.pathname + there.search + there.hash);
     }
   } catch (e) {}
+  // ---- Consent ----
+  // The visitor's last choice, from the of_consent cookie: the banner's
+  // consent version, a digit per category (1 allowed, 0 not, 2 not asked)
+  // and when, in Unix seconds.
+  function readChoice() {
+    var m = readCookie(CHOICE, "\\d+\\.[012]{3}\\.\\d+");
+    if (!m) return null;
+    var p = m.split("."), c = { v: Number(p[0]), at: Number(p[2]) };
+    CATS.forEach(function (k, i) { if (p[1].charAt(i) !== "2") c[k] = p[1].charAt(i) === "1"; });
+    return c;
+  }
+  var choice = readChoice(), gpc = !!navigator.globalPrivacyControl, lang = (navigator.language || "en").toLowerCase();
+  var bannerOff = script.getAttribute("data-banner") === "off", cfg = null, CFG = "of_cb";
+  try {
+    var cached = JSON.parse(localStorage.getItem(CFG) || "null");
+    if (cached && cached.key === key && cached.lang === lang && cached.cfg) cfg = cached;
+  } catch (e) {}
+  function on() { return !bannerOff && cfg && cfg.cfg.enabled; }
+  var EEA = "AT BE BG HR CY CZ DK EE FI FR DE GR HU IE IT LV LT LU MT NL PL PT RO SK SI ES SE IS LI NO GB CH GF GP MQ RE YT MF";
+  function region() {
+    var c = on() ? cfg.cfg.country : "", tz = "";
+    if (c) return EEA.indexOf(c) >= 0 && c.length === 2 ? "eea" : c === "US" ? "us" : "other";
+    try { tz = Intl.DateTimeFormat().resolvedOptions().timeZone || ""; } catch (e) {}
+    if (/^Europe\//.test(tz) || /^Atlantic\/(Reykjavik|Canary|Madeira|Azores|Faroe)$/.test(tz) ||
+      /^(Africa\/Ceuta|Asia\/Nicosia|Asia\/Famagusta|Arctic\/Longyearbyen)$/.test(tz)) return "eea";
+    if (/^(America\/(New_York|Detroit|Kentucky|Indiana|Chicago|Menominee|North_Dakota|Denver|Boise|Phoenix|Los_Angeles|Anchorage|Juneau|Sitka|Metlakatla|Yakutat|Nome|Adak)|Pacific\/Honolulu|US\/)/.test(tz)) return "us";
+    return "other";
+  }
+  // The rule for this visitor: opt_in (ask first), opt_out, notice or
+  // none. Without the banner, data-consent decides as it always has.
+  function rule() {
+    if (on()) return cfg.cfg.regions[region()] || "opt_in";
+    return needsConsent() ? "opt_in" : "none";
+  }
+  // A choice counts unless the banner asks again: a newer consent version
+  // or an older choice than reask_after_days, where the rule asks first.
+  function decided() {
+    if (!choice) return false;
+    if (!on() || rule() !== "opt_in") return true;
+    var c = cfg.cfg, days = c.reask_after_days;
+    return choice.v >= c.consent_version && !(days > 0 && Date.now() / 1000 - choice.at > days * 86400);
+  }
+  function honoursGPC() { return gpc && (!on() || cfg.cfg.frameworks.gpc); }
+  function recompute() {
+    var r = rule(), mine = decided();
+    CATS.forEach(function (k) {
+      var asked = !on() || cfg.cfg.categories[k];
+      if (mine && choice[k] !== undefined) cats[k] = choice[k];
+      else if (!asked) cats[k] = r !== "opt_in";
+      else cats[k] = r !== "opt_in" && !(k === "marketing" && honoursGPC());
+    });
+    // An id cookie from before the banner was set with consent.
+    if (stored && !mine && !on()) CATS.forEach(function (k) { cats[k] = true; });
+    if (!on() && !mine) cats.marketing = cats.preferences = cats.analytics;
+    consented = cats.analytics;
+  }
+  recompute();
   if (consented) writeCookie(anon);
+  else if (stored && choice) setCookie(COOKIE, anon, false);
 
   // Variants to preview, from ?of_flag=key:variant, kept for the visit.
   var preview = {};
@@ -319,6 +399,241 @@
   watch("replaceState");
   w.addEventListener("popstate", function () { if (location.href !== lastURL) page(); });
 
+  // ---- Consent banner ----
+  // The banner's settings come from Outflare, kept in this browser for a
+  // few minutes so later pages show it at once.
+  // Kept-back scripts wait for the settings on a first page, since the
+  // banner may ask first where data-consent wouldn't.
+  var ready = bannerOff || !!cfg || !w.fetch;
+  function loadBanner() {
+    if (bannerOff || !w.fetch || (cfg && Date.now() - cfg.at < (cfg.cfg.enabled ? 300000 : 1800000))) return;
+    var fail = function () { if (!ready) { ready = true; unblock(); } };
+    fetch(api + "/v1/site/consent?key=" + encodeURIComponent(key) + "&lang=" + encodeURIComponent(lang))
+      .then(function (res) { return res.ok ? res.json() : null; })
+      .then(function (out) {
+        if (!out) return fail();
+        var was = on();
+        ready = true;
+        cfg = { key: key, lang: lang, at: Date.now(), cfg: out };
+        try { localStorage.setItem(CFG, JSON.stringify(cfg)); } catch (e) {}
+        settle(!was);
+      }, fail);
+  }
+  // settle applies the current choices everywhere: the id cookie, the ad
+  // platforms' consent signals, the scripts kept back, and the banner.
+  var signalled = false, listeners = [];
+  function settle(first) {
+    recompute();
+    writeCookie(anon);
+    signals(first || !signalled);
+    unblock();
+    if (on() && !decided() && rule() !== "none") showBanner(false);
+    else if (on() && rule() !== "none") showReopen();
+    else hideBanner();
+    listeners.forEach(function (fn) { try { fn(choices()); } catch (e) {} });
+  }
+  function choices() {
+    return { necessary: true, analytics: cats.analytics, marketing: cats.marketing, preferences: cats.preferences,
+      decided: decided(), region: region(), rule: rule(), gpc: gpc };
+  }
+  // choose keeps the visitor's choice: in the of_consent cookie (the server
+  // sets it too, for a full year), and in Outflare when it changed.
+  function choose(next, action) {
+    var c = { v: on() ? cfg.cfg.consent_version : 1, at: Math.floor(Date.now() / 1000) }, digits = "", body = { key: key, anonymousId: anon, action: action };
+    CATS.forEach(function (k) {
+      var asked = !on() || cfg.cfg.categories[k], v = next[k] === undefined ? cats[k] : !!next[k];
+      digits += asked ? (v ? "1" : "0") : "2";
+      if (asked) { c[k] = v; body[k] = v; }
+    });
+    var before = readCookie(CHOICE, "[^;]*").split(".");
+    choice = c;
+    setCookie(CHOICE, c.v + "." + digits + "." + c.at, true);
+    settle(false);
+    if (before[0] === String(c.v) && before[1] === digits) return;
+    body.region = region();
+    body.gpc = gpc;
+    body.lang = lang;
+    body.path = location.pathname;
+    if (on()) { body.version = cfg.cfg.version; body.consent_version = cfg.cfg.consent_version; }
+    if (w.fetch) {
+      try { fetch(api + "/v1/site/consent", { method: "POST", body: JSON.stringify(body), keepalive: true, headers: { "Content-Type": "text/plain" } }).then(null, function () {}); } catch (e) {}
+    }
+  }
+
+  // Google Consent Mode v2, Meta, TikTok and Microsoft, each when the
+  // banner is on and the workspace left it on. The first call sets the
+  // defaults; later ones update them.
+  function signals(first) {
+    if (!on()) return;
+    var fw = cfg.cfg.frameworks, m = cats.marketing, a = cats.analytics, p = cats.preferences, waiting = !decided() && rule() === "opt_in";
+    var g = function (v) { return v ? "granted" : "denied"; };
+    if (fw.google_consent_mode) {
+      var gtag = function () { (w.dataLayer = w.dataLayer || []).push(arguments); };
+      var st = { ad_storage: g(m), ad_user_data: g(m), ad_personalization: g(m), analytics_storage: g(a),
+        functionality_storage: g(p), personalization_storage: g(p), security_storage: "granted" };
+      if (first) {
+        st.wait_for_update = 500;
+        gtag("consent", "default", st);
+        gtag("set", "ads_data_redaction", !m);
+      } else gtag("consent", "update", st);
+    }
+    if (fw.microsoft) (w.uetq = w.uetq || []).push("consent", first ? "default" : "update", { ad_storage: g(m) });
+    signalled = true;
+    vendorSignals(waiting);
+  }
+  // Meta's and TikTok's pixels take consent only once they have loaded,
+  // so this runs again when the page has.
+  function vendorSignals(waiting) {
+    if (!on()) return;
+    var fw = cfg.cfg.frameworks, m = cats.marketing;
+    try { if (fw.meta && typeof w.fbq === "function") w.fbq("consent", m ? "grant" : "revoke"); } catch (e) {}
+    try {
+      if (fw.tiktok && w.ttq) {
+        if (waiting && w.ttq.holdConsent) w.ttq.holdConsent();
+        else if (m && w.ttq.grantConsent) w.ttq.grantConsent();
+        else if (!m && w.ttq.revokeConsent) w.ttq.revokeConsent();
+      }
+    } catch (e) {}
+  }
+
+  // Scripts and iframes kept back until their categories are allowed:
+  // type="text/plain" data-category="marketing", or data-src on an iframe.
+  function allowed(el) {
+    var list = (el.getAttribute("data-category") || "").split(/[\s,]+/).filter(Boolean);
+    for (var i = 0; i < list.length; i++) if (list[i] !== "necessary" && !cats[list[i]]) return false;
+    return list.length > 0;
+  }
+  function unblock() {
+    if (!ready || !d.querySelectorAll) return;
+    var held = d.querySelectorAll('script[type="text/plain"][data-category],iframe[data-category][data-src]');
+    for (var i = 0; i < held.length; i++) {
+      var el = held[i];
+      if (el.getAttribute("data-of-loaded") !== null || !allowed(el)) continue;
+      el.setAttribute("data-of-loaded", "");
+      if (el.tagName === "IFRAME") { el.src = el.getAttribute("data-src"); continue; }
+      var run = d.createElement("script");
+      for (var j = 0; j < el.attributes.length; j++) {
+        var at = el.attributes[j];
+        if (at.name !== "type" && at.name !== "data-type") run.setAttribute(at.name, at.value);
+      }
+      if (el.getAttribute("data-type")) run.type = el.getAttribute("data-type");
+      if (!el.src) run.text = el.text;
+      run.async = false;
+      el.parentNode.replaceChild(run, el);
+    }
+  }
+
+  // The banner, in its own shadow root so the site's styles leave it alone.
+  var host = null, root = null, prefsOpen = false;
+  var esc = function (t) { return String(t == null ? "" : t).replace(/[&<>"']/g, function (c) { return "&#" + c.charCodeAt(0) + ";"; }); };
+  function contrast(hex) {
+    var h = (hex || "").replace("#", "");
+    if (h.length === 3) h = h.replace(/./g, "$&$&");
+    var n = parseInt(h, 16);
+    if (h.length !== 6 || isNaN(n)) return "";
+    return (0.299 * (n >> 16) + 0.587 * ((n >> 8) & 255) + 0.114 * (n & 255)) > 150 ? "#111827" : "#ffffff";
+  }
+  function css(c) {
+    var dark = c.theme === "dark", col = c.colors || {};
+    var bg = col.background || (dark ? "#111827" : "#ffffff"), fg = col.text || (dark ? "#f9fafb" : "#1f2937");
+    var pri = col.primary || (dark ? "#f9fafb" : "#111827");
+    return ":host{all:initial}" +
+      ".of-cb,.of-cb-reopen{--bg:" + bg + ";--fg:" + fg + ";--pri:" + pri + ";--pri-fg:" + (contrast(pri) || "#fff") + ";--line:" + (dark ? "rgba(255,255,255,.2)" : "rgba(0,0,0,.14)") + "}" +
+      ".of-cb{position:fixed;z-index:2147483646;box-sizing:border-box;font:14px/1.45 system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;color:var(--fg);background:var(--bg);box-shadow:0 6px 30px rgba(0,0,0,.2);padding:16px 20px;display:flex;flex-wrap:wrap;gap:12px 20px;align-items:center}" +
+      ".of-cb *{box-sizing:border-box}" +
+      ".of-cb--bar{left:0;right:0;bottom:0}.of-cb--bar.of-cb--top{top:0;bottom:auto}" +
+      ".of-cb--box{width:min(420px,calc(100vw - 32px));border-radius:12px;flex-direction:column;align-items:stretch;bottom:16px;right:16px}" +
+      ".of-cb--box.of-cb--bottom_left{right:auto;left:16px}.of-cb--box.of-cb--top{bottom:auto;top:16px}.of-cb--box.of-cb--bottom{right:auto;left:50%;transform:translateX(-50%)}" +
+      ".of-cb--modal,.of-cb--box.of-cb--center{top:50%;left:50%;right:auto;bottom:auto;transform:translate(-50%,-50%);width:min(520px,calc(100vw - 32px));max-height:calc(100vh - 32px);overflow:auto;border-radius:14px;flex-direction:column;align-items:stretch}" +
+      ".of-cb--box,.of-cb--modal{flex-wrap:nowrap}.of-cb--box .of-cb-text,.of-cb--modal .of-cb-text{flex:none}" +
+      ".of-cb-overlay{position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:2147483645}" +
+      ".of-cb-text{flex:1 1 320px;min-width:0}.of-cb-logo{display:block;max-height:28px;max-width:140px;margin-bottom:8px}" +
+      ".of-cb-title{margin:0 0 4px;font-size:15px;font-weight:600}.of-cb-body,.of-cb-note{margin:0;opacity:.85}.of-cb-note{margin-top:6px;font-size:13px}" +
+      ".of-cb a{color:inherit;text-decoration:underline}" +
+      ".of-cb-btns{display:flex;flex-wrap:wrap;gap:8px}" +
+      ".of-cb-btn{font:inherit;font-weight:600;cursor:pointer;border-radius:8px;padding:9px 16px;min-height:40px;border:1px solid var(--pri);background:var(--pri);color:var(--pri-fg)}" +
+      ".of-cb-btn--plain{background:transparent;color:var(--fg);border-color:var(--line)}" +
+      ".of-cb-btn:focus-visible,.of-cb-reopen:focus-visible,.of-cb input:focus-visible{outline:2px solid var(--pri);outline-offset:2px}" +
+      ".of-cb-prefs{width:100%;display:grid;gap:8px}" +
+      ".of-cb-cat{display:flex;gap:12px;align-items:flex-start;justify-content:space-between;border-top:1px solid var(--line);padding-top:8px}" +
+      ".of-cb-cat p{margin:2px 0 0;font-size:13px;opacity:.8}.of-cb-cat input{width:18px;height:18px;margin:2px 0 0;accent-color:var(--pri)}.of-cb-on{font-size:12px;opacity:.75;white-space:nowrap}" +
+      ".of-cb-reopen{position:fixed;bottom:16px;left:16px;z-index:2147483646;width:40px;height:40px;border-radius:50%;border:1px solid var(--line);background:var(--bg);color:var(--fg);cursor:pointer;box-shadow:0 2px 10px rgba(0,0,0,.18);display:flex;align-items:center;justify-content:center;padding:0}" +
+      "@media (max-width:600px){.of-cb--bar{flex-direction:column;align-items:stretch}.of-cb-btns>.of-cb-btn{flex:1 1 auto}}" +
+      (c.custom_css || "");
+  }
+  function mount(html) {
+    if (!d.body) { d.addEventListener("DOMContentLoaded", function () { mount(html); }); return; }
+    if (!host) {
+      host = d.createElement("div");
+      host.setAttribute("data-outflare-consent", "");
+      root = host.attachShadow ? host.attachShadow({ mode: "open" }) : host;
+      root.addEventListener("click", clicked);
+      d.body.appendChild(host);
+    }
+    root.innerHTML = "<style>" + css(cfg.cfg) + "</style>" + html;
+    var first = root.querySelector && root.querySelector(".of-cb--modal [data-of-consent]");
+    if (first && first.focus) first.focus();
+  }
+  function hideBanner() { if (host) { host.parentNode && host.parentNode.removeChild(host); host = root = null; } }
+  function showReopen() {
+    if (!cfg.cfg.reopen_button) return hideBanner();
+    mount('<button type="button" class="of-cb-reopen" data-of-consent="settings" aria-label="' + esc(cfg.cfg.texts.settings) + '" title="' + esc(cfg.cfg.texts.settings) +
+      '"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M12 2a10 10 0 1 0 10 10 4 4 0 0 1-5-5 4 4 0 0 1-5-5"/><circle cx="8.5" cy="8.5" r="1"/><circle cx="16" cy="15.5" r="1"/><circle cx="11" cy="16" r="1"/></svg></button>');
+  }
+  function showBanner(prefs) {
+    if (!on()) return;
+    prefsOpen = prefs;
+    var c = cfg.cfg, t = c.texts, r = rule(), html = "";
+    if (c.custom_html) return mount('<div class="of-cb-custom">' + c.custom_html + "</div>");
+    var layout = c.layout === "modal" ? "modal" : c.layout === "box" ? "box" : "bar";
+    var btn = function (act, label, plain) { return '<button type="button" class="of-cb-btn' + (plain ? " of-cb-btn--plain" : "") + '" data-of-consent="' + act + '">' + esc(label) + "</button>"; };
+    if (layout === "modal") html += '<div class="of-cb-overlay"></div>';
+    html += '<div class="of-cb of-cb--' + layout + " of-cb--" + esc(c.position) + '" role="dialog" aria-labelledby="of-cb-title"' + (layout === "modal" ? ' aria-modal="true"' : "") + ">";
+    html += '<div class="of-cb-text">' + (c.logo_url ? '<img class="of-cb-logo" alt="" src="' + esc(c.logo_url) + '">' : "") +
+      '<p class="of-cb-title" id="of-cb-title">' + esc(t.title) + "</p>" +
+      '<p class="of-cb-body">' + esc(t.body) + (c.policy_url ? ' <a href="' + esc(c.policy_url) + '">' + esc(t.policy) + "</a>" : "") + "</p>" +
+      (honoursGPC() && r !== "opt_in" ? '<p class="of-cb-note">' + esc(t.gpc_honoured) + "</p>" : "") + "</div>";
+    if (prefs) {
+      html += '<div class="of-cb-prefs"><div class="of-cb-cat"><div><strong>' + esc(t.necessary) + "</strong><p>" + esc(t.necessary_desc) + '</p></div><span class="of-cb-on">' + esc(t.always_on) + "</span></div>";
+      CATS.forEach(function (k) {
+        if (!c.categories[k]) return;
+        html += '<label class="of-cb-cat"><div><strong>' + esc(t[k]) + "</strong><p>" + esc(t[k + "_desc"]) + '</p></div><input type="checkbox" data-of-category="' + k + '"' + (cats[k] ? " checked" : "") + "></label>";
+      });
+      html += "</div>";
+    }
+    html += '<div class="of-cb-btns">';
+    if (r === "opt_in") html += btn("reject", t.reject) + btn(prefs ? "save" : "customize", prefs ? t.save : t.customize, true) + btn("accept", t.accept);
+    else if (r === "opt_out") html += btn("opt_out", t.opt_out) + btn(prefs ? "save" : "customize", prefs ? t.save : t.customize, true) + btn("accept", t.ok);
+    else html += btn(prefs ? "save" : "customize", prefs ? t.save : t.customize, true) + btn("accept", t.ok);
+    mount(html + "</div></div>");
+  }
+  function clicked(e) {
+    var b = e.target && e.target.closest ? e.target.closest("[data-of-consent]") : null;
+    if (!b) return;
+    var act = b.getAttribute("data-of-consent"), all = {};
+    if (act === "settings" || act === "customize") return showBanner(true);
+    if (act === "accept" || act === "reject") {
+      CATS.forEach(function (k) { all[k] = act === "accept"; });
+      return choose(all, act + "_all");
+    }
+    if (act === "opt_out") return choose({ marketing: false }, "opt_out");
+    if (act === "save") {
+      var boxes = root.querySelectorAll("[data-of-category]");
+      for (var i = 0; i < boxes.length; i++) all[boxes[i].getAttribute("data-of-category")] = !!boxes[i].checked;
+      return choose(all, "custom");
+    }
+  }
+  // Links such as "Cookie settings" in the site's footer open the banner.
+  d.addEventListener("click", function (e) {
+    var a = e.target && e.target.closest ? e.target.closest("[data-outflare-consent-open]") : null;
+    if (a && on()) { if (e.preventDefault) e.preventDefault(); showBanner(true); }
+  }, true);
+  // Scripts added later, by the site or a tag manager, are checked too.
+  if (w.MutationObserver) {
+    try { new MutationObserver(function () { unblock(); }).observe(d.documentElement, { childList: true, subtree: true }); } catch (e) {}
+  }
+  w.addEventListener("load", function () { vendorSignals(!decided() && rule() === "opt_in"); unblock(); });
+
   var queued = Array.isArray(w.outflare) ? w.outflare : [];
   w.outflare = {
     loaded: true,
@@ -327,10 +642,28 @@
     // The visitor's id, to send with identify from your server when they
     // sign up or sign in, so their earlier visits join their record.
     anonymousId: function () { return anon; },
-    // Call with true once the visitor accepts analytics cookies (the id is
-    // then kept in a cookie for a year), false if they withdraw (the cookie
-    // is removed).
-    consent: function (yes) { consented = !!yes; writeCookie(anon); },
+    // The visitor's choices: {necessary, analytics, marketing, preferences,
+    // decided, region, rule, gpc}. With true they accept every category
+    // (analytics keeps their id in a cookie for a year), with false they
+    // refuse or withdraw them all (the cookie is removed), and with
+    // {marketing: false} they set some. Each change is kept in Outflare.
+    consent: function (yes) {
+      if (arguments.length) {
+        var next = {};
+        if (yes && typeof yes === "object") next = yes;
+        else CATS.forEach(function (k) { next[k] = !!yes; });
+        choose(next, "api");
+      }
+      return choices();
+    },
+    // Opens the banner on its categories, such as from "Cookie settings".
+    showConsent: function () { if (on()) showBanner(true); },
+    // Runs fn(choices) now and whenever they change.
+    onConsent: function (fn) {
+      if (typeof fn !== "function") return;
+      listeners.push(fn);
+      try { fn(choices()); } catch (e) {}
+    },
     // Forget the visitor, such as on sign-out on a shared computer.
     reset: function () {
       anon = uuid();
@@ -360,6 +693,9 @@
     }
   };
   if (flagsWanted) loadFlags();
+  if (on()) settle(true);
+  else unblock();
+  loadBanner();
   page();
   queued.forEach(function (c) {
     if (c && w.outflare[c[0]]) w.outflare[c[0]].apply(null, c.slice(1));

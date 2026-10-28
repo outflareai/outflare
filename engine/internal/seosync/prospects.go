@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 
@@ -30,7 +31,7 @@ var ProspectMethods = []string{"competitor_gap", "broken_link", "reclaim", "comp
 var ProspectStages = []string{"prospect", "excluded", "pitched", "replied", "agreed", "live", "declined", "removed"}
 
 // ExcludedReasons say why a prospect is never pitched.
-var ExcludedReasons = []string{"links_to_us", "competitor", "customer", "partner", "opted_out", "spam"}
+var ExcludedReasons = []string{"links_to_us", "competitor", "customer", "partner", "opted_out", "spam", "page_gone"}
 
 // InOutreach are the stages in which a site is being pitched: no other
 // prospect on the same site may be pitched meanwhile.
@@ -81,8 +82,10 @@ var methodPoints = map[string]int{
 
 // ProspectScore is how worth pitching a page is, from 0 to 100, with why:
 // half from the site's strength, a quarter from its search traffic and a
-// quarter from the method, less points for a suspect spam score.
-func ProspectScore(method string, rating, traffic *float64, spam *int) (int, []ScoreFactor) {
+// quarter from the method, less points for a suspect spam score. Once the
+// AI page reader has judged how well the page fits the site (fit, 0 to
+// 100), that moves it up to 15 points either way.
+func ProspectScore(method string, rating, traffic *float64, spam, fit *int) (int, []ScoreFactor) {
 	factors := []ScoreFactor{}
 	if rating != nil {
 		factors = append(factors, ScoreFactor{"domain_rating", int(math.Round(math.Max(0, math.Min(100, *rating)) / 2))})
@@ -94,6 +97,9 @@ func ProspectScore(method string, rating, traffic *float64, spam *int) (int, []S
 	factors = append(factors, ScoreFactor{"method_" + method, methodPoints[method]})
 	if spam != nil && *spam >= SpamSuspect {
 		factors = append(factors, ScoreFactor{"spam_suspect", -20})
+	}
+	if fit != nil {
+		factors = append(factors, ScoreFactor{"relevance", int(math.Round(float64(*fit-50) * 0.3))})
 	}
 	score := 0
 	for _, f := range factors {
@@ -185,7 +191,7 @@ func AddProspects(ctx context.Context, tx pgx.Tx, ws string, site ProspectSite, 
 		if spam == nil {
 			spam = f.spam
 		}
-		score, factors := ProspectScore(p.Method, rating, traffic, spam)
+		score, factors := ProspectScore(p.Method, rating, traffic, spam, nil)
 		var reason *string
 		switch {
 		case f.suppressed != "":
@@ -344,4 +350,84 @@ func SystemRecorder(ws string) Recorder {
 func TargetOf(action string) string {
 	t, _, _ := strings.Cut(action, ".")
 	return t
+}
+
+// ReclaimRequest picks the lost links to win back.
+type ReclaimRequest struct {
+	// Days: links lost in this many days.
+	Days int
+	// MinRating leaves out weaker linking sites; 0 keeps them all.
+	MinRating float64
+}
+
+// ReclaimProspects adds the site's links lost in the last req.Days as
+// reclaim prospects, at most MaxProspectsAdded, strongest first: their page
+// is where the link was, their page to offer is what it linked to, and the
+// evidence names the backlink and why the provider says it went. Links
+// someone marked to disavow, or that look toxic, are left out. It costs
+// nothing: the links are already stored.
+func ReclaimProspects(ctx context.Context, tx pgx.Tx, ws string, site ProspectSite, req ReclaimRequest, createdBy *string, rec Recorder) (ProspectsAdded, error) {
+	rows, err := tx.Query(ctx, `
+		SELECT DISTINCT ON (b.source_url) b.id::text, b.source_url, b.target_url, b.anchor, b.source_rating, b.domain_traffic, b.spam_score,
+			b.lost_at, COALESCE((SELECT e.reason FROM backlink_events e WHERE e.backlink_id = b.id AND e.kind = 'lost' ORDER BY e.at DESC LIMIT 1), '')
+		FROM backlinks b
+		WHERE b.workspace_id = $1 AND b.site_id = $2 AND b.status = 'lost' AND b.lost_at > now() - make_interval(days => $3)
+		  AND b.review <> 'disavow' AND COALESCE(b.spam_score, 0) < $4 AND COALESCE(b.source_rating, 0) >= $5
+		ORDER BY b.source_url, b.source_rating DESC NULLS LAST, b.lost_at DESC`,
+		ws, site.ID, req.Days, SpamToxic, req.MinRating)
+	if err != nil {
+		return ProspectsAdded{}, err
+	}
+	type lost struct {
+		p      Prospect
+		rating float64
+	}
+	var found []lost
+	for rows.Next() {
+		var id, from, to, anchor, reason string
+		var rating, traffic *float64
+		var spam *int
+		var lostAt *time.Time
+		if err := rows.Scan(&id, &from, &to, &anchor, &rating, &traffic, &spam, &lostAt, &reason); err != nil {
+			rows.Close()
+			return ProspectsAdded{}, err
+		}
+		page, d := ProspectPage(from)
+		if page == "" || OwnDomain(site, d) {
+			continue
+		}
+		target, td := ProspectPage(to)
+		if !OwnDomain(site, td) {
+			target = ""
+		}
+		ev := map[string]any{"backlink_id": id, "anchor": trunc(anchor, 200), "lost_reason": reason}
+		if lostAt != nil {
+			ev["lost_at"] = lostAt.UTC().Format(time.RFC3339)
+		}
+		r := 0.0
+		if rating != nil {
+			r = *rating
+		}
+		found = append(found, lost{Prospect{PageURL: page, Method: "reclaim", TargetURL: target, Evidence: ev, DomainRating: rating, Traffic: traffic, SpamScore: spam}, r})
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return ProspectsAdded{}, err
+	}
+	slices.SortStableFunc(found, func(a, b lost) int { return cmpDesc(a.rating, b.rating) })
+	list := make([]Prospect, 0, min(len(found), MaxProspectsAdded))
+	for _, f := range found[:min(len(found), MaxProspectsAdded)] {
+		list = append(list, f.p)
+	}
+	return AddProspects(ctx, tx, ws, site, "reclaim", createdBy, rec, list)
+}
+
+func cmpDesc(a, b float64) int {
+	switch {
+	case a > b:
+		return -1
+	case a < b:
+		return 1
+	}
+	return 0
 }

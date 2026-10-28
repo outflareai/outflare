@@ -43,6 +43,15 @@ func (fakeClaude) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		draftReviewAnswer(w, string(body))
 		return
 	}
+	if strings.Contains(string(body), "proposing A/B tests") || strings.Contains(string(body), "You write versions of website copy") ||
+		strings.Contains(string(body), "You explain an A/B test's results") {
+		answerABTestAI(w, string(body))
+		return
+	}
+	if strings.Contains(string(body), "You read one web page for a link building team") {
+		readLinkPage(w)
+		return
+	}
 	if strings.Contains(string(body), "You write fix tickets for a website") {
 		writeTicket(w, string(body))
 		return

@@ -25,6 +25,7 @@ func (s *Server) routesSocialAccounts(mux *http.ServeMux) {
 	mux.HandleFunc("POST /v1/workspaces/{ws}/social/accounts/sync", s.inBrand(manage, s.syncSocialAccounts))
 	mux.HandleFunc("GET /v1/workspaces/{ws}/social/accounts/{id}", s.inBrand(read, s.getSocialAccount))
 	mux.HandleFunc("PATCH /v1/workspaces/{ws}/social/accounts/{id}", s.inBrand(manage, s.updateSocialAccount))
+	mux.HandleFunc("POST /v1/workspaces/{ws}/social/accounts/{id}/sync", s.inBrand(manage, s.syncSocialAccountNow))
 	mux.HandleFunc("GET /v1/workspaces/{ws}/social/accounts/{id}/days", s.inBrand(read, s.listSocialAccountDays))
 	mux.HandleFunc("GET /v1/workspaces/{ws}/social/posts", s.inBrand(read, s.listSocialPosts))
 	mux.HandleFunc("GET /v1/workspaces/{ws}/social/growth", s.inBrand(read, s.socialGrowth))
@@ -54,8 +55,13 @@ type socialAccountView struct {
 	LastSyncedAt       *time.Time `json:"last_synced_at"`
 	NextSyncAt         time.Time  `json:"next_sync_at"`
 	LastError          *string    `json:"last_error"`
-	CreatedAt          time.Time  `json:"created_at"`
-	UpdatedAt          time.Time  `json:"updated_at"`
+	// Why the last read failed in a word, how many reads in a row failed,
+	// and when; a failed read is tried again the same day.
+	LastErrorCode *string    `json:"last_error_code"`
+	Failures      int        `json:"failures"`
+	LastFailedAt  *time.Time `json:"last_failed_at"`
+	CreatedAt     time.Time  `json:"created_at"`
+	UpdatedAt     time.Time  `json:"updated_at"`
 }
 
 const socialAccountSelect = `
@@ -67,14 +73,14 @@ const socialAccountSelect = `
 			AND d.day <= (now() AT TIME ZONE 'UTC')::date - 7 ORDER BY d.day DESC LIMIT 1),
 		a.followers - (SELECT d.followers FROM social_account_days d WHERE d.account_id = a.id AND d.followers IS NOT NULL
 			AND d.day <= (now() AT TIME ZONE 'UTC')::date - 28 ORDER BY d.day DESC LIMIT 1),
-		a.last_synced_at, a.next_sync_at, a.last_error, a.created_at, a.updated_at
+		a.last_synced_at, a.next_sync_at, a.last_error, a.last_error_code, a.failures, a.last_failed_at, a.created_at, a.updated_at
 	FROM social_accounts a WHERE a.workspace_id = $1`
 
 func scanSocialAccount(row pgx.Row) (socialAccountView, error) {
 	var v socialAccountView
 	err := row.Scan(&v.ID, &v.Channel, &v.Kind, &v.BrandID, &v.IntegrationID, &v.ExternalID, &v.Handle, &v.Name, &v.URL, &v.AvatarURL,
 		&v.Status, &v.Followers, &v.Following, &v.Posts, &v.FollowersChange1d, &v.FollowersChange7d, &v.FollowersChange28d,
-		&v.LastSyncedAt, &v.NextSyncAt, &v.LastError, &v.CreatedAt, &v.UpdatedAt)
+		&v.LastSyncedAt, &v.NextSyncAt, &v.LastError, &v.LastErrorCode, &v.Failures, &v.LastFailedAt, &v.CreatedAt, &v.UpdatedAt)
 	return v, err
 }
 
@@ -241,6 +247,14 @@ func (s *Server) syncSocialAccounts(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			return err
 		}
+		// Accounts whose last read failed are read again now too, rather
+		// than at their next try.
+		args := []any{a.WorkspaceID}
+		sel := brandSel{in: a.Brands}
+		if _, err := tx.Exec(ctx, `UPDATE social_accounts a SET next_sync_at = now() WHERE a.workspace_id = $1 AND a.status = 'active'
+			AND a.last_error IS NOT NULL`+sel.sql("a.brand_id", &args), args...); err != nil {
+			return err
+		}
 		// A minute's key: pressing it twice reads once.
 		key := "now:" + strconv.FormatInt(time.Now().Unix()/60, 10)
 		for _, id := range list {
@@ -263,6 +277,40 @@ func (s *Server) syncSocialAccounts(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusAccepted, map[string]any{"queued": true, "connections": n})
+}
+
+// syncSocialAccountNow reads one account now, such as one whose last read
+// failed, instead of waiting for its next try.
+func (s *Server) syncSocialAccountNow(w http.ResponseWriter, r *http.Request) {
+	a := accessFrom(r.Context())
+	cur, ok := s.findSocialAccount(w, r, a, r.PathValue("id"))
+	if !ok {
+		return
+	}
+	if !a.writes(nil, cur.BrandID) {
+		writeError(w, r, http.StatusForbidden, "forbidden", string(errSharedRecord))
+		return
+	}
+	if cur.Status != "active" || cur.IntegrationID == nil {
+		writeError(w, r, http.StatusConflict, "conflict", "this account is "+cur.Status+"; resume it or connect it again to read it")
+		return
+	}
+	ctx := r.Context()
+	err := pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
+		if _, err := tx.Exec(ctx, `UPDATE social_accounts SET next_sync_at = now(), updated_at = now() WHERE workspace_id = $1 AND id = $2`, a.WorkspaceID, cur.ID); err != nil {
+			return err
+		}
+		if err := enqueueSocialSync(ctx, tx, a.WorkspaceID, *cur.IntegrationID, "account:"+cur.ID+":"+newID()); err != nil {
+			return err
+		}
+		return record(ctx, tx, &a.principal, a.WorkspaceID, "social_account.sync_requested", "social_account", cur.ID,
+			map[string]any{"channel": cur.Channel, "failures": cur.Failures, "last_error_code": deref(cur.LastErrorCode)})
+	})
+	if err != nil {
+		s.internal(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusAccepted, map[string]any{"queued": true})
 }
 
 type socialDayView struct {

@@ -81,6 +81,7 @@ import { AIVisibility } from "./pages/AIVisibility";
 import { Backlinks } from "./pages/Backlinks";
 import { Competitors } from "./pages/Competitors";
 import { LinkBuilding } from "./pages/LinkBuilding";
+import { News } from "./pages/News";
 import { Warmup } from "./pages/Warmup";
 import { ConnectAI } from "./pages/ConnectAI";
 import { Authorize } from "./pages/Authorize";
@@ -565,6 +566,7 @@ function Shell({ me, onSignOut, onReload }: { me: Me; onSignOut: () => void; onR
         {ready && ws && tab === "mailboxes" && <Mailboxes key={ws.id} ws={ws.id} canManage={writer} openOAuth={!!outcome.ws} go={setTab} />}
         {ready && ws && tab === "domains" && <Domains key={ws.id} ws={ws.id} canManage={writer} open={item ?? ""} onOpen={(d) => setItem(d || undefined)} go={setTab} />}
         {ready && ws && tab === "link-building" && <LinkBuilding key={ws.id} ws={ws.id} canManage={can("seo.manage")} go={setTab} />}
+        {ready && ws && tab === "news" && <News key={ws.id} ws={ws.id} canManage={can("seo.manage")} go={setTab} />}
         {ready && ws && tab === "allocation" && <Allocation key={ws.id} ws={ws.id} canManage={writer} canSetMode={isAdmin} go={setTab} />}
         {ready && ws && tab === "senders" && <Senders key={ws.id} ws={ws.id} canManage={writer} canManageTeams={isAdmin} />}
         {ready && ws && tab === "servers" && <Servers key={ws.id} ws={ws.id} canManage={writer} open={item ?? ""} onOpen={(id) => setItem(id || undefined)} go={setTab} />}

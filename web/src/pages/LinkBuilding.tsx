@@ -3,6 +3,7 @@ import type { LinkBuildingSettings, LinkProspect, LinkRead, SEOSite } from "@out
 import { useBrand } from "@/lib/brand";
 import { DataTable } from "@/components/data-table";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { api, errorMessage } from "../api";
 import { ask, Badge, Button, confirmAction, Empty, ErrorText, field, Loading, Menu, PageHeader, toast, type tones } from "../ui";
 import { ago } from "../format";
@@ -36,7 +37,18 @@ const methodLabel: Record<Method, string> = {
 };
 const reasonLabel: Record<NonNullable<LinkProspect["excluded_reason"]>, string> = {
   links_to_us: "already links to you", competitor: "a competitor", customer: "a customer", partner: "a partner", opted_out: "opted out", spam: "spam",
+  page_gone: "its page is gone",
 };
+type Check = NonNullable<LinkProspect["check"]>;
+const checkLabel: Record<Check["status"], string> = {
+  up: "Page up", gone: "Page gone", redirected: "Redirects away", blocked: "robots.txt blocks OutflareBot", opted_out: "Site opted out of crawling",
+  unreachable: "Site unreachable", failed: "Check failed",
+};
+const sourceLabel: Record<LinkProspect["contacts"][number]["source"], string> = { author: "Author", page: "On the page", contact_page: "Contact page" };
+const checkSummary = (c: Check) =>
+  [checkLabel[c.status], c.links_to_us && "links to you", c.broken.length > 0 && `${c.broken.length} broken link${c.broken.length === 1 ? "" : "s"}`, c.fit != null && `fit ${c.fit}`]
+    .filter(Boolean)
+    .join(" · ");
 const shows: Record<Show, { label: string; stages: Stage[] }> = {
   open: { label: "To pitch", stages: ["prospect"] },
   outreach: { label: "In outreach", stages: ["pitched", "replied", "agreed"] },
@@ -177,6 +189,7 @@ function Prospects({ ws, site, canManage, brand }: { ws: string; site: SEOSite; 
   const [busy, setBusy] = useState("");
   const [error, setError] = useState("");
   const [reload, setReload] = useState(0);
+  const [open, setOpen] = useState<LinkProspect | null>(null);
 
   useEffect(() => {
     setList(null);
@@ -239,6 +252,29 @@ function Prospects({ ws, site, canManage, brand }: { ws: string; site: SEOSite; 
     setError("");
     setReload((n) => n + 1);
   };
+  const checkOne = async (p: LinkProspect) => {
+    const { error } = await api.POST("/v1/workspaces/{ws}/link-prospects/{prospect}/check", { params: { path: { ws, prospect: p.id } } });
+    if (error) return setError(errorMessage(error));
+    toast(`Checking ${p.domain}. It takes a minute; checks run at most once an hour.`);
+  };
+  const checkAll = async () => {
+    setBusy("check");
+    const { data, error } = await api.POST("/v1/workspaces/{ws}/link-prospects/check", { params: { path: { ws } }, body: { site_id: site.id } });
+    setBusy("");
+    if (error || !data) return setError(errorMessage(error));
+    setError("");
+    const n = (data as { count?: number }).count ?? 0;
+    toast(n ? `Checking ${n} page${n === 1 ? "" : "s"}. Results show here in a few minutes.` : "Every page to pitch was checked already.");
+  };
+  const reclaim = async () => {
+    setBusy("reclaim");
+    const { data, error } = await api.POST("/v1/workspaces/{ws}/link-prospects/reclaim", { params: { path: { ws } }, body: { site_id: site.id } });
+    setBusy("");
+    if (error || !data) return setError(errorMessage(error));
+    setError("");
+    toast(data.added ? `Added ${data.added} lost link${data.added === 1 ? "" : "s"} to win back. Check their pages next.` : "No new lost links in the last 90 days.");
+    setReload((n) => n + 1);
+  };
   const remove = async (p: LinkProspect) => {
     if (!(await confirmAction(`Delete ${p.page_url}?`, "For a page added by mistake. To keep the website out of outreach, exclude it instead.", "Delete"))) return;
     const { error } = await api.DELETE("/v1/workspaces/{ws}/link-prospects/{prospect}", { params: { path: { ws, prospect: p.id } } });
@@ -253,6 +289,8 @@ function Prospects({ ws, site, canManage, brand }: { ws: string; site: SEOSite; 
         <Menu
           aria={`More for ${p.page_url}`}
           items={[
+            { label: "Details", onClick: () => setOpen(p) },
+            { label: p.check ? "Check the page again" : "Check the page", onClick: () => checkOne(p) },
             ...(moves[p.stage] ?? []).filter((s) => !(p.stage === "prospect" && s === "pitched")).map((s) => ({ label: moveLabel[s], onClick: () => move(p, s) })),
             p.stage !== "excluded" && { label: "Exclude", onClick: () => move(p, "excluded") },
             { label: p.target_url ? "Change your page to offer" : "Choose your page to offer", onClick: () => offer(p) },
@@ -271,8 +309,12 @@ function Prospects({ ws, site, canManage, brand }: { ws: string; site: SEOSite; 
             {(Object.keys(methodLabel) as Method[]).map((m) => <option key={m} value={m}>{methodLabel[m]}</option>)}
           </select>
           <Button type="submit" disabled={!page.trim() || busy === "add"}>Add page</Button>
+          <span className="flex-1" />
+          <Button variant="ghost" disabled={busy === "reclaim"} onClick={reclaim}>Win back lost links</Button>
+          <Button variant="ghost" disabled={busy === "check"} onClick={checkAll}>Check pages</Button>
         </form>
       )}
+      {open && <ProspectSheet ws={ws} prospect={open} canManage={canManage} onClose={() => setOpen(null)} onChanged={() => { setOpen(null); setReload((n) => n + 1); }} />}
       {!list ? (
         <Loading />
       ) : (
@@ -294,6 +336,7 @@ function Prospects({ ws, site, canManage, brand }: { ws: string; site: SEOSite; 
               </div>
               <div className="font-mono text-[12px] break-all text-muted-foreground">{path(p.page_url)}</div>
               <div className="text-xs text-muted-foreground">{[`score ${p.score}`, methodLabel[p.method], p.domain_rating != null && `rating ${num(p.domain_rating)}`].filter(Boolean).join(" · ")}</div>
+              {p.check && <div className="text-xs text-muted-foreground">{checkSummary(p.check)}</div>}
               {actions(p)}
             </div>
           )}
@@ -307,6 +350,11 @@ function Prospects({ ws, site, canManage, brand }: { ws: string; site: SEOSite; 
                   <a className="font-medium whitespace-nowrap underline-offset-2 hover:underline" href={p.page_url} target="_blank" rel="noreferrer noopener nofollow">{p.domain}</a>
                   <div className="max-w-72 truncate font-mono text-[12px] text-muted-foreground" title={p.page_url}>{path(p.page_url)}</div>
                   {p.target_url && <div className="max-w-72 truncate text-[12px] text-muted-foreground" title={p.target_url}>Offer {path(p.target_url)}</div>}
+                  {p.check && (
+                    <button className="block max-w-72 truncate text-left text-[12px] text-muted-foreground underline-offset-2 hover:underline" onClick={() => setOpen(p)}>
+                      {checkSummary(p.check)}{p.contacts.length > 0 && ` · ${p.contacts.length} contact${p.contacts.length === 1 ? "" : "s"}`}
+                    </button>
+                  )}
                 </div>
               ),
             },
@@ -336,6 +384,107 @@ function Prospects({ ws, site, canManage, brand }: { ws: string; site: SEOSite; 
         />
       )}
     </div>
+  );
+}
+
+function ProspectSheet({ ws, prospect: p, canManage, onClose, onChanged }: { ws: string; prospect: LinkProspect; canManage: boolean; onClose: () => void; onChanged: () => void }) {
+  const [error, setError] = useState("");
+  const c = p.check;
+  const offer = async (url: string) => {
+    const { error } = await api.PATCH("/v1/workspaces/{ws}/link-prospects/{prospect}", { params: { path: { ws, prospect: p.id } }, body: { target_url: url } });
+    if (error) return setError(errorMessage(error));
+    onChanged();
+  };
+  const check = async () => {
+    const { error } = await api.POST("/v1/workspaces/{ws}/link-prospects/{prospect}/check", { params: { path: { ws, prospect: p.id } } });
+    if (error) return setError(errorMessage(error));
+    toast(`Checking ${p.domain}. It takes a minute; checks run at most once an hour.`);
+  };
+  const row = (label: string, value: React.ReactNode) => (
+    <div className="grid grid-cols-[8rem_1fr] gap-2">
+      <dt className="text-muted-foreground">{label}</dt>
+      <dd className="min-w-0 break-words">{value}</dd>
+    </div>
+  );
+  return (
+    <Sheet open onOpenChange={(o) => !o && onClose()}>
+      <SheetContent className="w-full overflow-y-auto sm:max-w-lg">
+        <SheetHeader>
+          <SheetTitle>{p.domain}</SheetTitle>
+          <SheetDescription className="break-all">{p.page_url}</SheetDescription>
+        </SheetHeader>
+        <div className="space-y-5 px-4 pb-6 text-[13px]">
+          {error && <ErrorText>{error}</ErrorText>}
+          <dl className="space-y-1.5">
+            {row("Stage", <Badge tone={stageTone[p.stage]}>{stageLabel[p.stage]}</Badge>)}
+            {row("Score", `${p.score} (${p.score_factors.map((f) => `${f.code.replace(/_/g, " ")} ${f.points > 0 ? "+" : ""}${f.points}`).join(", ")})`)}
+            {row("Found by", methodLabel[p.method])}
+            {row("Your page to offer", p.target_url ? <a className="underline-offset-2 hover:underline" href={p.target_url} target="_blank" rel="noreferrer noopener">{path(p.target_url)}</a> : "Not chosen")}
+          </dl>
+          {!c ? (
+            <p className="text-muted-foreground">Not checked yet. OutflareBot reads the page, its outbound links and contact pages, and your AI reads what it's about.</p>
+          ) : (
+            <>
+              <section className="space-y-1.5">
+                <h3 className="font-medium">The page, {ago(c.checked_at)}</h3>
+                <dl className="space-y-1.5">
+                  {row("Status", checkLabel[c.status])}
+                  {c.title && row("Title", c.title)}
+                  {c.author && row("Author", c.author)}
+                  {c.page_kind && row("Kind", c.page_kind.replace(/_/g, " "))}
+                  {c.topic && row("Topic", c.topic)}
+                  {c.fit != null && row("Fit", `${c.fit} of 100${c.fit_reason ? `: ${c.fit_reason}` : ""}`)}
+                  {c.ai_error === "no_ai" && row("AI", "Connect your AI model to have it read pages.")}
+                  {row("Links to you", c.links_to_us ? c.our_links.map((l) => `${path(l.url)}${l.nofollow ? " (nofollow)" : ""}`).join(", ") : "No")}
+                </dl>
+                {c.suggested_target && c.suggested_target !== p.target_url && (
+                  <div className="flex flex-wrap items-center gap-2 rounded-md border px-3 py-2">
+                    <span className="min-w-0 flex-1">Suggested page to offer: <span className="font-mono text-[12px]">{path(c.suggested_target)}</span>{c.suggested_reason && <span className="block text-[12px] text-muted-foreground">{c.suggested_reason}</span>}</span>
+                    {canManage && <Button variant="ghost" onClick={() => offer(c.suggested_target)}>Use it</Button>}
+                  </div>
+                )}
+              </section>
+              <section className="space-y-1.5">
+                <h3 className="font-medium">Broken links ({c.broken.length} of {c.outbound} outbound)</h3>
+                {c.broken.length === 0 ? (
+                  <p className="text-muted-foreground">None found.</p>
+                ) : (
+                  <ul className="space-y-1">
+                    {c.broken.map((b) => (
+                      <li key={b.url} className="break-all">
+                        <span className="font-mono text-[12px]">{b.url}</span>
+                        <span className="text-[12px] text-muted-foreground"> · {b.status || "no answer"}{b.anchor && ` · “${b.anchor}”`}</span>
+                        {b.archive_url && (
+                          <a className="block text-[12px] underline-offset-2 hover:underline" href={b.archive_url} target="_blank" rel="noreferrer noopener nofollow">
+                            What it said ({b.archived_at ? new Date(b.archived_at).toLocaleDateString() : "archived"})
+                          </a>
+                        )}
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </section>
+            </>
+          )}
+          <section className="space-y-1.5">
+            <h3 className="font-medium">Who to contact</h3>
+            {p.contacts.length === 0 ? (
+              <p className="text-muted-foreground">Nobody found yet.</p>
+            ) : (
+              <ul className="space-y-1">
+                {p.contacts.map((k) => (
+                  <li key={k.record_id}>
+                    {k.email ? <a className="underline-offset-2 hover:underline" href={`mailto:${k.email}`}>{k.email}</a> : k.name}
+                    <span className="text-[12px] text-muted-foreground"> · {sourceLabel[k.source]} · {k.confidence}% sure</span>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </section>
+          {canManage && <Button variant="ghost" onClick={check}>{c ? "Check again" : "Check the page"}</Button>}
+        </div>
+      </SheetContent>
+    </Sheet>
   );
 }
 
