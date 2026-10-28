@@ -34,20 +34,17 @@ func TestReplyDeals(t *testing.T) {
 	go func() { q.Run(runCtx, 2); close(done) }() //nolint:errcheck
 	t.Cleanup(func() { cancel(); <-done })
 
-	owner.must(201, "POST", cat+"/types", map[string]any{"name": "Deal"})
-	owner.must(201, "POST", cat+"/option-sets", map[string]any{"name": "Deal stage", "options": []map[string]any{
-		{"key": "new", "label": "New"}, {"key": "qualified", "label": "Qualified"}, {"key": "meeting", "label": "Meeting"},
-		{"key": "won", "label": "Won"}, {"key": "lost", "label": "Lost"}}})
-	owner.must(201, "POST", cat+"/types/deal/fields", map[string]any{"label": "Stage", "value_type": "status", "option_set": "deal_stage"})
-
+	// Every workspace has the Deal type, with stages and links to its
+	// people and company.
 	deal := func(stage string) map[string]any {
 		return map[string]any{"type": "deal", "field": "stage", "stage": stage, "closed": []string{"won", "lost"}}
 	}
 	rules := base + "/reply-rules"
-	// The deal type needs a way to point at the reply's person or company.
-	owner.must(400, "PUT", rules, map[string]any{"rules": map[string]any{"interested": map[string]any{"deal": deal("qualified")}}})
-	owner.must(201, "POST", cat+"/types/deal/fields", map[string]any{"label": "Contacts", "value_type": "record_reference", "target_type": "person", "multiple": true})
-	owner.must(201, "POST", cat+"/types/deal/fields", map[string]any{"label": "Company", "value_type": "record_reference", "target_type": "account"})
+	// A deal type needs a way to point at the reply's person or company.
+	owner.must(201, "POST", cat+"/types", map[string]any{"name": "Opportunity"})
+	owner.must(201, "POST", cat+"/types/opportunity/fields", map[string]any{"label": "Stage", "value_type": "status", "option_set": "deal_stage"})
+	owner.must(400, "PUT", rules, map[string]any{"rules": map[string]any{"interested": map[string]any{"deal": map[string]any{
+		"type": "opportunity", "field": "stage", "stage": "qualified"}}}})
 	owner.must(400, "PUT", rules, map[string]any{"rules": map[string]any{"interested": map[string]any{"deal": deal("signed")}}})
 	owner.must(400, "PUT", rules, map[string]any{"rules": map[string]any{"interested": map[string]any{"deal": deal("won")}}})
 	owner.must(400, "PUT", rules, map[string]any{"rules": map[string]any{"auto_reply": map[string]any{"deal": deal("qualified")}}})
@@ -56,7 +53,7 @@ func TestReplyDeals(t *testing.T) {
 	owner.must(200, "PUT", rules, map[string]any{"rules": map[string]any{
 		"interested":     map[string]any{"deal": deal("qualified")},
 		"meeting_booked": map[string]any{"deal": deal("meeting")},
-		"not_now":        map[string]any{"action": "nothing", "deal": deal("new")},
+		"not_now":        map[string]any{"action": "nothing", "deal": deal("lead")},
 	}})
 
 	recs := base + "/records"
@@ -84,7 +81,7 @@ func TestReplyDeals(t *testing.T) {
 		var out []map[string]any
 		for i := 0; i < 400; i++ {
 			out = out[:0]
-			rows, err := e.pool.Query(ctx, `SELECT id::text, name, COALESCE(attributes ->> 'stage', ''), attributes -> 'company' ->> 0 IS NOT NULL OR attributes ->> 'company' IS NOT NULL
+			rows, err := e.pool.Query(ctx, `SELECT id::text, name, COALESCE(attributes ->> 'stage', ''), attributes ->> 'associated_company' IS NOT NULL
 				FROM records WHERE workspace_id = $1 AND record_type = 'deal' ORDER BY created_at`, ws)
 			if err != nil {
 				t.Fatal(err)
@@ -139,6 +136,10 @@ func TestReplyDeals(t *testing.T) {
 	}
 	id := d["id"].(string)
 	applied(1)
+	// It is the same deal in outreach outcomes, under the same id.
+	if od := owner.must(200, "GET", base+"/deals/"+id, nil); od["source"] != "crm" || od["state"] != "open" || od["stage"] != "Qualified" || od["name"] != "Prospect" {
+		t.Fatalf("outcomes deal: %v", od)
+	}
 
 	// A meeting moves it on; a later "not now" never moves it back.
 	label("meeting_booked")
@@ -157,7 +158,12 @@ func TestReplyDeals(t *testing.T) {
 	stageIs(id, "qualified")
 
 	// Once the deal is won, a new interested reply opens a new deal.
-	owner.must(200, "PATCH", recs+"/"+id, map[string]any{"attributes": map[string]any{"stage": "won"}})
+	owner.must(200, "PATCH", recs+"/"+id, map[string]any{"attributes": map[string]any{"stage": "won",
+		"value": map[string]any{"amount_minor": 250000, "currency": "EUR"}, "close_date": "2026-10-20"}})
+	if od := owner.must(200, "GET", base+"/deals/"+id, nil); od["state"] != "won" || od["amount_cents"] != 250000.0 || od["currency"] != "EUR" ||
+		!strings.HasPrefix(od["closed_at"].(string), "2026-10-20") {
+		t.Fatalf("won deal in outcomes: %v", od)
+	}
 	label("interested")
 	if d := deals(2)[1]; d["stage"] != "qualified" {
 		t.Fatalf("new deal: %v", d)

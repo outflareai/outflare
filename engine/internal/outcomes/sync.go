@@ -106,10 +106,11 @@ type syncPayload struct {
 	Integration string `json:"integration_id"`
 }
 
-// Register adds the sync job handler.
+// Register adds the sync, CRM push and deal attribution job handlers.
 func (s *Syncer) Register(q *jobs.Queue) {
 	q.Handle(JobSync, s.syncJob)
 	q.Handle(JobPushReply, s.HandlePushReply)
+	q.Handle(JobAttributeDeal, s.attributeDealJob)
 }
 
 // Run enqueues a sync for every outcome integration every interval.

@@ -12404,7 +12404,7 @@ paths:
       operationId: listDeals
       x-outflare-access: { scope: outcomes.read }
       summary: List deals
-      description: "Scope: outcomes.read. Deals from the CRM, plus any logged by hand. Newest first."
+      description: "Scope: outcomes.read. Every deal: those in Outflare's CRM (each deal is a record of the Deal type, with the same id), those synced from HubSpot and those logged here. Newest first."
       tags: [outcomes]
       parameters:
         - { $ref: "#/components/parameters/Brand" }
@@ -26240,6 +26240,7 @@ components:
         unattributed: { type: boolean, description: Not from outreach; pins that. }
     Deal:
       type: object
+      description: "A deal's outreach outcome. Every deal is also a record of the workspace's Deal type in the CRM, with the same id: GET .../records/{id} shows its stage, value, people and company, and changes made there show here."
       required: [id, project_id, sequence_id, mission_id, lead_id, meeting_id, source, integration_id, external_id, name, stage, state, amount_cents, currency, opened_at, closed_at, attribution, attribution_pinned, created_at, updated_at, lead_email, sequence_name, project_name]
       properties:
         id: { type: string, format: uuid }
@@ -26248,11 +26249,11 @@ components:
         mission_id: { type: [string, "null"], format: uuid }
         lead_id: { type: [string, "null"], format: uuid }
         meeting_id: { type: [string, "null"], format: uuid }
-        source: { type: string, enum: [hubspot, manual, api] }
+        source: { type: string, enum: [hubspot, manual, api, crm], description: "crm: made in Outflare's CRM, by hand, a reply rule or an import." }
         integration_id: { type: [string, "null"], format: uuid }
         external_id: { type: [string, "null"] }
         name: { type: string }
-        stage: { type: string }
+        stage: { type: string, description: "The stage's name: HubSpot's for a synced deal, the CRM stage's label for the others." }
         state: { type: string, enum: [open, won, lost] }
         amount_cents: { type: [integer, "null"] }
         currency: { type: string }

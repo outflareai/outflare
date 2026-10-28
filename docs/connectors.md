@@ -179,7 +179,7 @@ Connectors with the `import.crm` capability (Attio) implement `connectors.CRMImp
 
 What the import does:
 
-- **Objects become record types.** People are `person` records and Companies `account` records. Deals and custom objects become record types of their own (`deal`), or the type of that name the workspace already has.
+- **Objects become record types.** People are `person` records and Companies `account` records. Deals go into the workspace's `deal` type, which every workspace has with Attio's field keys, so they also count in outreach outcomes. Custom objects become record types of their own, or the type of that name the workspace already has.
 - **Fields go into the catalog.** Each CRM field becomes a field of its record type: an existing one when it already holds the same kind of value (a company's industry goes into the built-in industry field, matched by option label), otherwise a new one. Select and status choices become option lists (deal stages become `deal_stage`). Name, email, phone and domain fields become the record's name and identities; a person's company becomes `companies`, job title `job_title`, LinkedIn `linkedin_url`, and a location also fills `city` and `country`. Fields the CRM works out itself (interactions, connection strength) and a company's team (the other side of each person's companies) are left out, and the summary says so.
 - **Members.** Owner and other member fields point at the Outflare member with the same email; CRM members who aren't in the workspace are left out.
 - **Matching, not duplicating.** A person whose email, or a company whose domain, a record here already holds verified is filled in instead of added. Emails and phones from a CRM come in unverified, since nobody proved who owns them.

@@ -1156,9 +1156,12 @@ var timelineBranches = map[string]string{
 		WHERE g.workspace_id = $1 AND g.record_id = ANY($2) {brand:q.brand_id}`,
 	"deal": `SELECT 'deal', d.id::text, COALESCE(d.opened_at, d.created_at), COALESCE(d.name, ''),
 			jsonb_build_object('stage', d.stage, 'state', d.state, 'amount_cents', d.amount_cents, 'currency', d.currency,
-				'sequence_id', d.sequence_id, 'meeting_id', d.meeting_id), d.source, d.record_id
+				'sequence_id', d.sequence_id, 'meeting_id', d.meeting_id), d.source,
+			COALESCE(CASE WHEN d.record_id = ANY($2) THEN d.record_id END, l.to_id, d.id)
 		FROM deals d LEFT JOIN sequences q ON q.id = d.sequence_id
-		WHERE d.workspace_id = $1 AND d.record_id = ANY($2) {brand:q.brand_id}`,
+		LEFT JOIN LATERAL (SELECT rr.to_id FROM record_relationships rr
+			WHERE rr.from_id = d.id AND rr.to_id = ANY($2) AND rr.valid_to IS NULL LIMIT 1) l ON true
+		WHERE d.workspace_id = $1 AND (d.record_id = ANY($2) OR d.id = ANY($2) OR l.to_id IS NOT NULL) {brand:q.brand_id}`,
 	"visit": `SELECT 'visit', v.id::text, v.started_at, v.landing_path,
 			jsonb_build_object('ended_at', v.last_seen_at, 'pageviews', v.pageviews, 'events', v.events, 'referrer_host', v.referrer_host,
 				'utm_source', v.utm_source, 'utm_medium', v.utm_medium, 'utm_campaign', v.utm_campaign, 'country', v.country,

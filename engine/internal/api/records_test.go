@@ -13,10 +13,12 @@ func TestCatalog(t *testing.T) {
 	owner, ws := setupOwner(t, h)
 	base := "/v1/workspaces/" + ws + "/catalog"
 
-	// Every workspace starts with people and companies, and the shared option lists.
+	// Every workspace starts with people and companies, the Deal type, and
+	// the shared option lists.
 	c := owner.must(200, "GET", base, nil)
 	types := c["types"].([]any)
-	if len(types) != 2 || types[0].(map[string]any)["key"] != "person" || types[1].(map[string]any)["plural"] != "Companies" {
+	if len(types) != 3 || types[0].(map[string]any)["key"] != "person" || types[1].(map[string]any)["plural"] != "Companies" ||
+		types[2].(map[string]any)["key"] != "deal" || len(types[2].(map[string]any)["fields"].([]any)) != 5 {
 		t.Fatalf("built-in types: %v", types)
 	}
 	sets := map[string]bool{}
@@ -29,36 +31,36 @@ func TestCatalog(t *testing.T) {
 		}
 	}
 
-	// A workspace adds a deal type with a stage list and fields.
+	// A workspace adds a type of its own with a stage list and fields.
 	owner.must(400, "POST", base+"/types", map[string]any{"name": "Person"})
-	deal := owner.must(201, "POST", base+"/types", map[string]any{"name": "Deal"})
-	if deal["key"] != "deal" || deal["plural"] != "Deals" || deal["builtin"] != false {
+	deal := owner.must(201, "POST", base+"/types", map[string]any{"name": "Contract"})
+	if deal["key"] != "contract" || deal["plural"] != "Contracts" || deal["builtin"] != false {
 		t.Fatalf("deal: %v", deal)
 	}
-	owner.must(400, "POST", base+"/types", map[string]any{"name": "Deal"})
-	stages := owner.must(201, "POST", base+"/option-sets", map[string]any{"name": "Deal stage", "options": []map[string]any{
+	owner.must(400, "POST", base+"/types", map[string]any{"name": "Contract"})
+	stages := owner.must(201, "POST", base+"/option-sets", map[string]any{"name": "Contract stage", "options": []map[string]any{
 		{"key": "open", "label": "Open"}, {"key": "won", "label": "Won"}, {"key": "lost", "label": "Lost"}}})
-	if stages["key"] != "deal_stage" || len(stages["options"].([]any)) != 3 {
+	if stages["key"] != "contract_stage" || len(stages["options"].([]any)) != 3 {
 		t.Fatalf("stages: %v", stages)
 	}
-	owner.must(400, "POST", base+"/types/deal/fields", map[string]any{"label": "Stage", "value_type": "status"})
-	owner.must(400, "POST", base+"/types/deal/fields", map[string]any{"label": "Stage", "value_type": "status", "option_set": "nope"})
-	owner.must(400, "POST", base+"/types/deal/fields", map[string]any{"label": "Name", "value_type": "text"})
-	owner.must(201, "POST", base+"/types/deal/fields", map[string]any{"label": "Stage", "value_type": "status", "option_set": "deal_stage", "filterable": true})
-	owner.must(201, "POST", base+"/types/deal/fields", map[string]any{"label": "Amount", "value_type": "currency"})
-	owner.must(201, "POST", base+"/types/deal/fields", map[string]any{"label": "Company", "value_type": "record_reference", "target_type": "account"})
+	owner.must(400, "POST", base+"/types/contract/fields", map[string]any{"label": "Stage", "value_type": "status"})
+	owner.must(400, "POST", base+"/types/contract/fields", map[string]any{"label": "Stage", "value_type": "status", "option_set": "nope"})
+	owner.must(400, "POST", base+"/types/contract/fields", map[string]any{"label": "Name", "value_type": "text"})
+	owner.must(201, "POST", base+"/types/contract/fields", map[string]any{"label": "Stage", "value_type": "status", "option_set": "contract_stage", "filterable": true})
+	owner.must(201, "POST", base+"/types/contract/fields", map[string]any{"label": "Amount", "value_type": "currency"})
+	owner.must(201, "POST", base+"/types/contract/fields", map[string]any{"label": "Company", "value_type": "record_reference", "target_type": "account"})
 	owner.must(201, "POST", base+"/types/person/fields", map[string]any{"label": "Plan", "value_type": "text", "write_policy": "source_owned"})
 	owner.must(400, "POST", base+"/types/person/fields", map[string]any{"label": "First name", "value_type": "text"})
 	owner.must(404, "POST", base+"/types/nope/fields", map[string]any{"label": "X", "value_type": "text"})
 
 	// A field's type never changes; built-ins never change.
-	owner.must(400, "PATCH", base+"/types/deal/fields/amount", map[string]any{"value_type": "number"})
-	owner.must(200, "PATCH", base+"/types/deal/fields/amount", map[string]any{"label": "Deal value"})
+	owner.must(400, "PATCH", base+"/types/contract/fields/amount", map[string]any{"value_type": "number"})
+	owner.must(200, "PATCH", base+"/types/contract/fields/amount", map[string]any{"label": "Contract value"})
 	owner.must(400, "PATCH", base+"/types/person/fields/first_name", map[string]any{"label": "Given name"})
 	owner.must(400, "PATCH", base+"/types/person", map[string]any{"name": "Human"})
 
 	// Options are archived, never deleted, so old values keep their meaning.
-	upd := owner.must(200, "PATCH", base+"/option-sets/deal_stage", map[string]any{"options": []map[string]any{
+	upd := owner.must(200, "PATCH", base+"/option-sets/contract_stage", map[string]any{"options": []map[string]any{
 		{"key": "open", "label": "Open"}, {"key": "won", "label": "Closed won"}}})
 	opts := upd["options"].([]any)
 	if len(opts) != 3 || opts[1].(map[string]any)["label"] != "Closed won" || opts[2].(map[string]any)["archived"] != true {
@@ -81,11 +83,11 @@ func TestCatalog(t *testing.T) {
 	}
 
 	// Archiving a type hides it unless asked for.
-	owner.must(200, "PATCH", base+"/types/deal", map[string]any{"archived": true})
-	if n := len(owner.must(200, "GET", base+"/types", nil)["data"].([]any)); n != 2 {
+	owner.must(200, "PATCH", base+"/types/contract", map[string]any{"archived": true})
+	if n := len(owner.must(200, "GET", base+"/types", nil)["data"].([]any)); n != 3 {
 		t.Fatalf("types without archived: %d", n)
 	}
-	if n := len(owner.must(200, "GET", base+"/types?archived=true", nil)["data"].([]any)); n != 3 {
+	if n := len(owner.must(200, "GET", base+"/types?archived=true", nil)["data"].([]any)); n != 4 {
 		t.Fatalf("types with archived: %d", n)
 	}
 

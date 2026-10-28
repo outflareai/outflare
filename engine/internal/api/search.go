@@ -157,6 +157,7 @@ func (s *Server) search(w http.ResponseWriter, r *http.Request) {
 				ts_rank(search_vector_record(r.name, r.attributes), q.t) + 0.5 AS rank, NULL::text AS body
 			FROM q, records r
 			WHERE $3 AND r.workspace_id = $1 AND r.merged_into IS NULL AND r.archived_at IS NULL
+				AND NOT ($7 AND r.record_type = 'deal') -- a deal comes once, as a deal
 				AND search_vector_record(r.name, r.attributes) @@ q.t
 				AND ($9::uuid[] IS NULL OR r.brand_id IS NULL OR r.brand_id = ANY ($9))
 				AND ($12::uuid IS NULL OR r.brand_id = $12) AND (NOT $13 OR r.brand_id IS NULL)
@@ -165,6 +166,7 @@ func (s *Server) search(w http.ResponseWriter, r *http.Request) {
 			(SELECT 'record', r.id, r.id, r.name, i.namespace || ': ' || i.value, r.updated_at, ts_rank(search_vector_identity(i.value), q.t) + 0.5, NULL
 			FROM q, record_identities i JOIN records r ON r.id = i.record_id
 			WHERE $3 AND i.workspace_id = $1 AND r.workspace_id = $1 AND i.valid_to IS NULL AND r.merged_into IS NULL AND r.archived_at IS NULL
+				AND NOT ($7 AND r.record_type = 'deal')
 				AND search_vector_identity(i.value) @@ q.t
 				AND ($9::uuid[] IS NULL OR r.brand_id IS NULL OR r.brand_id = ANY ($9))
 				AND ($12::uuid IS NULL OR r.brand_id = $12) AND (NOT $13 OR r.brand_id IS NULL)

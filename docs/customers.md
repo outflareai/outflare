@@ -10,7 +10,7 @@ Everything here works the same from the REST API and the MCP server.
 
 The catalog says what records can hold. Read it first (`GET /v1/workspaces/{ws}/catalog`, MCP `get_catalog`) and reuse what is there before adding anything.
 
-- **Record types.** Every workspace has `person` and `account` (shown as Companies). Add your own with `POST .../catalog/types`, such as `deal`. A type's key never changes; archiving one keeps its records.
+- **Record types.** Every workspace has `person` and `account` (shown as Companies), and a `deal` type (Deals) it can change like its own. Add your own with `POST .../catalog/types`, such as `subscription`. A type's key never changes; archiving one keeps its records.
 - **Fields.** Each type has fields, each the one definition of a fact for every feature: imports, list filters, enrichment, the CRM and merge tags all use it. Built in: first and last name, job title, seniority, companies, country, city, time zone, LinkedIn and lifecycle stage for people; website, industry, company size, country, LinkedIn and lifecycle stage for companies. Add your own with `POST .../catalog/types/{type}/fields`.
 - **Value types.** `text`, `number`, `currency` (`{"amount_minor": 1999, "currency": "USD"}`), `date`, `timestamp`, `checkbox`, `select` and `status` (an option key), `rating` (0 to 5), `email`, `phone` (international format), `url`, `location`, `record_reference` (another record, such as a deal's company) and `actor_reference` (a member of the workspace). `multiple` fields take a list. A field's key, value type, option list and target never change; anything else can, and a field can be archived.
 - **Option lists.** `select` and `status` fields share option lists, so the industry of a lead, a CRM company and an import are the same values. Built in: country (ISO 3166 codes), industry, company size, seniority and lifecycle stage. Add your own, such as deal stages, with `POST .../catalog/option-sets`. Options are archived, never deleted, so old values keep their meaning.
@@ -62,6 +62,18 @@ Only a **verified** identity claims its value, and only one record can hold a va
 ## Links
 
 Records link to each other: a person to their companies, a deal to its company. Record reference fields (such as a person's `companies`) are links too, so there is one graph. Add other links with `POST .../records/{record}/relationships` (`kind` such as `partner_of`) and end them with `.../relationships/{relationship}/end`; ended links are kept.
+
+## Deals
+
+Every deal is one record of the `deal` type, whether it was made in the CRM, by a reply rule, by an import, logged for outreach (`POST .../deals`) or synced from HubSpot. The deal record and the deal in outreach outcomes share an id, so `GET .../records/{id}` and `GET .../deals/{id}` are the same deal, and a change on either side shows on the other.
+
+- **Fields.** Every workspace starts with Attio's shape, so a deal type brought over from Attio already fits: `stage` (a status field on the `deal_stage` list: lead, qualified, meeting, proposal, negotiation, won, lost), `value` (currency), `close_date`, `associated_people` and `associated_company`. A workspace that made its own `deal` type keeps it, with any of these fields it lacked added, and `won` and `lost` added to its stages.
+- **Won and lost** close a deal: outcomes count it as won or lost, and its close date is the day it closed. Any other stage is open.
+- **People and company.** A deal logged for a lead gets the lead's person, and their company when the deal has none.
+- **Outreach.** A deal made in the CRM is tied to the outreach that reached its first person, as a synced deal is: their lead's sequence, project and latest meeting before the deal opened (the `deals.attribute` job, `deal.attributed` event).
+- **HubSpot.** HubSpot stays the source of truth for a synced deal: its next sync of that deal writes its name, stage, value and close date again. A HubSpot stage the CRM has no match for keeps the record's open stage.
+- **Archiving** a deal record takes it out of outcomes and reports; deleting a deal through `DELETE .../deals/{id}` archives its record. A deal from HubSpot stays in outcomes until HubSpot closes or removes it.
+- **Timelines.** A deal is on the timelines of its people and company, and its own timeline shows it and its changes.
 
 ## Product events
 

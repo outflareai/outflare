@@ -315,7 +315,10 @@ func TestCRMImportFromAttio(t *testing.T) {
 		t.Fatalf("deals: %v", c)
 	}
 	cat := sum["catalog"].(map[string]any)
-	if fmt.Sprint(cat["types_created"]) != "[deal]" || fmt.Sprint(cat["option_sets_created"]) != "[account_categories deal_stage]" ||
+	// Every workspace has the Deal type with Attio's field keys, so Attio's
+	// deals go into it.
+	if fmt.Sprint(cat["types_created"]) != "[]" || fmt.Sprint(cat["option_sets_created"]) != "[account_categories]" ||
+		!strings.Contains(fmt.Sprint(cat["fields_reused"]), "deal.stage") ||
 		!strings.Contains(fmt.Sprint(cat["fields_skipped"]), "companies.team") || !strings.Contains(fmt.Sprint(cat["fields_skipped"]), "people.last_interaction") ||
 		!strings.Contains(fmt.Sprint(cat["fields_reused"]), "account.industry") {
 		t.Fatalf("catalog: %v", cat)

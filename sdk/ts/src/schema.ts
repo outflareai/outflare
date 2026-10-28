@@ -9172,7 +9172,7 @@ export interface paths {
         };
         /**
          * List deals
-         * @description Scope: outcomes.read. Deals from the CRM, plus any logged by hand. Newest first.
+         * @description Scope: outcomes.read. Every deal: those in Outflare's CRM (each deal is a record of the Deal type, with the same id), those synced from HubSpot and those logged here. Newest first.
          */
         get: operations["listDeals"];
         put?: never;
@@ -23377,6 +23377,7 @@ export interface components {
             /** @description Not from outreach; pins that. */
             unattributed?: boolean;
         };
+        /** @description A deal's outreach outcome. Every deal is also a record of the workspace's Deal type in the CRM, with the same id: GET .../records/{id} shows its stage, value, people and company, and changes made there show here. */
         Deal: {
             /** Format: uuid */
             id: string;
@@ -23390,12 +23391,16 @@ export interface components {
             lead_id: string | null;
             /** Format: uuid */
             meeting_id: string | null;
-            /** @enum {string} */
-            source: "hubspot" | "manual" | "api";
+            /**
+             * @description crm: made in Outflare's CRM, by hand, a reply rule or an import.
+             * @enum {string}
+             */
+            source: "hubspot" | "manual" | "api" | "crm";
             /** Format: uuid */
             integration_id: string | null;
             external_id: string | null;
             name: string;
+            /** @description The stage's name: HubSpot's for a synced deal, the CRM stage's label for the others. */
             stage: string;
             /** @enum {string} */
             state: "open" | "won" | "lost";

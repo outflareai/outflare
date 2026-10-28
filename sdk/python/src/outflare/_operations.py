@@ -9525,7 +9525,7 @@ class Operations(_Mixin):
     ) -> Any:
         """List deals.
 
-        Scope: outcomes.read. Deals from the CRM, plus any logged by hand. Newest first.
+        Scope: outcomes.read. Every deal: those in Outflare's CRM (each deal is a record of the Deal type, with the same id), those synced from HubSpot and those logged here. Newest first.
 
         Needs: the outcomes.read scope.
         GET /v1/workspaces/{ws}/deals

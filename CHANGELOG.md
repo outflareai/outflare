@@ -6,6 +6,16 @@ Each pull request that changes what Outflare does adds a change note in [changes
 
 ## [Unreleased]
 
+## [0.13.0] - 2026-10-28
+
+### Changed
+
+- Every deal is now one CRM record. Deals logged for outreach or synced from HubSpot appear under Deals with their people and company, and deals made in the CRM, by a reply rule or by an Attio import count in outreach outcomes and reports.
+
+### Upgrading
+
+- existing deals move over when the engine starts; every workspace gets a Deal type, and a workspace's own `deal` type is kept and filled in.
+
 ## [0.12.0] - 2026-10-28
 
 ### Added

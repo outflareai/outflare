@@ -44,7 +44,7 @@ func TestKits(t *testing.T) {
 	if !strings.Contains(res["error"].(map[string]any)["message"].(string), "audience_size") {
 		t.Fatalf("conflict: %v", res)
 	}
-	if n := len(owner.must(200, "GET", base+"/catalog/option-sets", nil)["data"].([]any)); n != 6 {
+	if n := len(owner.must(200, "GET", base+"/catalog/option-sets", nil)["data"].([]any)); n != 7 {
 		t.Fatalf("a refused kit added option lists: %d", n)
 	}
 

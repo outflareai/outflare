@@ -1682,6 +1682,10 @@ func createWorkspace(ctx context.Context, tx pgx.Tx, name, ownerID string) (stri
 		}
 		break
 	}
+	// New workspaces start with the Deal type, like Attio's Deals.
+	if _, err := tx.Exec(ctx, `SELECT outflare_deal_type($1)`, id); err != nil {
+		return "", err
+	}
 	// The slug may be one another workspace had; it now leads here.
 	if _, err := tx.Exec(ctx, `DELETE FROM workspace_slug_history WHERE slug = (SELECT slug FROM workspaces WHERE id = $1)`, id); err != nil {
 		return "", err
