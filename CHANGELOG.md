@@ -6,6 +6,12 @@ Each pull request that changes what Outflare does adds a change note in [changes
 
 ## [Unreleased]
 
+## [0.15.0] - 2026-10-28
+
+### Changed
+
+- See every domain your workspace has set up in one list, with what each is used for (website, SEO, site tracking, cold email, Lifecycle email, tracked links) and what still needs a step, through `GET /domains` and the `list_workspace_domains` MCP tool. `GET /connections` (MCP `list_connections`) lists every connected account, mailbox sign-ins included.
+
 ## [0.14.0] - 2026-10-28
 
 ### Added

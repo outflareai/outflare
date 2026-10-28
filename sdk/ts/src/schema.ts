@@ -9090,6 +9090,92 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/workspaces/{ws}/domain-lookups/{domain}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                /** @example proton.me */
+                domain: string;
+            };
+            cookie?: never;
+        };
+        /**
+         * What kind of email domain this is
+         * @description Scope: leads.read. The same answer as GET /email-domains/{domain},
+         *     under a name that can't be mistaken for Lifecycle's email domains.
+         */
+        get: operations["getDomainLookup"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/workspaces/{ws}/domains": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+            };
+            cookie?: never;
+        };
+        /**
+         * List the workspace's own domains
+         * @description Scope: workspace.read. Every domain the workspace has set up for
+         *     something, once, by registrable domain (`www.acme.example` and
+         *     `mail.acme.example` are both `acme.example`): a brand's website, an
+         *     SEO site, a site tracking origin, a cold email sending domain, a
+         *     Lifecycle email domain and a tracking domain for links. Each use says
+         *     its host and status, and `needs_attention` lists the uses still
+         *     pending or failing. `record_id` is the company record with this
+         *     domain, when there is one. With `brand`, only that brand's uses; a
+         *     brand-limited caller sees its brands' uses and the shared ones.
+         */
+        get: operations["listDomains"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/workspaces/{ws}/connections": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+            };
+            cookie?: never;
+        };
+        /**
+         * List every connected account
+         * @description Scope: integrations.read. Every account the workspace has connected,
+         *     in one shape: connector integrations (GET /integrations) and the
+         *     Google and Microsoft sign-ins for mailboxes (GET /oauth-connections).
+         *     `kind` says which, and its id opens it there. With `brand`, only the
+         *     connections that brand uses, as GET /integrations. Mailbox sign-ins
+         *     belong to the whole workspace, so they are left out when a brand is
+         *     picked or the caller is limited to brands.
+         */
+        get: operations["listConnections"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/workspaces/{ws}/outcomes/report": {
         parameters: {
             query?: never;
@@ -23335,6 +23421,57 @@ export interface components {
         };
         /** @description `true`, `false`, or `"unknown"` when there is no evidence either way. */
         Tri: boolean | "unknown";
+        /** @enum {string} */
+        DomainPurpose: "website" | "seo" | "site_tracking" | "cold_email" | "lifecycle_email" | "tracking_links";
+        WorkspaceDomain: {
+            /** @example acme.example */
+            domain: string;
+            brand_ids: string[];
+            uses: {
+                purpose: components["schemas"]["DomainPurpose"];
+                /**
+                 * @description The host set up, which can be a subdomain.
+                 * @example mail.acme.example
+                 */
+                host: string;
+                /**
+                 * @description active where there is nothing to verify (a brand's website, a site tracking origin).
+                 * @enum {string}
+                 */
+                status: "verified" | "pending" | "failed" | "active";
+                /** Format: uuid */
+                brand_id: string | null;
+                /** @description What opens it in its own module: the brand, SEO site, site key, Lifecycle or tracking domain id, or the sending domain's name. */
+                id: string;
+            }[];
+            purposes: components["schemas"]["DomainPurpose"][];
+            /** @description Purposes with a use still pending or failing. */
+            needs_attention: components["schemas"]["DomainPurpose"][];
+            /**
+             * Format: uuid
+             * @description The company record with this domain.
+             */
+            record_id: string | null;
+        };
+        Connection: {
+            /** @enum {string} */
+            kind: "integration" | "mailbox_oauth";
+            /** Format: uuid */
+            id: string;
+            /**
+             * @description The connector, or google or microsoft for a mailbox sign-in.
+             * @example hubspot
+             */
+            connector: string;
+            name: string;
+            /** @example crm */
+            category: string;
+            status: string;
+            /** Format: uuid */
+            brand_id: string | null;
+            /** Format: date-time */
+            created_at: string;
+        };
         Classification: {
             /**
              * @description email when an address was sent; address-only attributes are left out for domain.
@@ -44874,6 +45011,95 @@ export interface operations {
                 };
             };
             400: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    getDomainLookup: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                /** @example proton.me */
+                domain: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The classification. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Classification"];
+                };
+            };
+            400: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    listDomains: {
+        parameters: {
+            query?: {
+                /** @description Only records of this brand: its id or handle, none for records shared by every brand, or all (the default). */
+                brand?: components["parameters"]["Brand"];
+                /** @description Only domains set up for this. */
+                purpose?: components["schemas"]["DomainPurpose"];
+            };
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The domains, by name. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["WorkspaceDomain"][];
+                    };
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    listConnections: {
+        parameters: {
+            query?: {
+                /** @description Only records of this brand: its id or handle, none for records shared by every brand, or all (the default). */
+                brand?: components["parameters"]["Brand"];
+                /** @description Only this connector category (mailboxes includes the mailbox sign-ins). */
+                category?: string;
+            };
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The connections, oldest first. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["Connection"][];
+                    };
+                };
+            };
             default: components["responses"]["Error"];
         };
     };

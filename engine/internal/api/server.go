@@ -489,6 +489,7 @@ func (s *Server) buildHandler() http.Handler {
 	s.routesCustomerProfiles(mux)
 	s.routesVerification(mux)
 	s.routesClassify(mux)
+	s.routesWorkspaceDomains(mux)
 	s.routesMissions(mux)
 	s.routesPlaybooks(mux)
 	s.routesKits(mux)

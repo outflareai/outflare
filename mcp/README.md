@@ -121,6 +121,7 @@ Read (always available):
 | `list_domains`, `get_domain` | Sending domains with health, issues and their fixes, DNS and blocklist results, settings and sending stats |
 | `list_sending_servers`, `get_sending_server` | Sending servers (shared SMTP host and IPs, e.g. Mailreef or your own mail server) with IP blocklist results, health, shared cap and sending stats |
 | `list_tracking_domains` | The workspace's own domains for unsubscribe and click links, with status and the CNAME target |
+| `list_workspace_domains` | Every domain the workspace has set up, once, with what it's used for (website, SEO, site tracking, cold email, Lifecycle, tracked links), each use's status and what needs attention |
 | `list_leads` | Search leads by email, name or company |
 | `get_lead` | One lead: fields, custom fields, lists, verification and suppression |
 | `list_events` | What happened since the last call: replies, bounces, opt-outs, paused mailboxes, held mission writes. Keep `next_after` and pass it back as `after`; `brand` narrows it |
@@ -157,6 +158,7 @@ Read (always available):
 | `list_inbox_tags`, `list_inbox_views` | The workspace's reply tags with counts, and the inbox filters people saved |
 | `list_connectors` | Services that can be connected (verification, sequencers, mailbox suppliers, CRMs, data, DNS), their credential fields and how many are connected |
 | `list_integrations` | Connected accounts with status, credits, last error and the brands that use each; `brand` lists what one brand uses |
+| `list_connections` | Every connected account in one list: connector integrations and the Google and Microsoft mailbox sign-ins |
 | `get_connection_request` | Whether the user has finished a connection link yet |
 | `preview_import`, `get_import` | What a connected Instantly or Smartlead account holds, and how an import went |
 | `preview_crm_import` | What a connected CRM (Attio) holds: objects, fields, pipeline stages, lists and counts, before moving it over |

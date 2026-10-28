@@ -467,6 +467,27 @@ export function createServer({ client: gtm, workspace, agency, readOnly = false,
   );
 
   server.registerTool(
+    "list_workspace_domains",
+    {
+      title: "List all of the workspace's domains",
+      description:
+        "Every domain the workspace has set up, once per registrable domain, with each use: a brand's website, an SEO site, site tracking, " +
+        "cold email sending, Lifecycle email and tracked links, each with its host and status (verified, pending, failed, active). " +
+        "needs_attention lists the uses still pending or failing; record_id is the company record with that domain. " +
+        "Use it to see what a domain is already set up for before adding it somewhere else.",
+      inputSchema: {
+        purpose: z
+          .enum(["website", "seo", "site_tracking", "cold_email", "lifecycle_email", "tracking_links"])
+          .optional()
+          .describe("Only domains set up for this."),
+        brand: brandParam,
+      },
+      annotations: read,
+    },
+    (q) => call(() => gtm.GET("/v1/workspaces/{ws}/domains", { params: { path, query: withBrand(q) } })),
+  );
+
+  server.registerTool(
     "get_domain",
     {
       title: "Get a sending domain",
@@ -1029,6 +1050,19 @@ export function createServer({ client: gtm, workspace, agency, readOnly = false,
       annotations: read,
     },
     (q) => call(() => gtm.GET("/v1/workspaces/{ws}/integrations", { params: { path, query: q } })),
+  );
+
+  server.registerTool(
+    "list_connections",
+    {
+      title: "List every connection",
+      description:
+        "Every account the workspace has connected in one list: connector integrations (kind integration, see list_integrations) and the Google " +
+        "and Microsoft sign-ins for mailboxes (kind mailbox_oauth), with connector, name, category and status. Credentials are never returned.",
+      inputSchema: { category: z.string().optional().describe("Only this category, e.g. crm or mailboxes."), brand: brandParam },
+      annotations: read,
+    },
+    (q) => call(() => gtm.GET("/v1/workspaces/{ws}/connections", { params: { path, query: withBrand(q) } })),
   );
 
   server.registerTool(

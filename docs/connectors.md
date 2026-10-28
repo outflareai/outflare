@@ -119,6 +119,12 @@ Signing in needs an app registered at the provider. Set `CONNECTOR_<ID>_CLIENT_I
 
 PostHog and HubSpot used to be two connectors each, one per way in (`posthog_cloud`, `hubspot_private_app`). They are one connector each now; the old ids still work in API calls, and existing connections moved over.
 
+## One list of connections and domains
+
+`GET /v1/workspaces/{ws}/connections` lists every account the workspace has connected in one shape: connector integrations (`kind: integration`, managed at `/integrations`) and the Google and Microsoft sign-ins for mailboxes (`kind: mailbox_oauth`, managed at `/oauth-connections`). Credentials are never returned.
+
+`GET /v1/workspaces/{ws}/domains` lists every domain the workspace has set up, once per registrable domain, with each thing it is used for: a brand's website, an SEO site, a site tracking origin, a cold email sending domain, a Lifecycle email domain and a tracking domain for links. Each use has its host (a subdomain such as `links.acme.example` counts under `acme.example`) and status, `needs_attention` lists the uses still pending or failing, and `record_id` is the company record with that domain, when there is one. `?purpose=` keeps the domains set up for one thing. Each module still sets its own domains up; this is the one place to see them together. The MCP tools are `list_connections` and `list_workspace_domains`.
+
 ## DNS records without a connection (Domain Connect)
 
 Where Outflare needs DNS records (a site's proof of ownership, a tracking domain, a sending domain's DKIM, SPF and DMARC, a cold email domain's missing SPF or DMARC), the page offers the same four ways: one click, a prompt for the person's own AI agent, a message for a developer, or the records to copy. The one-click button first checks whether the domain's DNS host supports [Domain Connect](https://www.domainconnect.org/). If it does and has taken Outflare's templates, the button sends the person to their DNS host's own screen, which lists the exact records and asks them to approve. They approve once and come back; Outflare gets no token and keeps no access. Everywhere else the button falls back to connecting Cloudflare (a sign-in or an API token), as before.

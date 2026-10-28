@@ -6031,6 +6031,26 @@ class Operations(_Mixin):
             "/v1/domain-connect",
         )
 
+    def get_domain_lookup(
+        self,
+        domain: str,
+        *,
+        ws: str | None = None,
+    ) -> Any:
+        """What kind of email domain this is.
+
+        Scope: leads.read. The same answer as GET /email-domains/{domain},
+        under a name that can't be mistaken for Lifecycle's email domains.
+
+        Needs: the leads.read scope.
+        GET /v1/workspaces/{ws}/domain-lookups/{domain}
+        """
+        return self._call(
+            "GET",
+            "/v1/workspaces/{ws}/domain-lookups/{domain}",
+            path={"domain": domain, "ws": ws},
+        )
+
     def get_email(
         self,
         id: str,
@@ -9402,6 +9422,33 @@ class Operations(_Mixin):
             path={"ws": ws},
         )
 
+    def list_connections(
+        self,
+        *,
+        ws: str | None = None,
+        brand: str | None = None,
+        category: str | None = None,
+    ) -> Any:
+        """List every connected account.
+
+        Scope: integrations.read. Every account the workspace has connected,
+        in one shape: connector integrations (GET /integrations) and the
+        Google and Microsoft sign-ins for mailboxes (GET /oauth-connections).
+        `kind` says which, and its id opens it there. With `brand`, only the
+        connections that brand uses, as GET /integrations. Mailbox sign-ins
+        belong to the whole workspace, so they are left out when a brand is
+        picked or the caller is limited to brands.
+
+        Needs: the integrations.read scope.
+        GET /v1/workspaces/{ws}/connections
+        """
+        return self._call(
+            "GET",
+            "/v1/workspaces/{ws}/connections",
+            path={"ws": ws},
+            query={"brand": brand, "category": category},
+        )
+
     def list_connector_catalog(
         self,
     ) -> Any:
@@ -9742,6 +9789,35 @@ class Operations(_Mixin):
             "GET",
             "/v1/workspaces/{ws}/digests",
             path={"ws": ws},
+        )
+
+    def list_domains(
+        self,
+        *,
+        ws: str | None = None,
+        brand: str | None = None,
+        purpose: str | None = None,
+    ) -> Any:
+        """List the workspace's own domains.
+
+        Scope: workspace.read. Every domain the workspace has set up for
+        something, once, by registrable domain (`www.acme.example` and
+        `mail.acme.example` are both `acme.example`): a brand's website, an
+        SEO site, a site tracking origin, a cold email sending domain, a
+        Lifecycle email domain and a tracking domain for links. Each use says
+        its host and status, and `needs_attention` lists the uses still
+        pending or failing. `record_id` is the company record with this
+        domain, when there is one. With `brand`, only that brand's uses; a
+        brand-limited caller sees its brands' uses and the shared ones.
+
+        Needs: the workspace.read scope.
+        GET /v1/workspaces/{ws}/domains
+        """
+        return self._call(
+            "GET",
+            "/v1/workspaces/{ws}/domains",
+            path={"ws": ws},
+            query={"brand": brand, "purpose": purpose},
         )
 
     def list_email_bison_compat_calls(

@@ -12310,6 +12310,96 @@ paths:
               schema: { $ref: "#/components/schemas/Classification" }
         "400": { $ref: "#/components/responses/Error" }
         default: { $ref: "#/components/responses/Error" }
+  /v1/workspaces/{ws}/domain-lookups/{domain}:
+    parameters:
+      - { $ref: "#/components/parameters/Workspace" }
+      - { name: domain, in: path, required: true, schema: { type: string }, example: proton.me }
+    get:
+      operationId: getDomainLookup
+      x-outflare-access: { scope: leads.read }
+      summary: What kind of email domain this is
+      description: |
+        Scope: leads.read. The same answer as GET /email-domains/{domain},
+        under a name that can't be mistaken for Lifecycle's email domains.
+      tags: [classification]
+      responses:
+        "200":
+          description: The classification.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Classification" }
+        "400": { $ref: "#/components/responses/Error" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/workspaces/{ws}/domains:
+    parameters: [{ $ref: "#/components/parameters/Workspace" }]
+    get:
+      operationId: listDomains
+      x-outflare-access: { scope: workspace.read, brand_limited: true }
+      summary: List the workspace's own domains
+      description: |
+        Scope: workspace.read. Every domain the workspace has set up for
+        something, once, by registrable domain (`www.acme.example` and
+        `mail.acme.example` are both `acme.example`): a brand's website, an
+        SEO site, a site tracking origin, a cold email sending domain, a
+        Lifecycle email domain and a tracking domain for links. Each use says
+        its host and status, and `needs_attention` lists the uses still
+        pending or failing. `record_id` is the company record with this
+        domain, when there is one. With `brand`, only that brand's uses; a
+        brand-limited caller sees its brands' uses and the shared ones.
+      tags: [brands]
+      parameters:
+        - { $ref: "#/components/parameters/Brand" }
+        - name: purpose
+          in: query
+          description: Only domains set up for this.
+          schema: { $ref: "#/components/schemas/DomainPurpose" }
+      responses:
+        "200":
+          description: The domains, by name.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data:
+                    type: array
+                    items: { $ref: "#/components/schemas/WorkspaceDomain" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/workspaces/{ws}/connections:
+    parameters: [{ $ref: "#/components/parameters/Workspace" }]
+    get:
+      operationId: listConnections
+      x-outflare-access: { scope: integrations.read, brand_limited: true }
+      summary: List every connected account
+      description: |
+        Scope: integrations.read. Every account the workspace has connected,
+        in one shape: connector integrations (GET /integrations) and the
+        Google and Microsoft sign-ins for mailboxes (GET /oauth-connections).
+        `kind` says which, and its id opens it there. With `brand`, only the
+        connections that brand uses, as GET /integrations. Mailbox sign-ins
+        belong to the whole workspace, so they are left out when a brand is
+        picked or the caller is limited to brands.
+      tags: [integrations]
+      parameters:
+        - { $ref: "#/components/parameters/Brand" }
+        - name: category
+          in: query
+          description: Only this connector category (mailboxes includes the mailbox sign-ins).
+          schema: { type: string }
+      responses:
+        "200":
+          description: The connections, oldest first.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data:
+                    type: array
+                    items: { $ref: "#/components/schemas/Connection" }
+        default: { $ref: "#/components/responses/Error" }
   /v1/workspaces/{ws}/outcomes/report:
     parameters:
       - { $ref: "#/components/parameters/Workspace" }
@@ -26276,6 +26366,47 @@ components:
       oneOf:
         - { type: boolean }
         - { type: string, enum: [unknown] }
+    DomainPurpose:
+      type: string
+      enum: [website, seo, site_tracking, cold_email, lifecycle_email, tracking_links]
+    WorkspaceDomain:
+      type: object
+      required: [domain, brand_ids, uses, purposes, needs_attention, record_id]
+      properties:
+        domain: { type: string, example: acme.example }
+        brand_ids: { type: array, items: { type: string, format: uuid } }
+        uses:
+          type: array
+          items:
+            type: object
+            required: [purpose, host, status, brand_id, id]
+            properties:
+              purpose: { $ref: "#/components/schemas/DomainPurpose" }
+              host: { type: string, description: "The host set up, which can be a subdomain.", example: mail.acme.example }
+              status:
+                type: string
+                enum: [verified, pending, failed, active]
+                description: "active where there is nothing to verify (a brand's website, a site tracking origin)."
+              brand_id: { type: [string, "null"], format: uuid }
+              id: { type: string, description: "What opens it in its own module: the brand, SEO site, site key, Lifecycle or tracking domain id, or the sending domain's name." }
+        purposes: { type: array, items: { $ref: "#/components/schemas/DomainPurpose" } }
+        needs_attention:
+          type: array
+          description: Purposes with a use still pending or failing.
+          items: { $ref: "#/components/schemas/DomainPurpose" }
+        record_id: { type: [string, "null"], format: uuid, description: "The company record with this domain." }
+    Connection:
+      type: object
+      required: [kind, id, connector, name, category, status, brand_id, created_at]
+      properties:
+        kind: { type: string, enum: [integration, mailbox_oauth] }
+        id: { type: string, format: uuid }
+        connector: { type: string, description: "The connector, or google or microsoft for a mailbox sign-in.", example: hubspot }
+        name: { type: string }
+        category: { type: string, example: crm }
+        status: { type: string }
+        brand_id: { type: [string, "null"], format: uuid }
+        created_at: { type: string, format: date-time }
     Classification:
       type: object
       required: [scope, normalized_domain, registrable_domain, taxonomy_version, intelligence_version, global, effective, analysis]
