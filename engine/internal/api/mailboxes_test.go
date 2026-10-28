@@ -23,7 +23,7 @@ type fakeDNS struct {
 	txt   map[string][]string
 	host  map[string][]string // blocklist answers; anything else is not found
 	cname map[string]string
-	mu    sync.RWMutex // guards host once jobs are running
+	mu    sync.RWMutex // guards host and txt once jobs are running
 }
 
 func (f *fakeDNS) LookupCNAME(_ context.Context, name string) (string, error) {
@@ -44,6 +44,13 @@ func (f *fakeDNS) setHost(name string, v []string) {
 	f.host[name] = v
 }
 
+// setTXT changes a TXT answer while jobs may be reading.
+func (f *fakeDNS) setTXT(name string, v []string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.txt[name] = v
+}
+
 func (f *fakeDNS) LookupHost(_ context.Context, name string) ([]string, error) {
 	f.mu.RLock()
 	defer f.mu.RUnlock()
@@ -61,6 +68,8 @@ func (f *fakeDNS) LookupMX(_ context.Context, name string) ([]*net.MX, error) {
 }
 
 func (f *fakeDNS) LookupTXT(_ context.Context, name string) ([]string, error) {
+	f.mu.RLock()
+	defer f.mu.RUnlock()
 	if v, ok := f.txt[name]; ok {
 		return v, nil
 	}

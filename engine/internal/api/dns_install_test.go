@@ -160,9 +160,19 @@ func TestDNSOneClickElsewhere(t *testing.T) {
 	if added("TXT", "_dmarc.northpeak.example") == nil {
 		t.Fatalf("DMARC not added: %v", cfRecords)
 	}
+	// Its DKIM key, copied from Google Admin.
+	owner.must(400, "POST", dPath+"/dns", map[string]any{"integration_id": cfConn, "dkim": []string{"p=not-a-key"}})
+	owner.must(202, "POST", dPath+"/dns", map[string]any{"integration_id": cfConn, "dkim": []string{"v=DKIM1; k=rsa; p=MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8A"}})
+	waitFor(t, owner, dPath, func(m map[string]any) bool {
+		in, _ := m["dns_install"].(map[string]any)
+		return in != nil && in["status"] != "queued"
+	})
+	if r := added("TXT", "google._domainkey.northpeak.example"); r == nil || !strings.Contains(r["content"].(string), "v=DKIM1; k=rsa; p=MIIB") {
+		t.Fatalf("DKIM not added: %v", cfRecords)
+	}
 	// Once DNS has them, there's nothing left to add.
-	e.dns.txt["northpeak.example"] = []string{"v=spf1 include:_spf.google.com ~all"}
-	e.dns.txt["_dmarc.northpeak.example"] = []string{"v=DMARC1; p=none"}
+	e.dns.setTXT("northpeak.example", []string{"v=spf1 include:_spf.google.com ~all"})
+	e.dns.setTXT("_dmarc.northpeak.example", []string{"v=DMARC1; p=none"})
 	owner.must(202, "POST", dPath+"/check", nil)
 	waitFor(t, owner, dPath, func(m map[string]any) bool { return !strings.Contains(issueCodes(m), "spf_missing") })
 	owner.must(400, "POST", dPath+"/dns", map[string]any{"integration_id": cfConn})

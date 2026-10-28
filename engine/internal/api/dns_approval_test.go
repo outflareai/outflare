@@ -43,9 +43,10 @@ func TestDNSApproval(t *testing.T) {
 	got := track.Capture(t)
 	provider := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
-		case "/dc/v2/northpeak.example/settings":
+		case "/dc/v2/northpeak.example/settings", "/dc/v2/lakeside.example/settings":
 			w.Write([]byte(`{"providerId":"cloudflare.com","providerName":"Cloudflare","urlSyncUX":"https://dash.example.net/dc","urlAPI":"https://` + r.Host + `/dc"}`))
-		case "/dc/v2/domainTemplates/providers/outflare.ai/services/siteverify", "/dc/v2/domainTemplates/providers/outflare.ai/services/dmarc":
+		case "/dc/v2/domainTemplates/providers/outflare.ai/services/siteverify", "/dc/v2/domainTemplates/providers/outflare.ai/services/dmarc",
+			"/dc/v2/domainTemplates/providers/outflare.ai/services/googleworkspace":
 			w.WriteHeader(http.StatusOK)
 		default:
 			http.NotFound(w, r)
@@ -143,6 +144,30 @@ func TestDNSApproval(t *testing.T) {
 	if run := owner.must(200, "GET", dPath, nil)["dns_install"].(map[string]any); run["provider"] != "Cloudflare" {
 		t.Fatalf("sending domain approved: %v", run)
 	}
+
+	// A domain on Google missing several records, and its DKIM key copied
+	// from Google Admin: the Google Workspace template adds only the
+	// groups missing.
+	e.dns.mx["lakeside.example"] = []*net.MX{{Host: "smtp.google.com.", Pref: 1}}
+	txt.set("_domainconnect.lakeside.example", strings.TrimPrefix(provider.URL, "https://")+"/dc")
+	lPath := base + "/sending-domains/lakeside.example"
+	owner.must(201, "POST", base+"/sending-domains", map[string]any{"domain": "lakeside.example"})
+	waitFor(t, owner, lPath, func(m map[string]any) bool { return m["checked_at"] != nil })
+	group := func(a map[string]any) url.Values {
+		link, _ := url.Parse(a["url"].(string))
+		if !strings.HasSuffix(link.Path, "/services/googleworkspace/apply") {
+			t.Fatalf("link: %s", link)
+		}
+		return link.Query()
+	}
+	if q := group(owner.must(200, "GET", lPath+"/dns/approval?return=/acme/domains", nil)); q.Get("groupId") != "spf,dmarc" {
+		t.Fatalf("groups: %v", q)
+	}
+	dkim := "v=DKIM1; k=rsa; p=MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8A"
+	if q := group(owner.must(200, "GET", lPath+"/dns/approval?return=/acme/domains&dkim="+url.QueryEscape(dkim), nil)); q.Get("groupId") != "spf,dkim,dmarc" || q.Get("dkimkey") != "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8A" {
+		t.Fatalf("with DKIM: %v", q)
+	}
+	owner.must(400, "GET", lPath+"/dns/approval?dkim=not-a-key", nil)
 
 	owner.must(404, "GET", base+"/email-provider-domains/00000000-0000-4000-8000-000000000000/dns/approval", nil)
 	owner.must(404, "POST", base+"/tracking-domains/00000000-0000-4000-8000-000000000000/dns/approved", map[string]any{})

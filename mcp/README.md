@@ -243,7 +243,7 @@ Write (left out when `OUTFLARE_MCP_READ_ONLY=1`):
 | `update_domain` | Pause or resume a domain, cap its daily sends, or set limits on all its mailboxes |
 | `update_mailbox` | Pause or resume a mailbox, or change its name, daily limit, minimum gap or pool |
 | `check_domain` | Re-check a domain's DNS and blocklists after a DNS change |
-| `add_domain_dns`, `get_domain_dns_approval` | Add a domain's missing SPF or DMARC record through the workspace's Cloudflare in one click, or with a link the user approves once at their DNS provider |
+| `add_domain_dns`, `get_domain_dns_approval` | Add a domain's missing mail records (MX, SPF, DMARC, its DKIM key) through the workspace's Cloudflare in one click, or with a link the user approves once at their DNS provider |
 | `update_sending_server` | Pause or resume a sending server, cap its daily sends, set its IPs, or turn off the automatic blocklist pause |
 | `check_sending_server` | Re-check a server's IPs against blocklists, e.g. after a delisting request |
 | `add_tracking_domain`, `check_tracking_domain`, `add_tracking_domain_dns`, `get_tracking_domain_dns_approval` | Use the user's own domain for unsubscribe and click links, check its CNAME, and add it through the workspace's Cloudflare in one click or with a link the user approves once at their DNS provider |

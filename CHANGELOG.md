@@ -6,6 +6,12 @@ Each pull request that changes what Outflare does adds a change note in [changes
 
 ## [Unreleased]
 
+## [0.17.0] - 2026-10-28
+
+### Changed
+
+- Mailboxes → Domains can now add a domain's missing MX, SPF, DKIM and DMARC records in one click for Google Workspace and Microsoft 365: paste the DKIM key from your admin console, then approve the records once at your DNS provider or add them through your Cloudflare connection. The approval also fixes an SPF record that is missing your mail host.
+
 ## [0.16.0] - 2026-10-28
 
 ### Changed

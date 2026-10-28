@@ -51,6 +51,7 @@ type domainView struct {
 	Health        string              `json:"health"`
 	Issues        []mailbox.Issue     `json:"issues"`
 	MXProvider    *string             `json:"mx_provider"`
+	MailHost      *string             `json:"mail_host"`
 	MXHosts       []string            `json:"mx_hosts"`
 	SPF           string              `json:"spf"`
 	SPFRecord     *string             `json:"spf_record"`
@@ -110,7 +111,8 @@ const domainSelect = `
 		       count(*) FILTER (WHERE status = 'error')::int AS error,
 		       count(*) FILTER (WHERE status = 'paused')::int AS paused,
 		       count(*) FILTER (WHERE status = 'verifying')::int AS verifying,
-		       COALESCE(sum(daily_limit) FILTER (WHERE status = 'active'), 0)::int AS capacity
+		       COALESCE(sum(daily_limit) FILTER (WHERE status = 'active'), 0)::int AS capacity,
+		       CASE WHEN count(DISTINCT provider) = 1 THEN min(provider) FILTER (WHERE provider IN ('google', 'microsoft')) END AS host
 		FROM mailboxes WHERE workspace_id = $1 AND ($2::text IS NULL OR domain = $2) GROUP BY domain
 	), sent AS (
 		SELECT lower(split_part(from_email, '@', 2)) AS domain,
@@ -137,7 +139,7 @@ const domainSelect = `
 		WHERE m.workspace_id = $1 AND ($2::text IS NULL OR m.domain = $2)
 		GROUP BY m.domain
 	)
-	SELECT d.domain, d.status, d.daily_limit, d.notes, d.project_id::text, d.brand_id::text, d.source, d.mx_provider, d.mx_hosts,
+	SELECT d.domain, d.status, d.daily_limit, d.notes, d.project_id::text, d.brand_id::text, d.source, d.mx_provider, mb.host, d.mx_hosts,
 	       d.spf, d.spf_record, d.dkim, d.dkim_selector, d.dmarc, d.dmarc_record, d.dmarc_policy, d.blocklists,
 	       d.checked_at, d.created_at, d.updated_at,
 	       COALESCE(mb.total, 0), COALESCE(mb.active, 0), COALESCE(mb.error, 0), COALESCE(mb.paused, 0),
@@ -161,7 +163,7 @@ func (s *Server) queryDomains(ctx context.Context, ws string, domain *string) ([
 		var v domainView
 		var lists []byte
 		c := &v.MailboxCounts
-		err := r.Scan(&v.Domain, &v.Status, &v.DailyLimit, &v.Notes, &v.ProjectID, &v.BrandID, &v.Source, &v.MXProvider, &v.MXHosts,
+		err := r.Scan(&v.Domain, &v.Status, &v.DailyLimit, &v.Notes, &v.ProjectID, &v.BrandID, &v.Source, &v.MXProvider, &v.MailHost, &v.MXHosts,
 			&v.SPF, &v.SPFRecord, &v.DKIM, &v.DKIMSelector, &v.DMARC, &v.DMARCRecord, &v.DMARCPolicy, &lists,
 			&v.CheckedAt, &v.CreatedAt, &v.UpdatedAt,
 			&v.Mailboxes, &c.Active, &c.Error, &c.Paused, &c.Verifying, &v.DailyCapacity,
@@ -194,6 +196,9 @@ func (s *Server) queryDomains(ctx context.Context, ws string, domain *string) ([
 		}
 		if v.SPFRecord != nil {
 			facts.SPFRecord = *v.SPFRecord
+		}
+		if v.MailHost != nil {
+			facts.MailHost = *v.MailHost
 		}
 		v.Issues = mailbox.DomainIssues(facts)
 		v.Health = mailbox.Health(facts.Checked, v.Issues)
@@ -282,10 +287,6 @@ func (s *Server) addDomainDNS(w http.ResponseWriter, r *http.Request) {
 	a := accessFrom(r.Context())
 	d, ok := s.findDomain(w, r, a.WorkspaceID, domainParam(r))
 	if !ok {
-		return
-	}
-	if len(sendingDomainRecords(*d)) == 0 {
-		writeError(w, r, http.StatusBadRequest, "invalid_request", "nothing to add: "+d.Domain+" has the SPF and DMARC records Outflare can add")
 		return
 	}
 	s.queueDNSAdd(w, r, a, "sending_domain", d.Domain, deref(d.BrandID))

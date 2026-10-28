@@ -16,11 +16,15 @@ import { authOption, ConnectDialog, startConnectorOAuth, type ReturnPage } from 
 // Otherwise it goes through the workspace's own Cloudflare connection:
 // see exactly which records go in, and add them with one button.
 
-export type DNSRow = { type: string; name: string; value: string; priority?: number | null };
+// change marks a record that replaces one already there (an SPF record
+// missing an include): only an approval at the provider can do that, since
+// the Cloudflare connection never changes a record.
+export type DNSRow = { type: string; name: string; value: string; priority?: number | null; change?: boolean };
 export type DNSRun = { status: "queued" | "done" | "failed"; added?: number; existing?: number; zone?: string; error?: string; provider?: string };
 type Approval = components["schemas"]["DNSApproval"];
 // What the records belong to, for the one-off approval at the provider.
-export type DNSApprovalFor = { kind: "seo_site" | "tracking_domain" | "email_domain" | "sending_domain"; id: string };
+// dkim is the DKIM key pasted from the mail host, for a sending domain.
+export type DNSApprovalFor = { kind: "seo_site" | "tracking_domain" | "email_domain" | "sending_domain"; id: string; dkim?: string[] };
 
 async function approvalLink(ws: string, f: DNSApprovalFor, ret: string) {
   const query = { return: ret };
@@ -32,7 +36,7 @@ async function approvalLink(ws: string, f: DNSApprovalFor, ret: string) {
     case "email_domain":
       return api.GET("/v1/workspaces/{ws}/email-provider-domains/{id}/dns/approval", { params: { path: { ws, id: f.id }, query } });
     case "sending_domain":
-      return api.GET("/v1/workspaces/{ws}/sending-domains/{domain}/dns/approval", { params: { path: { ws, domain: f.id }, query } });
+      return api.GET("/v1/workspaces/{ws}/sending-domains/{domain}/dns/approval", { params: { path: { ws, domain: f.id }, query: { ...query, dkim: f.dkim?.length ? f.dkim : undefined } } });
   }
 }
 
@@ -155,15 +159,16 @@ export function DNSOneClick({ ws, page, item, approval, connections, records, ru
     return () => {
       live = false;
     };
-  }, [ws, approval?.kind, approval?.id, canManage, pending]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [ws, approval?.kind, approval?.id, approval?.dkim?.join("\n"), canManage, pending]); // eslint-disable-line react-hooks/exhaustive-deps
   if (!canManage) return <Panel><p className="text-[13px] text-muted-foreground">An owner or admin can add {records.length === 1 ? "it" : "them"} in one click.</p></Panel>;
-  const these = records.length === 1 ? "this record" : `these ${records.length} records`;
-  const list = (
+  const count = (n: number) => (n === 1 ? "this record" : `these ${n} records`);
+  const these = count(records.length);
+  const list = (rows: DNSRow[]) => (
     <ul className="divide-y rounded-md border bg-background text-[12px]">
-      {records.map((r, i) => (
+      {rows.map((r, i) => (
         <li key={i} className="grid gap-x-3 gap-y-0.5 px-3 py-2 sm:grid-cols-[3.5rem_minmax(0,14rem)_1fr]">
           <span className="font-mono font-medium">{r.type}</span>
-          <code className="break-all font-mono">{r.name}</code>
+          <code className="break-all font-mono">{r.name}{r.change && <span className="ml-1.5 font-sans text-muted-foreground">(replaces the one there)</span>}</code>
           <code className="break-all font-mono text-muted-foreground">{r.type === "MX" ? `${r.priority ?? 10} ` : ""}{r.value}</code>
         </li>
       ))}
@@ -192,7 +197,7 @@ export function DNSOneClick({ ws, page, item, approval, connections, records, ru
     return (
       <Panel>
         <p className="text-[13px]">Add {these} at {appr.provider}:</p>
-        {list}
+        {list(records)}
         <p className="text-[12px] text-muted-foreground">{appr.provider} shows you the same records and asks you to approve them once. Outflare gets no access to your account. {after}</p>
         <div className="flex flex-wrap items-center gap-2">
           <Button onClick={go}><Icon name="check" className="size-3.5" /> Approve in {appr.provider}</Button>
@@ -234,19 +239,23 @@ export function DNSOneClick({ ws, page, item, approval, connections, records, ru
     if (held) toast("Waiting for approval in a mission.");
     reload();
   }
+  // The connection only adds records, so a change is left to the person.
+  const adds = records.filter((r) => !r.change);
+  const changes = records.length - adds.length;
   const queued = run?.status === "queued";
-  const ready = records.length > 0 && !queued && run?.status !== "done";
+  const ready = adds.length > 0 && !queued && run?.status !== "done";
   return (
     <Panel>
       {ready && (
         <>
-          <p className="text-[13px]">Outflare will add {these} in Cloudflare:</p>
-          {list}
+          <p className="text-[13px]">Outflare will add {count(adds.length)} in Cloudflare:</p>
+          {list(adds)}
           <p className="text-[12px] text-muted-foreground">{after}</p>
         </>
       )}
+      {changes > 0 && run?.status !== "done" && <p className="text-[12px] text-muted-foreground">Outflare never changes a record already there, so change the SPF record yourself, or hand it to your AI agent or a developer below.</p>}
       <div className="flex flex-wrap items-center gap-3">
-        {(ready || queued) && <Button disabled={busy || queued} onClick={add}><Icon name="check" className="size-3.5" /> {queued ? "Adding…" : run?.status === "failed" ? "Try again" : `Add ${these}`}</Button>}
+        {(ready || queued) && <Button disabled={busy || queued} onClick={add}><Icon name="check" className="size-3.5" /> {queued ? "Adding…" : run?.status === "failed" ? "Try again" : `Add ${count(adds.length)}`}</Button>}
         {run?.status === "done" && <Status tone="green">{run.added === undefined ? "Added in Cloudflare" : run.added ? `Added ${plural(run.added, "record")}${run.zone ? ` to ${run.zone}` : ""}` : "Already there"}{run.existing && run.added ? `, ${run.existing} already there` : ""}</Status>}
         {run?.status === "failed" && <span className="text-[13px] text-destructive">{run.error}</span>}
       </div>
@@ -259,7 +268,7 @@ export function DNSOneClick({ ws, page, item, approval, connections, records, ru
 // why finishes "Add these DNS records for <domain>, ...".
 export function dnsHelp(domain: string, records: DNSRow[], why: string): { prompt: string; developer: { subject: string; body: string } } {
   const list = records
-    .map((r, i) => `${i + 1}. Type: ${r.type}\n   Name (host): ${r.name}\n${r.type === "MX" ? `   Priority: ${r.priority ?? 10}\n` : ""}   Value: ${r.value}\n`)
+    .map((r, i) => `${i + 1}. Type: ${r.type}\n   Name (host): ${r.name}\n${r.type === "MX" ? `   Priority: ${r.priority ?? 10}\n` : ""}   Value: ${r.value}\n${r.change ? "   This replaces the record already there under this name.\n" : ""}`)
     .join("");
   const these = records.length === 1 ? "this DNS record" : "these DNS records";
   const prompt =
@@ -273,7 +282,8 @@ export function dnsHelp(domain: string, records: DNSRow[], why: string): { promp
     "When you're done, tell me. Outflare looks for the records on its own.";
   const body =
     `Hi,\n\nCould you add ${these} for ${domain}, ${why}?\n\n${list}\n` +
-    "They go alongside the records already there; nothing else changes. CNAME records should be DNS only (not proxied). Outflare checks for them on its own and ticks them off once they're visible.\n\nThanks!";
+    `${records.some((r) => r.change) ? "Any marked as replacing a record take the place of that one; the rest go alongside the records already there." : "They go alongside the records already there; nothing else changes."}` +
+    " CNAME records should be DNS only (not proxied). Outflare checks for them on its own and ticks them off once they're visible.\n\nThanks!";
   return { prompt, developer: { subject: `Please add DNS records for ${domain}`, body } };
 }
 

@@ -11,6 +11,10 @@ type DomainFacts struct {
 	Checked    bool // false until the first DNS check has run
 	Paused     bool
 	MXProvider string
+	// MailHost is the mail host every mailbox on the domain is on (google
+	// or microsoft), or empty when they differ or there are none. It
+	// stands in for MXProvider while the domain has no MX record.
+	MailHost   string
 	SPF        string
 	SPFRecord  string
 	DKIM       string
@@ -38,6 +42,8 @@ type DNSRecord struct {
 	Type  string `json:"type"`
 	Host  string `json:"host"`
 	Value string `json:"value"`
+	// Priority is an MX record's preference.
+	Priority int `json:"priority,omitempty"`
 }
 
 // spfIncludes are the SPF includes each mail host's servers send from.
@@ -112,13 +118,17 @@ func DomainIssues(f DomainFacts) []Issue {
 		}
 	}
 
-	include := spfIncludes[f.MXProvider]
+	host := f.MXProvider
+	if host == "" || host == "none" {
+		host = f.MailHost
+	}
+	include := spfIncludes[host]
 	switch f.SPF {
 	case "missing":
 		i := Issue{Code: "spf_missing", Severity: "critical", Title: "No SPF record",
 			Detail: "Google, Yahoo and Microsoft reject or junk bulk mail without SPF. Add this TXT record at your DNS host."}
 		if include != "" {
-			i.Record = &DNSRecord{"TXT", "@", "v=spf1 " + include + " ~all"}
+			i.Record = &DNSRecord{Type: "TXT", Host: "@", Value: "v=spf1 " + include + " ~all"}
 		} else {
 			i.Detail = "Google, Yahoo and Microsoft reject or junk bulk mail without SPF. Ask your inbox provider for its SPF include and add a TXT record at @ like v=spf1 include:<their SPF domain> ~all."
 		}
@@ -129,8 +139,9 @@ func DomainIssues(f DomainFacts) []Issue {
 	case "pass":
 		rec := strings.ToLower(f.SPFRecord)
 		if include != "" && !strings.Contains(rec, include) {
-			add(Issue{Code: "spf_provider", Severity: "warning", Title: "SPF does not include " + providerName(f.MXProvider),
-				Detail: "Mail sent through " + providerName(f.MXProvider) + " fails SPF until the record includes it. Add " + include + " before the all mechanism."})
+			add(Issue{Code: "spf_provider", Severity: "warning", Title: "SPF does not include " + providerName(host),
+				Detail: "Mail sent through " + providerName(host) + " fails SPF until the record includes it. Change the SPF record to the one below, which adds " + include + " and keeps everything already in it.",
+				Record: &DNSRecord{Type: "TXT", Host: "@", Value: withInclude(f.SPFRecord, include)}})
 		}
 		if strings.Contains(rec, "+all") || strings.Contains(rec, "?all") {
 			add(Issue{Code: "spf_permissive", Severity: "warning", Title: "SPF lets any server send as this domain",
@@ -139,22 +150,30 @@ func DomainIssues(f DomainFacts) []Issue {
 	}
 
 	if f.DKIM == "missing" {
-		add(Issue{Code: "dkim_missing", Severity: "critical", Title: "No DKIM key found", Detail: dkimHelp(f.MXProvider)})
+		add(Issue{Code: "dkim_missing", Severity: "critical", Title: "No DKIM key found", Detail: dkimHelp(host)})
 	}
 
 	switch f.DMARC {
 	case "missing":
 		add(Issue{Code: "dmarc_missing", Severity: "critical", Title: "No DMARC record",
 			Detail: "Google and Yahoo require DMARC from bulk senders. Start with p=none, then move to p=quarantine once SPF and DKIM pass.",
-			Record: &DNSRecord{"TXT", "_dmarc", "v=DMARC1; p=none"}})
+			Record: &DNSRecord{Type: "TXT", Host: "_dmarc", Value: "v=DMARC1; p=none;"}})
 	case "none_policy":
 		add(Issue{Code: "dmarc_none", Severity: "info", Title: "DMARC policy is p=none",
 			Detail: "This meets Google and Yahoo's rules. Once SPF and DKIM pass, p=quarantine tells receivers you stand behind your mail."})
 	}
 
 	if f.MXProvider == "none" {
-		add(Issue{Code: "mx_missing", Severity: "warning", Title: "No MX record",
-			Detail: "Replies to this domain cannot be delivered, and receivers trust domains that can't receive mail less. Add the MX records your inbox provider gives you."})
+		i := Issue{Code: "mx_missing", Severity: "warning", Title: "No MX record",
+			Detail: "Replies to this domain cannot be delivered, and receivers trust domains that can't receive mail less. Add the MX records your inbox provider gives you."}
+		switch f.MailHost {
+		case ProviderGoogle:
+			i.Detail = "Replies to this domain cannot be delivered, and receivers trust domains that can't receive mail less. Its mailboxes are on Google Workspace, so add Google's MX record."
+			i.Record = &DNSRecord{Type: "MX", Host: "@", Value: "smtp.google.com", Priority: 1}
+		case ProviderMicrosoft:
+			i.Detail = "Replies to this domain cannot be delivered, and receivers trust domains that can't receive mail less. Its mailboxes are on Microsoft 365: add the MX record the Microsoft 365 admin center shows under Settings > Domains (it ends in mail.protection.outlook.com)."
+		}
+		add(i)
 	}
 	return sortIssues(out)
 }
@@ -175,6 +194,15 @@ func Health(checked bool, issues []Issue) string {
 		}
 	}
 	return h
+}
+
+// withInclude puts include first in an SPF record, keeping the rest.
+func withInclude(spf, include string) string {
+	f := strings.Fields(spf)
+	if len(f) == 0 || !strings.EqualFold(f[0], "v=spf1") {
+		return "v=spf1 " + include + " ~all"
+	}
+	return strings.Join(append([]string{"v=spf1", include}, f[1:]...), " ")
 }
 
 func sortIssues(in []Issue) []Issue {

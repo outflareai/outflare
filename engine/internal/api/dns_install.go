@@ -14,12 +14,13 @@ import (
 	"github.com/outflareai/outflare/engine/internal/connectors"
 	"github.com/outflareai/outflare/engine/internal/crawl"
 	"github.com/outflareai/outflare/engine/internal/jobs"
+	"github.com/outflareai/outflare/engine/internal/mailbox"
 	"github.com/outflareai/outflare/engine/internal/track"
 )
 
 // One click for the other records Outflare asks a workspace to put in its
 // DNS: a site's proof of ownership (SEO), a tracking domain's CNAME and a
-// cold email domain's missing SPF or DMARC record.
+// cold email domain's missing MX, SPF, DKIM or DMARC records.
 // The workspace's own DNS host connection (Cloudflare) adds them in a job.
 // Sending domains have their own (emails.JobDomainDNS), and brand setup its
 // install step.
@@ -49,6 +50,9 @@ type dnsAddJob struct {
 	IntegrationID string `json:"integration_id"`
 	ActorID       string `json:"actor_id,omitempty"`
 	ActorType     string `json:"actor_type,omitempty"`
+	// DKIM is what the person copied from their mail host's admin for a
+	// sending domain's DKIM key (mailbox.DKIMRecords).
+	DKIM []string `json:"dkim,omitempty"`
 }
 
 // dnsConnections gives, for a brand, the workspace's working connections
@@ -83,12 +87,28 @@ func (s *Server) connectionsWith(ctx context.Context, ws, capability string) (fu
 // connection in the body.
 func (s *Server) queueDNSAdd(w http.ResponseWriter, r *http.Request, a *access, subject, id, brand string) {
 	var req struct {
-		IntegrationID string `json:"integration_id"`
+		IntegrationID string   `json:"integration_id"`
+		DKIM          []string `json:"dkim"`
 	}
 	if !decode(w, r, &req) {
 		return
 	}
 	ctx := r.Context()
+	if subject == "sending_domain" {
+		d, ok := s.findDomain(w, r, a.WorkspaceID, id)
+		if !ok {
+			return
+		}
+		recs, err := sendingDomainRecords(*d, req.DKIM, false)
+		if err != nil {
+			writeError(w, r, http.StatusBadRequest, "invalid_request", err.Error())
+			return
+		}
+		if len(recs) == 0 {
+			writeError(w, r, http.StatusBadRequest, "invalid_request", "nothing to add: "+d.Domain+" has the records Outflare can add (it never changes a record already there, such as an SPF record missing an include)")
+			return
+		}
+	}
 	if s.allocError(w, r, s.setupConnection(ctx, a.WorkspaceID, brand, req.IntegrationID, connectors.CapDNSWrite)) {
 		return
 	}
@@ -98,7 +118,7 @@ func (s *Server) queueDNSAdd(w http.ResponseWriter, r *http.Request, a *access, 
 			return err
 		}
 		if _, err := jobs.Enqueue(ctx, tx, jobs.NewJob{Kind: jobDNSAdd, WorkspaceID: &a.WorkspaceID, MaxAttempts: 4,
-			Payload: dnsAddJob{Subject: subject, ID: id, BrandID: brand, IntegrationID: req.IntegrationID, ActorID: a.ActorID, ActorType: a.ActorType}}); err != nil {
+			Payload: dnsAddJob{Subject: subject, ID: id, BrandID: brand, IntegrationID: req.IntegrationID, ActorID: a.ActorID, ActorType: a.ActorType, DKIM: req.DKIM}}); err != nil {
 			return err
 		}
 		return record(ctx, tx, &a.principal, a.WorkspaceID, subject+".dns_requested", subject, id, map[string]any{"integration_id": req.IntegrationID})
@@ -156,7 +176,7 @@ func (s *Server) dnsAddJob(ctx context.Context, job jobs.Job) error {
 
 // addSubjectRecords adds what the subject needs: a site's TXT proof, a
 // tracking domain's CNAME to this server, or a cold email domain's missing
-// SPF and DMARC records.
+// mail records.
 func (s *Server) addSubjectRecords(ctx context.Context, ws string, p dnsAddJob) (connectors.DNSResult, error) {
 	var want []connectors.DNSRecord
 	switch p.Subject {
@@ -182,9 +202,11 @@ func (s *Server) addSubjectRecords(ctx context.Context, ws string, p dnsAddJob) 
 		if len(list) == 0 {
 			return connectors.DNSResult{}, pgx.ErrNoRows
 		}
-		want = sendingDomainRecords(list[0])
+		if want, err = sendingDomainRecords(list[0], p.DKIM, false); err != nil {
+			return connectors.DNSResult{}, errInvalid(err.Error())
+		}
 		if len(want) == 0 {
-			return connectors.DNSResult{}, errInvalid("nothing to add: the domain's SPF and DMARC records are in place")
+			return connectors.DNSResult{}, errInvalid("nothing to add: the domain's records are in place")
 		}
 	}
 	o, err := s.integrations.Open(ctx, s.pool, ws, p.IntegrationID)
@@ -202,21 +224,40 @@ func (s *Server) addSubjectRecords(ctx context.Context, ws string, p dnsAddJob) 
 }
 
 // sendingDomainRecords are the records a cold email domain's health check
-// asks for that Outflare can add (a missing SPF or DMARC record), with
-// absolute names.
-func sendingDomainRecords(d domainView) []connectors.DNSRecord {
-	var out []connectors.DNSRecord
+// asks for that Outflare can add, with absolute names: a missing MX, SPF
+// or DMARC record, Google or Microsoft in its SPF record, and its DKIM key
+// from dkim, what the person copied from their mail host's admin (none
+// leaves DKIM out). Adding an include to an SPF record already there
+// changes that record, which only the DNS provider's own approval does
+// (it merges SPF), so it is left out unless merges.
+func sendingDomainRecords(d domainView, dkim []string, merges bool) ([]connectors.DNSRecord, error) {
+	var recs []mailbox.DNSRecord
 	for _, i := range d.Issues {
-		if i.Record == nil {
-			continue
+		switch {
+		case i.Code == "spf_provider" && !merges:
+		case i.Record != nil:
+			recs = append(recs, *i.Record)
+		case i.Code == "dkim_missing" && len(dkim) > 0:
+			host := deref(d.MXProvider)
+			if host == "" || host == "none" {
+				host = deref(d.MailHost)
+			}
+			rs, err := mailbox.DKIMRecords(host, dkim)
+			if err != nil {
+				return nil, err
+			}
+			recs = append(recs, rs...)
 		}
-		name := d.Domain
-		if i.Record.Host != "@" {
-			name = i.Record.Host + "." + d.Domain
-		}
-		out = append(out, connectors.DNSRecord{Type: i.Record.Type, Name: name, Content: i.Record.Value})
 	}
-	return out
+	var out []connectors.DNSRecord
+	for _, r := range recs {
+		name := d.Domain
+		if r.Host != "@" {
+			name = r.Host + "." + d.Domain
+		}
+		out = append(out, connectors.DNSRecord{Type: r.Type, Name: name, Content: r.Value, Priority: r.Priority})
+	}
+	return out, nil
 }
 
 // afterDNSAdded starts looking for the records, so they tick off on their

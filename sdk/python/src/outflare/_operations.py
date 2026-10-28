@@ -545,13 +545,14 @@ class Operations(_Mixin):
         domain: str,
         *,
         ws: str | None = None,
+        dkim: list[str] | None = None,
         integration_id: str,
         extra_body: dict[str, Any] | None = None,
         idempotency_key: str | None = None,
     ) -> Any:
-        """Add a domain's missing SPF or DMARC record in one click.
+        """Add a domain's missing mail records in one click.
 
-        Scope: mailboxes.manage. Adds the records the domain's issues ask for (`issues[].record`) through the workspace's own DNS host connection (such as Cloudflare), in the background. It only adds records, never changes or deletes one. Poll the domain: `dns_install` says how it went, and the domain is checked again once they're in. 400 when nothing is missing.
+        Scope: mailboxes.manage. Adds the records the domain's issues ask for (`issues[].record`: a missing MX, SPF or DMARC record) and, with `dkim`, its DKIM key, through the workspace's own DNS host connection (such as Cloudflare), in the background. It only adds records, never changes or deletes one, so an SPF record missing its mail host's include (`spf_provider`) is left to the approval link or to you. Poll the domain: `dns_install` says how it went, and the domain is checked again once they're in. 400 when nothing is missing or `dkim` isn't a key from the domain's mail host.
 
         Needs: the mailboxes.manage scope.
         POST /v1/workspaces/{ws}/sending-domains/{domain}/dns
@@ -560,7 +561,7 @@ class Operations(_Mixin):
             "POST",
             "/v1/workspaces/{ws}/sending-domains/{domain}/dns",
             path={"domain": domain, "ws": ws},
-            body={"integration_id": integration_id},
+            body={"dkim": dkim, "integration_id": integration_id},
             extra_body=extra_body,
             idempotency_key=idempotency_key,
         )
@@ -7315,10 +7316,11 @@ class Operations(_Mixin):
         *,
         ws: str | None = None,
         return_: str | None = None,
+        dkim: list[str] | None = None,
     ) -> Any:
-        """Get a one-off approval link for a domain's missing SPF or DMARC record.
+        """Get a one-off approval link for a domain's missing mail records.
 
-        Scope: mailboxes.manage. Looks up the domain's DNS provider. When it supports Domain Connect and has Outflare's template, `url` takes the person to the provider's own screen to approve exactly these records once; Outflare keeps no access afterwards. Otherwise `reason` says why, and .../dns with a DNS host connection is the way.
+        Scope: mailboxes.manage. Looks up the domain's DNS provider. When it supports Domain Connect and has Outflare's template, `url` takes the person to the provider's own screen to approve exactly these records once; Outflare keeps no access afterwards. The records are the ones the domain's issues ask for, including an include added to its SPF record (the provider merges it), and its DKIM key with `dkim`. One record goes through a general template, several through the mail host's (Google Workspace, Microsoft 365). Otherwise `reason` says why, and .../dns with a DNS host connection is the way. 400 when `dkim` isn't a key from the domain's mail host.
 
         Needs: the mailboxes.manage scope.
         GET /v1/workspaces/{ws}/sending-domains/{domain}/dns/approval
@@ -7327,7 +7329,7 @@ class Operations(_Mixin):
             "GET",
             "/v1/workspaces/{ws}/sending-domains/{domain}/dns/approval",
             path={"domain": domain, "ws": ws},
-            query={"return": return_},
+            query={"return": return_, "dkim": dkim},
         )
 
     def get_sending_server(

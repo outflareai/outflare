@@ -59,7 +59,7 @@ func TestDomainsAddCheckAndSettings(t *testing.T) {
 		t.Fatalf("bare: %s %v", issueCodes(bare), bare)
 	}
 	rec := bare["issues"].([]any)[2].(map[string]any)["record"].(map[string]any)
-	if rec["host"] != "_dmarc" || rec["value"] != "v=DMARC1; p=none" {
+	if rec["host"] != "_dmarc" || rec["value"] != "v=DMARC1; p=none;" {
 		t.Fatalf("dmarc fix record: %v", rec)
 	}
 

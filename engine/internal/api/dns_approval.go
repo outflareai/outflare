@@ -44,7 +44,7 @@ type dnsSubject struct {
 	Subject string // seo_site, tracking_domain, email_domain, sending_domain
 	ID      string
 	BrandID string
-	Kind    string // the templates' kind: site, tracking, email
+	Kind    string // the templates' kinds, tried in order: site, tracking, email, any, mailbox
 	FQDN    string // where the records go
 	All     []domainconnect.Rec
 	Want    []domainconnect.Rec // the ones not in place yet
@@ -96,7 +96,13 @@ func (s *Server) approvalFor(ctx context.Context, sub dnsSubject, redirect strin
 	if !dc.Ready(ctx) {
 		return dnsApprovalView{Reason: domainconnect.ReasonNotConfigured}, nil
 	}
-	plan, ok := domainconnect.PlanFor(sub.Kind, sub.FQDN, sub.All, sub.Want)
+	var plan domainconnect.Plan
+	ok := false
+	for _, kind := range strings.Split(sub.Kind, ",") {
+		if plan, ok = domainconnect.PlanFor(kind, sub.FQDN, sub.All, sub.Want); ok {
+			break
+		}
+	}
 	if !ok {
 		return dnsApprovalView{Reason: domainconnect.ReasonNoTemplate}, nil
 	}
@@ -238,18 +244,25 @@ func (s *Server) emailDomainSubject(w http.ResponseWriter, r *http.Request) (*ac
 	return a, sub, true
 }
 
-// sendingDomainSubject is a cold email domain's missing SPF or DMARC
-// record. The general templates add one record each, so a domain missing
-// both is offered its DNS host connection instead.
+// sendingDomainSubject is a cold email domain's missing mail records,
+// with its DKIM key from the dkim query parameters when the person
+// copied it. One record goes through a general template; several through
+// the mail host's (Google Workspace, Microsoft 365), which add only the
+// groups missing. Anything else is offered its DNS host connection.
 func (s *Server) sendingDomainSubject(w http.ResponseWriter, r *http.Request) (*access, dnsSubject, bool) {
 	a := accessFrom(r.Context())
 	d, ok := s.findDomain(w, r, a.WorkspaceID, domainParam(r))
 	if !ok {
 		return nil, dnsSubject{}, false
 	}
-	sub := dnsSubject{Subject: "sending_domain", ID: d.Domain, BrandID: deref(d.BrandID), Kind: "any", FQDN: d.Domain}
-	for _, rec := range sendingDomainRecords(*d) {
-		sub.Want = append(sub.Want, domainconnect.Rec{Type: rec.Type, Name: rec.Name, Value: rec.Content})
+	recs, err := sendingDomainRecords(*d, r.URL.Query()["dkim"], true)
+	if err != nil {
+		writeError(w, r, http.StatusBadRequest, "invalid_request", err.Error())
+		return nil, dnsSubject{}, false
+	}
+	sub := dnsSubject{Subject: "sending_domain", ID: d.Domain, BrandID: deref(d.BrandID), Kind: "any,mailbox", FQDN: d.Domain}
+	for _, rec := range recs {
+		sub.Want = append(sub.Want, domainconnect.Rec{Type: rec.Type, Name: rec.Name, Value: rec.Content, Priority: rec.Priority})
 	}
 	sub.All = sub.Want
 	return a, sub, true

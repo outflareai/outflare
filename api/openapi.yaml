@@ -2808,8 +2808,8 @@ paths:
       operationId: addSendingDomainDNS
       x-outflare-access: { scope: mailboxes.manage }
       parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
-      summary: Add a domain's missing SPF or DMARC record in one click
-      description: "Scope: mailboxes.manage. Adds the records the domain's issues ask for (`issues[].record`) through the workspace's own DNS host connection (such as Cloudflare), in the background. It only adds records, never changes or deletes one. Poll the domain: `dns_install` says how it went, and the domain is checked again once they're in. 400 when nothing is missing."
+      summary: Add a domain's missing mail records in one click
+      description: "Scope: mailboxes.manage. Adds the records the domain's issues ask for (`issues[].record`: a missing MX, SPF or DMARC record) and, with `dkim`, its DKIM key, through the workspace's own DNS host connection (such as Cloudflare), in the background. It only adds records, never changes or deletes one, so an SPF record missing its mail host's include (`spf_provider`) is left to the approval link or to you. Poll the domain: `dns_install` says how it went, and the domain is checked again once they're in. 400 when nothing is missing or `dkim` isn't a key from the domain's mail host."
       tags: [domains]
       requestBody:
         required: true
@@ -2820,6 +2820,7 @@ paths:
               required: [integration_id]
               properties:
                 integration_id: { type: string, format: uuid, description: "One of `dns_connections`: a connection that can add DNS records (capability dns.write)." }
+                dkim: { $ref: "#/components/schemas/SendingDomainDKIM" }
       responses:
         "202":
           description: "Queued. Inside a mission, a MissionHeld answer when the call was held for approval or dry-run instead."
@@ -2837,17 +2838,19 @@ paths:
     get:
       operationId: getSendingDomainDNSApproval
       x-outflare-access: { scope: mailboxes.manage }
-      summary: Get a one-off approval link for a domain's missing SPF or DMARC record
-      description: "Scope: mailboxes.manage. Looks up the domain's DNS provider. When it supports Domain Connect and has Outflare's template, `url` takes the person to the provider's own screen to approve exactly these records once; Outflare keeps no access afterwards. Otherwise `reason` says why, and .../dns with a DNS host connection is the way."
+      summary: Get a one-off approval link for a domain's missing mail records
+      description: "Scope: mailboxes.manage. Looks up the domain's DNS provider. When it supports Domain Connect and has Outflare's template, `url` takes the person to the provider's own screen to approve exactly these records once; Outflare keeps no access afterwards. The records are the ones the domain's issues ask for, including an include added to its SPF record (the provider merges it), and its DKIM key with `dkim`. One record goes through a general template, several through the mail host's (Google Workspace, Microsoft 365). Otherwise `reason` says why, and .../dns with a DNS host connection is the way. 400 when `dkim` isn't a key from the domain's mail host."
       tags: [domains]
       parameters:
         - { name: return, in: query, description: "The app path the provider sends the browser back to, such as /acme/domains. Default: /.", schema: { type: string } }
+        - { name: dkim, in: query, style: form, explode: true, allowReserved: true, description: "The domain's DKIM key, as in addSendingDomainDNS: repeat it for Microsoft 365's two targets.", schema: { $ref: "#/components/schemas/SendingDomainDKIM" } }
       responses:
         "200":
           description: Whether the provider can, and the link.
           content:
             application/json:
               schema: { $ref: "#/components/schemas/DNSApproval" }
+        "400": { $ref: "#/components/responses/Error" }
         "403": { $ref: "#/components/responses/Error" }
         "404": { $ref: "#/components/responses/Error" }
         default: { $ref: "#/components/responses/Error" }
@@ -27212,7 +27215,7 @@ components:
         created_at: { type: string, format: date-time }
     SendingDomain:
       type: object
-      required: [domain, status, daily_limit, notes, source, health, issues, mx_provider, mx_hosts, spf, spf_record, dkim, dkim_selector, dmarc, dmarc_record, dmarc_policy, blocklists, checked_at, mailboxes, mailbox_counts, daily_capacity, sent_24h, sent_7d, replies_7d, contacted_leads_7d, replied_leads_7d, bounces_7d, warmup, created_at, updated_at]
+      required: [domain, status, daily_limit, notes, source, health, issues, mx_provider, mail_host, mx_hosts, spf, spf_record, dkim, dkim_selector, dmarc, dmarc_record, dmarc_policy, blocklists, checked_at, mailboxes, mailbox_counts, daily_capacity, sent_24h, sent_7d, replies_7d, contacted_leads_7d, replied_leads_7d, bounces_7d, warmup, created_at, updated_at]
       properties:
         domain: { type: string, example: acme-com.example }
         status: { type: string, enum: [active, paused], description: "paused: no sequence or test sends from the domain's mailboxes." }
@@ -27227,6 +27230,7 @@ components:
           description: What to fix, most severe first.
           items: { $ref: "#/components/schemas/DomainIssue" }
         mx_provider: { type: [string, "null"], enum: [google, microsoft, other, none, null] }
+        mail_host: { type: [string, "null"], enum: [google, microsoft, null], description: "The mail host every mailbox on the domain is on, or null when they differ or there are none. The fixes use it while the domain has no MX record." }
         mx_hosts: { type: array, items: { type: string }, description: MX hosts by preference. }
         spf: { type: string, enum: [pass, missing, invalid, pending] }
         spf_record: { type: [string, "null"] }
@@ -27272,7 +27276,7 @@ components:
         - type: object
           required: [daily, dns_install, dns_connections]
           properties:
-            dns_install: { oneOf: [{ $ref: "#/components/schemas/EmailDomainDNSInstall" }, { type: "null" }], description: The last one-click run that added the domain's missing SPF or DMARC record (addSendingDomainDNS). }
+            dns_install: { oneOf: [{ $ref: "#/components/schemas/EmailDomainDNSInstall" }, { type: "null" }], description: The last one-click run that added the domain's missing mail records (addSendingDomainDNS). }
             dns_connections: { type: array, items: { type: string, format: uuid }, description: "The workspace's connections that can add the domain's records, such as Cloudflare." }
             daily:
               type: array
@@ -27303,7 +27307,13 @@ components:
           properties:
             type: { type: string, example: TXT }
             host: { type: string, description: "Relative to the domain: @ is the domain itself.", example: _dmarc }
-            value: { type: string, example: "v=DMARC1; p=none" }
+            value: { type: string, example: "v=DMARC1; p=none;" }
+            priority: { type: integer, description: An MX record's preference. }
+    SendingDomainDKIM:
+      type: array
+      description: "The domain's DKIM key, copied from its mail host's admin: for Google Workspace the one TXT value shown for google._domainkey (v=DKIM1; k=rsa; p=...), for Microsoft 365 the two CNAME targets shown for selector1 and selector2, in that order. Use it when the domain has the dkim_missing issue."
+      maxItems: 2
+      items: { type: string, maxLength: 2048 }
     SendingServer:
       type: object
       required: [id, host, name, ips, ips_source, status, paused_by, status_reason, pause_on_listing, daily_limit, notes, health, issues, blocklists, checked_at, mailboxes, mailbox_counts, domains, daily_capacity, sent_24h, sent_7d, replies_7d, contacted_leads_7d, replied_leads_7d, bounces_7d, created_at, updated_at]

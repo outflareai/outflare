@@ -5137,29 +5137,40 @@ export function createServer({ client: gtm, workspace, agency, readOnly = false,
     ({ domain }) => call(() => gtm.POST("/v1/workspaces/{ws}/sending-domains/{domain}/check", { params: { path: { ws, domain } } })),
   );
 
+  // A sending domain's DKIM key, copied by the user from their mail host's admin.
+  const dkimKey = z
+    .array(z.string())
+    .max(2)
+    .optional()
+    .describe("Only for the dkim_missing issue: the DKIM key the user copied from their mail host's admin. Google Workspace: the one TXT value for google._domainkey (v=DKIM1; k=rsa; p=...). Microsoft 365: the two CNAME targets for selector1 and selector2, in that order. Never guess it.");
+
   server.registerTool(
     "add_domain_dns",
     {
-      title: "Add a domain's missing SPF or DMARC record in one click",
+      title: "Add a domain's missing mail records in one click",
       description:
-        "Add the records a sending domain's issues ask for (issues[].record: a missing SPF or DMARC record) through the workspace's own DNS host connection (one of get_domain's dns_connections, such as Cloudflare). " +
-        "It only adds records, never changes one. Runs in the background; get_domain shows dns_install, and the domain is checked again once they're in.",
-      inputSchema: { domain: z.string(), integration_id: id.describe("A connection from the domain's dns_connections") },
+        "Add the records a sending domain's issues ask for (issues[].record: a missing MX, SPF or DMARC record) and, with dkim, its DKIM key, through the workspace's own DNS host connection (one of get_domain's dns_connections, such as Cloudflare). " +
+        "It only adds records, never changes one, so an SPF record missing its mail host's include (spf_provider) is left to get_domain_dns_approval or the user. Runs in the background; get_domain shows dns_install, and the domain is checked again once they're in.",
+      inputSchema: {
+        domain: z.string(),
+        integration_id: id.describe("A connection from the domain's dns_connections"),
+        dkim: dkimKey,
+      },
       annotations: write,
     },
-    ({ domain, integration_id }) =>
-      call(() => gtm.POST("/v1/workspaces/{ws}/sending-domains/{domain}/dns", { params: { path: { ws, domain } }, body: { integration_id } })),
+    ({ domain, integration_id, dkim }) =>
+      call(() => gtm.POST("/v1/workspaces/{ws}/sending-domains/{domain}/dns", { params: { path: { ws, domain } }, body: { integration_id, dkim } })),
   );
 
   server.registerTool(
     "get_domain_dns_approval",
     {
-      title: "Get a one-off approval link for a domain's missing SPF or DMARC record",
-      description: "Get a link for the user to approve the domain's missing SPF or DMARC record once on their DNS provider's own screen (Domain Connect, at Cloudflare, GoDaddy and others): they see the exact record and approve, and Outflare keeps no access. Hand the url to the user to open. When available is false, reason says why (the provider doesn't support it, or both records are missing); use add_domain_dns with a DNS connection instead.",
-      inputSchema: { domain: z.string() },
+      title: "Get a one-off approval link for a domain's missing mail records",
+      description: "Get a link for the user to approve the domain's missing mail records (MX, SPF, DMARC, an include added to its SPF record, and with dkim its DKIM key) once on their DNS provider's own screen (Domain Connect, at Cloudflare, GoDaddy and others): they see the exact records and approve, and Outflare keeps no access. Hand the url to the user to open. When available is false, reason says why (the provider doesn't support it, or no template covers these records); use add_domain_dns with a DNS connection instead.",
+      inputSchema: { domain: z.string(), dkim: dkimKey },
       annotations: read,
     },
-    ({ domain }) => call(() => gtm.GET("/v1/workspaces/{ws}/sending-domains/{domain}/dns/approval", { params: { path: { ws, domain } } })),
+    ({ domain, dkim }) => call(() => gtm.GET("/v1/workspaces/{ws}/sending-domains/{domain}/dns/approval", { params: { path: { ws, domain }, query: { dkim } } })),
   );
 
   server.registerTool(

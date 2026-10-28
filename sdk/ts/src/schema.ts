@@ -2018,8 +2018,8 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Add a domain's missing SPF or DMARC record in one click
-         * @description Scope: mailboxes.manage. Adds the records the domain's issues ask for (`issues[].record`) through the workspace's own DNS host connection (such as Cloudflare), in the background. It only adds records, never changes or deletes one. Poll the domain: `dns_install` says how it went, and the domain is checked again once they're in. 400 when nothing is missing.
+         * Add a domain's missing mail records in one click
+         * @description Scope: mailboxes.manage. Adds the records the domain's issues ask for (`issues[].record`: a missing MX, SPF or DMARC record) and, with `dkim`, its DKIM key, through the workspace's own DNS host connection (such as Cloudflare), in the background. It only adds records, never changes or deletes one, so an SPF record missing its mail host's include (`spf_provider`) is left to the approval link or to you. Poll the domain: `dns_install` says how it went, and the domain is checked again once they're in. 400 when nothing is missing or `dkim` isn't a key from the domain's mail host.
          */
         post: operations["addSendingDomainDNS"];
         delete?: never;
@@ -2040,8 +2040,8 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * Get a one-off approval link for a domain's missing SPF or DMARC record
-         * @description Scope: mailboxes.manage. Looks up the domain's DNS provider. When it supports Domain Connect and has Outflare's template, `url` takes the person to the provider's own screen to approve exactly these records once; Outflare keeps no access afterwards. Otherwise `reason` says why, and .../dns with a DNS host connection is the way.
+         * Get a one-off approval link for a domain's missing mail records
+         * @description Scope: mailboxes.manage. Looks up the domain's DNS provider. When it supports Domain Connect and has Outflare's template, `url` takes the person to the provider's own screen to approve exactly these records once; Outflare keeps no access afterwards. The records are the ones the domain's issues ask for, including an include added to its SPF record (the provider merges it), and its DKIM key with `dkim`. One record goes through a general template, several through the mail host's (Google Workspace, Microsoft 365). Otherwise `reason` says why, and .../dns with a DNS host connection is the way. 400 when `dkim` isn't a key from the domain's mail host.
          */
         get: operations["getSendingDomainDNSApproval"];
         put?: never;
@@ -24600,6 +24600,11 @@ export interface components {
             issues: components["schemas"]["DomainIssue"][];
             /** @enum {string|null} */
             mx_provider: "google" | "microsoft" | "other" | "none" | null;
+            /**
+             * @description The mail host every mailbox on the domain is on, or null when they differ or there are none. The fixes use it while the domain has no MX record.
+             * @enum {string|null}
+             */
+            mail_host: "google" | "microsoft" | null;
             /** @description MX hosts by preference. */
             mx_hosts: string[];
             /** @enum {string} */
@@ -24653,7 +24658,7 @@ export interface components {
             updated_at: string;
         };
         SendingDomainDetail: components["schemas"]["SendingDomain"] & {
-            /** @description The last one-click run that added the domain's missing SPF or DMARC record (addSendingDomainDNS). */
+            /** @description The last one-click run that added the domain's missing mail records (addSendingDomainDNS). */
             dns_install: components["schemas"]["EmailDomainDNSInstall"] | null;
             /** @description The workspace's connections that can add the domain's records, such as Cloudflare. */
             dns_connections: string[];
@@ -24686,10 +24691,14 @@ export interface components {
                  * @example _dmarc
                  */
                 host: string;
-                /** @example v=DMARC1; p=none */
+                /** @example v=DMARC1; p=none; */
                 value: string;
+                /** @description An MX record's preference. */
+                priority?: number;
             };
         };
+        /** @description The domain's DKIM key, copied from its mail host's admin: for Google Workspace the one TXT value shown for google._domainkey (v=DKIM1; k=rsa; p=...), for Microsoft 365 the two CNAME targets shown for selector1 and selector2, in that order. Use it when the domain has the dkim_missing issue. */
+        SendingDomainDKIM: string[];
         SendingServer: {
             /** Format: uuid */
             id: string;
@@ -32076,6 +32085,7 @@ export interface operations {
                      * @description One of `dns_connections`: a connection that can add DNS records (capability dns.write).
                      */
                     integration_id: string;
+                    dkim?: components["schemas"]["SendingDomainDKIM"];
                 };
             };
         };
@@ -32100,6 +32110,8 @@ export interface operations {
             query?: {
                 /** @description The app path the provider sends the browser back to, such as /acme/domains. Default: /. */
                 return?: string;
+                /** @description The domain's DKIM key, as in addSendingDomainDNS: repeat it for Microsoft 365's two targets. */
+                dkim?: components["schemas"]["SendingDomainDKIM"];
             };
             header?: never;
             path: {
@@ -32120,6 +32132,7 @@ export interface operations {
                     "application/json": components["schemas"]["DNSApproval"];
                 };
             };
+            400: components["responses"]["Error"];
             403: components["responses"]["Error"];
             404: components["responses"]["Error"];
             default: components["responses"]["Error"];

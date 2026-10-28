@@ -513,7 +513,7 @@ function Detail({ ws, canManage, open, onOpen, go }: Props) {
         <ul className="space-y-3">
           {[...problems, ...notes].map((i) => <IssueRow key={i.code + i.title} issue={i} domain={d.domain} />)}
         </ul>
-        {missingRecords(d).length > 0 && (
+        {(missingRecords(d).length > 0 || dkimHost(d)) && (
           <div className="mt-4">
             <SendingDNS ws={ws} d={d} canManage={canManage} reload={load} />
           </div>
@@ -574,23 +574,77 @@ function Detail({ ws, canManage, open, onOpen, go }: Props) {
 }
 
 // missingRecords are the records the domain's issues ask for, with full
-// names, as the server adds them.
+// names, as the server adds them. The SPF fix replaces the record there.
 function missingRecords(d: SendingDomainDetail): DNSRow[] {
-  return d.issues.flatMap((i) => (i.record ? [{ type: i.record.type, name: i.record.host === "@" ? d.domain : `${i.record.host}.${d.domain}`, value: i.record.value }] : []));
+  return d.issues.flatMap((i) => (i.record ? [{ type: i.record.type, name: i.record.host === "@" ? d.domain : `${i.record.host}.${d.domain}`, value: i.record.value, priority: i.record.priority, change: i.code === "spf_provider" }] : []));
 }
 
-// The ways to add a domain's missing SPF or DMARC record.
+// dkimHost is the mail host whose DKIM key can be pasted in when the
+// domain has none: Google Workspace or Microsoft 365.
+function dkimHost(d: SendingDomainDetail): "google" | "microsoft" | null {
+  if (!d.issues.some((i) => i.code === "dkim_missing")) return null;
+  const host = d.mx_provider && d.mx_provider !== "none" ? d.mx_provider : d.mail_host;
+  return host === "google" || host === "microsoft" ? host : null;
+}
+
+// dkimRows turns what was pasted into the records, checked the same way the
+// server checks them, or null while it isn't a key yet.
+const googleKey = /^v=DKIM1;\s*k=rsa;\s*p=([A-Za-z0-9+/]+={0,2})$/;
+const microsoftTarget = /^selector[12]-[a-z0-9-]+\._domainkey\.[a-z0-9-]+(\.[a-z0-9-]+)+$/;
+function dkimRows(domain: string, host: "google" | "microsoft", values: string[]): DNSRow[] | null {
+  if (host === "google") {
+    const m = values[0].trim().replace(/^"+|"+$/g, "").replaceAll('" "', "").trim().split(/\s+/).join(" ").match(googleKey);
+    return m ? [{ type: "TXT", name: `google._domainkey.${domain}`, value: `v=DKIM1; k=rsa; p=${m[1]}` }] : null;
+  }
+  const t = values.map((v) => v.trim().toLowerCase().replace(/\.$/, ""));
+  if (!t.every((v, i) => microsoftTarget.test(v) && v.startsWith(`selector${i + 1}-`))) return null;
+  return t.map((v, i) => ({ type: "CNAME", name: `selector${i + 1}._domainkey.${domain}`, value: v }));
+}
+
+// The ways to add a domain's missing mail records: MX, SPF, DMARC, and the
+// DKIM key once it's pasted from the mail host.
 function SendingDNS({ ws, d, canManage, reload }: { ws: string; d: SendingDomainDetail; canManage: boolean; reload: () => void }) {
-  const records = missingRecords(d);
+  const host = dkimHost(d);
+  const [pasted, setPasted] = useState<string[]>(["", ""]);
+  const values = host === "google" ? pasted.slice(0, 1) : pasted;
+  const dkimRecords = host && values.some((v) => v.trim()) ? dkimRows(d.domain, host, values) : null;
+  const dkim = dkimRecords ? values.map((v) => v.trim()) : undefined;
+  const records = [...missingRecords(d), ...(dkimRecords ?? [])];
+  const set = (i: number) => (e: { target: { value: string } }) => setPasted((p) => p.map((v, j) => (j === i ? e.target.value : v)));
   return (
-    <DNSWays ws={ws} page="domains" item={d.domain} approval={{ kind: "sending_domain", id: d.domain }} connections={d.dns_connections} canManage={canManage} reload={reload}
-      records={records} run={d.dns_install} {...dnsHelp(d.domain, records, "so mail sent from it passes SPF and DMARC checks")}
+    <div className="space-y-3">
+      {host && canManage && (
+        <div className="space-y-2 rounded-md border bg-muted/30 p-3 text-[13px]">
+          {host === "google" ? (
+            <>
+              <p>To add the DKIM key too, open the Google Admin console, go to Apps, Google Workspace, Gmail, Authenticate email, pick {d.domain} and press Generate new record. Paste the TXT record value here:</p>
+              <textarea className={cn(field, "w-full font-mono text-[12px]")} rows={3} value={pasted[0]} onChange={set(0)} placeholder="v=DKIM1; k=rsa; p=MIIBIjANBgkq…" aria-label="DKIM TXT record value" />
+            </>
+          ) : (
+            <>
+              <p>To add the DKIM keys too, open the Microsoft Defender portal, go to Email authentication settings, DKIM, pick {d.domain} and copy the two CNAME targets here:</p>
+              <input className={cn(field, "w-full font-mono text-[12px]")} value={pasted[0]} onChange={set(0)} placeholder="selector1-acme-example._domainkey.acme.onmicrosoft.com" aria-label="selector1 CNAME target" />
+              <input className={cn(field, "w-full font-mono text-[12px]")} value={pasted[1]} onChange={set(1)} placeholder="selector2-acme-example._domainkey.acme.onmicrosoft.com" aria-label="selector2 CNAME target" />
+            </>
+          )}
+          {values.some((v) => v.trim()) && !dkimRecords && <p className="text-[12px] text-destructive">{host === "google" ? "That isn't a DKIM TXT value yet. It starts with v=DKIM1; k=rsa; p=" : "Paste both targets: the selector1 one first, then selector2."}</p>}
+        </div>
+      )}
+      {records.length > 0 && <SendingDNSWays ws={ws} d={d} canManage={canManage} reload={reload} records={records} dkim={dkim} />}
+    </div>
+  );
+}
+
+function SendingDNSWays({ ws, d, canManage, reload, records, dkim }: { ws: string; d: SendingDomainDetail; canManage: boolean; reload: () => void; records: DNSRow[]; dkim?: string[] }) {
+  return (
+    <DNSWays ws={ws} page="domains" item={d.domain} approval={{ kind: "sending_domain", id: d.domain, dkim }} connections={d.dns_connections} canManage={canManage} reload={reload}
+      records={records} run={d.dns_install} {...dnsHelp(d.domain, records, "so mail sent from it is delivered and passes SPF, DKIM and DMARC checks")}
       used={(way, how) => track("ui.dns_one_click_used", { where: "sending_domain", way, how })}
-      manual={<>Add each record shown above where {d.domain}'s DNS is managed, then press Re-check DNS.</>}
+      manual={<>Add each record shown above where {d.domain}'s DNS is managed, then press Re-check DNS. If the domain already has an SPF record, change it to the one shown instead of adding a second.</>}
       intro={<>Connect the Cloudflare account {d.domain} is on.</>}
       after="Records already there stay as they are. Then Outflare checks the domain again."
       onAdd={async (integration) => {
-        const { data, error } = await api.POST("/v1/workspaces/{ws}/sending-domains/{domain}/dns", { params: { path: { ws, domain: d.domain } }, body: { integration_id: integration } });
+        const { data, error } = await api.POST("/v1/workspaces/{ws}/sending-domains/{domain}/dns", { params: { path: { ws, domain: d.domain } }, body: { integration_id: integration, dkim } });
         return { error, held: heldByMission(data) };
       }} />
   );
