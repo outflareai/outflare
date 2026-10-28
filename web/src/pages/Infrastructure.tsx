@@ -8,6 +8,7 @@ import { api, errorMessage } from "../api";
 import { Badge, Button, Card, confirmAction, Empty, ErrorText, field, Loading, Menu, PageHeader, Stat, Stats, toast, type tones } from "../ui";
 import { ago, placementTone, plural } from "../format";
 import type { Tab } from "../App";
+import { useBrand } from "@/lib/brand";
 import { DataTable } from "@/components/data-table";
 
 type Tone = keyof typeof tones;
@@ -62,9 +63,11 @@ function Overview({ ws, canManage, onOpen, go }: Props) {
   const [plans, setPlans] = useState<InfraPlan[]>([]);
   const [mailboxes, setMailboxes] = useState<Mailbox[]>([]);
   const [filter, setFilter] = useState<Filter>("not_ready");
+  // Narrowed to the brand picked in the sidebar.
+  const { query: brandQuery } = useBrand(ws);
 
   const load = useCallback(async () => {
-    const path = { params: { path: { ws } } };
+    const path = { params: { path: { ws }, query: brandQuery } };
     const [o, p, m] = await Promise.all([
       api.GET("/v1/workspaces/{ws}/infrastructure", path),
       api.GET("/v1/workspaces/{ws}/infra-plans", path),
@@ -73,7 +76,7 @@ function Overview({ ws, canManage, onOpen, go }: Props) {
     if (o.data) setOverview(o.data);
     if (p.data) setPlans(p.data.data);
     if (m.data) setMailboxes(m.data.data);
-  }, [ws]);
+  }, [ws, brandQuery.brand]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     load();

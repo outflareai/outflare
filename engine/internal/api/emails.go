@@ -614,11 +614,16 @@ func (s *Server) listEmailDomains(w http.ResponseWriter, r *http.Request) {
 		}
 		provider = &p
 	}
+	sel, ok := s.brandFilter(w, r)
+	if !ok {
+		return
+	}
 	list, err := s.queryEmailDomains(r.Context(), a.WorkspaceID, nil, provider)
 	if err != nil {
 		s.internal(w, r, err)
 		return
 	}
+	list = slices.DeleteFunc(list, func(d emailDomainView) bool { return !sel.matches(d.BrandID) })
 	if list == nil {
 		list = []emailDomainView{}
 	}

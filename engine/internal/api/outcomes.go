@@ -225,6 +225,11 @@ func (s *Server) listMeetings(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	f.Status, f.Attributed = q.Get("status"), q.Get("attributed") == "true"
+	sel, ok := s.brandFilter(w, r)
+	if !ok {
+		return
+	}
+	f.Brand = sel.id
 	list, err := outcomes.ListMeetings(r.Context(), s.pool, a.WorkspaceID, f)
 	if s.outcomeError(w, r, err, "meeting") {
 		return
@@ -345,6 +350,11 @@ func (s *Server) listDeals(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	f.State, f.Attributed = q.Get("state"), q.Get("attributed") == "true"
+	sel, ok := s.brandFilter(w, r)
+	if !ok {
+		return
+	}
+	f.Brand = sel.id
 	list, err := outcomes.ListDeals(r.Context(), s.pool, a.WorkspaceID, f)
 	if s.outcomeError(w, r, err, "deal") {
 		return

@@ -285,7 +285,7 @@ func addDays(day string, n int) string {
 
 func inWindow(day string, w window) bool { return day >= w.From && day <= w.To }
 
-func (s *Server) dailyRows(ctx context.Context, ws, report, from, to, host string) ([]dayRow, error) {
+func (s *Server) dailyRows(ctx context.Context, ws, report, from, to, host string, sel brandSel) ([]dayRow, error) {
 	sql := `SELECT d.integration_id::text, i.name, d.connector, d.host, to_char(d.day, 'YYYY-MM-DD'), d.key,
 			d.visitors, d.pageviews, d.sessions, d.bounce_rate, d.avg_duration, d.clicks, d.impressions, d.ctr, d.position, d.events, d.conversions
 		FROM analytics_daily d JOIN integrations i ON i.id = d.integration_id
@@ -300,6 +300,7 @@ func (s *Server) dailyRows(ctx context.Context, ws, report, from, to, host strin
 		args = append(args, host)
 		sql += ` AND d.host = $5`
 	}
+	sql += sel.sql(`analytics_site_brand(d.workspace_id, d.integration_id, d.site, d.host)`, &args)
 	rows, err := s.pool.Query(ctx, sql+` ORDER BY d.day`, args...)
 	if err != nil {
 		return nil, err
@@ -318,6 +319,10 @@ func (s *Server) dailyRows(ctx context.Context, ws, report, from, to, host strin
 
 func (s *Server) analyticsChanges(w http.ResponseWriter, r *http.Request) {
 	ws := accessFrom(r.Context()).WorkspaceID
+	sel, ok := s.brandFilter(w, r)
+	if !ok {
+		return
+	}
 	q := r.URL.Query()
 	days, top := 7, 5
 	if v := q.Get("days"); v != "" {
@@ -341,6 +346,9 @@ func (s *Server) analyticsChanges(w http.ResponseWriter, r *http.Request) {
 		writeError(w, r, http.StatusBadRequest, "invalid_request", "host is a domain, like example.com")
 		return
 	}
+	if host != "" && !s.needHostInBrand(w, r, ws, host, sel) {
+		return
+	}
 	to := time.Now().UTC().AddDate(0, 0, -1).Format(time.DateOnly)
 	if v := q.Get("to"); v != "" {
 		if dateOnly(v) == "" {
@@ -356,7 +364,7 @@ func (s *Server) analyticsChanges(w http.ResponseWriter, r *http.Request) {
 	}
 	from := addDays(to, -back+1)
 	ctx := r.Context()
-	traffic, err := s.dailyRows(ctx, ws, connectors.ReportTraffic, from, to, host)
+	traffic, err := s.dailyRows(ctx, ws, connectors.ReportTraffic, from, to, host, sel)
 	if err != nil {
 		s.internal(w, r, err)
 		return
@@ -467,7 +475,7 @@ func (s *Server) analyticsChanges(w http.ResponseWriter, r *http.Request) {
 		"Movers come from the top 50 rows stored per day, so a page, source or query that was below the top 50 can look new.",
 	}
 	for _, report := range []string{connectors.ReportPages, connectors.ReportSources, connectors.ReportSearchQueries} {
-		rows, err := s.dailyRows(ctx, ws, report, addDays(to, -2*days-7), to, host)
+		rows, err := s.dailyRows(ctx, ws, report, addDays(to, -2*days-7), to, host, sel)
 		if err != nil {
 			s.internal(w, r, err)
 			return
@@ -479,7 +487,7 @@ func (s *Server) analyticsChanges(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	seo, err := s.seoChanges(ctx, ws, host, top)
+	seo, err := s.seoChanges(ctx, ws, host, top, sel)
 	if err != nil {
 		s.internal(w, r, err)
 		return
@@ -488,12 +496,12 @@ func (s *Server) analyticsChanges(w http.ResponseWriter, r *http.Request) {
 		site(h).SEO = list
 	}
 
-	syncs, err := s.syncStatuses(ctx, ws)
+	syncs, err := s.syncStatuses(ctx, ws, sel)
 	if err != nil {
 		s.internal(w, r, err)
 		return
 	}
-	seoSources, err := s.seoSources(ctx, ws)
+	seoSources, err := s.seoSources(ctx, ws, sel)
 	if err != nil {
 		s.internal(w, r, err)
 		return
@@ -706,7 +714,11 @@ func moversFor(report string, rows []dayRow, tools map[string]*toolChange, top i
 
 // seoChanges compares each SEO connection's latest snapshot of a domain
 // with the one before.
-func (s *Server) seoChanges(ctx context.Context, ws, host string, top int) (map[string][]seoChange, error) {
+func (s *Server) seoChanges(ctx context.Context, ws, host string, top int, sel brandSel) (map[string][]seoChange, error) {
+	inBrand, err := s.hostBrandFilter(ctx, ws, sel)
+	if err != nil {
+		return nil, err
+	}
 	sql := `SELECT s.integration_id::text, i.name, s.connector, s.host, s.report, to_char(s.day, 'YYYY-MM-DD'), s.key, s.metrics
 		FROM seo_snapshots s JOIN integrations i ON i.id = s.integration_id
 		JOIN (SELECT integration_id, host, report, day, dense_rank() OVER (PARTITION BY integration_id, host, report ORDER BY day DESC) AS n
@@ -738,6 +750,9 @@ func (s *Server) seoChanges(ctx context.Context, ws, host string, top int) (map[
 		var raw []byte
 		if err := rows.Scan(&id, &name, &conn, &h, &report, &day, &key, &raw); err != nil {
 			return nil, err
+		}
+		if !inBrand(h) {
+			continue
 		}
 		k := id + "|" + h
 		it := items[k]
@@ -1067,12 +1082,16 @@ type catalogSite struct {
 func (s *Server) analyticsCatalog(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	ws := accessFrom(ctx).WorkspaceID
-	syncs, err := s.syncStatuses(ctx, ws)
+	sel, ok := s.brandFilter(w, r)
+	if !ok {
+		return
+	}
+	syncs, err := s.syncStatuses(ctx, ws, sel)
 	if err != nil {
 		s.internal(w, r, err)
 		return
 	}
-	sources, err := s.analyticsSources(ctx, ws)
+	sources, err := s.analyticsSources(ctx, ws, sel)
 	if err != nil {
 		s.internal(w, r, err)
 		return
@@ -1148,7 +1167,7 @@ func (s *Server) analyticsCatalog(w http.ResponseWriter, r *http.Request) {
 		}
 		changes[st.Host] = append(changes[st.Host], tc)
 	}
-	seoSources, err := s.seoSources(ctx, ws)
+	seoSources, err := s.seoSources(ctx, ws, sel)
 	if err != nil {
 		s.internal(w, r, err)
 		return

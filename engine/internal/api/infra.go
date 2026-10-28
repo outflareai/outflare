@@ -370,10 +370,17 @@ func (s *Server) findPlan(w http.ResponseWriter, r *http.Request, ws, id string,
 
 func (s *Server) listPlans(w http.ResponseWriter, r *http.Request) {
 	a := accessFrom(r.Context())
+	sel, ok := s.brandFilter(w, r)
+	if !ok {
+		return
+	}
 	var list []planView
 	err := pgx.BeginFunc(r.Context(), s.pool, func(tx pgx.Tx) error {
 		var err error
-		list, err = s.queryPlans(r.Context(), tx, a.WorkspaceID, nil, false)
+		if list, err = s.queryPlans(r.Context(), tx, a.WorkspaceID, nil, false); err != nil {
+			return err
+		}
+		list, err = plansFor(r.Context(), tx, a.WorkspaceID, list, sel)
 		return err
 	})
 	if err != nil {
@@ -384,6 +391,38 @@ func (s *Server) listPlans(w http.ResponseWriter, r *http.Request) {
 		list = []planView{}
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"data": list})
+}
+
+// plansFor keeps the plans that pass a brand filter: a plan belongs to its
+// project's brand, and one with no project (or a project with no brand)
+// to no brand.
+func plansFor(ctx context.Context, q pgx.Tx, ws string, plans []planView, sel brandSel) ([]planView, error) {
+	if sel.all() {
+		return plans, nil
+	}
+	brands := map[string]*string{}
+	rows, err := q.Query(ctx, `SELECT id::text, brand_id::text FROM projects WHERE workspace_id = $1`, ws)
+	if err != nil {
+		return nil, err
+	}
+	for rows.Next() {
+		var id string
+		var b *string
+		if err := rows.Scan(&id, &b); err != nil {
+			return nil, err
+		}
+		brands[id] = b
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return slices.DeleteFunc(plans, func(p planView) bool {
+		var b *string
+		if p.ProjectID != nil {
+			b = brands[*p.ProjectID]
+		}
+		return !sel.matches(b)
+	}), nil
 }
 
 func (s *Server) getPlan(w http.ResponseWriter, r *http.Request) {
@@ -990,11 +1029,19 @@ type stageMailbox struct {
 func (s *Server) infraOverview(w http.ResponseWriter, r *http.Request) {
 	a := accessFrom(r.Context())
 	ctx := r.Context()
+	sel, ok := s.brandFilter(w, r)
+	if !ok {
+		return
+	}
+	countArgs := []any{a.WorkspaceID}
+	countWhere := sel.sql("brand_id", &countArgs)
+	listArgs := []any{a.WorkspaceID}
+	listWhere := sel.sql("m.brand_id", &listArgs)
 	counts := map[string]int{"warming": 0, "ready": 0, "resting": 0, "retired": 0}
 	var list []stageMailbox
 	var plans []planView
 	err := pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
-		rows, err := tx.Query(ctx, `SELECT lifecycle_stage, count(*)::int FROM mailboxes WHERE workspace_id = $1 GROUP BY 1`, a.WorkspaceID)
+		rows, err := tx.Query(ctx, `SELECT lifecycle_stage, count(*)::int FROM mailboxes WHERE workspace_id = $1`+countWhere+` GROUP BY 1`, countArgs...)
 		if err != nil {
 			return err
 		}
@@ -1018,16 +1065,19 @@ func (s *Server) infraOverview(w http.ResponseWriter, r *http.Request) {
 				SELECT count(*) FILTER (WHERE g.landed IS NOT NULL) AS placed, count(*) FILTER (WHERE g.landed = 'inbox') AS inbox
 				FROM warmup_messages g WHERE g.from_mailbox_id = m.id AND g.created_at > now() - interval '7 days'
 			) w ON true
-			WHERE m.workspace_id = $1 AND m.lifecycle_stage <> 'ready'
+			WHERE m.workspace_id = $1 AND m.lifecycle_stage <> 'ready'`+listWhere+`
 			ORDER BY CASE m.lifecycle_stage WHEN 'resting' THEN 0 WHEN 'warming' THEN 1 ELSE 2 END, m.stage_until NULLS LAST, lower(m.email)
-			LIMIT 1000`, a.WorkspaceID)
+			LIMIT 1000`, listArgs...)
 		if err != nil {
 			return err
 		}
 		if list, err = pgx.CollectRows(rows, pgx.RowToStructByPos[stageMailbox]); err != nil {
 			return err
 		}
-		plans, err = s.queryPlans(ctx, tx, a.WorkspaceID, nil, false)
+		if plans, err = s.queryPlans(ctx, tx, a.WorkspaceID, nil, false); err != nil {
+			return err
+		}
+		plans, err = plansFor(ctx, tx, a.WorkspaceID, plans, sel)
 		return err
 	})
 	if err != nil {

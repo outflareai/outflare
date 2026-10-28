@@ -1189,6 +1189,12 @@ func (s *Server) listMessages(w http.ResponseWriter, r *http.Request) {
 		}
 		where += ` AND created_at < ` + arg(t)
 	}
+	sel, ok := s.brandFilter(w, r)
+	if !ok {
+		return
+	}
+	// A message belongs to its sequence's brand.
+	where += sel.sql(`(SELECT q.brand_id FROM sequences q WHERE q.id = messages.sequence_id)`, &args)
 	rows, err := s.pool.Query(r.Context(), `
 		SELECT id, sequence_id, enrollment_id, step_position, lead_id, mailbox_id, from_email, to_email, subject, body,
 		       message_id, status, error, created_at, sent_at

@@ -1,11 +1,10 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { cn } from "@/lib/utils";
 import type { Agency as AgencyT, Workspace } from "@outflare/sdk";
 import { api } from "./api";
 import { identify, page, resetAnalytics } from "./lib/analytics";
 import { appPath, isID, isItemSlug, itemKinds, itemOrPage, parsePath, rememberWorkspaces, type Tab } from "./lib/paths";
 import { DialogHost, Loading, toast, ToastHost } from "./ui";
-import { brandSearch } from "./lib/brand";
 import { Icon, type IconName } from "./icons";
 import { SidebarInset, SidebarProvider } from "@/components/ui/sidebar";
 import { ApiPanel, canOpen, CommandPalette, everyday, isSettings, modules, resetNav, SettingsFrame, settingsGroups, shortcuts, Sidebar, startNav, tabNames, TopBar, useTheme, type Command, type MenuLink } from "./shell";
@@ -82,6 +81,7 @@ import { Competitors } from "./pages/Competitors";
 import { Warmup } from "./pages/Warmup";
 import { ConnectAI } from "./pages/ConnectAI";
 import { Authorize } from "./pages/Authorize";
+import { setBrand, useBrand } from "@/lib/brand";
 
 type Me = { user: { id?: string; name?: string; email?: string; email_verified?: boolean; has_password?: boolean; email_resend_after?: number }; workspaces: Workspace[]; agencies: AgencyT[]; menu_links?: MenuLink[]; support_view?: { expires_at: string } | null };
 type State =
@@ -222,7 +222,11 @@ function Shell({ me, onSignOut, onReload }: { me: Me; onSignOut: () => void; onR
   const [links, setLinks] = useState<Record<string, { id: string; slug: string; name?: string }>>({});
   const linkKey = (kind: string, ref: string) => `${wsId}:${kind}:${ref.toLowerCase()}`;
   const kind = itemKinds[tab];
-  const ready = !findWs && !findItem;
+  // Pages wait for the brands, so their first reads already carry the
+  // brand picked.
+  const brandState = useBrand(wsId || undefined);
+  const pickedBrand = brandState.brand?.handle;
+  const ready = !findWs && !findItem && (!wsId || brandState.loaded);
   const link = kind && item && isID(item) ? links[linkKey(kind, item)] : undefined;
   // Opens a tab, or one item in it (such as a domain).
   const setTab = useCallback((t: Tab, it?: string) => {
@@ -324,7 +328,7 @@ function Shell({ me, onSignOut, onReload }: { me: Me; onSignOut: () => void; onR
   }, [ws?.id, isAdmin]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
-    if (!ws || findWs || findItem) return;
+    if (!ws || findWs || findItem || !brandState.loaded) return;
     // Wait for an item's slug rather than show its ID first.
     if (kind && item && isID(item) && !link) return;
     const path = appPath(ws.id, tab, link?.slug ?? item);
@@ -334,25 +338,48 @@ function Shell({ me, onSignOut, onReload }: { me: Me; onSignOut: () => void; onR
     const named = known(here.ws);
     const sameItem = here.tab === tab && !!here.item && !!item && !!kind && (here.item === item || links[linkKey(kind, here.item)]?.id === item);
     const stale = here.legacy || sameItem || (here.ws !== undefined && here.ws !== ws.slug && (named === undefined || named === ws.id));
-    // The brand picked in the sidebar stays in the URL (?brand=repocket).
-    if (location.pathname !== path) history[stale ? "replaceState" : "pushState"](null, "", path + brandSearch());
+    // The brand picked is part of the path (appPath), so switching it, or
+    // an old link's ?brand=, replaces the URL rather than adding to history.
+    const there = parsePath(path);
+    const otherBrand = here.ws === there.ws && here.tab === there.tab && here.item === there.item;
+    // An item open when the brand is switched closes (below), and its URL
+    // keeps the old brand, so Back returns to it on that brand.
+    if (otherBrand && here.item && here.brand && there.brand && here.brand !== there.brand) return;
+    // An old link's ?brand= is in the path now.
+    const query = new URLSearchParams(location.search);
+    query.delete("brand");
+    const search = query.toString() ? `?${query}` : "";
+    if (location.pathname !== path || location.search !== search) history[stale || otherBrand ? "replaceState" : "pushState"](null, "", path + search);
     document.title = `${link?.name ?? (kind ? undefined : item) ?? tabNames[tab]} · ${ws.name} · Outflare`;
-  }, [ws?.id, ws?.slug, ws?.name, tab, item, link, findWs, findItem]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [ws?.id, ws?.slug, ws?.name, tab, item, link, findWs, findItem, pickedBrand, brandState.loaded, brandState.active.length]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Unread replies show on the Inbox tab, refreshed every 30 seconds.
+  // Switching brand shows the new brand's records everywhere: the page
+  // reloads (keyed by brand below), and an item open from the old brand
+  // closes back to its list.
+  const lastBrand = useRef<string | undefined>(undefined);
+  useEffect(() => {
+    if (!brandState.loaded) return;
+    const was = lastBrand.current;
+    lastBrand.current = pickedBrand ?? "";
+    if (was !== undefined && was !== lastBrand.current && item) setTab(tab);
+  }, [pickedBrand, brandState.loaded]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Unread replies show on the Inbox tab, for the brand picked in the
+  // sidebar, refreshed every 30 seconds.
   useEffect(() => {
     if (!wsId) return;
-    const load = () => api.GET("/v1/workspaces/{ws}/stats", { params: { path: { ws: wsId } } }).then(({ data }) => data && setUnread(data.unread_replies));
+    const load = () => api.GET("/v1/workspaces/{ws}/stats", { params: { path: { ws: wsId }, query: pickedBrand ? { brand: pickedBrand } : {} } }).then(({ data }) => data && setUnread(data.unread_replies));
     load();
     const t = setInterval(load, 30000);
     return () => clearInterval(t);
-  }, [wsId, tab]);
+  }, [wsId, tab, pickedBrand]);
 
   useEffect(() => {
     const back = () => {
       const p = fromPath();
       const id = known(p.ws);
       if (id) setWsId(id);
+      if (p.brand && (!id || id === wsId)) setBrand(p.brand, "link");
       const t = p.tab ?? tab;
       if (p.tab) setTabState(p.tab);
       const k = itemKinds[t];
@@ -471,7 +498,7 @@ function Shell({ me, onSignOut, onReload }: { me: Me; onSignOut: () => void; onR
         <TopBar ws={ws} tab={tab} item={item} itemName={link?.name} onTab={go} onApi={() => setApiOpen((o) => !o)} apiOpen={apiOpen} />
         {/* Every page uses the whole width beside the sidebar: tables and
             charts stretch, and forms and text cap themselves at a reading width. */}
-        <div className="w-full px-4 py-6 sm:px-6 lg:px-8">
+        <div key={pickedBrand ?? "all"} className="w-full px-4 py-6 sm:px-6 lg:px-8">
         {me.support_view && <SupportViewBanner name={me.user.name || me.user.email || "this person"} />}
         {!me.support_view && me.user.email_verified === false && me.user.email && <ConfirmEmailBanner email={me.user.email} resendAfter={me.user.email_resend_after ?? 0} />}
         {ws?.test && (

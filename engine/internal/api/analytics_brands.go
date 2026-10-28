@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"slices"
 	"strings"
 	"time"
 
@@ -19,7 +20,50 @@ import (
 
 func (s *Server) routesAnalyticsBrands(mux *http.ServeMux) {
 	mux.HandleFunc("GET /v1/workspaces/{ws}/analytics/site-brands", s.inBrand(auth.ScopeAnalyticsRead, s.listSiteBrands))
-	mux.HandleFunc("PUT /v1/workspaces/{ws}/analytics/{id}/site-brand", s.inWorkspace(auth.ScopeIntegrationsManage, s.setSiteBrand))
+	mux.HandleFunc("PUT /v1/workspaces/{ws}/analytics/{id}/site-brand", s.inBrand(auth.ScopeIntegrationsManage, s.setSiteBrand))
+}
+
+// siteOwner is the brand a site reports for, and whether someone placed it
+// by hand (a placed site with no brand is shared by every brand).
+type siteOwner struct {
+	brand *string
+	set   bool
+}
+
+// siteOwners says who owns each of a connection's sites, by site id.
+func (s *Server) siteOwners(ctx context.Context, ws, integration string, sites, hosts []string) (map[string]siteOwner, error) {
+	rows, err := s.pool.Query(ctx, `
+		SELECT x.site, analytics_site_brand($1, $2, x.site, x.host)::text, o.site IS NOT NULL
+		FROM unnest($3::text[], $4::text[]) AS x (site, host)
+		LEFT JOIN analytics_site_brands o ON o.workspace_id = $1 AND o.integration_id = $2 AND o.site = x.site`,
+		ws, integration, sites, hosts)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := map[string]siteOwner{}
+	for rows.Next() {
+		var site string
+		var o siteOwner
+		if err := rows.Scan(&site, &o.brand, &o.set); err != nil {
+			return nil, err
+		}
+		out[site] = o
+	}
+	return out, rows.Err()
+}
+
+// placesSite reports whether the caller may see and place a site. Someone
+// kept to some brands places the sites of their own brands and the ones
+// nobody has placed yet, never another brand's or a shared one.
+func (a *access) placesSite(o siteOwner) bool {
+	if a.Brands == nil {
+		return true
+	}
+	if o.brand != nil {
+		return slices.Contains(a.Brands, *o.brand)
+	}
+	return !o.set
 }
 
 type siteBrand struct {
@@ -128,18 +172,27 @@ func (s *Server) setSiteBrand(w http.ResponseWriter, r *http.Request) {
 		writeError(w, r, http.StatusBadRequest, "invalid_request", "site is the site's id, from GET .../analytics/{id}/sites")
 		return
 	}
-	if !isUUID(id) {
-		writeError(w, r, http.StatusNotFound, "not_found", "analytics connection not found")
+	if _, ok := s.loadIntegration(w, r); !ok {
 		return
 	}
-	var exists bool
-	if err := s.pool.QueryRow(r.Context(), `SELECT EXISTS (SELECT 1 FROM integrations WHERE workspace_id = $1 AND id = $2)`, a.WorkspaceID, id).Scan(&exists); err != nil {
-		s.internal(w, r, err)
-		return
-	}
-	if !exists {
-		writeError(w, r, http.StatusNotFound, "not_found", "analytics connection not found")
-		return
+	if a.Brands != nil {
+		// Someone kept to some brands puts a site in one of them, and only
+		// a site that is theirs already or nobody's yet.
+		var host string
+		_ = s.pool.QueryRow(r.Context(), `SELECT host FROM analytics_syncs WHERE workspace_id = $1 AND integration_id = $2 AND site = $3`, a.WorkspaceID, id, req.Site).Scan(&host)
+		owners, err := s.siteOwners(r.Context(), a.WorkspaceID, id, []string{req.Site}, []string{host})
+		if err != nil {
+			s.internal(w, r, err)
+			return
+		}
+		if !a.placesSite(owners[req.Site]) {
+			writeError(w, r, http.StatusForbidden, "forbidden", "this site belongs to another brand or is shared by every brand; you can place sites only in your own brands")
+			return
+		}
+		if ref == "" || ref == "auto" || ref == "none" {
+			writeError(w, r, http.StatusForbidden, "forbidden", "you can place sites only in your own brands: brand is one of their ids or handles")
+			return
+		}
 	}
 	var brandID *string
 	switch ref {
@@ -152,6 +205,10 @@ func (s *Server) setSiteBrand(w http.ResponseWriter, r *http.Request) {
 		}
 		if err != nil {
 			s.internal(w, r, err)
+			return
+		}
+		if a.Brands != nil && !slices.Contains(a.Brands, bid) {
+			writeError(w, r, http.StatusForbidden, "forbidden", "you can place sites only in your own brands")
 			return
 		}
 		brandID = &bid

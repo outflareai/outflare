@@ -819,6 +819,7 @@ class Operations(_Mixin):
         self,
         *,
         ws: str | None = None,
+        brand: str | None = None,
         from_: str | None = None,
         to: str | None = None,
         fresh: bool | None = None,
@@ -838,7 +839,7 @@ class Operations(_Mixin):
             "GET",
             "/v1/workspaces/{ws}/analytics/summary",
             path={"ws": ws},
-            query={"from": from_, "to": to, "fresh": fresh},
+            query={"brand": brand, "from": from_, "to": to, "fresh": fresh},
         )
 
     def apply_allocation_suggestion(
@@ -5203,6 +5204,7 @@ class Operations(_Mixin):
         self,
         *,
         ws: str | None = None,
+        brand: str | None = None,
     ) -> Any:
         """Show who gets alerts by email.
 
@@ -5220,12 +5222,14 @@ class Operations(_Mixin):
             "GET",
             "/v1/workspaces/{ws}/alerts/settings",
             path={"ws": ws},
+            query={"brand": brand},
         )
 
     def get_allocation_attention(
         self,
         *,
         ws: str | None = None,
+        brand: str | None = None,
     ) -> Any:
         """What needs a person.
 
@@ -5238,6 +5242,7 @@ class Operations(_Mixin):
             "GET",
             "/v1/workspaces/{ws}/allocation/attention",
             path={"ws": ws},
+            query={"brand": brand},
         )
 
     def get_allocation_settings(
@@ -5262,6 +5267,7 @@ class Operations(_Mixin):
         self,
         *,
         ws: str | None = None,
+        brand: str | None = None,
     ) -> Any:
         """What each website can be asked.
 
@@ -5274,12 +5280,14 @@ class Operations(_Mixin):
             "GET",
             "/v1/workspaces/{ws}/analytics/catalog",
             path={"ws": ws},
+            query={"brand": brand},
         )
 
     def get_analytics_changes(
         self,
         *,
         ws: str | None = None,
+        brand: str | None = None,
         days: int | None = None,
         to: str | None = None,
         host: str | None = None,
@@ -5296,7 +5304,7 @@ class Operations(_Mixin):
             "GET",
             "/v1/workspaces/{ws}/analytics/changes",
             path={"ws": ws},
-            query={"days": days, "to": to, "host": host, "limit": limit},
+            query={"brand": brand, "days": days, "to": to, "host": host, "limit": limit},
         )
 
     def get_analytics_history(
@@ -6397,6 +6405,7 @@ class Operations(_Mixin):
         self,
         *,
         ws: str | None = None,
+        brand: str | None = None,
     ) -> Any:
         """Mailboxes by lifecycle stage, the ones not ready, and plans in progress.
 
@@ -6412,6 +6421,7 @@ class Operations(_Mixin):
             "GET",
             "/v1/workspaces/{ws}/infrastructure",
             path={"ws": ws},
+            query={"brand": brand},
         )
 
     def get_install_health(
@@ -7293,6 +7303,7 @@ class Operations(_Mixin):
         self,
         *,
         ws: str | None = None,
+        brand: str | None = None,
         report: Literal["overview", "keywords", "backlinks", "links", "competitors", "audit"] | None = None,
         host: str | None = None,
         integration: str | None = None,
@@ -7316,7 +7327,15 @@ class Operations(_Mixin):
             "GET",
             "/v1/workspaces/{ws}/seo/history",
             path={"ws": ws},
-            query={"report": report, "host": host, "integration": integration, "from": from_, "to": to, "limit": limit},
+            query={
+                "brand": brand,
+                "report": report,
+                "host": host,
+                "integration": integration,
+                "from": from_,
+                "to": to,
+                "limit": limit,
+            },
         )
 
     def get_seo_overview(
@@ -7928,6 +7947,7 @@ class Operations(_Mixin):
         self,
         *,
         ws: str | None = None,
+        brand: str | None = None,
     ) -> Any:
         """What is blocked, and what to do about it.
 
@@ -7947,6 +7967,7 @@ class Operations(_Mixin):
             "GET",
             "/v1/workspaces/{ws}/status",
             path={"ws": ws},
+            query={"brand": brand},
         )
 
     def get_supplier_sync(
@@ -8846,6 +8867,7 @@ class Operations(_Mixin):
         self,
         *,
         ws: str | None = None,
+        brand: str | None = None,
         sequence_id: str | None = None,
         mailbox_id: str | None = None,
         limit: int | None = None,
@@ -8865,6 +8887,7 @@ class Operations(_Mixin):
             "/v1/workspaces/{ws}/allocation/changes",
             path={"ws": ws},
             query={
+                "brand": brand,
                 "sequence_id": sequence_id,
                 "mailbox_id": mailbox_id,
                 "limit": limit,
@@ -8878,6 +8901,7 @@ class Operations(_Mixin):
         self,
         *,
         ws: str | None = None,
+        brand: str | None = None,
         sequence_id: str | None = None,
     ) -> Any:
         """List suggestions waiting on a person.
@@ -8891,7 +8915,7 @@ class Operations(_Mixin):
             "GET",
             "/v1/workspaces/{ws}/allocation/suggestions",
             path={"ws": ws},
-            query={"sequence_id": sequence_id},
+            query={"brand": brand, "sequence_id": sequence_id},
         )
 
     def list_analytics_site_brands(
@@ -8929,7 +8953,7 @@ class Operations(_Mixin):
     ) -> Any:
         """List the sites a connection can read.
 
-        Scope: analytics.read. GA4 properties, Search Console properties, PostHog projects, Fathom or Umami sites, and so on, each with the domain it counts under and whether the sync stores it. Every site syncs unless switched off, up to 20 per connection. Pass an id as `site` on reports, or make it the default.
+        Scope: analytics.read. GA4 properties, Search Console properties, PostHog projects, Fathom or Umami sites, and so on, each with the domain it counts under and whether the sync stores it. Every site syncs unless switched off, up to 20 per connection. Pass an id as `site` on reports, or make it the default. Someone kept to some brands sees their brands' sites and the ones no brand has yet.
 
         Needs: the analytics.read scope.
         GET /v1/workspaces/{ws}/analytics/{id}/sites
@@ -8945,6 +8969,7 @@ class Operations(_Mixin):
         self,
         *,
         ws: str | None = None,
+        brand: str | None = None,
     ) -> Any:
         """List connected analytics tools.
 
@@ -8963,12 +8988,14 @@ class Operations(_Mixin):
             "GET",
             "/v1/workspaces/{ws}/analytics",
             path={"ws": ws},
+            query={"brand": brand},
         )
 
     def list_analytics_syncs(
         self,
         *,
         ws: str | None = None,
+        brand: str | None = None,
     ) -> Any:
         """What the sync has stored for each connection.
 
@@ -8981,6 +9008,7 @@ class Operations(_Mixin):
             "GET",
             "/v1/workspaces/{ws}/analytics/syncs",
             path={"ws": ws},
+            query={"brand": brand},
         )
 
     def list_api_tokens(
@@ -9356,6 +9384,7 @@ class Operations(_Mixin):
         self,
         *,
         ws: str | None = None,
+        brand: str | None = None,
         site: str | None = None,
         before: str | None = None,
         cursor: str | None = None,
@@ -9373,7 +9402,7 @@ class Operations(_Mixin):
             "GET",
             "/v1/workspaces/{ws}/crawls",
             path={"ws": ws},
-            query={"site": site, "before": before, "cursor": cursor, "fields": fields, "limit": limit},
+            query={"brand": brand, "site": site, "before": before, "cursor": cursor, "fields": fields, "limit": limit},
         )
 
     def list_crm_imports(
@@ -9481,6 +9510,7 @@ class Operations(_Mixin):
         self,
         *,
         ws: str | None = None,
+        brand: str | None = None,
         from_: str | None = None,
         to: str | None = None,
         project_id: str | None = None,
@@ -9505,6 +9535,7 @@ class Operations(_Mixin):
             "/v1/workspaces/{ws}/deals",
             path={"ws": ws},
             query={
+                "brand": brand,
                 "from": from_,
                 "to": to,
                 "project_id": project_id,
@@ -9681,6 +9712,7 @@ class Operations(_Mixin):
         self,
         *,
         ws: str | None = None,
+        brand: str | None = None,
         provider_id: str | None = None,
     ) -> Any:
         """List sending domains for lifecycle email.
@@ -9694,7 +9726,7 @@ class Operations(_Mixin):
             "GET",
             "/v1/workspaces/{ws}/email-provider-domains",
             path={"ws": ws},
-            query={"provider_id": provider_id},
+            query={"brand": brand, "provider_id": provider_id},
         )
 
     def list_email_provider_guides(
@@ -10266,6 +10298,7 @@ class Operations(_Mixin):
         self,
         *,
         ws: str | None = None,
+        brand: str | None = None,
     ) -> Any:
         """List infrastructure plans.
 
@@ -10278,6 +10311,7 @@ class Operations(_Mixin):
             "GET",
             "/v1/workspaces/{ws}/infra-plans",
             path={"ws": ws},
+            query={"brand": brand},
         )
 
     def list_integration_models(
@@ -10534,6 +10568,7 @@ class Operations(_Mixin):
         self,
         *,
         ws: str | None = None,
+        brand: str | None = None,
         list_id: str | None = None,
         q: str | None = None,
         suppressed: bool | None = None,
@@ -10555,6 +10590,7 @@ class Operations(_Mixin):
             "/v1/workspaces/{ws}/leads",
             path={"ws": ws},
             query={
+                "brand": brand,
                 "list_id": list_id,
                 "q": q,
                 "suppressed": suppressed,
@@ -10708,6 +10744,7 @@ class Operations(_Mixin):
         self,
         *,
         ws: str | None = None,
+        brand: str | None = None,
         from_: str | None = None,
         to: str | None = None,
         project_id: str | None = None,
@@ -10732,6 +10769,7 @@ class Operations(_Mixin):
             "/v1/workspaces/{ws}/meetings",
             path={"ws": ws},
             query={
+                "brand": brand,
                 "from": from_,
                 "to": to,
                 "project_id": project_id,
@@ -10809,6 +10847,7 @@ class Operations(_Mixin):
         self,
         *,
         ws: str | None = None,
+        brand: str | None = None,
         sequence_id: str | None = None,
         lead_id: str | None = None,
         mailbox_id: str | None = None,
@@ -10832,6 +10871,7 @@ class Operations(_Mixin):
             "/v1/workspaces/{ws}/messages",
             path={"ws": ws},
             query={
+                "brand": brand,
                 "sequence_id": sequence_id,
                 "lead_id": lead_id,
                 "mailbox_id": mailbox_id,
@@ -11040,6 +11080,7 @@ class Operations(_Mixin):
         self,
         *,
         ws: str | None = None,
+        brand: str | None = None,
     ) -> Any:
         """List connected sequencer accounts.
 
@@ -11052,6 +11093,7 @@ class Operations(_Mixin):
             "GET",
             "/v1/workspaces/{ws}/platforms",
             path={"ws": ws},
+            query={"brand": brand},
         )
 
     def list_playbook_catalog(
@@ -11544,6 +11586,7 @@ class Operations(_Mixin):
         self,
         *,
         ws: str | None = None,
+        brand: str | None = None,
     ) -> Any:
         """List SEO connections.
 
@@ -11556,6 +11599,7 @@ class Operations(_Mixin):
             "GET",
             "/v1/workspaces/{ws}/seo",
             path={"ws": ws},
+            query={"brand": brand},
         )
 
     def list_seo_competitor_events(
@@ -12447,6 +12491,7 @@ class Operations(_Mixin):
         self,
         *,
         ws: str | None = None,
+        brand: str | None = None,
         level: Literal["ok", "warning", "critical", "paused"] | None = None,
         mailbox_id: str | None = None,
     ) -> Any:
@@ -12465,7 +12510,7 @@ class Operations(_Mixin):
             "GET",
             "/v1/workspaces/{ws}/mailbox-health",
             path={"ws": ws},
-            query={"level": level, "mailbox_id": mailbox_id},
+            query={"brand": brand, "level": level, "mailbox_id": mailbox_id},
         )
 
     def mark_infra_domains_bought(
@@ -14438,6 +14483,7 @@ class Operations(_Mixin):
         self,
         *,
         ws: str | None = None,
+        brand: str | None = None,
         q: str,
         kinds: str | None = None,
         limit: int | None = None,
@@ -14458,7 +14504,7 @@ class Operations(_Mixin):
             "GET",
             "/v1/workspaces/{ws}/search",
             path={"ws": ws},
-            query={"q": q, "kinds": kinds, "limit": limit, "mode": mode},
+            query={"brand": brand, "q": q, "kinds": kinds, "limit": limit, "mode": mode},
         )
 
     def send_email(
@@ -14827,7 +14873,8 @@ class Operations(_Mixin):
         Scope: integrations.manage. For a site whose domain is not one of
         the brand's (a GA4 property named for an app, a PostHog project for
         a game), or to make a site shared. `auto` goes back to matching by
-        domain.
+        domain. Someone kept to some brands places a site that is theirs or
+        no brand's yet, in one of their brands only (403 otherwise).
 
         Needs: the integrations.manage scope.
         PUT /v1/workspaces/{ws}/analytics/{id}/site-brand
@@ -16496,7 +16543,7 @@ class Operations(_Mixin):
     ) -> Any:
         """Switch a site on or off, or set its domain.
 
-        Scope: integrations.manage. Switching a site off stops its sync and deletes what was stored for it, so totals by domain stop counting it. Switching one on starts its 90-day backfill now. The domain lines the site up with other tools for the same website; an empty string goes back to the tool's own.
+        Scope: integrations.manage. Switching a site off stops its sync and deletes what was stored for it, so totals by domain stop counting it. Switching one on starts its 90-day backfill now. The domain lines the site up with other tools for the same website; an empty string goes back to the tool's own. Someone kept to some brands changes only their brands' sites and the ones no brand has yet, and can't give a site another brand's domain.
 
         Needs: the integrations.manage scope.
         PATCH /v1/workspaces/{ws}/analytics/{id}/sites/{site}

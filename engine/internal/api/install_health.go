@@ -140,7 +140,8 @@ func (s *Server) installChecks(ctx context.Context, ws, brand string) (installHe
 	for _, c := range clientReleases {
 		v.Latest.Clients[strings.TrimSuffix(c.prefix, "/")] = c.latest
 	}
-	page := func(p string) string { return s.appPath(ctx, ws, p) }
+	brandPage := s.brandAppPath(ctx, ws, brand, "")
+	page := func(p string) string { return brandPage + p }
 	forBrand := func(b *string) bool { return brand == "" || b == nil || *b == brand }
 	add := func(c installCheck) {
 		if forBrand(c.BrandID) {

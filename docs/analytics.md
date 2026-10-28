@@ -147,6 +147,18 @@ only, because its API allows ten calls a day and three days of history.
   the domain and `PUT .../analytics/$ID/site-brand` with `{"site", "brand"}`
   (a handle, `none` for shared, or `auto` to follow the domain again) picks a
   brand outright.
+- **Every site gets a decision.** Each row says why its brand was suggested
+  ("Matches trailcast.example", "Name matches"), and Save waits until every
+  ticked site has a brand, is shared by all brands, or is set to "Don't
+  import". A site no brand fits can start one: "New brand from this site"
+  makes a brand named after the site, with its domain as the website.
+- **Pick a brand's sites without signing in again.** With one brand picked
+  in the sidebar and no analytics counting for it, Analytics offers "Pick
+  from {connection}" for each analytics connection the brand uses, and lists
+  only that brand's sites and the ones no brand has yet.
+- **People kept to some brands** (and their API tokens) see and place only
+  their brands' sites and the ones no brand has yet, into their own brands:
+  never another brand's site, a shared one, or another brand's domain.
 - **Gaps show on Home.** Until every stored site has a brand, Analytics shows
   "Finish setting up analytics" and `GET /status` (and Home's needs-attention
   list) reports `analytics_site_unmapped` with the sites. A brand that no

@@ -180,15 +180,38 @@ function Websites({ ws, days, sources, seo, selected, onPick, canManage }: { ws:
   // by connection: the set-up still to finish.
   const [unmapped, setUnmapped] = useState<Record<string, number>>({});
   const [settingUp, setSettingUp] = useState<AnalyticsSource | null>(null);
+  // With one brand picked: whether any site counts for it, and the
+  // connections it uses, to pick its sites from without signing in again.
+  const [brandSites, setBrandSites] = useState<number | null>(null);
+  const [usable, setUsable] = useState<string[]>([]);
+  const [focused, setFocused] = useState(false);
   useEffect(() => {
     if (!canManage) return;
-    api.GET("/v1/workspaces/{ws}/analytics/site-brands", { params: { path: { ws } } }).then(({ data }) => {
+    // Every brand's sites, to count the ones still to place.
+    api.GET("/v1/workspaces/{ws}/analytics/site-brands", { params: { path: { ws }, query: { brand: "all" } } }).then(({ data }) => {
       const out: Record<string, number> = {};
       for (const b of data?.data ?? []) if (brands.length ? b.source === "none" : !b.host) out[b.integration_id] = (out[b.integration_id] ?? 0) + 1;
       setUnmapped(out);
+      setBrandSites(picked ? (data?.data ?? []).filter((b) => b.brand_id === picked.id).length : null);
     });
-  }, [ws, sources, reload, canManage, brands.length]);
+  }, [ws, sources, reload, canManage, brands.length, picked?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    if (!picked || !canManage) return setUsable([]);
+    api.GET("/v1/workspaces/{ws}/integrations", { params: { path: { ws }, query: { brand: picked.handle, category: "analytics" } } }).then(({ data }) => setUsable((data?.data ?? []).map((i) => i.id)));
+  }, [ws, picked?.handle, canManage, sources]); // eslint-disable-line react-hooks/exhaustive-deps
   const setup = (id: string) => setSettingUp(sources.find((s) => s.id === id) ?? null);
+  const pickFrom = picked && brandSites === 0 ? sources.filter((s) => usable.includes(s.id)) : [];
+  const pick = pickFrom.length > 0 && picked && (
+    <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border bg-card px-4 py-3 shadow-xs">
+      <div className="min-w-0 text-[13px]">
+        <div className="font-medium">{picked.name} has no website analytics yet</div>
+        <div className="text-muted-foreground">Pick its sites from the {pickFrom.length === 1 ? "connection" : "connections"} you already have. No need to sign in again.</div>
+      </div>
+      <div className="flex flex-wrap gap-2">
+        {pickFrom.map((s) => <Button key={s.id} onClick={() => { setFocused(true); setup(s.id); }}>{pickFrom.length > 1 ? `Pick from ${s.name}` : `Pick ${picked.name}'s sites`}</Button>)}
+      </div>
+    </div>
+  );
   const todo = sources.filter((s) => unmapped[s.id]);
   const finish = todo.length > 0 && (
     <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-brand-strong/40 bg-brand-strong/5 px-4 py-3 dark:border-brand/40 dark:bg-brand/5">
@@ -203,7 +226,7 @@ function Websites({ ws, days, sources, seo, selected, onPick, canManage }: { ws:
       </div>
     </div>
   );
-  const dialog = settingUp && <SiteSetupDialog ws={ws} source={settingUp} from="analytics" onClose={(saved) => { setSettingUp(null); if (saved) setReload((n) => n + 1); }} />;
+  const dialog = settingUp && <SiteSetupDialog ws={ws} source={settingUp} from={focused ? "brand" : "analytics"} focus={focused ? picked : undefined} onClose={(saved) => { setSettingUp(null); setFocused(false); if (saved) setReload((n) => n + 1); }} />;
   useEffect(() => {
     api.GET("/v1/workspaces/{ws}/analytics/overview", { params: { path: { ws }, query: { ...storedRange(days), ...(brand ? { brand } : {}) } } }).then(({ data, error }) => {
       if (error || !data) return setError(errorMessage(error));
@@ -235,6 +258,7 @@ function Websites({ ws, days, sources, seo, selected, onPick, canManage }: { ws:
     return (
       <div className="space-y-3">
         {finish}
+        {pick}
         {dialog}
         <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border bg-card px-4 py-3 text-[13px] shadow-xs">
           <span>
@@ -250,6 +274,7 @@ function Websites({ ws, days, sources, seo, selected, onPick, canManage }: { ws:
   return (
     <section aria-label="Websites" className="space-y-3">
       {finish}
+      {pick}
       {dialog}
       <div className="flex flex-wrap items-center justify-between gap-2">
         <h2 className="text-[13px] font-medium">Websites <span className="font-normal text-muted-foreground">· stored history, {periods.find((p) => p.days === days)?.label.toLowerCase()} to yesterday</span></h2>

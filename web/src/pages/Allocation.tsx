@@ -5,6 +5,7 @@ import { Badge, Button, confirmAction, Empty, field, Loading, PageHeader, Stat, 
 import { ago, plural, stamp } from "../format";
 import type { Tab } from "../App";
 import { DataTable } from "@/components/data-table";
+import { useBrand } from "@/lib/brand";
 
 type Shortage = { sequence_id: string; sequence_name: string; needed_daily: number; active_daily: number; blocking: AllocationBlocking[]; note: string };
 type Orphan = { sequence_id: string; sequence_name: string; leads: number };
@@ -28,12 +29,15 @@ export function Allocation({ ws, canManage, canSetMode, go }: { ws: string; canM
   const [busy, setBusy] = useState<string | null>(null);
   const [running, setRunning] = useState(false);
 
+  // Narrowed to the brand picked in the sidebar: its sequences and mailboxes.
+  const { query: brandQuery } = useBrand(ws);
   const load = useCallback(async () => {
     const path = { params: { path: { ws } } };
+    const branded = { params: { path: { ws }, query: brandQuery } };
     const [a, s, c, m, p] = await Promise.all([
-      api.GET("/v1/workspaces/{ws}/allocation/attention", path),
-      api.GET("/v1/workspaces/{ws}/allocation/suggestions", path),
-      api.GET("/v1/workspaces/{ws}/allocation/changes", { params: { path: { ws }, query: { limit: 100 } } }),
+      api.GET("/v1/workspaces/{ws}/allocation/attention", branded),
+      api.GET("/v1/workspaces/{ws}/allocation/suggestions", branded),
+      api.GET("/v1/workspaces/{ws}/allocation/changes", { params: { path: { ws }, query: { limit: 100, ...brandQuery } } }),
       api.GET("/v1/workspaces/{ws}/allocation/settings", path),
       api.GET("/v1/workspaces/{ws}/platforms", path),
     ]);
@@ -42,7 +46,7 @@ export function Allocation({ ws, canManage, canSetMode, go }: { ws: string; canM
     setSuggestions(s.data?.data ?? []);
     setChanges(c.data?.data ?? []);
     if (m.data?.mode) setMode(m.data.mode);
-  }, [ws]);
+  }, [ws, brandQuery.brand]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     load();

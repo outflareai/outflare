@@ -357,10 +357,11 @@ function Meetings({ ws, from, to, canManage, sequences, projects, onChange }: { 
   const [adding, setAdding] = useState(false);
   const [moving, setMoving] = useState<Meeting | null>(null);
 
+  const { query: brandQuery } = useBrand(ws);
   const load = useCallback(async () => {
-    const { data } = await api.GET("/v1/workspaces/{ws}/meetings", { params: { path: { ws }, query: { from, to, limit: 500, ...(status ? { status } : {}) } } });
+    const { data } = await api.GET("/v1/workspaces/{ws}/meetings", { params: { path: { ws }, query: { from, to, limit: 500, ...(status ? { status } : {}), ...brandQuery } } });
     setList(data?.data ?? []);
-  }, [ws, from, to, status]);
+  }, [ws, from, to, status, brandQuery.brand]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     load();
@@ -608,10 +609,11 @@ function Deals({ ws, from, to, canManage, currency, connected, onChange, go }: {
   const [list, setList] = useState<Deal[] | null>(null);
   const [adding, setAdding] = useState(false);
 
+  const { query: brandQuery } = useBrand(ws);
   const load = useCallback(async () => {
-    const { data } = await api.GET("/v1/workspaces/{ws}/deals", { params: { path: { ws }, query: { from, to, limit: 500 } } });
+    const { data } = await api.GET("/v1/workspaces/{ws}/deals", { params: { path: { ws }, query: { from, to, limit: 500, ...brandQuery } } });
     setList(data?.data ?? []);
-  }, [ws, from, to]);
+  }, [ws, from, to, brandQuery.brand]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     load();

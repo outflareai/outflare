@@ -323,9 +323,17 @@ func handleProblem(h string) string {
 		return "handle must use only lowercase letters, numbers and dashes, and start and end with a letter or number"
 	case h == "none" || h == "all":
 		return "handle must not be none or all"
+	case slices.Contains(pageNames, h):
+		return "handle must not be the name of a page in the app, like " + h + ": it comes before the page in URLs (/acme/repocket/seo)"
 	}
 	return ""
 }
+
+// pageNames are the web app's pages (appTabs in web/src/lib/paths.ts). A
+// brand's handle is the part of the app's URLs after the workspace, before
+// the page, so it can't be one of them. TestBrandHandlesAreNotPages keeps
+// the two lists the same.
+var pageNames = []string{"overview", "get-started", "setup", "ai", "ai-usage", "tools", "reports", "analytics", "tracking", "links", "seo", "seo-overview", "audits", "fixes", "experiments", "keywords", "ai-visibility", "backlinks", "competitors", "reddit", "social", "ads", "visitors", "inbox", "missions", "playbooks", "outcomes", "projects", "sequences", "infrastructure", "mailboxes", "domains", "warmup", "servers", "allocation", "lifecycle", "emails", "broadcasts", "journeys", "templates", "topics", "providers", "leads", "lists", "suppression", "company", "brands", "ideal-customers", "workspace", "members", "alerts", "digests", "senders", "connectors", "webhooks", "tokens", "logs", "audit", "agency", "instance", "account", "email-finder", "lead-finder", "reviews", "flags"}
 
 // handleFrom makes a handle from a brand's name: "Repocket Games" becomes
 // "repocket-games".
@@ -333,6 +341,9 @@ func handleFrom(name string) string {
 	h := strings.Trim(nonSlug.ReplaceAllString(strings.ToLower(name), "-"), "-")
 	if len(h) > 40 {
 		h = strings.Trim(h[:40], "-")
+	}
+	if slices.Contains(pageNames, h) {
+		h += "-brand"
 	}
 	if handleProblem(h) != "" {
 		h = "brand"
@@ -1016,4 +1027,77 @@ func brandWrite(ctx context.Context, tx interface {
 // models are picked from. It is the same everywhere, so it needs no sign-in.
 func (s *Server) listBusinessModels(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, brands.All())
+}
+
+// brandHosts lists the websites (hosts) a brand filter lets through, from
+// the hosts query returns for the workspace ($1). nil means every host.
+func (s *Server) brandHosts(ctx context.Context, ws string, sel brandSel, query string) ([]string, error) {
+	if sel.all() {
+		return nil, nil
+	}
+	inBrand, err := s.hostBrandFilter(ctx, ws, sel)
+	if err != nil {
+		return nil, err
+	}
+	rows, err := s.pool.Query(ctx, query, ws)
+	if err != nil {
+		return nil, err
+	}
+	all, err := pgx.CollectRows(rows, pgx.RowTo[string])
+	if err != nil {
+		return nil, err
+	}
+	out := []string{}
+	for _, h := range all {
+		if inBrand(h) {
+			out = append(out, h)
+		}
+	}
+	return out, nil
+}
+
+// needHostInBrand writes a 404 unless a website (host) belongs to a brand
+// filter's brand: by the brand's domains, or because an analytics site the
+// brand owns reads it.
+func (s *Server) needHostInBrand(w http.ResponseWriter, r *http.Request, ws, host string, sel brandSel) bool {
+	if sel.all() {
+		return true
+	}
+	inBrand, err := s.hostBrandFilter(r.Context(), ws, sel)
+	if err == nil && inBrand(host) {
+		return true
+	}
+	var mapped bool
+	if err == nil {
+		args := []any{ws, host}
+		err = s.pool.QueryRow(r.Context(), `SELECT EXISTS (SELECT 1 FROM analytics_syncs a WHERE a.workspace_id = $1 AND a.host = $2`+
+			sel.sql(`analytics_site_brand(a.workspace_id, a.integration_id, a.site, a.host)`, &args)+`)`, args...).Scan(&mapped)
+	}
+	if err != nil {
+		s.internal(w, r, err)
+		return false
+	}
+	if !mapped {
+		writeError(w, r, http.StatusNotFound, "not_found", host+" is not one of this brand's websites")
+	}
+	return mapped
+}
+
+// servesSQL is the filter's condition on a connection, row alias i: the
+// connections its brand uses, as integrationsFor keeps them.
+func (b brandSel) servesSQL(i string, args *[]any) string {
+	out := ""
+	switch b.id {
+	case "":
+	case "none":
+		out = fmt.Sprintf(` AND %s.brand_id IS NULL AND cardinality(%s.brand_ids) = 0`, i, i)
+	default:
+		*args = append(*args, b.id)
+		out = fmt.Sprintf(` AND integration_serves(%s, $%d::uuid)`, i, len(*args))
+	}
+	if b.in != nil {
+		*args = append(*args, b.in)
+		out += fmt.Sprintf(` AND EXISTS (SELECT 1 FROM unnest($%d::uuid[]) b WHERE integration_serves(%s, b))`, len(*args), i)
+	}
+	return out
 }

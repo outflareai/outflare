@@ -6,6 +6,7 @@ import type { Tab } from "../App";
 import { placementTone } from "../format";
 import { DataTable } from "@/components/data-table";
 import { changeWarmup, WarmupCell } from "./Mailboxes";
+import { useBrand } from "@/lib/brand";
 
 // Warm-up across every mailbox. Outflare doesn't send warm-up mail itself:
 // a connected sequencer with its own warm-up (EmailBison, Instantly,
@@ -16,13 +17,15 @@ export function Warmup({ ws, canManage, go }: { ws: string; canManage: boolean; 
   const [sequencers, setSequencers] = useState<{ id: string; name: string }[]>([]);
   const [error, setError] = useState("");
 
+  // Narrowed to the brand picked in the sidebar.
+  const { query: brandQuery } = useBrand(ws);
   const load = useCallback(async () => {
-    const path = { params: { path: { ws } } };
+    const path = { params: { path: { ws }, query: brandQuery } };
     const [m, i] = await Promise.all([api.GET("/v1/workspaces/{ws}/mailboxes", path), api.GET("/v1/workspaces/{ws}/integrations", path)]);
     if (m.error || !m.data) return setError(errorMessage(m.error));
     setMailboxes(m.data.data);
     setSequencers((i.data?.data ?? []).filter((x) => x.capabilities.includes("control.warmup")).map((x) => ({ id: x.id, name: x.name })));
-  }, [ws]);
+  }, [ws, brandQuery.brand]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     load();

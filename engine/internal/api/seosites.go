@@ -140,9 +140,16 @@ const crawlRunCols = `r.id, r.site_id, r.host, r.status, r.trigger, NULLIF(r.rea
 	r.bytes, r.created_at, r.started_at, r.finished_at`
 
 func scanCrawlRun(row pgx.Row, v *crawlRunView, extra ...any) error {
-	return row.Scan(append([]any{&v.ID, &v.SiteID, &v.Host, &v.Status, &v.Trigger, &v.Reason, &v.ErrorCode, &v.MaxPages,
-		&v.DelayMS, &v.ObeyRobots, &v.PagesFetched, &v.PagesBlocked, &v.PagesFailed, &v.PagesFound, &v.PagesFallback, &v.PagesFirewalled, &v.FallbackHint, &v.PagesExcluded, &v.PagesRendered, &v.Settings, &v.HealthScore, &v.Issues.Errors, &v.Issues.Warnings, &v.Issues.Notices,
-		&v.Bytes, &v.CreatedAt, &v.StartedAt, &v.FinishedAt}, extra...)...)
+	var settings []byte
+	if err := row.Scan(append([]any{&v.ID, &v.SiteID, &v.Host, &v.Status, &v.Trigger, &v.Reason, &v.ErrorCode, &v.MaxPages,
+		&v.DelayMS, &v.ObeyRobots, &v.PagesFetched, &v.PagesBlocked, &v.PagesFailed, &v.PagesFound, &v.PagesFallback, &v.PagesFirewalled, &v.FallbackHint, &v.PagesExcluded, &v.PagesRendered, &settings, &v.HealthScore, &v.Issues.Errors, &v.Issues.Warnings, &v.Issues.Notices,
+		&v.Bytes, &v.CreatedAt, &v.StartedAt, &v.FinishedAt}, extra...)...); err != nil {
+		return err
+	}
+	// A run from before settings were kept ({}) crawled with the defaults.
+	var err error
+	v.Settings, err = crawl.SettingsFrom(settings)
+	return err
 }
 
 // loadSEOSites returns the workspace's sites, or one when id is set, kept
@@ -758,11 +765,15 @@ func (s *Server) listCrawls(w http.ResponseWriter, r *http.Request) {
 		writeError(w, r, http.StatusBadRequest, "invalid_request", "before is a crawl id from next_before")
 		return
 	}
+	sel, ok := s.brandFilter(w, r)
+	if !ok {
+		return
+	}
 	args := []any{a.WorkspaceID, site, before, limit}
 	rows, err := s.pool.Query(r.Context(), `SELECT `+crawlRunCols+` FROM crawl_runs r JOIN seo_sites s ON s.id = r.site_id
 		WHERE r.workspace_id = $1 AND ($2 = '' OR r.site_id::text = $2)
 		  AND ($3 = '' OR (r.created_at, r.id) < (SELECT created_at, id FROM crawl_runs WHERE id::text = $3 AND workspace_id = $1))`+
-		brandSel{in: a.Brands}.sql("s.brand_id", &args)+`
+		sel.sql("s.brand_id", &args)+`
 		ORDER BY r.created_at DESC, r.id DESC LIMIT $4`, args...)
 	if err != nil {
 		s.internal(w, r, err)

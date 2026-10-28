@@ -58,8 +58,11 @@ export function SequenceMailboxes({ ws, seq, canManage, go, onChange }: { ws: st
     // A platform campaign can only use mailboxes connected in its account;
     // Outflare can only send from mailboxes it has a login for.
     const accounts = new Set((seq.links ?? []).filter((l) => l.control === "full").map((l) => l.integration_id));
+    // A brand's sequence picks from its brand's mailboxes and unassigned
+    // ones, never another brand's.
     const all = (data?.data ?? []).filter((m) =>
       m.assignment?.sequence_id !== seq.id &&
+      (!seq.brand_id || !m.brand_id || m.brand_id === seq.brand_id) &&
       (accounts.size ? (m.platforms ?? []).some((p) => accounts.has(p.integration_id) && p.status === "ok") : m.has_login !== false));
     setChosen([]);
     setPicking(all);

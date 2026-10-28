@@ -187,9 +187,12 @@ const suggestionSelect = `
 	FROM allocation_suggestions g JOIN sequences q ON q.id = g.sequence_id JOIN mailboxes m ON m.id = g.mailbox_id
 	LEFT JOIN teams t ON t.id = g.approver_team_id`
 
-func (s *Server) loadSuggestions(ctx context.Context, ws string, seq *string) ([]suggestionView, error) {
-	rows, err := s.pool.Query(ctx, suggestionSelect+` WHERE g.workspace_id = $1 AND ($2::uuid IS NULL OR g.sequence_id = $2)
-		ORDER BY g.needs DESC, q.name, m.email`, ws, seq)
+// loadSuggestions lists suggestions, for one sequence or for the
+// sequences of one brand (by the sequence they are for).
+func (s *Server) loadSuggestions(ctx context.Context, ws string, seq *string, sel brandSel) ([]suggestionView, error) {
+	args := []any{ws, seq}
+	rows, err := s.pool.Query(ctx, suggestionSelect+` WHERE g.workspace_id = $1 AND ($2::uuid IS NULL OR g.sequence_id = $2)`+sel.sql("q.brand_id", &args)+`
+		ORDER BY g.needs DESC, q.name, m.email`, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -210,7 +213,11 @@ func (s *Server) listSuggestions(w http.ResponseWriter, r *http.Request) {
 		}
 		seq = &v
 	}
-	list, err := s.loadSuggestions(r.Context(), a.WorkspaceID, seq)
+	sel, ok := s.brandFilter(w, r)
+	if !ok {
+		return
+	}
+	list, err := s.loadSuggestions(r.Context(), a.WorkspaceID, seq, sel)
 	if err != nil {
 		s.internal(w, r, err)
 		return
@@ -349,7 +356,11 @@ type allocChangeView struct {
 	CreatedAt      time.Time  `json:"created_at"`
 }
 
-func (s *Server) loadChanges(ctx context.Context, ws string, seq, mailbox *string, limit, offset int) ([]allocChangeView, error) {
+// loadChanges lists changes, newest first; with a brand, the changes to
+// that brand's mailboxes.
+func (s *Server) loadChanges(ctx context.Context, ws string, seq, mailbox *string, limit, offset int, sel brandSel) ([]allocChangeView, error) {
+	args := []any{ws, seq, mailbox, limit, offset}
+	brand := sel.sql("m.brand_id", &args)
 	rows, err := s.pool.Query(ctx, `
 		SELECT c.id, c.mailbox_id, m.email, c.action, c.from_sequence_id, f.name, c.to_sequence_id, t.name,
 		       c.source, c.reason, ac.display_name, c.undone_at, c.created_at
@@ -357,8 +368,8 @@ func (s *Server) loadChanges(ctx context.Context, ws string, seq, mailbox *strin
 		LEFT JOIN sequences f ON f.id = c.from_sequence_id LEFT JOIN sequences t ON t.id = c.to_sequence_id
 		LEFT JOIN actors ac ON ac.id = c.actor_id
 		WHERE c.workspace_id = $1 AND ($2::uuid IS NULL OR c.from_sequence_id = $2 OR c.to_sequence_id = $2)
-		  AND ($3::uuid IS NULL OR c.mailbox_id = $3)
-		ORDER BY c.created_at DESC, c.id DESC LIMIT $4 OFFSET $5`, ws, seq, mailbox, limit, offset)
+		  AND ($3::uuid IS NULL OR c.mailbox_id = $3)`+brand+`
+		ORDER BY c.created_at DESC, c.id DESC LIMIT $4 OFFSET $5`, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -400,8 +411,12 @@ func (s *Server) listChanges(w http.ResponseWriter, r *http.Request) {
 		}
 		offset = n
 	}
+	sel, ok := s.brandFilter(w, r)
+	if !ok {
+		return
+	}
 	// One more than asked for says whether there is a next page.
-	list, err := s.loadChanges(r.Context(), a.WorkspaceID, seq, mailbox, limit+1, offset)
+	list, err := s.loadChanges(r.Context(), a.WorkspaceID, seq, mailbox, limit+1, offset, sel)
 	if err != nil {
 		s.internal(w, r, err)
 		return
@@ -947,8 +962,8 @@ func (s *Server) sequenceAllocation(w http.ResponseWriter, r *http.Request) {
 	}
 	if out.Mailboxes, err = load(`x.sequence_id = $2`); err == nil {
 		if out.Incoming, err = load(`x.next_sequence_id = $2`); err == nil {
-			if out.Suggested, err = s.loadSuggestions(ctx, a.WorkspaceID, &id); err == nil {
-				if out.Changes, err = s.loadChanges(ctx, a.WorkspaceID, &id, nil, 50, 0); err == nil {
+			if out.Suggested, err = s.loadSuggestions(ctx, a.WorkspaceID, &id, brandSel{}); err == nil {
+				if out.Changes, err = s.loadChanges(ctx, a.WorkspaceID, &id, nil, 50, 0, brandSel{}); err == nil {
 					var links map[string][]linkView
 					links, err = s.loadLinks(ctx, a.WorkspaceID, []string{id})
 					out.Links = links[id]
@@ -1022,7 +1037,13 @@ func (s *Server) resolveOrphans(w http.ResponseWriter, r *http.Request) {
 func (s *Server) allocationAttention(w http.ResponseWriter, r *http.Request) {
 	a := accessFrom(r.Context())
 	ctx := r.Context()
-	suggestions, err := s.loadSuggestions(ctx, a.WorkspaceID, nil)
+	// With a brand: its sequences' suggestions, shortages and follow-ups,
+	// and its mailboxes. Platform accounts are the workspace's.
+	sel, ok := s.brandFilter(w, r)
+	if !ok {
+		return
+	}
+	suggestions, err := s.loadSuggestions(ctx, a.WorkspaceID, nil, sel)
 	if err != nil {
 		s.internal(w, r, err)
 		return
@@ -1044,11 +1065,12 @@ func (s *Server) allocationAttention(w http.ResponseWriter, r *http.Request) {
 		Blocking     json.RawMessage `json:"blocking"`
 		Note         string          `json:"note"`
 	}
+	args := []any{a.WorkspaceID}
 	rows, err := s.pool.Query(ctx, `
 		SELECT q.id, q.name, st.needed_daily, st.active_daily, st.blocking, st.note
 		FROM allocation_status st JOIN sequences q ON q.id = st.sequence_id
-		WHERE st.workspace_id = $1 AND q.status = 'active' AND st.needed_daily > st.active_daily
-		ORDER BY q.priority DESC, q.name`, a.WorkspaceID)
+		WHERE st.workspace_id = $1 AND q.status = 'active' AND st.needed_daily > st.active_daily`+sel.sql("q.brand_id", &args)+`
+		ORDER BY q.priority DESC, q.name`, args...)
 	if err != nil {
 		s.internal(w, r, err)
 		return
@@ -1063,10 +1085,11 @@ func (s *Server) allocationAttention(w http.ResponseWriter, r *http.Request) {
 		SequenceName string `json:"sequence_name"`
 		Leads        int    `json:"leads"`
 	}
+	args = []any{a.WorkspaceID}
 	rows, err = s.pool.Query(ctx, `
 		SELECT q.id, q.name, count(*)::int FROM enrollments e JOIN sequences q ON q.id = e.sequence_id
-		WHERE e.workspace_id = $1 AND e.status = 'active' AND (e.mailbox_id IS NULL OR e.mailbox_id IN (SELECT id FROM mailboxes WHERE lifecycle_stage = 'retired')) AND e.next_step > 0 AND NOT e.handoff
-		GROUP BY q.id, q.name ORDER BY q.name`, a.WorkspaceID)
+		WHERE e.workspace_id = $1 AND e.status = 'active' AND (e.mailbox_id IS NULL OR e.mailbox_id IN (SELECT id FROM mailboxes WHERE lifecycle_stage = 'retired')) AND e.next_step > 0 AND NOT e.handoff`+sel.sql("q.brand_id", &args)+`
+		GROUP BY q.id, q.name ORDER BY q.name`, args...)
 	if err != nil {
 		s.internal(w, r, err)
 		return
@@ -1077,14 +1100,15 @@ func (s *Server) allocationAttention(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var unconfirmed int
+	args = []any{a.WorkspaceID}
 	if err := s.pool.QueryRow(ctx, `
 		SELECT CASE WHEN EXISTS (SELECT 1 FROM teams WHERE workspace_id = $1)
-		       THEN (SELECT count(*) FROM mailboxes WHERE workspace_id = $1 AND sender_confirmed_at IS NULL) ELSE 0 END`,
-		a.WorkspaceID).Scan(&unconfirmed); err != nil {
+		       THEN (SELECT count(*) FROM mailboxes WHERE workspace_id = $1 AND sender_confirmed_at IS NULL`+sel.sql("brand_id", &args)+`) ELSE 0 END`,
+		args...).Scan(&unconfirmed); err != nil {
 		s.internal(w, r, err)
 		return
 	}
-	accounts, err := s.loadPlatforms(ctx, a.WorkspaceID)
+	accounts, err := s.loadPlatforms(ctx, a.WorkspaceID, sel)
 	if err != nil {
 		s.internal(w, r, err)
 		return

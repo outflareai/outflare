@@ -88,6 +88,18 @@ func (s *Server) listLeads(w http.ResponseWriter, r *http.Request) {
 	where := ` WHERE l.workspace_id = $1`
 	args := []any{a.WorkspaceID}
 	arg := func(v any) string { args = append(args, v); return "$" + strconv.Itoa(len(args)) }
+	// A lead is a brand's when it is on one of the brand's lists; with
+	// brand=none, when it is on no brand's list.
+	sel, ok := s.brandFilter(w, r)
+	if !ok {
+		return
+	}
+	switch {
+	case sel.id == "none":
+		where += ` AND NOT EXISTS (SELECT 1 FROM lead_list_members m JOIN lead_lists x ON x.id = m.list_id WHERE m.lead_id = l.id AND x.brand_id IS NOT NULL)`
+	case sel.id != "":
+		where += ` AND EXISTS (SELECT 1 FROM lead_list_members m JOIN lead_lists x ON x.id = m.list_id WHERE m.lead_id = l.id AND x.brand_id = ` + arg(sel.id) + `)`
+	}
 	if v := q.Get("list_id"); v != "" {
 		if !validUUID(v) {
 			writeError(w, r, http.StatusBadRequest, "invalid_request", "list_id must be a UUID")

@@ -629,8 +629,10 @@ function Leads({ ws, seq, canManage, onChange, go }: { ws: string; seq: Sequence
 
   useEffect(() => {
     load();
-    api.GET("/v1/workspaces/{ws}/lead-lists", { params: { path: { ws } } }).then(({ data }) => data && setLists(data.data));
-  }, [load, ws]);
+    // A brand's sequence enrolls from that brand's lists and unassigned
+    // ones, never another brand's.
+    api.GET("/v1/workspaces/{ws}/lead-lists", { params: { path: { ws } } }).then(({ data }) => data && setLists(data.data.filter((l) => !seq.brand_id || !l.brand_id || l.brand_id === seq.brand_id)));
+  }, [load, ws, seq.brand_id]);
 
   async function enroll(e: FormEvent) {
     e.preventDefault();

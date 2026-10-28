@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -65,8 +66,15 @@ type seoSource struct {
 	Budget     seosync.Budget `json:"budget"`
 }
 
-func (s *Server) seoSources(ctx context.Context, ws string) ([]seoSource, error) {
+// seoSources lists the SEO connections a brand filter's brand uses, with
+// only that brand's domains.
+func (s *Server) seoSources(ctx context.Context, ws string, sel brandSel) ([]seoSource, error) {
 	list, err := s.integrations.List(ctx, s.pool, ws, "")
+	if err != nil {
+		return nil, err
+	}
+	list = integrationsFor(list, sel)
+	inBrand, err := s.hostBrandFilter(ctx, ws, sel)
 	if err != nil {
 		return nil, err
 	}
@@ -93,6 +101,9 @@ func (s *Server) seoSources(ctx context.Context, ws string) ([]seoSource, error)
 			return nil, err
 		}
 		for _, h := range hosts {
+			if !inBrand(h) {
+				continue
+			}
 			d := seoDomain{Host: h}
 			err := s.pool.QueryRow(ctx, `SELECT last_run_at, last_ok_at, last_error, last_cost FROM seo_syncs WHERE integration_id = $1 AND host = $2`, i.ID, h).
 				Scan(&d.LastRunAt, &d.LastOKAt, &d.LastError, &d.LastCost)
@@ -136,7 +147,11 @@ func (s *Server) listSEO(w http.ResponseWriter, r *http.Request) {
 	if !s.needIntegrations(w, r) {
 		return
 	}
-	out, err := s.seoSources(r.Context(), accessFrom(r.Context()).WorkspaceID)
+	sel, ok := s.brandFilter(w, r)
+	if !ok {
+		return
+	}
+	out, err := s.seoSources(r.Context(), accessFrom(r.Context()).WorkspaceID, sel)
 	if err != nil {
 		s.internal(w, r, err)
 		return
@@ -353,7 +368,7 @@ func (s *Server) setSEOSettings(w http.ResponseWriter, r *http.Request) {
 		s.internal(w, r, err)
 		return
 	}
-	srcs, err := s.seoSources(r.Context(), a.WorkspaceID)
+	srcs, err := s.seoSources(r.Context(), a.WorkspaceID, brandSel{})
 	if err != nil {
 		s.internal(w, r, err)
 		return
@@ -445,7 +460,20 @@ func (s *Server) seoHistory(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
-	args := []any{ws, report, host, from, to, v.Get("integration"), limit}
+	sel, ok := s.brandFilter(w, r)
+	if !ok {
+		return
+	}
+	hosts, err := s.brandHosts(r.Context(), ws, sel, `SELECT DISTINCT host FROM seo_snapshots WHERE workspace_id = $1`)
+	if err != nil {
+		s.internal(w, r, err)
+		return
+	}
+	if host != "" && hosts != nil && !slices.Contains(hosts, host) {
+		writeError(w, r, http.StatusNotFound, "not_found", host+" is not one of this brand's websites")
+		return
+	}
+	args := []any{ws, report, host, from, to, v.Get("integration"), limit, hosts}
 	if id := v.Get("integration"); id != "" && !isUUID(id) {
 		writeError(w, r, http.StatusBadRequest, "invalid_request", "integration is a connection id from GET .../seo")
 		return
@@ -457,7 +485,8 @@ func (s *Server) seoHistory(w http.ResponseWriter, r *http.Request) {
 		WITH days AS (
 			SELECT integration_id, host, day, dense_rank() OVER (PARTITION BY integration_id, host ORDER BY day DESC) AS n
 			FROM (SELECT DISTINCT integration_id, host, day FROM seo_snapshots
-				WHERE workspace_id = $1 AND report = $2 AND ($3 = '' OR host = $3) AND ($6 = '' OR integration_id::text = $6)) x
+				WHERE workspace_id = $1 AND report = $2 AND ($3 = '' OR host = $3) AND ($6 = '' OR integration_id::text = $6)
+				  AND ($8::text[] IS NULL OR host = ANY($8::text[]))) x
 		)
 		SELECT to_char(s.day, 'YYYY-MM-DD'), s.integration_id::text, s.connector, s.host, s.country, s.key, s.url, s.kind, s.metrics,
 			(SELECT p.metrics FROM seo_snapshots p JOIN days pd ON pd.integration_id = p.integration_id AND pd.host = p.host AND pd.day = p.day
@@ -508,7 +537,13 @@ type seoLatest struct {
 	connectors.SEOMetrics
 }
 
-func (s *Server) seoLatestByHost(ctx context.Context, ws string) (map[string][]seoLatest, error) {
+// seoLatestByHost is each SEO connection's latest overview of each domain a
+// brand filter lets through.
+func (s *Server) seoLatestByHost(ctx context.Context, ws string, sel brandSel) (map[string][]seoLatest, error) {
+	inBrand, err := s.hostBrandFilter(ctx, ws, sel)
+	if err != nil {
+		return nil, err
+	}
 	rows, err := s.pool.Query(ctx, `
 		SELECT DISTINCT ON (s.integration_id, s.host) s.host, s.integration_id::text, i.name, s.connector, to_char(s.day, 'YYYY-MM-DD'), s.metrics
 		FROM seo_snapshots s JOIN integrations i ON i.id = s.integration_id
@@ -525,6 +560,9 @@ func (s *Server) seoLatestByHost(ctx context.Context, ws string) (map[string][]s
 		var raw []byte
 		if err := rows.Scan(&host, &l.Integration, &l.Name, &l.Connector, &l.Day, &raw); err != nil {
 			return nil, err
+		}
+		if !inBrand(host) {
+			continue
 		}
 		_ = json.Unmarshal(raw, &l.SEOMetrics)
 		out[host] = append(out[host], l)

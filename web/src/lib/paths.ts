@@ -1,29 +1,53 @@
-// Where the app is lives in the URL, /{workspace}/{tab}, so a reload or a
-// shared link opens the same page. {workspace} is the workspace's slug, its
-// name in URLs (set in Workspace settings). A third segment opens one item,
-// e.g. /acme/sequences/{id} or /acme/domains/acme-com.example.
+// Where the app is lives in the URL, /{workspace}/{brand}/{tab}, so a
+// reload or a shared link opens the same page on the same brand.
+// {workspace} is the workspace's slug, its name in URLs (set in Workspace
+// settings). {brand} is the brand's handle, or "all" for every brand; a
+// workspace without brands, and the pages that belong to the whole
+// workspace (Members, Tokens and the like), leave it out. A last segment
+// opens one item, e.g. /acme/repocket/sequences/{id}.
 //
-// Links from before slugs, /w/{workspace id}/{tab}, still open and are
-// rewritten to the slug.
+// Older links still open: /w/{workspace id}/{tab} is rewritten to the slug,
+// and /{workspace}/{tab}?brand=repocket to /{workspace}/repocket/{tab}.
 
 export const appTabs = ["overview", "get-started", "setup", "ai", "ai-usage", "tools", "reports", "analytics", "tracking", "flags", "links", "seo", "seo-overview", "audits", "fixes", "experiments", "keywords", "ai-visibility", "backlinks", "competitors", "reddit", "social", "reviews", "ads", "visitors", "inbox", "missions", "playbooks", "outcomes", "projects", "sequences", "infrastructure", "mailboxes", "domains", "warmup", "servers", "allocation", "lifecycle", "emails", "broadcasts", "journeys", "templates", "topics", "providers", "leads", "lists", "lead-finder", "email-finder", "suppression", "company", "brands", "ideal-customers", "workspace", "members", "alerts", "digests", "senders", "connectors", "webhooks", "tokens", "logs", "audit", "agency", "instance", "account"] as const;
 export type Tab = (typeof appTabs)[number];
 
-const isTab = (t?: string): t is Tab => !!t && (appTabs as readonly string[]).includes(t);
+export const isTab = (t?: string): t is Tab => !!t && (appTabs as readonly string[]).includes(t);
 
-export type Place = { ws?: string; tab?: Tab; item?: string; legacy?: boolean };
+// Pages that belong to the whole workspace, not to a brand: their URLs
+// have no brand in them.
+export const workspaceTabs: readonly Tab[] = ["get-started", "tools", "ai", "ai-usage", "workspace", "members", "digests", "tokens", "webhooks", "agency", "instance", "account"];
 
-// parsePath reads a workspace (slug or, in old links, ID), tab and item.
-// Paths that are not app pages, such as /invite, give {}.
+// The brand part of URLs: a handle, "all", or "" for a workspace without
+// brands. Set by lib/brand.ts as the brand picked changes.
+let brandPart = "";
+export function setBrandPart(part: string) {
+  brandPart = part;
+}
+
+export type Place = { ws?: string; brand?: string; tab?: Tab; item?: string; legacy?: boolean };
+
+// parsePath reads a workspace (slug or, in old links, ID), brand, tab and
+// item. A brand is the segment after the workspace when it is not a page's
+// name; brand handles can't be one. Paths that are not app pages, such as
+// /invite, give {}.
 export function parsePath(path: string): Place {
   const parts = path.split("/").slice(1);
   const legacy = parts[0] === "w";
   if (legacy) parts.shift();
-  const [ws, tab, ...rest] = parts;
-  if (!ws || (!legacy && tab !== undefined && !isTab(tab))) return {};
-  if (!legacy && tab === undefined && ws.includes(".")) return {};
+  if (parts.length && parts[parts.length - 1] === "") parts.pop();
+  const ws = parts.shift();
+  if (!ws) return {};
+  if (!legacy && !parts.length && ws.includes(".")) return {};
+  let brand: string | undefined;
+  if (!legacy && parts.length && !isTab(parts[0])) {
+    brand = decodeURIComponent(parts.shift()!).toLowerCase();
+    if (!/^[a-z0-9][a-z0-9-]*$/.test(brand)) return {};
+  }
+  const [tab, ...rest] = parts;
+  if (tab !== undefined && !isTab(tab)) return {};
   const item = rest.length ? rest.map(decodeURIComponent).join("/") : undefined;
-  return { ws: decodeURIComponent(ws), tab: isTab(tab) ? tab : undefined, item, legacy };
+  return { ws: decodeURIComponent(ws), brand, tab, item, legacy };
 }
 
 // Slugs of the signed-in person's workspaces by ID, so any page can link
@@ -35,19 +59,22 @@ export function rememberWorkspaces(list: { id: string; slug: string }[]) {
   for (const w of list) slugs.set(w.id, w.slug);
 }
 
-// appPath is the URL of a page: appPath(ws, "connectors", "claude") is
-// /acme/connectors/claude. ws is the workspace ID or slug.
+// appPath is the URL of a page on the brand picked: appPath(ws,
+// "sequences", "q3-founders") is /acme/repocket/sequences/q3-founders, and
+// appPath(ws, "connectors", "claude") /acme/connectors/claude. ws is the
+// workspace ID or slug.
 export function appPath(ws: string, tab: Tab, item?: string): string {
   const slug = slugs.get(ws) ?? ws;
-  return `/${encodeURIComponent(slug)}/${tab}${item ? `/${encodeURIComponent(item)}` : ""}`;
+  const brand = brandPart && !workspaceTabs.includes(tab) ? `/${encodeURIComponent(brandPart)}` : "";
+  return `/${encodeURIComponent(slug)}${brand}/${tab}${item ? `/${encodeURIComponent(item)}` : ""}`;
 }
 
-// The same path with the workspace and item hidden, for product analytics:
-// /:ws/sequences/:item. Other paths come back unchanged.
+// The same path with the workspace, brand and item hidden, for product
+// analytics: /:ws/:brand/sequences/:item. Other paths come back unchanged.
 export function anonymousPath(path: string): string {
   const p = parsePath(path);
-  if (!p.ws || (!p.tab && !p.legacy)) return path; // /invite and the like
-  return `/:ws${p.tab ? `/${p.tab}` : ""}${p.item ? "/:item" : ""}`;
+  if (!p.ws || (!p.tab && !p.legacy && !p.brand)) return path; // /invite and the like
+  return `/:ws${p.brand ? "/:brand" : ""}${p.tab ? `/${p.tab}` : ""}${p.item ? "/:item" : ""}`;
 }
 
 // Item pages whose URLs name the item by a slug made from its name

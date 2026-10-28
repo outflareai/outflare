@@ -11,6 +11,7 @@ import { ago, plural } from "../format";
 import { cn } from "@/lib/utils";
 import { setBrand, useBrand } from "@/lib/brand";
 import type { Tab } from "../App";
+import { NotInABrand } from "@/components/unassigned";
 
 // Brands: the businesses one company markets from a single workspace, such
 // as Geonode and Repocket. Connectors, people, tokens and leads stay shared,
@@ -113,6 +114,7 @@ export function Brands({ ws, canManage, canEdit, open, setOpen, go }: { ws: stri
           )}
         </div>
       )}
+      {active.length > 0 && <NotInABrand ws={ws} brands={active} canEdit={canEdit} onMoved={reload} />}
       {active.length >= 2 && <ContactRuleCard ws={ws} canManage={canManage} />}
       {archived.length > 0 && (
         <Card title="Archived" description="Hidden from the sidebar and pickers. Their records are kept.">
@@ -436,10 +438,9 @@ function Members({ ws, brand: b, canEdit, onChanged }: { ws: string; brand: Bran
   const [busy, setBusy] = useState("");
 
   const load = useCallback(async () => {
-    const [p, d] = await Promise.all([
-      api.GET("/v1/workspaces/{ws}/projects", { params: { path: { ws } } }),
-      api.GET("/v1/workspaces/{ws}/sending-domains", { params: { path: { ws } } }),
-    ]);
+    // Every brand's, to move them in and out of this one.
+    const all = { params: { path: { ws }, query: { brand: "all" } } };
+    const [p, d] = await Promise.all([api.GET("/v1/workspaces/{ws}/projects", all), api.GET("/v1/workspaces/{ws}/sending-domains", all)]);
     if (p.data) setProjects(p.data.data);
     if (d.data) setDomains(d.data.data);
   }, [ws]);
@@ -573,7 +574,7 @@ function DetailsCard({ ws, brand: b, canManage, onSaved, go }: { ws: string; bra
   }
 
   return (
-    <Card title="Details" description="Its name, website, other domains and links. The handle names the brand in links and API calls (?brand=).">
+    <Card title="Details" description="Its name, website, other domains and links. The handle names the brand in links (/acme/repocket/seo) and API calls (?brand=).">
       <form onSubmit={save} className="space-y-4">
         <div className="grid gap-4 md:grid-cols-2">
           <Input label="Name" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} maxLength={100} readOnly={ro} required />

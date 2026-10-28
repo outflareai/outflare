@@ -67,12 +67,13 @@ export function registerQueryTools(server: McpServer, gtm: MissionClient, worksp
         kinds: z.array(kinds).optional().describe("Only these kinds. Default: every kind this connection may read."),
         limit: z.number().int().min(1).max(100).optional(),
         mode: z.enum(["words", "meaning"]).optional().describe("words (default) matches the words; meaning matches what they mean."),
+        brand: z.string().optional().describe("Only this brand's records: a handle or id from list_brands, none for records shared by every brand, or all."),
       },
       annotations: read,
     },
-    ({ q, kinds, limit, mode }) =>
+    ({ q, kinds, limit, mode, brand }) =>
       call(() =>
-        gtm.GET("/v1/workspaces/{ws}/search", { params: { path: path(), query: { q, kinds: kinds?.join(","), limit, mode } } }),
+        gtm.GET("/v1/workspaces/{ws}/search", { params: { path: path(), query: { q, kinds: kinds?.join(","), limit, mode, brand } } }),
       ),
   );
 

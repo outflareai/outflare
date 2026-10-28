@@ -96,8 +96,11 @@ type MeetingFilter struct {
 	Status     string
 	// Attributed: only meetings tied to outreach.
 	Attributed bool
-	Limit      int
-	Before     *time.Time // cursor: starts_at of the last row seen
+	// Brand is a brand's id, "none" for rows no brand owns, or "" for
+	// all; a row's brand is its sequence's, else its project's.
+	Brand  string
+	Limit  int
+	Before *time.Time // cursor: starts_at of the last row seen
 }
 
 // ListMeetings returns meetings, newest first.
@@ -115,8 +118,10 @@ func ListMeetings(ctx context.Context, q Querier, ws string, f MeetingFilter) ([
 		  AND ($7 = '' OR m.status = $7)
 		  AND (NOT $8 OR m.attribution <> 'none')
 		  AND ($9::timestamptz IS NULL OR m.starts_at < $9)
+		  AND ($11 = '' OR COALESCE((SELECT q.brand_id FROM sequences q WHERE q.id = m.sequence_id),
+		       (SELECT p.brand_id FROM projects p WHERE p.id = m.project_id))::text IS NOT DISTINCT FROM NULLIF($11, 'none'))
 		ORDER BY m.starts_at DESC, m.id LIMIT $10`,
-		ws, f.From, f.To, f.ProjectID, f.SequenceID, f.MissionID, f.Status, f.Attributed, f.Before, f.Limit)
+		ws, f.From, f.To, f.ProjectID, f.SequenceID, f.MissionID, f.Status, f.Attributed, f.Before, f.Limit, f.Brand)
 	if err != nil {
 		return nil, err
 	}

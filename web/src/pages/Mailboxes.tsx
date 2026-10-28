@@ -29,12 +29,12 @@ export function Mailboxes({ ws, canManage, openOAuth, go }: { ws: string; canMan
   const brand = useBrand(ws).brand?.handle;
   const load = useCallback(async () => {
     const path = { params: { path: { ws } } };
-    const [m, d, s, h] = await Promise.all([api.GET("/v1/workspaces/{ws}/mailboxes", { params: { path: { ws }, query: { ...(brand ? { brand } : {}) } } }), api.GET("/v1/workspaces/{ws}/sending-domains", { params: { path: { ws }, query: { ...(brand ? { brand } : {}) } } }), api.GET("/v1/workspaces/{ws}/senders", path), api.GET("/v1/workspaces/{ws}/mailbox-health", path)]);
+    const [m, d, s, h] = await Promise.all([api.GET("/v1/workspaces/{ws}/mailboxes", { params: { path: { ws }, query: { ...(brand ? { brand } : {}) } } }), api.GET("/v1/workspaces/{ws}/sending-domains", { params: { path: { ws }, query: { ...(brand ? { brand } : {}) } } }), api.GET("/v1/workspaces/{ws}/senders", path), api.GET("/v1/workspaces/{ws}/mailbox-health", { params: { path: { ws }, query: { ...(brand ? { brand } : {}) } } })]);
     setMailboxes(m.data?.data ?? []);
     setDomains(d.data?.data ?? []);
     setSenders(s.data?.data ?? []);
     if (h.data) setHealth({ summary: h.data.summary, byId: new Map(h.data.data.map((x) => [x.mailbox_id, x])) });
-    const i = await api.GET("/v1/workspaces/{ws}/integrations", path);
+    const i = await api.GET("/v1/workspaces/{ws}/integrations", { params: { path: { ws }, query: { ...(brand ? { brand } : {}) } } });
     setWarmupPlatforms((i.data?.data ?? []).filter((x) => x.capabilities.includes("control.warmup")).map((x) => ({ id: x.id, name: x.name, config: x.config })));
     setLoaded(true);
   }, [ws, brand]);

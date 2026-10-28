@@ -595,7 +595,7 @@ func (s *Server) queryVector(ctx context.Context, ws string, c aiChoice, cfg llm
 
 // searchMeaning answers GET .../search?mode=meaning: the items nearest in
 // meaning to q that the caller may see.
-func (s *Server) searchMeaning(w http.ResponseWriter, r *http.Request, q string, want map[string]bool, limit int) {
+func (s *Server) searchMeaning(w http.ResponseWriter, r *http.Request, q string, want map[string]bool, limit int, picked *string, shared bool) {
 	a := accessFrom(r.Context())
 	ctx := r.Context()
 	if want["email"] {
@@ -673,24 +673,24 @@ func (s *Server) searchMeaning(w http.ResponseWriter, r *http.Request, q string,
 				SELECT 'record' AS kind, r.id, r.id AS record_id, coalesce(r.name, '') AS title, r.record_type AS detail, r.updated_at AS at, n.score, '' AS snippet
 				FROM near n JOIN records r ON n.kind = 'record' AND r.id = n.item_id
 				WHERE r.workspace_id = $1 AND r.merged_into IS NULL AND r.archived_at IS NULL
-					AND ($5::uuid[] IS NULL OR r.brand_id IS NULL OR r.brand_id = ANY ($5))
+					AND ($5::uuid[] IS NULL OR r.brand_id IS NULL OR r.brand_id = ANY ($5)) AND ($9::uuid IS NULL OR r.brand_id = $9) AND (NOT $10 OR r.brand_id IS NULL)
 				UNION ALL
 				SELECT 'message', m.id, m.record_id, coalesce(m.subject, ''), 'received', m.received_at, n.score,
 					left(regexp_replace(coalesce(m.body, ''), '\s+', ' ', 'g'), 240)
 				FROM near n JOIN inbound_messages m ON n.kind = 'message' AND m.id = n.item_id
 				LEFT JOIN mailboxes x ON x.id = m.mailbox_id
-				WHERE m.workspace_id = $1 AND ($5::uuid[] IS NULL OR x.brand_id IS NULL OR x.brand_id = ANY ($5))
+				WHERE m.workspace_id = $1 AND ($5::uuid[] IS NULL OR x.brand_id IS NULL OR x.brand_id = ANY ($5)) AND ($9::uuid IS NULL OR x.brand_id = $9) AND (NOT $10 OR x.brand_id IS NULL)
 				UNION ALL
 				SELECT 'meeting', g.id, g.record_id, coalesce(g.title, ''), coalesce(g.status, ''), coalesce(g.booked_at, g.created_at), n.score,
 					left(regexp_replace(coalesce(g.notes, ''), '\s+', ' ', 'g'), 240)
 				FROM near n JOIN meetings g ON n.kind = 'meeting' AND g.id = n.item_id
 				LEFT JOIN sequences x ON x.id = g.sequence_id
-				WHERE g.workspace_id = $1 AND ($5::uuid[] IS NULL OR x.brand_id IS NULL OR x.brand_id = ANY ($5))
+				WHERE g.workspace_id = $1 AND ($5::uuid[] IS NULL OR x.brand_id IS NULL OR x.brand_id = ANY ($5)) AND ($9::uuid IS NULL OR x.brand_id = $9) AND (NOT $10 OR x.brand_id IS NULL)
 				UNION ALL
 				SELECT 'deal', d.id, d.record_id, coalesce(d.name, ''), coalesce(d.stage, ''), coalesce(d.opened_at, d.created_at), n.score, ''
 				FROM near n JOIN deals d ON n.kind = 'deal' AND d.id = n.item_id
 				LEFT JOIN sequences x ON x.id = d.sequence_id
-				WHERE d.workspace_id = $1 AND ($5::uuid[] IS NULL OR x.brand_id IS NULL OR x.brand_id = ANY ($5))
+				WHERE d.workspace_id = $1 AND ($5::uuid[] IS NULL OR x.brand_id IS NULL OR x.brand_id = ANY ($5)) AND ($9::uuid IS NULL OR x.brand_id = $9) AND (NOT $10 OR x.brand_id IS NULL)
 			)
 			SELECT h.kind, h.id::text, h.record_id::text, rr.name, h.title, h.detail, h.at, h.score::float8, h.snippet
 			FROM hits h
@@ -699,7 +699,7 @@ func (s *Server) searchMeaning(w http.ResponseWriter, r *http.Request, q string,
 				AND ($5::uuid[] IS NULL OR rr.brand_id IS NULL OR rr.brand_id = ANY ($5))
 			ORDER BY h.score DESC LIMIT $8`,
 			a.WorkspaceID, vectorLiteral(vec), embedModel(c.Provider), kinds, brandList(a.Brands), a.has(auth.ScopeCustomersRead),
-			semanticCandidates, limit)
+			semanticCandidates, limit, picked, shared)
 		if err != nil {
 			return err
 		}

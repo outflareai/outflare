@@ -102,7 +102,11 @@ func countOf(n int, one, many string) string {
 
 func (s *Server) status(w http.ResponseWriter, r *http.Request) {
 	a := accessFrom(r.Context())
-	v, err := s.workspaceStatus(r.Context(), a.WorkspaceID)
+	sel, ok := s.brandFilter(w, r)
+	if !ok {
+		return
+	}
+	v, err := s.workspaceStatus(r.Context(), a.WorkspaceID, sel)
 	if err != nil {
 		s.internal(w, r, err)
 		return
@@ -111,9 +115,38 @@ func (s *Server) status(w http.ResponseWriter, r *http.Request) {
 }
 
 // workspaceStatus works out the workspace's blockers and set-up steps.
-func (s *Server) workspaceStatus(ctx context.Context, ws string) (statusView, error) {
+// With one brand picked (or the records no brand has), what belongs to
+// brands counts only that brand's: mailboxes, domains, sequences,
+// missions, replies, plans, connections and analytics. What the workspace
+// shares (sending servers, fixes, people, the catalog, the company)
+// counts as always.
+func (s *Server) workspaceStatus(ctx context.Context, ws string, sel brandSel) (statusView, error) {
+	// Every query takes the brand as $2 (null for all brands); bf is the
+	// condition on a column, true when no brand is picked.
+	var brandArg *string
+	if sel.id != "" && sel.id != "none" {
+		brandArg = &sel.id
+	}
+	bf := func(col string) string {
+		switch sel.id {
+		case "":
+			return `$2::uuid IS NULL`
+		case "none":
+			return `(` + col + ` IS NULL AND $2::uuid IS NULL)`
+		}
+		return col + ` = $2::uuid`
+	}
+	// A project's brand, for rows that belong to a project.
+	byProject := func(col string) string {
+		return bf(`(SELECT p.brand_id FROM projects p WHERE p.id = ` + col + `)`)
+	}
 	v := statusView{Blockers: []statusBlocker{}, CheckedAt: time.Now().UTC()}
-	page := func(p string) string { return s.appPath(ctx, ws, p) }
+	// Links open on the brand asked about.
+	brandPage := s.appPath(ctx, ws, "")
+	if brandArg != nil {
+		brandPage = s.brandAppPath(ctx, ws, *brandArg, "")
+	}
+	page := func(p string) string { return brandPage + p }
 	add := func(b statusBlocker) {
 		if b.Items == nil {
 			b.Items = []statusItem{}
@@ -128,19 +161,20 @@ func (s *Server) workspaceStatus(ctx context.Context, ws string) (statusView, er
 	}
 	err := s.pool.QueryRow(ctx, `
 		SELECT
-			(SELECT count(*) FROM mailboxes WHERE workspace_id = $1 AND lifecycle_stage <> 'retired'),
-			(SELECT count(*) FROM mailboxes WHERE workspace_id = $1 AND status = 'active' AND lifecycle_stage = 'ready'),
-			(SELECT count(*) FROM mailboxes WHERE workspace_id = $1 AND status IN ('active', 'verifying') AND lifecycle_stage = 'warming'),
-			(SELECT min(stage_until) FROM mailboxes WHERE workspace_id = $1 AND status IN ('active', 'verifying') AND lifecycle_stage = 'warming'),
+			(SELECT count(*) FROM mailboxes WHERE workspace_id = $1 AND lifecycle_stage <> 'retired' AND `+bf("brand_id")+`),
+			(SELECT count(*) FROM mailboxes WHERE workspace_id = $1 AND status = 'active' AND lifecycle_stage = 'ready' AND `+bf("brand_id")+`),
+			(SELECT count(*) FROM mailboxes WHERE workspace_id = $1 AND status IN ('active', 'verifying') AND lifecycle_stage = 'warming' AND `+bf("brand_id")+`),
+			(SELECT min(stage_until) FROM mailboxes WHERE workspace_id = $1 AND status IN ('active', 'verifying') AND lifecycle_stage = 'warming' AND `+bf("brand_id")+`),
 			(SELECT count(*) FROM leads WHERE workspace_id = $1),
-			(SELECT count(*) FROM sequences WHERE workspace_id = $1 AND status <> 'archived'),
-			(SELECT count(*) FROM sequences WHERE workspace_id = $1 AND status = 'active'),
-			(SELECT count(*) FROM inbound_messages WHERE workspace_id = $1 AND kind = 'reply' AND NOT read AND NOT done),
-			(SELECT count(*) FROM mission_actions WHERE workspace_id = $1 AND status = 'pending'),
-			(SELECT count(*) FROM infra_plans WHERE workspace_id = $1 AND status = 'draft'),
+			(SELECT count(*) FROM sequences WHERE workspace_id = $1 AND status <> 'archived' AND `+bf("brand_id")+`),
+			(SELECT count(*) FROM sequences WHERE workspace_id = $1 AND status = 'active' AND `+bf("brand_id")+`),
+			(SELECT count(*) FROM inbound_messages i JOIN mailboxes m ON m.id = i.mailbox_id
+			 WHERE i.workspace_id = $1 AND i.kind = 'reply' AND NOT i.read AND NOT i.done AND `+bf("m.brand_id")+`),
+			(SELECT count(*) FROM mission_actions a JOIN missions x ON x.id = a.mission_id WHERE a.workspace_id = $1 AND a.status = 'pending' AND `+bf("x.brand_id")+`),
+			(SELECT count(*) FROM infra_plans WHERE workspace_id = $1 AND status = 'draft' AND `+byProject("project_id")+`),
 			(SELECT count(*) FROM allocation_status st JOIN sequences q ON q.id = st.sequence_id
-			 WHERE st.workspace_id = $1 AND q.status = 'active' AND st.needed_daily > st.active_daily),
-			(SELECT count(*) FROM fixes WHERE workspace_id = $1 AND status = 'open' AND severity = 'error')`, ws,
+			 WHERE st.workspace_id = $1 AND q.status = 'active' AND st.needed_daily > st.active_daily AND `+bf("q.brand_id")+`),
+			(SELECT count(*) FROM fixes WHERE workspace_id = $1 AND status = 'open' AND severity = 'error')`, ws, brandArg,
 	).Scan(&c.mailboxes, &c.ready, &c.warming, &c.firstReady, &c.leads, &c.sequences, &c.activeSequences,
 		&c.unread, &c.held, &c.draftPlans, &c.shortages, &c.fixErrors)
 	if err != nil {
@@ -150,7 +184,7 @@ func (s *Server) workspaceStatus(ctx context.Context, ws string) (statusView, er
 	// Mailboxes.
 	errored, nErrored, err := s.statusItems(ctx, `
 		SELECT id::text, email, COALESCE(status_reason, ''), count(*) OVER ()::int FROM mailboxes
-		WHERE workspace_id = $1 AND status = 'error' ORDER BY updated_at DESC LIMIT 5`, ws)
+		WHERE workspace_id = $1 AND status = 'error' AND `+bf("brand_id")+` ORDER BY updated_at DESC LIMIT 5`, ws, brandArg)
 	if err != nil {
 		return v, err
 	}
@@ -181,6 +215,9 @@ func (s *Server) workspaceStatus(ctx context.Context, ws string) (statusView, er
 	var critical []statusItem
 	healthy := false
 	for _, d := range domains {
+		if !sel.matches(d.BrandID) {
+			continue
+		}
 		if d.Health == "critical" {
 			reason := ""
 			for _, is := range d.Issues {
@@ -215,8 +252,8 @@ func (s *Server) workspaceStatus(ctx context.Context, ws string) (statusView, er
 
 	// Connections.
 	broken, nBroken, err := s.statusItems(ctx, `
-		SELECT id::text, COALESCE(NULLIF(name, ''), connector), COALESCE(last_error, ''), count(*) OVER ()::int FROM integrations
-		WHERE workspace_id = $1 AND status = 'error' ORDER BY updated_at DESC LIMIT 5`, ws)
+		SELECT id::text, COALESCE(NULLIF(name, ''), connector), COALESCE(last_error, ''), count(*) OVER ()::int FROM integrations i
+		WHERE workspace_id = $1 AND status = 'error' AND ($2::uuid IS NULL OR integration_serves(i, $2::uuid)) ORDER BY updated_at DESC LIMIT 5`, ws, brandArg)
 	if err != nil {
 		return v, err
 	}
@@ -245,7 +282,7 @@ func (s *Server) workspaceStatus(ctx context.Context, ws string) (statusView, er
 	}
 	paused, nPaused, err := s.statusItems(ctx, `
 		SELECT id::text, name, status_reason, count(*) OVER ()::int FROM missions
-		WHERE workspace_id = $1 AND status = 'paused' ORDER BY updated_at DESC LIMIT 5`, ws)
+		WHERE workspace_id = $1 AND status = 'paused' AND `+bf("brand_id")+` ORDER BY updated_at DESC LIMIT 5`, ws, brandArg)
 	if err != nil {
 		return v, err
 	}
@@ -288,7 +325,7 @@ func (s *Server) workspaceStatus(ctx context.Context, ws string) (statusView, er
 	}
 	failedSends, nFailedSends, err := s.statusItems(ctx, `
 		SELECT id::text, name, COALESCE(status_reason, ''), count(*) OVER ()::int FROM email_broadcasts
-		WHERE workspace_id = $1 AND status = 'failed' AND updated_at > now() - interval '7 days' ORDER BY updated_at DESC LIMIT 5`, ws)
+		WHERE workspace_id = $1 AND status = 'failed' AND updated_at > now() - interval '7 days' AND `+bf("brand_id")+` ORDER BY updated_at DESC LIMIT 5`, ws, brandArg)
 	if err != nil {
 		return v, err
 	}
@@ -397,11 +434,11 @@ func (s *Server) workspaceStatus(ctx context.Context, ws string) (statusView, er
 		WITH b AS (SELECT EXISTS (SELECT 1 FROM brands WHERE workspace_id = $1 AND status = 'active') AS any)
 		SELECT s.integration_id::text, COALESCE(NULLIF(s.site_name, ''), s.site), i.name, count(*) OVER ()::int
 		FROM analytics_syncs s JOIN integrations i ON i.id = s.integration_id, b
-		WHERE s.workspace_id = $1 AND s.site <> '' AND i.status <> 'error'
+		WHERE s.workspace_id = $1 AND s.site <> '' AND i.status <> 'error' AND $2::uuid IS NULL
 		  AND CASE WHEN b.any THEN analytics_site_brand($1, s.integration_id, s.site, s.host) IS NULL
 		        AND NOT EXISTS (SELECT 1 FROM analytics_site_brands o WHERE o.integration_id = s.integration_id AND o.site = s.site)
 		      ELSE s.host = '' END
-		ORDER BY i.name, 2 LIMIT 5`, ws)
+		ORDER BY i.name, 2 LIMIT 5`, ws, brandArg)
 	if err != nil {
 		return v, err
 	}
@@ -410,13 +447,37 @@ func (s *Server) workspaceStatus(ctx context.Context, ws string) (statusView, er
 			Detail: "Their numbers count for no brand and don't line up with the brand's other tools. update_analytics_site with the brand's website as domain, or set_analytics_site_brand, maps each; a site that is a test copy can be switched off with sync false.", Count: nUnmapped, Items: unmapped,
 			Fix: statusFix{Tool: "update_analytics_site", Page: page("analytics"), Who: "person"}})
 	}
+	// Records in no brand, in a workspace with brands: they show under
+	// no brand, so someone should put each in its brand (Brands → Not in a
+	// brand). Records in a project follow the project, so they count once,
+	// as the project.
+	if sel.all() {
+		loose, nLoose, err := s.statusItems(ctx, `
+			WITH loose AS (
+				SELECT 'projects' AS kind, count(*) AS n FROM projects WHERE workspace_id = $1 AND brand_id IS NULL AND status <> 'archived'
+				UNION ALL SELECT 'sending domains', count(*) FROM sending_domains WHERE workspace_id = $1 AND brand_id IS NULL AND project_id IS NULL
+				UNION ALL SELECT 'mailboxes', count(*) FROM mailboxes m WHERE workspace_id = $1 AND brand_id IS NULL AND project_id IS NULL AND lifecycle_stage <> 'retired'
+				UNION ALL SELECT 'lead lists', count(*) FROM lead_lists WHERE workspace_id = $1 AND brand_id IS NULL AND project_id IS NULL
+				UNION ALL SELECT 'sequences', count(*) FROM sequences WHERE workspace_id = $1 AND brand_id IS NULL AND project_id IS NULL AND status <> 'archived'
+			)
+			SELECT kind, n::text || ' ' || kind, '', sum(n) OVER ()::int FROM loose, (SELECT 1 FROM brands WHERE workspace_id = $1 AND status = 'active' LIMIT 1) b
+			WHERE n > 0 ORDER BY n DESC`, ws)
+		if err != nil {
+			return v, err
+		}
+		if nLoose > 0 {
+			add(statusBlocker{Code: "records_unassigned", Severity: "info", Area: "brands", Title: countOf(nLoose, "record is", "records are") + " in no brand",
+				Detail: "They count for no brand, so they don't show when one brand is picked. Put each in its brand on the Brands page (Not in a brand), or with add_to_brand.", Count: nLoose, Items: loose,
+				Fix: statusFix{Tool: "add_to_brand", Page: page("brands"), Who: "person"}})
+		}
+	}
 	unread, nUnread, err := s.statusItems(ctx, `
 		SELECT b.id::text, b.name, b.website, count(*) OVER ()::int FROM brands b
-		WHERE b.workspace_id = $1 AND b.status = 'active' AND b.website <> ''
+		WHERE b.workspace_id = $1 AND b.status = 'active' AND b.website <> '' AND ($2::uuid IS NULL OR b.id = $2::uuid)
 		  AND EXISTS (SELECT 1 FROM analytics_syncs a WHERE a.workspace_id = $1 AND a.site <> '')
 		  AND NOT EXISTS (SELECT 1 FROM analytics_syncs s WHERE s.workspace_id = $1 AND s.site <> ''
 		      AND analytics_site_brand($1, s.integration_id, s.site, s.host) = b.id)
-		ORDER BY b.created_at LIMIT 5`, ws)
+		ORDER BY b.created_at LIMIT 5`, ws, brandArg)
 	if err != nil {
 		return v, err
 	}
@@ -433,7 +494,8 @@ func (s *Server) workspaceStatus(ctx context.Context, ws string) (statusView, er
 		items, n, err := s.statusItems(ctx, `
 			SELECT id::text, title, kind, count(*) OVER ()::int FROM install_issues
 			WHERE workspace_id = $1 AND resolved_at IS NULL AND severity = $2 AND kind <> 'connection_broken'
-			ORDER BY opened_at LIMIT 5`, ws, sev)
+			  AND ($3::uuid IS NULL OR brand_id = $3 OR brand_id IS NULL)
+			ORDER BY opened_at LIMIT 5`, ws, sev, brandArg)
 		if err != nil {
 			return v, err
 		}

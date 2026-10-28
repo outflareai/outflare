@@ -105,8 +105,18 @@ func (s *Server) search(w http.ResponseWriter, r *http.Request) {
 			want[k] = true
 		}
 	}
+	// ?brand= keeps the hits to one brand's records, or (none) to the
+	// shared ones.
+	sel, ok := s.brandFilter(w, r)
+	if !ok {
+		return
+	}
+	var picked *string
+	if sel.id != "" && sel.id != "none" {
+		picked = &sel.id
+	}
 	if mode == "meaning" {
-		s.searchMeaning(w, r, text, want, limit)
+		s.searchMeaning(w, r, text, want, limit, picked, sel.id == "none")
 		return
 	}
 	// What the caller may find: a kind it asked for (or all), with its scope.
@@ -149,6 +159,7 @@ func (s *Server) search(w http.ResponseWriter, r *http.Request) {
 			WHERE $3 AND r.workspace_id = $1 AND r.merged_into IS NULL AND r.archived_at IS NULL
 				AND search_vector_record(r.name, r.attributes) @@ q.t
 				AND ($9::uuid[] IS NULL OR r.brand_id IS NULL OR r.brand_id = ANY ($9))
+				AND ($12::uuid IS NULL OR r.brand_id = $12) AND (NOT $13 OR r.brand_id IS NULL)
 			ORDER BY 7 DESC, 6 DESC LIMIT 200)
 			UNION ALL
 			(SELECT 'record', r.id, r.id, r.name, i.namespace || ': ' || i.value, r.updated_at, ts_rank(search_vector_identity(i.value), q.t) + 0.5, NULL
@@ -156,6 +167,7 @@ func (s *Server) search(w http.ResponseWriter, r *http.Request) {
 			WHERE $3 AND i.workspace_id = $1 AND r.workspace_id = $1 AND i.valid_to IS NULL AND r.merged_into IS NULL AND r.archived_at IS NULL
 				AND search_vector_identity(i.value) @@ q.t
 				AND ($9::uuid[] IS NULL OR r.brand_id IS NULL OR r.brand_id = ANY ($9))
+				AND ($12::uuid IS NULL OR r.brand_id = $12) AND (NOT $13 OR r.brand_id IS NULL)
 			ORDER BY 7 DESC, 6 DESC LIMIT 200)
 			UNION ALL
 			(SELECT 'message', m.id, m.record_id, coalesce(m.subject, ''), 'sent', coalesce(m.sent_at, m.created_at),
@@ -163,6 +175,7 @@ func (s *Server) search(w http.ResponseWriter, r *http.Request) {
 			FROM q, messages m LEFT JOIN sequences x ON x.id = m.sequence_id
 			WHERE $4 AND m.workspace_id = $1 AND search_vector_message(m.subject, NULL) @@ q.t
 				AND ($9::uuid[] IS NULL OR x.brand_id IS NULL OR x.brand_id = ANY ($9))
+				AND ($12::uuid IS NULL OR x.brand_id = $12) AND (NOT $13 OR x.brand_id IS NULL)
 			ORDER BY 7 DESC, 6 DESC LIMIT 200)
 			UNION ALL
 			(SELECT 'message', n.id, n.record_id, coalesce(n.subject, ''), 'received', n.received_at,
@@ -170,6 +183,7 @@ func (s *Server) search(w http.ResponseWriter, r *http.Request) {
 			FROM q, inbound_messages n LEFT JOIN mailboxes x ON x.id = n.mailbox_id
 			WHERE $5 AND n.workspace_id = $1 AND search_vector_message(n.subject, n.body) @@ q.t
 				AND ($9::uuid[] IS NULL OR x.brand_id IS NULL OR x.brand_id = ANY ($9))
+				AND ($12::uuid IS NULL OR x.brand_id = $12) AND (NOT $13 OR x.brand_id IS NULL)
 			ORDER BY 7 DESC, 6 DESC LIMIT 200)
 			UNION ALL
 			(SELECT 'meeting', g.id, g.record_id, coalesce(g.title, ''), coalesce(g.status, ''), coalesce(g.booked_at, g.created_at),
@@ -177,6 +191,7 @@ func (s *Server) search(w http.ResponseWriter, r *http.Request) {
 			FROM q, meetings g LEFT JOIN sequences x ON x.id = g.sequence_id
 			WHERE $6 AND g.workspace_id = $1 AND search_vector_title(g.title, g.notes) @@ q.t
 				AND ($9::uuid[] IS NULL OR x.brand_id IS NULL OR x.brand_id = ANY ($9))
+				AND ($12::uuid IS NULL OR x.brand_id = $12) AND (NOT $13 OR x.brand_id IS NULL)
 			ORDER BY 7 DESC, 6 DESC LIMIT 200)
 			UNION ALL
 			(SELECT 'deal', d.id, d.record_id, coalesce(d.name, ''), coalesce(d.stage, ''), coalesce(d.opened_at, d.created_at),
@@ -184,6 +199,7 @@ func (s *Server) search(w http.ResponseWriter, r *http.Request) {
 			FROM q, deals d LEFT JOIN sequences x ON x.id = d.sequence_id
 			WHERE $7 AND d.workspace_id = $1 AND search_vector_title(d.name, d.stage) @@ q.t
 				AND ($9::uuid[] IS NULL OR x.brand_id IS NULL OR x.brand_id = ANY ($9))
+				AND ($12::uuid IS NULL OR x.brand_id = $12) AND (NOT $13 OR x.brand_id IS NULL)
 			ORDER BY 7 DESC, 6 DESC LIMIT 200)
 			UNION ALL
 			(SELECT 'email', e.id, e.record_id, coalesce(e.subject, ''), coalesce(e.status, ''), coalesce(e.sent_at, e.created_at),
@@ -191,6 +207,7 @@ func (s *Server) search(w http.ResponseWriter, r *http.Request) {
 			FROM q, emails e
 			WHERE $8 AND e.workspace_id = $1 AND search_vector_title(e.subject, NULL) @@ q.t
 				AND ($9::uuid[] IS NULL OR e.brand_id IS NULL OR e.brand_id = ANY ($9))
+				AND ($12::uuid IS NULL OR e.brand_id = $12) AND (NOT $13 OR e.brand_id IS NULL)
 			ORDER BY 7 DESC, 6 DESC LIMIT 200)
 		),
 		best AS (
@@ -211,7 +228,7 @@ func (s *Server) search(w http.ResponseWriter, r *http.Request) {
 		may[auth.ScopeOutcomesRead] && (len(want) == 0 || want["meeting"]),
 		may[auth.ScopeOutcomesRead] && (len(want) == 0 || want["deal"]),
 		may[auth.ScopeEmailsRead] && (len(want) == 0 || want["email"]),
-		brandList(a.Brands), a.has(auth.ScopeCustomersRead), limit)
+		brandList(a.Brands), a.has(auth.ScopeCustomersRead), limit, picked, sel.id == "none")
 	if err != nil {
 		s.internal(w, r, err)
 		return

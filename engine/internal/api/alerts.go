@@ -129,9 +129,20 @@ func scanAlertSetting(row pgx.Row) (alertSetting, error) {
 func (s *Server) getAlertSettings(w http.ResponseWriter, r *http.Request) {
 	a := accessFrom(r.Context())
 	ctx := r.Context()
+	// ?brand= keeps the workspace's settings and that brand's own; none
+	// keeps only the workspace's.
+	sel, ok := s.brandFilter(w, r)
+	if !ok {
+		return
+	}
+	var picked *string
+	if sel.id != "" && sel.id != "none" {
+		picked = &sel.id
+	}
 	rows, err := s.pool.Query(ctx, `SELECT `+alertSettingCols+` FROM alert_settings
 		WHERE workspace_id = $1 AND ($2::uuid[] IS NULL OR brand_id IS NULL OR brand_id = ANY ($2))
-		ORDER BY brand_id NULLS FIRST, kind`, a.WorkspaceID, a.Brands)
+			AND ($3::uuid IS NULL OR brand_id IS NULL OR brand_id = $3) AND (NOT $4 OR brand_id IS NULL)
+		ORDER BY brand_id NULLS FIRST, kind`, a.WorkspaceID, a.Brands, picked, sel.id == "none")
 	if err != nil {
 		s.internal(w, r, err)
 		return

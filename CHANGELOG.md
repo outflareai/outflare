@@ -6,6 +6,17 @@ Each pull request that changes what Outflare does adds a change note in [changes
 
 ## [Unreleased]
 
+## [0.11.0] - 2026-10-28
+
+### Changed
+
+- Choosing what an analytics connection imports says why each site's brand was suggested, waits until every site has a brand, is shared or is left out, and can make a new brand from a site. With one brand picked, Analytics offers that brand's sites from connections it already uses. Records in no brand are listed under Company → Brands to move.
+- App links name the brand after the workspace, like `/acme/repocket/seo`, or `/acme/all/seo` for every brand; older `?brand=` links still open. Switching brand reloads the page, and an item from the other brand closes back to its list. A brand's handle can no longer be the name of a page.
+
+### Fixed
+
+- With a brand picked, every page shows only that brand: Home, SEO, analytics, ad platforms, site audits, mailboxes, warm-up, leads, meetings, deals, email domains and search. Websites read through a shared connection, like Ahrefs or Search Console, count for the brand that owns them.
+
 ## [0.10.0] - 2026-10-28
 
 ### Changed

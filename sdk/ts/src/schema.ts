@@ -4629,7 +4629,7 @@ export interface paths {
         };
         /**
          * List the sites a connection can read
-         * @description Scope: analytics.read. GA4 properties, Search Console properties, PostHog projects, Fathom or Umami sites, and so on, each with the domain it counts under and whether the sync stores it. Every site syncs unless switched off, up to 20 per connection. Pass an id as `site` on reports, or make it the default.
+         * @description Scope: analytics.read. GA4 properties, Search Console properties, PostHog projects, Fathom or Umami sites, and so on, each with the domain it counts under and whether the sync stores it. Every site syncs unless switched off, up to 20 per connection. Pass an id as `site` on reports, or make it the default. Someone kept to some brands sees their brands' sites and the ones no brand has yet.
          */
         get: operations["listAnalyticsSites"];
         put?: never;
@@ -4662,7 +4662,7 @@ export interface paths {
         head?: never;
         /**
          * Switch a site on or off, or set its domain
-         * @description Scope: integrations.manage. Switching a site off stops its sync and deletes what was stored for it, so totals by domain stop counting it. Switching one on starts its 90-day backfill now. The domain lines the site up with other tools for the same website; an empty string goes back to the tool's own.
+         * @description Scope: integrations.manage. Switching a site off stops its sync and deletes what was stored for it, so totals by domain stop counting it. Switching one on starts its 90-day backfill now. The domain lines the site up with other tools for the same website; an empty string goes back to the tool's own. Someone kept to some brands changes only their brands' sites and the ones no brand has yet, and can't give a site another brand's domain.
          */
         patch: operations["updateAnalyticsSite"];
         trace?: never;
@@ -4736,7 +4736,8 @@ export interface paths {
          * @description Scope: integrations.manage. For a site whose domain is not one of
          *     the brand's (a GA4 property named for an app, a PostHog project for
          *     a game), or to make a site shared. `auto` goes back to matching by
-         *     domain.
+         *     domain. Someone kept to some brands places a site that is theirs or
+         *     no brand's yet, in one of their brands only (403 otherwise).
          */
         put: operations["setAnalyticsSiteBrand"];
         post?: never;
@@ -25516,11 +25517,11 @@ export interface components {
                  * @description Stable; new codes may be added.
                  * @enum {string}
                  */
-                code: "no_mailboxes" | "none_ready" | "mailbox_error" | "domain_critical" | "server_paused" | "connection_broken" | "connection_requested" | "approval_waiting" | "mission_paused" | "allocation_short" | "infra_plan_waiting" | "unread_replies" | "context_missing" | "analytics_site_unmapped" | "brand_without_analytics" | "fixes_waiting" | "email_domain_failed" | "email_broadcast_failed" | "email_broadcast_audience_warning" | "social_drafts_waiting" | "duplicates_waiting" | "events_quarantined" | "crm_import_failed" | "install_broken" | "install_outdated";
+                code: "no_mailboxes" | "none_ready" | "mailbox_error" | "domain_critical" | "server_paused" | "connection_broken" | "connection_requested" | "approval_waiting" | "mission_paused" | "allocation_short" | "infra_plan_waiting" | "unread_replies" | "context_missing" | "analytics_site_unmapped" | "brand_without_analytics" | "fixes_waiting" | "email_domain_failed" | "email_broadcast_failed" | "email_broadcast_audience_warning" | "social_drafts_waiting" | "duplicates_waiting" | "events_quarantined" | "crm_import_failed" | "install_broken" | "install_outdated" | "records_unassigned";
                 /** @enum {string} */
                 severity: "critical" | "warning" | "info";
                 /** @enum {string} */
-                area: "mailboxes" | "domains" | "servers" | "connectors" | "missions" | "sequences" | "infrastructure" | "inbox" | "context" | "analytics" | "fixes" | "lifecycle" | "social" | "customers" | "setup";
+                area: "mailboxes" | "domains" | "servers" | "connectors" | "missions" | "sequences" | "infrastructure" | "inbox" | "context" | "analytics" | "fixes" | "lifecycle" | "social" | "customers" | "setup" | "brands";
                 title: string;
                 /** @description What it means and how to fix it. */
                 detail: string;
@@ -32245,6 +32246,8 @@ export interface operations {
     listLeads: {
         parameters: {
             query?: {
+                /** @description Only records of this brand: its id or handle, none for records shared by every brand, or all (the default). */
+                brand?: components["parameters"]["Brand"];
                 list_id?: string;
                 /** @description Matches email, name or company. */
                 q?: string;
@@ -34210,6 +34213,8 @@ export interface operations {
     listMessages: {
         parameters: {
             query?: {
+                /** @description Only records of this brand: its id or handle, none for records shared by every brand, or all (the default). */
+                brand?: components["parameters"]["Brand"];
                 sequence_id?: string;
                 lead_id?: string;
                 mailbox_id?: string;
@@ -34947,7 +34952,10 @@ export interface operations {
     };
     getAlertSettings: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description Only records of this brand: its id or handle, none for records shared by every brand, or all (the default). */
+                brand?: components["parameters"]["Brand"];
+            };
             header?: never;
             path: {
                 /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
@@ -36183,7 +36191,10 @@ export interface operations {
     };
     listAnalyticsSources: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description Only records of this brand: its id or handle, none for records shared by every brand, or all (the default). */
+                brand?: components["parameters"]["Brand"];
+            };
             header?: never;
             path: {
                 /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
@@ -36210,6 +36221,8 @@ export interface operations {
     analyticsSummary: {
         parameters: {
             query?: {
+                /** @description Only records of this brand: its id or handle, none for records shared by every brand, or all (the default). */
+                brand?: components["parameters"]["Brand"];
                 /** @description First day, inclusive (YYYY-MM-DD). Default 27 days before to. */
                 from?: components["parameters"]["AnalyticsFrom"];
                 /** @description Last day, inclusive (YYYY-MM-DD). Default today (UTC). */
@@ -36337,6 +36350,8 @@ export interface operations {
     getAnalyticsChanges: {
         parameters: {
             query?: {
+                /** @description Only records of this brand: its id or handle, none for records shared by every brand, or all (the default). */
+                brand?: components["parameters"]["Brand"];
                 /** @description Period length, 1 to 90. Default 7. */
                 days?: number;
                 /** @description Last day to consider. Default yesterday, UTC. */
@@ -36381,7 +36396,10 @@ export interface operations {
     };
     getAnalyticsCatalog: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description Only records of this brand: its id or handle, none for records shared by every brand, or all (the default). */
+                brand?: components["parameters"]["Brand"];
+            };
             header?: never;
             path: {
                 /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
@@ -36463,7 +36481,10 @@ export interface operations {
     };
     listAnalyticsSyncs: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description Only records of this brand: its id or handle, none for records shared by every brand, or all (the default). */
+                brand?: components["parameters"]["Brand"];
+            };
             header?: never;
             path: {
                 /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
@@ -37430,7 +37451,10 @@ export interface operations {
     };
     listSEO: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description Only records of this brand: its id or handle, none for records shared by every brand, or all (the default). */
+                brand?: components["parameters"]["Brand"];
+            };
             header?: never;
             path: {
                 /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
@@ -37457,6 +37481,8 @@ export interface operations {
     getSEOHistory: {
         parameters: {
             query?: {
+                /** @description Only records of this brand: its id or handle, none for records shared by every brand, or all (the default). */
+                brand?: components["parameters"]["Brand"];
                 report?: components["schemas"]["SEOReportName"];
                 /** @example example.com */
                 host?: string;
@@ -38170,6 +38196,8 @@ export interface operations {
     listCrawls: {
         parameters: {
             query?: {
+                /** @description Only records of this brand: its id or handle, none for records shared by every brand, or all (the default). */
+                brand?: components["parameters"]["Brand"];
                 /** @description Only this site's crawls. */
                 site?: string;
                 /** @description A crawl id from next_before. */
@@ -44549,6 +44577,8 @@ export interface operations {
     listMeetings: {
         parameters: {
             query?: {
+                /** @description Only records of this brand: its id or handle, none for records shared by every brand, or all (the default). */
+                brand?: components["parameters"]["Brand"];
                 /** @description Start of the period, inclusive. A date (2026-10-01) or a time. Default 30 days before to. */
                 from?: components["parameters"]["From"];
                 /** @description End of the period. A date includes that whole day. Default now. */
@@ -44738,6 +44768,8 @@ export interface operations {
     listDeals: {
         parameters: {
             query?: {
+                /** @description Only records of this brand: its id or handle, none for records shared by every brand, or all (the default). */
+                brand?: components["parameters"]["Brand"];
                 /** @description Start of the period, inclusive. A date (2026-10-01) or a time. Default 30 days before to. */
                 from?: components["parameters"]["From"];
                 /** @description End of the period. A date includes that whole day. Default now. */
@@ -47089,6 +47121,8 @@ export interface operations {
     mailboxHealth: {
         parameters: {
             query?: {
+                /** @description Only records of this brand: its id or handle, none for records shared by every brand, or all (the default). */
+                brand?: components["parameters"]["Brand"];
                 level?: "ok" | "warning" | "critical" | "paused";
                 /** @description One or more ids, comma separated. */
                 mailbox_id?: string;
@@ -47543,7 +47577,10 @@ export interface operations {
     };
     getStatus: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description Only records of this brand: its id or handle, none for records shared by every brand, or all (the default). */
+                brand?: components["parameters"]["Brand"];
+            };
             header?: never;
             path: {
                 /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
@@ -49090,6 +49127,8 @@ export interface operations {
     searchWorkspace: {
         parameters: {
             query: {
+                /** @description Only records of this brand: its id or handle, none for records shared by every brand, or all (the default). */
+                brand?: components["parameters"]["Brand"];
                 /** @description The words to search for. */
                 q: string;
                 /** @description Comma-separated kinds to search: record, message, meeting, deal, email. Default: every kind you may read. */
@@ -51490,6 +51529,8 @@ export interface operations {
     listAllocationSuggestions: {
         parameters: {
             query?: {
+                /** @description Only records of this brand: its id or handle, none for records shared by every brand, or all (the default). */
+                brand?: components["parameters"]["Brand"];
                 sequence_id?: string;
             };
             header?: never;
@@ -51589,6 +51630,8 @@ export interface operations {
     listAllocationChanges: {
         parameters: {
             query?: {
+                /** @description Only records of this brand: its id or handle, none for records shared by every brand, or all (the default). */
+                brand?: components["parameters"]["Brand"];
                 sequence_id?: string;
                 mailbox_id?: string;
                 limit?: number;
@@ -51669,7 +51712,10 @@ export interface operations {
     };
     getAllocationAttention: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description Only records of this brand: its id or handle, none for records shared by every brand, or all (the default). */
+                brand?: components["parameters"]["Brand"];
+            };
             header?: never;
             path: {
                 /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
@@ -51715,7 +51761,10 @@ export interface operations {
     };
     listPlatforms: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description Only records of this brand: its id or handle, none for records shared by every brand, or all (the default). */
+                brand?: components["parameters"]["Brand"];
+            };
             header?: never;
             path: {
                 /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
@@ -52055,7 +52104,10 @@ export interface operations {
     };
     getInfrastructure: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description Only records of this brand: its id or handle, none for records shared by every brand, or all (the default). */
+                brand?: components["parameters"]["Brand"];
+            };
             header?: never;
             path: {
                 /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
@@ -52179,7 +52231,10 @@ export interface operations {
     };
     listInfraPlans: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description Only records of this brand: its id or handle, none for records shared by every brand, or all (the default). */
+                brand?: components["parameters"]["Brand"];
+            };
             header?: never;
             path: {
                 /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
@@ -52763,6 +52818,8 @@ export interface operations {
     listEmailProviderDomains: {
         parameters: {
             query?: {
+                /** @description Only records of this brand: its id or handle, none for records shared by every brand, or all (the default). */
+                brand?: components["parameters"]["Brand"];
                 provider_id?: string;
             };
             header?: never;

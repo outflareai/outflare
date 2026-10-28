@@ -3190,6 +3190,7 @@ paths:
       description: "Scope: leads.read"
       tags: [leads]
       parameters:
+        - { $ref: "#/components/parameters/Brand" }
         - { name: list_id, in: query, schema: { type: string, format: uuid } }
         - { name: q, in: query, description: "Matches email, name or company.", schema: { type: string } }
         - { name: suppressed, in: query, schema: { type: boolean } }
@@ -4615,6 +4616,7 @@ paths:
         ones the policy blocked and why.
       tags: [sequences]
       parameters:
+        - { $ref: "#/components/parameters/Brand" }
         - { name: sequence_id, in: query, schema: { type: string, format: uuid } }
         - { name: lead_id, in: query, schema: { type: string, format: uuid } }
         - { name: mailbox_id, in: query, schema: { type: string, format: uuid } }
@@ -5085,6 +5087,7 @@ paths:
         Alert emails are Outflare's account email, at most
         daily_email_limit a day for each person; the rest wait in the app.
       tags: [alerts]
+      parameters: [{ $ref: "#/components/parameters/Brand" }]
       responses:
         "200":
           description: Settings.
@@ -6027,6 +6030,8 @@ paths:
         or hand a person a link with POST .../connect-requests. Nothing
         needs to be connected for the rest of Outflare to work.
       tags: [analytics]
+      parameters:
+        - { $ref: "#/components/parameters/Brand" }
       responses:
         "200":
           description: The connections.
@@ -6053,6 +6058,7 @@ paths:
         last 28 days.
       tags: [analytics]
       parameters:
+        - { $ref: "#/components/parameters/Brand" }
         - { $ref: "#/components/parameters/AnalyticsFrom" }
         - { $ref: "#/components/parameters/AnalyticsTo" }
         - { $ref: "#/components/parameters/AnalyticsFresh" }
@@ -6154,6 +6160,7 @@ paths:
         and gaps: what is missing and which connector or action fixes it. Units for every metric are given once, in units.
       tags: [analytics]
       parameters:
+        - { $ref: "#/components/parameters/Brand" }
         - { name: days, in: query, description: "Period length, 1 to 90. Default 7.", schema: { type: integer, minimum: 1, maximum: 90 } }
         - { name: to, in: query, description: "Last day to consider. Default yesterday, UTC.", schema: { type: string, format: date } }
         - { name: host, in: query, description: "One website, like example.com.", schema: { type: string } }
@@ -6187,6 +6194,8 @@ paths:
         last sync, the SEO tools with snapshots and budget left, and gaps with the connector or action that fixes each. ask maps
         common questions to the tool or endpoint that answers them.
       tags: [analytics]
+      parameters:
+        - { $ref: "#/components/parameters/Brand" }
       responses:
         "200":
           description: The catalog.
@@ -6250,6 +6259,8 @@ paths:
       summary: What the sync has stored for each connection
       description: "Scope: analytics.read."
       tags: [analytics]
+      parameters:
+        - { $ref: "#/components/parameters/Brand" }
       responses:
         "200":
           description: One entry per analytics connection.
@@ -6316,9 +6327,9 @@ paths:
       - { name: id, in: path, required: true, schema: { type: string, format: uuid }, description: The integration id. }
     get:
       operationId: listAnalyticsSites
-      x-outflare-access: { scope: analytics.read }
+      x-outflare-access: { scope: analytics.read, brand_limited: true }
       summary: List the sites a connection can read
-      description: "Scope: analytics.read. GA4 properties, Search Console properties, PostHog projects, Fathom or Umami sites, and so on, each with the domain it counts under and whether the sync stores it. Every site syncs unless switched off, up to 20 per connection. Pass an id as `site` on reports, or make it the default."
+      description: "Scope: analytics.read. GA4 properties, Search Console properties, PostHog projects, Fathom or Umami sites, and so on, each with the domain it counts under and whether the sync stores it. Every site syncs unless switched off, up to 20 per connection. Pass an id as `site` on reports, or make it the default. Someone kept to some brands sees their brands' sites and the ones no brand has yet."
       tags: [analytics]
       parameters:
         - { $ref: "#/components/parameters/AnalyticsFresh" }
@@ -6343,10 +6354,10 @@ paths:
       - { name: site, in: path, required: true, schema: { type: string }, description: "The site's id from GET .../sites, URL-encoded (Search Console ids contain `:` and `/`)." }
     patch:
       operationId: updateAnalyticsSite
-      x-outflare-access: { scope: integrations.manage }
+      x-outflare-access: { scope: integrations.manage, brand_limited: true }
       parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
       summary: Switch a site on or off, or set its domain
-      description: "Scope: integrations.manage. Switching a site off stops its sync and deletes what was stored for it, so totals by domain stop counting it. Switching one on starts its 90-day backfill now. The domain lines the site up with other tools for the same website; an empty string goes back to the tool's own."
+      description: "Scope: integrations.manage. Switching a site off stops its sync and deletes what was stored for it, so totals by domain stop counting it. Switching one on starts its 90-day backfill now. The domain lines the site up with other tools for the same website; an empty string goes back to the tool's own. Someone kept to some brands changes only their brands' sites and the ones no brand has yet, and can't give a site another brand's domain."
       tags: [analytics]
       requestBody:
         required: true
@@ -6445,14 +6456,15 @@ paths:
       - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
     put:
       operationId: setAnalyticsSiteBrand
-      x-outflare-access: { scope: integrations.manage }
+      x-outflare-access: { scope: integrations.manage, brand_limited: true }
       parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
       summary: Pick the brand an analytics site reports for
       description: |
         Scope: integrations.manage. For a site whose domain is not one of
         the brand's (a GA4 property named for an app, a PostHog project for
         a game), or to make a site shared. `auto` goes back to matching by
-        domain.
+        domain. Someone kept to some brands places a site that is theirs or
+        no brand's yet, in one of their brands only (403 otherwise).
       tags: [analytics, brands]
       requestBody:
         required: true
@@ -6945,6 +6957,8 @@ paths:
       summary: List SEO connections
       description: "Scope: analytics.read. DataForSEO and Ahrefs connections with their reports, the domains they follow, the country, the weekly snapshot setting and this month's budget and spend. Empty means none is connected; nothing else needs one."
       tags: [seo]
+      parameters:
+        - { $ref: "#/components/parameters/Brand" }
       responses:
         "200":
           description: SEO connections.
@@ -6972,6 +6986,7 @@ paths:
         `from` or `to` name a range.
       tags: [seo]
       parameters:
+        - { $ref: "#/components/parameters/Brand" }
         - { name: report, in: query, schema: { $ref: "#/components/schemas/SEOReportName" } }
         - { name: host, in: query, schema: { type: string }, example: example.com }
         - { name: integration, in: query, schema: { type: string, format: uuid } }
@@ -7448,6 +7463,7 @@ paths:
       description: "Scope: seo.read."
       tags: [seo]
       parameters:
+        - { $ref: "#/components/parameters/Brand" }
         - { name: site, in: query, description: "Only this site's crawls.", schema: { type: string, format: uuid } }
         - { name: before, in: query, description: "A crawl id from next_before.", schema: { type: string, format: uuid } }
         - { $ref: "#/components/parameters/Cursor" }
@@ -12274,6 +12290,7 @@ paths:
       description: "Scope: outcomes.read. Newest first. Page with before=next_before."
       tags: [outcomes]
       parameters:
+        - { $ref: "#/components/parameters/Brand" }
         - { $ref: "#/components/parameters/From" }
         - { $ref: "#/components/parameters/To" }
         - { name: project_id, in: query, schema: { type: string, format: uuid } }
@@ -12390,6 +12407,7 @@ paths:
       description: "Scope: outcomes.read. Deals from the CRM, plus any logged by hand. Newest first."
       tags: [outcomes]
       parameters:
+        - { $ref: "#/components/parameters/Brand" }
         - { $ref: "#/components/parameters/From" }
         - { $ref: "#/components/parameters/To" }
         - { name: project_id, in: query, schema: { type: string, format: uuid } }
@@ -13992,6 +14010,7 @@ paths:
         says what to do. Worst first. Computed on read.
       tags: [mailboxes]
       parameters:
+        - { $ref: "#/components/parameters/Brand" }
         - { name: level, in: query, schema: { type: string, enum: [ok, warning, critical, paused] } }
         - { name: mailbox_id, in: query, schema: { type: string }, description: "One or more ids, comma separated." }
       responses:
@@ -14334,6 +14353,8 @@ paths:
         dashboard page that resolve it and whether an agent or a person must
         act. Worst first. `setup` is the getting-started checklist.
       tags: [context]
+      parameters:
+        - { $ref: "#/components/parameters/Brand" }
       responses:
         "200":
           description: The status.
@@ -15409,6 +15430,7 @@ paths:
         brands finds their rows and the shared ones, as on the record timeline.
       tags: [search]
       parameters:
+        - { $ref: "#/components/parameters/Brand" }
         - { name: q, in: query, required: true, schema: { type: string, maxLength: 500 }, description: The words to search for. }
         - name: kinds
           in: query
@@ -17192,6 +17214,7 @@ paths:
       description: "Scope: sequences.read."
       tags: [allocation]
       parameters:
+        - { $ref: "#/components/parameters/Brand" }
         - { name: sequence_id, in: query, schema: { type: string, format: uuid } }
       responses:
         "200":
@@ -17255,6 +17278,7 @@ paths:
       description: "Scope: sequences.read."
       tags: [allocation]
       parameters:
+        - { $ref: "#/components/parameters/Brand" }
         - { name: sequence_id, in: query, schema: { type: string, format: uuid } }
         - { name: mailbox_id, in: query, schema: { type: string, format: uuid } }
         - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 500, default: 100 } }
@@ -17309,6 +17333,8 @@ paths:
       summary: What needs a person
       description: "Scope: sequences.read. Approvals, suggestions to review, shortages, follow-ups whose mailbox is gone and unconfirmed senders."
       tags: [allocation]
+      parameters:
+        - { $ref: "#/components/parameters/Brand" }
       responses:
         "200":
           description: Items needing attention.
@@ -17352,6 +17378,8 @@ paths:
       summary: List connected sequencer accounts
       description: "Scope: sequences.read. Every connected account of an outside sequencer (EmailBison, Instantly, Smartlead) that mailbox allocation reads. Outflare reads each one every 5 minutes; its live campaigns become sequences with `links`, and its mailboxes become mailboxes with `has_login: false` unless Outflare already has them."
       tags: [allocation]
+      parameters:
+        - { $ref: "#/components/parameters/Brand" }
       responses:
         "200":
           description: The accounts.
@@ -17598,6 +17626,8 @@ paths:
         ready with the reason and until when, the plans that are not finished,
         and the suppliers plans can buy from on this server.
       tags: [infrastructure]
+      parameters:
+        - { $ref: "#/components/parameters/Brand" }
       responses:
         "200":
           description: Overview.
@@ -17699,6 +17729,8 @@ paths:
       summary: List infrastructure plans
       description: "Scope: infrastructure.read. Newest first, without their items."
       tags: [infrastructure]
+      parameters:
+        - { $ref: "#/components/parameters/Brand" }
       responses:
         "200":
           description: Plans.
@@ -18107,6 +18139,7 @@ paths:
       description: "Scope: emails.read. Not the cold-email sending domains under /domains: these are registered with an email provider."
       tags: [emails]
       parameters:
+        - { $ref: "#/components/parameters/Brand" }
         - { name: provider_id, in: query, schema: { type: string, format: uuid } }
       responses:
         "200":
@@ -27885,9 +27918,9 @@ components:
               code:
                 type: string
                 description: Stable; new codes may be added.
-                enum: [no_mailboxes, none_ready, mailbox_error, domain_critical, server_paused, connection_broken, connection_requested, approval_waiting, mission_paused, allocation_short, infra_plan_waiting, unread_replies, context_missing, analytics_site_unmapped, brand_without_analytics, fixes_waiting, email_domain_failed, email_broadcast_failed, email_broadcast_audience_warning, social_drafts_waiting, duplicates_waiting, events_quarantined, crm_import_failed, install_broken, install_outdated]
+                enum: [no_mailboxes, none_ready, mailbox_error, domain_critical, server_paused, connection_broken, connection_requested, approval_waiting, mission_paused, allocation_short, infra_plan_waiting, unread_replies, context_missing, analytics_site_unmapped, brand_without_analytics, fixes_waiting, email_domain_failed, email_broadcast_failed, email_broadcast_audience_warning, social_drafts_waiting, duplicates_waiting, events_quarantined, crm_import_failed, install_broken, install_outdated, records_unassigned]
               severity: { type: string, enum: [critical, warning, info] }
-              area: { type: string, enum: [mailboxes, domains, servers, connectors, missions, sequences, infrastructure, inbox, context, analytics, fixes, lifecycle, social, customers, setup] }
+              area: { type: string, enum: [mailboxes, domains, servers, connectors, missions, sequences, infrastructure, inbox, context, analytics, fixes, lifecycle, social, customers, setup, brands] }
               title: { type: string }
               detail: { type: string, description: What it means and how to fix it. }
               count: { type: integer }

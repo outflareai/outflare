@@ -191,3 +191,16 @@ func (s *Server) appPath(ctx context.Context, workspaceID, page string) string {
 	}
 	return "/" + slug + "/" + page
 }
+
+// brandAppPath is a page's path in the web app on one brand
+// (/acme/repocket/seo), or on none in particular when brandID is "".
+func (s *Server) brandAppPath(ctx context.Context, workspaceID, brandID, page string) string {
+	var handle string
+	if brandID != "" {
+		_ = s.pool.QueryRow(ctx, `SELECT handle FROM brands WHERE workspace_id = $1 AND id = $2`, workspaceID, brandID).Scan(&handle)
+	}
+	if handle == "" {
+		return s.appPath(ctx, workspaceID, page)
+	}
+	return s.appPath(ctx, workspaceID, handle+"/"+page)
+}

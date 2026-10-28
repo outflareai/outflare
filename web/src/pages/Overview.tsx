@@ -13,14 +13,14 @@ import { openGetStartedAt } from "./GetStarted";
 import { blockerTone, dotClass, type Tone } from "@/lib/status";
 import { tabNames } from "../shell";
 
-type Go = (tab: "ai" | "get-started" | "members" | "inbox" | "sequences" | "mailboxes" | "domains" | "leads" | "company" | "servers" | "connectors" | "missions" | "allocation" | "infrastructure" | "analytics" | "fixes" | "lifecycle" | "social" | "setup") => void;
+type Go = (tab: "ai" | "get-started" | "members" | "inbox" | "sequences" | "mailboxes" | "domains" | "leads" | "company" | "servers" | "connectors" | "missions" | "allocation" | "infrastructure" | "analytics" | "fixes" | "lifecycle" | "social" | "setup" | "brands") => void;
 
 // The page that resolves each area of blocker GET /status reports.
 const areaTab: Record<WorkspaceStatus["blockers"][number]["area"], Parameters<Go>[0]> = {
   mailboxes: "mailboxes", domains: "domains", servers: "servers", connectors: "connectors", missions: "missions",
   sequences: "allocation", infrastructure: "infrastructure", inbox: "inbox", context: "company", analytics: "analytics", fixes: "fixes",
   // Customer data has no page of its own yet; Outflare's agent resolves it.
-  lifecycle: "lifecycle", social: "social", customers: "ai", setup: "setup",
+  lifecycle: "lifecycle", social: "social", customers: "ai", setup: "setup", brands: "brands",
 };
 
 // One row on the "Needs you" list: a status blocker, a rate that is off,
@@ -65,7 +65,7 @@ export function Overview({ ws, name, isAdmin, go, limited = false }: { ws: strin
     const load = async () => {
       const [stats, st] = await Promise.all([
         api.GET("/v1/workspaces/{ws}/stats", { params: { path: { ws }, query: handle ? { brand: handle } : {} } }),
-        limited ? Promise.resolve({ data: undefined }) : api.GET("/v1/workspaces/{ws}/status", { params: { path: { ws } } }),
+        limited ? Promise.resolve({ data: undefined }) : api.GET("/v1/workspaces/{ws}/status", { params: { path: { ws }, query: handle ? { brand: handle } : {} } }),
       ]);
       if (stats.data) setS(stats.data);
       if (st.data) setStatus(st.data);

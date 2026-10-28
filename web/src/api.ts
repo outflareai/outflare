@@ -23,3 +23,24 @@ export function errorMessage(error: unknown): string {
   track("ui.error_shown", { outcome: "failure", error_code: e?.error?.code ?? "unknown" });
   return e?.error?.message ?? "Something went wrong";
 }
+
+// Every workspace read carries the brand picked in the sidebar (lib/brand.ts),
+// so no page shows another brand's records by forgetting to ask for its
+// own. A call that names a brand itself (brand: "all" for every brand)
+// keeps it. Connecting a tool and the company context take brand to mean
+// something else, so they are left alone.
+let requestBrand = "";
+export function setRequestBrand(handle: string) {
+  requestBrand = handle;
+}
+const ownBrandParam = [/\/integrations\/oauth\//, /\/context$/];
+
+api.use({
+  onRequest({ request }) {
+    if (!requestBrand || request.method !== "GET") return;
+    const url = new URL(request.url);
+    if (!/^\/v1\/workspaces\/[^/]+\/./.test(url.pathname) || url.searchParams.has("brand") || ownBrandParam.some((r) => r.test(url.pathname))) return;
+    url.searchParams.set("brand", requestBrand);
+    return new Request(url, request);
+  },
+});

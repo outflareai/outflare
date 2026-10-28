@@ -40,7 +40,8 @@ export function Company({ ws, canManage }: { ws: string; canManage: boolean }) {
     if (data) setData(data);
   }, [ws]);
   const loadMemories = useCallback(async () => {
-    const { data } = await api.GET("/v1/workspaces/{ws}/memories", { params: { path: { ws }, query: { limit: 200, ...(q.trim() ? { q: q.trim() } : {}) } } });
+    // The company's own memories; a brand's are on its page under Brands.
+    const { data } = await api.GET("/v1/workspaces/{ws}/memories", { params: { path: { ws }, query: { limit: 200, brand: "none", ...(q.trim() ? { q: q.trim() } : {}) } } });
     if (data) setMemories(data.data);
   }, [ws, q]);
   useEffect(() => void load(), [load]);

@@ -3,7 +3,9 @@
 // to store it and which brand it belongs to. The brand's website becomes
 // the site's domain, so its numbers line up with the brand's other tools
 // without anyone typing a domain. Opens right after a tool is connected and
-// from Analytics while any site has no brand.
+// from Analytics while any site has no brand. Every row ends in a brand,
+// shared by all brands or not imported: nothing is guessed silently, and a
+// site no brand fits can start a new brand.
 
 import { useEffect, useMemo, useState } from "react";
 import type { AnalyticsSiteBrand, AnalyticsSitePlan, Brand } from "@outflare/sdk";
@@ -18,8 +20,9 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 type Source = { id: string; name: string; connector: string };
 
 // A row as the person is setting it: brand is a brand's handle, "none" for
-// shared by every brand, or "" for not chosen yet.
-type Draft = { sync: boolean; brand: string; domain: string; suggested: boolean };
+// shared by every brand, or "" for not chosen yet. why says where a guess
+// came from, shown beside it until the person picks.
+type Draft = { sync: boolean; brand: string; domain: string; why: string };
 
 const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, "");
 const hostOf = (url?: string) => (url ?? "").replace(/^[a-z-]+:(\/\/)?/i, "").replace(/^www\./, "").split(/[/?#:]/)[0].toLowerCase();
@@ -33,9 +36,14 @@ const testCopy = /\b(staging|stage|test|testing|dev|development|sandbox|qa|previ
 // ("zenshield-4fe59" is Zenshield). GA4 adds the account in brackets, which
 // names the company rather than the site, so that part is left out.
 export function guessBrand(site: AnalyticsSitePlan, brands: Brand[]): Brand | undefined {
+  return guess(site, brands)?.brand;
+}
+
+// guess is guessBrand with the reason: the site's address or its name.
+function guess(site: AnalyticsSitePlan, brands: Brand[]): { brand: Brand; why: string } | undefined {
   const host = site.host || hostOf(site.url);
   const byHost = brands.find((b) => belongs(host, b));
-  if (byHost) return byHost;
+  if (byHost) return { brand: byHost, why: `Matches ${host}` };
   const text = norm(site.name.replace(/\s*\([^)]*\)\s*$/, ""));
   let best: Brand | undefined, score = 0, tie = false;
   for (const b of brands) {
@@ -44,13 +52,17 @@ export function guessBrand(site: AnalyticsSitePlan, brands: Brand[]): Brand | un
     if (s > score) [best, score, tie] = [b, s, false];
     else if (s > 0 && s === score && b.id !== best?.id) tie = true;
   }
-  return tie ? undefined : best;
+  return tie || !best ? undefined : { brand: best, why: "Name matches" };
 }
 
-export function SiteSetup({ ws, source, canManage, onSaved, onCancel, compact = false }: {
+export function SiteSetup({ ws, source, canManage, onSaved, onCancel, compact = false, focus }: {
   ws: string; source: Source; canManage: boolean; onSaved?: () => void; onCancel?: () => void; compact?: boolean;
+  // A brand to pick sites for: the list shows its sites and the ones no
+  // brand has yet.
+  focus?: Brand;
 }) {
-  const { active: brands } = useBrand(ws);
+  const { active: brands, reload: reloadBrands } = useBrand(ws);
+  const [creating, setCreating] = useState("");
   const [sites, setSites] = useState<AnalyticsSitePlan[] | null>(null);
   const [mapped, setMapped] = useState<Record<string, AnalyticsSiteBrand>>({});
   const [drafts, setDrafts] = useState<Record<string, Draft>>({});
@@ -62,7 +74,8 @@ export function SiteSetup({ ws, source, canManage, onSaved, onCancel, compact = 
   useEffect(() => {
     Promise.all([
       api.GET("/v1/workspaces/{ws}/analytics/{id}/sites", { params: { path: { ws, id: source.id } } }),
-      api.GET("/v1/workspaces/{ws}/analytics/site-brands", { params: { path: { ws }, query: { integration: source.id } } }),
+      // Every brand's sites: this is where each site gets one.
+      api.GET("/v1/workspaces/{ws}/analytics/site-brands", { params: { path: { ws }, query: { integration: source.id, brand: "all" } } }),
     ]).then(([s, m]) => {
       if (s.error || !s.data) return setError(errorMessage(s.error));
       setSites(s.data.data);
@@ -90,9 +103,11 @@ export function SiteSetup({ ws, source, canManage, onSaved, onCancel, compact = 
     if (!sites) return;
     setDrafts(Object.fromEntries(sites.map((s) => {
       const now = current(s);
-      const guess = !now && brands.length > 0 ? guessBrand(s, brands) : undefined;
+      const g = !now && brands.length > 0 ? guess(s, brands) : undefined;
       const fresh = !now && !s.host;
-      return [s.id, { sync: fresh && testCopy.test(s.name) ? false : s.sync, brand: now || guess?.handle || "", domain: "", suggested: !!guess }];
+      // A brand found by the site's domain says so too.
+      const byDomain = now && now !== "none" && mapped[s.id]?.source !== "set" && s.host ? `Matches ${s.host}` : "";
+      return [s.id, { sync: fresh && testCopy.test(s.name) ? false : s.sync, brand: now || g?.brand.handle || "", domain: "", why: g?.why ?? byDomain }];
     })));
   }, [sites, mapped, brandKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -111,7 +126,20 @@ export function SiteSetup({ ws, source, canManage, onSaved, onCancel, compact = 
     return d && (d.sync !== s.sync || (d.sync && (d.brand !== current(s) || hostFor(s, d) !== s.host)));
   });
   const missing = sites.filter((s) => drafts[s.id]?.sync && (brands.length ? !drafts[s.id].brand : !s.host && !drafts[s.id].domain)).length;
-  const set = (id: string, patch: Partial<Draft>) => setDrafts({ ...drafts, [id]: { ...drafts[id], ...patch, suggested: patch.brand !== undefined ? false : drafts[id].suggested } });
+  const set = (id: string, patch: Partial<Draft>) => setDrafts((all) => ({ ...all, [id]: { ...all[id], ...patch, why: patch.brand !== undefined ? "" : all[id].why } }));
+  // Focused on one brand: its sites and the ones nobody has placed, never
+  // another brand's.
+  const shown = focus ? sites.filter((s) => { const now = current(s); return now === focus.handle || now === "" || drafts[s.id]?.brand === focus.handle; }) : sites;
+  const others = sites.length - shown.length;
+
+  async function newBrand(s: AnalyticsSitePlan, name: string, website: string) {
+    const { data, error } = await api.POST("/v1/workspaces/{ws}/brands", { params: { path: { ws } }, body: { name, website } });
+    if (error || !data) return toast(errorMessage(error), "error");
+    track("ui.analytics_site_brand_created", { connector: source.connector });
+    await reloadBrands();
+    setCreating("");
+    set(s.id, { brand: data.handle, sync: true, domain: "" });
+  }
 
   async function save() {
     setBusy(true);
@@ -156,7 +184,7 @@ export function SiteSetup({ ws, source, canManage, onSaved, onCancel, compact = 
             </tr>
           </thead>
           <tbody>
-            {sites.map((s) => {
+            {shown.map((s) => {
               const d = drafts[s.id];
               if (!d) return null;
               const host = hostFor(s, d);
@@ -175,13 +203,22 @@ export function SiteSetup({ ws, source, canManage, onSaved, onCancel, compact = 
                     ) : brands.length > 0 ? (
                       <div className="space-y-1">
                         <div className="flex items-center gap-2">
-                          <select aria-label={`Brand for ${s.name}`} className={`${field} w-48 ${!d.brand ? "border-amber-500/60" : ""}`} value={d.brand} disabled={!canManage || busy} onChange={(e) => set(s.id, { brand: e.target.value, domain: "" })}>
+                          <select aria-label={`Brand for ${s.name}`} className={`${field} w-48 ${!d.brand ? "border-amber-500/60" : ""}`} value={d.brand} disabled={!canManage || busy}
+                            onChange={(e) => {
+                              const v = e.target.value;
+                              if (v === newOption) return setCreating(s.id);
+                              if (v === skipOption) return set(s.id, { sync: false });
+                              set(s.id, { brand: v, domain: "" });
+                            }}>
                             {!d.brand && <option value="">Choose a brand…</option>}
                             {brands.map((x) => <option key={x.id} value={x.handle}>{x.name}</option>)}
                             <option value="none">Shared by all brands</option>
+                            <option value={skipOption}>Don't import</option>
+                            <option value={newOption}>New brand from this site…</option>
                           </select>
-                          {d.suggested && <span className="rounded bg-muted px-1.5 py-0.5 text-[11px] text-muted-foreground" title="Guessed from the site's name. Saving keeps it.">Suggested</span>}
+                          {d.why && <span className="rounded bg-muted px-1.5 py-0.5 text-[11px] whitespace-nowrap text-muted-foreground" title="Why this brand">{d.why}</span>}
                         </div>
+                        {creating === s.id && <NewBrandForm site={s} onCreate={(name, website) => newBrand(s, name, website)} onCancel={() => setCreating("")} />}
                         {editing === s.id ? (
                           <DomainInput initial={host} onDone={(v) => { setEditing(""); if (v !== null) set(s.id, { domain: v }); }} />
                         ) : (
@@ -201,6 +238,7 @@ export function SiteSetup({ ws, source, canManage, onSaved, onCancel, compact = 
           </tbody>
         </table>
       </div>
+      {others > 0 && focus && <p className="text-[12px] text-muted-foreground">{others === 1 ? "1 other site belongs" : `${others} other sites belong`} to other brands or every brand. Pick All brands in the sidebar to see them.</p>}
       <div className={`flex flex-wrap items-center gap-3 ${compact ? "justify-end" : "justify-between"}`}>
         {!compact && (
           <p className="text-[12px] text-muted-foreground">
@@ -211,11 +249,31 @@ export function SiteSetup({ ws, source, canManage, onSaved, onCancel, compact = 
         <div className="flex gap-2">
           {onCancel && <Button variant="ghost" onClick={onCancel} disabled={busy}>Later</Button>}
           {canManage && (onCancel || changed.length > 0) && (
-            <Button onClick={save} disabled={busy || changed.length === 0}>{busy ? "Saving…" : changed.length ? `Save ${changed.length === 1 ? "1 site" : `${changed.length} sites`}` : "Saved"}</Button>
+            <Button onClick={save} disabled={busy || changed.length === 0 || missing > 0} title={missing > 0 ? "Choose a brand, Shared by all brands or Don't import for every site" : undefined}>
+              {busy ? "Saving…" : missing > 0 ? `${missing === 1 ? "1 site needs" : `${missing} sites need`} a choice` : changed.length ? `Save ${changed.length === 1 ? "1 site" : `${changed.length} sites`}` : "Saved"}
+            </Button>
           )}
         </div>
       </div>
     </div>
+  );
+}
+
+const newOption = "__new", skipOption = "__skip";
+
+// A brand made from a site no brand fits: named after the site (without
+// GA4's account in brackets), with the site's domain as its website.
+function NewBrandForm({ site, onCreate, onCancel }: { site: AnalyticsSitePlan; onCreate: (name: string, website: string) => Promise<void>; onCancel: () => void }) {
+  const [name, setName] = useState(site.name.replace(/\s*\([^)]*\)\s*$/, ""));
+  const [website, setWebsite] = useState(site.host || hostOf(site.url));
+  const [busy, setBusy] = useState(false);
+  return (
+    <form className="flex flex-wrap items-center gap-1.5 rounded-md border bg-muted/40 p-2" onSubmit={async (e) => { e.preventDefault(); setBusy(true); await onCreate(name.trim(), hostOf(website.trim()) || website.trim()); setBusy(false); }}>
+      <input aria-label="Brand name" autoFocus className={`${field} h-7 w-36`} value={name} onChange={(e) => setName(e.target.value)} />
+      <input aria-label="Brand website" className={`${field} h-7 w-40`} placeholder="example.com" value={website} onChange={(e) => setWebsite(e.target.value)} />
+      <Button type="submit" disabled={busy || !name.trim()}>{busy ? "Creating…" : "Create brand"}</Button>
+      <Button variant="ghost" type="button" onClick={onCancel}>Cancel</Button>
+    </form>
   );
 }
 
@@ -234,7 +292,7 @@ function DomainInput({ initial, inline = false, onDone }: { initial: string; inl
 
 // The step after connecting an analytics tool: what to import, and for
 // which brand.
-export function SiteSetupDialog({ ws, source, from, onClose }: { ws: string; source: Source; from: "connect" | "analytics"; onClose: (saved: boolean) => void }) {
+export function SiteSetupDialog({ ws, source, from, focus, onClose }: { ws: string; source: Source; from: "connect" | "analytics" | "brand"; focus?: Brand; onClose: (saved: boolean) => void }) {
   useEffect(() => {
     track("ui.analytics_sites_opened", { from, connector: source.connector });
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
@@ -246,11 +304,15 @@ export function SiteSetupDialog({ ws, source, from, onClose }: { ws: string; sou
     <Dialog open onOpenChange={(o) => !o && later()}>
       <DialogContent className="sm:max-w-2xl">
         <DialogHeader className="text-left">
-          <DialogTitle className="flex items-center gap-2.5 text-[15px]"><ConnectorLogo id={source.connector} />Choose what to import from {source.name}</DialogTitle>
-          <DialogDescription className="text-[13px]">Tick the sites to store and pick the brand each belongs to. Test copies start unticked, and brands are guessed from the site names: check them and save.</DialogDescription>
+          <DialogTitle className="flex items-center gap-2.5 text-[15px]"><ConnectorLogo id={source.connector} />{focus ? `Pick ${focus.name}'s sites from ${source.name}` : `Choose what to import from ${source.name}`}</DialogTitle>
+          <DialogDescription className="text-[13px]">
+            {focus
+              ? `Set ${focus.name} on the sites that belong to it. Sites other brands use stay as they are.`
+              : "Give every site a brand, share it with all brands, or leave it out. Test copies start unticked, and suggestions say why they matched: check them and save. A site no brand fits can start a new brand."}
+          </DialogDescription>
         </DialogHeader>
         <div className="max-h-[60vh] overflow-y-auto">
-          <SiteSetup ws={ws} source={source} canManage compact onSaved={() => onClose(true)} onCancel={later} />
+          <SiteSetup ws={ws} source={source} canManage compact focus={focus} onSaved={() => onClose(true)} onCancel={later} />
         </div>
         <DialogFooter className="hidden" />
       </DialogContent>

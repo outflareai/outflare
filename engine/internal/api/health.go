@@ -1,6 +1,7 @@
 package api
 
 import (
+	"fmt"
 	"net/http"
 	"sort"
 	"strings"
@@ -37,6 +38,31 @@ func (s *Server) mailboxHealth(w http.ResponseWriter, r *http.Request) {
 	if level != "" && level != health.OK && level != health.Warning && level != health.Critical && level != health.Paused {
 		writeError(w, r, http.StatusBadRequest, "invalid_request", "level must be ok, warning, critical or paused")
 		return
+	}
+	sel, ok := s.brandFilter(w, r)
+	if !ok {
+		return
+	}
+	if !sel.all() {
+		// One brand's mailboxes, or the ones no brand has.
+		args := []any{a.WorkspaceID}
+		where := sel.sql("brand_id", &args)
+		if len(ids) > 0 {
+			args = append(args, ids)
+			where += fmt.Sprintf(` AND id = ANY($%d::uuid[])`, len(args))
+		}
+		rows, err := s.pool.Query(r.Context(), `SELECT id::text FROM mailboxes WHERE workspace_id = $1`+where, args...)
+		if err == nil {
+			ids, err = pgx.CollectRows(rows, pgx.RowTo[string])
+		}
+		if err != nil {
+			s.internal(w, r, err)
+			return
+		}
+		if len(ids) == 0 {
+			writeJSON(w, http.StatusOK, map[string]any{"summary": health.Summarise(nil), "data": []health.Mailbox{}})
+			return
+		}
 	}
 	list, err := health.Check(r.Context(), s.pool, a.WorkspaceID, ids)
 	if err != nil {

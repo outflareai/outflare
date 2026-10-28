@@ -153,7 +153,9 @@ type platformView struct {
 	Conflicts      int        `json:"conflicts"`
 }
 
-func (s *Server) loadPlatforms(ctx context.Context, ws string) ([]platformView, error) {
+func (s *Server) loadPlatforms(ctx context.Context, ws string, sel brandSel) ([]platformView, error) {
+	args := []any{ws, fmt.Sprintf("%d minutes", int(allocation.StaleAfter.Minutes()))}
+	serves := sel.servesSQL("i", &args)
 	rows, err := s.pool.Query(ctx, `
 		SELECT i.id::text, i.name, i.connector, ps.control, ps.synced_at, ps.error,
 		       ps.synced_at IS NULL OR ps.synced_at < now() - $2::interval OR ps.error IS NOT NULL,
@@ -165,7 +167,7 @@ func (s *Server) loadPlatforms(ctx context.Context, ws string) ([]platformView, 
 		        WHERE p.integration_id = i.id AND cardinality(p.campaign_ids) > 0
 		          AND (l.id IS NULL OR NOT (l.external_id = ANY(p.campaign_ids)) OR cardinality(p.campaign_ids) > 1))::int
 		FROM integrations i JOIN platform_syncs ps ON ps.integration_id = i.id
-		WHERE i.workspace_id = $1 ORDER BY i.name`, ws, fmt.Sprintf("%d minutes", int(allocation.StaleAfter.Minutes())))
+		WHERE i.workspace_id = $1`+serves+` ORDER BY i.name`, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -177,7 +179,11 @@ func (s *Server) loadPlatforms(ctx context.Context, ws string) ([]platformView, 
 }
 
 func (s *Server) listPlatforms(w http.ResponseWriter, r *http.Request) {
-	list, err := s.loadPlatforms(r.Context(), accessFrom(r.Context()).WorkspaceID)
+	sel, ok := s.brandFilter(w, r)
+	if !ok {
+		return
+	}
+	list, err := s.loadPlatforms(r.Context(), accessFrom(r.Context()).WorkspaceID, sel)
 	if err != nil {
 		s.internal(w, r, err)
 		return

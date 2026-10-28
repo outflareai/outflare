@@ -281,19 +281,21 @@ func (s *Server) analyticsOverview(w http.ResponseWriter, r *http.Request) {
 	}
 	// SEO snapshots join on the same domain; a domain only SEO follows
 	// still gets a row.
-	seo, err := s.seoLatestByHost(r.Context(), ws)
+	seo, err := s.seoLatestByHost(r.Context(), ws, f.brand)
 	if err != nil {
 		s.internal(w, r, err)
 		return
-	}
-	for _, site := range out {
-		site.SEO = seo[site.Host]
-		delete(seo, site.Host)
 	}
 	inBrand, err := s.hostBrandFilter(r.Context(), ws, f.brand)
 	if err != nil {
 		s.internal(w, r, err)
 		return
+	}
+	for _, site := range out {
+		if inBrand(site.Host) {
+			site.SEO = seo[site.Host]
+		}
+		delete(seo, site.Host)
 	}
 	for host, l := range seo {
 		if (f.host == "" || f.host == host) && inBrand(host) {
@@ -305,7 +307,7 @@ func (s *Server) analyticsOverview(w http.ResponseWriter, r *http.Request) {
 			site.SEO = []seoLatest{}
 		}
 	}
-	syncs, err := s.syncStatuses(r.Context(), ws)
+	syncs, err := s.syncStatuses(r.Context(), ws, f.brand)
 	if err != nil {
 		s.internal(w, r, err)
 		return
@@ -332,6 +334,9 @@ func (s *Server) analyticsCompare(w http.ResponseWriter, r *http.Request) {
 	}
 	if f.host == "" {
 		writeError(w, r, http.StatusBadRequest, "invalid_request", "host is the website to compare, like example.com; GET .../analytics/overview lists them")
+		return
+	}
+	if !s.needHostInBrand(w, r, ws, f.host, f.brand) {
 		return
 	}
 	f.report = connectors.ReportTraffic
@@ -386,8 +391,10 @@ type syncStatus struct {
 	Paused      bool       `json:"paused"`
 }
 
-func (s *Server) syncStatuses(ctx context.Context, ws string) ([]syncStatus, error) {
-	sources, err := s.analyticsSources(ctx, ws)
+// syncStatuses lists each analytics connection's sites and how their
+// syncs went, for the sites a brand filter lets through.
+func (s *Server) syncStatuses(ctx context.Context, ws string, sel brandSel) ([]syncStatus, error) {
+	sources, err := s.analyticsSources(ctx, ws, sel)
 	if err != nil {
 		return nil, err
 	}
@@ -395,11 +402,13 @@ func (s *Server) syncStatuses(ctx context.Context, ws string) ([]syncStatus, err
 	for _, src := range sources {
 		// One row per site the sync has run for, or one for the connection
 		// before its first run.
+		args := []any{src.ID}
+		inBrand := sel.sql(`analytics_site_brand(i.workspace_id, i.id, a.site, a.host)`, &args)
 		rows, err := s.pool.Query(ctx, `
 			SELECT a.site, a.host, to_char(a.first_day, 'YYYY-MM-DD'), to_char(a.last_day, 'YYYY-MM-DD'), a.last_run_at, a.last_ok_at, a.last_error,
 				COALESCE((i.config->>'sync_paused')::boolean, false)
-			FROM integrations i LEFT JOIN analytics_syncs a ON a.integration_id = i.id WHERE i.id = $1
-			ORDER BY a.site`, src.ID)
+			FROM integrations i LEFT JOIN analytics_syncs a ON a.integration_id = i.id`+inBrand+` WHERE i.id = $1
+			ORDER BY a.site`, args...)
 		if err != nil {
 			return nil, err
 		}
@@ -435,7 +444,11 @@ func (n nullText) Scan(v any) error {
 func nullable(dst *string) nullText { return nullText{dst} }
 
 func (s *Server) analyticsSyncs(w http.ResponseWriter, r *http.Request) {
-	out, err := s.syncStatuses(r.Context(), accessFrom(r.Context()).WorkspaceID)
+	sel, ok := s.brandFilter(w, r)
+	if !ok {
+		return
+	}
+	out, err := s.syncStatuses(r.Context(), accessFrom(r.Context()).WorkspaceID, sel)
 	if err != nil {
 		s.internal(w, r, err)
 		return
@@ -459,7 +472,7 @@ func (s *Server) analyticsSyncAll(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ws := accessFrom(r.Context()).WorkspaceID
-	sources, err := s.analyticsSources(r.Context(), ws)
+	sources, err := s.analyticsSources(r.Context(), ws, brandSel{})
 	if err != nil {
 		s.internal(w, r, err)
 		return

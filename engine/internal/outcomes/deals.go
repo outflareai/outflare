@@ -68,8 +68,11 @@ type DealFilter struct {
 	MissionID  string
 	State      string
 	Attributed bool
-	Limit      int
-	Before     *time.Time
+	// Brand is a brand's id, "none" for rows no brand owns, or "" for
+	// all; a row's brand is its sequence's, else its project's.
+	Brand  string
+	Limit  int
+	Before *time.Time
 }
 
 // ListDeals returns deals, newest first.
@@ -87,8 +90,10 @@ func ListDeals(ctx context.Context, q Querier, ws string, f DealFilter) ([]Deal,
 		  AND ($7 = '' OR d.state = $7)
 		  AND (NOT $8 OR d.attribution <> 'none')
 		  AND ($9::timestamptz IS NULL OR d.opened_at < $9)
+		  AND ($11 = '' OR COALESCE((SELECT q.brand_id FROM sequences q WHERE q.id = d.sequence_id),
+		       (SELECT p.brand_id FROM projects p WHERE p.id = d.project_id))::text IS NOT DISTINCT FROM NULLIF($11, 'none'))
 		ORDER BY d.opened_at DESC, d.id LIMIT $10`,
-		ws, f.From, f.To, f.ProjectID, f.SequenceID, f.MissionID, f.State, f.Attributed, f.Before, f.Limit)
+		ws, f.From, f.To, f.ProjectID, f.SequenceID, f.MissionID, f.State, f.Attributed, f.Before, f.Limit, f.Brand)
 	if err != nil {
 		return nil, err
 	}

@@ -6,6 +6,7 @@ import { Search } from "lucide-react";
 import { DataTable } from "@/components/data-table";
 import { ago } from "../format";
 import type { Tab } from "../App";
+import { useBrand } from "@/lib/brand";
 
 // How each verification result reads in the table. Unverified addresses are
 // checked automatically before their first email, so they aren't a problem.
@@ -33,12 +34,14 @@ export function Leads({ ws, canManage, go }: { ws: string; canManage: boolean; g
   const [loaded, setLoaded] = useState(false);
   const [importing, setImporting] = useState<boolean | null>(null);
 
+  // Narrowed to the brand picked in the sidebar: leads on its lists.
+  const { query: brandQuery } = useBrand(ws);
   const load = useCallback(
     async (after?: string) => {
-      const query = { ...(listId ? { list_id: listId } : {}), ...(q ? { q } : {}), ...(verification ? { verification: verification as "deliverable" } : {}), ...(after ? { after } : {}), limit: 100 };
+      const query = { ...(listId ? { list_id: listId } : {}), ...(q ? { q } : {}), ...(verification ? { verification: verification as "deliverable" } : {}), ...(after ? { after } : {}), limit: 100, ...brandQuery };
       const [l, ls] = await Promise.all([
         api.GET("/v1/workspaces/{ws}/leads", { params: { path: { ws }, query } }),
-        after ? Promise.resolve(null) : api.GET("/v1/workspaces/{ws}/lead-lists", { params: { path: { ws } } }),
+        after ? Promise.resolve(null) : api.GET("/v1/workspaces/{ws}/lead-lists", { params: { path: { ws }, query: brandQuery } }),
       ]);
       if (l.data) {
         setLeads((prev) => (after ? [...prev, ...l.data.data] : l.data.data));
@@ -48,7 +51,7 @@ export function Leads({ ws, canManage, go }: { ws: string; canManage: boolean; g
       if (ls?.data) setLists(ls.data.data);
       setLoaded(true);
     },
-    [ws, listId, q, verification],
+    [ws, listId, q, verification, brandQuery.brand], // eslint-disable-line react-hooks/exhaustive-deps
   );
 
   useEffect(() => {

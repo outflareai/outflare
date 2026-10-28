@@ -28,9 +28,9 @@ func (s *Server) routesAnalytics(mux *http.ServeMux) {
 	read := auth.ScopeAnalyticsRead
 	mux.HandleFunc("GET /v1/workspaces/{ws}/analytics", s.inWorkspace(read, s.listAnalytics))
 	mux.HandleFunc("GET /v1/workspaces/{ws}/analytics/summary", s.inWorkspace(read, s.analyticsSummary))
-	mux.HandleFunc("GET /v1/workspaces/{ws}/analytics/{id}/sites", s.inWorkspace(read, s.analyticsSites))
+	mux.HandleFunc("GET /v1/workspaces/{ws}/analytics/{id}/sites", s.inBrand(read, s.analyticsSites))
 	mux.HandleFunc("PUT /v1/workspaces/{ws}/analytics/{id}/site", s.inWorkspace(auth.ScopeIntegrationsManage, s.setAnalyticsSite))
-	mux.HandleFunc("PATCH /v1/workspaces/{ws}/analytics/{id}/sites/{site}", s.inWorkspace(auth.ScopeIntegrationsManage, s.updateAnalyticsSite))
+	mux.HandleFunc("PATCH /v1/workspaces/{ws}/analytics/{id}/sites/{site}", s.inBrand(auth.ScopeIntegrationsManage, s.updateAnalyticsSite))
 	mux.HandleFunc("GET /v1/workspaces/{ws}/analytics/{id}/reports/{report}", s.inWorkspace(read, s.analyticsReport))
 }
 
@@ -60,11 +60,14 @@ func siteOf(i connectors.Integration) string {
 	return cfg.Site
 }
 
-func (s *Server) analyticsSources(ctx context.Context, ws string) ([]analyticsSource, error) {
+// analyticsSources lists the analytics connections a brand filter's brand
+// uses.
+func (s *Server) analyticsSources(ctx context.Context, ws string, sel brandSel) ([]analyticsSource, error) {
 	list, err := s.integrations.List(ctx, s.pool, ws, "")
 	if err != nil {
 		return nil, err
 	}
+	list = integrationsFor(list, sel)
 	out := []analyticsSource{}
 	for _, i := range list {
 		c, ok := s.integrations.Registry.Get(i.Connector)
@@ -85,12 +88,28 @@ func (s *Server) listAnalytics(w http.ResponseWriter, r *http.Request) {
 	if !s.needIntegrations(w, r) {
 		return
 	}
-	out, err := s.analyticsSources(r.Context(), accessFrom(r.Context()).WorkspaceID)
+	sel, ok := s.brandFilter(w, r)
+	if !ok {
+		return
+	}
+	out, err := s.analyticsSources(r.Context(), accessFrom(r.Context()).WorkspaceID, sel)
 	if err != nil {
 		s.internal(w, r, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"data": out})
+}
+
+// siteInBrand reports whether a connection's site belongs to a brand
+// filter's brand, by the site's own brand, the connection's, or its domain.
+func (s *Server) siteInBrand(ctx context.Context, ws, integration, site string, sel brandSel) (bool, error) {
+	if sel.all() {
+		return true, nil
+	}
+	var brand *string
+	err := s.pool.QueryRow(ctx, `SELECT analytics_site_brand($1, $2, $3,
+		COALESCE((SELECT host FROM analytics_syncs WHERE integration_id = $2 AND site = $3 LIMIT 1), ''))::text`, ws, integration, site).Scan(&brand)
+	return sel.matches(brand), err
 }
 
 // openAnalytics loads an analytics integration with its credentials.
@@ -182,7 +201,26 @@ func (s *Server) analyticsSites(w http.ResponseWriter, r *http.Request) {
 		s.analyticsFailed(w, r, o, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"data": analyticsync.Plan(analyticsync.ParseConfig(o.Integration.Config), sites), "site": siteOf(o.Integration)})
+	plan := analyticsync.Plan(analyticsync.ParseConfig(o.Integration.Config), sites)
+	if a := accessFrom(r.Context()); a.Brands != nil {
+		// Someone kept to some brands sees their brands' sites and the ones
+		// nobody has placed yet.
+		owners, err := s.planOwners(r.Context(), o, plan)
+		if err != nil {
+			s.internal(w, r, err)
+			return
+		}
+		plan = slices.DeleteFunc(plan, func(p analyticsync.SitePlan) bool { return !a.placesSite(owners[p.ID]) })
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"data": plan, "site": siteOf(o.Integration)})
+}
+
+func (s *Server) planOwners(ctx context.Context, o *connectors.Opened, plan []analyticsync.SitePlan) (map[string]siteOwner, error) {
+	ids, hosts := make([]string, len(plan)), make([]string, len(plan))
+	for i, p := range plan {
+		ids[i], hosts[i] = p.ID, p.Host
+	}
+	return s.siteOwners(ctx, o.WorkspaceID, o.ID, ids, hosts)
 }
 
 // updateAnalyticsSite switches one site's sync on or off and sets the
@@ -248,6 +286,33 @@ func (s *Server) updateAnalyticsSite(w http.ResponseWriter, r *http.Request) {
 	if plan == nil {
 		writeError(w, r, http.StatusNotFound, "unknown_site", "this connection cannot read "+id+"; GET .../analytics/"+o.ID+"/sites lists the ones it can")
 		return
+	}
+	if a.Brands != nil {
+		// Someone kept to some brands changes their brands' sites and the
+		// ones nobody has placed yet, and can't move one into another brand
+		// by its domain.
+		owners, err := s.planOwners(r.Context(), o, []analyticsync.SitePlan{*plan})
+		if err != nil {
+			s.internal(w, r, err)
+			return
+		}
+		if !a.placesSite(owners[id]) {
+			writeError(w, r, http.StatusNotFound, "unknown_site", "this connection cannot read "+id+"; GET .../analytics/"+o.ID+"/sites lists the ones it can")
+			return
+		}
+		if req.Domain != nil && domain != "" {
+			moved := *plan
+			moved.Host = domain
+			after, err := s.planOwners(r.Context(), o, []analyticsync.SitePlan{moved})
+			if err != nil {
+				s.internal(w, r, err)
+				return
+			}
+			if b := after[id].brand; b != nil && !slices.Contains(a.Brands, *b) {
+				writeError(w, r, http.StatusForbidden, "forbidden", domain+" is another brand's website; you can place sites only in your own brands")
+				return
+			}
+		}
 	}
 	entry := analyticsync.SiteConfig{ID: id, Domain: plan.Domain, Off: !plan.Sync, ConversionEvents: plan.ConversionEvents}
 	if len(entry.ConversionEvents) == 0 {
@@ -546,10 +611,27 @@ func (s *Server) analyticsSummary(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ws := accessFrom(r.Context()).WorkspaceID
-	sources, err := s.analyticsSources(r.Context(), ws)
+	sel, ok := s.brandFilter(w, r)
+	if !ok {
+		return
+	}
+	all, err := s.analyticsSources(r.Context(), ws, sel)
 	if err != nil {
 		s.internal(w, r, err)
 		return
+	}
+	// A shared connection counts here only when the site it reads is the
+	// brand's.
+	sources := []analyticsSource{}
+	for _, src := range all {
+		in, err := s.siteInBrand(r.Context(), ws, src.ID, src.Site, sel)
+		if err != nil {
+			s.internal(w, r, err)
+			return
+		}
+		if in {
+			sources = append(sources, src)
+		}
 	}
 	type item struct {
 		analyticsSource

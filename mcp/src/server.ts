@@ -506,7 +506,7 @@ export function createServer({ client: gtm, workspace, agency, readOnly = false,
     {
       title: "List leads",
       description: "Search leads by email, name or company. Each lead carries its latest verification result (null = not checked yet). Page with cursor=next_cursor.",
-      inputSchema: { q: z.string().optional(), list_id: id.optional(), suppressed: z.boolean().optional(), verification: z.enum(["deliverable", "undeliverable", "risky", "unknown", "unverified"]).optional(), limit: limit(500), cursor, fields },
+      inputSchema: { q: z.string().optional(), list_id: id.optional(), brand: brandParam, suppressed: z.boolean().optional(), verification: z.enum(["deliverable", "undeliverable", "risky", "unknown", "unverified"]).optional(), limit: limit(500), cursor, fields },
       annotations: read,
     },
     (q) => call(() => gtm.GET("/v1/workspaces/{ws}/leads", { params: { path, query: q } })),
@@ -783,6 +783,7 @@ export function createServer({ client: gtm, workspace, agency, readOnly = false,
       title: "List sent messages",
       description: "Every send attempt, newest first: sent, failed, and blocked by the policy with the reason. Page with cursor=next_cursor.",
       inputSchema: {
+        brand: brandParam,
         sequence_id: id.optional(),
         lead_id: id.optional(),
         mailbox_id: id.optional(),
@@ -794,7 +795,7 @@ export function createServer({ client: gtm, workspace, agency, readOnly = false,
       },
       annotations: read,
     },
-    (q) => call(() => gtm.GET("/v1/workspaces/{ws}/messages", { params: { path, query: q } })),
+    (q) => call(() => gtm.GET("/v1/workspaces/{ws}/messages", { params: { path, query: withBrand(q) } })),
   );
 
   server.registerTool(
@@ -872,9 +873,10 @@ export function createServer({ client: gtm, workspace, agency, readOnly = false,
       description:
         "EmailBison, Instantly and Smartlead accounts whose campaigns mailbox allocation manages: when each was last read, whether its first plan is " +
         "still awaiting review, and mailboxes waiting to be confirmed or in conflict. Their live campaigns appear as sequences with links.",
+      inputSchema: { brand: brandParam },
       annotations: read,
     },
-    () => call(() => gtm.GET("/v1/workspaces/{ws}/platforms", { params: { path } })),
+    (q) => call(() => gtm.GET("/v1/workspaces/{ws}/platforms", { params: { path, query: withBrand(q) } })),
   );
 
   server.registerTool(
@@ -1070,7 +1072,7 @@ export function createServer({ client: gtm, workspace, agency, readOnly = false,
         "Every sending mailbox graded ok, warning, critical or paused, worst first, with each problem explained and what to do: sign-in failures " +
         "(suspended account, wrong app password, revoked consent), replies not syncing, send failures, bounce rate, warm-up inbox placement, " +
         "domain SPF/DKIM/DMARC and blocklists, and new mailboxes not warming up.",
-      inputSchema: { level: z.enum(["ok", "warning", "critical", "paused"]).optional(), mailbox_id: z.array(id).max(500).optional() },
+      inputSchema: { level: z.enum(["ok", "warning", "critical", "paused"]).optional(), mailbox_id: z.array(id).max(500).optional(), brand: brandParam },
       annotations: read,
     },
     ({ mailbox_id, ...q }) => call(() => gtm.GET("/v1/workspaces/{ws}/mailbox-health", { params: { path, query: { ...q, mailbox_id: mailbox_id?.join(",") } } })),
@@ -1361,9 +1363,10 @@ export function createServer({ client: gtm, workspace, agency, readOnly = false,
       description:
         "Connected web analytics, product analytics and search consoles (Google Analytics, Search Console, Bing Webmaster Tools, PostHog, Plausible, Fathom, Matomo, Umami, Mixpanel, Amplitude, Cloudflare, Simple Analytics, Clarity, Vercel), " +
         "with the reports each answers and its default site. Empty means none is connected: find one with list_connectors category analytics and request_connection.",
+      inputSchema: { brand: brandParam },
       annotations: read,
     },
-    () => callCompact(() => gtm.GET("/v1/workspaces/{ws}/analytics", { params: { path } })),
+    (q) => callCompact(() => gtm.GET("/v1/workspaces/{ws}/analytics", { params: { path, query: withBrand(q) } })),
   );
 
   const storedRange = {
@@ -1440,6 +1443,7 @@ export function createServer({ client: gtm, workspace, agency, readOnly = false,
         "the pages, sources and search queries that rose or fell most, unusual days, SEO moves since the previous weekly snapshot, " +
         "and gaps: what is missing (no search console, no conversions, a broken sync) with the connector ids for request_connection or the fix. Units are given once in units.",
       inputSchema: {
+        brand: brandParam,
         days: z.number().int().min(1).max(90).optional().describe("Period length. Default 7 (this week against last week); 28 for month on month."),
         host: z.string().max(253).optional().describe("One website, like example.com. Default: every website."),
         to: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional().describe("Last day to consider (YYYY-MM-DD). Default yesterday, UTC."),
@@ -1447,7 +1451,7 @@ export function createServer({ client: gtm, workspace, agency, readOnly = false,
       },
       annotations: read,
     },
-    (q) => callCompact(() => gtm.GET("/v1/workspaces/{ws}/analytics/changes", { params: { path, query: q } })),
+    (q) => callCompact(() => gtm.GET("/v1/workspaces/{ws}/analytics/changes", { params: { path, query: withBrand(q) } })),
   );
 
   server.registerTool(
@@ -1457,9 +1461,10 @@ export function createServer({ client: gtm, workspace, agency, readOnly = false,
       description:
         "Per website: the analytics tools, the metrics each has stored per report, days stored and last sync, SEO tools with snapshots and budget left, and gaps with how to fix them. " +
         "ask maps common questions to the tool that answers them. Read it once before planning analysis; the same is in the resource outflare://analytics/catalog.",
+      inputSchema: { brand: brandParam },
       annotations: read,
     },
-    () => callCompact(() => gtm.GET("/v1/workspaces/{ws}/analytics/catalog", { params: { path } })),
+    (q) => callCompact(() => gtm.GET("/v1/workspaces/{ws}/analytics/catalog", { params: { path, query: withBrand(q) } })),
   );
 
   server.registerResource(
@@ -1563,9 +1568,10 @@ export function createServer({ client: gtm, workspace, agency, readOnly = false,
       description:
         "DataForSEO and Ahrefs connections: the reports each answers, the domains it follows, its country, and this month's budget and spend " +
         "(dollars for DataForSEO, API units for Ahrefs). Empty means none is connected: find one with list_connectors category seo and request_connection.",
+      inputSchema: { brand: brandParam },
       annotations: read,
     },
-    () => callCompact(() => gtm.GET("/v1/workspaces/{ws}/seo", { params: { path } })),
+    (q) => callCompact(() => gtm.GET("/v1/workspaces/{ws}/seo", { params: { path, query: withBrand(q) } })),
   );
 
   server.registerTool(
@@ -1577,6 +1583,7 @@ export function createServer({ client: gtm, workspace, agency, readOnly = false,
         "estimated organic traffic and its value, one row per snapshot. report keywords: the latest snapshot's keywords with position, volume and traffic, and previous for the snapshot before. " +
         "Use this before get_seo_report, which costs money.",
       inputSchema: {
+        brand: brandParam,
         report: seoReport.optional(),
         host: z.string().max(253).optional().describe("A domain, like example.com."),
         integration: z.string().uuid().optional(),
@@ -1586,7 +1593,7 @@ export function createServer({ client: gtm, workspace, agency, readOnly = false,
       },
       annotations: read,
     },
-    (q) => callCompact(() => gtm.GET("/v1/workspaces/{ws}/seo/history", { params: { path, query: q } })),
+    (q) => callCompact(() => gtm.GET("/v1/workspaces/{ws}/seo/history", { params: { path, query: withBrand(q) } })),
   );
 
   server.registerTool(
@@ -1608,10 +1615,10 @@ export function createServer({ client: gtm, workspace, agency, readOnly = false,
     {
       title: "How the website is doing",
       description: "Traffic totals (visitors, page views, visits, or clicks and impressions for search consoles) from every analytics connection over one range, in one call. A connection that cannot answer says why in error.",
-      inputSchema: analyticsRange,
+      inputSchema: { ...analyticsRange, brand: brandParam },
       annotations: { ...read, openWorldHint: true },
     },
-    (q) => callCompact(() => gtm.GET("/v1/workspaces/{ws}/analytics/summary", { params: { path, query: q } })),
+    (q) => callCompact(() => gtm.GET("/v1/workspaces/{ws}/analytics/summary", { params: { path, query: withBrand(q) } })),
   );
 
   server.registerTool(
@@ -1778,10 +1785,11 @@ export function createServer({ client: gtm, workspace, agency, readOnly = false,
       title: "Infrastructure overview",
       description:
         "Mailboxes by lifecycle stage (warming, ready, resting, retired; only ready ones send cold email), every mailbox that is not ready with why and until when, " +
-        "the plans in progress, and the suppliers plans can buy from.",
+        "the plans in progress, and the suppliers plans can buy from. brand narrows it to one brand's mailboxes and plans.",
+      inputSchema: { brand: brandParam },
       annotations: read,
     },
-    () => call(() => gtm.GET("/v1/workspaces/{ws}/infrastructure", { params: { path } })),
+    (q) => call(() => gtm.GET("/v1/workspaces/{ws}/infrastructure", { params: { path, query: q } })),
   );
 
   server.registerTool(
