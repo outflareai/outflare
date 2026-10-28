@@ -1240,7 +1240,7 @@ export function createServer({ client: gtm, workspace, agency, readOnly = false,
     {
       title: "AI model settings",
       description:
-        "Which AI model (Claude, OpenAI, Gemini, Mistral, xAI or a router such as OpenRouter, with the workspace's own key) plans missions and runs Outflare's own agent, its price, the monthly AI limit and this month's AI spend. " +
+        "Which AI model (Claude, OpenAI, Gemini, Mistral, xAI, DeepSeek or a router such as OpenRouter, with the workspace's own key) plans missions and runs Outflare's own agent, its price, the monthly AI limit and this month's AI spend. " +
         "problem says what must be done first, such as connecting a provider or choosing a model. Keys are never shown.",
       annotations: read,
     },
@@ -1288,7 +1288,7 @@ export function createServer({ client: gtm, workspace, agency, readOnly = false,
     "list_ai_models",
     {
       title: "List an AI connection's models",
-      description: "The chat models a connected AI model key (Claude, OpenAI, Gemini, Mistral, xAI, OpenRouter, Vercel AI Gateway, Requesty) can use, asked of the provider (free). price is set where Outflare knows it. Needs integrations.manage.",
+      description: "The chat models a connected AI model key (Claude, OpenAI, Gemini, Mistral, xAI, DeepSeek, OpenRouter, Vercel AI Gateway, Requesty) can use, asked of the provider (free). price is set where Outflare knows it. Needs integrations.manage.",
       inputSchema: { integration_id: id },
       annotations: read,
     },

@@ -23,7 +23,7 @@ guessed or redrawn logo.
 | --- | --- |
 | ahrefs, apollo, bing_webmaster, calendly, claude, cloudflare, github, google_analytics, google_calendar, linkedin, outlook_calendar, plausible, posthog, resend, salesforce, vercel, x, zoom | [svgl](https://github.com/pheralb/svgl) (MIT), which collects official brand assets |
 | amazon_ses, amplitude, cursor, google_search_console, google_tag_manager, hotjar, mailgun, matomo, route53, segment, sendgrid, vscode | [gilbarbara/logos](https://github.com/gilbarbara/logos) (CC0), via `@iconify-json/logos` 1.2.18 for `cursor-icon` and `visual-studio-code`; the Cursor mark is black, with a white dark variant |
-| gemini, mistral, openai, openrouter, xai | [Lobe Icons](https://github.com/lobehub/lobe-icons) (MIT), `@lobehub/icons-static-svg` 1.101.0: the colour marks for Gemini and Mistral, the OpenAI, OpenRouter and xAI marks in black with a white dark variant |
+| deepseek, gemini, mistral, openai, openrouter, xai | [Lobe Icons](https://github.com/lobehub/lobe-icons) (MIT), `@lobehub/icons-static-svg` 1.101.0: the colour marks for DeepSeek, Gemini and Mistral, the OpenAI, OpenRouter and xAI marks in black with a white dark variant |
 | crunchbase, fathom, godaddy, hubspot, mixpanel, namecheap, reddit, simple_analytics, umami | [Simple Icons](https://simpleicons.org) (CC0), in the brand colour Simple Icons records |
 | emailable, hunter, instantly, neverbounce, peopledatalabs | The company's own website logo (symbol only) |
 | attio, bouncer, debounce, findymail, leadmagic, millionverifier, reoon, smartlead (bouncer and reoon now live in `integrations/connectors/<id>/logo.svg`) | The company's own website logo (symbol only), taken from its site in October 2026 |

@@ -1,5 +1,5 @@
 // Package llm talks to the AI model a workspace chose, with the
-// workspace's own API key: Claude, OpenAI, Gemini, Mistral, xAI, or a router
+// workspace's own API key: Claude, OpenAI, Gemini, Mistral, xAI, DeepSeek, or a router
 // (OpenRouter, Vercel AI Gateway, Requesty). The planner
 // and the built-in agent use it through one small interface, so they work
 // the same whichever provider runs them.
@@ -80,6 +80,9 @@ var (
 
 	XAI = Provider{ID: "xai", Name: "xAI", Vendor: "xai", BaseURL: "https://api.x.ai/v1", Env: "OUTFLARE_XAI_BASE_URL",
 		KeyURL: "https://console.x.ai/", PricingURL: "https://docs.x.ai/docs/models", KeyPrefixes: []string{"xai-"}, openAI: true}
+	// DeepSeek hosts in China; its connector says so.
+	DeepSeek = Provider{ID: "deepseek", Name: "DeepSeek", Vendor: "deepseek", BaseURL: "https://api.deepseek.com/v1", Env: "OUTFLARE_DEEPSEEK_BASE_URL",
+		KeyURL: "https://platform.deepseek.com/api_keys", PricingURL: "https://api-docs.deepseek.com/quick_start/pricing", KeyPrefixes: []string{"sk-"}, openAI: true}
 	// Vercel AI Gateway and Requesty are routers like OpenRouter: one key
 	// for many vendors' models, billed by the router.
 	VercelAIGateway = Provider{ID: "vercel_ai_gateway", Name: "Vercel AI Gateway", Vendor: "vercel", BaseURL: "https://ai-gateway.vercel.sh/v1", Env: "OUTFLARE_VERCEL_AI_GATEWAY_BASE_URL",
@@ -87,7 +90,7 @@ var (
 	Requesty = Provider{ID: "requesty", Name: "Requesty", Vendor: "requesty", BaseURL: "https://router.requesty.ai/v1", Env: "OUTFLARE_REQUESTY_BASE_URL",
 		KeyURL: "https://app.requesty.ai/", PricingURL: "https://www.requesty.ai/models-new", openAI: true}
 
-	Providers = []Provider{Claude, OpenAI, Gemini, Mistral, XAI, OpenRouter, VercelAIGateway, Requesty}
+	Providers = []Provider{Claude, OpenAI, Gemini, Mistral, XAI, DeepSeek, OpenRouter, VercelAIGateway, Requesty}
 )
 
 // ProviderFor returns the provider whose connector id is id.

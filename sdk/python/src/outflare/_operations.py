@@ -10322,7 +10322,7 @@ class Operations(_Mixin):
     ) -> Any:
         """List the models an AI model connection can use.
 
-        Scope: integrations.manage. For an AI model (Claude, OpenAI, Gemini, Mistral, xAI or a router)
+        Scope: integrations.manage. For an AI model (Claude, OpenAI, Gemini, Mistral, xAI, DeepSeek or a router)
         connection: the chat models its key can use, asked of the provider
         live (costs nothing). `price` is set where Outflare knows the list
         price; for the rest, enter it with your choice in `PUT /ai-settings`.
@@ -16480,7 +16480,7 @@ class Operations(_Mixin):
 
         Scope: seo.manage. Send only what changes. Each model is one of the
         workspace's own AI model connections (Claude, OpenAI, Gemini,
-        Mistral, xAI or a router, with its own key) and a model id from GET
+        Mistral, xAI, DeepSeek or a router, with its own key) and a model id from GET
         .../integrations/{id}/models. OpenRouter reaches many vendors'
         models with one key. `web_search` lets the model search the web
         before it answers, as AI assistants do for people, so its answer

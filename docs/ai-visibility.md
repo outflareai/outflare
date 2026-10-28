@@ -6,7 +6,7 @@ often their answers name your brand, how that compares with your
 competitors, and which pages they cite.
 
 Every question goes to a model on **your own AI connection** (Claude,
-OpenAI, Gemini, Mistral, xAI, or a router such as OpenRouter, Vercel AI
+OpenAI, Gemini, Mistral, xAI, DeepSeek, or a router such as OpenRouter, Vercel AI
 Gateway or Requesty, connected on the Connectors page with
 your own key), and the cost goes to your account with that provider.
 Outflare never supplies a key: with no AI connection, AI visibility stays off

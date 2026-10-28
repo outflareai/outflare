@@ -39,7 +39,7 @@ Credentials are sealed with the instance key (`OUTFLARE_SECRET_KEY`, AES-256-GCM
 | `dns`, `registrar` | Cloudflare, Namecheap, GoDaddy, Route 53 |
 | `notification` | Slack: [alerts](alerts.md) posted to a channel the workspace picks |
 | `warehouse` | Exports |
-| `model` | Claude, OpenAI, Gemini, Mistral, xAI, or a router (OpenRouter, Vercel AI Gateway, Requesty: one key for many vendors' models), with your own API key. OpenAI and xAI are tagged for subscription sign-in (ChatGPT plans, SuperGrok), which is coming; use a key for now. They plan missions from a goal, run Outflare's built-in agent and ask the questions [AI visibility](ai-visibility.md) samples. Pick one under Workspace settings → AI model |
+| `model` | Claude, OpenAI, Gemini, Mistral, xAI, DeepSeek, or a router (OpenRouter, Vercel AI Gateway, Requesty: one key for many vendors' models), with your own API key. OpenAI and xAI are tagged for subscription sign-in (ChatGPT plans, SuperGrok), which is coming; use a key for now. DeepSeek is tagged **Hosted in China**: it processes prompts, including customer details in them, in China; its models are also on the routers. They plan missions from a goal, run Outflare's built-in agent and ask the questions [AI visibility](ai-visibility.md) samples. Pick one under Workspace settings → AI model |
 | `custom` | A generic HTTP API or MCP server registered by the workspace |
 
 ## Connecting

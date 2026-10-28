@@ -135,7 +135,7 @@ func TestAIModelTags(t *testing.T) {
 	}
 	for id, want := range map[string]string{
 		"openai": "ChatGPT plan sign-in soon", "xai": "SuperGrok sign-in soon",
-		"openrouter": "Router", "vercel_ai_gateway": "Router", "requesty": "Router",
+		"deepseek": "Hosted in China", "openrouter": "Router", "vercel_ai_gateway": "Router", "requesty": "Router",
 		"claude": "", "gemini": "", "mistral": "",
 	} {
 		if got := label(id); got != want {

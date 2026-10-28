@@ -13,7 +13,7 @@ import (
 
 // openAIModel calls a provider that speaks OpenAI's chat completions API:
 // OpenAI itself, Gemini (through Google's OpenAI-compatible endpoint),
-// Mistral, xAI and the routers (OpenRouter, Vercel AI Gateway, Requesty).
+// Mistral, xAI, DeepSeek and the routers (OpenRouter, Vercel AI Gateway, Requesty).
 type openAIModel struct {
 	c    Config
 	http *http.Client

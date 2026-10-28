@@ -6862,7 +6862,7 @@ export interface paths {
          * Choose the AI models to sample
          * @description Scope: seo.manage. Send only what changes. Each model is one of the
          *     workspace's own AI model connections (Claude, OpenAI, Gemini,
-         *     Mistral, xAI or a router, with its own key) and a model id from GET
+         *     Mistral, xAI, DeepSeek or a router, with its own key) and a model id from GET
          *     .../integrations/{id}/models. OpenRouter reaches many vendors'
          *     models with one key. `web_search` lets the model search the web
          *     before it answers, as AI assistants do for people, so its answer
@@ -8516,7 +8516,7 @@ export interface paths {
         };
         /**
          * List the models an AI model connection can use
-         * @description Scope: integrations.manage. For an AI model (Claude, OpenAI, Gemini, Mistral, xAI or a router)
+         * @description Scope: integrations.manage. For an AI model (Claude, OpenAI, Gemini, Mistral, xAI, DeepSeek or a router)
          *     connection: the chat models its key can use, asked of the provider
          *     live (costs nothing). `price` is set where Outflare knows the list
          *     price; for the rest, enter it with your choice in `PUT /ai-settings`.
@@ -21178,7 +21178,7 @@ export interface components {
             /** Format: uuid */
             integration_id: string;
             /** @enum {string} */
-            provider: "claude" | "openai" | "gemini" | "mistral" | "xai" | "openrouter" | "vercel_ai_gateway" | "requesty";
+            provider: "claude" | "openai" | "gemini" | "mistral" | "xai" | "deepseek" | "openrouter" | "vercel_ai_gateway" | "requesty";
             model: string;
             web_search: boolean;
             input_cents_per_million?: number;
@@ -22854,7 +22854,7 @@ export interface components {
             task_models: {
                 [key: string]: {
                     /** @enum {string} */
-                    provider: "claude" | "openai" | "gemini" | "mistral" | "xai" | "openrouter" | "vercel_ai_gateway" | "requesty";
+                    provider: "claude" | "openai" | "gemini" | "mistral" | "xai" | "deepseek" | "openrouter" | "vercel_ai_gateway" | "requesty";
                     model: string;
                     input_cents_per_million?: number;
                     output_cents_per_million?: number;
@@ -22883,7 +22883,7 @@ export interface components {
             /** @description The model in use now; null when none can be. */
             active: null | {
                 /** @enum {string} */
-                provider: "claude" | "openai" | "gemini" | "mistral" | "xai" | "openrouter" | "vercel_ai_gateway" | "requesty";
+                provider: "claude" | "openai" | "gemini" | "mistral" | "xai" | "deepseek" | "openrouter" | "vercel_ai_gateway" | "requesty";
                 provider_name: string;
                 /** Format: uuid */
                 integration_id: string;
@@ -22903,7 +22903,7 @@ export interface components {
             };
             providers: {
                 /** @enum {string} */
-                connector: "claude" | "openai" | "gemini" | "mistral" | "xai" | "openrouter" | "vercel_ai_gateway" | "requesty";
+                connector: "claude" | "openai" | "gemini" | "mistral" | "xai" | "deepseek" | "openrouter" | "vercel_ai_gateway" | "requesty";
                 name: string;
                 default_model: string | null;
                 /** @description The lighter model routine check-ins use by default; null uses the main model. */

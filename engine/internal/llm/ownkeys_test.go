@@ -12,7 +12,7 @@ import (
 // platformEnv sets every variable an SDK or habit would read a
 // server-wide key from, so a test fails if any of it reaches a request.
 func platformEnv(t *testing.T) {
-	for _, k := range []string{"ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "OPENAI_API_KEY", "GEMINI_API_KEY", "GOOGLE_API_KEY", "MISTRAL_API_KEY", "XAI_API_KEY", "OPENROUTER_API_KEY", "AI_GATEWAY_API_KEY", "REQUESTY_API_KEY"} {
+	for _, k := range []string{"ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "OPENAI_API_KEY", "GEMINI_API_KEY", "GOOGLE_API_KEY", "MISTRAL_API_KEY", "XAI_API_KEY", "DEEPSEEK_API_KEY", "OPENROUTER_API_KEY", "AI_GATEWAY_API_KEY", "REQUESTY_API_KEY"} {
 		t.Setenv(k, "sk-platform-test-not-a-real-key")
 	}
 }
@@ -52,7 +52,7 @@ func TestClaudeUsesOnlyTheWorkspaceKey(t *testing.T) {
 
 func TestOpenAICompatibleUsesOnlyTheWorkspaceKey(t *testing.T) {
 	platformEnv(t)
-	for _, p := range []Provider{OpenAI, Gemini, Mistral, XAI, Requesty} {
+	for _, p := range []Provider{OpenAI, Gemini, Mistral, XAI, DeepSeek, Requesty} {
 		rec := &recorder{}
 		srv := rec.server(t, `{"data":[{"id":"model-test"}]}`)
 		key := "sk-workspace-test-not-a-real-key"

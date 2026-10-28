@@ -1,5 +1,5 @@
 // Package models connects a workspace's own AI model API key: Claude,
-// OpenAI, Gemini, Mistral, xAI, or a router (OpenRouter, Vercel AI Gateway,
+// OpenAI, Gemini, Mistral, xAI, DeepSeek, or a router (OpenRouter, Vercel AI Gateway,
 // Requesty). Missions use the one the workspace
 // picks to turn a goal into a plan and to run the built-in agent; AI
 // visibility asks the models the workspace picks its prompts.
@@ -47,6 +47,8 @@ var info = map[string]struct {
 	llm.Mistral.ID: {summary: "Mistral's models, hosted in the EU.", website: "https://mistral.ai/", docs: "https://docs.mistral.ai/", keyHint: "Mistral console → API keys."},
 	llm.XAI.ID: {summary: "xAI's Grok models.", website: "https://x.ai/api", docs: "https://docs.x.ai/docs/overview", keyHint: "xAI Console → API Keys.",
 		tags: []c.Tag{{Label: "SuperGrok sign-in soon", Help: "xAI lets some apps use a SuperGrok or X Premium+ plan instead of an API key. It isn't open to Outflare yet: connect an API key for now."}}},
+	llm.DeepSeek.ID: {summary: "DeepSeek's low-cost models, hosted in China.", website: "https://www.deepseek.com/", docs: "https://api-docs.deepseek.com/", keyHint: "DeepSeek Platform → API keys.",
+		tags: []c.Tag{{Label: "Hosted in China", Help: "DeepSeek processes what Outflare sends it, including customer and lead details in prompts, on servers in China. To keep data outside China, use DeepSeek's models through a router such as OpenRouter."}}},
 	llm.OpenRouter.ID: {summary: "Hundreds of models from many vendors (OpenAI, Google, Meta, xAI, Perplexity...) with one key; OpenRouter reports what each call cost.",
 		website: "https://openrouter.ai/", docs: "https://openrouter.ai/docs/quickstart", keyHint: "OpenRouter → Settings → API keys. A key with its own credit limit is safest.", tags: []c.Tag{router}},
 	llm.VercelAIGateway.ID: {summary: "Models from many vendors with one Vercel key, billed to your Vercel team.",

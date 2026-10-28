@@ -9369,7 +9369,7 @@ paths:
       description: |
         Scope: seo.manage. Send only what changes. Each model is one of the
         workspace's own AI model connections (Claude, OpenAI, Gemini,
-        Mistral, xAI or a router, with its own key) and a model id from GET
+        Mistral, xAI, DeepSeek or a router, with its own key) and a model id from GET
         .../integrations/{id}/models. OpenRouter reaches many vendors'
         models with one key. `web_search` lets the model search the web
         before it answers, as AI assistants do for people, so its answer
@@ -11603,7 +11603,7 @@ paths:
       x-outflare-access: { scope: integrations.manage }
       summary: List the models an AI model connection can use
       description: |
-        Scope: integrations.manage. For an AI model (Claude, OpenAI, Gemini, Mistral, xAI or a router)
+        Scope: integrations.manage. For an AI model (Claude, OpenAI, Gemini, Mistral, xAI, DeepSeek or a router)
         connection: the chat models its key can use, asked of the provider
         live (costs nothing). `price` is set where Outflare knows the list
         price; for the rest, enter it with your choice in `PUT /ai-settings`.
@@ -24353,7 +24353,7 @@ components:
       required: [integration_id, provider, model, web_search]
       properties:
         integration_id: { type: string, format: uuid }
-        provider: { type: string, enum: [claude, openai, gemini, mistral, xai, openrouter, vercel_ai_gateway, requesty] }
+        provider: { type: string, enum: [claude, openai, gemini, mistral, xai, deepseek, openrouter, vercel_ai_gateway, requesty] }
         model: { type: string }
         web_search: { type: boolean }
         input_cents_per_million: { type: number }
@@ -25771,7 +25771,7 @@ components:
             type: object
             required: [provider, model]
             properties:
-              provider: { type: string, enum: [claude, openai, gemini, mistral, xai, openrouter, vercel_ai_gateway, requesty] }
+              provider: { type: string, enum: [claude, openai, gemini, mistral, xai, deepseek, openrouter, vercel_ai_gateway, requesty] }
               model: { type: string }
               input_cents_per_million: { type: number }
               output_cents_per_million: { type: number }
@@ -25803,7 +25803,7 @@ components:
             - type: object
               required: [provider, provider_name, integration_id, model, price, price_source]
               properties:
-                provider: { type: string, enum: [claude, openai, gemini, mistral, xai, openrouter, vercel_ai_gateway, requesty] }
+                provider: { type: string, enum: [claude, openai, gemini, mistral, xai, deepseek, openrouter, vercel_ai_gateway, requesty] }
                 provider_name: { type: string }
                 integration_id: { type: string, format: uuid }
                 model: { type: string }
@@ -25824,7 +25824,7 @@ components:
             type: object
             required: [connector, name, default_model, light_model, cheap_model, key_url, pricing_url, connections, known_prices]
             properties:
-              connector: { type: string, enum: [claude, openai, gemini, mistral, xai, openrouter, vercel_ai_gateway, requesty] }
+              connector: { type: string, enum: [claude, openai, gemini, mistral, xai, deepseek, openrouter, vercel_ai_gateway, requesty] }
               name: { type: string }
               default_model: { type: [string, "null"] }
               light_model: { type: [string, "null"], description: The lighter model routine check-ins use by default; null uses the main model. }
