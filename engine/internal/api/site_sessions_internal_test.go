@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http/httptest"
 	"os/exec"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -178,7 +179,11 @@ func TestSiteFlagsClient(t *testing.T) {
 			Payload map[string]any
 		}
 		Classes []string
-		Stored  map[string]string
+		Tracked []struct {
+			Event      string
+			Properties map[string]string
+		}
+		Stored map[string]string
 	}) {
 		t.Helper()
 		b, _ := json.Marshal(opts)
@@ -216,5 +221,82 @@ func TestSiteFlagsClient(t *testing.T) {
 	// Without data-flags, nothing is asked.
 	if got := run(map[string]any{"href": "https://northpeak.example/"}); got.FlagAsks != 0 {
 		t.Fatalf("asked for flags without data-flags: %+v", got)
+	}
+}
+
+// A visitor joins a flag's A/B test when the page shows them its version:
+// the snippet sends Experiment Viewed once per visit for each flag read, or
+// for each flag whose class data-flags put on <html>, and never for a
+// preview.
+func TestSiteFlagsExposure(t *testing.T) {
+	node, err := exec.LookPath("node")
+	if err != nil {
+		t.Skip("node not installed")
+	}
+	type tracked struct {
+		Event      string
+		Properties map[string]string
+	}
+	run := func(opts map[string]any) (got struct {
+		Anon    string
+		Tracked []tracked
+		Stored  map[string]string
+	}) {
+		t.Helper()
+		b, _ := json.Marshal(opts)
+		out, err := exec.Command(node, "testdata/run_site.mjs", "site.js", string(b)).CombinedOutput()
+		if err != nil {
+			t.Fatalf("%v: %s", err, out)
+		}
+		if err := json.Unmarshal(out, &got); err != nil {
+			t.Fatalf("%v: %s", err, out)
+		}
+		return got
+	}
+	views := func(ts []tracked) []string {
+		var out []string
+		for _, e := range ts {
+			if e.Event != "Experiment Viewed" {
+				t.Fatalf("unexpected event %+v", e)
+			}
+			out = append(out, e.Properties["flag"]+":"+e.Properties["variant"])
+		}
+		slices.Sort(out)
+		return out
+	}
+	answer := map[string]any{"flags": map[string]any{"hero": "faster", "pricing": "annual", "chat-widget": false}}
+
+	// Read with outflare.flag, without data-flags: only that flag joins.
+	got := run(map[string]any{"href": "https://northpeak.example/", "flags": answer, "noTag": true, "quiet": true, "read": []string{"hero", "hero", "chat-widget"}})
+	if v := views(got.Tracked); !slices.Equal(v, []string{"hero:faster"}) {
+		t.Fatalf("read with flag: %v", v)
+	}
+	// The next page of the visit doesn't send it again.
+	again := run(map[string]any{"href": "https://northpeak.example/", "flags": answer, "noTag": true, "quiet": true, "read": []string{"hero"}, "stored": got.Stored, "cookie": "of_aid=" + got.Anon})
+	if len(again.Tracked) != 0 {
+		t.Fatalf("sent twice in a visit: %+v", again.Tracked)
+	}
+
+	// Flags only fetched, never read, don't join anyone.
+	if got := run(map[string]any{"href": "https://northpeak.example/", "flags": answer, "noTag": true, "quiet": true, "read": []string{}}); len(got.Tracked) != 0 {
+		t.Fatalf("sent without being shown: %+v", got.Tracked)
+	}
+
+	// With data-flags every flag with a class on <html> is shown.
+	got = run(map[string]any{"href": "https://northpeak.example/", "flags": answer, "quiet": true})
+	if v := views(got.Tracked); !slices.Equal(v, []string{"hero:faster", "pricing:annual"}) {
+		t.Fatalf("data-flags: %v", v)
+	}
+
+	// Reading the map onFlags gives counts too.
+	got = run(map[string]any{"href": "https://northpeak.example/", "flags": answer, "noTag": true})
+	if v := views(got.Tracked); !slices.Equal(v, []string{"hero:faster", "pricing:annual"}) {
+		t.Fatalf("onFlags: %v", v)
+	}
+
+	// A preview is the team looking, not a visitor.
+	got = run(map[string]any{"href": "https://northpeak.example/?of_flag=hero:control", "flags": answer, "noTag": true, "quiet": true, "read": []string{"hero"}})
+	if len(got.Tracked) != 0 {
+		t.Fatalf("preview sent: %+v", got.Tracked)
 	}
 }

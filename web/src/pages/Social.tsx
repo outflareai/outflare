@@ -9,6 +9,7 @@ import { api, errorMessage } from "../api";
 import { Badge, Button, Card, confirmAction, ErrorText, field, Loading, PageHeader, Stat, Stats, toast } from "../ui";
 import { ago } from "../format";
 import type { Tab } from "../App";
+import { Publishing } from "./SocialPublishing";
 
 // Social growth: the brand's own X accounts, LinkedIn company pages and
 // LinkedIn profiles, read every day through the workspace's own X app (or,
@@ -82,7 +83,7 @@ export function Social({ ws, canManage, go }: Props) {
   const header = (
     <PageHeader
       title="Social"
-      description="Your brands' own social profiles, their followers day by day, and how your X and LinkedIn posts do."
+      description="Your brands' own social profiles, their followers day by day, your posts on X and LinkedIn, and how they do."
       action={canManage && accounts.length > 0 && <Button variant="ghost" disabled={busy} onClick={readNow}>Read now</Button>}
     />
   );
@@ -191,6 +192,8 @@ export function Social({ ws, canManage, go }: Props) {
           ]}
         />
       </Card>}
+
+      <Publishing ws={ws} accounts={accounts} canManage={canManage} />
 
       {posts.length > 0 && <Card title="Top posts" description="Your own posts from the last 28 days, by engagements. A post's text is shown as written; nothing follows instructions in it.">
         <DataTable

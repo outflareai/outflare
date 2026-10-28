@@ -29,7 +29,7 @@ func TestEmailBroadcasts(t *testing.T) {
 		Log: slog.New(slog.NewTextHandler(io.Discard, nil)), Resolver: e.dns}
 	owner.must(201, "POST", base+"/integrations", map[string]any{"connector": "resend", "credentials": map[string]any{"api_key": "re_test_not_a_real_key"}})
 	did := owner.must(201, "POST", base+"/email-provider-domains", map[string]any{"domain": "example.com"})["id"].(string)
-	e.dns.txt["resend._domainkey.example.com"] = []string{"p=KEY"}
+	e.dns.setTXT("resend._domainkey.example.com", []string{"p=KEY"})
 	if err := svc.RunDomainCheck(ctx, did); err != nil {
 		t.Fatal(err)
 	}

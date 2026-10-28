@@ -327,6 +327,7 @@ var seedValues = map[string]string{
 	"allocation_changes.action": "assign",
 	"deploys.kind":              "push",
 	"integrations.connector":    "plausible",
+	"social_accounts.channel":   "x",
 	"integrations.brand_ids":    "{}",
 	"customer_events.name":      "bravo_event",
 	"site_keys.key":             "ofk_bravo",

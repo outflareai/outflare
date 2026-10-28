@@ -18,7 +18,7 @@ import (
 
 // Rank tracking: the keywords a workspace follows for an SEO site and
 // where the site ranks for each, from the workspace's own SERP connection
-// (DataForSEO for Google). Checks are jobs (ranks), daily or weekly per
+// (DataForSEO or Geonode, for Google). Checks are jobs (ranks), daily or weekly per
 // keyword or when someone asks, within the connection's monthly budget.
 
 func (s *Server) routesSEORanks(mux *http.ServeMux) {
@@ -78,19 +78,28 @@ type rankConnection struct {
 	Connector     string `json:"connector"`
 }
 
-// rankConnection is the workspace's default SERP connection, or nil.
-func (s *Server) rankConnection(r *http.Request) (*rankConnection, error) {
-	ctx := r.Context()
+// rankConnections are the workspace's connected SERP connections, the one
+// checks use by default first.
+func (s *Server) rankConnections(r *http.Request) ([]rankConnection, error) {
+	list := []rankConnection{}
 	if s.integrations == nil {
-		return nil, nil
+		return list, nil
 	}
-	id, err := ranks.DefaultConnection(ctx, s.pool, s.integrations.Registry, accessFrom(ctx).WorkspaceID)
-	if err != nil || id == "" {
+	rows, err := s.pool.Query(r.Context(), `SELECT id::text, name, connector FROM integrations
+		WHERE workspace_id = $1 AND connector = ANY($2) AND status = 'connected'
+		ORDER BY array_position($2, connector), created_at, id`, accessFrom(r.Context()).WorkspaceID, ranks.SERPConnectors(s.integrations.Registry))
+	if err != nil {
 		return nil, err
 	}
-	c := rankConnection{IntegrationID: id}
-	err = s.pool.QueryRow(ctx, `SELECT name, connector FROM integrations WHERE id = $1`, id).Scan(&c.Name, &c.Connector)
-	return &c, err
+	for rows.Next() {
+		var c rankConnection
+		if err := rows.Scan(&c.IntegrationID, &c.Name, &c.Connector); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		list = append(list, c)
+	}
+	return list, rows.Err()
 }
 
 func (s *Server) listRankings(w http.ResponseWriter, r *http.Request) {
@@ -115,12 +124,16 @@ func (s *Server) listRankings(w http.ResponseWriter, r *http.Request) {
 	if list == nil {
 		list = []trackedView{}
 	}
-	conn, err := s.rankConnection(r)
+	conns, err := s.rankConnections(r)
 	if err != nil {
 		s.internal(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"data": list, "connection": conn})
+	var conn *rankConnection
+	if len(conns) > 0 {
+		conn = &conns[0]
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"data": list, "connection": conn, "connections": conns})
 }
 
 var countryCode = regexp.MustCompile(`^[A-Z]{2}$`)
@@ -162,7 +175,7 @@ func (s *Server) serpConnection(r *http.Request, id string) error {
 	var connector string
 	err := s.pool.QueryRow(r.Context(), `SELECT connector FROM integrations WHERE id = $1 AND workspace_id = $2`, id, accessFrom(r.Context()).WorkspaceID).Scan(&connector)
 	if errors.Is(err, pgx.ErrNoRows) || (err == nil && !slices.Contains(ranks.SERPConnectors(s.integrations.Registry), connector)) {
-		return errInvalid("integration_id is a connection that can check rankings, such as DataForSEO")
+		return errInvalid("integration_id is a connection that can check rankings: DataForSEO or Geonode")
 	}
 	return err
 }
@@ -388,13 +401,13 @@ func (s *Server) checkRankings(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	conn, err := s.rankConnection(r)
+	conns, err := s.rankConnections(r)
 	if err != nil {
 		s.internal(w, r, err)
 		return
 	}
-	if conn == nil {
-		writeError(w, r, http.StatusConflict, "connector_needed", "rank tracking needs a SERP connection: connect DataForSEO on the Connectors page")
+	if len(conns) == 0 {
+		writeError(w, r, http.StatusConflict, "connector_needed", "rank tracking needs a SERP connection: connect DataForSEO or Geonode on the Connectors page")
 		return
 	}
 	ctx := r.Context()

@@ -242,6 +242,9 @@ func Fetch(ctx context.Context, pool *pgxpool.Pool, o *connectors.Opened, r conn
 	if q.Traffic {
 		key += "|traffic"
 	}
+	if q.Page {
+		key += "|page"
+	}
 	if !opt.Fresh {
 		var raw []byte
 		var at time.Time
@@ -502,6 +505,9 @@ type Result struct {
 	Links []LinkRun `json:"links"`
 	// Competitors is each SEO site's competitors read.
 	Competitors []CompetitorRun `json:"competitors"`
+	// DeadPages is each SEO site's weekly read of who links to its
+	// competitors' dead pages.
+	DeadPages []DeadPageRun `json:"dead_pages"`
 }
 
 // Domains is what a connection snapshots: its own list, or else the
@@ -592,7 +598,7 @@ func (s *Syncer) sync(ctx context.Context, ws, integrationID string, newOnly, re
 	if !ok {
 		return Result{}, connectors.Errf(connectors.ErrInvalid, "%s is not an SEO connection", o.Name)
 	}
-	res := Result{Domains: []string{}, Unit: Unit(r), Links: []LinkRun{}, Competitors: []CompetitorRun{}}
+	res := Result{Domains: []string{}, Unit: Unit(r), Links: []LinkRun{}, Competitors: []CompetitorRun{}, DeadPages: []DeadPageRun{}}
 	domains, _, err := Domains(ctx, s.Pool, o.Integration)
 	if err != nil {
 		return res, err
@@ -694,6 +700,14 @@ func (s *Syncer) sync(ctx context.Context, ws, integrationID string, newOnly, re
 			if errors.As(err, &be) || connectors.KindOf(err) == connectors.ErrAuth {
 				break
 			}
+		}
+	}
+	// Who links to competitors' pages that just went, within the share
+	// of the budget the workspace allows.
+	if connectors.SupportsSEO(r, connectors.SEOLinks) && len(sites) > 0 && connectors.KindOf(firstErr) != connectors.ErrAuth {
+		res.DeadPages = s.readDeadPages(ctx, o, r, sites)
+		for _, d := range res.DeadPages {
+			res.Cost += d.Cost
 		}
 	}
 	if connectors.KindOf(firstErr) == connectors.ErrAuth {

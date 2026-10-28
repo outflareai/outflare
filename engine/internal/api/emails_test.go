@@ -171,7 +171,7 @@ func TestLifecycleEmail(t *testing.T) {
 		recs[0].(map[string]any)["status"] != "missing" || recs[3].(map[string]any)["purpose"] != "dmarc" {
 		t.Fatalf("records = %v", d)
 	}
-	e.dns.txt["resend._domainkey.example.com"] = []string{"p=KEY"}
+	e.dns.setTXT("resend._domainkey.example.com", []string{"p=KEY"})
 	fake.verified = true
 	if err := svc.RunDomainCheck(ctx, did); err != nil {
 		t.Fatal(err)

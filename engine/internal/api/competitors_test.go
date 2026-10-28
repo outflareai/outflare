@@ -162,4 +162,9 @@ func TestCompetitorGlance(t *testing.T) {
 		kinds["title_changed"]["before"] != "Old home" {
 		t.Fatalf("events: %v", feed)
 	}
+	var removed string
+	if err := e.pool.QueryRow(context.Background(), `SELECT data->>'url' FROM audit_events WHERE workspace_id = $1 AND action = 'competitor.page_removed'`,
+		ws).Scan(&removed); err != nil || removed != "https://rival.example/old" {
+		t.Fatalf("page removed webhook: %q %v", removed, err)
+	}
 }

@@ -235,7 +235,7 @@ func (d DataForSEO) SEOReport(ctx context.Context, cl *c.Client, creds c.Creds, 
 		}
 	case c.SEOLinks:
 		task := map[string]any{"target": q.Target, "mode": "as_is", "limit": q.Limit, "order_by": []string{"domain_from_rank,desc"},
-			"rank_scale": "one_hundred", "include_subdomains": true, "backlinks_status_type": "live"}
+			"rank_scale": "one_hundred", "include_subdomains": !q.Page, "backlinks_status_type": "live"}
 		if q.Since != "" {
 			task["backlinks_status_type"] = "all"
 			task["filters"] = []any{"last_seen", ">=", q.Since + " 00:00:00 +00:00"}

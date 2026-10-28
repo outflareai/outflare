@@ -60,7 +60,7 @@ func sendingSetup(t *testing.T, e *env, clock *fakeClock) (*client, string, *mai
 	e.mail.Dialer.TLSConfig = srv.ClientTLS
 	e.send.Now = clock.Now
 	// A real SPF record, so the allocator counts these mailboxes as ready.
-	e.dns.txt["acme.test"] = []string{"v=spf1 include:_spf.google.com ~all"}
+	e.dns.setTXT("acme.test", []string{"v=spf1 include:_spf.google.com ~all"})
 	e.runJobs(t)
 	owner, ws := setupOwner(t, e.h)
 	base := "/v1/workspaces/" + ws

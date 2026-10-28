@@ -22,7 +22,7 @@ func TestTrackingDomainAndClicks(t *testing.T) {
 	}
 	owner.must(409, "POST", base+"/tracking-domains", map[string]string{"domain": "links.acme-com.example"})
 	owner.must(400, "POST", base+"/tracking-domains", map[string]string{"domain": "not a domain"})
-	e.dns.cname = map[string]string{"links.acme-com.example": "localhost"}
+	e.dns.setCNAME("links.acme-com.example", "localhost")
 	if td = owner.must(200, "POST", base+"/tracking-domains/"+td["id"].(string)+"/check", nil); td["status"] != "verified" {
 		t.Fatalf("verified: %v", td)
 	}

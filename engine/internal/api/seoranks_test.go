@@ -143,3 +143,86 @@ func TestRankTracking(t *testing.T) {
 		time.Sleep(50 * time.Millisecond)
 	}
 }
+
+func TestRankTrackingWithGeonode(t *testing.T) {
+	got := track.Capture(t)
+	e := freshEnv(t)
+	owner, ws := setupOwner(t, e.h)
+	base := "/v1/workspaces/" + ws
+	site := owner.must(201, "POST", base+"/seo-sites", map[string]any{"url": "https://www.example.com/"})["id"].(string)
+	sb := base + "/seo-sites/" + site
+
+	// Geonode alone is the default.
+	gn := owner.must(201, "POST", base+"/integrations", map[string]any{"connector": "geonode", "credentials": map[string]string{"api_key": "gn-key"}})["id"].(string)
+	if c := owner.must(200, "GET", sb+"/rankings", nil)["connection"].(map[string]any); c["integration_id"] != gn || c["connector"] != "geonode" {
+		t.Fatalf("geonode default: %v", c)
+	}
+	// With DataForSEO too, DataForSEO stays the default and both are listed.
+	dfs := owner.must(201, "POST", base+"/integrations", map[string]any{"connector": "dataforseo", "credentials": map[string]string{"login": "jo", "password": "pw"}})["id"].(string)
+	l := owner.must(200, "GET", sb+"/rankings", nil)
+	conns := l["connections"].([]any)
+	if l["connection"].(map[string]any)["integration_id"] != dfs || len(conns) != 2 || conns[1].(map[string]any)["integration_id"] != gn {
+		t.Fatalf("both: %v", l)
+	}
+
+	owner.must(201, "POST", sb+"/rankings", map[string]any{"keywords": []string{"proxy pricing", "cut short", "nothing here"}, "integration_id": gn})
+	e.runRanks(t)
+	byKey := func() map[string]map[string]any {
+		out := map[string]map[string]any{}
+		for _, r := range owner.must(200, "GET", sb+"/rankings", nil)["data"].([]any) {
+			out[r.(map[string]any)["keyword"].(string)] = r.(map[string]any)
+		}
+		return out
+	}
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		k := byKey()
+		if k["proxy pricing"]["last_checked_at"] != nil && k["nothing here"]["last_checked_at"] != nil && k["cut short"]["last_error"] != nil {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("not checked: %v", k)
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	k := byKey()
+	// 13th on Geonode's Google (DataForSEO would have said 3).
+	if pp := k["proxy pricing"]; pp["position"].(float64) != 13 || pp["url"] != "https://www.example.com/pricing" || pp["engine"] != "google" || pp["integration_id"] != gn {
+		t.Fatalf("proxy pricing: %v", pp)
+	}
+	if nh := k["nothing here"]; nh["position"] != nil || nh["last_error"] != nil {
+		t.Fatalf("no results: %v", nh)
+	}
+	// Stopped early without finding the site: not "not in the top 100".
+	if cs := k["cut short"]; cs["position"] != nil || cs["last_checked_at"] != nil {
+		t.Fatalf("cut short: %v", cs)
+	}
+	// Pages returned are spend on the Geonode connection; DataForSEO was not called.
+	for _, s := range owner.must(200, "GET", base+"/spend", nil)["data"].([]any) {
+		if p := s.(map[string]any)["provider"]; p != "geonode" {
+			t.Fatalf("spend on %v", p)
+		}
+	}
+
+	// A keyword can move to the other connection.
+	if v := owner.must(200, "PATCH", sb+"/rankings/"+k["proxy pricing"]["id"].(string), map[string]any{"integration_id": dfs}); v["integration_id"] != dfs {
+		t.Fatalf("moved: %v", v)
+	}
+
+	deadline = time.Now().Add(5 * time.Second)
+	for {
+		failed := false
+		for _, ev := range got() {
+			if ev.Name == "rank.checked" && ev.WorkspaceID == ws && ev.Outcome == track.Error && ev.ErrorCode == "connector_unavailable" {
+				failed = true
+			}
+		}
+		if failed {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("no rank.checked event for the incomplete check")
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+}

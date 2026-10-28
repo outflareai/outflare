@@ -97,6 +97,14 @@ var (
 		Namespace: namespace, Subsystem: "flags", Name: "request_seconds",
 		Help: "Time to decide a visitor's feature flags, by surface.", Buckets: requestBuckets,
 	}, []string{"surface"})
+	abResults = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Namespace: namespace, Subsystem: "ab", Name: "results_total",
+		Help: "A/B test results counted from product events, by outcome (ok, error).",
+	}, []string{"outcome"})
+	abResultsDuration = prometheus.NewHistogram(prometheus.HistogramOpts{
+		Namespace: namespace, Subsystem: "ab", Name: "results_seconds",
+		Help: "Time to count an A/B test's results from product events, every goal included.", Buckets: requestBuckets,
+	})
 	flagCache = prometheus.NewCounterVec(prometheus.CounterOpts{
 		Namespace: namespace, Subsystem: "flags", Name: "cache_total",
 		Help: "Lookups of a workspace's flags, by result (hit: from memory, miss: read from Postgres).",
@@ -213,6 +221,19 @@ var (
 		Help: "Reviews kept for the first time, by platform (a page's first read included).",
 	}, []string{"platform"})
 
+	// Social publishing: the brand's own posts on X and LinkedIn.
+	socialPublishes = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Namespace: namespace, Subsystem: "social", Name: "publishes_total",
+		Help: "Posts the publish job tried, by channel and outcome (published, failed: the channel refused or the outcome is unknown, retried: a rate limit before anything was posted).",
+	}, []string{"channel", "outcome"})
+
+	// Link reads: who links to a page or domain, from the workspace's
+	// own SEO connection.
+	linkReads = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Namespace: namespace, Subsystem: "seo", Name: "link_reads_total",
+		Help: "Reads of who links to a page or domain, by reason (requested, dead_page) and outcome (success, budget_reached, connector_auth, invalid_request, provider_error, internal).",
+	}, []string{"reason", "outcome"})
+
 	buildInfo = prometheus.NewGaugeVec(prometheus.GaugeOpts{
 		Namespace: namespace, Name: "build_info",
 		Help: "Always 1; the labels are the running engine version and its role (OUTFLARE_ROLE).",
@@ -225,7 +246,7 @@ var own = []prometheus.Collector{
 	httpRequests, httpDuration, httpInFlight, httpRateLimited,
 	jobsDone, jobDuration, jobWait, jobsActive, jobsReaped, workers,
 	siteEvents, inboxEvents, inboxBatch,
-	flagRequests, flagDuration, flagCache,
+	flagRequests, flagDuration, flagCache, abResults, abResultsDuration,
 	pipelineItems, pipelineCodes, pipelineBatch, pipelineBatchSize, pipelineWait, pipelineLimitWaits, pipelineLimitReports,
 	aiCalls, aiTokens, aiCost, aiBudgetAlerts,
 	connectionLimitAlerts, connectionLimitStops,
@@ -234,7 +255,8 @@ var own = []prometheus.Collector{
 	queryRuns, queryDuration, queryRows,
 	semanticRuns, semanticItems, semanticDuration, semanticAvailable, semanticWorkspaces,
 	adConversions, adConversionsOldest,
-	reviewReads, reviewsFound,
+	reviewReads, reviewsFound, linkReads,
+	socialPublishes,
 	buildInfo,
 }
 
@@ -340,6 +362,13 @@ func FlagCache(hit bool) {
 	}
 }
 
+// ABResults records counting one A/B test's results: its outcome (ok,
+// error) and time.
+func ABResults(outcome string, d time.Duration) {
+	abResults.WithLabelValues(outcome).Inc()
+	abResultsDuration.Observe(d.Seconds())
+}
+
 // QueryRan records one query: its outcome, time and rows returned.
 func QueryRan(outcome string, d time.Duration, rows int) {
 	queryRuns.WithLabelValues(outcome).Inc()
@@ -414,6 +443,9 @@ func HookEvent(connector, result string, lag time.Duration) {
 	}
 }
 
+// LinkRead records one read of who links to a page or domain.
+func LinkRead(reason, outcome string) { linkReads.WithLabelValues(reason, outcome).Inc() }
+
 // ReviewPageRead records one read of a review page: its outcome and how
 // many reviews it kept for the first time.
 func ReviewPageRead(platform, outcome string, added int) {
@@ -421,6 +453,11 @@ func ReviewPageRead(platform, outcome string, added int) {
 	if added > 0 {
 		reviewsFound.WithLabelValues(platform).Add(float64(added))
 	}
+}
+
+// SocialPublished records one try of the publish job.
+func SocialPublished(channel, outcome string) {
+	socialPublishes.WithLabelValues(channel, outcome).Inc()
 }
 
 // DomainConnectLookup records a Domain Connect lookup: available, or the

@@ -2,6 +2,7 @@ package seo
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -25,15 +26,16 @@ type Geonode struct{}
 func (Geonode) Definition() c.Definition {
 	d := def("geonode", "Geonode", "https://geonode.com", "https://docs.geonode.com/docs/scraper-api",
 		"https://app.geonode.com/",
-		"Searches the web, finds your brands' social links, reads public X follower counts, and reads your own site's pages when a firewall blocks OutflareBot.",
+		"Searches the web, tracks where your pages rank on Google, finds your brands' social links, reads public X follower counts, and reads your own site's pages when a firewall blocks OutflareBot.",
 		"Runs web searches for finding companies and pages, through Geonode's Search API. "+
+			"Checks where your pages rank on Google for the keywords you track, through Geonode's Google Search Light API (one credit per results page; a check reads 10 pages), within the monthly budget you set on the connection. "+
 			"Reads each brand's homepage to suggest its social profiles and app store listings, and the public X profile in each brand's links once a day for its follower count. "+
 			"For sites you have proved you own, and only for pages robots.txt allows: when a page answers with a firewall block or a challenge, "+
 			"OutflareBot reads it through Geonode's Scraper API instead. Searches and pages cost Geonode tokens on your account.",
-		"Tokens per search and per page, on your Geonode plan", []c.Field{
+		"Tokens per search and per page, and a credit per Google results page, on your Geonode plan", []c.Field{
 			{Name: "api_key", Label: "API key", Secret: true, Help: "Geonode dashboard > Scraper API > API keys."},
 		})
-	d.Capabilities = []string{c.CapCrawlFetch, c.CapWebSearch, c.CapHooks}
+	d.Capabilities = []string{c.CapCrawlFetch, c.CapWebSearch, c.CapSERP, c.CapHooks}
 	return d
 }
 
@@ -186,6 +188,113 @@ func (g Geonode) WebSearch(ctx context.Context, cl *c.Client, creds c.Creds, q c
 		res.Results = append(res.Results, c.WebResult{Position: pos, Title: strings.TrimSpace(r.Title), URL: u, Domain: d, Snippet: strings.TrimSpace(snippet)})
 	}
 	return res, nil
+}
+
+// geonodeSERPPageUSD is what one Google results page costs (one credit).
+// Geonode's answers do not say, so every rank check's cost is worked out
+// from it.
+const geonodeSERPPageUSD = 0.5 / 1000
+
+// geonodeCountries are Google's names for the countries rank tracking
+// covers, for the uule that makes Google search from there. The language
+// comes from the same list DataForSEO uses.
+var geonodeCountries = map[string]string{
+	"US": "United States", "GB": "United Kingdom", "AU": "Australia", "CA": "Canada", "NZ": "New Zealand",
+	"IE": "Ireland", "IN": "India", "SG": "Singapore", "ZA": "South Africa", "DE": "Germany",
+	"FR": "France", "ES": "Spain", "IT": "Italy", "NL": "Netherlands", "BR": "Brazil",
+	"MX": "Mexico", "SE": "Sweden", "PL": "Poland", "JP": "Japan",
+}
+
+// uule is Google's location parameter for a place by its name: "w+CAIQICI",
+// a character for the name's length, then the name in base64.
+func uule(name string) string {
+	const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_"
+	return "w+CAIQICI" + string(alphabet[len(name)%len(alphabet)]) + base64.RawStdEncoding.EncodeToString([]byte(name))
+}
+
+// SERPEngines: Geonode's Google Search Light reads Google.
+func (Geonode) SERPEngines() []string { return []string{"google"} }
+
+func serpPages(depth int) int { return min((max(depth, 10)+9)/10, 10) }
+
+// EstimateSERP is one credit for each 10 results read.
+func (Geonode) EstimateSERP(q c.SERPQuery) c.SEOCost {
+	return c.SEOCost{USD: geonodeSERPPageUSD * float64(serpPages(q.Depth)), Estimated: true}
+}
+
+// SERP reads Google's organic results with POST /v1/google/search/light,
+// every page in one request. Geonode bills the pages it returns; when it
+// stops early the answer is Partial.
+func (g Geonode) SERP(ctx context.Context, cl *c.Client, creds c.Creds, engine string, q c.SERPQuery) (c.SERPResult, error) {
+	out := c.SERPResult{Engine: "google", Items: []c.SERPItem{}}
+	if engine != "" && engine != "google" {
+		return out, c.Errf(c.ErrInvalid, "Geonode here reads Google only")
+	}
+	name, ok := geonodeCountries[q.Country]
+	if !ok {
+		keys := make([]string, 0, len(geonodeCountries))
+		for k := range geonodeCountries {
+			keys = append(keys, k)
+		}
+		return out, c.Errf(c.ErrInvalid, "Geonode here covers %s; ask for one of those countries", strings.Join(sorted(keys), ", "))
+	}
+	device := q.Device
+	if device == "" {
+		device = "desktop"
+	}
+	if device != "desktop" && device != "mobile" {
+		return out, c.Errf(c.ErrInvalid, "device is desktop or mobile")
+	}
+	pages := serpPages(q.Depth)
+	status, raw, err := g.post(ctx, cl, creds, "/v1/google/search/light", map[string]any{
+		"query": q.Keyword, "pages": pages, "format": "json", "device": device,
+		"locale": locations[q.Country].lang + "-" + q.Country, "uule": uule(name),
+	})
+	if err != nil {
+		return out, err
+	}
+	var resp struct {
+		PagesReturned int    `json:"pages_returned"`
+		PagesStopped  string `json:"pages_stopped"`
+		Pages         []struct {
+			Results []struct {
+				Title      string `json:"title"`
+				URL        string `json:"url"`
+				SourceHost string `json:"source_host"`
+			} `json:"results"`
+		} `json:"pages"`
+		Code string `json:"code"`
+	}
+	_ = json.Unmarshal(raw, &resp)
+	if status != http.StatusOK {
+		// Nothing is billed when page 1 fails. No results is an answer:
+		// the site is not on Google for it.
+		if status == http.StatusUnprocessableEntity && resp.Code == "NO_RESULTS" {
+			return out, nil
+		}
+		if resp.Code != "" {
+			return out, c.Errf(geonodeKind(resp.Code), "Geonode could not read Google's results (%s)", resp.Code)
+		}
+		return out, c.HTTPError("Geonode", status, string(raw))
+	}
+	returned := resp.PagesReturned
+	if returned == 0 {
+		returned = len(resp.Pages)
+	}
+	out.Cost = c.SEOCost{USD: geonodeSERPPageUSD * float64(returned), Units: float64(returned), Estimated: true}
+	out.Partial = resp.PagesStopped != "" && resp.PagesStopped != "no_results"
+	// Positions count down the pages in order, so they do not depend on
+	// how Geonode numbers a page after the first.
+	for _, p := range resp.Pages {
+		for _, r := range p.Results {
+			d := c.ResultDomain(r.URL)
+			if d == "" {
+				continue
+			}
+			out.Items = append(out.Items, c.SERPItem{Position: len(out.Items) + 1, URL: r.URL, Domain: d, Title: strings.TrimSpace(r.Title)})
+		}
+	}
+	return out, nil
 }
 
 // geonodeKind sorts Geonode's error codes into ours.

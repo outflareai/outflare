@@ -2,6 +2,7 @@ package connectors
 
 import (
 	"context"
+	"net/url"
 	"strings"
 	"time"
 )
@@ -192,6 +193,9 @@ type SEOQuery struct {
 	// Traffic adds the linking pages' and domains' traffic and referring
 	// domains to the links report, which costs more on Ahrefs.
 	Traffic bool `json:"traffic,omitempty"`
+	// Page makes Target one page's URL in the links report: only the
+	// links to that exact page.
+	Page bool `json:"page,omitempty"`
 }
 
 // SEOReport is a provider's answer, in provider-neutral terms.
@@ -239,6 +243,12 @@ func CheckSEOQuery(q SEOQuery) (SEOQuery, error) {
 	}
 	if q.Target == "" {
 		return q, Errf(ErrInvalid, "name a domain, like example.com")
+	}
+	if q.Page {
+		u, err := url.Parse(q.Target)
+		if q.Report != SEOLinks || err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
+			return q, Errf(ErrInvalid, "a page's links are read with the links report and a page URL, like https://example.com/guide")
+		}
 	}
 	if q.Since != "" {
 		if _, err := time.Parse(time.DateOnly, q.Since); err != nil {

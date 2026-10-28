@@ -144,7 +144,7 @@ func TestBrandSetupChecklist(t *testing.T) {
 	if s := setupSteps(o)["verify_site"]; s["status"] != "waiting" || s["done"] != false {
 		t.Fatalf("waiting for DNS: %v", s)
 	}
-	e.dns.txt["northpeak.example"] = []string{rec2["content"].(string)}
+	e.dns.setTXT("northpeak.example", []string{rec2["content"].(string)})
 	if _, err := e.pool.Exec(context.Background(), `UPDATE seo_sites SET verify_checked_at = now() - interval '2 minutes'`); err != nil {
 		t.Fatal(err)
 	}
@@ -257,7 +257,7 @@ func TestBrandSetupOneClickInstalls(t *testing.T) {
 		t.Fatalf("watching for the record: %v", s)
 	}
 	// Cloudflare's record is what the background check then finds.
-	e.dns.txt["northpeak.example"] = []string{vin["record"].(map[string]any)["content"].(string)}
+	e.dns.setTXT("northpeak.example", []string{vin["record"].(map[string]any)["content"].(string)})
 	e.srv.CheckInstalls(ctx)
 	if s := setupSteps(owner.must(200, "GET", setup, nil))["verify_site"]; s["status"] != "done" {
 		t.Fatalf("verified: %v", s)

@@ -42,8 +42,8 @@ func TestEmailDomainDNS(t *testing.T) {
 	owner.must(201, "POST", base+"/integrations", map[string]any{"connector": "resend", "credentials": map[string]any{"api_key": "re_test_not_a_real_key"}})
 	// The domain already has a DMARC policy, and the domain typed twice
 	// in one record's name.
-	e.dns.txt["_dmarc.example.com"] = []string{"v=DMARC1; p=reject"}
-	e.dns.txt["resend._domainkey.example.com.example.com"] = []string{"p=KEY"}
+	e.dns.setTXT("_dmarc.example.com", []string{"v=DMARC1; p=reject"})
+	e.dns.setTXT("resend._domainkey.example.com.example.com", []string{"p=KEY"})
 	did := owner.must(201, "POST", base+"/email-provider-domains", map[string]any{"domain": "example.com"})["id"].(string)
 	d := waitFor(t, owner, base+"/email-provider-domains/"+did, func(d map[string]any) bool { return len(d["records"].([]any)) > 0 })
 	recs := map[string]map[string]any{}

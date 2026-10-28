@@ -161,11 +161,23 @@ keywords at a time, or every page's target keyword, for one country and
 device (desktop or mobile). Each is checked weekly, or daily if you choose.
 
 Checks read Google's top 100 organic results through the workspace's own
-DataForSEO connection (see [SEO tools](seo.md)), never an account of
-Outflare's. With no DataForSEO connection, rank tracking stays off and the
-Keywords page (Rankings) says to connect one. A check costs about $0.02. It
-counts towards the connection's monthly budget, stops when the budget is
-spent (the keyword's `last_error` says so) and is recorded on Outcomes.
+DataForSEO or Geonode connection (see [SEO tools](seo.md)), never an account
+of Outflare's. With neither connected, rank tracking stays off and the
+Keywords page (Rankings) says to connect one. A check costs about $0.02 with
+DataForSEO, or 10 Geonode credits (about $0.005) through Geonode's Google
+Search Light API, one credit per page of 10 results. It counts towards the
+connection's monthly budget, stops when the budget is spent (the keyword's
+`last_error` says so) and is recorded on Outcomes.
+
+With both connected, DataForSEO is the default and each keyword can name the
+connection that checks it (`integration_id` when tracking or with `PATCH`;
+`connections` in the list says which there are, and the Rankings tab has a
+picker). Geonode searches from the keyword's country with Google's own
+location setting and in that country's language, on desktop or an Android
+phone. When Geonode stops before the 10th page and the site was not in the
+pages that came back, the check counts as incomplete (its `last_error` says
+so) and runs again next time, rather than recording the site as outside the
+top 100. The pages that came back are still paid.
 
 Each tracked keyword shows the site's latest position (null when it is not in
 the top 100), the page that ranks, the position at the check before, the

@@ -333,6 +333,42 @@ class Operations(_Mixin):
             idempotency_key=idempotency_key,
         )
 
+    def add_link_prospects(
+        self,
+        *,
+        ws: str | None = None,
+        prospects: list[dict[str, Any]],
+        site_id: str,
+        source: str | None = None,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Add link prospects.
+
+        Scope: seo.manage. Adds up to 500 pages that could link to a site.
+        Each page's website becomes a company record (a prospect company
+        when the workspace has none). Numbers the caller leaves out come
+        from what is stored: the site's backlinks and the SEO connections'
+        snapshots. Each gets a `score` (half the site's strength, a quarter
+        its search traffic, a quarter the method, less for suspect spam).
+        A page is added as `excluded` when its website already links to
+        the site (except for `reclaim` and `unlinked_mention`), is a
+        tracked competitor, is on the suppression list, or has toxic
+        links. A page already on the list for the site is kept as it is
+        (`existing`). Records link_prospect.found for each page added.
+
+        Needs: the seo.manage scope.
+        POST /v1/workspaces/{ws}/link-prospects
+        """
+        return self._call(
+            "POST",
+            "/v1/workspaces/{ws}/link-prospects",
+            path={"ws": ws},
+            body={"prospects": prospects, "site_id": site_id, "source": source},
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
     def add_mailbox(
         self,
         *,
@@ -618,6 +654,37 @@ class Operations(_Mixin):
             "/v1/workspaces/{ws}/seo-sites/{site}/dns",
             path={"site": site, "ws": ws},
             body={"integration_id": integration_id},
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
+    def add_social_series_post(
+        self,
+        id: str,
+        *,
+        ws: str | None = None,
+        body: str,
+        link_url: str | None = None,
+        scheduled_for: str | None = None,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Hand in a post for an approved series.
+
+        Scope: social.manage, so an API token or agent can post on a
+        schedule (a daily changelog summary). The series must be approved
+        and not paused, and under its daily_limit for the last 24 hours
+        (409 otherwise). The post is queued as approved and goes out at
+        `scheduled_for` or now, like any other publication.
+
+        Needs: the social.manage scope.
+        POST /v1/workspaces/{ws}/social/series/{id}/posts
+        """
+        return self._call(
+            "POST",
+            "/v1/workspaces/{ws}/social/series/{id}/posts",
+            path={"id": id, "ws": ws},
+            body={"body": body, "link_url": link_url, "scheduled_for": scheduled_for},
             extra_body=extra_body,
             idempotency_key=idempotency_key,
         )
@@ -1029,6 +1096,56 @@ class Operations(_Mixin):
             idempotency_key=idempotency_key,
         )
 
+    def approve_social_publication(
+        self,
+        id: str,
+        *,
+        ws: str | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Approve a post so it goes out.
+
+        Scope: social.post, and only a signed-in person: API tokens and
+        agents get 403, so every post on a brand's account has a person's
+        approval. The account's connection must be connected. The post
+        then goes out once, at `scheduled_for` or now, in the background;
+        read it for its link. If the channel refuses it, or doesn't answer
+        so it may or may not be up, it is `failed` with the reason and
+        never sent again.
+
+        Needs: the social.post scope.
+        POST /v1/workspaces/{ws}/social/publications/{id}/approve
+        """
+        return self._call(
+            "POST",
+            "/v1/workspaces/{ws}/social/publications/{id}/approve",
+            path={"id": id, "ws": ws},
+            idempotency_key=idempotency_key,
+        )
+
+    def approve_social_series(
+        self,
+        id: str,
+        *,
+        ws: str | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Approve a post series.
+
+        Scope: social.post, and only a signed-in person: API tokens and
+        agents get 403. Approves every post later handed in for the
+        series, up to its daily_limit, on its account.
+
+        Needs: the social.post scope.
+        POST /v1/workspaces/{ws}/social/series/{id}/approve
+        """
+        return self._call(
+            "POST",
+            "/v1/workspaces/{ws}/social/series/{id}/approve",
+            path={"id": id, "ws": ws},
+            idempotency_key=idempotency_key,
+        )
+
     def archive_flag(
         self,
         flag: str,
@@ -1259,6 +1376,27 @@ class Operations(_Mixin):
             "POST",
             "/v1/workspaces/{ws}/list-runs/{run}/cancel",
             path={"run": run, "ws": ws},
+            idempotency_key=idempotency_key,
+        )
+
+    def cancel_social_publication(
+        self,
+        id: str,
+        *,
+        ws: str | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Cancel a post that has not gone out.
+
+        Scope: social.manage. A drafting, draft or approved post is cancelled and kept in the list as cancelled.
+
+        Needs: the social.manage scope.
+        DELETE /v1/workspaces/{ws}/social/publications/{id}
+        """
+        return self._call(
+            "DELETE",
+            "/v1/workspaces/{ws}/social/publications/{id}",
+            path={"id": id, "ws": ws},
             idempotency_key=idempotency_key,
         )
 
@@ -1715,6 +1853,46 @@ class Operations(_Mixin):
             "POST",
             "/v1/auth/password-reset/confirm",
             body={"password": password, "token": token},
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
+    def create_ab_test(
+        self,
+        *,
+        ws: str | None = None,
+        control: str | None = None,
+        flag: str | None = None,
+        goals: list[dict[str, Any]] | None = None,
+        hypothesis: str | None = None,
+        min_effect: float | None = None,
+        name: str | None = None,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Add an A/B test.
+
+        Scope: analytics.manage. A question asked of a feature flag: which of its versions does best at the goals.
+        The flag splits visitors; a visitor joins the test the first time a page shows them the flag's version (the
+        website script sends Experiment Viewed, stored as experiment_viewed with properties flag and variant; a
+        server sends the same through POST .../customer-events), and converts when a goal event follows. It starts
+        as a draft: start it to measure. At most 500 tests per workspace.
+
+        Needs: the analytics.manage scope.
+        POST /v1/workspaces/{ws}/ab-tests
+        """
+        return self._call(
+            "POST",
+            "/v1/workspaces/{ws}/ab-tests",
+            path={"ws": ws},
+            body={
+                "control": control,
+                "flag": flag,
+                "goals": goals,
+                "hypothesis": hypothesis,
+                "min_effect": min_effect,
+                "name": name,
+            },
             extra_body=extra_body,
             idempotency_key=idempotency_key,
         )
@@ -3432,6 +3610,82 @@ class Operations(_Mixin):
             idempotency_key=idempotency_key,
         )
 
+    def create_social_publication(
+        self,
+        *,
+        ws: str | None = None,
+        account_id: str,
+        body: str | None = None,
+        link_url: str | None = None,
+        prompt: str | None = None,
+        scheduled_for: str | None = None,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Write a post for the brand's own account.
+
+        Scope: social.manage. A draft of an original post on an X account
+        or LinkedIn page or profile from GET .../social/accounts, for a
+        person to approve. Write `body` yourself, or leave it out and give
+        `prompt`: the workspace's own AI model (the social_posts task)
+        drafts it in the background, on its own AI bill, and the post is
+        `drafting` until then. `link_url` is tagged with UTM (one campaign
+        per account, this post's own utm_content) and goes after the text
+        on its own line. The text and link must fit the channel: 280 on X,
+        where every link counts as 23, and 3000 on LinkedIn.
+        `scheduled_for` posts it at that time once approved; without it,
+        it posts as soon as it is approved.
+
+        Needs: the social.manage scope.
+        POST /v1/workspaces/{ws}/social/publications
+        """
+        return self._call(
+            "POST",
+            "/v1/workspaces/{ws}/social/publications",
+            path={"ws": ws},
+            body={
+                "account_id": account_id,
+                "body": body,
+                "link_url": link_url,
+                "prompt": prompt,
+                "scheduled_for": scheduled_for,
+            },
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
+    def create_social_series(
+        self,
+        *,
+        ws: str | None = None,
+        account_id: str,
+        daily_limit: int | None = None,
+        name: str,
+        template: str | None = None,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Add a recurring post series.
+
+        Scope: social.manage. A series such as a daily changelog summary on
+        the product's own account. It is unapproved until a person
+        approves it; then each post handed in for it (POST
+        .../series/{id}/posts) goes out with no other approval, up to
+        `daily_limit` in any 24 hours. `template` tells the approver what
+        it will post: a sample or a description.
+
+        Needs: the social.manage scope.
+        POST /v1/workspaces/{ws}/social/series
+        """
+        return self._call(
+            "POST",
+            "/v1/workspaces/{ws}/social/series",
+            path={"ws": ws},
+            body={"account_id": account_id, "daily_limit": daily_limit, "name": name, "template": template},
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
     def create_social_watch(
         self,
         *,
@@ -4007,6 +4261,27 @@ class Operations(_Mixin):
             "DELETE",
             "/v1/workspaces/{ws}/lead-lists/{id}",
             path={"id": id, "ws": ws},
+            idempotency_key=idempotency_key,
+        )
+
+    def delete_link_prospect(
+        self,
+        prospect: str,
+        *,
+        ws: str | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Delete a link prospect.
+
+        Scope: seo.manage. For one added by mistake. To keep a site out of outreach, exclude it instead, so it is not added again.
+
+        Needs: the seo.manage scope.
+        DELETE /v1/workspaces/{ws}/link-prospects/{prospect}
+        """
+        return self._call(
+            "DELETE",
+            "/v1/workspaces/{ws}/link-prospects/{prospect}",
+            path={"prospect": prospect, "ws": ws},
             idempotency_key=idempotency_key,
         )
 
@@ -4613,6 +4888,35 @@ class Operations(_Mixin):
             idempotency_key=idempotency_key,
         )
 
+    def draft_social_publication(
+        self,
+        id: str,
+        *,
+        ws: str | None = None,
+        prompt: str | None = None,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Have the AI (re)write a draft.
+
+        Scope: social.manage. The workspace's own AI model (the
+        social_posts task) writes the draft again in the background, from
+        `prompt` (or the one it was given before) and the current text, on
+        the workspace's own AI bill. It is `drafting` until then, and a
+        draft again after, with status_reason when the AI fell short.
+
+        Needs: the social.manage scope.
+        POST /v1/workspaces/{ws}/social/publications/{id}/draft
+        """
+        return self._call(
+            "POST",
+            "/v1/workspaces/{ws}/social/publications/{id}/draft",
+            path={"id": id, "ws": ws},
+            body={"prompt": prompt},
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
     def draft_social_reply(
         self,
         id: str,
@@ -4714,6 +5018,32 @@ class Operations(_Mixin):
             "/v1/workspaces/{ws}/email-finder/verify",
             path={"ws": ws},
             body={"force": force, "items": items},
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
+    def end_ab_test(
+        self,
+        test: str,
+        *,
+        ws: str | None = None,
+        decision: str,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """End an A/B test.
+
+        Scope: analytics.manage. Stops measuring and keeps the results as they stand, with the version you chose
+        (decision; "" for none). The flag is left as it is: ship the winner by changing the flag.
+
+        Needs: the analytics.manage scope.
+        POST /v1/workspaces/{ws}/ab-tests/{test}/end
+        """
+        return self._call(
+            "POST",
+            "/v1/workspaces/{ws}/ab-tests/{test}/end",
+            path={"test": test, "ws": ws},
+            body={"decision": decision},
             extra_body=extra_body,
             idempotency_key=idempotency_key,
         )
@@ -4926,6 +5256,46 @@ class Operations(_Mixin):
                 "brand": brand,
                 "currency": currency,
             },
+        )
+
+    def get_ab_test(
+        self,
+        test: str,
+        *,
+        ws: str | None = None,
+    ) -> Any:
+        """Get an A/B test.
+
+        Scope: analytics.read.
+
+        Needs: the analytics.read scope.
+        GET /v1/workspaces/{ws}/ab-tests/{test}
+        """
+        return self._call(
+            "GET",
+            "/v1/workspaces/{ws}/ab-tests/{test}",
+            path={"test": test, "ws": ws},
+        )
+
+    def get_ab_test_results(
+        self,
+        test: str,
+        *,
+        ws: str | None = None,
+    ) -> Any:
+        """Get an A/B test's results.
+
+        Scope: analytics.read. A running test's results now, counted from product events; a finished test's as they
+        stood when it ended. 409 for a draft. Safe to check every day: p_value is always valid, so looking often
+        doesn't make a false winner more likely.
+
+        Needs: the analytics.read scope.
+        GET /v1/workspaces/{ws}/ab-tests/{test}/results
+        """
+        return self._call(
+            "GET",
+            "/v1/workspaces/{ws}/ab-tests/{test}/results",
+            path={"test": test, "ws": ws},
         )
 
     def get_ad_settings(
@@ -6701,6 +7071,62 @@ class Operations(_Mixin):
             path={"id": id, "ws": ws},
         )
 
+    def get_link_building_settings(
+        self,
+        *,
+        ws: str | None = None,
+    ) -> Any:
+        """Get link building settings.
+
+        Scope: seo.read. The pitch cool-down and the weekly read of competitors' dead pages, with the defaults until someone changes them.
+
+        Needs: the seo.read scope.
+        GET /v1/workspaces/{ws}/link-building/settings
+        """
+        return self._call(
+            "GET",
+            "/v1/workspaces/{ws}/link-building/settings",
+            path={"ws": ws},
+        )
+
+    def get_link_prospect(
+        self,
+        prospect: str,
+        *,
+        ws: str | None = None,
+    ) -> Any:
+        """Get a link prospect.
+
+        Scope: seo.read.
+
+        Needs: the seo.read scope.
+        GET /v1/workspaces/{ws}/link-prospects/{prospect}
+        """
+        return self._call(
+            "GET",
+            "/v1/workspaces/{ws}/link-prospects/{prospect}",
+            path={"prospect": prospect, "ws": ws},
+        )
+
+    def get_link_read(
+        self,
+        read: str,
+        *,
+        ws: str | None = None,
+    ) -> Any:
+        """Get a link read with its links.
+
+        Scope: seo.read. The links a read found, strongest first. Free.
+
+        Needs: the seo.read scope.
+        GET /v1/workspaces/{ws}/link-reads/{read}
+        """
+        return self._call(
+            "GET",
+            "/v1/workspaces/{ws}/link-reads/{read}",
+            path={"read": read, "ws": ws},
+        )
+
     def get_list_run(
         self,
         run: str,
@@ -7998,6 +8424,44 @@ class Operations(_Mixin):
             query={"brand": brand},
         )
 
+    def get_social_publication(
+        self,
+        id: str,
+        *,
+        ws: str | None = None,
+    ) -> Any:
+        """Get a post.
+
+        Scope: social.read. Once published, post_id is its row in GET .../social/posts, with its numbers.
+
+        Needs: the social.read scope.
+        GET /v1/workspaces/{ws}/social/publications/{id}
+        """
+        return self._call(
+            "GET",
+            "/v1/workspaces/{ws}/social/publications/{id}",
+            path={"id": id, "ws": ws},
+        )
+
+    def get_social_series(
+        self,
+        id: str,
+        *,
+        ws: str | None = None,
+    ) -> Any:
+        """Get a post series.
+
+        Scope: social.read.
+
+        Needs: the social.read scope.
+        GET /v1/workspaces/{ws}/social/series/{id}
+        """
+        return self._call(
+            "GET",
+            "/v1/workspaces/{ws}/social/series/{id}",
+            path={"id": id, "ws": ws},
+        )
+
     def get_social_watch(
         self,
         id: str,
@@ -8517,6 +8981,28 @@ class Operations(_Mixin):
             "/v1/workspaces/{ws}/records/duplicates/{candidate}/link",
             path={"candidate": candidate, "ws": ws},
             idempotency_key=idempotency_key,
+        )
+
+    def list_ab_tests(
+        self,
+        *,
+        ws: str | None = None,
+        brand: str | None = None,
+        status: Literal["draft", "running", "done"] | None = None,
+        flag: str | None = None,
+    ) -> Any:
+        """List A/B tests.
+
+        Scope: analytics.read. The workspace's A/B tests, newest first. A brand's tests include those of shared flags, which reach its site too.
+
+        Needs: the analytics.read scope.
+        GET /v1/workspaces/{ws}/ab-tests
+        """
+        return self._call(
+            "GET",
+            "/v1/workspaces/{ws}/ab-tests",
+            path={"ws": ws},
+            query={"brand": brand, "status": status, "flag": flag},
         )
 
     def list_ad_accounts(
@@ -9668,6 +10154,45 @@ class Operations(_Mixin):
             path={"ws": ws},
         )
 
+    def list_dead_pages(
+        self,
+        *,
+        ws: str | None = None,
+        brand: str | None = None,
+        site_id: str | None = None,
+        days: int | None = None,
+        limit: int | None = None,
+        offset: int | None = None,
+        fields: list[str] | None = None,
+        cursor: str | None = None,
+    ) -> Any:
+        """List competitors' dead pages and who links to them.
+
+        Scope: seo.read. Pages gone from tracked competitors' sitemaps in the
+        last `days`, with who links to them from the latest read of each
+        page: the most linking domains first, then the pages not read yet
+        (`read_id` null; read one with POST .../link-reads, or let the weekly
+        read do it). Sites linking to a dead page may link to yours instead.
+        Free.
+
+        Needs: the seo.read scope.
+        GET /v1/workspaces/{ws}/link-reads/dead-pages
+        """
+        return self._call(
+            "GET",
+            "/v1/workspaces/{ws}/link-reads/dead-pages",
+            path={"ws": ws},
+            query={
+                "brand": brand,
+                "site_id": site_id,
+                "days": days,
+                "limit": limit,
+                "offset": offset,
+                "fields": fields,
+                "cursor": cursor,
+            },
+        )
+
     def list_deals(
         self,
         *,
@@ -10793,6 +11318,88 @@ class Operations(_Mixin):
             },
         )
 
+    def list_link_prospects(
+        self,
+        *,
+        ws: str | None = None,
+        brand: str | None = None,
+        site_id: str | None = None,
+        stage: str | None = None,
+        method: str | None = None,
+        record_id: str | None = None,
+        min_score: int | None = None,
+        order: Literal["score", "newest", "changed"] | None = None,
+        limit: int | None = None,
+        offset: int | None = None,
+        fields: list[str] | None = None,
+        cursor: str | None = None,
+    ) -> Any:
+        """List link prospects.
+
+        Scope: seo.read. Pages that could link to the workspace's SEO
+        sites, from every way of earning links (`method`), best first.
+        Each page's website is a company record (`record_id`). Leaves out
+        `excluded` prospects unless `stage` asks for them. Reads only what
+        is stored, so it costs nothing.
+
+        Needs: the seo.read scope.
+        GET /v1/workspaces/{ws}/link-prospects
+        """
+        return self._call(
+            "GET",
+            "/v1/workspaces/{ws}/link-prospects",
+            path={"ws": ws},
+            query={
+                "brand": brand,
+                "site_id": site_id,
+                "stage": stage,
+                "method": method,
+                "record_id": record_id,
+                "min_score": min_score,
+                "order": order,
+                "limit": limit,
+                "offset": offset,
+                "fields": fields,
+                "cursor": cursor,
+            },
+        )
+
+    def list_link_reads(
+        self,
+        *,
+        ws: str | None = None,
+        brand: str | None = None,
+        site_id: str | None = None,
+        target: str | None = None,
+        reason: Literal["requested", "dead_page"] | None = None,
+        limit: int | None = None,
+        offset: int | None = None,
+        fields: list[str] | None = None,
+        cursor: str | None = None,
+    ) -> Any:
+        """List link reads.
+
+        Scope: seo.read. Reads of who links to a page or domain, newest first, without their rows (GET .../link-reads/{id} has them). Free.
+
+        Needs: the seo.read scope.
+        GET /v1/workspaces/{ws}/link-reads
+        """
+        return self._call(
+            "GET",
+            "/v1/workspaces/{ws}/link-reads",
+            path={"ws": ws},
+            query={
+                "brand": brand,
+                "site_id": site_id,
+                "target": target,
+                "reason": reason,
+                "limit": limit,
+                "offset": offset,
+                "fields": fields,
+                "cursor": cursor,
+            },
+        )
+
     def list_list_runs(
         self,
         id: str,
@@ -11379,7 +11986,7 @@ class Operations(_Mixin):
     ) -> Any:
         """List the keywords a site tracks and where it ranks.
 
-        Scope: seo.read. Each tracked keyword with the site's latest position in the top 100 (null when it is not there), the page that ranks, the position the check before and the best so far, and the page that targets the keyword. `connection` is the SERP connection checks use by default (DataForSEO for Google), or null when none is connected.
+        Scope: seo.read. Each tracked keyword with the site's latest position in the top 100 (null when it is not there), the page that ranks, the position the check before and the best so far, and the page that targets the keyword. `connection` is the SERP connection checks use by default (DataForSEO before Geonode, both for Google), or null when none is connected; `connections` lists every connected one, the default first, for choosing one per keyword with `integration_id`.
 
         Needs: the seo.read scope.
         GET /v1/workspaces/{ws}/seo-sites/{site}/rankings
@@ -12160,6 +12767,66 @@ class Operations(_Mixin):
             },
         )
 
+    def list_social_publications(
+        self,
+        *,
+        ws: str | None = None,
+        status: Literal["drafting", "draft", "approved", "publishing", "published", "failed", "cancelled"]
+        | None = None,
+        channel: str | None = None,
+        account_id: str | None = None,
+        series_id: str | None = None,
+        before: str | None = None,
+        limit: int | None = None,
+        cursor: str | None = None,
+        fields: list[str] | None = None,
+        brand: str | None = None,
+    ) -> Any:
+        """List the brand's own posts, scheduled and published.
+
+        Scope: social.read. Newest first. next_before pages back.
+
+        Needs: the social.read scope.
+        GET /v1/workspaces/{ws}/social/publications
+        """
+        return self._call(
+            "GET",
+            "/v1/workspaces/{ws}/social/publications",
+            path={"ws": ws},
+            query={
+                "status": status,
+                "channel": channel,
+                "account_id": account_id,
+                "series_id": series_id,
+                "before": before,
+                "limit": limit,
+                "cursor": cursor,
+                "fields": fields,
+                "brand": brand,
+            },
+        )
+
+    def list_social_series(
+        self,
+        *,
+        ws: str | None = None,
+        account_id: str | None = None,
+        brand: str | None = None,
+    ) -> Any:
+        """List recurring post series.
+
+        Scope: social.read.
+
+        Needs: the social.read scope.
+        GET /v1/workspaces/{ws}/social/series
+        """
+        return self._call(
+            "GET",
+            "/v1/workspaces/{ws}/social/series",
+            path={"ws": ws},
+            query={"account_id": account_id, "brand": brand},
+        )
+
     def list_social_watches(
         self,
         *,
@@ -12386,6 +13053,30 @@ class Operations(_Mixin):
             "GET",
             "/v1/workspaces/{ws}/teams",
             path={"ws": ws},
+        )
+
+    def list_top_linked_pages(
+        self,
+        *,
+        ws: str | None = None,
+        target: str,
+        limit: int | None = None,
+        offset: int | None = None,
+        fields: list[str] | None = None,
+        cursor: str | None = None,
+    ) -> Any:
+        """List a domain's most linked pages.
+
+        Scope: seo.read. A domain's pages ranked by the domains linking to them, from its latest stored read (POST .../link-reads with the domain; `read_id` null until then): the pages worth making a better version of. Counts cover the links that read kept (its `limit`, strongest first), not every link the provider knows. Free.
+
+        Needs: the seo.read scope.
+        GET /v1/workspaces/{ws}/link-reads/top-pages
+        """
+        return self._call(
+            "GET",
+            "/v1/workspaces/{ws}/link-reads/top-pages",
+            path={"ws": ws},
+            query={"target": target, "limit": limit, "offset": offset, "fields": fields, "cursor": cursor},
         )
 
     def list_tracking_campaigns(
@@ -13405,6 +14096,52 @@ class Operations(_Mixin):
                 "signed_by": signed_by,
                 "support_contact": support_contact,
                 "tone": tone,
+            },
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
+    def read_links(
+        self,
+        *,
+        ws: str | None = None,
+        estimate_only: bool | None = None,
+        fresh: bool | None = None,
+        integration_id: str | None = None,
+        limit: int | None = None,
+        site_id: str | None = None,
+        target: str,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Read who links to a page or domain.
+
+        Scope: seo.manage. Reads who links to `target` from the workspace's
+        own Ahrefs or DataForSEO connection (`integration_id`, or the first
+        connected one, Ahrefs first): one page when `target` is a URL with
+        a path, else the whole domain. It costs money within the
+        connection's budget (about $0.02 plus $0.00003 a link on DataForSEO;
+        about one API unit a link on Ahrefs, 50 at least), so send
+        `estimate_only` first to see the cost and the budget. A copy under a
+        day old answers for free unless `fresh`. The read is kept for
+        GET .../link-reads/dead-pages and .../top-pages. 409
+        `connector_needed` when the workspace has no such connection, 402
+        `budget_reached` past the budget.
+
+        Needs: the seo.manage scope.
+        POST /v1/workspaces/{ws}/link-reads
+        """
+        return self._call(
+            "POST",
+            "/v1/workspaces/{ws}/link-reads",
+            path={"ws": ws},
+            body={
+                "estimate_only": estimate_only,
+                "fresh": fresh,
+                "integration_id": integration_id,
+                "limit": limit,
+                "site_id": site_id,
+                "target": target,
             },
             extra_body=extra_body,
             idempotency_key=idempotency_key,
@@ -15418,6 +16155,28 @@ class Operations(_Mixin):
             idempotency_key=idempotency_key,
         )
 
+    def start_ab_test(
+        self,
+        test: str,
+        *,
+        ws: str | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Start an A/B test.
+
+        Scope: analytics.manage. Starts measuring from now. The flag must be live with at least two variants, the
+        control among them, and no other running test; a flag that is off is turned on. 409 otherwise.
+
+        Needs: the analytics.manage scope.
+        POST /v1/workspaces/{ws}/ab-tests/{test}/start
+        """
+        return self._call(
+            "POST",
+            "/v1/workspaces/{ws}/ab-tests/{test}/start",
+            path={"test": test, "ws": ws},
+            idempotency_key=idempotency_key,
+        )
+
     def start_ai_run(
         self,
         cohort: str,
@@ -16222,7 +16981,7 @@ class Operations(_Mixin):
     ) -> Any:
         """Track keywords for a site.
 
-        Scope: seo.manage. Adds up to 100 keywords (and, with `from_targets`, every page's target keyword) for one country and device; keywords already tracked there are skipped. Each is checked weekly by default, or daily, through the workspace's own SERP connection within its monthly budget (about $0.02 a check with DataForSEO), and the first check starts now.
+        Scope: seo.manage. Adds up to 100 keywords (and, with `from_targets`, every page's target keyword) for one country and device; keywords already tracked there are skipped. Each is checked weekly by default, or daily, through the workspace's own SERP connection within its monthly budget (about $0.02 a check with DataForSEO, $0.005 with Geonode), and the first check starts now.
 
         Needs: the seo.manage scope.
         POST /v1/workspaces/{ws}/seo-sites/{site}/rankings
@@ -16301,6 +17060,44 @@ class Operations(_Mixin):
             "GET",
             "/u/{token}",
             path={"token": token},
+        )
+
+    def update_ab_test(
+        self,
+        test: str,
+        *,
+        ws: str | None = None,
+        control: str | None = None,
+        flag: str | None = None,
+        goals: list[dict[str, Any]] | None = None,
+        hypothesis: str | None = None,
+        min_effect: float | None = None,
+        name: str | None = None,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Change an A/B test.
+
+        Scope: analytics.manage. Its name and hypothesis at any time; its control, goals and min_effect only while it is a draft,
+        so results can't be reshaped after the fact. The flag can't change.
+
+        Needs: the analytics.manage scope.
+        PATCH /v1/workspaces/{ws}/ab-tests/{test}
+        """
+        return self._call(
+            "PATCH",
+            "/v1/workspaces/{ws}/ab-tests/{test}",
+            path={"test": test, "ws": ws},
+            body={
+                "control": control,
+                "flag": flag,
+                "goals": goals,
+                "hypothesis": hypothesis,
+                "min_effect": min_effect,
+                "name": name,
+            },
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
         )
 
     def update_ad_account(
@@ -16580,10 +17377,11 @@ class Operations(_Mixin):
         outreach), `classify_domain` (domain research, below) and
         `ai_visibility` (reading AI answers about your brands; the sampling
         itself asks the models chosen under AI visibility), `social_replies`
-        (drafting replies to posts social watches found), `review_replies`
+        (drafting replies to posts social watches found), `social_posts`
+        (drafting the brand's own posts on X and LinkedIn), `review_replies`
         (drafting answers to reviews) and `email_verification` (checking addresses the free checks could not
         settle). A task left out uses the main model, except that
-        `check_in`, `ai_visibility`, `social_replies` and `review_replies` use the provider's
+        `check_in`, `ai_visibility`, `social_replies`, `social_posts` and `review_replies` use the provider's
         lighter model (Claude Sonnet 5.5) and `reply_labelling`,
         `classify_domain` and `email_verification` its cheapest (Claude
         Haiku 5.5), when they cost less than the main model. Each tool's
@@ -17900,6 +18698,77 @@ class Operations(_Mixin):
             idempotency_key=idempotency_key,
         )
 
+    def update_link_building_settings(
+        self,
+        *,
+        ws: str | None = None,
+        pitch_cooldown_days: int | None = None,
+        weekly_budget_percent: int | None = None,
+        weekly_reads: bool | None = None,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Change link building settings.
+
+        Scope: seo.manage. `pitch_cooldown_days` is how long after a declined
+        pitch its website may be pitched again (0 to 365, default 60).
+        `weekly_reads` has the weekly SEO snapshot read who links to pages
+        that just went from tracked competitors' sitemaps (default on),
+        spending at most `weekly_budget_percent` of the connection's monthly
+        budget a month on it (1 to 100, default 10). Send only what changes.
+
+        Needs: the seo.manage scope.
+        PATCH /v1/workspaces/{ws}/link-building/settings
+        """
+        return self._call(
+            "PATCH",
+            "/v1/workspaces/{ws}/link-building/settings",
+            path={"ws": ws},
+            body={
+                "pitch_cooldown_days": pitch_cooldown_days,
+                "weekly_budget_percent": weekly_budget_percent,
+                "weekly_reads": weekly_reads,
+            },
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
+    def update_link_prospect(
+        self,
+        prospect: str,
+        *,
+        ws: str | None = None,
+        excluded_reason: Literal["links_to_us", "competitor", "customer", "partner", "opted_out", "spam"] | None = None,
+        note: str | None = None,
+        stage: str | None = None,
+        target_url: str | None = None,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Move a link prospect along, or change its page to offer.
+
+        Scope: seo.manage. `stage` moves it: `pitched`, `replied`, `agreed`,
+        `live`, `declined`, `removed` (a live link went away), `excluded`
+        (with `excluded_reason`), or back to `prospect`. Moving into
+        outreach (`pitched`, `replied` or `agreed`) answers 409
+        `site_in_outreach` while another prospect on the same website is
+        in outreach or was declined in the last 60 days, and 409 `conflict`
+        when its domain is on the suppression list or the prospect is
+        excluded (move it back to `prospect` first). Each move records
+        link_prospect.<stage> (reopened for `prospect`).
+
+        Needs: the seo.manage scope.
+        PATCH /v1/workspaces/{ws}/link-prospects/{prospect}
+        """
+        return self._call(
+            "PATCH",
+            "/v1/workspaces/{ws}/link-prospects/{prospect}",
+            path={"prospect": prospect, "ws": ws},
+            body={"excluded_reason": excluded_reason, "note": note, "stage": stage, "target_url": target_url},
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
     def update_mailbox(
         self,
         id: str,
@@ -18894,6 +19763,73 @@ class Operations(_Mixin):
             "/v1/workspaces/{ws}/social/items/{id}",
             path={"id": id, "ws": ws},
             body={"status": status},
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
+    def update_social_publication(
+        self,
+        id: str,
+        *,
+        ws: str | None = None,
+        body: str | None = None,
+        link_url: str | None = None,
+        scheduled_for: str | None = None,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Edit a post that has not gone out.
+
+        Scope: social.manage. A draft, or an approved post that has not
+        gone out yet; an approved one goes back to a draft and needs
+        approving again. `link_url` and `scheduled_for` null clear them.
+
+        Needs: the social.manage scope.
+        PATCH /v1/workspaces/{ws}/social/publications/{id}
+        """
+        return self._call(
+            "PATCH",
+            "/v1/workspaces/{ws}/social/publications/{id}",
+            path={"id": id, "ws": ws},
+            body={"body": body, "link_url": link_url, "scheduled_for": scheduled_for},
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
+    def update_social_series(
+        self,
+        id: str,
+        *,
+        ws: str | None = None,
+        account_id: str | None = None,
+        daily_limit: int | None = None,
+        name: str | None = None,
+        paused: bool | None = None,
+        template: str | None = None,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Change, pause or resume a post series.
+
+        Scope: social.manage. A new account, a new template or a higher
+        daily_limit takes the series' approval away until a person
+        approves it again; a new name, a lower limit, pausing and resuming
+        don't.
+
+        Needs: the social.manage scope.
+        PATCH /v1/workspaces/{ws}/social/series/{id}
+        """
+        return self._call(
+            "PATCH",
+            "/v1/workspaces/{ws}/social/series/{id}",
+            path={"id": id, "ws": ws},
+            body={
+                "account_id": account_id,
+                "daily_limit": daily_limit,
+                "name": name,
+                "paused": paused,
+                "template": template,
+            },
             extra_body=extra_body,
             idempotency_key=idempotency_key,
         )

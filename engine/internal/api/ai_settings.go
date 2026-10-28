@@ -53,6 +53,8 @@ const (
 	taskAIVisibility = aivis.Task
 	// Drafting a reply to a post a social watch found.
 	taskSocialReplies = socialReplyTask
+	// Drafting the brand's own posts on X and LinkedIn.
+	taskSocialPosts = socialPostTask
 	// Drafting a public answer to a review on the brand's review pages.
 	taskReviewReplies = reviewReplyTask
 	// Checking an email address the free checks could not settle.
@@ -75,6 +77,7 @@ var aiTasks = []aiTask{
 	{taskDomainResearch, "Domain research", "Reading an unknown email domain's homepage to tell what kind of company it is."},
 	{taskAIVisibility, "AI visibility", "Reading what AI models answer about your brands, such as checking the answers against your brand's facts."},
 	{taskSocialReplies, "Social replies", "Drafting replies to posts your social watches found, such as Reddit threads, for a person to approve."},
+	{taskSocialPosts, "Social posts", "Drafting the brand's own posts on X and LinkedIn, for a person to approve."},
 	{taskReviewReplies, "Review answers", "Drafting public answers to reviews of your brands, for a person to edit and post."},
 	{taskEmailVerification, "Email verification", "Checking email addresses the free checks could not settle."},
 	{taskFixTickets, "Fix tickets", "Writing fix tickets from site audits and other findings, for your team or your coding agent to act on."},
@@ -83,7 +86,7 @@ var aiTasks = []aiTask{
 // taskTier says which of the provider's cheaper models a task defaults to.
 func taskTier(task string, p llm.Provider) string {
 	switch task {
-	case taskCheckIn, taskAIVisibility, taskSocialReplies, taskReviewReplies, taskFixTickets:
+	case taskCheckIn, taskAIVisibility, taskSocialReplies, taskSocialPosts, taskReviewReplies, taskFixTickets:
 		return p.LightModel
 	case taskReplyLabelling, taskDomainResearch, taskEmailVerification:
 		if p.CheapModel != "" {

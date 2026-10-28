@@ -19,15 +19,15 @@ func issueCodes(d map[string]any) string {
 func TestDomainsAddCheckAndSettings(t *testing.T) {
 	e := freshEnv(t)
 	// good.test is set up properly; bare.test has nothing; listed.test is on the DBL.
-	e.dns.mx["good.test"] = []*net.MX{{Host: "alt1.aspmx.l.google.com.", Pref: 5}, {Host: "aspmx.l.google.com.", Pref: 1}}
-	e.dns.txt["good.test"] = []string{"v=spf1 include:_spf.google.com ~all"}
-	e.dns.txt["google._domainkey.good.test"] = []string{"v=DKIM1; k=rsa; p=MIIBIjAN"}
-	e.dns.txt["_dmarc.good.test"] = []string{"v=DMARC1; p=quarantine; rua=mailto:d@good.test"}
-	e.dns.mx["listed.test"] = e.dns.mx["good.test"]
-	e.dns.txt["listed.test"] = []string{"v=spf1 include:spf.example.net ~all"}
-	e.dns.txt["_dmarc.listed.test"] = []string{"v=DMARC1; p=none"}
-	e.dns.host["listed.test.dbl.spamhaus.org"] = []string{"127.0.1.2"}
-	e.dns.host["listed.test.multi.surbl.org"] = []string{"127.0.0.1"} // refused
+	e.dns.setMX("good.test", []*net.MX{{Host: "alt1.aspmx.l.google.com.", Pref: 5}, {Host: "aspmx.l.google.com.", Pref: 1}})
+	e.dns.setTXT("good.test", []string{"v=spf1 include:_spf.google.com ~all"})
+	e.dns.setTXT("google._domainkey.good.test", []string{"v=DKIM1; k=rsa; p=MIIBIjAN"})
+	e.dns.setTXT("_dmarc.good.test", []string{"v=DMARC1; p=quarantine; rua=mailto:d@good.test"})
+	e.dns.setMX("listed.test", []*net.MX{{Host: "alt1.aspmx.l.google.com.", Pref: 5}, {Host: "aspmx.l.google.com.", Pref: 1}})
+	e.dns.setTXT("listed.test", []string{"v=spf1 include:spf.example.net ~all"})
+	e.dns.setTXT("_dmarc.listed.test", []string{"v=DMARC1; p=none"})
+	e.dns.setHost("listed.test.dbl.spamhaus.org", []string{"127.0.1.2"})
+	e.dns.setHost("listed.test.multi.surbl.org", []string{"127.0.0.1"}) // refused
 	e.runJobs(t)
 	owner, ws := setupOwner(t, e.h)
 	base := "/v1/workspaces/" + ws

@@ -237,6 +237,9 @@ func (a Ahrefs) SEOReport(ctx context.Context, cl *c.Client, creds c.Creds, q c.
 		}
 		v := url.Values{"target": {q.Target}, "mode": {"subdomains"}, "output": {"json"}, "aggregation": {"similar_links"},
 			"select": {fields}, "order_by": {"domain_rating_source:desc"}, "limit": {itoa(q.Limit)}, "history": {"live"}}
+		if q.Page {
+			v.Set("mode", "exact")
+		}
 		if q.Since != "" {
 			v.Set("history", "since:"+q.Since)
 		}

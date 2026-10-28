@@ -10,7 +10,7 @@ func TestClassify(t *testing.T) {
 	e := freshEnv(t)
 	owner, ws := setupOwner(t, e.h)
 	base := "/v1/workspaces/" + ws
-	e.dns.mx["acme-widgets.test"] = []*net.MX{{Host: "acme-widgets-test.mail.protection.outlook.com.", Pref: 0}}
+	e.dns.setMX("acme-widgets.test", []*net.MX{{Host: "acme-widgets-test.mail.protection.outlook.com.", Pref: 0}})
 
 	global := func(body map[string]any) map[string]any { return body["global"].(map[string]any) }
 	effective := func(body map[string]any) map[string]any { return body["effective"].(map[string]any) }
@@ -42,7 +42,7 @@ func TestClassify(t *testing.T) {
 	}
 
 	// A domain that takes no mail.
-	e.dns.mx["parked.test"] = []*net.MX{{Host: ".", Pref: 0}}
+	e.dns.setMX("parked.test", []*net.MX{{Host: ".", Pref: 0}})
 	body = owner.must(200, "POST", base+"/classifications", map[string]any{"domain": "parked.test"})
 	if effective(body)["matched_policy_id"] != "default_no_mail" {
 		t.Fatalf("parked: %v", body)

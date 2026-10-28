@@ -13,6 +13,7 @@ import { registerQueryTools } from "./query.js";
 import { registerRecordTools } from "./records.js";
 import { registerContextTools } from "./context.js";
 import { registerFlagTools } from "./flags.js";
+import { registerABTestTools } from "./abtests.js";
 import { registerSupplierTools } from "./suppliers.js";
 
 const inboxCategories = [
@@ -348,6 +349,7 @@ export function createServer({ client: gtm, workspace, agency, readOnly = false,
   // What Outflare knows and what is blocked: the first call of a conversation.
   registerContextTools(server, gtm, () => ws, readOnly, call, withBrand);
   registerFlagTools(server, gtm, () => ws, readOnly, call, withBrand);
+  registerABTestTools(server, gtm, () => ws, readOnly, call, withBrand);
   registerBrandTools(server, gtm, () => ws, readOnly, call);
   registerSetupTools(server, gtm, () => ws, readOnly, call);
   registerRecordTools(server, gtm, () => ws, readOnly, call);
@@ -3427,6 +3429,141 @@ export function createServer({ client: gtm, workspace, agency, readOnly = false,
       call(() => gtm.GET("/v1/workspaces/{ws}/social/accounts/{id}/days", { params: { path: { ws, id: account_id }, query: { days } } })),
   );
 
+  const publicationStatus = z.enum(["drafting", "draft", "approved", "publishing", "published", "failed", "cancelled"]);
+  const scheduledFor = z.string().datetime({ offset: true }).nullable().optional().describe("When to post it (ISO 8601); omit or null to post as soon as a person approves it.");
+
+  server.registerTool(
+    "list_social_publications",
+    {
+      title: "List the brand's own posts",
+      description:
+        "Original posts on the brand's X accounts and LinkedIn pages and profiles, newest first: drafts, approved and scheduled ones, published ones with their link and " +
+        "post_id (its numbers are in list_own_social_posts), and failed ones with the reason. Pass next_before as before for older ones.",
+      inputSchema: {
+        status: publicationStatus.optional(),
+        channel: z.enum(["x", "linkedin"]).optional(),
+        account_id: id.optional(),
+        series_id: id.optional(),
+        before: z.string().optional(),
+        limit: limit(200),
+        brand: socialBrand,
+      },
+      annotations: read,
+    },
+    (query) => call(() => gtm.GET("/v1/workspaces/{ws}/social/publications", { params: { path: { ws }, query } })),
+  );
+
+  server.registerTool(
+    "create_social_publication",
+    {
+      title: "Write a post for the brand's own account",
+      description:
+        "A draft of an original post on an X account or LinkedIn page or profile (account_id from list_social_accounts). Write body yourself, or give prompt and leave body " +
+        "out for the workspace's own AI to draft it (status drafting, then draft). link_url is tagged with UTM and goes after the text. X takes 280 characters and counts " +
+        "every link as 23; LinkedIn 3,000. A person approves it in Outflare before it posts (there is no approve tool); scheduled_for posts it at that time once approved.",
+      inputSchema: {
+        account_id: id,
+        body: z.string().max(3000).optional(),
+        prompt: z.string().max(4000).optional().describe("What the AI should write about, when body is left out."),
+        link_url: z.string().url().optional(),
+        scheduled_for: scheduledFor,
+      },
+      annotations: write,
+    },
+    (body) => call(() => gtm.POST("/v1/workspaces/{ws}/social/publications", { params: { path: { ws } }, body })),
+  );
+
+  server.registerTool(
+    "update_social_publication",
+    {
+      title: "Edit a post that has not gone out",
+      description: "Change the text, link or time of a draft, or of an approved post that has not gone out yet (it then needs a person's approval again). null clears link_url or scheduled_for.",
+      inputSchema: { publication_id: id, body: z.string().max(3000).optional(), link_url: z.string().url().nullable().optional(), scheduled_for: scheduledFor },
+      annotations: write,
+    },
+    ({ publication_id, ...body }) =>
+      call(() => gtm.PATCH("/v1/workspaces/{ws}/social/publications/{id}", { params: { path: { ws, id: publication_id } }, body })),
+  );
+
+  server.registerTool(
+    "draft_social_publication",
+    {
+      title: "Have the AI rewrite a post",
+      description: "The workspace's own AI model writes the draft again from prompt (or the one it had) and the current text, in the background, on the workspace's own AI bill. Read it again with list_social_publications.",
+      inputSchema: { publication_id: id, prompt: z.string().max(4000).optional() },
+      annotations: write,
+    },
+    ({ publication_id, prompt }) =>
+      call(() => gtm.POST("/v1/workspaces/{ws}/social/publications/{id}/draft", { params: { path: { ws, id: publication_id } }, body: { prompt } })),
+  );
+
+  server.registerTool(
+    "cancel_social_publication",
+    {
+      title: "Cancel a post that has not gone out",
+      description: "A drafting, draft or approved post is cancelled and never posts. A published post stays up: delete it on the channel itself.",
+      inputSchema: { publication_id: id },
+      annotations: { ...write, destructiveHint: true, idempotentHint: true },
+    },
+    ({ publication_id }) => call(() => gtm.DELETE("/v1/workspaces/{ws}/social/publications/{id}", { params: { path: { ws, id: publication_id } } })),
+  );
+
+  server.registerTool(
+    "list_social_series",
+    {
+      title: "List recurring post series",
+      description: "Series such as a daily changelog summary: the account, daily_limit, whether a person approved it (approved_by), paused, and posts handed in over the last 24 hours.",
+      inputSchema: { account_id: id.optional(), brand: socialBrand },
+      annotations: read,
+    },
+    (query) => call(() => gtm.GET("/v1/workspaces/{ws}/social/series", { params: { path: { ws }, query } })),
+  );
+
+  server.registerTool(
+    "create_social_series",
+    {
+      title: "Add a recurring post series",
+      description:
+        "A series of posts on one account, such as a daily changelog summary. A person approves it once in Outflare; then add_series_post queues each post with no other " +
+        "approval, up to daily_limit (1 to 24, default 1) in any 24 hours. template tells the approver what it will post. Changing the account or template, or raising " +
+        "daily_limit with update_social_series, needs approving again; pausing doesn't.",
+      inputSchema: { account_id: id, name: z.string().min(1).max(200), template: z.string().max(4000).optional(), daily_limit: z.number().int().min(1).max(24).optional() },
+      annotations: write,
+    },
+    (body) => call(() => gtm.POST("/v1/workspaces/{ws}/social/series", { params: { path: { ws } }, body })),
+  );
+
+  server.registerTool(
+    "update_social_series",
+    {
+      title: "Change, pause or resume a post series",
+      description: "A new account, a new template or a higher daily_limit takes the series' approval away until a person approves it again; a new name, a lower limit and pausing don't.",
+      inputSchema: {
+        series_id: id,
+        account_id: id.optional(),
+        name: z.string().min(1).max(200).optional(),
+        template: z.string().max(4000).optional(),
+        daily_limit: z.number().int().min(1).max(24).optional(),
+        paused: z.boolean().optional(),
+      },
+      annotations: write,
+    },
+    ({ series_id, ...body }) => call(() => gtm.PATCH("/v1/workspaces/{ws}/social/series/{id}", { params: { path: { ws, id: series_id } }, body })),
+  );
+
+  server.registerTool(
+    "add_series_post",
+    {
+      title: "Post in an approved series",
+      description:
+        "Hand in the text of the series' next post (at most 280 characters on X, links counting 23). The series must be approved by a person and not paused, and under " +
+        "its daily_limit; the post then goes out on the brand's account at scheduled_for or now, with no other approval. Check it with list_social_publications.",
+      inputSchema: { series_id: id, body: z.string().min(1).max(3000), link_url: z.string().url().optional(), scheduled_for: scheduledFor },
+      annotations: sends,
+    },
+    ({ series_id, ...body }) => call(() => gtm.POST("/v1/workspaces/{ws}/social/series/{id}/posts", { params: { path: { ws, id: series_id } }, body })),
+  );
+
   const reviewPlatform = z.enum(["trustpilot", "g2", "capterra", "google_reviews"]).describe("A review site: trustpilot, g2, capterra or google_reviews (a Google Maps place)");
 
   server.registerTool(
@@ -3988,6 +4125,207 @@ export function createServer({ client: gtm, workspace, agency, readOnly = false,
     (query) => call(() => gtm.GET("/v1/workspaces/{ws}/seo-competitors/gaps", { params: { path: { ws }, query } })),
   );
 
+  const prospectMethod = z.enum(["competitor_gap", "broken_link", "reclaim", "competitor_dead_page", "resource_page", "asset", "unlinked_mention", "partner", "manual"]);
+
+  server.registerTool(
+    "list_link_prospects",
+    {
+      title: "List link prospects",
+      description:
+        "Pages that could link to an SEO site, from every way of earning links (method), best score first, each on its website's company record (record_id). " +
+        "Leaves out excluded ones unless stage asks for them; stage takes several separated by commas, such as pitched,replied,agreed for what is in outreach. Reads what is stored, so it costs nothing.",
+      inputSchema: {
+        site_id: id.optional(),
+        stage: z.string().max(100).optional().describe("prospect, excluded, pitched, replied, agreed, live, declined or removed; several separated by commas."),
+        method: prospectMethod.optional(),
+        record_id: id.optional().describe("A company record: the prospects on its website."),
+        min_score: z.number().int().min(0).max(100).optional(),
+        order: z.enum(["score", "newest", "changed"]).optional(),
+        limit: z.number().int().min(1).max(500).optional(),
+        cursor: z.string().optional().describe("next_cursor from the previous page."),
+        brand: z.string().max(100).optional().describe("A brand's id or handle, or none for shared sites."),
+      },
+      annotations: read,
+    },
+    (query) => call(() => gtm.GET("/v1/workspaces/{ws}/link-prospects", { params: { path: { ws }, query } })),
+  );
+
+  server.registerTool(
+    "add_link_prospects",
+    {
+      title: "Add link prospects",
+      description:
+        "Add up to 500 pages that could link to an SEO site. Each website becomes a company record; numbers you leave out come from stored backlinks and SEO snapshots, and each page gets a score. " +
+        "Pages whose website already links to the site, is a tracked competitor, is on the suppression list or has toxic links are added as excluded, with why. A page already listed is kept as it is. " +
+        "Costs nothing. Then list_link_prospects, and update_link_prospect to set target_url (our page to offer).",
+      inputSchema: {
+        site_id: id,
+        source: z.string().max(100).optional().describe("Who found them, such as a playbook's id."),
+        prospects: z
+          .array(
+            z.object({
+              page_url: z.string().max(2048),
+              method: prospectMethod.optional(),
+              target_url: z.string().max(2048).optional().describe("Our page to offer, on the site."),
+              evidence: z.record(z.string(), z.unknown()).optional().describe("What was found: the broken link, the competitor it links to, the mention. Ids and URLs only."),
+              domain_rating: z.number().min(0).max(100).optional(),
+              traffic: z.number().min(0).optional(),
+              spam_score: z.number().int().min(0).max(100).optional(),
+              note: z.string().max(2000).optional(),
+            }),
+          )
+          .min(1)
+          .max(500),
+      },
+      annotations: write,
+    },
+    (body) => call(() => gtm.POST("/v1/workspaces/{ws}/link-prospects", { params: { path: { ws } }, body })),
+  );
+
+  server.registerTool(
+    "update_link_prospect",
+    {
+      title: "Move a link prospect along",
+      description:
+        "stage moves it: pitched, replied, agreed, live, declined, removed (a live link went away), excluded (with excluded_reason) or back to prospect. " +
+        "Moving into outreach (pitched, replied, agreed) fails with site_in_outreach while another prospect on the same website is in outreach or was declined in the last 60 days, " +
+        "and with conflict when the website is on the suppression list or the prospect is excluded (move it back to prospect first). " +
+        "target_url is our page to offer; note is free text.",
+      inputSchema: {
+        prospect_id: id,
+        stage: z.enum(["prospect", "excluded", "pitched", "replied", "agreed", "live", "declined", "removed"]).optional(),
+        excluded_reason: z.enum(["links_to_us", "competitor", "customer", "partner", "opted_out", "spam"]).optional(),
+        target_url: z.string().max(2048).optional(),
+        note: z.string().max(2000).optional(),
+      },
+      annotations: { ...write, idempotentHint: true },
+    },
+    ({ prospect_id, ...body }) =>
+      call(() => gtm.PATCH("/v1/workspaces/{ws}/link-prospects/{prospect}", { params: { path: { ws, prospect: prospect_id } }, body })),
+  );
+
+  server.registerTool(
+    "delete_link_prospect",
+    {
+      title: "Delete a link prospect",
+      description: "Deletes a prospect added by mistake. To keep a website out of outreach, exclude it with update_link_prospect instead, so it is not added again.",
+      inputSchema: { prospect_id: id },
+      annotations: { ...write, destructiveHint: true },
+    },
+    ({ prospect_id }) =>
+      call(() => gtm.DELETE("/v1/workspaces/{ws}/link-prospects/{prospect}", { params: { path: { ws, prospect: prospect_id } } })),
+  );
+
+  server.registerTool(
+    "read_links",
+    {
+      title: "Read who links to a page or domain",
+      description:
+        "Reads who links to target from the workspace's own Ahrefs or DataForSEO connection: one page when target is a URL with a path, else the whole domain. " +
+        "Costs money within the connection's budget, so call it with estimate_only first and tell the person the cost. A copy under a day old is free unless fresh. " +
+        "Fails with connector_needed when the workspace has no SEO connection. Then use list_dead_pages or list_top_linked_pages, and add_link_prospects for the linking pages worth asking.",
+      inputSchema: {
+        target: z.string().max(2048).describe("A page URL, like https://rival.example/guide, or a domain, like rival.example."),
+        site_id: id.optional().describe("The SEO site this is for."),
+        integration_id: id.optional(),
+        limit: z.number().int().min(1).max(1000).optional().describe("Links to read, strongest first; default 100."),
+        fresh: z.boolean().optional(),
+        estimate_only: z.boolean().optional().describe("Only answer the cost and the budget."),
+      },
+      annotations: { ...write, openWorldHint: true },
+    },
+    (body) => call(() => gtm.POST("/v1/workspaces/{ws}/link-reads", { params: { path: { ws } }, body })),
+  );
+
+  server.registerTool(
+    "list_link_reads",
+    {
+      title: "List link reads",
+      description: "Earlier reads of who links to a page or domain, newest first, without their links (get_link_read has them). Free.",
+      inputSchema: {
+        site_id: id.optional(),
+        target: z.string().max(2048).optional(),
+        reason: z.enum(["requested", "dead_page"]).optional(),
+        limit: z.number().int().min(1).max(200).optional(),
+        cursor: z.string().optional().describe("next_cursor from the previous page."),
+        brand: z.string().max(100).optional().describe("A brand's id or handle, or none for shared sites."),
+      },
+      annotations: read,
+    },
+    (query) => call(() => gtm.GET("/v1/workspaces/{ws}/link-reads", { params: { path: { ws }, query } })),
+  );
+
+  server.registerTool(
+    "get_link_read",
+    {
+      title: "Get a link read with its links",
+      description: "The links one read found, strongest first: the linking page, its domain and rating, the anchor. Free.",
+      inputSchema: { read_id: id },
+      annotations: read,
+    },
+    ({ read_id }) => call(() => gtm.GET("/v1/workspaces/{ws}/link-reads/{read}", { params: { path: { ws, read: read_id } } })),
+  );
+
+  server.registerTool(
+    "list_dead_pages",
+    {
+      title: "List competitors' dead pages and who links to them",
+      description:
+        "Pages gone from tracked competitors' sitemaps, with who links to them from the latest read: the most linking domains first, then pages not read yet (read_id null; read_links reads one). " +
+        "The sites linking to a dead page may link to the workspace's page instead. Free.",
+      inputSchema: {
+        site_id: id.optional(),
+        days: z.number().int().min(1).max(365).optional().describe("How far back; default 90."),
+        limit: z.number().int().min(1).max(500).optional(),
+        cursor: z.string().optional().describe("next_cursor from the previous page."),
+        brand: z.string().max(100).optional().describe("A brand's id or handle, or none for shared sites."),
+      },
+      annotations: read,
+    },
+    (query) => call(() => gtm.GET("/v1/workspaces/{ws}/link-reads/dead-pages", { params: { path: { ws }, query } })),
+  );
+
+  server.registerTool(
+    "list_top_linked_pages",
+    {
+      title: "List a domain's most linked pages",
+      description: "A domain's pages ranked by the domains linking to them, from its latest read (read_links with the domain first). The pages worth making a better version of. Free.",
+      inputSchema: {
+        target: z.string().max(300).describe("A domain that was read, like rival.example."),
+        limit: z.number().int().min(1).max(500).optional(),
+        cursor: z.string().optional().describe("next_cursor from the previous page."),
+      },
+      annotations: read,
+    },
+    (query) => call(() => gtm.GET("/v1/workspaces/{ws}/link-reads/top-pages", { params: { path: { ws }, query } })),
+  );
+
+  server.registerTool(
+    "get_link_building_settings",
+    {
+      title: "Get link building settings",
+      description: "The pitch cool-down (days after a declined pitch before its website may be pitched again) and the weekly read of competitors' dead pages with its share of the budget.",
+      inputSchema: {},
+      annotations: read,
+    },
+    () => call(() => gtm.GET("/v1/workspaces/{ws}/link-building/settings", { params: { path: { ws } } })),
+  );
+
+  server.registerTool(
+    "update_link_building_settings",
+    {
+      title: "Change link building settings",
+      description: "pitch_cooldown_days (0 to 365), weekly_reads (on or off) and weekly_budget_percent (1 to 100: the most of an SEO connection's monthly budget the weekly reads spend). Send only what changes.",
+      inputSchema: {
+        pitch_cooldown_days: z.number().int().min(0).max(365).optional(),
+        weekly_reads: z.boolean().optional(),
+        weekly_budget_percent: z.number().int().min(1).max(100).optional(),
+      },
+      annotations: { ...write, idempotentHint: true },
+    },
+    (body) => call(() => gtm.PATCH("/v1/workspaces/{ws}/link-building/settings", { params: { path: { ws } }, body })),
+  );
+
   server.registerTool(
     "get_fix_prompt",
     {
@@ -4527,7 +4865,7 @@ export function createServer({ client: gtm, workspace, agency, readOnly = false,
       title: "List a site's tracked keywords and rankings",
       description:
         "Each keyword an SEO site tracks, with the site's latest Google position in the top 100 (null when not there), the ranking page, the position the check before, the best so far and the page that targets it. " +
-        "connection is the SERP connection checks use (DataForSEO), or null.",
+        "connection is the SERP connection checks use by default (DataForSEO, else Geonode), or null; connections lists every one, for integration_id.",
       inputSchema: { site_id: id },
       annotations: read,
     },
@@ -4539,8 +4877,8 @@ export function createServer({ client: gtm, workspace, agency, readOnly = false,
     {
       title: "Track keywords for a site",
       description:
-        "Adds up to 100 keywords to rank tracking for one country and device; from_targets also adds every page's target keyword. Checks run weekly by default (or daily) through the workspace's own DataForSEO connection, " +
-        "about $0.02 each within its monthly budget, and the first check starts now.",
+        "Adds up to 100 keywords to rank tracking for one country and device; from_targets also adds every page's target keyword. Checks run weekly by default (or daily) through the workspace's own DataForSEO or Geonode connection (integration_id picks one), " +
+        "about $0.02 each with DataForSEO or $0.005 with Geonode, within its monthly budget, and the first check starts now.",
       inputSchema: {
         site_id: id,
         keywords: z.array(z.string().max(200)).max(100).optional(),
@@ -6411,7 +6749,7 @@ export function createServer({ client: gtm, workspace, agency, readOnly = false,
         monthly_limit_cents: z.number().int().min(0).max(10_000_000).nullable(),
         task_models: z
           .record(
-            z.enum(["plan", "turn", "check_in", "reply_labelling", "classify_domain", "ai_visibility", "social_replies", "review_replies", "email_verification"]),
+            z.enum(["plan", "turn", "check_in", "reply_labelling", "classify_domain", "ai_visibility", "social_replies", "social_posts", "review_replies", "email_verification"]),
             z
               .object({
                 model: z.string().max(200),

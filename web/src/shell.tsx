@@ -48,6 +48,7 @@ export const tabNames: Record<Tab, string> = {
   channels: "Channels",
   tracking: "Website tracking",
   flags: "Feature flags",
+  "ab-tests": "A/B tests",
   seo: "Rankings & backlinks",
   "seo-overview": "SEO overview",
   audits: "Site audits",
@@ -57,6 +58,7 @@ export const tabNames: Record<Tab, string> = {
   "ai-visibility": "AI visibility",
   backlinks: "Backlinks",
   competitors: "Competitors",
+  "link-building": "Link building",
   reddit: "Reddit",
   social: "Accounts",
   reviews: "Reviews",
@@ -135,6 +137,7 @@ export const tabBlurbs: Record<Tab, string> = {
   broadcasts: "One lifecycle email to many people at once, such as a newsletter or a launch.",
   journeys: "Flows an event starts: send an email, wait, branch on what people did, exit.",
   providers: "Amazon SES, Postmark or Resend, connected step by step, and the domains you send from.",
+  "link-building": "Pages that could link to your site, from every way of earning links, followed until the link is live; one website pitched at a time.",
   allocation: "Which mailbox sends for which sequence, and which sequences are short of mailboxes.",
   senders: "Who your mailboxes send as, and which team owns which senders and sequences.",
   outcomes: "Meetings and deals your outreach produced, what they cost, and the cost of each.",
@@ -142,6 +145,7 @@ export const tabBlurbs: Record<Tab, string> = {
   analytics: "Visitors, top pages, traffic sources and conversions from the analytics tools on your website.",
   tracking: "Outflare's own snippet for your websites: the script tag to paste, and whether each site is sending visits.",
   flags: "Turn things on for some visitors, or split them between versions to see which works better.",
+  "ab-tests": "See which version of a flag wins at a goal, with numbers that stay honest however often you check.",
   channels: "Visits, sign-ups, revenue and cost for every channel, credited the same way in every report.",
   links: "Tag every link with one channel, source and campaign, so each visit, lead and sale is credited to the right place.",
   "seo-overview": "Is each brand growing in search: branded search, visitors, domain rating and links, with their trends.",
@@ -214,6 +218,7 @@ export const tabDocs: Partial<Record<Tab, string>> = {
   channels: "/docs/guides/attribution/",
   tracking: "/docs/guides/website-tracking/",
   flags: "/docs/guides/feature-flags/",
+  "ab-tests": "/docs/guides/ab-tests/",
   seo: "/docs/integrations/seo/",
   "seo-overview": "/docs/integrations/seo/",
   audits: "/docs/guides/site-audits/",
@@ -257,7 +262,7 @@ export type Module = { id: string; label: string; icon: IconName; tabs: Tab[] };
 export const modules: Module[] = [
   { id: "crm", label: "CRM", icon: "leads", tabs: ["leads", "lists", "lead-finder", "email-finder", "suppression"] },
   { id: "visitors", label: "Visitors", icon: "visitors", tabs: ["visitors"] },
-  { id: "outreach", label: "Outreach", icon: "sequences", tabs: ["sequences", "allocation", "reports"] },
+  { id: "outreach", label: "Outreach", icon: "sequences", tabs: ["sequences", "link-building", "allocation", "reports"] },
   { id: "deliverability", label: "Deliverability", icon: "mailboxes", tabs: ["infrastructure", "mailboxes", "domains", "warmup", "servers", "senders"] },
   { id: "lifecycle", label: "Lifecycle", icon: "lifecycle", tabs: ["lifecycle", "broadcasts", "journeys", "templates", "topics", "emails", "providers"] },
   { id: "seo", label: "SEO", icon: "seo", tabs: ["seo-overview", "audits", "fixes", "experiments", "keywords", "seo", "backlinks", "ai-visibility", "competitors"] },
@@ -265,7 +270,7 @@ export const modules: Module[] = [
   { id: "reviews", label: "Reviews", icon: "reviews", tabs: ["reviews"] },
   { id: "ads", label: "Paid ads", icon: "ads", tabs: ["ads"] },
   // Partners goes here when its pages land.
-  { id: "analytics", label: "Analytics", icon: "reports", tabs: ["channels", "outcomes", "analytics", "tracking", "flags", "links"] },
+  { id: "analytics", label: "Analytics", icon: "reports", tabs: ["channels", "outcomes", "analytics", "tracking", "flags", "ab-tests", "links"] },
   // Playbooks: recipes that use every module above, from playbooks/ in the repository.
   { id: "playbooks", label: "Playbooks", icon: "playbooks", tabs: ["playbooks"] },
   // The company hub: what Outflare knows about the business, for every module.
@@ -276,7 +281,7 @@ const allModules = modules;
 
 // Pages that work for someone kept to some brands. The others need every
 // brand (the API answers 403), so they are hidden from them.
-const brandTabs: readonly Tab[] = ["overview", "seo-overview", "audits", "fixes", "experiments", "keywords", "ai-visibility", "backlinks", "competitors", "reddit", "social", "reviews", "ads", "visitors", "tracking", "flags", "inbox", "projects", "sequences", "leads", "lists", "lead-finder", "suppression", "mailboxes", "domains", "company", "brands", "setup", "ideal-customers", "members", "account", "instance"];
+const brandTabs: readonly Tab[] = ["overview", "seo-overview", "audits", "fixes", "experiments", "keywords", "ai-visibility", "backlinks", "competitors", "link-building", "reddit", "social", "reviews", "ads", "visitors", "tracking", "flags", "ab-tests", "inbox", "projects", "sequences", "leads", "lists", "lead-finder", "suppression", "mailboxes", "domains", "company", "brands", "setup", "ideal-customers", "members", "account", "instance"];
 export const canOpen = (ws: Workspace | undefined, t: Tab) => !ws?.brand_ids?.length || brandTabs.includes(t);
 
 // The sidebar keeps two things. Pins are kept in this browser for the
@@ -884,6 +889,8 @@ function callFor(tab: Tab, ws: string, item?: string): Call {
       return { title: "Fix tickets", path: "/v1/workspaces/{ws}/fix-tickets", params: base, query: { status: "todo" }, mcp: "list_fix_tickets", ask: "Take the three worst fix tickets, read each with get_fix_ticket, and tell me which to approve and why.", scope: "seo.read" };
     case "competitors":
       return { title: "Sites you compete with", path: "/v1/workspaces/{ws}/seo-competitors", params: base, query: { status: "tracked" }, mcp: "list_seo_competitors", ask: "What did my tracked competitors publish this month, and whose domain rating is rising?", scope: "seo.read" };
+    case "link-building":
+      return { title: "Pages that could link to you", path: "/v1/workspaces/{ws}/link-prospects", params: base, mcp: "list_link_prospects", ask: "Which competitor pages died this month, who links to them, and which of those sites should we ask first?", scope: "seo.read" };
     case "backlinks":
       return { title: "Links to your sites", path: "/v1/workspaces/{ws}/backlinks", params: base, query: { status: "live" }, mcp: "list_backlinks", ask: "Which strong links did we lose this month, and where did our new links come from?", scope: "seo.read" };
     case "reddit":
@@ -906,6 +913,8 @@ function callFor(tab: Tab, ws: string, item?: string): Call {
       return { title: "Website tracking keys and their snippets", path: "/v1/workspaces/{ws}/site-keys", params: base, mcp: "list_site_keys", ask: "Is our website snippet installed and sending visits on every site?", scope: "customers.read" };
     case "flags":
       return { title: "Feature flags", path: "/v1/workspaces/{ws}/flags", params: base, mcp: "list_flags", ask: "Set up a test of a new pricing headline on half of our visitors, shown only on the pricing page.", scope: "analytics.read" };
+    case "ab-tests":
+      return { title: "A/B tests", path: "/v1/workspaces/{ws}/ab-tests", params: base, mcp: "list_ab_tests", ask: "How is our pricing headline test doing, and is it safe to stop?", scope: "analytics.read" };
     case "channels":
       return { title: "Visits, conversions, revenue and cost per channel", path: "/v1/workspaces/{ws}/attribution/channels", params: base, mcp: "get_attribution_channels", ask: "Which channel brought the most revenue this month, and what did each sign-up cost us per channel?", scope: "analytics.read" };
     case "links":

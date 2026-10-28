@@ -602,10 +602,14 @@ const moved = (t: TrackedKeyword) => {
 };
 
 // Rankings: where the site ranks on Google for the keywords it tracks,
-// checked through the workspace's own DataForSEO connection.
+// checked through the workspace's own DataForSEO or Geonode connection.
+type RankConnection = { integration_id: string; name: string; connector: string };
+
 function Rankings({ ws, site, go }: { ws: string; site: string; go: Props["go"] }) {
   const [rows, setRows] = useState<TrackedKeyword[] | null>(null);
-  const [conn, setConn] = useState<{ name: string } | null | undefined>(undefined);
+  const [conn, setConn] = useState<RankConnection | null | undefined>(undefined);
+  const [conns, setConns] = useState<RankConnection[]>([]);
+  const [source, setSource] = useState("");
   const [error, setError] = useState("");
   const [keywords, setKeywords] = useState("");
   const [device, setDevice] = useState<"desktop" | "mobile">("desktop");
@@ -618,6 +622,7 @@ function Rankings({ ws, site, go }: { ws: string; site: string; go: Props["go"] 
       if (error || !data) return setError(errorMessage(error));
       setRows(data.data);
       setConn(data.connection);
+      setConns(data.connections);
     });
   }, [ws, site, reload]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -629,7 +634,7 @@ function Rankings({ ws, site, go }: { ws: string; site: string; go: Props["go"] 
   };
   const track = async (body: { keywords?: string[]; from_targets?: boolean }) => {
     setBusy(true);
-    const { data, error } = await api.POST("/v1/workspaces/{ws}/seo-sites/{site}/rankings", { params: { path }, body: { ...body, device } });
+    const { data, error } = await api.POST("/v1/workspaces/{ws}/seo-sites/{site}/rankings", { params: { path }, body: { ...body, device, ...(source ? { integration_id: source } : {}) } });
     done(error, data ? `${plural(data.added, "keyword")} tracked${data.skipped ? `, ${data.skipped} already were` : ""}. The first check has started.` : "");
     return !error;
   };
@@ -648,6 +653,12 @@ function Rankings({ ws, site, go }: { ws: string; site: string; go: Props["go"] 
     const { error } = await api.PATCH("/v1/workspaces/{ws}/seo-sites/{site}/rankings/{tracked}", { params: { path: { ...path, tracked: t.id } }, body: { frequency: t.frequency === "daily" ? "weekly" : "daily" } });
     done(error, t.frequency === "daily" ? "Checked weekly" : "Checked daily");
   };
+  const switchSource = async (t: TrackedKeyword, id: string) => {
+    setBusy(true);
+    const { error } = await api.PATCH("/v1/workspaces/{ws}/seo-sites/{site}/rankings/{tracked}", { params: { path: { ...path, tracked: t.id } }, body: { integration_id: id } });
+    done(error, `Checked through ${conns.find((c) => c.integration_id === id)?.name ?? "that connection"}`);
+  };
+  const sourceOf = (t: TrackedKeyword) => conns.find((c) => c.integration_id === t.integration_id) ?? conn;
   const remove = async (t: TrackedKeyword) => {
     setBusy(true);
     const { error } = await api.DELETE("/v1/workspaces/{ws}/seo-sites/{site}/rankings/{tracked}", { params: { path: { ...path, tracked: t.id } } });
@@ -658,8 +669,16 @@ function Rankings({ ws, site, go }: { ws: string; site: string; go: Props["go"] 
   if (!rows || conn === undefined) return <Loading />;
   if (!conn && rows.length === 0)
     return (
-      <Empty title="Connect DataForSEO to track rankings" action={<Button onClick={() => go("connectors", "dataforseo")}>Connect DataForSEO</Button>}>
-        Outflare checks where your pages rank on Google for the keywords you choose, daily or weekly, with your own DataForSEO account. Each check costs about $0.02 and stops at the monthly budget you set on the connection.
+      <Empty
+        title="Connect DataForSEO or Geonode to track rankings"
+        action={
+          <div className="flex gap-2">
+            <Button onClick={() => go("connectors", "dataforseo")}>Connect DataForSEO</Button>
+            <Button variant="ghost" onClick={() => go("connectors", "geonode")}>Connect Geonode</Button>
+          </div>
+        }
+      >
+        Outflare checks where your pages rank on Google for the keywords you choose, daily or weekly, with your own DataForSEO or Geonode account. Each check costs about $0.02 with DataForSEO or $0.005 with Geonode, and stops at the monthly budget you set on the connection.
       </Empty>
     );
   const ranked = rows.filter((r) => r.position !== null);
@@ -687,12 +706,20 @@ function Rankings({ ws, site, go }: { ws: string; site: string; go: Props["go"] 
           <option value="desktop">Desktop</option>
           <option value="mobile">Mobile</option>
         </select>
+        {conns.length > 1 && (
+          <select className={field} aria-label="Check with" value={source} onChange={(e) => setSource(e.target.value)}>
+            <option value="">{`Check with ${conns[0].name}`}</option>
+            {conns.slice(1).map((c) => <option key={c.integration_id} value={c.integration_id}>{`Check with ${c.name}`}</option>)}
+          </select>
+        )}
         <Button type="submit" disabled={busy || !keywords.trim()}>Track</Button>
         <Button type="button" variant="ghost" disabled={busy} onClick={() => track({ from_targets: true })}>Track every target keyword</Button>
         {rows.length > 0 && <Button type="button" variant="ghost" disabled={busy} onClick={check}>Check now</Button>}
       </form>
       <p className="text-xs text-muted-foreground">
-        {conn ? `Checked on Google (US unless you choose) through ${conn.name}, within its monthly budget. Each check is on Outcomes.` : "The DataForSEO connection was removed, so checks have stopped."} Agents use list_rankings and track_keywords.
+        {conn
+          ? `Checked on Google (US unless you choose) through ${conns.length > 1 ? "the connection each keyword names" : conn.name}, within its monthly budget. Each check is on Outcomes.`
+          : "The rank tracking connection was removed, so checks have stopped."} Agents use list_rankings and track_keywords.
       </p>
       <DataTable
         data={rows}
@@ -713,7 +740,23 @@ function Rankings({ ws, site, go }: { ws: string; site: string; go: Props["go"] 
             cell: ({ row }) => (
               <div>
                 <div>{row.original.keyword} {row.original.status === "paused" && <Badge>Paused</Badge>}</div>
-                <div className="text-xs text-muted-foreground">{row.original.country} · {row.original.device} · {row.original.frequency}</div>
+                <div className="text-xs text-muted-foreground">
+                  {row.original.country} · {row.original.device} · {row.original.frequency}
+                  {conns.length > 1 && (
+                    <>
+                      {" · "}
+                      <select
+                        className="bg-transparent text-xs"
+                        aria-label={`Check ${row.original.keyword} with`}
+                        disabled={busy}
+                        value={sourceOf(row.original)?.integration_id ?? ""}
+                        onChange={(e) => switchSource(row.original, e.target.value)}
+                      >
+                        {conns.map((c) => <option key={c.integration_id} value={c.integration_id}>{c.name}</option>)}
+                      </select>
+                    </>
+                  )}
+                </div>
               </div>
             ),
           },

@@ -87,6 +87,7 @@ var errorCodes = []errorCode{
 	{"unknown_site", []int{400, 404}, "The connection cannot read that site.", false},
 	{"no_domains", []int{400}, "The connection has no domains to snapshot.", false},
 	{"budget_reached", []int{402}, "An SEO connection reached its daily or monthly usage limit (its budget). Raise it in the SEO settings or on the connection's page under Connectors.", false},
+	{"site_in_outreach", []int{409}, "Another link prospect on the same website is being pitched, or was declined recently (60 days). One site is pitched by one campaign at a time; pitch it later or pick another site.", false},
 	{"platform_error", []int{502}, "The sending platform returned an error.", true},
 	{"send_failed", []int{502}, "The email could not be sent through the mailbox.", true},
 	{"bad_signature", []int{401}, "An inbound webhook's signature does not match.", false},

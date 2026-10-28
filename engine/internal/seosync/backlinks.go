@@ -321,9 +321,17 @@ func applyLink(ctx context.Context, tx pgx.Tx, ws string, site LinkSite, connect
 	case "lost":
 		at = *lostAt
 	}
-	_, err = tx.Exec(ctx, `INSERT INTO backlink_events (workspace_id, site_id, backlink_id, kind, at, connector, run_id, source_rating, reason)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`, ws, site.ID, id, ch.event, at, connector, runID, rating, view.LostReason)
-	return ch, err
+	if _, err := tx.Exec(ctx, `INSERT INTO backlink_events (workspace_id, site_id, backlink_id, kind, at, connector, run_id, source_rating, reason)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`, ws, site.ID, id, ch.event, at, connector, runID, rating, view.LostReason); err != nil {
+		return ch, err
+	}
+	// backlink.new, backlink.lost and backlink.regained, for webhooks.
+	return ch, audit.Record(ctx, tx, audit.Event{WorkspaceID: ws, ActorType: "system", Action: "backlink." + ch.event,
+		TargetType: "backlink", TargetID: id, Data: map[string]any{
+			"site_id": site.ID, "brand_id": site.BrandID, "source_url": from, "target_url": to, "source_domain": domain,
+			"source_rating": rating, "nofollow": l.Nofollow, "at": at.UTC().Format(time.RFC3339), "reason": view.LostReason,
+			"connector": connector, "run_id": runID},
+		Props: map[string]any{"site_id": site.ID, "connector": connector}})
 }
 
 // storeDetails keeps a provider's details of a link: what the linking page

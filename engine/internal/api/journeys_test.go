@@ -29,7 +29,7 @@ func TestJourneys(t *testing.T) {
 	svc := &emails.Service{Pool: e.pool, Store: e.integrations, Box: e.box, PublicURL: "https://outflare.test", Log: log, Resolver: e.dns}
 	owner.must(201, "POST", base+"/integrations", map[string]any{"connector": "resend", "credentials": map[string]any{"api_key": "re_test_not_a_real_key"}})
 	did := owner.must(201, "POST", base+"/email-provider-domains", map[string]any{"domain": "example.com"})["id"].(string)
-	e.dns.txt["resend._domainkey.example.com"] = []string{"p=KEY"}
+	e.dns.setTXT("resend._domainkey.example.com", []string{"p=KEY"})
 	if err := svc.RunDomainCheck(ctx, did); err != nil {
 		t.Fatal(err)
 	}

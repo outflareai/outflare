@@ -1,6 +1,7 @@
 // Package ranks tracks where an SEO site ranks for the keywords a
 // workspace follows. Each check reads a search engine's results page
-// through the workspace's own SERP connection (DataForSEO for Google),
+// through the workspace's own SERP connection (DataForSEO or Geonode, for
+// Google),
 // within the connection's monthly budget, and records what it cost in the
 // Outcomes ledger. Checks run as jobs: daily or weekly per keyword, or
 // when someone asks.
@@ -46,7 +47,7 @@ const (
 const due = `(t.last_checked_at IS NULL OR t.last_checked_at < now() - CASE t.frequency WHEN 'daily' THEN interval '20 hours' ELSE interval '6 days 20 hours' END)`
 
 // ErrNoConnection means the workspace has no SERP connection.
-var ErrNoConnection = connectors.Errf(connectors.ErrInvalid, "rank tracking needs a SERP connection: connect DataForSEO on the Connectors page")
+var ErrNoConnection = connectors.Errf(connectors.ErrInvalid, "rank tracking needs a SERP connection: connect DataForSEO or Geonode on the Connectors page")
 
 // Service runs rank checks.
 type Service struct {
@@ -146,7 +147,7 @@ type tracked struct {
 	integration                          *string
 }
 
-// SERPConnectors are the connectors that can check ranks.
+// SERPConnectors are the connectors that can check ranks, by name.
 func SERPConnectors(reg *connectors.Registry) []string {
 	var ids []string
 	for _, d := range reg.All() {
@@ -159,12 +160,14 @@ func SERPConnectors(reg *connectors.Registry) []string {
 	return ids
 }
 
-// DefaultConnection is the workspace's first connected SERP connection, or
-// "".
+// DefaultConnection is the workspace's SERP connection for keywords that
+// do not name one, or "": the first connector in SERPConnectors' order
+// (DataForSEO before Geonode, so a workspace that tracked ranks before
+// Geonode could keeps its source), then the oldest connection.
 func DefaultConnection(ctx context.Context, q jobs.Querier, reg *connectors.Registry, ws string) (string, error) {
 	var id string
 	err := q.QueryRow(ctx, `SELECT id::text FROM integrations WHERE workspace_id = $1 AND connector = ANY($2) AND status = 'connected'
-		ORDER BY created_at, id LIMIT 1`, ws, SERPConnectors(reg)).Scan(&id)
+		ORDER BY array_position($2, connector), created_at, id LIMIT 1`, ws, SERPConnectors(reg)).Scan(&id)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return "", nil
 	}
@@ -336,6 +339,16 @@ func (s *Service) checkWith(ctx context.Context, ws, siteID, host, integrationID
 			continue
 		}
 		pos, page := Find(out.Items, hosts)
+		if pos == nil && out.Partial {
+			// Not in the pages that came back is not "not in the top 100":
+			// try again next time.
+			err := connectors.Errf(connectors.ErrUnavailable, "%s returned fewer results than asked, so the check was incomplete; it will run again", o.Name)
+			if ferr := s.fail(ctx, ws, list[i:i+1], err, res); ferr != nil && !errors.Is(ferr, err) {
+				return ferr
+			}
+			kwErr = err
+			continue
+		}
 		top := out.Items[:min(len(out.Items), topKept)]
 		raw, _ := json.Marshal(top)
 		_, err = s.Pool.Exec(ctx, `

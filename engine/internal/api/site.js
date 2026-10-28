@@ -33,6 +33,12 @@
 // the script takes it off as soon as the flags arrive, and your inline
 // script after a second or two at most. ?of_flag=key:variant on any page
 // shows that variant to you alone for the rest of the visit, to preview it.
+//
+// A visitor joins a flag's A/B test when the page shows them its version:
+// when the page reads it (outflare.flag, outflare.flagPayload, or a flag
+// in what onFlags gives), or, with data-flags, when its class goes on
+// <html>. The script then sends Experiment Viewed with the flag and the
+// variant, once per visit. Previews send nothing.
 (function () {
   "use strict";
   var w = window, d = document;
@@ -209,11 +215,24 @@
   // Flags: asked for once per page (and again on in-app navigation, since
   // rules can depend on the page), and kept for the visit so the next page
   // starts with the last answer.
-  var FLAGS = "of_flags", flagsWanted = script.getAttribute("data-flags") !== null, flagState = null, flagWaiters = [], flagClasses = [];
+  var FLAGS = "of_flags", SEEN = "of_flags_seen", classFlags = script.getAttribute("data-flags") !== null, flagsWanted = classFlags, flagState = null, flagWaiters = [], flagClasses = [], seen = {};
   try {
     var kept = JSON.parse(sessionStorage.getItem(FLAGS) || "null");
     if (kept && kept.anon === anon) flagState = kept;
+    var keptSeen = JSON.parse(sessionStorage.getItem(SEEN) || "null");
+    if (keptSeen && keptSeen.anon === anon) seen = keptSeen.flags || {};
   } catch (e) {}
+  // The visitor has been shown flag k's version: tell Outflare once per
+  // visit (and again only if their version changes), so the flag's A/B
+  // test counts them. Not for a preview, nor before the flags arrive.
+  function exposed(k) {
+    if (Object.prototype.hasOwnProperty.call(preview, k)) return;
+    var v = flagState && flagState.flags[k];
+    if (!v || seen[k] === v) return;
+    seen[k] = v;
+    try { sessionStorage.setItem(SEEN, JSON.stringify({ anon: anon, flags: seen })); } catch (e) {}
+    track("Experiment Viewed", { flag: k, variant: v });
+  }
   function applyFlags(state) {
     flagState = state;
     var root = d.documentElement, cls = [];
@@ -221,6 +240,7 @@
     flagClasses.forEach(function (c) { root.classList.remove(c); });
     cls.forEach(function (c) { root.classList.add(c); });
     flagClasses = cls;
+    if (classFlags) for (k in state.flags) exposed(k);
     root.classList.remove("of-wait");
     var waiting = flagWaiters;
     flagWaiters = [];
@@ -236,9 +256,14 @@
     for (var k in preview) if (preview[k]) out[k] = preview[k];
     return out;
   }
+  // Every flag that is on, with its variant or false. Reading one counts
+  // as showing it.
   function flagMap() {
     var out = {}, k;
-    for (k in (flagState && flagState.flags) || {}) out[k] = variant(k);
+    function get(k) { return function () { exposed(k); return variant(k); }; }
+    for (k in (flagState && flagState.flags) || {}) {
+      if (!Object.prototype.hasOwnProperty.call(preview, k)) Object.defineProperty(out, k, { get: get(k), enumerable: true });
+    }
     for (k in preview) out[k] = preview[k];
     return out;
   }
@@ -310,16 +335,19 @@
     reset: function () {
       anon = uuid();
       if (consented) writeCookie(anon);
-      try { sessionStorage.removeItem(FLAGS); } catch (e) {}
+      seen = {};
+      try { sessionStorage.removeItem(FLAGS); sessionStorage.removeItem(SEEN); } catch (e) {}
       if (flagsWanted) loadFlags();
     },
     // The visitor's variant of a flag, or false: false too until the
     // flags arrive, so wait with onFlags when it matters.
     flag: function (k) {
       if (!flagsWanted) loadFlags();
+      exposed(String(k));
       return variant(String(k));
     },
     flagPayload: function (k) {
+      exposed(String(k));
       var v = variant(String(k));
       return v && flagState && flagState.payloads ? flagState.payloads[k] : undefined;
     },

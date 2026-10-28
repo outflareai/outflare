@@ -30,7 +30,7 @@ func TestEmailTopicsAndPreferences(t *testing.T) {
 		t.Fatal(err)
 	}
 	did := owner.must(201, "POST", base+"/email-provider-domains", map[string]any{"domain": "example.com"})["id"].(string)
-	e.dns.txt["resend._domainkey.example.com"] = []string{"p=KEY"}
+	e.dns.setTXT("resend._domainkey.example.com", []string{"p=KEY"})
 	if err := svc.RunDomainCheck(ctx, did); err != nil {
 		t.Fatal(err)
 	}

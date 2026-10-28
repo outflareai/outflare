@@ -11,6 +11,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
+	"github.com/outflareai/outflare/engine/internal/audit"
 	"github.com/outflareai/outflare/engine/internal/jobs"
 	"github.com/outflareai/outflare/engine/internal/track"
 )
@@ -31,6 +32,9 @@ const (
 	glanceEvery = 167 * time.Hour
 	// sampleURLs is how many added or removed pages an event lists.
 	sampleURLs = 10
+	// maxRemovedEvents is how many competitor.page_removed events one look
+	// records; the feed counts them all.
+	maxRemovedEvents = 50
 )
 
 // ErrBlocked is a glance robots.txt forbids or could not be read for.
@@ -286,6 +290,17 @@ func (s *Service) glance(ctx context.Context, job jobs.Job) error {
 		}
 		if err := pagesEvent("pages_removed", removed); err != nil {
 			return err
+		}
+		// Each page gone from a competitor's sitemaps is a webhook event,
+		// at most maxRemovedEvents a look: links to it may be worth asking
+		// for instead.
+		for _, u := range removed[:min(len(removed), maxRemovedEvents)] {
+			if err := audit.Record(ctx, tx, audit.Event{WorkspaceID: ws, ActorType: "system", Action: "competitor.page_removed",
+				TargetType: "seo_competitor", TargetID: p.CompetitorID, Data: map[string]any{
+					"site_id": siteID, "competitor_id": p.CompetitorID, "url": u, "removed": len(removed)},
+				Props: map[string]any{"site_id": siteID, "competitor_id": p.CompetitorID, "removed": len(removed)}}); err != nil {
+				return err
+			}
 		}
 		if look.Title != "" && look.Title != title {
 			if err := event("title_changed", map[string]any{"before": title, "after": look.Title}); err != nil {

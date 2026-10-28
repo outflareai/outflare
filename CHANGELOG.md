@@ -6,6 +6,18 @@ Each pull request that changes what Outflare does adds a change note in [changes
 
 ## [Unreleased]
 
+## [0.18.0] - 2026-10-28
+
+### Added
+
+- Publish the brand's own posts on X and LinkedIn: write one or have your own AI draft it, approve it, and it goes out now or at a set time. A recurring series, such as a daily changelog summary, is approved once and then posts what your script hands in, up to a daily limit.
+- Link building: one list of pages that could link to your site, from every way of earning links, scored and followed from pitched to live, one pitch per website at a time. See who links to any page or domain from your own Ahrefs or DataForSEO, and which links point at competitors' dead pages, read weekly within a budget share you set.
+- A/B tests: pick a feature flag, choose what counts as success, and see which version wins, with the chance each one beats the original, the likely size of the lift, and a warning when the split looks wrong. Results are safe to check every day.
+
+### Changed
+
+- Rank tracking can now check Google through your own Geonode connection as well as DataForSEO, at about $0.005 for the top 100. With both connected, choose which one checks each keyword on the Rankings tab.
+
 ## [0.17.0] - 2026-10-28
 
 ### Changed

@@ -133,7 +133,7 @@ func TestDNSOneClickElsewhere(t *testing.T) {
 	}
 
 	// A cold email domain on Google with no SPF or DMARC record yet.
-	e.dns.mx["northpeak.example"] = []*net.MX{{Host: "aspmx.l.google.com.", Pref: 1}}
+	e.dns.setMX("northpeak.example", []*net.MX{{Host: "aspmx.l.google.com.", Pref: 1}})
 	dPath := base + "/sending-domains/northpeak.example"
 	owner.must(201, "POST", base+"/sending-domains", map[string]any{"domain": "northpeak.example"})
 	d := waitFor(t, owner, dPath, func(m map[string]any) bool { return m["checked_at"] != nil })

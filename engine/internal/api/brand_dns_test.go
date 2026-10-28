@@ -114,7 +114,7 @@ func TestBrandDNSInOneGo(t *testing.T) {
 
 	// Once DNS shows the site's proof, that group is in place.
 	rec := site["records"].([]any)[0].(map[string]any)
-	e.dns.txt["northpeak.example"] = []string{rec["value"].(string)}
+	e.dns.setTXT("northpeak.example", []string{rec["value"].(string)})
 	if _, err := e.pool.Exec(context.Background(), `UPDATE seo_sites SET verify_checked_at = now() - interval '2 minutes'`); err != nil {
 		t.Fatal(err)
 	}
@@ -158,8 +158,8 @@ func TestBrandDNSCheckNow(t *testing.T) {
 			proof = g["records"].([]any)[0].(map[string]any)["value"].(string)
 		}
 	}
-	e.dns.txt["northpeak.example"] = []string{proof}
-	e.dns.cname = map[string]string{"links.northpeak.example": "localhost"}
+	e.dns.setTXT("northpeak.example", []string{proof})
+	e.dns.setCNAME("links.northpeak.example", "localhost")
 	d = owner.must(200, "POST", check, nil)
 	if m := missing(d); d["missing"] != 0.0 || m["seo_site"] != 0 || m["tracking_domain"] != 0 {
 		t.Fatalf("added by hand: %v", d)

@@ -59,6 +59,9 @@ var brandOf = map[string]string{
 	"mission_action": `SELECT m.brand_id FROM mission_actions a JOIN missions m ON m.id = a.mission_id WHERE a.id = $1::uuid AND m.workspace_id = $2`,
 	"review_page":    `SELECT brand_id FROM review_pages WHERE id = $1::uuid AND workspace_id = $2`,
 	"review":         `SELECT brand_id FROM reviews WHERE id = $1::uuid AND workspace_id = $2`,
+	"seo_competitor": `SELECT brand_id FROM seo_competitors WHERE id = $1::uuid AND workspace_id = $2`,
+	"backlink":       `SELECT brand_id FROM backlinks WHERE id = $1::uuid AND workspace_id = $2`,
+	"link_prospect":  `SELECT brand_id FROM link_prospects WHERE id = $1::uuid AND workspace_id = $2`,
 	// A domain's id is its name.
 	"domain": `SELECT brand_id FROM sending_domains WHERE domain = lower($1) AND workspace_id = $2`,
 }

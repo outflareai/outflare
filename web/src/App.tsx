@@ -48,6 +48,7 @@ import { Reports } from "./pages/Reports";
 import { Analytics } from "./pages/Analytics";
 import { WebsiteTracking } from "./pages/WebsiteTracking";
 import { Flags } from "./pages/Flags";
+import { ABTests } from "./pages/ABTests";
 import { CampaignLinks } from "./pages/CampaignLinks";
 import { Channels } from "./pages/Channels";
 import { IdealCustomers } from "./pages/IdealCustomers";
@@ -79,6 +80,7 @@ import { SEOOverview } from "./pages/SEOOverview";
 import { AIVisibility } from "./pages/AIVisibility";
 import { Backlinks } from "./pages/Backlinks";
 import { Competitors } from "./pages/Competitors";
+import { LinkBuilding } from "./pages/LinkBuilding";
 import { Warmup } from "./pages/Warmup";
 import { ConnectAI } from "./pages/ConnectAI";
 import { Authorize } from "./pages/Authorize";
@@ -524,6 +526,7 @@ function Shell({ me, onSignOut, onReload }: { me: Me; onSignOut: () => void; onR
         {ready && ws && tab === "setup" && <BrandSetup key={ws.id} ws={ws.id} canManage={isAdmin} go={setTab} />}
         {ready && ws && tab === "get-started" && !isAdmin && <p className="text-sm text-muted-foreground">An owner or admin of {ws.name} sets this up.</p>}
         {ready && ws && tab === "flags" && <Flags key={ws.id} ws={ws.id} canManage={can("analytics.manage")} go={setTab} />}
+        {ready && ws && tab === "ab-tests" && <ABTests key={ws.id} ws={ws.id} canManage={can("analytics.manage")} go={setTab} />}
         {ready && ws && tab === "channels" && <Channels key={ws.id} ws={ws.id} canManage={can("analytics.manage")} go={setTab} />}
         {ready && ws && tab === "links" && <CampaignLinks key={ws.id} ws={ws.id} canManage={writer} />}
         {ready && ws && tab === "tracking" && <WebsiteTracking key={ws.id} ws={ws.id} canManage={isAdmin} go={setTab} />}
@@ -561,6 +564,7 @@ function Shell({ me, onSignOut, onReload }: { me: Me; onSignOut: () => void; onR
         {ready && ws && tab === "infrastructure" && <Infrastructure key={ws.id} ws={ws.id} canManage={writer} canApprove={isAdmin} open={item ?? ""} onOpen={(it) => setItem(it || undefined)} go={setTab} />}
         {ready && ws && tab === "mailboxes" && <Mailboxes key={ws.id} ws={ws.id} canManage={writer} openOAuth={!!outcome.ws} go={setTab} />}
         {ready && ws && tab === "domains" && <Domains key={ws.id} ws={ws.id} canManage={writer} open={item ?? ""} onOpen={(d) => setItem(d || undefined)} go={setTab} />}
+        {ready && ws && tab === "link-building" && <LinkBuilding key={ws.id} ws={ws.id} canManage={can("seo.manage")} go={setTab} />}
         {ready && ws && tab === "allocation" && <Allocation key={ws.id} ws={ws.id} canManage={writer} canSetMode={isAdmin} go={setTab} />}
         {ready && ws && tab === "senders" && <Senders key={ws.id} ws={ws.id} canManage={writer} canManageTeams={isAdmin} />}
         {ready && ws && tab === "servers" && <Servers key={ws.id} ws={ws.id} canManage={writer} open={item ?? ""} onOpen={(id) => setItem(id || undefined)} go={setTab} />}

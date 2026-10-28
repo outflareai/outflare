@@ -42,7 +42,9 @@ another two-letter country per connection or per call.
 DataForSEO also reads Google's live results for one keyword, which is how
 [rank tracking](search-intelligence.md#rank-tracking) checks where your
 pages rank. Each check is about $0.02 for the top 100 and counts towards the
-same budget.
+same budget. A Geonode connection can check ranks too, through Geonode's
+Google Search Light API: one credit per page of 10 results, about $0.005 for
+the top 100, within a monthly budget you set on the Geonode connection.
 
 ## Cost and budget
 
@@ -154,7 +156,9 @@ links from the site's own subdomains do not.
   a tool first finds a link, `lost` (dated by the tool's last sighting, with
   its reason) and `regained` when a lost link is found again. A site's first
   read is a baseline: only links first found or lost in the 30 days before it
-  become events, so old links don't show up as news.
+  become events, so old links don't show up as news. Each is also a webhook
+  event (`backlink.new`, `backlink.lost`, `backlink.regained`), for a
+  playbook that asks for a lost link back.
 - **What each link carries.** Like Ahrefs' backlinks report: the linking
   domain's DR (`source_rating`) and the page's UR (`url_rating`), how many
   keywords the page ranks for, how many domains it links to and links it
@@ -272,7 +276,9 @@ same list.
   title or description, and moves in domain rating (a point or more), traffic
   or keywords (a tenth or more) and referring domains (a twentieth or more).
   The first look and the first snapshot are a baseline. The **Competitors**
-  page in the SEO module shows both.
+  page in the SEO module shows both. Each page gone from their sitemaps is
+  also a webhook event (`competitor.page_removed`, at most 50 a look), since
+  sites still linking to it may link to yours instead.
 
 ### Gaps
 
@@ -293,6 +299,75 @@ keyword or link outside that read. Reading the gaps costs nothing; the weekly
 read is priced like the keywords and links reports and counts against the
 connection's budget. Gaps are ideas for content and links: Outflare never
 contacts a site for you.
+
+## Link prospects
+
+Every way of earning links (competitors' links, broken links, links to win
+back, competitors' dead pages, resource pages, promoting a piece of content,
+mentions without a link, partners) adds to one list of **link prospects**:
+pages that could link to one of your sites (`POST /link-prospects`, up to 500
+at a time, MCP `add_link_prospects`). Playbooks add to it too. It costs
+nothing: numbers come from what is stored.
+
+- **One company per website.** Each page's website is a company record (a
+  prospect company when you have none), so its people, replies and deals
+  stay in one place.
+- **A score from 0 to 100**, best first: half the website's strength (domain
+  rating), a quarter its search traffic, a quarter the method (winning back
+  a lost link scores highest), less 20 for a suspect spam score.
+  `score_factors` says why. Numbers you don't pass come from your backlinks
+  and the SEO connections' snapshots.
+- **Kept out, with why.** A page is added as `excluded` when its website
+  already links to the site (`links_to_us`, except when winning a link back
+  or asking a site that names you), is a tracked competitor, is on the
+  suppression list (`competitor`, `customer`, `partner`, or `opted_out` for
+  any other reason) or has toxic links (`spam`).
+- **Stages.** `prospect`, then `pitched`, `replied`, `agreed` and `live`, or
+  `declined`; `removed` when a live link goes away (`PATCH
+  /link-prospects/{id}`, MCP `update_link_prospect`). Each move is a webhook
+  event (`link_prospect.*`).
+- **One pitch per website.** While a prospect on a website is pitched,
+  replied or agreed, or for the cool-down after one was declined (60 days by
+  default, `pitch_cooldown_days` in the [settings](#link-reads)), moving another
+  page there into outreach answers `409 site_in_outreach`. A website that
+  opts out is never pitched, even when it was added earlier, and an excluded
+  prospect goes back to `prospect` before it can be pitched.
+
+The **Link building** page under Outreach shows the list, competitors' dead
+pages (add their linking sites as prospects in one click), a domain's most
+linked pages and the settings. Outflare never offers or agrees to pay for a
+link.
+
+### Link reads
+
+Who links to a page or domain that isn't yours: a competitor's page that
+went dead, a competitor's most linked guide, a site you want links like.
+Outflare reads it from your own Ahrefs or DataForSEO connection (`POST
+/link-reads`, MCP `read_links`): one page when the target is a URL with a
+path, else the whole domain. Each read costs money within the connection's
+budget (about $0.02 plus $0.00003 a link on DataForSEO, about one API unit a
+link on Ahrefs), so ask with `estimate_only` first to see the cost. A copy
+under a day old is free. Without an SEO connection, it answers `409
+connector_needed`.
+
+Every read is kept, so these reports cost nothing:
+
+- **Dead pages** (`GET /link-reads/dead-pages`, MCP `list_dead_pages`):
+  pages gone from tracked competitors' sitemaps, with who links to them, the
+  most linking domains first. Those sites now have a broken link and may
+  link to your page instead.
+- **Top pages** (`GET /link-reads/top-pages?target=rival.example`, MCP
+  `list_top_linked_pages`): a domain's pages ranked by the domains linking
+  to them, from its latest read. The counts cover the links that read kept.
+
+**The weekly read.** The weekly SEO snapshot also reads who links to pages
+that went from tracked competitors' sitemaps in the last 8 days (at most 20
+a site, each page once). It spends at most a share of the connection's
+monthly budget a month on this: 10% by default. Change it, or turn it off,
+in the link building settings (`PATCH /link-building/settings`, MCP
+`update_link_building_settings`), which also hold the pitch cool-down
+(`pitch_cooldown_days`, 60 by default). Your own lost links need no paid
+read: your backlinks already name the page that dropped the link.
 
 ## API
 
@@ -316,6 +391,19 @@ curl -X POST -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/jso
   -d '{"site_id": "'$SITE'", "host": "rival.example"}' "$URL/v1/workspaces/$WS/seo-competitors"
 curl -H "Authorization: Bearer $TOKEN" "$URL/v1/workspaces/$WS/seo-competitors/events?days=30"
 curl -H "Authorization: Bearer $TOKEN" "$URL/v1/workspaces/$WS/backlinks/summary"
+
+# Who links to a competitor's page: estimate, then read; then the free reports
+curl -X POST -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+  -d '{"target": "https://rival.example/guide", "estimate_only": true}' "$URL/v1/workspaces/$WS/link-reads"
+curl -H "Authorization: Bearer $TOKEN" "$URL/v1/workspaces/$WS/link-reads/dead-pages?site_id=$SITE"
+
+# Link prospects: add pages, list the best, pitch one
+curl -X POST -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+  -d '{"site_id": "'$SITE'", "prospects": [{"page_url": "https://blog.example.org/best-tools", "method": "broken_link"}]}' \
+  "$URL/v1/workspaces/$WS/link-prospects"
+curl -H "Authorization: Bearer $TOKEN" "$URL/v1/workspaces/$WS/link-prospects?min_score=40"
+curl -X PATCH -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+  -d '{"stage": "pitched"}' "$URL/v1/workspaces/$WS/link-prospects/$PROSPECT"
 
 # A live report: costs money within the budget, cached for a day
 curl -H "Authorization: Bearer $TOKEN" "$URL/v1/workspaces/$WS/seo/$ID/reports/backlinks?target=example.com&limit=100"

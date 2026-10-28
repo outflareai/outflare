@@ -4183,6 +4183,109 @@
       }
     },
     {
+      "type": "timeseries",
+      "title": "A/B test results time (p95)",
+      "description": "95th percentile time to count an A/B test's results from product events, every goal included (opening a running test's results, or ending it). Normal is under a second for most sites; it grows with a site's traffic, since each look scans the test's events.",
+      "id": 92,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 283
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(outflare_ab_results_seconds_bucket{job=\"$job\"}[15m])))",
+          "legendFormat": "p95",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "custom": {
+            "fillOpacity": 10
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "mean",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "A/B test results counted, by outcome",
+      "description": "How often A/B test results are counted (ok) or fail (error, usually the 30-second limit on a big site or the database). Normal is a few a minute when people are looking, and no errors.",
+      "id": 93,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 283
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (outcome) (rate(outflare_ab_results_total{job=\"$job\"}[15m])) * 60",
+          "legendFormat": "{{outcome}}",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "fillOpacity": 10,
+            "stacking": {
+              "mode": "normal"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "mean",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
       "type": "row",
       "title": "Reviews (review pages read daily)",
       "id": 87,
@@ -4191,7 +4294,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 283
+        "y": 291
       },
       "panels": []
     },
@@ -4208,7 +4311,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 284
+        "y": 292
       },
       "targets": [
         {
@@ -4258,7 +4361,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 284
+        "y": 292
       },
       "targets": [
         {
@@ -4308,7 +4411,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 292
+        "y": 300
       },
       "targets": [
         {
@@ -4358,7 +4461,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 292
+        "y": 300
       },
       "targets": [
         {
@@ -4374,6 +4477,232 @@
       "fieldConfig": {
         "defaults": {
           "unit": "s",
+          "custom": {
+            "fillOpacity": 10
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "mean",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "type": "row",
+      "title": "Social publishing (the brand's own posts)",
+      "id": 92,
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 300
+      },
+      "panels": []
+    },
+    {
+      "type": "timeseries",
+      "title": "Posts by outcome",
+      "description": "Posts the publish job tried per hour, by channel and outcome. Normal is all published; failed means the channel refused a post or did not answer (each one is listed with its reason under Social); retried is a rate limit before anything was posted.",
+      "id": 93,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 301
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (channel, outcome) (increase(outflare_social_publishes_total{job=\"$job\"}[1h]))",
+          "legendFormat": "{{channel}} {{outcome}}",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "fillOpacity": 10
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "mean",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Most overdue approved post",
+      "description": "How long past its time the most overdue approved post is, by channel. Posts go out within a minute or two of their time, so normal is near zero.",
+      "id": 94,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 301
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "max by (channel) (outflare_social_publication_overdue_seconds{job=\"$job\"})",
+          "legendFormat": "{{channel}}",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "custom": {
+            "fillOpacity": 10
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "mean",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Approved posts waiting",
+      "description": "Approved posts not out yet, by channel and state: later is scheduled ahead (normal), due is waiting for the publish job and should stay near zero.",
+      "id": 95,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 309
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (channel, state) (outflare_social_publications_scheduled{job=\"$job\"})",
+          "legendFormat": "{{channel}} {{state}}",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "fillOpacity": 10
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "mean",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "type": "row",
+      "title": "Link building (who links to a page, on workspaces' own SEO connections)",
+      "id": 96,
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 317
+      },
+      "panels": []
+    },
+    {
+      "type": "timeseries",
+      "title": "Link reads by reason and outcome",
+      "description": "Reads of who links to a page or domain, per hour: requested by people, agents and playbooks, or the weekly read of competitors' dead pages (dead_page). Normal: mostly success, in a burst after the weekly SEO snapshot. budget_reached means a connection's budget or the workspace's weekly share ran out; provider_error or connector_auth rising means Ahrefs or DataForSEO is failing or a key was revoked.",
+      "id": 97,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 318
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (reason, outcome) (rate(outflare_seo_link_reads_total{job=\"$job\"}[1h]))",
+          "legendFormat": "{{reason}} {{outcome}}",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps",
           "custom": {
             "fillOpacity": 10
           }

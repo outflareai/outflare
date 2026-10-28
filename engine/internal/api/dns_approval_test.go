@@ -128,8 +128,8 @@ func TestDNSApproval(t *testing.T) {
 
 	// A cold email domain missing only its DMARC record: the general
 	// template adds it.
-	e.dns.mx["northpeak.example"] = []*net.MX{{Host: "aspmx.l.google.com.", Pref: 1}}
-	e.dns.txt["northpeak.example"] = []string{"v=spf1 include:_spf.google.com ~all"}
+	e.dns.setMX("northpeak.example", []*net.MX{{Host: "aspmx.l.google.com.", Pref: 1}})
+	e.dns.setTXT("northpeak.example", []string{"v=spf1 include:_spf.google.com ~all"})
 	dPath := base + "/sending-domains/northpeak.example"
 	owner.must(201, "POST", base+"/sending-domains", map[string]any{"domain": "northpeak.example"})
 	waitFor(t, owner, dPath, func(m map[string]any) bool { return m["checked_at"] != nil })
@@ -148,7 +148,7 @@ func TestDNSApproval(t *testing.T) {
 	// A domain on Google missing several records, and its DKIM key copied
 	// from Google Admin: the Google Workspace template adds only the
 	// groups missing.
-	e.dns.mx["lakeside.example"] = []*net.MX{{Host: "smtp.google.com.", Pref: 1}}
+	e.dns.setMX("lakeside.example", []*net.MX{{Host: "smtp.google.com.", Pref: 1}})
 	txt.set("_domainconnect.lakeside.example", strings.TrimPrefix(provider.URL, "https://")+"/dc")
 	lPath := base + "/sending-domains/lakeside.example"
 	owner.must(201, "POST", base+"/sending-domains", map[string]any{"domain": "lakeside.example"})

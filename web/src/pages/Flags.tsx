@@ -13,6 +13,7 @@ import { DataTable } from "@/components/data-table";
 import { Switch } from "@/components/ui/switch";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import type { Tab } from "@/lib/paths";
+import { testFlag } from "./ABTests";
 
 type Props = { ws: string; canManage: boolean; go: (t: Tab) => void };
 
@@ -132,7 +133,7 @@ export function Flags({ ws, canManage, go }: Props) {
               id: "menu", header: "", enableSorting: false,
               cell: ({ row: { original: f } }) => canManage && (
                 <span onClick={(e) => e.stopPropagation()}>
-                  <Menu items={[{ label: "Edit", onClick: () => setEditing(f) }, { label: "Archive", danger: true, onClick: () => archive(f) }]} />
+                  <Menu items={[{ label: "Edit", onClick: () => setEditing(f) }, ...(isSplit(f) ? [{ label: "A/B test it", onClick: () => { testFlag(f.key); go("ab-tests"); } }] : []), { label: "Archive", danger: true, onClick: () => archive(f) }]} />
                 </span>
               ),
             },

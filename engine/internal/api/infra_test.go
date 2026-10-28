@@ -27,10 +27,10 @@ func infraSetup(t *testing.T, e *env, clock *fakeClock) (*client, string, string
 
 // goodDNS gives a domain Google MX, SPF, DKIM and DMARC.
 func goodDNS(e *env, domain string) {
-	e.dns.mx[domain] = []*net.MX{{Host: "aspmx.l.google.com.", Pref: 1}}
-	e.dns.txt[domain] = []string{"v=spf1 include:_spf.google.com ~all"}
-	e.dns.txt["google._domainkey."+domain] = []string{"v=DKIM1; k=rsa; p=MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA"}
-	e.dns.txt["_dmarc."+domain] = []string{"v=DMARC1; p=none"}
+	e.dns.setMX(domain, []*net.MX{{Host: "aspmx.l.google.com.", Pref: 1}})
+	e.dns.setTXT(domain, []string{"v=spf1 include:_spf.google.com ~all"})
+	e.dns.setTXT("google._domainkey."+domain, []string{"v=DKIM1; k=rsa; p=MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA"})
+	e.dns.setTXT("_dmarc."+domain, []string{"v=DMARC1; p=none"})
 }
 
 // addMailbox stands in for a mailbox the person imported.

@@ -34,6 +34,9 @@ type SERPResult struct {
 	Engine string     `json:"engine"`
 	Items  []SERPItem `json:"items"`
 	Cost   SEOCost    `json:"cost"`
+	// Partial: the engine stopped before the depth asked, so a site not in
+	// Items may still rank below them.
+	Partial bool `json:"partial,omitempty"`
 }
 
 // SERPReader reads search results pages.

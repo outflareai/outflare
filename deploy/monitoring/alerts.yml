@@ -65,6 +65,20 @@ groups:
         annotations:
           summary: "Deciding feature flags takes over 250 ms at the 95th percentile, so pages wait longer to show their variant. Check the database pool and the Feature flags row."
 
+      - alert: OutflareABResultsSlow
+        expr: histogram_quantile(0.95, sum by (le) (rate(outflare_ab_results_seconds_bucket[30m]))) > 10
+        for: 30m
+        labels: { severity: info }
+        annotations:
+          summary: "Counting A/B test results takes over 10 seconds at the 95th percentile: a busy site's tests scan many product events. Check the Feature flags row and slow queries on customer_events; caching results or reading them from ClickHouse is the fix."
+
+      - alert: OutflareABResultsFailing
+        expr: sum(increase(outflare_ab_results_total{outcome="error"}[30m])) > 5
+        for: 5m
+        labels: { severity: warning }
+        annotations:
+          summary: "Over 5 A/B test results failed to count in 30 minutes, so people can't see how their tests are doing or end them. Look for errors on .../ab-tests/{test}/results and .../end in the logs (a query over its 30-second limit, or the database)."
+
       - alert: OutflareSmartListsBehind
         expr: max(outflare_smart_lists_oldest_refresh_seconds) > 3600
         for: 15m
@@ -302,3 +316,29 @@ groups:
         labels: { severity: warning }
         annotations:
           summary: "Over half of review page reads fail: a review site may have changed its page or started blocking reads; check the review_page.read_failed events by platform and error code."
+
+      - alert: OutflareSocialPostsOverdue
+        # Approved posts go out within a minute or two of their time; one
+        # 10 minutes late means the social scheduler or the social.publish
+        # jobs are stuck.
+        expr: max by (channel) (outflare_social_publication_overdue_seconds) > 600
+        for: 5m
+        labels: { severity: warning }
+        annotations:
+          summary: "An approved {{ $labels.channel }} post is over 10 minutes past its time; check the social.publish jobs and the engine log for social.scheduler_failed."
+
+      - alert: OutflareSocialPostsFailing
+        expr: sum by (channel) (increase(outflare_social_publishes_total{outcome="failed"}[1h])) > 5
+        for: 15m
+        labels: { severity: warning }
+        annotations:
+          summary: "Over 5 {{ $labels.channel }} posts failed in an hour: the channel may have changed its API or be down; check the social_publication.publish_failed events by error code."
+
+      - alert: OutflareLinkReadsFailing
+        # budget_reached is a workspace's own limit doing its job, not a
+        # fault, so it is left out.
+        expr: sum(rate(outflare_seo_link_reads_total{outcome!~"success|budget_reached"}[6h])) / sum(rate(outflare_seo_link_reads_total[6h])) > 0.5 and sum(increase(outflare_seo_link_reads_total[6h])) > 10
+        for: 1h
+        labels: { severity: warning }
+        annotations:
+          summary: "Over half of link reads (who links to a page) fail: Ahrefs or DataForSEO may be failing or have changed their links API; check link_reads.weekly_failed events and api.called for readLinks by error code."

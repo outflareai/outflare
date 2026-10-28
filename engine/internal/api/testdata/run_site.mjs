@@ -4,7 +4,9 @@
 // answers to each post in turn (a number, or "error" for a network error).
 // With flags (the answer to /v1/site/flags) it also asks for flags, as with
 // data-flags, and prints what onFlags gave and the classes on <html>;
-// stored is what sessionStorage held from an earlier page.
+// stored is what sessionStorage held from an earlier page. With quiet, no
+// onFlags callback reads the flags; read lists flags to read with
+// outflare.flag once they arrive. tracked lists the track events sent.
 import { readFileSync } from "node:fs";
 import vm from "node:vm";
 
@@ -19,7 +21,7 @@ const loc = {
   get search() { return new URL(href).search; },
 };
 const attrs = { "data-key": "ofk_test_not_a_real_key", "data-consent": "granted", "data-domains": opt.domains || "" };
-if (opt.flags) attrs["data-flags"] = "";
+if (opt.flags && !opt.noTag) attrs["data-flags"] = "";
 const classes = new Set(opt.htmlClass ? [opt.htmlClass] : []);
 const storage = new Map(Object.entries(opt.stored || {}));
 const sessionStorage = {
@@ -31,7 +33,7 @@ const document = {
   currentScript: { src: "https://app.outflare.example/site.js", getAttribute: (k) => attrs[k] ?? null },
   referrer: opt.referrer || "",
   title: "",
-  cookie: "",
+  cookie: opt.cookie || "",
   addEventListener() {},
   documentElement: { classList: { add: (c) => classes.add(c), remove: (c) => classes.delete(c) } },
 };
@@ -44,7 +46,11 @@ let posts = 0;
 const statuses = opt.statuses || [200];
 const timers = [];
 let flagAsks = 0;
-const fetch = (url) => {
+const tracked = [];
+const fetch = (url, init) => {
+  if (url.endsWith("/v1/site/events")) {
+    for (const e of JSON.parse(init.body).batch) if (e.type === "track") tracked.push({ event: e.event, properties: e.properties });
+  }
   if (url.endsWith("/v1/site/flags")) {
     flagAsks++;
     return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve(opt.flags) });
@@ -60,10 +66,11 @@ const ctx = vm.createContext({
 });
 vm.runInContext(readFileSync(file, "utf8"), ctx);
 let got = null;
-if (opt.flags) window.outflare.onFlags((f) => { got = { flags: f, payload: window.outflare.flagPayload("hero") }; });
+if (opt.flags && !opt.quiet) window.outflare.onFlags((f) => { got = { flags: { ...f }, payload: window.outflare.flagPayload("hero") }; });
+for (const k of opt.read || []) window.outflare.onFlags(() => window.outflare.flag(k));
 // Let answers arrive and retries run, without waiting for real time.
 for (let i = 0; i < 10; i++) {
   await new Promise((r) => setImmediate(r));
   while (timers.length) timers.shift()();
 }
-console.log(JSON.stringify({ anon: window.outflare.anonymousId(), href, posts, flagAsks, got, classes: [...classes].sort(), stored: Object.fromEntries(storage) }));
+console.log(JSON.stringify({ anon: window.outflare.anonymousId(), href, posts, flagAsks, got, classes: [...classes].sort(), tracked, stored: Object.fromEntries(storage) }));

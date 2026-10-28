@@ -73,9 +73,11 @@ var (
 	smartFailing    = desc("smart_lists", "failing", "Smart lists whose last refresh failed.")
 	reviewPages     = desc("reviews", "pages", "Review pages being read, by platform and state (ok, failing: the last read failed).", "platform", "state")
 	reviewOldest    = desc("reviews", "oldest_read_seconds", "How long since the least recently read active review page was read (or added, if never read), by platform.", "platform")
+	socialScheduled = desc("social", "publications_scheduled", "Approved posts waiting to go out, by channel and state (due: its time has come, later: scheduled ahead).", "channel", "state")
+	socialOverdue   = desc("social", "publication_overdue_seconds", "How long past its time the most overdue approved post is, by channel. Posts go out within a minute or two of their time.", "channel")
 	scrapeErrors    = desc("metrics", "scrape_errors", "Queries that failed in the last database scrape.")
 	scrapeDuration  = desc("metrics", "scrape_duration_seconds", "Time the last database scrape took.")
-	allDescs        = []*prometheus.Desc{poolAcquired, poolIdle, poolTotal, poolMax, poolAcquires, poolWaits, poolWaitSeconds, poolAcquireSecs, poolCanceled, queued, scheduled, oldestDue, running, dbBackends, dbMaxConns, dbLongestXact, dbLockWaits, dbSize, dbCommits, dbRollbacks, dbBlocksHit, dbBlocksRead, dbDeadlocks, dbTempBytes, tableBytes, tableDeadRows, tableSeqScans, pipeItems, pipeOldest, pipeRuns, pipeBreakers, inboxPending, inboxOldest, inboxFailed, smartLists, smartOldest, smartFailing, reviewPages, reviewOldest, scrapeErrors, scrapeDuration}
+	allDescs        = []*prometheus.Desc{poolAcquired, poolIdle, poolTotal, poolMax, poolAcquires, poolWaits, poolWaitSeconds, poolAcquireSecs, poolCanceled, queued, scheduled, oldestDue, running, dbBackends, dbMaxConns, dbLongestXact, dbLockWaits, dbSize, dbCommits, dbRollbacks, dbBlocksHit, dbBlocksRead, dbDeadlocks, dbTempBytes, tableBytes, tableDeadRows, tableSeqScans, pipeItems, pipeOldest, pipeRuns, pipeBreakers, inboxPending, inboxOldest, inboxFailed, smartLists, smartOldest, smartFailing, reviewPages, reviewOldest, socialScheduled, socialOverdue, scrapeErrors, scrapeDuration}
 	gauge, counter  = prometheus.GaugeValue, prometheus.CounterValue
 )
 
@@ -269,6 +271,26 @@ func (p *Postgres) query() []prometheus.Metric {
 		}
 		for platform, age := range oldest {
 			add(reviewOldest, gauge, age, platform)
+		}
+		return nil
+	})
+	run("social_publications", `
+		SELECT channel, CASE WHEN coalesce(scheduled_for, approved_at) <= now() THEN 'due' ELSE 'later' END, count(*),
+			coalesce(max(extract(epoch FROM now() - coalesce(scheduled_for, approved_at))) FILTER (WHERE coalesce(scheduled_for, approved_at) <= now()), 0)::float8
+		FROM social_publications WHERE status = 'approved' GROUP BY 1, 2`, func(r rowser) error {
+		overdue := map[string]float64{}
+		for r.Next() {
+			var channel, state string
+			var n int64
+			var age float64
+			if err := r.Scan(&channel, &state, &n, &age); err != nil {
+				return err
+			}
+			add(socialScheduled, gauge, float64(n), channel, state)
+			overdue[channel] = max(overdue[channel], age)
+		}
+		for channel, age := range overdue {
+			add(socialOverdue, gauge, age, channel)
 		}
 		return nil
 	})

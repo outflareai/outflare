@@ -26,6 +26,10 @@ type fakeX struct {
 	access    string
 	refreshes int
 	followers int
+	// Posts made with POST /2/tweets, and a status to answer it with
+	// instead (a 429, a 503).
+	tweets     []string
+	postStatus int
 }
 
 func (f *fakeX) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -70,6 +74,19 @@ func (f *fakeX) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	switch {
+	case r.URL.Path == "/2/tweets" && r.Method == "POST":
+		if f.postStatus != 0 {
+			w.WriteHeader(f.postStatus)
+			io.WriteString(w, `{"title": "Service Unavailable", "status": 503}`)
+			return
+		}
+		var in struct {
+			Text string `json:"text"`
+		}
+		json.NewDecoder(r.Body).Decode(&in)
+		f.tweets = append(f.tweets, in.Text)
+		w.WriteHeader(201)
+		fmt.Fprintf(w, `{"data": {"id": "50%d", "text": %q}}`, len(f.tweets), in.Text)
 	case r.URL.Path == "/2/users/me":
 		fmt.Fprintf(w, `{"data": {"id": "2244994945", "name": "Northpeak", "username": "northpeak", "profile_image_url": "https://pbs.example/n.png",
 			"public_metrics": {"followers_count": %d, "following_count": 12, "tweet_count": 340}}}`, f.followers)
@@ -92,10 +109,14 @@ func (f *fakeX) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 // fakeLinkedIn answers LinkedIn's API for the server's OAuth app: the
-// person, the pages they administer, followers and page post statistics.
-type fakeLinkedIn struct{}
+// person, the pages they administer, followers, page post statistics and
+// new posts.
+type fakeLinkedIn struct {
+	mu    sync.Mutex
+	posts []map[string]any
+}
 
-func (fakeLinkedIn) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+func (f *fakeLinkedIn) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	if r.URL.Path == "/token" {
 		r.ParseForm()
@@ -138,6 +159,15 @@ func (fakeLinkedIn) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		// The app was not granted the member's analytics.
 		w.WriteHeader(403)
 		io.WriteString(w, `{"message": "Not enough permissions", "status": 403}`)
+	case r.URL.Path == "/rest/posts" && r.Method == "POST":
+		var in map[string]any
+		json.NewDecoder(r.Body).Decode(&in)
+		f.mu.Lock()
+		f.posts = append(f.posts, in)
+		n := len(f.posts)
+		f.mu.Unlock()
+		w.Header().Set("x-restli-id", fmt.Sprintf("urn:li:share:70%d", n))
+		w.WriteHeader(201)
 	case r.URL.Path == "/rest/posts":
 		if q.Get("author") != "urn:li:organization:777" {
 			w.WriteHeader(400)
@@ -173,7 +203,7 @@ func TestSocialAccountsXAndLinkedIn(t *testing.T) {
 	fx := &fakeX{followers: 1500}
 	xs := httptest.NewServer(fx)
 	t.Cleanup(xs.Close)
-	li := httptest.NewServer(fakeLinkedIn{})
+	li := httptest.NewServer(&fakeLinkedIn{})
 	t.Cleanup(li.Close)
 	e.integrations.Client.BaseURLs["x"] = xs.URL
 	e.integrations.Client.BaseURLs["x.auth"] = xs.URL

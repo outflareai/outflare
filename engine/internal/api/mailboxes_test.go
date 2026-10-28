@@ -23,10 +23,14 @@ type fakeDNS struct {
 	txt   map[string][]string
 	host  map[string][]string // blocklist answers; anything else is not found
 	cname map[string]string
-	mu    sync.RWMutex // guards host and txt once jobs are running
+	// mu guards every map: background jobs (domain checks) read them while
+	// a test changes them, so tests change them only through the setters.
+	mu sync.RWMutex
 }
 
 func (f *fakeDNS) LookupCNAME(_ context.Context, name string) (string, error) {
+	f.mu.RLock()
+	defer f.mu.RUnlock()
 	if v, ok := f.cname[name]; ok {
 		return v + ".", nil
 	}
@@ -44,11 +48,26 @@ func (f *fakeDNS) setHost(name string, v []string) {
 	f.host[name] = v
 }
 
-// setTXT changes a TXT answer while jobs may be reading.
+// setTXT, setMX and setCNAME change an answer while jobs may be reading.
 func (f *fakeDNS) setTXT(name string, v []string) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.txt[name] = v
+}
+
+func (f *fakeDNS) setMX(name string, v []*net.MX) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.mx[name] = v
+}
+
+func (f *fakeDNS) setCNAME(name, target string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.cname == nil {
+		f.cname = map[string]string{}
+	}
+	f.cname[name] = target
 }
 
 func (f *fakeDNS) LookupHost(_ context.Context, name string) ([]string, error) {
@@ -61,6 +80,8 @@ func (f *fakeDNS) LookupHost(_ context.Context, name string) ([]string, error) {
 }
 
 func (f *fakeDNS) LookupMX(_ context.Context, name string) ([]*net.MX, error) {
+	f.mu.RLock()
+	defer f.mu.RUnlock()
 	if v, ok := f.mx[name]; ok {
 		return v, nil
 	}
@@ -111,9 +132,9 @@ func TestMailboxImportVerifyAndManage(t *testing.T) {
 	e := freshEnv(t)
 	srv := mailtest.Start(t, map[string]string{"ana@acme.test": "app-pass-1", "bo@acme.test": "app-pass-2"})
 	e.mail.Dialer.TLSConfig = srv.ClientTLS
-	e.dns.mx["gw.test"] = []*net.MX{{Host: "aspmx.l.google.com."}}
-	e.dns.txt["acme.test"] = []string{"v=spf1 include:_spf.google.com ~all"}
-	e.dns.txt["_dmarc.acme.test"] = []string{"v=DMARC1; p=none"}
+	e.dns.setMX("gw.test", []*net.MX{{Host: "aspmx.l.google.com."}})
+	e.dns.setTXT("acme.test", []string{"v=spf1 include:_spf.google.com ~all"})
+	e.dns.setTXT("_dmarc.acme.test", []string{"v=DMARC1; p=none"})
 	e.runJobs(t)
 	owner, ws := setupOwner(t, e.h)
 	base := "/v1/workspaces/" + ws

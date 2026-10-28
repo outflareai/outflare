@@ -56,7 +56,7 @@ func (LinkedIn) Definition() c.Definition {
 			AuthURL: "https://www.linkedin.com/oauth/v2/authorization", TokenURL: "https://www.linkedin.com/oauth/v2/accessToken",
 			Scopes: scopes,
 		},
-		Capabilities: []string{c.CapSocialMetrics},
+		Capabilities: []string{c.CapSocialMetrics, c.CapSocialPublish},
 		Status:       c.Available,
 		Pricing:      "Free",
 	}

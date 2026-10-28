@@ -35,6 +35,10 @@ func (fakeClaude) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		draftSocial(w, string(body))
 		return
 	}
+	if strings.Contains(string(body), "You write one original post for a company's own account") {
+		draftSocialPost(w, string(body))
+		return
+	}
 	if strings.Contains(string(body), "You draft a business's public reply to a customer review") {
 		draftReviewAnswer(w, string(body))
 		return

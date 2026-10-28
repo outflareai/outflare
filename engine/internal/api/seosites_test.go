@@ -3,6 +3,7 @@ package api_test
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -327,6 +328,39 @@ func (fakeGeonode) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		})
 	case "/v1/search":
 		io.WriteString(w, `{"engine": "google", "tokens_charged": 1, "results": [{"position": 1, "title": "Acme", "url": "https://acme.example/"}]}`)
+	case "/v1/google/search/light":
+		// Google Search Light: www.example.com is 13th for "proxy pricing";
+		// "cut short" stops after page 1.
+		var req struct {
+			Query string `json:"query"`
+			Pages int    `json:"pages"`
+		}
+		json.NewDecoder(r.Body).Decode(&req)
+		page := func(n int, urls ...string) map[string]any {
+			res := []any{}
+			for i, u := range urls {
+				res = append(res, map[string]any{"position": i + 1, "title": "A result", "url": u})
+			}
+			return map[string]any{"page": n, "attempts": 1, "results": res}
+		}
+		ten := func(host string) []string {
+			out := make([]string, 10)
+			for i := range out {
+				out[i] = fmt.Sprintf("https://%s/%d", host, i)
+			}
+			return out
+		}
+		switch req.Query {
+		case "proxy pricing":
+			json.NewEncoder(w).Encode(map[string]any{"job_id": "j1", "pages_requested": req.Pages, "pages_returned": 2, "pages_stopped": "no_results",
+				"pages": []any{page(1, ten("rival.example")...), page(2, "https://a.example/", "https://b.example/", "https://www.example.com/pricing")}})
+		case "cut short":
+			json.NewEncoder(w).Encode(map[string]any{"job_id": "j2", "pages_requested": req.Pages, "pages_returned": 1, "pages_stopped": "blocked",
+				"pages": []any{page(1, ten("rival.example")...)}})
+		default:
+			w.WriteHeader(http.StatusUnprocessableEntity)
+			io.WriteString(w, `{"code": "NO_RESULTS", "message": "no results", "retryable": false}`)
+		}
 	default:
 		http.NotFound(w, r)
 	}

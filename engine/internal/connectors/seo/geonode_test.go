@@ -106,3 +106,82 @@ func TestGeonodeWebSearch(t *testing.T) {
 		t.Fatalf("empty: %v", err)
 	}
 }
+
+func TestGeonodeSERP(t *testing.T) {
+	var body map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/google/search/light" {
+			w.WriteHeader(404)
+			return
+		}
+		body = nil
+		json.NewDecoder(r.Body).Decode(&body)
+		switch body["query"] {
+		case "broke":
+			w.WriteHeader(402)
+			io.WriteString(w, `{"code": "PAYMENT_REQUIRED", "message": "no balance", "retryable": false}`)
+		case "blocked":
+			w.WriteHeader(422)
+			io.WriteString(w, `{"code": "UPSTREAM_BLOCKED", "message": "refused", "retryable": true}`)
+		case "nothing":
+			w.WriteHeader(422)
+			io.WriteString(w, `{"code": "NO_RESULTS", "message": "none", "retryable": false}`)
+		case "short":
+			io.WriteString(w, `{"pages_requested": 10, "pages_returned": 1, "pages_stopped": "clock",
+				"pages": [{"page": 1, "results": [{"position": 1, "title": "Rival", "url": "https://rival.example/"}]}]}`)
+		default:
+			io.WriteString(w, `{"job_id": "j", "pages_requested": 10, "pages_returned": 2, "pages_stopped": "no_results", "pages": [
+				{"page": 1, "results": [{"position": 1, "title": " Rival ", "url": "https://rival.example/a"}, {"position": 2, "title": "No URL"}]},
+				{"page": 2, "results": [{"position": 1, "title": "Acme", "url": "https://www.acme.example/pricing", "source_host": "www.acme.example"}]}]}`)
+		}
+	}))
+	defer srv.Close()
+	cl := &c.Client{BaseURLs: map[string]string{"geonode": srv.URL}}
+	g := Geonode{}
+	creds := c.Creds{"api_key": "k"}
+	ctx := context.Background()
+	var _ c.SERPReader = g
+	if !g.Definition().Has(c.CapSERP) || g.SERPEngines()[0] != "google" {
+		t.Fatal("not a SERP reader")
+	}
+	if e := g.EstimateSERP(c.SERPQuery{Depth: 100}); e.USD != 0.005 || !e.Estimated {
+		t.Fatalf("estimate: %+v", e)
+	}
+
+	res, err := g.SERP(ctx, cl, creds, "google", c.SERPQuery{Keyword: "acme pricing", Country: "US", Device: "mobile", Depth: 100})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// One request reads every page, from the country, in its language.
+	if body["pages"] != float64(10) || body["device"] != "mobile" || body["locale"] != "en-US" || body["uule"] != "w+CAIQICINVW5pdGVkIFN0YXRlcw" || body["format"] != "json" {
+		t.Fatalf("request: %v", body)
+	}
+	// Positions run on across pages; results without a URL are left out.
+	if len(res.Items) != 2 || res.Items[0].Title != "Rival" || res.Items[1].Position != 2 || res.Items[1].Domain != "acme.example" || res.Partial {
+		t.Fatalf("items: %+v", res)
+	}
+	if res.Cost.USD != 0.001 || res.Cost.Units != 2 {
+		t.Fatalf("cost: %+v", res.Cost)
+	}
+	if _, err := g.SERP(ctx, cl, creds, "google", c.SERPQuery{Keyword: "acme", Country: "DE", Depth: 10}); err != nil || body["pages"] != float64(1) || body["locale"] != "de-DE" || body["device"] != "desktop" {
+		t.Fatalf("germany: %v %v", body, err)
+	}
+	if res, err := g.SERP(ctx, cl, creds, "google", c.SERPQuery{Keyword: "short", Country: "US", Depth: 100}); err != nil || !res.Partial || res.Cost.Units != 1 {
+		t.Fatalf("short: %+v %v", res, err)
+	}
+	if res, err := g.SERP(ctx, cl, creds, "google", c.SERPQuery{Keyword: "nothing", Country: "US", Depth: 100}); err != nil || len(res.Items) != 0 || res.Cost.USD != 0 {
+		t.Fatalf("no results: %+v %v", res, err)
+	}
+	if _, err := g.SERP(ctx, cl, creds, "google", c.SERPQuery{Keyword: "broke", Country: "US"}); c.KindOf(err) != c.ErrQuota {
+		t.Fatalf("broke: %v", err)
+	}
+	if _, err := g.SERP(ctx, cl, creds, "google", c.SERPQuery{Keyword: "blocked", Country: "US"}); c.KindOf(err) != c.ErrUnavailable {
+		t.Fatalf("blocked: %v", err)
+	}
+	if _, err := g.SERP(ctx, cl, creds, "google", c.SERPQuery{Keyword: "x", Country: "ZZ"}); c.KindOf(err) != c.ErrInvalid {
+		t.Fatalf("country: %v", err)
+	}
+	if _, err := g.SERP(ctx, cl, creds, "bing", c.SERPQuery{Keyword: "x", Country: "US"}); c.KindOf(err) != c.ErrInvalid {
+		t.Fatalf("engine: %v", err)
+	}
+}

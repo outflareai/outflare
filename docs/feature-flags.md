@@ -1,6 +1,6 @@
 # Feature flags
 
-A feature flag turns something on for the visitors you pick, or splits them between versions so you can see which works better. Your website reads flags through Outflare's tracking script, and your servers through the API, and both get the same answer for the same visitor. Experiments (A/B tests with results) are built on flags.
+A feature flag turns something on for the visitors you pick, or splits them between versions so you can see which works better. Your website reads flags through Outflare's tracking script, and your servers through the API, and both get the same answer for the same visitor. [A/B tests](ab-tests.md), with results, are built on flags.
 
 ## Kinds
 
@@ -49,6 +49,7 @@ The script then asks for the visitor's flags as the page loads (and again after 
 - `outflare.flag("key")` returns the version or `false`. It is `false` until the flags arrive, so use `onFlags` when it matters. Calling it on a page without `data-flags` starts asking.
 - `outflare.flagPayload("key")` returns the version's content, if it has any.
 - `<html>` gets a class for each version the visitor has, `of-flag-<flag>-<version>` (`of-flag-pricing-headline-faster`), so a test can be done in CSS alone.
+- Reading a flag (or, with `data-flags`, its class going on `<html>`) sends Experiment Viewed once per visit, so the flag's [A/B test](ab-tests.md) counts the visitor from then.
 
 ### No flicker
 

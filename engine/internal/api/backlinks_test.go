@@ -1,6 +1,7 @@
 package api_test
 
 import (
+	"context"
 	"testing"
 	"time"
 
@@ -80,6 +81,13 @@ func TestBacklinksLifecycle(t *testing.T) {
 	}
 	if len(feed) != 4 || kinds["new"] != 1 || kinds["lost"] != 2 || kinds["regained"] != 1 {
 		t.Fatalf("feed: %v", feed)
+	}
+	// Each change is a webhook event too.
+	var hooks map[string]int
+	if err := e.pool.QueryRow(context.Background(), `SELECT jsonb_object_agg(action, n) FROM (SELECT action, count(*) AS n FROM audit_events
+		WHERE workspace_id = $1 AND action LIKE 'backlink.%' AND target_type = 'backlink' GROUP BY action) x`, ws).Scan(&hooks); err != nil ||
+		hooks["backlink.new"] != 1 || hooks["backlink.lost"] != 2 || hooks["backlink.regained"] != 1 {
+		t.Fatalf("backlink webhooks: %v %v", hooks, err)
 	}
 	if only := owner.must(200, "GET", base+"/backlinks/events?kind=regained", nil)["data"].([]any); len(only) != 1 ||
 		only[0].(map[string]any)["backlink"].(map[string]any)["source_domain"] != "gone.example.org" {

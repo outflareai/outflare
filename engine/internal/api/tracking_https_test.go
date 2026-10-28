@@ -73,7 +73,7 @@ func TestTrackingDomainHTTPS(t *testing.T) {
 		t.Fatalf("added: %v", td)
 	}
 	e.runServerJobs(t)
-	e.dns.cname = map[string]string{"links.acme.example": "domains.outflare.test"}
+	e.dns.setCNAME("links.acme.example", "domains.outflare.test")
 	if td = owner.must(200, "POST", base+"/tracking-domains/"+id+"/check", nil); td["status"] != "verified" || td["https_status"] != "pending" {
 		t.Fatalf("verified: %v", td)
 	}
@@ -111,7 +111,7 @@ func TestTrackingDomainHTTPSFails(t *testing.T) {
 	owner, ws := setupOwner(t, e.h)
 	base := "/v1/workspaces/" + ws
 	e.runServerJobs(t)
-	e.dns.cname = map[string]string{"links.acme.example": "localhost"}
+	e.dns.setCNAME("links.acme.example", "localhost")
 	td := owner.must(201, "POST", base+"/tracking-domains", map[string]string{"domain": "links.acme.example"})
 	waitUntil(t, func() bool {
 		d := owner.must(200, "GET", base+"/tracking-domains", nil)["data"].([]any)[0].(map[string]any)

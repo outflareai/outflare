@@ -55,7 +55,7 @@ func (X) Definition() c.Definition {
 			{Name: "client_id", Label: "OAuth 2.0 client id", Help: "Under Keys and tokens in the X developer console."},
 			{Name: "client_secret", Label: "OAuth 2.0 client secret", Secret: true},
 		},
-		Capabilities: []string{c.CapSocialMetrics},
+		Capabilities: []string{c.CapSocialMetrics, c.CapSocialPublish},
 		Status:       c.Available,
 		Pricing:      "X bills your developer account per use",
 	}

@@ -2,7 +2,7 @@
 
 Outflare finds threads where your brand can genuinely help, drafts a reply that says who you are, and posts it from the brand's own Reddit account once a person approves it. Visitors and sign-ups come back to the reply that brought them, through customer events.
 
-Reddit is the first channel of the Social module. X and LinkedIn start with growth: followers and your own posts' numbers, read every day (below). Publishing, listening and replies on X and LinkedIn come next, through the same watches, posts and actions.
+Reddit is the first channel of the Social module. On X and LinkedIn, Outflare reads growth (followers and your own posts' numbers, every day) and publishes the brand's own posts, written by you or drafted by your AI and approved by a person, now or at a set time (below). Listening and replies on X and LinkedIn come next, through the same watches, posts and actions.
 
 ## Growth on X and LinkedIn
 
@@ -28,10 +28,28 @@ API: `POST .../brands/{brand}/links/discover` (202; 409 `connector_needed` witho
 
 API: `GET .../social/accounts`, `GET`/`PATCH .../social/accounts/{id}`, `GET .../social/accounts/{id}/days`, `GET .../social/posts` and `GET .../social/growth` (scope `social.read`; changes need `social.manage`). MCP: `list_social_accounts`, `update_social_account`, `sync_social_accounts`, `get_social_account_days`, `list_own_social_posts` and `get_social_growth`.
 
+## Publishing on X and LinkedIn
+
+Write a post for one of the brand's accounts on the Social page (or with the API or an agent), or give a short brief and let your own AI model draft it. A person approves it, and it goes out from the brand's own account straight away or at the time you set. Published posts join the account's posts, so their impressions, likes and clicks are read every day like any other post.
+
+- **Accounts.** Any X account or LinkedIn company page or profile your connections reach (above). Posting needs the X connection signed in to the brand's account, or the LinkedIn sign-in; both already ask for the right to post, so nobody signs in again.
+- **Length.** X takes 280 characters and counts every link as 23; LinkedIn takes 3,000. Outflare counts the way the channel does and refuses a post that won't fit, when it is written, edited and approved.
+- **Links.** A link is tagged with UTM (source the channel, medium social, one campaign per account, and the post's own `utm_content`) and goes after the text on its own line, so visitors and sign-ups come back to the post that brought them.
+- **AI drafts.** With a prompt and no text, your own AI model (the **Social posts** task under Settings, AI model) drafts the post in the background, on your AI bill and booked to organic social. It never invents numbers or claims. Ask it again with a new prompt as often as you like.
+- **Approval.** Only a signed-in person approves a post (scope `social.post`); API tokens and agents get 403. Editing an approved post that hasn't gone out takes the approval away. Cancel one that hasn't gone out at any time.
+- **Never twice.** A post is marked as going out before the call. If the channel refuses it, or doesn't answer so it may or may not be up, it is marked failed with the reason and never sent again; check the account and write a new one. Only a rate limit, answered before anything was posted, is tried again.
+- **Costs.** LinkedIn's API is free. X bills the owner of the developer app for each post created (pay per use, more for a post with a link); you pay X directly, on your own app.
+
+### Recurring posts
+
+A series posts on a schedule you run, such as a daily summary of your changelog on the product's own X account. Create the series with its account, a name, a template (what it will post, for the person who approves it) and a daily limit (1 to 24). A person approves the series once. After that, your script or agent hands in each post's text (`POST .../social/series/{id}/posts`) and it goes out with no other approval, up to the daily limit in any 24 hours. Changing the account or template, or raising the limit, needs approving again; pausing stops it.
+
+API: `GET`/`POST .../social/publications`, `GET`/`PATCH`/`DELETE .../social/publications/{id}`, `POST .../{id}/approve` and `POST .../{id}/draft`; `GET`/`POST .../social/series`, `GET`/`PATCH .../social/series/{id}`, `POST .../{id}/approve` and `POST .../{id}/posts`. Reading needs `social.read`, writing `social.manage`, approving `social.post` and a person. MCP: `list_social_publications`, `create_social_publication`, `update_social_publication`, `draft_social_publication`, `cancel_social_publication`, `list_social_series`, `create_social_series`, `update_social_series` and `add_series_post` (there is no approve tool).
+
 ## What it never does
 
 - **No bought upvotes, no networks of other accounts, no undisclosed posts.** Every reply goes out from the brand's own account and ends with a disclosure line, such as "Disclosure: I work at Northpeak." The API refuses a reply without it.
-- **No reply without a person.** Only a signed-in person can approve a reply (`POST .../social/actions/{id}/approve`, scope `social.post`). API tokens and agents get 403, and there is no MCP tool for it.
+- **No reply or post without a person.** Only a signed-in person can approve a reply (`POST .../social/actions/{id}/approve`, scope `social.post`), a post, or a recurring series once. API tokens and agents get 403, and there is no MCP tool for it. Original posts carry no disclosure line: they come from the brand's own account.
 - **No shared keys.** Outflare searches and posts with the workspace's own Reddit app, and drafts with the workspace's own AI model. With no app connected, nothing runs; with no AI model, people write replies themselves.
 
 ## Set up

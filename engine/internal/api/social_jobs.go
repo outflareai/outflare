@@ -43,6 +43,7 @@ func (s *Server) registerSocialJobs(q *jobs.Queue) {
 	q.Handle(jobSocialDraft, s.socialDraftJob)
 	q.Handle(jobSocialAct, s.socialActJob)
 	s.registerSocialAccountJobs(q)
+	s.registerSocialPublishJobs(q)
 	s.registerBrandLinkJobs(q)
 	s.registerReviewJobs(q)
 }
@@ -64,6 +65,9 @@ func (s *Server) RunSocial(ctx context.Context, every time.Duration) {
 			track.Fail(ctx, s.log, track.Event{Name: "social.scheduler_failed", ActorType: "system", Surface: "system"}, "internal", err)
 		}
 		if _, err := s.QueueDueSocialSyncs(ctx); err != nil && ctx.Err() == nil {
+			track.Fail(ctx, s.log, track.Event{Name: "social.scheduler_failed", ActorType: "system", Surface: "system"}, "internal", err)
+		}
+		if _, err := s.QueueDueSocialPublications(ctx); err != nil && ctx.Err() == nil {
 			track.Fail(ctx, s.log, track.Event{Name: "social.scheduler_failed", ActorType: "system", Surface: "system"}, "internal", err)
 		}
 		if _, err := s.QueueDueReviewReads(ctx); err != nil && ctx.Err() == nil {
