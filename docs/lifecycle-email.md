@@ -215,7 +215,10 @@ such as onboarding or win-back (`.../journeys`, MCP `create_journey` and
   "signed_up"}`) and the event is approved in the event catalog, if the
   person and the event meet its `filter`: attribute
   conditions on the record (`{"attribute": "plan", "op": "neq", "value":
-  "free"}`) and property conditions on the event. Kind `manual` starts
+  "free"}`) and property conditions on the event. The event can be one a
+  [rule](rules.md) emits, such as `customer.stalled` after a week without
+  activation, so a journey can follow a change, an absence or a smart
+  list join. Kind `manual` starts
   only when someone adds a person (`POST .../journeys/{id}/runs` with
   `record_id`, MCP `add_to_journey`); any active journey takes manual adds.
 - **Entry.** `once` (the default): a person goes through it once ever.

@@ -167,6 +167,13 @@ var Catalog = []Event{
 	{"journey.updated", "lifecycle_email", "A journey's settings or steps changed."},
 	{"journey_run.entered", "lifecycle_email", "A person entered a journey. The target is the journey; data.via is event or manual."},
 	{"journey_run.exited", "lifecycle_email", "A person left a journey before its end. The target is the journey; data.reason says why (goal, manual, ...)."},
+	// Rules
+	{"rule.created", "rules", "A rule was created in the rules engine (draft until activated). data has trigger, conditions, fire, record_type and emit_event."},
+	{"rule.updated", "rules", "A rule's name, description or definition changed. data.definition_changed says whether its version went up."},
+	{"rule.activated", "rules", "A rule went live. It acts only on what happens from now on."},
+	{"rule.paused", "rules", "A rule was paused: it fires for no one until activated again."},
+	{"rule.archived", "rules", "A rule was archived for good. Its firings stay."},
+	{"rule.fired", "rules", "A rule fired for a record and emitted its event on the record's timeline. data has record_id, event (the emitted event's name), event_id, trigger, depth and rule_version. Fires once per record and episode."},
 	// Setup and install health
 	{"brand_setup.installed", "setup", "A one-click install on a brand's setup checklist finished: the website script through Tag Manager, or a DNS record through the DNS host. data has brand_id, step, method and integration_id."},
 	{"brand_setup.install_failed", "setup", "A one-click install on a brand's setup checklist failed. data has brand_id, step, method and integration_id; GET .../brands/{brand}/setup says why."},

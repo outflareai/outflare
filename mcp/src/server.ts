@@ -7574,6 +7574,144 @@ export function createServer({ client: gtm, workspace, agency, readOnly = false,
     ({ journey, run }) => call(() => gtm.POST("/v1/workspaces/{ws}/journeys/{id}/runs/{run}/exit", { params: { path: { ws, id: journey, run } } })),
   );
 
+  const ruleCondition = z.object({
+    attribute: z.string().optional().describe("A field on the record, such as plan or lifecycle_stage."),
+    property: z.string().optional().describe("A property of the event that set the rule off (for absence, of the start event)."),
+    op: z.enum(["eq", "neq", "gt", "lt", "contains", "exists", "not_exists"]),
+    value: z.unknown().optional(),
+  });
+  const ruleFields = {
+    name: z.string().max(200).optional(),
+    description: z.string().max(2000).optional(),
+    brand_id: z.string().nullable().optional().describe("Only this brand's records (and shared ones); null for every brand."),
+    record_type: z.string().optional().describe("person (default). Only a change rule can watch another record type, such as deal."),
+    trigger: z
+      .object({
+        kind: z.enum(["event", "change", "absence", "audience"]),
+        event: z.string().optional().describe("event: the event. absence: the event that must happen."),
+        start_event: z.string().optional().describe("absence: the event that starts the clock. Leave out for inactivity: each event restarts it."),
+        within_seconds: z.number().int().min(60).max(31536000).optional().describe("absence: how long to wait."),
+        list_id: z.string().optional().describe("audience: the smart list's id."),
+        on: z.enum(["enter", "leave"]).optional().describe("audience: joining or leaving."),
+      })
+      .optional()
+      .describe(
+        "event: an event happens. change: the record's fields come to meet the conditions (no settings). absence: event doesn't happen within within_seconds of start_event. audience: someone joins or leaves a smart list.",
+      ),
+    conditions: z.array(ruleCondition).max(20).optional().describe("Change and audience rules test attributes only."),
+    match: z.enum(["all", "any"]).optional(),
+    emit_event: z.string().optional().describe("The event the rule emits on the record's timeline, such as customer.reactivated. Journeys and webhooks can act on it."),
+    fire: z.enum(["every_time", "once"]).optional().describe("every_time (default): each time the condition becomes true. once: once per record, ever."),
+    cooldown_seconds: z.number().int().min(0).max(31536000).optional(),
+    manual_edits: z.boolean().optional().describe("Let a change someone made by hand fire a change rule. Off by default."),
+  };
+
+  server.registerTool(
+    "list_rules",
+    {
+      title: "List rules",
+      description: "The rules engine's rules, newest first: each turns what happens to records (an event, a change, something not happening in time, joining or leaving a smart list) into a business event of its own.",
+      inputSchema: { status: z.enum(["draft", "active", "paused", "archived"]).optional() },
+      annotations: read,
+    },
+    (query) => call(() => gtm.GET("/v1/workspaces/{ws}/rules", { params: { path, query } })),
+  );
+
+  server.registerTool(
+    "get_rule",
+    {
+      title: "Get a rule",
+      description: "One rule with how often it fired, for how many records, and when last.",
+      inputSchema: { rule: z.string().describe("The rule's id.") },
+      annotations: read,
+    },
+    ({ rule }) => call(() => gtm.GET("/v1/workspaces/{ws}/rules/{id}", { params: { path: { ws, id: rule } } })),
+  );
+
+  server.registerTool(
+    "create_rule",
+    {
+      title: "Draft a rule",
+      description:
+        "A draft rule that emits emit_event on a record's timeline when its trigger happens and its conditions hold, once per episode. It never sends anything itself: a journey or webhook acts on its event. " +
+        "Check it with simulate_rule, then activate_rule.",
+      inputSchema: { ...ruleFields, name: z.string().max(200), trigger: ruleFields.trigger.unwrap(), emit_event: z.string() },
+      annotations: write,
+    },
+    (body) => call(() => gtm.POST("/v1/workspaces/{ws}/rules", { params: { path }, body })),
+  );
+
+  server.registerTool(
+    "update_rule",
+    {
+      title: "Change a rule",
+      description: "Change a draft or paused rule. An active one only changes its name and description: pause_rule first.",
+      inputSchema: { rule: z.string().describe("The rule's id."), ...ruleFields },
+      annotations: write,
+    },
+    ({ rule, ...body }) => call(() => gtm.PATCH("/v1/workspaces/{ws}/rules/{id}", { params: { path: { ws, id: rule } }, body })),
+  );
+
+  server.registerTool(
+    "simulate_rule",
+    {
+      title: "Dry-run a rule",
+      description: "What a rule would have done over the last days (default 30, at most 90): how many records it would have fired for, how many times, and a sample. Nothing is stored or sent.",
+      inputSchema: { rule: z.string().describe("The rule's id."), days: z.number().int().min(1).max(90).optional() },
+      annotations: read,
+    },
+    ({ rule, ...body }) => call(() => gtm.POST("/v1/workspaces/{ws}/rules/{id}/simulate", { params: { path: { ws, id: rule } }, body })),
+  );
+
+  server.registerTool(
+    "activate_rule",
+    {
+      title: "Activate a rule",
+      description:
+        "Make a draft or paused rule live. Confirm with the user first: journeys and webhooks listening to its event will act on it. It only acts on what happens from now on, and is refused if rules would set each other off in a loop.",
+      inputSchema: { rule: z.string().describe("The rule's id.") },
+      annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: true },
+    },
+    ({ rule }) => call(() => gtm.POST("/v1/workspaces/{ws}/rules/{id}/activate", { params: { path: { ws, id: rule } } })),
+  );
+
+  server.registerTool(
+    "pause_rule",
+    {
+      title: "Pause a rule",
+      description: "The rule fires for no one until activated again.",
+      inputSchema: { rule: z.string().describe("The rule's id.") },
+      annotations: write,
+    },
+    ({ rule }) => call(() => gtm.POST("/v1/workspaces/{ws}/rules/{id}/pause", { params: { path: { ws, id: rule } } })),
+  );
+
+  server.registerTool(
+    "archive_rule",
+    {
+      title: "Archive a rule",
+      description: "Stop a rule for good. Its firings and the events it emitted stay.",
+      inputSchema: { rule: z.string().describe("The rule's id.") },
+      annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: false },
+    },
+    ({ rule }) => call(() => gtm.POST("/v1/workspaces/{ws}/rules/{id}/archive", { params: { path: { ws, id: rule } } })),
+  );
+
+  server.registerTool(
+    "list_rule_firings",
+    {
+      title: "List when a rule fired",
+      description: "When a rule fired and for which record, newest first, with the event it emitted and the one that set it off.",
+      inputSchema: {
+        rule: z.string().describe("The rule's id."),
+        record_id: z.string().optional().describe("Only this record's firings."),
+        cursor: z.string().optional(),
+      },
+      annotations: read,
+    },
+    ({ rule, ...query }) => call(() => gtm.GET("/v1/workspaces/{ws}/rules/{id}/firings", { params: { path: { ws, id: rule }, query } })),
+  );
+
   const addresses = z.union([z.string(), z.array(z.string())]);
 
   server.registerTool(

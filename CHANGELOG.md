@@ -6,6 +6,12 @@ Each pull request that changes what Outflare does adds a change note in [changes
 
 ## [Unreleased]
 
+## [0.19.0] - 2026-10-28
+
+### Added
+
+- Rules: turn what happens to your customers into business events of your own, such as "reactivated" or "stalled after sign-up". A rule fires when an event happens, a field changes, something doesn't happen in time or someone joins a smart list, once per episode, and journeys and webhooks act on its event. Try one first with a dry run. API and MCP for now.
+
 ## [0.18.0] - 2026-10-28
 
 ### Added

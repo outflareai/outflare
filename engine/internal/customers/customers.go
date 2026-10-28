@@ -9,6 +9,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"time"
 
@@ -208,12 +209,19 @@ type Event struct {
 // event with the same MessageID is already stored, or the workspace has no
 // such record.
 func Record(ctx context.Context, q Querier, workspaceID string, ev Event) (bool, error) {
+	id, err := RecordEvent(ctx, q, workspaceID, ev)
+	return id != "", err
+}
+
+// RecordEvent is Record returning the stored event's id, or "" when it
+// stored nothing.
+func RecordEvent(ctx context.Context, q Querier, workspaceID string, ev Event) (string, error) {
 	if ev.Properties == nil {
 		ev.Properties = map[string]any{}
 	}
 	props, err := json.Marshal(ev.Properties)
 	if err != nil {
-		return false, err
+		return "", err
 	}
 	if ev.OccurredAt.IsZero() {
 		ev.OccurredAt = time.Now()
@@ -231,10 +239,10 @@ func Record(ctx context.Context, q Querier, workspaceID string, ev Event) (bool,
 		ON CONFLICT (workspace_id, message_id) DO NOTHING RETURNING id::text`,
 		workspaceID, ev.RecordID, ev.Name, string(props), ev.Source, msg, ev.OccurredAt, ev.RequestID).Scan(&id)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return false, nil
+		return "", nil
 	}
 	if err != nil {
-		return false, err
+		return "", err
 	}
 	// The catalog entry goes in before journeys hear of the event: outside a
 	// transaction the job could otherwise run before the name is approved.
@@ -244,28 +252,103 @@ func Record(ctx context.Context, q Querier, workspaceID string, ev Event) (bool,
 			last_seen_at = GREATEST(event_definitions.last_seen_at, EXCLUDED.last_seen_at),
 			first_seen_at = LEAST(COALESCE(event_definitions.first_seen_at, EXCLUDED.first_seen_at), EXCLUDED.first_seen_at)`,
 		workspaceID, ev.Name, ev.OccurredAt); err != nil {
-		return false, err
+		return "", err
 	}
 	if err := EventAdded(ctx, q, workspaceID, id, ev.Name); err != nil {
-		return false, err
+		return "", err
 	}
-	return true, nil
+	return id, nil
 }
 
 // JobJourneyEvent is the job that hands a new event to journeys.
 const JobJourneyEvent = "journey.event"
 
-// EventAdded tells journeys about a new event on a person's timeline when
-// an active journey starts or ends on its name. Call it in the transaction
-// that stored the event.
+// The jobs that hand changes to the rules engine (engine/internal/rules).
+const (
+	JobRuleEvent    = "rule.event"
+	JobRuleChange   = "rule.change"
+	JobRuleAudience = "rule.audience"
+)
+
+// EventAdded tells journeys and rules about a new event on a person's
+// timeline when an active journey starts or ends on its name, or an active
+// rule listens to it. Call it in the transaction that stored the event.
 func EventAdded(ctx context.Context, q Querier, workspaceID, eventID, name string) error {
-	var hit bool
+	var journey, rule bool
 	if err := q.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM journeys WHERE workspace_id = $1
-		AND ((status = 'active' AND trigger_event = $2) OR (status IN ('active', 'paused') AND goal_event = $2)))`,
-		workspaceID, name).Scan(&hit); err != nil || !hit {
+		AND ((status = 'active' AND trigger_event = $2) OR (status IN ('active', 'paused') AND goal_event = $2))),
+		EXISTS (SELECT 1 FROM rules WHERE workspace_id = $1 AND status = 'active' AND $2 = ANY (watch_events))`,
+		workspaceID, name).Scan(&journey, &rule); err != nil {
 		return err
 	}
-	_, err := jobs.Enqueue(ctx, q, jobs.NewJob{Kind: JobJourneyEvent, WorkspaceID: &workspaceID, Payload: map[string]string{"event_id": eventID},
-		IdempotencyKey: "journey-event:" + eventID})
+	if journey {
+		if _, err := jobs.Enqueue(ctx, q, jobs.NewJob{Kind: JobJourneyEvent, WorkspaceID: &workspaceID, Payload: map[string]string{"event_id": eventID},
+			IdempotencyKey: "journey-event:" + eventID}); err != nil {
+			return err
+		}
+	}
+	if rule {
+		if _, err := jobs.Enqueue(ctx, q, jobs.NewJob{Kind: JobRuleEvent, WorkspaceID: &workspaceID, Payload: map[string]string{"event_id": eventID},
+			IdempotencyKey: "rule-event:" + eventID}); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// FieldChange is one field of a record that changed, for rules that test
+// it.
+type FieldChange struct {
+	RecordID string `json:"record_id"`
+	Field    string `json:"field"`
+	// The value before, and whether there was one.
+	Old    any    `json:"old,omitempty"`
+	HadOld bool   `json:"had_old"`
+	Source string `json:"source"`
+}
+
+// FieldChanged tells rules that a record's field changed when an active
+// rule tests that field. Call it in the transaction that changed it.
+func FieldChanged(ctx context.Context, q Querier, workspaceID string, c FieldChange) error {
+	var hit bool
+	if err := q.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM rules WHERE workspace_id = $1 AND status = 'active' AND trigger_kind = 'change'
+		AND $2 = ANY (watch_fields))`, workspaceID, c.Field).Scan(&hit); err != nil || !hit {
+		return err
+	}
+	_, err := jobs.Enqueue(ctx, q, jobs.NewJob{Kind: JobRuleChange, WorkspaceID: &workspaceID, Payload: c})
 	return err
+}
+
+// ListWatched reports whether an active rule acts on people joining or
+// leaving a smart list, so its refresh says who did.
+func ListWatched(ctx context.Context, q Querier, workspaceID, listID string) (bool, error) {
+	var hit bool
+	err := q.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM rules WHERE workspace_id = $1 AND status = 'active' AND list_id = $2)`,
+		workspaceID, listID).Scan(&hit)
+	return hit, err
+}
+
+// ListChange is people who joined or left a smart list in one refresh.
+type ListChange struct {
+	ListID    string    `json:"list_id"`
+	On        string    `json:"on"` // enter or leave
+	RecordIDs []string  `json:"record_ids"`
+	At        time.Time `json:"at"`
+}
+
+// listBatch is the most people one rule.audience job takes.
+const listBatch = 500
+
+// ListChanged hands who joined or left a smart list to rules, in jobs of
+// up to 500 people. Call it in the refresh's transaction.
+func ListChanged(ctx context.Context, q Querier, workspaceID string, c ListChange) error {
+	for start := 0; start < len(c.RecordIDs); start += listBatch {
+		part := c
+		part.RecordIDs = c.RecordIDs[start:min(start+listBatch, len(c.RecordIDs))]
+		if _, err := jobs.Enqueue(ctx, q, jobs.NewJob{Kind: JobRuleAudience, WorkspaceID: &workspaceID, Payload: part,
+			IdempotencyKey: fmt.Sprintf("rule-audience:%s:%s:%d:%d", c.ListID, c.On, c.At.UnixNano(), start)}); err != nil {
+			return err
+		}
+	}
+	return nil
 }

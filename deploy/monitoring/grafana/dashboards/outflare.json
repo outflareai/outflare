@@ -3902,6 +3902,249 @@
     },
     {
       "type": "row",
+      "title": "Rules",
+      "id": 98,
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 265
+      },
+      "panels": []
+    },
+    {
+      "type": "timeseries",
+      "title": "Rule outcomes",
+      "description": "Rules evaluated per minute, by trigger kind and outcome: fired, or why not (no_match is normal; duplicate means a replay was caught; late and before_live are backfills that set nothing off). Absence clocks show as started and stopped.",
+      "id": 99,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 266
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (trigger, outcome) (rate(outflare_rules_evaluations_total{job=\"$job\"}[5m])) * 60",
+          "legendFormat": "{{trigger}} {{outcome}}",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "fillOpacity": 10,
+            "stacking": {
+              "mode": "none"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "mean",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Rule jobs",
+      "description": "Rule jobs per minute by kind and outcome, and how long the slowest wait for a worker (p95). Normal is a few seconds' wait and no dead jobs.",
+      "id": 100,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 266
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (kind, outcome) (rate(outflare_jobs_processed_total{job=\"$job\",kind=~\"rule\\\\..*\"}[5m])) * 60",
+          "legendFormat": "{{kind}} {{outcome}}",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          }
+        },
+        {
+          "refId": "B",
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(outflare_jobs_wait_seconds_bucket{job=\"$job\",kind=~\"rule\\\\..*\"}[5m])))",
+          "legendFormat": "p95 wait seconds",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "fillOpacity": 10,
+            "stacking": {
+              "mode": "none"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "mean",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Absence timers",
+      "description": "Absence timers of active rules that ran out and wait to be handled, and how long the oldest has waited. They are handled every minute, so normal is near 0 and under two minutes.",
+      "id": 101,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 274
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "max(outflare_rules_timers_due{job=\"$job\"})",
+          "legendFormat": "due",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          }
+        },
+        {
+          "refId": "B",
+          "expr": "max(outflare_rules_oldest_due_seconds{job=\"$job\"})",
+          "legendFormat": "oldest seconds",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "fillOpacity": 10,
+            "stacking": {
+              "mode": "none"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "mean",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Active rules",
+      "description": "Active rules in every workspace, by trigger kind.",
+      "id": 102,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 274
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "max by (trigger) (outflare_rules_active{job=\"$job\"})",
+          "legendFormat": "{{trigger}}",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "fillOpacity": 10,
+            "stacking": {
+              "mode": "none"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "mean",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "type": "row",
       "title": "Paid media (conversions sent back)",
       "id": 80,
       "collapsed": false,
@@ -3909,7 +4152,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 265
+        "y": 282
       },
       "panels": []
     },
@@ -3926,7 +4169,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 266
+        "y": 283
       },
       "targets": [
         {
@@ -3979,7 +4222,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 266
+        "y": 283
       },
       "targets": [
         {
@@ -4025,7 +4268,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 274
+        "y": 291
       },
       "panels": []
     },
@@ -4042,7 +4285,7 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 275
+        "y": 292
       },
       "targets": [
         {
@@ -4095,7 +4338,7 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 275
+        "y": 292
       },
       "targets": [
         {
@@ -4145,7 +4388,7 @@
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 275
+        "y": 292
       },
       "targets": [
         {
@@ -4195,7 +4438,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 283
+        "y": 300
       },
       "targets": [
         {
@@ -4245,7 +4488,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 283
+        "y": 300
       },
       "targets": [
         {
@@ -4294,7 +4537,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 291
+        "y": 308
       },
       "panels": []
     },
@@ -4311,7 +4554,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 292
+        "y": 309
       },
       "targets": [
         {
@@ -4361,7 +4604,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 292
+        "y": 309
       },
       "targets": [
         {
@@ -4411,7 +4654,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 300
+        "y": 317
       },
       "targets": [
         {
@@ -4461,7 +4704,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 300
+        "y": 317
       },
       "targets": [
         {
@@ -4507,7 +4750,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 300
+        "y": 317
       },
       "panels": []
     },
@@ -4524,7 +4767,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 301
+        "y": 318
       },
       "targets": [
         {
@@ -4574,7 +4817,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 301
+        "y": 318
       },
       "targets": [
         {
@@ -4624,7 +4867,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 309
+        "y": 326
       },
       "targets": [
         {
@@ -4670,7 +4913,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 317
+        "y": 334
       },
       "panels": []
     },
@@ -4687,7 +4930,7 @@
         "h": 8,
         "w": 24,
         "x": 0,
-        "y": 318
+        "y": 335
       },
       "targets": [
         {

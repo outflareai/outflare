@@ -299,6 +299,7 @@ var Follows = []Ref{
 	{"journey_runs", "record_id"}, {"payment_subscriptions", "record_id"}, {"seo_competitors", "record_id"},
 	{"site_sessions", "record_id"}, {"site_visitors", "record_id"}, {"site_visitors", "account_id"},
 	{"ad_conversion_sends", "record_id"}, {"attribution_conversions", "record_id"}, {"link_prospects", "record_id"},
+	{"rule_firings", "record_id"},
 }
 
 // Owned are the record columns a merge handles itself (identities, links,
@@ -314,6 +315,10 @@ var Owned = []Ref{
 	// The next refresh drops the merged record and adds the one kept, if
 	// it matches.
 	{"smart_list_members", "record_id"},
+	// Where the merged record stood with each rule stays its own: the
+	// record kept has its own state, so it neither fires again nor misses
+	// its own timers.
+	{"rule_states", "record_id"},
 }
 
 // Follow moves every Follows column from one record to another and
@@ -341,6 +346,11 @@ func Follow(ctx context.Context, tx pgx.Tx, workspaceID, fromID, intoID string) 
 		sql := `UPDATE ` + r.Table + ` SET ` + r.Column + ` = $2 WHERE workspace_id = $3 AND ` + r.Column + ` = $1`
 		if r.Table == "email_broadcast_recipients" {
 			sql += ` AND NOT EXISTS (SELECT 1 FROM email_broadcast_recipients o WHERE o.broadcast_id = email_broadcast_recipients.broadcast_id AND o.record_id = $2)`
+		}
+		// A rule that fired for both in the same episode keeps the kept
+		// record's firing.
+		if r.Table == "rule_firings" {
+			sql += ` AND NOT EXISTS (SELECT 1 FROM rule_firings o WHERE o.rule_id = rule_firings.rule_id AND o.record_id = $2 AND o.episode_key = rule_firings.episode_key)`
 		}
 		tag, err := tx.Exec(ctx, sql, fromID, intoID, workspaceID)
 		if err != nil {

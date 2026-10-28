@@ -228,9 +228,11 @@ func attributeChange(ctx context.Context, tx pgx.Tx, ws, id, key string, prev an
 		old = &s
 	}
 	now, _ := json.Marshal(next)
-	_, err := tx.Exec(ctx, `INSERT INTO attribute_changes (workspace_id, record_id, field_key, old_value, new_value, source)
-		VALUES ($1, $2, $3, $4, $5, $6)`, ws, id, key, old, string(now), leadSource)
-	return err
+	if _, err := tx.Exec(ctx, `INSERT INTO attribute_changes (workspace_id, record_id, field_key, old_value, new_value, source)
+		VALUES ($1, $2, $3, $4, $5, $6)`, ws, id, key, old, string(now), leadSource); err != nil {
+		return err
+	}
+	return FieldChanged(ctx, tx, ws, FieldChange{RecordID: id, Field: key, Old: prev, HadOld: had, Source: leadSource})
 }
 
 // PersonVars puts the lead's person into a cold email's merge tags: the

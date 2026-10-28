@@ -19962,6 +19962,234 @@ paths:
         "400": { $ref: "#/components/responses/Error" }
         "404": { $ref: "#/components/responses/Error" }
         default: { $ref: "#/components/responses/Error" }
+  /v1/workspaces/{ws}/rules:
+    parameters: [{ $ref: "#/components/parameters/Workspace" }]
+    get:
+      operationId: listRules
+      x-outflare-access: { scope: customers.read, brand_limited: true }
+      summary: List rules, newest first
+      description: |
+        Scope: customers.read. The rules engine's rules: each turns what happens to records into a business event of its
+        own. Archived rules only with status=archived.
+      tags: [rules]
+      parameters:
+        - { $ref: "#/components/parameters/Brand" }
+        - { name: status, in: query, schema: { $ref: "#/components/schemas/RuleStatus" } }
+      responses:
+        "200":
+          description: Rules.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data: { type: array, items: { $ref: "#/components/schemas/Rule" } }
+        "400": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        default: { $ref: "#/components/responses/Error" }
+    post:
+      operationId: createRule
+      x-outflare-access: { scope: customers.manage, brand_limited: true }
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      summary: Create a rule
+      description: |
+        Scope: customers.manage. A draft rule: when its trigger happens and its conditions hold, it emits emit_event on the
+        record's timeline, which journeys and webhooks act on. Triggers: event (an event happens), change (the record's
+        fields come to meet the conditions), absence (an event doesn't happen within a time), audience (someone joins or
+        leaves a smart list). Check it with POST .../rules/{id}/simulate, then activate it.
+      tags: [rules]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/RuleInput" }
+      responses:
+        "201":
+          description: The rule, a draft.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Rule" }
+        "400": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        "202": { $ref: "#/components/responses/MissionHeld" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/workspaces/{ws}/rules/{id}:
+    parameters:
+      - { $ref: "#/components/parameters/Workspace" }
+      - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+    get:
+      operationId: getRule
+      x-outflare-access: { scope: customers.read, brand_limited: true }
+      summary: Get a rule with how often it fired
+      description: "Scope: customers.read."
+      tags: [rules]
+      responses:
+        "200":
+          description: The rule.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Rule" }
+        "404": { $ref: "#/components/responses/Error" }
+        default: { $ref: "#/components/responses/Error" }
+    patch:
+      operationId: updateRule
+      x-outflare-access: { scope: customers.manage, brand_limited: true }
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      summary: Change a rule
+      description: |
+        Scope: customers.manage. A draft or paused rule changes freely, and a change to what it does raises its version;
+        an active one only its name and description, so pause it first.
+      tags: [rules]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/RuleInput" }
+      responses:
+        "200":
+          description: The rule.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Rule" }
+        "400": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        "202": { $ref: "#/components/responses/MissionHeld" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/workspaces/{ws}/rules/{id}/activate:
+    parameters:
+      - { $ref: "#/components/parameters/Workspace" }
+      - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+    post:
+      operationId: activateRule
+      x-outflare-access: { scope: customers.manage, brand_limited: true }
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      summary: Activate a draft or paused rule
+      description: |
+        Scope: customers.manage. The rule acts only on what happens from now on: events from before, and absence timers
+        that ran out while it was paused, never fire it. Refused (409) when its event would set off active rules that, in
+        the end, set it off again.
+      tags: [rules]
+      responses:
+        "200":
+          description: The rule, active.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Rule" }
+        "400": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        "202": { $ref: "#/components/responses/MissionHeld" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/workspaces/{ws}/rules/{id}/pause:
+    parameters:
+      - { $ref: "#/components/parameters/Workspace" }
+      - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+    post:
+      operationId: pauseRule
+      x-outflare-access: { scope: customers.manage, brand_limited: true }
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      summary: Pause an active rule
+      description: "Scope: customers.manage. It fires for no one until activated again."
+      tags: [rules]
+      responses:
+        "200":
+          description: The rule, paused.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Rule" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        "202": { $ref: "#/components/responses/MissionHeld" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/workspaces/{ws}/rules/{id}/archive:
+    parameters:
+      - { $ref: "#/components/parameters/Workspace" }
+      - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+    post:
+      operationId: archiveRule
+      x-outflare-access: { scope: customers.manage, brand_limited: true }
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      summary: Archive a rule
+      description: "Scope: customers.manage. Stops it for good. Its firings and the events it emitted stay."
+      tags: [rules]
+      responses:
+        "200":
+          description: The rule, archived.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Rule" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        "202": { $ref: "#/components/responses/MissionHeld" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/workspaces/{ws}/rules/{id}/simulate:
+    parameters:
+      - { $ref: "#/components/parameters/Workspace" }
+      - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+    post:
+      operationId: simulateRule
+      x-outflare-access: { scope: customers.read, brand_limited: true }
+      summary: Dry-run a rule over recent days
+      description: |
+        Scope: customers.read. What the rule would have done over the last days (default 30, at most 90), as if it had
+        been active: how many records it would have fired for, how many times, and a sample. Nothing is stored, emitted
+        or sent. Event and absence rules replay the events Postgres keeps; change and audience rules look at records and
+        list members as they are now (see note). Stops after 15 seconds with query_timeout.
+      tags: [rules]
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                days: { type: integer, minimum: 1, maximum: 90, default: 30 }
+      responses:
+        "200":
+          description: What it would have done.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RuleSimulation" }
+        "400": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/workspaces/{ws}/rules/{id}/firings:
+    parameters:
+      - { $ref: "#/components/parameters/Workspace" }
+      - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+    get:
+      operationId: listRuleFirings
+      x-outflare-access: { scope: customers.read, brand_limited: true }
+      summary: When a rule fired and for whom, newest first
+      description: "Scope: customers.read. One per record and episode. Page with cursor=next_cursor."
+      tags: [rules]
+      parameters:
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 200, default: 50 } }
+        - { name: before, in: query, schema: { type: string }, description: From next_before. }
+        - { name: record_id, in: query, schema: { type: string, format: uuid }, description: Only this record's firings. }
+        - { $ref: "#/components/parameters/Cursor" }
+        - { $ref: "#/components/parameters/Fields" }
+      responses:
+        "200":
+          description: Firings.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data: { type: array, items: { $ref: "#/components/schemas/RuleFiring" } }
+                  next_before: { type: [string, "null"] }
+                  next_cursor: { $ref: "#/components/schemas/NextCursor" }
+        "400": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        default: { $ref: "#/components/responses/Error" }
   /v1/workspaces/{ws}/journeys:
     parameters: [{ $ref: "#/components/parameters/Workspace" }]
     get:
@@ -21962,6 +22190,78 @@ webhooks:
             schema: { $ref: "#/components/schemas/WebhookEvent" }
       responses:
         "200": { description: Any 2xx answer means received; anything else is retried. }
+  rule.created:
+    post:
+      operationId: webhook_rule_created
+      summary: "A rule was created in the rules engine (draft until activated). data has trigger, conditions, fire, record_type and emit_event."
+      tags: [webhooks]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/WebhookEvent" }
+      responses:
+        "200": { description: Any 2xx answer means received; anything else is retried. }
+  rule.updated:
+    post:
+      operationId: webhook_rule_updated
+      summary: "A rule's name, description or definition changed. data.definition_changed says whether its version went up."
+      tags: [webhooks]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/WebhookEvent" }
+      responses:
+        "200": { description: Any 2xx answer means received; anything else is retried. }
+  rule.activated:
+    post:
+      operationId: webhook_rule_activated
+      summary: "A rule went live. It acts only on what happens from now on."
+      tags: [webhooks]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/WebhookEvent" }
+      responses:
+        "200": { description: Any 2xx answer means received; anything else is retried. }
+  rule.paused:
+    post:
+      operationId: webhook_rule_paused
+      summary: "A rule was paused: it fires for no one until activated again."
+      tags: [webhooks]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/WebhookEvent" }
+      responses:
+        "200": { description: Any 2xx answer means received; anything else is retried. }
+  rule.archived:
+    post:
+      operationId: webhook_rule_archived
+      summary: "A rule was archived for good. Its firings stay."
+      tags: [webhooks]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/WebhookEvent" }
+      responses:
+        "200": { description: Any 2xx answer means received; anything else is retried. }
+  rule.fired:
+    post:
+      operationId: webhook_rule_fired
+      summary: "A rule fired for a record and emitted its event on the record's timeline. data has record_id, event (the emitted event's name), event_id, trigger, depth and rule_version. Fires once per record and episode."
+      tags: [webhooks]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/WebhookEvent" }
+      responses:
+        "200": { description: Any 2xx answer means received; anything else is retried. }
   brand_setup.installed:
     post:
       operationId: webhook_brand_setup_installed
@@ -22813,7 +23113,7 @@ components:
       required: [id, type, created_at, workspace_id, actor, target, request_id, data]
       properties:
         id: { type: string, description: "Unique per event, and the webhook-id header. Use it to ignore repeats.", example: evt_48213 }
-        type: { type: string, enum: [lead.replied, lead.unsubscribed, inbox.replied, inbox.updated, inbox.classified, lead.bounced, mailbox.auto_paused, lead.created, lead.updated, lead.deleted, leads.imported, suppressions.added, suppression.removed, lead_list.created, lead_list.leads_added, lead_list.run_started, lead_list.build_done, lead_list.build_failed, lead_list.refresh_done, lead_list.refresh_failed, lead_list.enrich_done, lead_list.enrich_failed, import.done, import.failed, sequence.created, sequence.updated, sequence.activated, sequence.paused, sequence.archived, sequence.deleted, sequence.steps_updated, sequence.leads_enrolled, enrollment.stopped, mailbox.imported, mailbox.updated, mailbox.paused, mailbox.resumed, mailbox.stage_changed, mailbox.deleted, domain.added, domain.paused, domain.resumed, domain.removed, email.queued, email.sent, email.delivered, email.bounced, email.complained, email.failed, email.suppressed, email.cancelled, email.unsubscribed, email.opened, email.clicked, email.preferences_changed, email_domain.verified, email_domain.verification_failed, email_provider.events_failed, email_template.published, meeting.created, meeting.updated, meeting.deleted, deal.created, deal.updated, deal.deleted, spend.recorded, integration.connected, integration.updated, integration.disconnected, connect_request.created, deploy.detected, deploy.failed, digest.ready, ai_budget.warned, ai_budget.reached, connection_limit.warned, connection_limit.reached, experiment.started, experiment.concluded, project.created, project.updated, project.deleted, mission.created, mission.updated, mission.submitted, mission.approved, mission.paused, mission.resumed, mission.stopped, mission.completed, mission.action_held, mission.action_approved, mission.action_rejected, infra.plan_created, infra.plan_approved, infra.ordered, infra.order_failed, infra.domains_bought, infra.mailbox_joined, infra.plan_warming, infra.plan_ready, infra.plan_cancelled, fix.found, fix.updated, fix.started, fix.verify_requested, fix.confirmed, fix.reopened, record.created, record.bulk_created, record.bulk_updated, record.updated, record.merged, identity.verified, identity.closed, relationship.added, relationship.ended, consent.granted, consent.withdrawn, consent.bulk_withdrawn, brand.created, brand.updated, email_broadcast.created, email_broadcast.started, email_broadcast.sent, email_broadcast.failed, email_broadcast.cancelled, journey.created, journey.updated, journey_run.entered, journey_run.exited, brand_setup.installed, brand_setup.install_failed, install.issue_opened, install.issue_resolved, seo_site.created, seo_site.verified, seo_site.unverified, seo_site.deleted, crawl.started, crawl.stopped, crawl.done, backlink.new, backlink.lost, backlink.regained, competitor.page_removed, link_prospect.found, link_prospect.excluded, link_prospect.pitched, link_prospect.replied, link_prospect.agreed, link_prospect.live, link_prospect.declined, link_prospect.removed, link_prospect.reopened, link_prospect.updated, link_prospect.deleted, social_action.drafted, social_action.approved, social_action.rejected, social_action.done, social_action.failed, review.posted, review.replied, review.reply_drafted, review_momentum.changed, alert.raised, visitor.became_hot, workspace.updated, webhook.test] }
+        type: { type: string, enum: [lead.replied, lead.unsubscribed, inbox.replied, inbox.updated, inbox.classified, lead.bounced, mailbox.auto_paused, lead.created, lead.updated, lead.deleted, leads.imported, suppressions.added, suppression.removed, lead_list.created, lead_list.leads_added, lead_list.run_started, lead_list.build_done, lead_list.build_failed, lead_list.refresh_done, lead_list.refresh_failed, lead_list.enrich_done, lead_list.enrich_failed, import.done, import.failed, sequence.created, sequence.updated, sequence.activated, sequence.paused, sequence.archived, sequence.deleted, sequence.steps_updated, sequence.leads_enrolled, enrollment.stopped, mailbox.imported, mailbox.updated, mailbox.paused, mailbox.resumed, mailbox.stage_changed, mailbox.deleted, domain.added, domain.paused, domain.resumed, domain.removed, email.queued, email.sent, email.delivered, email.bounced, email.complained, email.failed, email.suppressed, email.cancelled, email.unsubscribed, email.opened, email.clicked, email.preferences_changed, email_domain.verified, email_domain.verification_failed, email_provider.events_failed, email_template.published, meeting.created, meeting.updated, meeting.deleted, deal.created, deal.updated, deal.deleted, spend.recorded, integration.connected, integration.updated, integration.disconnected, connect_request.created, deploy.detected, deploy.failed, digest.ready, ai_budget.warned, ai_budget.reached, connection_limit.warned, connection_limit.reached, experiment.started, experiment.concluded, project.created, project.updated, project.deleted, mission.created, mission.updated, mission.submitted, mission.approved, mission.paused, mission.resumed, mission.stopped, mission.completed, mission.action_held, mission.action_approved, mission.action_rejected, infra.plan_created, infra.plan_approved, infra.ordered, infra.order_failed, infra.domains_bought, infra.mailbox_joined, infra.plan_warming, infra.plan_ready, infra.plan_cancelled, fix.found, fix.updated, fix.started, fix.verify_requested, fix.confirmed, fix.reopened, record.created, record.bulk_created, record.bulk_updated, record.updated, record.merged, identity.verified, identity.closed, relationship.added, relationship.ended, consent.granted, consent.withdrawn, consent.bulk_withdrawn, brand.created, brand.updated, email_broadcast.created, email_broadcast.started, email_broadcast.sent, email_broadcast.failed, email_broadcast.cancelled, journey.created, journey.updated, journey_run.entered, journey_run.exited, rule.created, rule.updated, rule.activated, rule.paused, rule.archived, rule.fired, brand_setup.installed, brand_setup.install_failed, install.issue_opened, install.issue_resolved, seo_site.created, seo_site.verified, seo_site.unverified, seo_site.deleted, crawl.started, crawl.stopped, crawl.done, backlink.new, backlink.lost, backlink.regained, competitor.page_removed, link_prospect.found, link_prospect.excluded, link_prospect.pitched, link_prospect.replied, link_prospect.agreed, link_prospect.live, link_prospect.declined, link_prospect.removed, link_prospect.reopened, link_prospect.updated, link_prospect.deleted, social_action.drafted, social_action.approved, social_action.rejected, social_action.done, social_action.failed, review.posted, review.replied, review.reply_drafted, review_momentum.changed, alert.raised, visitor.became_hot, workspace.updated, webhook.test] }
         created_at: { type: string, format: date-time }
         workspace_id: { type: string, format: uuid }
         actor: { $ref: "#/components/schemas/WebhookRef" }
@@ -23695,6 +23995,100 @@ components:
         status: { oneOf: [{ $ref: "#/components/schemas/EmailStatus" }, { type: "null" }] }
         skipped: { type: [string, "null"], description: Why this person did not get it. }
         created_at: { type: string, format: date-time }
+    RuleStatus: { type: string, enum: [draft, active, paused, archived] }
+    RuleCondition:
+      type: object
+      required: [op]
+      description: |
+        One test. Set attribute (a field on the record, such as plan or address.country) or property (a property of the
+        event that set the rule off; for an absence rule, of the start event). Change and audience rules test attributes
+        only.
+      properties:
+        attribute: { type: string }
+        property: { type: string }
+        op: { type: string, enum: [eq, neq, gt, lt, contains, exists, not_exists] }
+        value: { description: "What eq, neq, gt, lt and contains compare with." }
+    RuleTrigger:
+      type: object
+      required: [kind]
+      description: |
+        What sets the rule off. event: event happens. change: no settings; the record's fields come to meet the
+        conditions (it fires when they become true, and again only after they stop being true). absence: event doesn't
+        happen within within_seconds of start_event; without start_event, each event starts the clock again
+        (inactivity). audience: someone joins (on enter) or leaves (on leave) the smart list list_id.
+      properties:
+        kind: { type: string, enum: [event, change, absence, audience] }
+        event: { type: string, description: "event: the event. absence: the event that must happen." }
+        start_event: { type: string, description: "absence: the event that starts the clock; leave out for inactivity." }
+        within_seconds: { type: integer, minimum: 60, maximum: 31536000, description: "absence: how long to wait." }
+        list_id: { type: string, format: uuid, description: "audience: the smart list." }
+        "on": { type: string, enum: [enter, leave], description: "audience: joining or leaving." }
+    RuleInput:
+      type: object
+      properties:
+        name: { type: string, maxLength: 200 }
+        description: { type: string, maxLength: 2000 }
+        brand_id: { type: [string, "null"], description: "A brand's id or handle: only that brand's records and the shared ones. null for every brand." }
+        record_type: { type: string, description: "What the rule is about (default person). Event, absence and audience rules are about people; a change rule can watch any record type." }
+        trigger: { $ref: "#/components/schemas/RuleTrigger" }
+        conditions: { type: array, maxItems: 20, items: { $ref: "#/components/schemas/RuleCondition" } }
+        match: { type: string, enum: [all, any], description: "all (the default) or any of the conditions must hold." }
+        emit_event: { type: string, description: "The event the rule emits on the record's timeline, such as customer.reactivated. It can't be one the rule listens to." }
+        fire: { type: string, enum: [every_time, once], description: "every_time (the default): each time the condition becomes true. once: once per record, ever." }
+        cooldown_seconds: { type: integer, minimum: 0, maximum: 31536000, description: "At least this long between two firings for one record (default 0)." }
+        manual_edits: { type: boolean, description: "Whether a change someone made by hand can fire a change rule. Off by default, so a correction sets nothing off." }
+    Rule:
+      type: object
+      required: [id, name, description, status, brand_id, record_type, trigger, conditions, match, emit_event, fire, cooldown_seconds, manual_edits, version, activated_at, created_at, updated_at]
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+        description: { type: string }
+        status: { $ref: "#/components/schemas/RuleStatus" }
+        brand_id: { type: [string, "null"] }
+        record_type: { type: string }
+        trigger: { $ref: "#/components/schemas/RuleTrigger" }
+        conditions: { type: array, items: { $ref: "#/components/schemas/RuleCondition" } }
+        match: { type: string, enum: [all, any] }
+        emit_event: { type: string }
+        fire: { type: string, enum: [every_time, once] }
+        cooldown_seconds: { type: integer }
+        manual_edits: { type: boolean }
+        version: { type: integer, description: Goes up when what the rule does changes; each firing records it. }
+        activated_at: { type: [string, "null"], format: date-time, description: When it last went live; it acts on what happens from then. }
+        stats:
+          type: object
+          description: Only on a single rule.
+          required: [firings, records, last_fired_at]
+          properties:
+            firings: { type: integer }
+            records: { type: integer, description: Records it fired for. }
+            last_fired_at: { type: [string, "null"], format: date-time }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    RuleFiring:
+      type: object
+      required: [id, record_id, rule_version, episode_key, event_id, cause_event_id, depth, fired_at]
+      properties:
+        id: { type: string, format: uuid }
+        record_id: { type: string, format: uuid }
+        rule_version: { type: integer }
+        episode_key: { type: string, description: "What made this firing one of its own: the event, the change episode, the absence clock or the list join." }
+        event_id: { type: [string, "null"], format: uuid, description: The event the rule emitted. }
+        cause_event_id: { type: [string, "null"], format: uuid, description: The event that set it off, if one did. }
+        depth: { type: integer, description: "1, or one more than the rule whose event set this one off. Rules stop at 5." }
+        fired_at: { type: string, format: date-time }
+    RuleSimulation:
+      type: object
+      required: [window_days, records, firings, sample, checked, truncated, note]
+      properties:
+        window_days: { type: integer }
+        records: { type: integer, description: Records it would have fired for. }
+        firings: { type: integer, description: How many times in all. }
+        sample: { type: array, items: { type: string, format: uuid }, description: Up to 20 of those records. }
+        checked: { type: integer, description: Events or records looked at. }
+        truncated: { type: boolean, description: More than 50,000 to look at; the numbers are a lower bound. }
+        note: { type: string, description: What was replayed and how to read the numbers. }
     JourneyStatus: { type: string, enum: [draft, active, paused, archived] }
     JourneyRunStatus: { type: string, enum: [active, completed, exited, failed] }
     JourneyCondition:

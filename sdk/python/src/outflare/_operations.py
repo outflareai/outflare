@@ -85,6 +85,29 @@ class Operations(_Mixin):
             idempotency_key=idempotency_key,
         )
 
+    def activate_rule(
+        self,
+        id: str,
+        *,
+        ws: str | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Activate a draft or paused rule.
+
+        Scope: customers.manage. The rule acts only on what happens from now on: events from before, and absence timers
+        that ran out while it was paused, never fire it. Refused (409) when its event would set off active rules that, in
+        the end, set it off again.
+
+        Needs: the customers.manage scope.
+        POST /v1/workspaces/{ws}/rules/{id}/activate
+        """
+        return self._call(
+            "POST",
+            "/v1/workspaces/{ws}/rules/{id}/activate",
+            path={"id": id, "ws": ws},
+            idempotency_key=idempotency_key,
+        )
+
     def add_agency_client(
         self,
         *,
@@ -1184,6 +1207,27 @@ class Operations(_Mixin):
         return self._call(
             "POST",
             "/v1/workspaces/{ws}/journeys/{id}/archive",
+            path={"id": id, "ws": ws},
+            idempotency_key=idempotency_key,
+        )
+
+    def archive_rule(
+        self,
+        id: str,
+        *,
+        ws: str | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Archive a rule.
+
+        Scope: customers.manage. Stops it for good. Its firings and the events it emitted stay.
+
+        Needs: the customers.manage scope.
+        POST /v1/workspaces/{ws}/rules/{id}/archive
+        """
+        return self._call(
+            "POST",
+            "/v1/workspaces/{ws}/rules/{id}/archive",
             path={"id": id, "ws": ws},
             idempotency_key=idempotency_key,
         )
@@ -3345,6 +3389,55 @@ class Operations(_Mixin):
             "/v1/workspaces/{ws}/roles",
             path={"ws": ws},
             body={"description": description, "name": name, "scopes": scopes},
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
+    def create_rule(
+        self,
+        *,
+        ws: str | None = None,
+        brand_id: str | None = None,
+        conditions: list[dict[str, Any]] | None = None,
+        cooldown_seconds: int | None = None,
+        description: str | None = None,
+        emit_event: str | None = None,
+        fire: Literal["every_time", "once"] | None = None,
+        manual_edits: bool | None = None,
+        match: Literal["all", "any"] | None = None,
+        name: str | None = None,
+        record_type: str | None = None,
+        trigger: dict[str, Any] | None = None,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Create a rule.
+
+        Scope: customers.manage. A draft rule: when its trigger happens and its conditions hold, it emits emit_event on the
+        record's timeline, which journeys and webhooks act on. Triggers: event (an event happens), change (the record's
+        fields come to meet the conditions), absence (an event doesn't happen within a time), audience (someone joins or
+        leaves a smart list). Check it with POST .../rules/{id}/simulate, then activate it.
+
+        Needs: the customers.manage scope.
+        POST /v1/workspaces/{ws}/rules
+        """
+        return self._call(
+            "POST",
+            "/v1/workspaces/{ws}/rules",
+            path={"ws": ws},
+            body={
+                "brand_id": brand_id,
+                "conditions": conditions,
+                "cooldown_seconds": cooldown_seconds,
+                "description": description,
+                "emit_event": emit_event,
+                "fire": fire,
+                "manual_edits": manual_edits,
+                "match": match,
+                "name": name,
+                "record_type": record_type,
+                "trigger": trigger,
+            },
             extra_body=extra_body,
             idempotency_key=idempotency_key,
         )
@@ -7690,6 +7783,25 @@ class Operations(_Mixin):
             "/v1/workspaces/{ws}/reviews/summary",
             path={"ws": ws},
             query={"brand": brand, "weeks": weeks},
+        )
+
+    def get_rule(
+        self,
+        id: str,
+        *,
+        ws: str | None = None,
+    ) -> Any:
+        """Get a rule with how often it fired.
+
+        Scope: customers.read.
+
+        Needs: the customers.read scope.
+        GET /v1/workspaces/{ws}/rules/{id}
+        """
+        return self._call(
+            "GET",
+            "/v1/workspaces/{ws}/rules/{id}",
+            path={"id": id, "ws": ws},
         )
 
     def get_semantic_search(
@@ -12292,6 +12404,53 @@ class Operations(_Mixin):
             path={"ws": ws},
         )
 
+    def list_rule_firings(
+        self,
+        id: str,
+        *,
+        ws: str | None = None,
+        limit: int | None = None,
+        before: str | None = None,
+        record_id: str | None = None,
+        cursor: str | None = None,
+        fields: list[str] | None = None,
+    ) -> Any:
+        """When a rule fired and for whom, newest first.
+
+        Scope: customers.read. One per record and episode. Page with cursor=next_cursor.
+
+        Needs: the customers.read scope.
+        GET /v1/workspaces/{ws}/rules/{id}/firings
+        """
+        return self._call(
+            "GET",
+            "/v1/workspaces/{ws}/rules/{id}/firings",
+            path={"id": id, "ws": ws},
+            query={"limit": limit, "before": before, "record_id": record_id, "cursor": cursor, "fields": fields},
+        )
+
+    def list_rules(
+        self,
+        *,
+        ws: str | None = None,
+        brand: str | None = None,
+        status: Literal["draft", "active", "paused", "archived"] | None = None,
+    ) -> Any:
+        """List rules, newest first.
+
+        Scope: customers.read. The rules engine's rules: each turns what happens to records into a business event of its
+        own. Archived rules only with status=archived.
+
+        Needs: the customers.read scope.
+        GET /v1/workspaces/{ws}/rules
+        """
+        return self._call(
+            "GET",
+            "/v1/workspaces/{ws}/rules",
+            path={"ws": ws},
+            query={"brand": brand, "status": status},
+        )
+
     def list_sender_matches(
         self,
         *,
@@ -13650,6 +13809,27 @@ class Operations(_Mixin):
             path={"id": id, "ws": ws},
             body={"reason": reason},
             extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
+    def pause_rule(
+        self,
+        id: str,
+        *,
+        ws: str | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Pause an active rule.
+
+        Scope: customers.manage. It fires for no one until activated again.
+
+        Needs: the customers.manage scope.
+        POST /v1/workspaces/{ws}/rules/{id}/pause
+        """
+        return self._call(
+            "POST",
+            "/v1/workspaces/{ws}/rules/{id}/pause",
+            path={"id": id, "ws": ws},
             idempotency_key=idempotency_key,
         )
 
@@ -16151,6 +16331,34 @@ class Operations(_Mixin):
             "/v1/workspaces/{ws}/test/inbound",
             path={"ws": ws},
             body={"body": body, "kind": kind, "lead_id": lead_id, "message_id": message_id},
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
+    def simulate_rule(
+        self,
+        id: str,
+        *,
+        ws: str | None = None,
+        days: int | None = None,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Dry-run a rule over recent days.
+
+        Scope: customers.read. What the rule would have done over the last days (default 30, at most 90), as if it had
+        been active: how many records it would have fired for, how many times, and a sample. Nothing is stored, emitted
+        or sent. Event and absence rules replay the events Postgres keeps; change and audience rules look at records and
+        list members as they are now (see note). Stops after 15 seconds with query_timeout.
+
+        Needs: the customers.read scope.
+        POST /v1/workspaces/{ws}/rules/{id}/simulate
+        """
+        return self._call(
+            "POST",
+            "/v1/workspaces/{ws}/rules/{id}/simulate",
+            path={"id": id, "ws": ws},
+            body={"days": days},
             extra_body=extra_body,
             idempotency_key=idempotency_key,
         )
@@ -19306,6 +19514,54 @@ class Operations(_Mixin):
             "/v1/workspaces/{ws}/roles/{role}",
             path={"role": role, "ws": ws},
             body={"description": description, "name": name, "scopes": scopes},
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
+    def update_rule(
+        self,
+        id: str,
+        *,
+        ws: str | None = None,
+        brand_id: str | None = None,
+        conditions: list[dict[str, Any]] | None = None,
+        cooldown_seconds: int | None = None,
+        description: str | None = None,
+        emit_event: str | None = None,
+        fire: Literal["every_time", "once"] | None = None,
+        manual_edits: bool | None = None,
+        match: Literal["all", "any"] | None = None,
+        name: str | None = None,
+        record_type: str | None = None,
+        trigger: dict[str, Any] | None = None,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Change a rule.
+
+        Scope: customers.manage. A draft or paused rule changes freely, and a change to what it does raises its version;
+        an active one only its name and description, so pause it first.
+
+        Needs: the customers.manage scope.
+        PATCH /v1/workspaces/{ws}/rules/{id}
+        """
+        return self._call(
+            "PATCH",
+            "/v1/workspaces/{ws}/rules/{id}",
+            path={"id": id, "ws": ws},
+            body={
+                "brand_id": brand_id,
+                "conditions": conditions,
+                "cooldown_seconds": cooldown_seconds,
+                "description": description,
+                "emit_event": emit_event,
+                "fire": fire,
+                "manual_edits": manual_edits,
+                "match": match,
+                "name": name,
+                "record_type": record_type,
+                "trigger": trigger,
+            },
             extra_body=extra_body,
             idempotency_key=idempotency_key,
         )

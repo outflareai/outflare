@@ -360,6 +360,11 @@ func (s *seeder) valueFor(tbl string, c column) (string, any) {
 		return cast, "leak@bravo.example"
 	case "url", "website", "page_url", "target":
 		return cast, "https://bravo.example/"
+	case "emit_event":
+		return cast, "bravo.emitted"
+	}
+	if tbl == "rules" && c.name == "trigger" {
+		return cast, `{"kind": "event", "event": "bravo.happened"}`
 	}
 	if c.typ == "ARRAY" {
 		return cast, "{}"

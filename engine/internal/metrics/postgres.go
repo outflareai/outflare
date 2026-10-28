@@ -71,13 +71,16 @@ var (
 	smartLists      = desc("smart_lists", "lists", "Smart lists in every workspace.")
 	smartOldest     = desc("smart_lists", "oldest_refresh_seconds", "How long since the least recently refreshed smart list was brought up to date (since it was made, if never). Lists refresh every 15 minutes.")
 	smartFailing    = desc("smart_lists", "failing", "Smart lists whose last refresh failed.")
+	rulesActive     = desc("rules", "active", "Active rules in every workspace, by trigger kind.", "trigger")
+	rulesTimersDue  = desc("rules", "timers_due", "Absence timers of active rules that ran out and wait to be handled. Normally 0 or close to it: they are handled every minute.")
+	rulesOldestDue  = desc("rules", "oldest_due_seconds", "How long the longest-waiting absence timer of an active rule has been due. Normally under two minutes.")
 	reviewPages     = desc("reviews", "pages", "Review pages being read, by platform and state (ok, failing: the last read failed).", "platform", "state")
 	reviewOldest    = desc("reviews", "oldest_read_seconds", "How long since the least recently read active review page was read (or added, if never read), by platform.", "platform")
 	socialScheduled = desc("social", "publications_scheduled", "Approved posts waiting to go out, by channel and state (due: its time has come, later: scheduled ahead).", "channel", "state")
 	socialOverdue   = desc("social", "publication_overdue_seconds", "How long past its time the most overdue approved post is, by channel. Posts go out within a minute or two of their time.", "channel")
 	scrapeErrors    = desc("metrics", "scrape_errors", "Queries that failed in the last database scrape.")
 	scrapeDuration  = desc("metrics", "scrape_duration_seconds", "Time the last database scrape took.")
-	allDescs        = []*prometheus.Desc{poolAcquired, poolIdle, poolTotal, poolMax, poolAcquires, poolWaits, poolWaitSeconds, poolAcquireSecs, poolCanceled, queued, scheduled, oldestDue, running, dbBackends, dbMaxConns, dbLongestXact, dbLockWaits, dbSize, dbCommits, dbRollbacks, dbBlocksHit, dbBlocksRead, dbDeadlocks, dbTempBytes, tableBytes, tableDeadRows, tableSeqScans, pipeItems, pipeOldest, pipeRuns, pipeBreakers, inboxPending, inboxOldest, inboxFailed, smartLists, smartOldest, smartFailing, reviewPages, reviewOldest, socialScheduled, socialOverdue, scrapeErrors, scrapeDuration}
+	allDescs        = []*prometheus.Desc{poolAcquired, poolIdle, poolTotal, poolMax, poolAcquires, poolWaits, poolWaitSeconds, poolAcquireSecs, poolCanceled, queued, scheduled, oldestDue, running, dbBackends, dbMaxConns, dbLongestXact, dbLockWaits, dbSize, dbCommits, dbRollbacks, dbBlocksHit, dbBlocksRead, dbDeadlocks, dbTempBytes, tableBytes, tableDeadRows, tableSeqScans, pipeItems, pipeOldest, pipeRuns, pipeBreakers, inboxPending, inboxOldest, inboxFailed, smartLists, smartOldest, smartFailing, rulesActive, rulesTimersDue, rulesOldestDue, reviewPages, reviewOldest, socialScheduled, socialOverdue, scrapeErrors, scrapeDuration}
 	gauge, counter  = prometheus.GaugeValue, prometheus.CounterValue
 )
 
@@ -194,6 +197,32 @@ func (p *Postgres) query() []prometheus.Metric {
 			add(smartLists, gauge, float64(lists))
 			add(smartOldest, gauge, oldest)
 			add(smartFailing, gauge, float64(failing))
+		}
+		return nil
+	})
+	run("rules_active", `SELECT trigger_kind, count(*) FROM rules WHERE status = 'active' GROUP BY trigger_kind`, func(r rowser) error {
+		for r.Next() {
+			var kind string
+			var n int64
+			if err := r.Scan(&kind, &n); err != nil {
+				return err
+			}
+			add(rulesActive, gauge, float64(n), kind)
+		}
+		return nil
+	})
+	run("rules_timers", `
+		SELECT count(*), coalesce(extract(epoch FROM now() - min(s.due_at)), 0)::float8
+		FROM rule_states s JOIN rules r ON r.id = s.rule_id
+		WHERE s.due_at <= now() AND r.status = 'active'`, func(r rowser) error {
+		for r.Next() {
+			var n int64
+			var oldest float64
+			if err := r.Scan(&n, &oldest); err != nil {
+				return err
+			}
+			add(rulesTimersDue, gauge, float64(n))
+			add(rulesOldestDue, gauge, oldest)
 		}
 		return nil
 	})

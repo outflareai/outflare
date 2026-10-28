@@ -166,6 +166,10 @@ var (
 		Buckets: []float64{.01, .05, .1, .25, .5, 1, 2.5, 5, 10},
 	})
 	// Query: read-only SQL run for people and agents.
+	ruleEvaluations = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Namespace: namespace, Subsystem: "rules", Name: "evaluations_total",
+		Help: "Rules evaluated for a record, by trigger kind and outcome (fired; or why not: no_match, duplicate, cooldown, late, before_live, too_deep, manual; absence clocks started and stopped).",
+	}, []string{"trigger", "outcome"})
 	queryRuns = prometheus.NewCounterVec(prometheus.CounterOpts{
 		Namespace: namespace, Subsystem: "query", Name: "runs_total",
 		Help: "Queries run, by outcome (success, invalid, timeout, unavailable, error).",
@@ -253,6 +257,7 @@ var own = []prometheus.Collector{
 	hooksReceived, hookEvents, hookLag,
 	domainConnectLookups, domainConnectDuration,
 	queryRuns, queryDuration, queryRows,
+	ruleEvaluations,
 	semanticRuns, semanticItems, semanticDuration, semanticAvailable, semanticWorkspaces,
 	adConversions, adConversionsOldest,
 	reviewReads, reviewsFound, linkReads,
@@ -361,6 +366,10 @@ func FlagCache(hit bool) {
 		flagCache.WithLabelValues("miss").Inc()
 	}
 }
+
+// RuleEvaluated counts one rule evaluated for one record, by trigger kind
+// and outcome.
+func RuleEvaluated(trigger, outcome string) { ruleEvaluations.WithLabelValues(trigger, outcome).Inc() }
 
 // ABResults records counting one A/B test's results: its outcome (ok,
 // error) and time.

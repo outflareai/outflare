@@ -193,6 +193,9 @@ func checkCondition(c Condition) string {
 	return ""
 }
 
+// CheckCondition reports what is wrong with one condition, or "".
+func CheckCondition(c Condition) string { return checkCondition(c) }
+
 // Templates is every template a journey's steps send.
 func Templates(steps []Step) []string {
 	out := []string{}

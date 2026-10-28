@@ -72,6 +72,7 @@ import (
 	"github.com/outflareai/outflare/engine/internal/platforms"
 	"github.com/outflareai/outflare/engine/internal/ranks"
 	"github.com/outflareai/outflare/engine/internal/research"
+	"github.com/outflareai/outflare/engine/internal/rules"
 	"github.com/outflareai/outflare/engine/internal/secrets"
 	"github.com/outflareai/outflare/engine/internal/sending"
 	"github.com/outflareai/outflare/engine/internal/seointel"
@@ -322,6 +323,10 @@ func Run(ctx context.Context, log *slog.Logger, cmd string, exts ...Extension) e
 	// Smart lists keep their members up to date from their rules.
 	smart := &smartlists.Service{Pool: pool, Log: log}
 	smart.Register(queue)
+	// Rules turn what happens to records into business events of their
+	// own, which journeys and webhooks act on.
+	ruleEngine := &rules.Service{Pool: pool, Log: log}
+	ruleEngine.Register(queue)
 	// The daily or weekly digest of each workspace, emailed only through
 	// the workspace's own email provider.
 	digest := &digests.Service{Pool: pool, Emails: lifecycle, PublicURL: cfg.PublicURL, Log: log}
@@ -485,6 +490,12 @@ func Run(ctx context.Context, log *slog.Logger, cmd string, exts ...Extension) e
 		go func() {
 			defer wg.Done()
 			smart.Run(ctx, time.Minute)
+		}()
+		// Absence rules' timers.
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			ruleEngine.Run(ctx, time.Minute)
 		}()
 		wg.Add(1)
 		go func() {

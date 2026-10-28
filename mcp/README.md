@@ -135,6 +135,7 @@ Read (always available):
 | `list_email_topics` | Subscription topics for lifecycle email, such as product updates |
 | `list_email_broadcasts`, `get_email_broadcast` | Lifecycle emails sent to many people at once, with results; who was skipped and why |
 | `list_journeys`, `get_journey`, `list_journey_runs` | If-this-then-that flows for people on customer records, what each step did, and who is in them |
+| `list_rules`, `get_rule`, `simulate_rule`, `list_rule_firings` | The rules engine: rules that turn what happens to records into business events, a dry run of what one would have done, and when it fired for whom |
 | `list_emails`, `get_email`, `get_email_recipient` | Transactional and lifecycle emails with delivery status, opens, clicks and what triggered each; one email's content and timeline; everything one address was sent |
 | `list_lead_lists`, `get_lead_list` | Lead lists with sizes, search settings and the latest build |
 | `list_lead_list_members` | A list's leads with their ICP fit score and reasons, best first |
@@ -319,6 +320,7 @@ Write (left out when `OUTFLARE_MCP_READ_ONLY=1`):
 | `create_email_topic`, `update_email_topic` | Add, rename or archive a topic people can choose on the preference page |
 | `create_email_broadcast`, `update_email_broadcast`, `send_email_broadcast`, `cancel_email_broadcast` | Draft a newsletter or announcement to a topic's subscribers or a list of customer records, send it now or later, or stop it |
 | `create_journey`, `update_journey`, `activate_journey`, `pause_journey`, `archive_journey`, `add_to_journey`, `exit_journey_run` | Build a flow that an event starts (send an email, wait, branch, exit), turn it on or off, and add or take out people |
+| `create_rule`, `update_rule`, `activate_rule`, `pause_rule`, `archive_rule` | Build a rule (an event happens, a field changes, something doesn't happen in time, someone joins or leaves a smart list) that emits a business event, and turn it on or off |
 | `create_infra_plan`, `update_infra_plan` | Draft or change a plan for domains and mailboxes; a draft buys nothing |
 | `approve_infra_plan` | Start buying, on the user's own supplier account (needs `infrastructure.approve`) |
 | `mark_domains_bought`, `cancel_infra_plan` | Tell a manual plan its domains are bought; stop a plan |

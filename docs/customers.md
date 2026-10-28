@@ -2,7 +2,7 @@
 
 Customer records are Outflare's one model of the people and companies a workspace knows, plus any other kind of record it tracks, such as deals, subscriptions or partners. The customer data platform, the CRM and lifecycle email all read and write the same records, so a fact about someone is stored once, whichever feature or connector wrote it.
 
-This covers the customer data platform so far: records, their identities and links, the shared catalog, product events, duplicates and merges, each record's timeline, and consent. [Search](workspace-search.md) finds records and their history by their words, [Query](query.md) reads it with SQL; segments and rules build on it.
+This covers the customer data platform so far: records, their identities and links, the shared catalog, product events, duplicates and merges, each record's timeline, and consent. [Search](workspace-search.md) finds records and their history by their words, [Query](query.md) reads it with SQL; [smart lists](lists.md#smart-lists) group it, and [rules](rules.md) turn what happens to records into business events of their own, which journeys and webhooks act on.
 
 Everything here works the same from the REST API and the MCP server.
 

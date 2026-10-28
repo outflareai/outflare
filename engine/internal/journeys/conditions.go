@@ -153,3 +153,27 @@ func compare(v any, ok bool, op string, want any) bool {
 	}
 	return false
 }
+
+// Holds reports whether attribute and property conditions hold for a
+// record's fields and an event's properties: all of them, or any when
+// match is any. Other features (rules) test the same way journeys do.
+func Holds(attributes, properties map[string]any, conds []Condition, match string) bool {
+	for _, c := range conds {
+		var ok bool
+		switch {
+		case c.Attribute != "":
+			v, found := lookup(attributes, c.Attribute)
+			ok = compare(v, found, c.Op, c.Value)
+		case c.Property != "":
+			v, found := lookup(properties, c.Property)
+			ok = compare(v, found, c.Op, c.Value)
+		}
+		if match == "any" && ok {
+			return true
+		}
+		if match != "any" && !ok {
+			return false
+		}
+	}
+	return match != "any"
+}

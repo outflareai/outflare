@@ -430,6 +430,7 @@ func (s *Server) buildHandler() http.Handler {
 	s.routesLeads(mux)
 	s.routesLists(mux)
 	s.routesSmartLists(mux)
+	s.routesRules(mux)
 	s.routesSequences(mux)
 	s.routesInbox(mux)
 	s.routesInboxTags(mux)

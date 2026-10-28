@@ -18,6 +18,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/outflareai/outflare/engine/internal/auth"
+	"github.com/outflareai/outflare/engine/internal/customers"
 )
 
 // Customer records: the people, companies and other things a workspace
@@ -502,9 +503,11 @@ func attributeChanged(ctx context.Context, tx pgx.Tx, a *access, id, key string,
 		return &s
 	}
 	old, now := asJSON(prev, had), asJSON(next, next != nil)
-	_, err := tx.Exec(ctx, `INSERT INTO attribute_changes (workspace_id, record_id, field_key, old_value, new_value, source, actor_id, request_id)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`, a.WorkspaceID, id, key, old, now, source, nullIfEmpty(a.ActorID), RequestID(ctx))
-	return err
+	if _, err := tx.Exec(ctx, `INSERT INTO attribute_changes (workspace_id, record_id, field_key, old_value, new_value, source, actor_id, request_id)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`, a.WorkspaceID, id, key, old, now, source, nullIfEmpty(a.ActorID), RequestID(ctx)); err != nil {
+		return err
+	}
+	return customers.FieldChanged(ctx, tx, a.WorkspaceID, customers.FieldChange{RecordID: id, Field: key, Old: prev, HadOld: had, Source: source})
 }
 
 // syncReferences keeps a record reference field's links in

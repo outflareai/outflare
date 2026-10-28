@@ -23,6 +23,7 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/outflareai/outflare/engine/internal/customers"
 	"github.com/outflareai/outflare/engine/internal/jobs"
 	"github.com/outflareai/outflare/engine/internal/track"
 )
@@ -384,18 +385,38 @@ func Refresh(ctx context.Context, tx pgx.Tx, ws, listID string) (Result, error) 
 	if _, err := tx.Exec(ctx, `SET LOCAL statement_timeout = '`+refreshTimeout+`'`); err != nil {
 		return res, err
 	}
+	// Rules that act on people joining or leaving need to know who did;
+	// otherwise counts are enough.
+	watched, err := customers.ListWatched(ctx, tx, ws, listID)
+	if err != nil {
+		return res, err
+	}
+	who := `'{}'::text[], '{}'::text[]`
+	if watched {
+		who = `(SELECT COALESCE(array_agg(record_id::text), '{}') FROM added), (SELECT COALESCE(array_agg(record_id::text), '{}') FROM gone)`
+	}
 	where, args := Where(rules, match, brandID, []any{ws})
 	args = append(args, listID)
 	l := "$" + strconv.Itoa(len(args))
+	var joined, left []string
 	err = tx.QueryRow(ctx, `WITH want AS (SELECT r.id FROM records r WHERE `+where+`),
 		gone AS (DELETE FROM smart_list_members m WHERE m.list_id = `+l+`
-			AND NOT EXISTS (SELECT 1 FROM want w WHERE w.id = m.record_id) RETURNING 1),
+			AND NOT EXISTS (SELECT 1 FROM want w WHERE w.id = m.record_id) RETURNING m.record_id),
 		added AS (INSERT INTO smart_list_members (workspace_id, list_id, record_id) SELECT $1, `+l+`, id FROM want
-			ON CONFLICT (list_id, record_id) DO NOTHING RETURNING 1)
-		SELECT (SELECT count(*) FROM added)::int, (SELECT count(*) FROM gone)::int, (SELECT count(*) FROM want)::int`, args...).
-		Scan(&res.Joined, &res.Left, &res.Members)
+			ON CONFLICT (list_id, record_id) DO NOTHING RETURNING record_id)
+		SELECT (SELECT count(*) FROM added)::int, (SELECT count(*) FROM gone)::int, (SELECT count(*) FROM want)::int, `+who, args...).
+		Scan(&res.Joined, &res.Left, &res.Members, &joined, &left)
 	if err != nil {
 		return res, err
+	}
+	at := time.Now()
+	for on, ids := range map[string][]string{"enter": joined, "leave": left} {
+		if len(ids) == 0 {
+			continue
+		}
+		if err := customers.ListChanged(ctx, tx, ws, customers.ListChange{ListID: listID, On: on, RecordIDs: ids, At: at}); err != nil {
+			return res, err
+		}
 	}
 	_, err = tx.Exec(ctx, `UPDATE smart_lists SET members = $3, refreshed_at = now(), error_code = NULL WHERE workspace_id = $1 AND id = $2`,
 		ws, listID, res.Members)
