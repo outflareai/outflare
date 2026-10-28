@@ -5,8 +5,11 @@
 # without this the cache would never be refreshed.
 #
 # It compiles everything the tests and go vet compile, without running
-# anything. It is a workflow of its own, so a cancelled or failed fill never
-# counts against main's CI (which Cloud waits on before it deploys).
+# anything, and keeps only what that build used: restoring the last cache and
+# saving it again with this commit's builds added made it grow on every push,
+# until unpacking it filled the test runners' disks. It is a workflow of its
+# own, so a cancelled or failed fill never counts against main's CI (which
+# Cloud waits on before it deploys).
 name: Go cache
 
 on:
@@ -37,10 +40,20 @@ jobs:
           path: |
             ~/.cache/go-build
             ~/go/pkg/mod
-          key: go-build-${{ runner.os }}-${{ hashFiles('go.sum') }}-${{ github.sha }}
+          key: go-build-v2-${{ runner.os }}-${{ hashFiles('go.sum') }}-${{ github.sha }}
           restore-keys: |
-            go-build-${{ runner.os }}-${{ hashFiles('go.sum') }}-
-            go-build-${{ runner.os }}-
+            go-build-v2-${{ runner.os }}-${{ hashFiles('go.sum') }}-
+            go-build-v2-${{ runner.os }}-
+      # Go refreshes a cache file's modification time when a build uses it
+      # (if it is more than an hour old), so marking every restored file as
+      # old, building, and deleting what is still old leaves exactly what
+      # this commit's build needs.
+      - name: Mark the restored build cache as unused
+        run: |
+          mkdir -p ~/.cache/go-build
+          find ~/.cache/go-build -mindepth 2 -type f -exec touch -d '2 days ago' {} +
+          touch -d '1 day ago' "$RUNNER_TEMP/unused-before"
+          du -sh ~/.cache/go-build
       - name: Compile everything the tests and go vet compile
         run: |
           go vet ./...
@@ -48,9 +61,13 @@ jobs:
           # then "runs" each with /bin/true, so no test (or database) runs.
           # (-c -o dir can't be used: several packages share a name.)
           go test -race -exec /bin/true ./...
+      - name: Drop what this build didn't use
+        run: |
+          find ~/.cache/go-build -mindepth 2 -type f ! -newer "$RUNNER_TEMP/unused-before" -delete
+          du -sh ~/.cache/go-build
       - uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
           path: |
             ~/.cache/go-build
             ~/go/pkg/mod
-          key: go-build-${{ runner.os }}-${{ hashFiles('go.sum') }}-${{ github.sha }}
+          key: go-build-v2-${{ runner.os }}-${{ hashFiles('go.sum') }}-${{ github.sha }}

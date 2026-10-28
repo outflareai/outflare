@@ -11,7 +11,11 @@
 // outflare methods to call once the page loaded ([name, ...args]), and
 // held are scripts kept back for consent (data-category). It also prints
 // the choices sent, Consent Mode's dataLayer, Microsoft's uetq, the calls
-// Meta's fbq got, the scripts let through and the cookies left.
+// Meta's fbq got, the scripts let through and the cookies left. With
+// loaded the page has finished loading; local is localStorage, tags the
+// page's scripts and iframes ({tag, src}) and policySpots how many
+// data-outflare-cookie-policy elements it has. It prints the cookie
+// report sent and what the policy elements were filled with.
 // With quiet, no onFlags callback reads the flags; read lists flags to read
 // with outflare.flag once they arrive. tracked lists the track events sent.
 import { readFileSync } from "node:fs";
@@ -30,6 +34,7 @@ const loc = {
 const attrs = { "data-key": "ofk_test_not_a_real_key", "data-consent": opt.consent || "granted", "data-domains": opt.domains || "" };
 if (opt.flags && !opt.noTag) attrs["data-flags"] = "";
 if (opt.bannerOff) attrs["data-banner"] = "off";
+if (opt.cookiesOff) attrs["data-cookies"] = "off";
 const classes = new Set(opt.htmlClass ? [opt.htmlClass] : []);
 const storage = new Map(Object.entries(opt.stored || {}));
 const sessionStorage = {
@@ -52,7 +57,18 @@ const held = (opt.held || []).map((h) => {
   };
   return el;
 });
+const local = new Map(Object.entries(opt.local || {}));
+const localStorage = {
+  getItem: (k) => (local.has(k) ? local.get(k) : null),
+  setItem: (k, v) => local.set(k, String(v)),
+  removeItem: (k) => local.delete(k),
+  key: (i) => [...local.keys()][i] ?? null,
+  get length() { return local.size; },
+};
+const tags = (opt.tags || []).map((t) => ({ tagName: t.tag.toUpperCase(), getAttribute: (k) => (k === "src" ? t.src : null) }));
+const spots = Array.from({ length: opt.policySpots || 0 }, () => ({ innerHTML: "", querySelector: () => null }));
 const document = {
+  readyState: opt.loaded ? "complete" : "loading",
   currentScript: { src: "https://app.outflare.example/site.js", getAttribute: (k) => attrs[k] ?? null },
   referrer: opt.referrer || "",
   title: "",
@@ -64,7 +80,11 @@ const document = {
     else jar.set(k.trim(), v);
   },
   addEventListener() {},
-  querySelectorAll: (q) => (q.includes("data-category") ? held.filter((h) => h.getAttribute("type") === "text/plain" && h.getAttribute("data-of-loaded") === null) : []),
+  querySelectorAll: (q) =>
+    q.includes("data-category") ? held.filter((h) => h.getAttribute("type") === "text/plain" && h.getAttribute("data-of-loaded") === null)
+    : q.includes("cookie-policy") ? spots
+    : q.startsWith("script[src]") ? tags
+    : [],
   createElement: () => {
     const n = { attrs: {}, setAttribute(k, v) { n.attrs[k] = v; } };
     return n;
@@ -82,8 +102,16 @@ const timers = [];
 let flagAsks = 0;
 const choices = [];
 let bannerAsks = 0;
+const cookieReports = [];
 const tracked = [];
 const fetch = (url, init) => {
+  if (url.includes("/v1/site/cookie-policy")) {
+    return Promise.resolve({ ok: true, status: 200, text: () => Promise.resolve("<div>policy</div>") });
+  }
+  if (url.endsWith("/v1/site/cookies")) {
+    cookieReports.push(JSON.parse(init.body));
+    return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve({ added: 0 }) });
+  }
   if (url.includes("/v1/site/consent")) {
     if (init && init.method === "POST") {
       choices.push(JSON.parse(init.body));
@@ -108,7 +136,7 @@ if (opt.fbq) window.fbq = (...a) => fbq.push(a);
 const ctx = vm.createContext({
   window, document, history, location: loc, URL, URLSearchParams, Intl, Date, Math, JSON, Array,
   navigator: { language: opt.language || "en", sendBeacon: () => true, globalPrivacyControl: !!opt.gpc },
-  crypto: globalThis.crypto, fetch, setTimeout: (f) => timers.push(f), sessionStorage,
+  crypto: globalThis.crypto, fetch, setTimeout: (f) => timers.push(f), sessionStorage, localStorage,
 });
 vm.runInContext(readFileSync(file, "utf8"), ctx);
 // Let the banner's settings arrive before acting like the visitor.
@@ -124,5 +152,5 @@ for (let i = 0; i < 10; i++) {
   while (timers.length) timers.shift()();
 }
 console.log(JSON.stringify({ anon: window.outflare.anonymousId(), href, posts, flagAsks, got, classes: [...classes].sort(), tracked, stored: Object.fromEntries(storage),
-  choices, bannerAsks, state, consent: window.outflare.consent(), dataLayer: (window.dataLayer || []).map((a) => [...a]), uetq: window.uetq || null, fbq, ran,
+  choices, bannerAsks, cookieReports, policy: spots.map((s) => s.innerHTML), local: Object.fromEntries(local), state, consent: window.outflare.consent(), dataLayer: (window.dataLayer || []).map((a) => [...a]), uetq: window.uetq || null, fbq, ran,
   cookies: Object.fromEntries(jar) }));

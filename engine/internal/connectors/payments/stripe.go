@@ -44,7 +44,8 @@ func (Stripe) Definition() c.Definition {
 		Summary: "See who pays you: customers, subscriptions, payments and refunds on each person's record.",
 		Description: "Reads your Stripe customers, subscriptions, payments and refunds, every few minutes. Each customer becomes a person " +
 			"with their plan, monthly revenue, lifetime revenue and billing status, and each payment is an event on their timeline, " +
-			"so the CRM, lifecycle email, missions and partners all use the same numbers. Read-only: Outflare never charges, refunds or changes anything in Stripe.",
+			"so the CRM, lifecycle email, missions and partners all use the same numbers. Outflare never charges, refunds or changes payments in Stripe; " +
+			"the one thing it can create is a promotion code for a partner, for a coupon you already have, when your key allows it.",
 		Website: "https://stripe.com", DocsURL: "https://docs.stripe.com/api",
 		KeyURL: "https://dashboard.stripe.com/apikeys",
 		Auth:   c.AuthOAuth2, AuthMethods: c.Both,
@@ -57,8 +58,9 @@ func (Stripe) Definition() c.Definition {
 		},
 		Fields: []c.Field{{Name: "api_key", Label: "Restricted key", Secret: true, Placeholder: "rk_live_...",
 			Help: "In Stripe: Developers, API keys, Create restricted key. Give it Read access to Customers, Charges, Events, Products, " +
-				"Prices and Subscriptions (under Billing), and nothing else. A test-mode key reads test data."}},
-		Capabilities: []string{c.CapPayments},
+				"Prices and Subscriptions (under Billing). To create partners' promo codes from Outflare, also give it Write access to " +
+				"Promotion codes and Read access to Coupons. A test-mode key reads test data."}},
+		Capabilities: []string{c.CapPayments, c.CapPromoCodes},
 		Pricing:      "Free: Stripe does not charge for API calls",
 	}
 }
@@ -80,6 +82,34 @@ func get(ctx context.Context, cl *c.Client, creds c.Creds, path string, q url.Va
 }
 
 var errMissing = errors.New("stripe: no such object")
+
+// post calls Stripe with a form and decodes the answer into out.
+func post(ctx context.Context, cl *c.Client, creds c.Creds, path string, form url.Values, idempotency string, out any) error {
+	req, _ := http.NewRequest(http.MethodPost, cl.Base("stripe", stripeAPI)+path, strings.NewReader(form.Encode()))
+	req.Header.Set("Authorization", "Bearer "+c.Token(creds))
+	req.Header.Set("Stripe-Version", stripeVersion)
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	if idempotency != "" {
+		req.Header.Set("Idempotency-Key", idempotency)
+	}
+	_, err := c.DoJSON(ctx, cl, "Stripe", req, out)
+	return err
+}
+
+// CreatePromoCode makes a promotion code for one of the account's coupons.
+func (Stripe) CreatePromoCode(ctx context.Context, cl *c.Client, creds c.Creds, code, coupon string, metadata map[string]string) (string, error) {
+	form := url.Values{"code": {code}, "coupon": {coupon}}
+	for k, v := range metadata {
+		form.Set("metadata["+k+"]", v)
+	}
+	var out struct {
+		ID string `json:"id"`
+	}
+	if err := post(ctx, cl, creds, "/v1/promotion_codes", form, "outflare-promo-"+coupon+"-"+code, &out); err != nil {
+		return "", err
+	}
+	return out.ID, nil
+}
 
 func (Stripe) Test(ctx context.Context, cl *c.Client, creds c.Creds) (c.Account, error) {
 	var list struct {

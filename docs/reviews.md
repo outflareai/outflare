@@ -19,10 +19,11 @@ With [Geonode](connectors.md) connected, Outflare searches the web for the brand
 
 ## Reading them every day
 
-Outflare reads each active page once a day through the workspace's own page reader (Geonode), and straight away when the page is added. The first read takes the page's history, up to 25 pages of reviews; later reads take the newest and stop at the first review already kept. Each read costs Geonode tokens on your own account: one per page of reviews read, so about one a day per site once the history is in. With no page reader connected, nothing is read and the page says which connection to add.
+Outflare reads each active page once a day through the workspace's own page reader (Geonode), and straight away when the page is added. The first read takes the page's history, up to 25 pages of reviews; later reads take the newest and stop at the first review already kept. Capterra lists its most helpful reviews first, so a daily Capterra read takes up to 5 pages instead. Each read costs Geonode tokens on your own account: one per page of reviews read, so about one a day per site once the history is in. With no page reader connected, nothing is read and the page says which connection to add.
 
 When a read fails, Outflare says why on the Reviews page and tries again on its own:
 
+- G2 and Google pages are always read in a browser (G2 shows anything else a bot check), which costs more Geonode tokens per page.
 - A page that shows no reviews (often a bot check, or a page built by its script) is read again in a browser straight away. If that works, later reads of the page start in a browser.
 - After that, a failed read is tried again the same day, so the day's numbers still come in: after 15 minutes, then 1 and 2 hours, then every 4 hours until one works. Only a wrong address (`page_not_found`) waits for the next day's read, since a person has to fix it.
 - **Try again** on the page (or `POST /v1/workspaces/{ws}/reviews/pages/{id}/read`, the `read_review_page` MCP tool) reads it now.

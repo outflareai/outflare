@@ -3061,6 +3061,7 @@ paths:
               required: [domain]
               properties:
                 domain: { type: string, example: links.acme-com.example }
+                partner_program: { type: string, description: "A partner program's id or slug: the domain serves its portal instead (also needs partners.manage), such as partners.acme-com.example. A program has one; 409 when it already has a domain." }
       responses:
         "201":
           description: The domain, with the result of the first check.
@@ -17392,6 +17393,160 @@ paths:
               schema: { $ref: "#/components/schemas/ConsentBanner" }
         "202": { $ref: "#/components/responses/MissionHeld" }
         default: { $ref: "#/components/responses/Error" }
+  /v1/workspaces/{ws}/site-keys/{id}/cookies:
+    parameters:
+      - { $ref: "#/components/parameters/Workspace" }
+      - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+    get:
+      operationId: listSiteCookies
+      x-outflare-access: { scope: customers.read }
+      summary: List a site's cookies and scripts
+      description: |
+        Scope: customers.read. Every cookie, storage key, script, embed and pixel found on the site key's site, from scans of
+        its pages and from what the website script sees in visitors' browsers (names only, never values), each matched to a
+        vendor in Outflare's catalogue. Ones the catalogue doesn't know have category unknown and status new: classify them
+        (PATCH .../cookies/{cookie}) for them to be in the cookie policy. before_consent marks one a browser had before the
+        visitor allowed its category. counts.to_review is how many wait for a person.
+      tags: [records]
+      responses:
+        "200":
+          description: What was found, the last scan and the policy's latest version.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, counts, scan, policy]
+                properties:
+                  data: { type: array, items: { $ref: "#/components/schemas/SiteCookie" } }
+                  counts:
+                    type: object
+                    required: [total, listed, to_review, before_consent]
+                    properties:
+                      total: { type: integer }
+                      listed: { type: integer, description: In the cookie policy. }
+                      to_review: { type: integer, description: "Unknown to the catalogue and not yet classified." }
+                      before_consent: { type: integer, description: "Seen in a browser before the visitor allowed their category." }
+                  scan: { oneOf: [{ $ref: "#/components/schemas/CookieScan" }, { type: "null" }], description: The latest scan. }
+                  policy:
+                    oneOf:
+                      - type: "null"
+                      - type: object
+                        required: [version, published_at, url]
+                        properties:
+                          version: { type: integer }
+                          published_at: { type: string, format: date-time }
+                          url: { type: string, description: The hosted policy page. }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/workspaces/{ws}/site-keys/{id}/cookies/{cookie}:
+    parameters:
+      - { $ref: "#/components/parameters/Workspace" }
+      - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      - { name: cookie, in: path, required: true, schema: { type: string, format: uuid } }
+    patch:
+      operationId: updateSiteCookie
+      x-outflare-access: { scope: customers.manage }
+      summary: Classify a cookie or script
+      description: |
+        Scope: customers.manage. Say what it is: its category, purpose and how long it is kept, and status listed (in the
+        policy) or ignored (never listed, such as a test cookie). A person's word stands over the catalogue's from then on.
+        The policy is published again when it changes. Records site_cookie.classified.
+      tags: [records]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/SiteCookieInput" }
+      responses:
+        "200":
+          description: The item.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SiteCookie" }
+        "202": { $ref: "#/components/responses/MissionHeld" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/workspaces/{ws}/site-keys/{id}/cookie-scans:
+    parameters:
+      - { $ref: "#/components/parameters/Workspace" }
+      - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+    post:
+      operationId: startCookieScan
+      x-outflare-access: { scope: customers.manage }
+      summary: Scan a site for cookies
+      description: |
+        Scope: customers.manage. Reads up to 20 of the site's pages as OutflareBot (each origin's home page, then the pages visits
+        land on most), following robots.txt, and records the cookies its server sets and the third-party scripts, embeds and
+        pixels in its HTML. Cookies that scripts set come from visitors' browsers instead. Sites with the consent banner on are
+        scanned every week. Answers 201 with the new scan, or 200 with one already waiting or running. Records cookie_scan.started.
+      tags: [records]
+      responses:
+        "201":
+          description: Queued.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CookieScan" }
+        "200":
+          description: A scan was already waiting or running.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CookieScan" }
+        "202": { $ref: "#/components/responses/MissionHeld" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/workspaces/{ws}/site-keys/{id}/cookie-policy:
+    parameters:
+      - { $ref: "#/components/parameters/Workspace" }
+      - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+    get:
+      operationId: getCookiePolicy
+      x-outflare-access: { scope: customers.read }
+      summary: Get a site's cookie policy
+      description: |
+        Scope: customers.read. The site's cookie policy as published: its latest version, or an earlier one with version. It
+        lists what was found on the site by category and vendor, everything not ignored and seen in the last 30 days, with its
+        purpose and how long it is kept. content is the policy in format (markdown, text or html). Published again on its own
+        whenever what the site uses changes; a version that adds a vendor needing consent asks visitors again. 404 until the
+        first scan or browser report.
+      tags: [records]
+      parameters:
+        - { name: format, in: query, schema: { type: string, enum: [markdown, text, html] }, description: "content's format. Default markdown." }
+        - { name: version, in: query, schema: { type: integer, minimum: 1 } }
+      responses:
+        "200":
+          description: The policy.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CookiePolicy" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/workspaces/{ws}/site-keys/{id}/cookie-policy/versions:
+    parameters:
+      - { $ref: "#/components/parameters/Workspace" }
+      - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+    get:
+      operationId: listCookiePolicyVersions
+      x-outflare-access: { scope: customers.read }
+      summary: List a site's cookie policy versions
+      description: "Scope: customers.read. Every version, newest first, with what it added and removed (kind:name) and whether it asked visitors again."
+      tags: [records]
+      responses:
+        "200":
+          description: Versions.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data:
+                    type: array
+                    items:
+                      type: object
+                      required: [version, published_at, added, removed, reasked]
+                      properties:
+                        version: { type: integer }
+                        published_at: { type: string, format: date-time }
+                        added: { type: array, items: { type: string } }
+                        removed: { type: array, items: { type: string } }
+                        reasked: { type: boolean }
+        default: { $ref: "#/components/responses/Error" }
   /v1/workspaces/{ws}/visitors:
     parameters: [{ $ref: "#/components/parameters/Workspace" }]
     get:
@@ -17686,6 +17841,84 @@ paths:
     options:
       operationId: sendSiteConsentPreflight
       summary: CORS preflight for consent choices
+      description: "Public. Any origin may send; the key, not the page, is checked."
+      tags: [records]
+      responses:
+        "204": { description: Allowed. }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/site/cookie-policy:
+    get:
+      operationId: getSiteCookiePolicy
+      summary: Get a site's cookie policy, publicly
+      description: |
+        Public: the site key (ofk_) is the authority. The site's latest cookie policy, for its own pages: json (the policy),
+        markdown, text or html (a fragment for a page, with a button that opens the consent banner). The website script fills
+        elements with data-outflare-cookie-policy from it; the same policy as a whole page is at /cookie-policy/{site key id}.
+        404 until the site's first scan or browser report.
+      tags: [records]
+      parameters:
+        - { name: key, in: query, required: true, schema: { type: string }, example: ofk_test_not_a_real_key }
+        - { name: format, in: query, schema: { type: string, enum: [json, markdown, text, html] }, description: "Default json." }
+      responses:
+        "200":
+          description: The policy.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CookiePolicy" }
+            text/markdown:
+              schema: { type: string }
+            text/plain:
+              schema: { type: string }
+            text/html:
+              schema: { type: string }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/site/cookies:
+    post:
+      operationId: sendSiteCookies
+      summary: Report a site's cookies from a browser
+      description: |
+        Public: the site key (ofk_) in the body is the authority. What the website script sends at most once a day per browser:
+        the names of the page's cookies and storage keys and the host and first path segment of its scripts and iframes, never
+        a value, a query string or who the visitor is. granted is the visitor's choice when the consent banner is on, so what
+        was there before they allowed it is flagged. Send the JSON as text/plain to skip the CORS preflight.
+      tags: [records]
+      requestBody:
+        required: true
+        content:
+          text/plain:
+            schema: { type: string }
+          application/json:
+            schema:
+              type: object
+              required: [key]
+              properties:
+                key: { type: string, example: ofk_test_not_a_real_key }
+                cookies: { type: array, maxItems: 200, items: { type: string } }
+                local: { type: array, maxItems: 200, items: { type: string } }
+                session: { type: array, maxItems: 200, items: { type: string } }
+                scripts: { type: array, maxItems: 200, items: { type: string } }
+                iframes: { type: array, maxItems: 100, items: { type: string } }
+                path: { type: string }
+                granted:
+                  type: object
+                  properties:
+                    analytics: { type: boolean }
+                    marketing: { type: boolean }
+                    preferences: { type: boolean }
+      responses:
+        "200":
+          description: Taken.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [added]
+                properties:
+                  added: { type: integer, description: Names new to the site. }
+        default: { $ref: "#/components/responses/Error" }
+    options:
+      operationId: sendSiteCookiesPreflight
+      summary: CORS preflight for cookie reports
       description: "Public. Any origin may send; the key, not the page, is checked."
       tags: [records]
       responses:
@@ -21411,6 +21644,988 @@ paths:
         "400": { $ref: "#/components/responses/Error" }
         "404": { $ref: "#/components/responses/Error" }
         default: { $ref: "#/components/responses/Error" }
+  /v1/workspaces/{ws}/partner-programs:
+    parameters: [{ $ref: "#/components/parameters/Workspace" }]
+    get:
+      operationId: listPartnerPrograms
+      x-outflare-access: { scope: partners.read }
+      summary: List partner programs
+      description: "Scope: partners.read. Referral, affiliate and influencer programs, oldest first, with their reward rules."
+      tags: [partners]
+      parameters:
+        - { $ref: "#/components/parameters/Brand" }
+        - { name: status, in: query, schema: { type: string, enum: [active, paused, archived] } }
+      responses:
+        "200":
+          description: Programs.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data: { type: array, items: { $ref: "#/components/schemas/PartnerProgram" } }
+        "400": { $ref: "#/components/responses/Error" }
+        default: { $ref: "#/components/responses/Error" }
+    post:
+      operationId: createPartnerProgram
+      x-outflare-access: { scope: partners.manage }
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      summary: Create a partner program from a preset
+      description: |
+        Scope: partners.manage. kind picks the preset; every setting it fills in can be changed. referral: two-sided
+        action rewards on the first sale (your system grants them), a 60-day window, a 14-day hold, partners accepted
+        at once. affiliate: 20% of every sale, a 30-day window, a 30-day hold, a $50 minimum payout. influencer: track
+        only (log fees by hand), no hold. The credit rule (window, first or last, codes_win) belongs to the program and
+        never follows the workspace's attribution settings. Pass rules to start with your own.
+      tags: [partners]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/PartnerProgramInput" }
+      responses:
+        "201":
+          description: The program.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PartnerProgram" }
+        "400": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        "202": { $ref: "#/components/responses/MissionHeld" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/workspaces/{ws}/partner-programs/{id}:
+    parameters:
+      - { $ref: "#/components/parameters/Workspace" }
+      - { name: id, in: path, required: true, description: "The program's id or slug.", schema: { type: string } }
+    get:
+      operationId: getPartnerProgram
+      x-outflare-access: { scope: partners.read }
+      summary: Get a partner program
+      description: "Scope: partners.read. With its reward rules and groups."
+      tags: [partners]
+      responses:
+        "200":
+          description: The program.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PartnerProgram" }
+        "404": { $ref: "#/components/responses/Error" }
+        default: { $ref: "#/components/responses/Error" }
+    patch:
+      operationId: updatePartnerProgram
+      x-outflare-access: { scope: partners.manage }
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      summary: Change a partner program's settings, or pause, archive or restore it
+      description: "Scope: partners.manage. Send only what changes. kind and slug can't change; currency can't once there are rewards. A paused program credits nothing new; its links still land."
+      tags: [partners]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/PartnerProgramInput" }
+      responses:
+        "200":
+          description: The program.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PartnerProgram" }
+        "400": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "202": { $ref: "#/components/responses/MissionHeld" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/workspaces/{ws}/partner-programs/{id}/rules:
+    parameters:
+      - { $ref: "#/components/parameters/Workspace" }
+      - { name: id, in: path, required: true, description: "The program's id or slug.", schema: { type: string } }
+    put:
+      operationId: setPartnerRules
+      x-outflare-access: { scope: partners.manage }
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      summary: Replace a partner program's reward rules
+      description: |
+        Scope: partners.manage. Rules stack: every rule a conversion matches gives a reward, except that only the best
+        cash rule (percent or fixed) for the partner counts: a group's own rule beats one for everyone, then the highest
+        tier (min_sales) reached. [] makes the program track only. Rewards already in the ledger keep what they earned.
+      tags: [partners]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [rules]
+              properties:
+                rules: { type: array, maxItems: 50, items: { $ref: "#/components/schemas/PartnerRuleInput" } }
+      responses:
+        "200":
+          description: The program.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PartnerProgram" }
+        "400": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "202": { $ref: "#/components/responses/MissionHeld" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/workspaces/{ws}/partner-programs/{id}/groups:
+    parameters:
+      - { $ref: "#/components/parameters/Workspace" }
+      - { name: id, in: path, required: true, description: "The program's id or slug.", schema: { type: string } }
+    post:
+      operationId: createPartnerGroup
+      x-outflare-access: { scope: partners.manage }
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      summary: Add a partner group (a tier with its own rates)
+      description: "Scope: partners.manage. Then give the group its own rules (group_id) and move partners into it."
+      tags: [partners]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name: { type: string, maxLength: 80 }
+      responses:
+        "201":
+          description: The group.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PartnerGroup" }
+        "400": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        "202": { $ref: "#/components/responses/MissionHeld" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/workspaces/{ws}/partner-programs/{id}/groups/{group}:
+    parameters:
+      - { $ref: "#/components/parameters/Workspace" }
+      - { name: id, in: path, required: true, description: "The program's id or slug.", schema: { type: string } }
+      - { name: group, in: path, required: true, schema: { type: string, format: uuid } }
+    delete:
+      operationId: deletePartnerGroup
+      x-outflare-access: { scope: partners.manage }
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      summary: Remove a partner group
+      description: "Scope: partners.manage. Its own rules go with it; its partners move to no group."
+      tags: [partners]
+      responses:
+        "204": { description: Removed. }
+        "404": { $ref: "#/components/responses/Error" }
+        "202": { $ref: "#/components/responses/MissionHeld" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/workspaces/{ws}/partner-programs/{id}/postback:
+    parameters:
+      - { $ref: "#/components/parameters/Workspace" }
+      - { name: id, in: path, required: true, description: "The program's id or slug.", schema: { type: string } }
+    post:
+      operationId: rotatePartnerPostback
+      x-outflare-access: { scope: partners.manage }
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      summary: Make the program's incoming postback URL
+      description: |
+        Scope: partners.manage. Shown once; making another retires the last. Partners' trackers and backends that can
+        only call a URL report conversions to it (GET or POST /v1/partner-postbacks/{token}). Treat it like a password:
+        anyone with it can report conversions to this program.
+      tags: [partners]
+      responses:
+        "201":
+          description: The URL.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [url, hint]
+                properties:
+                  url: { type: string, description: The postback URL, with its secret. }
+                  hint: { type: string, description: "The start of the secret, shown later as postback_hint." }
+        "404": { $ref: "#/components/responses/Error" }
+        "202": { $ref: "#/components/responses/MissionHeld" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/workspaces/{ws}/partner-programs/{id}/widget-sessions:
+    parameters:
+      - { $ref: "#/components/parameters/Workspace" }
+      - { name: id, in: path, required: true, description: "A program's id or slug.", schema: { type: string } }
+    post:
+      operationId: createPartnerWidgetSession
+      x-outflare-access: { scope: partners.conversions }
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      summary: Open the referral widget for a customer signed in to your app
+      description: |
+        Scope: partners.conversions. Call it from your backend when a signed-in customer opens the page that shows the
+        widget, and put embed_url in an iframe. The customer becomes a partner in the program if they aren't one (active
+        when the program accepts partners on its own, otherwise pending), identified with customer_id, email or
+        record_id the same way as conversions. The widget shows their link, promo codes and earnings, and uses a session
+        that lasts 12 hours; never cache embed_url or show it to anyone else. The widget posts
+        {type: "outflare:partner-widget", height} to its parent page whenever its height changes.
+      tags: [partners]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                customer_id: { type: string, description: Your own id for the customer. }
+                email: { type: string, format: email }
+                record_id: { type: string, format: uuid }
+                name: { type: string, description: Set on a new customer record only. }
+      responses:
+        "201":
+          description: The widget session.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [token, embed_url, expires_in_seconds, partner_id, status, code, link]
+                properties:
+                  token: { type: string, description: The session; embed_url carries it. }
+                  embed_url: { type: string }
+                  expires_in_seconds: { type: integer }
+                  partner_id: { type: string, format: uuid }
+                  status: { type: string, enum: [pending, active, suspended, rejected] }
+                  code: { type: string }
+                  link: { type: string }
+        "400": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "202": { $ref: "#/components/responses/MissionHeld" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/workspaces/{ws}/partner-programs/{id}/portal:
+    parameters:
+      - { $ref: "#/components/parameters/Workspace" }
+      - { name: id, in: path, required: true, description: "The program's id or slug.", schema: { type: string } }
+    put:
+      operationId: setPartnerPortal
+      x-outflare-access: { scope: partners.manage }
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      summary: Open, close or set up a program's partner portal
+      description: |
+        Scope: partners.manage. The portal is where partners apply, sign in with a link emailed through the workspace's own
+        email provider (settings.email_from), and see their links, codes, masked referred customers, rewards and payouts. It
+        is served at {subdomain}.{the server's partners domain}, on a tracking domain tied to the program
+        (POST .../tracking-domains with partner_program), or at /p/{id}/ on this server. settings, when sent, replace the
+        stored ones; a kind's defaults fill in pages and sign-up.
+      tags: [partners]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                enabled: { type: boolean }
+                subdomain: { type: [string, "null"], description: "Lowercase letters, digits and hyphens; \"\" for none." }
+                settings: { $ref: "#/components/schemas/PartnerPortalSettings" }
+      responses:
+        "200":
+          description: The program.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PartnerProgram" }
+        "400": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        "202": { $ref: "#/components/responses/MissionHeld" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/workspaces/{ws}/partner-programs/{id}/assets:
+    parameters:
+      - { $ref: "#/components/parameters/Workspace" }
+      - { name: id, in: path, required: true, description: "The program's id or slug.", schema: { type: string } }
+    get:
+      operationId: listPartnerAssets
+      x-outflare-access: { scope: partners.read }
+      summary: List a program's assets for partners
+      description: "Scope: partners.read. Banners, copy, email swipes and links shown on the portal's Assets page."
+      tags: [partners]
+      responses:
+        "200":
+          description: Assets.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data: { type: array, items: { $ref: "#/components/schemas/PartnerAsset" } }
+        "404": { $ref: "#/components/responses/Error" }
+        default: { $ref: "#/components/responses/Error" }
+    post:
+      operationId: createPartnerAsset
+      x-outflare-access: { scope: partners.manage }
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      summary: Add an asset for partners
+      description: "Scope: partners.manage. image: a banner's https address. text: copy or an email swipe. link: a page to promote."
+      tags: [partners]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [kind, title]
+              properties:
+                kind: { type: string, enum: [image, text, link] }
+                title: { type: string, maxLength: 200 }
+                body: { type: string, maxLength: 10000 }
+                url: { type: string, maxLength: 2000 }
+                position: { type: integer }
+      responses:
+        "201":
+          description: The asset.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PartnerAsset" }
+        "400": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "202": { $ref: "#/components/responses/MissionHeld" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/workspaces/{ws}/partner-programs/{id}/assets/{asset}:
+    parameters:
+      - { $ref: "#/components/parameters/Workspace" }
+      - { name: id, in: path, required: true, description: "The program's id or slug.", schema: { type: string } }
+      - { name: asset, in: path, required: true, schema: { type: string, format: uuid } }
+    delete:
+      operationId: deletePartnerAsset
+      x-outflare-access: { scope: partners.manage }
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      summary: Remove an asset
+      description: "Scope: partners.manage."
+      tags: [partners]
+      responses:
+        "204": { description: Removed. }
+        "404": { $ref: "#/components/responses/Error" }
+        "202": { $ref: "#/components/responses/MissionHeld" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/workspaces/{ws}/partners/{id}/impersonate:
+    parameters:
+      - { $ref: "#/components/parameters/Workspace" }
+      - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+    post:
+      operationId: impersonatePartner
+      x-outflare-access: { scope: partners.manage }
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      summary: See the portal as a partner does
+      description: |
+        Scope: partners.manage. A one-time link that opens the program's portal as the partner sees it, read-only, for an
+        hour, even while the portal is closed. Recorded in the audit log (partner.impersonated).
+      tags: [partners]
+      responses:
+        "201":
+          description: The link.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [url, read_only, expires_in_seconds]
+                properties:
+                  url: { type: string }
+                  read_only: { type: boolean }
+                  expires_in_seconds: { type: integer, description: How long the link works; the session it opens lasts an hour. }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "202": { $ref: "#/components/responses/MissionHeld" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/workspaces/{ws}/partners:
+    parameters: [{ $ref: "#/components/parameters/Workspace" }]
+    get:
+      operationId: listPartners
+      x-outflare-access: { scope: partners.read }
+      summary: List partners, newest first
+      description: "Scope: partners.read. Each partner's membership in one program, with their links, promo codes and totals."
+      tags: [partners]
+      parameters:
+        - { $ref: "#/components/parameters/Brand" }
+        - { name: program, in: query, description: "A program's id or slug.", schema: { type: string } }
+        - { name: status, in: query, schema: { type: string, enum: [pending, active, suspended, rejected] } }
+        - { name: record_id, in: query, description: The partner's customer record., schema: { type: string, format: uuid } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 500, default: 100 } }
+        - { name: before, in: query, schema: { type: string, format: date-time } }
+        - { $ref: "#/components/parameters/Cursor" }
+        - { $ref: "#/components/parameters/Fields" }
+      responses:
+        "200":
+          description: Partners.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, next_before]
+                properties:
+                  data: { type: array, items: { $ref: "#/components/schemas/Partner" } }
+                  next_before: { type: [string, "null"], format: date-time }
+                  next_cursor: { $ref: "#/components/schemas/NextCursor" }
+        "400": { $ref: "#/components/responses/Error" }
+        default: { $ref: "#/components/responses/Error" }
+    post:
+      operationId: createPartner
+      x-outflare-access: { scope: partners.manage }
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      summary: Add a partner to a program
+      description: |
+        Scope: partners.manage. A partner is a customer record: pass record_id, or an email (the person with it, made
+        when nobody has it). code is their ref code; one is made from their name when left out. Each partner gets a
+        tracking campaign (channel affiliates, named after the code), a short link (/r/{code} on your tracking domain)
+        and a campaign link to the program's landing page.
+      tags: [partners]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/PartnerInput" }
+      responses:
+        "201":
+          description: The partner.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Partner" }
+        "400": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        "202": { $ref: "#/components/responses/MissionHeld" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/workspaces/{ws}/partners/{id}:
+    parameters:
+      - { $ref: "#/components/parameters/Workspace" }
+      - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+    get:
+      operationId: getPartner
+      x-outflare-access: { scope: partners.read }
+      summary: Get a partner
+      description: "Scope: partners.read."
+      tags: [partners]
+      responses:
+        "200":
+          description: The partner.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Partner" }
+        "404": { $ref: "#/components/responses/Error" }
+        default: { $ref: "#/components/responses/Error" }
+    patch:
+      operationId: updatePartner
+      x-outflare-access: { scope: partners.manage }
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      summary: Approve, suspend or reject a partner, or change their group, payout method or note
+      description: "Scope: partners.manage. Send only what changes. A partner who isn't active earns nothing new; their links still land. The code can't change: add a promo code instead. group_id \"\" is no group."
+      tags: [partners]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/PartnerInput" }
+      responses:
+        "200":
+          description: The partner.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Partner" }
+        "400": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "202": { $ref: "#/components/responses/MissionHeld" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/workspaces/{ws}/partners/{id}/promo-codes:
+    parameters:
+      - { $ref: "#/components/parameters/Workspace" }
+      - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+    post:
+      operationId: addPartnerPromoCode
+      x-outflare-access: { scope: partners.manage }
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      summary: Tie a promo code to a partner
+      description: "Scope: partners.manage. The code as customers type it at checkout (matched in any case). A conversion that reports it (promo_code) credits the partner. Make the code in your billing system yourself, or pass coupon to have Outflare make it there (status shows how that went)."
+      tags: [partners]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [code]
+              properties:
+                code: { type: string, maxLength: 64 }
+                coupon: { type: string, maxLength: 200, description: "A coupon's id in the workspace's billing account (Stripe): Outflare makes the code there too, with the workspace's own key, which needs Write access to Promotion codes. Leave it out when you make the code yourself." }
+      responses:
+        "201":
+          description: The partner.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Partner" }
+        "400": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        "202": { $ref: "#/components/responses/MissionHeld" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/workspaces/{ws}/partners/{id}/promo-codes/{code}:
+    parameters:
+      - { $ref: "#/components/parameters/Workspace" }
+      - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      - { name: code, in: path, required: true, schema: { type: string } }
+    delete:
+      operationId: removePartnerPromoCode
+      x-outflare-access: { scope: partners.manage }
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      summary: Remove a partner's promo code
+      description: "Scope: partners.manage."
+      tags: [partners]
+      responses:
+        "204": { description: Removed. }
+        "404": { $ref: "#/components/responses/Error" }
+        "202": { $ref: "#/components/responses/MissionHeld" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/workspaces/{ws}/partners/{id}/fees:
+    parameters:
+      - { $ref: "#/components/parameters/Workspace" }
+      - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+    post:
+      operationId: addPartnerFee
+      x-outflare-access: { scope: partners.manage }
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      summary: Log a fixed fee for a partner
+      description: "Scope: partners.manage. Such as an influencer's fee for a post or a month. Approved at once, counted toward their next payout and logged as a cost (channel affiliates), so cost per sale works."
+      tags: [partners]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/PartnerLedgerInput" }
+      responses:
+        "201":
+          description: The ledger entry.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PartnerReward" }
+        "400": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "202": { $ref: "#/components/responses/MissionHeld" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/workspaces/{ws}/partners/{id}/adjustments:
+    parameters:
+      - { $ref: "#/components/parameters/Workspace" }
+      - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+    post:
+      operationId: addPartnerAdjustment
+      x-outflare-access: { scope: partners.manage }
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      summary: Correct what a partner is owed
+      description: "Scope: partners.manage. Positive adds, negative takes away; it nets in their next payout. note (why) is required. The ledger never edits an entry: corrections are new entries."
+      tags: [partners]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/PartnerLedgerInput" }
+      responses:
+        "201":
+          description: The ledger entry.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PartnerReward" }
+        "400": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "202": { $ref: "#/components/responses/MissionHeld" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/workspaces/{ws}/partner-conversions:
+    parameters: [{ $ref: "#/components/parameters/Workspace" }]
+    get:
+      operationId: listPartnerConversions
+      x-outflare-access: { scope: partners.read }
+      summary: List partner conversions, newest first
+      description: "Scope: partners.read. Leads, sales and refunds credited to partners."
+      tags: [partners]
+      parameters:
+        - { $ref: "#/components/parameters/Brand" }
+        - { name: type, in: query, schema: { type: string, enum: [signup, sale, refund, custom] } }
+        - { name: partner_id, in: query, schema: { type: string, format: uuid } }
+        - { name: program, in: query, description: "A program's id or slug.", schema: { type: string } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 500, default: 100 } }
+        - { name: before, in: query, schema: { type: string, format: date-time } }
+        - { $ref: "#/components/parameters/Cursor" }
+        - { $ref: "#/components/parameters/Fields" }
+      responses:
+        "200":
+          description: Conversions.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, next_before]
+                properties:
+                  data: { type: array, items: { $ref: "#/components/schemas/PartnerConversion" } }
+                  next_before: { type: [string, "null"], format: date-time }
+                  next_cursor: { $ref: "#/components/schemas/NextCursor" }
+        "400": { $ref: "#/components/responses/Error" }
+        default: { $ref: "#/components/responses/Error" }
+    post:
+      operationId: createPartnerConversion
+      x-outflare-access: { scope: partners.conversions }
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      summary: Report a sign-up, sale, refund or custom conversion from your backend
+      description: |
+        Scope: partners.conversions, the one scope a server-to-server token needs. Report every sign-up, sale, refund
+        and custom conversion. Each one becomes a customer event on the customer's timeline, under the names attribution
+        reads (signed_up; payment.succeeded with payment_id = external_id and amount_minor; payment.refunded; or a custom
+        conversion's event_name), whether or not a partner referred them. Outflare also credits the referred ones. The partner is found from, in order: promo_code (when the program's
+        codes_win is on), ref (the code from the link, such as a cookie you kept), click_id (ref_click from a short link);
+        then a referral already bound to this customer in the program (the first partner keeps them); then the
+        customer's own website visits that carried a ref, inside the program's window, first or last as it says. A visit
+        only proposes a partner: this call binds it. Identify the customer with customer_id (your own user id),
+        email or record_id, the same way each time. external_id (your charge or order id) makes a retry safe and is what
+        a refund's refund_of names. Not credited is not an error: the answer is 200 with credited false and a reason
+        (no_partner, partner_inactive, program_inactive, self_referral, sale_not_found or currency). 201 means it was
+        credited, with the rewards it earned.
+      tags: [partners]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/PartnerConversionInput" }
+      responses:
+        "201":
+          description: Credited.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PartnerConversionResult" }
+        "200":
+          description: Not credited, or already recorded (duplicate).
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PartnerConversionResult" }
+        "400": { $ref: "#/components/responses/Error" }
+        "202": { $ref: "#/components/responses/MissionHeld" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/partner-postbacks/{token}:
+    parameters:
+      - { name: token, in: path, required: true, description: "The program's postback secret (ofb_...).", schema: { type: string } }
+    get:
+      operationId: partnerPostback
+      security: []
+      summary: Report a conversion by URL (incoming postback)
+      description: |
+        The program's postback URL, for trackers and backends that can only call a URL. Takes the same fields as
+        POST .../partner-conversions from the query string, with the names affiliate networks use as aliases: type
+        (or event, goal), ref, click_id (or ref_click, clickid), promo_code (or coupon), customer_id (or user_id),
+        email, external_id (or order_id, transaction_id, charge_id, txid), refund_of, amount (in the currency's main
+        unit, such as 49.90; or amount_cents), currency, product_id, sub_id and occurred_at.
+      tags: [partners]
+      parameters:
+        - { name: type, in: query, schema: { type: string, enum: [signup, lead, sale, refund, custom] } }
+        - { name: event_name, in: query, schema: { type: string } }
+        - { name: recurring, in: query, schema: { type: string, description: "true for a subscription renewal." } }
+        - { name: ref, in: query, schema: { type: string } }
+        - { name: click_id, in: query, schema: { type: string } }
+        - { name: promo_code, in: query, schema: { type: string } }
+        - { name: customer_id, in: query, schema: { type: string } }
+        - { name: email, in: query, schema: { type: string } }
+        - { name: external_id, in: query, schema: { type: string } }
+        - { name: refund_of, in: query, schema: { type: string } }
+        - { name: amount, in: query, schema: { type: string } }
+        - { name: currency, in: query, schema: { type: string } }
+      responses:
+        "201":
+          description: Credited.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PartnerConversionResult" }
+        "200":
+          description: Not credited, or already recorded.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PartnerConversionResult" }
+        "400": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        default: { $ref: "#/components/responses/Error" }
+    post:
+      operationId: partnerPostbackPost
+      security: []
+      summary: Report a conversion by URL, with a form or JSON body
+      description: "The same as the GET, with the fields in a form (application/x-www-form-urlencoded) or a JSON object; body fields win over the query string."
+      tags: [partners]
+      requestBody:
+        content:
+          application/x-www-form-urlencoded:
+            schema: { type: object, additionalProperties: { type: string } }
+          application/json:
+            schema: { type: object, additionalProperties: true }
+      responses:
+        "201":
+          description: Credited.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PartnerConversionResult" }
+        "200":
+          description: Not credited, or already recorded.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PartnerConversionResult" }
+        "400": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/workspaces/{ws}/partner-referrals:
+    parameters: [{ $ref: "#/components/parameters/Workspace" }]
+    get:
+      operationId: listPartnerReferrals
+      x-outflare-access: { scope: partners.read }
+      summary: List referred customers, newest first
+      description: "Scope: partners.read. Each customer a partner was credited with, once per program, with their net sales."
+      tags: [partners]
+      parameters:
+        - { $ref: "#/components/parameters/Brand" }
+        - { name: partner_id, in: query, schema: { type: string, format: uuid } }
+        - { name: record_id, in: query, description: The referred customer., schema: { type: string, format: uuid } }
+        - { name: status, in: query, schema: { type: string, enum: [lead, customer, refunded, rejected] } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 500, default: 100 } }
+        - { name: before, in: query, schema: { type: string, format: date-time } }
+        - { $ref: "#/components/parameters/Cursor" }
+        - { $ref: "#/components/parameters/Fields" }
+      responses:
+        "200":
+          description: Referrals.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, next_before]
+                properties:
+                  data: { type: array, items: { $ref: "#/components/schemas/PartnerReferral" } }
+                  next_before: { type: [string, "null"], format: date-time }
+                  next_cursor: { $ref: "#/components/schemas/NextCursor" }
+        "400": { $ref: "#/components/responses/Error" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/workspaces/{ws}/partner-rewards:
+    parameters: [{ $ref: "#/components/parameters/Workspace" }]
+    get:
+      operationId: listPartnerRewards
+      x-outflare-access: { scope: partners.read }
+      summary: List the reward ledger, newest first
+      description: "Scope: partners.read. Cash, fees, actions and adjustments. status pending is still on hold or waiting for a person; approved cash counts toward the next payout; an approved action waits for your system to fulfil it."
+      tags: [partners]
+      parameters:
+        - { $ref: "#/components/parameters/Brand" }
+        - { name: status, in: query, schema: { type: string, enum: [pending, approved, rejected, paid, fulfilled] } }
+        - { name: kind, in: query, schema: { type: string, enum: [cash, fee, action, adjustment] } }
+        - { name: partner_id, in: query, schema: { type: string, format: uuid } }
+        - { name: payout_id, in: query, schema: { type: string, format: uuid } }
+        - { name: program, in: query, description: "A program's id or slug.", schema: { type: string } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 500, default: 100 } }
+        - { name: before, in: query, schema: { type: string, format: date-time } }
+        - { $ref: "#/components/parameters/Cursor" }
+        - { $ref: "#/components/parameters/Fields" }
+      responses:
+        "200":
+          description: Ledger entries.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, next_before]
+                properties:
+                  data: { type: array, items: { $ref: "#/components/schemas/PartnerReward" } }
+                  next_before: { type: [string, "null"], format: date-time }
+                  next_cursor: { $ref: "#/components/schemas/NextCursor" }
+        "400": { $ref: "#/components/responses/Error" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/workspaces/{ws}/partner-rewards/{id}/approve:
+    parameters:
+      - { $ref: "#/components/parameters/Workspace" }
+      - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+    post:
+      operationId: approvePartnerReward
+      x-outflare-access: { scope: partners.manage }
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      summary: Approve a held reward now
+      description: "Scope: partners.manage. Even before its hold ends. Cash is logged as a cost and counts toward the next payout; an action fires partner_reward.approved for your system."
+      tags: [partners]
+      requestBody:
+        content:
+          application/json:
+            schema: { type: object }
+      responses:
+        "200":
+          description: The ledger entry.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PartnerReward" }
+        "400": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "202": { $ref: "#/components/responses/MissionHeld" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/workspaces/{ws}/partner-rewards/{id}/reject:
+    parameters:
+      - { $ref: "#/components/parameters/Workspace" }
+      - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+    post:
+      operationId: rejectPartnerReward
+      x-outflare-access: { scope: partners.manage }
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      summary: Reject a held reward
+      description: "Scope: partners.manage. Only a pending one; take back an approved one with an adjustment. note says why, for the partner."
+      tags: [partners]
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                note: { type: string, maxLength: 2000 }
+      responses:
+        "200":
+          description: The ledger entry.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PartnerReward" }
+        "400": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "202": { $ref: "#/components/responses/MissionHeld" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/workspaces/{ws}/partner-rewards/{id}/fulfil:
+    parameters:
+      - { $ref: "#/components/parameters/Workspace" }
+      - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+    post:
+      operationId: fulfilPartnerReward
+      x-outflare-access: { scope: partners.conversions }
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      summary: Report that your system carried out an action reward
+      description: "Scope: partners.conversions. After partner_reward.approved told your system to grant something (credit, a free month), call this so the ledger shows it done."
+      tags: [partners]
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                note: { type: string, maxLength: 2000 }
+      responses:
+        "200":
+          description: The ledger entry.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PartnerReward" }
+        "400": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "202": { $ref: "#/components/responses/MissionHeld" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/workspaces/{ws}/partner-payouts:
+    parameters: [{ $ref: "#/components/parameters/Workspace" }]
+    get:
+      operationId: listPartnerPayouts
+      x-outflare-access: { scope: partners.read }
+      summary: List partner payouts, newest first
+      description: "Scope: partners.read."
+      tags: [partners]
+      parameters:
+        - { $ref: "#/components/parameters/Brand" }
+        - { name: status, in: query, schema: { type: string, enum: [due, paid, canceled] } }
+        - { name: partner_id, in: query, schema: { type: string, format: uuid } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 500, default: 100 } }
+        - { name: before, in: query, schema: { type: string, format: date-time } }
+        - { $ref: "#/components/parameters/Cursor" }
+        - { $ref: "#/components/parameters/Fields" }
+      responses:
+        "200":
+          description: Payouts.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, next_before]
+                properties:
+                  data: { type: array, items: { $ref: "#/components/schemas/PartnerPayout" } }
+                  next_before: { type: [string, "null"], format: date-time }
+                  next_cursor: { $ref: "#/components/schemas/NextCursor" }
+        "400": { $ref: "#/components/responses/Error" }
+        default: { $ref: "#/components/responses/Error" }
+    post:
+      operationId: createPartnerPayouts
+      x-outflare-access: { scope: partners.manage }
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      summary: Make the payouts that are due
+      description: |
+        Scope: partners.manage. For each partner (one with partner_id, one program, or all) whose approved, unpaid cash,
+        fees and adjustments reach the program's minimum, one payout gathers them and partner_payout.created fires.
+        Outflare never holds or sends money: pay from your own account or payout tool, then mark it paid.
+      tags: [partners]
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                partner_id: { type: string, format: uuid }
+                program: { type: string, description: "A program's id or slug." }
+      responses:
+        "200":
+          description: The payouts made now (none when nothing is due).
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data: { type: array, items: { $ref: "#/components/schemas/PartnerPayout" } }
+        "400": { $ref: "#/components/responses/Error" }
+        "202": { $ref: "#/components/responses/MissionHeld" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/workspaces/{ws}/partner-payouts/{id}/paid:
+    parameters:
+      - { $ref: "#/components/parameters/Workspace" }
+      - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+    post:
+      operationId: markPartnerPayoutPaid
+      x-outflare-access: { scope: partners.manage }
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      summary: Mark a payout paid
+      description: "Scope: partners.manage. After you paid it from your own account: a note and the payment's reference (a PayPal or Wise transfer id, an invoice number)."
+      tags: [partners]
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                note: { type: string, maxLength: 2000 }
+                reference: { type: string, maxLength: 200 }
+                paid_at: { type: string, format: date-time, description: When it was paid; now when left out. }
+      responses:
+        "200":
+          description: The payout.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PartnerPayout" }
+        "400": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "202": { $ref: "#/components/responses/MissionHeld" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/workspaces/{ws}/partner-payouts/{id}/cancel:
+    parameters:
+      - { $ref: "#/components/parameters/Workspace" }
+      - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+    post:
+      operationId: cancelPartnerPayout
+      x-outflare-access: { scope: partners.manage }
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      summary: Cancel a due payout
+      description: "Scope: partners.manage. Its rewards go back into the partner's balance."
+      tags: [partners]
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                note: { type: string, maxLength: 2000 }
+      responses:
+        "200":
+          description: The payout.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PartnerPayout" }
+        "400": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "202": { $ref: "#/components/responses/MissionHeld" }
+        default: { $ref: "#/components/responses/Error" }
 webhooks:
   lead.replied:
     post:
@@ -23504,6 +24719,186 @@ webhooks:
             schema: { $ref: "#/components/schemas/WebhookEvent" }
       responses:
         "200": { description: Any 2xx answer means received; anything else is retried. }
+  partner_program.created:
+    post:
+      operationId: webhook_partner_program_created
+      summary: "A partner program (referral, affiliate or influencer) was created. data has kind, brand_id and rules (how many)."
+      tags: [webhooks]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/WebhookEvent" }
+      responses:
+        "200": { description: Any 2xx answer means received; anything else is retried. }
+  partner_program.updated:
+    post:
+      operationId: webhook_partner_program_updated
+      summary: "A partner program's settings changed, or it was paused, archived or restored. data has kind, status and changed (the settings sent)."
+      tags: [webhooks]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/WebhookEvent" }
+      responses:
+        "200": { description: Any 2xx answer means received; anything else is retried. }
+  partner_program.rules_updated:
+    post:
+      operationId: webhook_partner_program_rules_updated
+      summary: "A partner program's reward rules were replaced. Rewards already in the ledger keep what they earned. data has kind and rules (how many)."
+      tags: [webhooks]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/WebhookEvent" }
+      responses:
+        "200": { description: Any 2xx answer means received; anything else is retried. }
+  partner.created:
+    post:
+      operationId: webhook_partner_created
+      summary: "Someone joined a partner program. data has program_id, program_kind, record_id (the partner's customer record), status (pending waits for approval) and source."
+      tags: [webhooks]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/WebhookEvent" }
+      responses:
+        "200": { description: Any 2xx answer means received; anything else is retried. }
+  partner.updated:
+    post:
+      operationId: webhook_partner_updated
+      summary: "A partner was approved, suspended or rejected, moved to another group, or their payout method or note changed. data has program_id, record_id, status, previous_status and group_id."
+      tags: [webhooks]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/WebhookEvent" }
+      responses:
+        "200": { description: Any 2xx answer means received; anything else is retried. }
+  partner_referral.created:
+    post:
+      operationId: webhook_partner_referral_created
+      summary: "A partner was credited with a customer, bound by a lead or sale from your backend. data has program_id, partner_id, record_id (the customer), via (ref, click, promo_code or visit) and source."
+      tags: [webhooks]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/WebhookEvent" }
+      responses:
+        "200": { description: Any 2xx answer means received; anything else is retried. }
+  partner_conversion.created:
+    post:
+      operationId: webhook_partner_conversion_created
+      summary: "A sign-up, sale, refund or custom conversion was recorded for a referred customer. data has program_id, partner_id, referral_id, record_id, type, event_name (custom only), recurring, amount_cents, currency, product_id, source and, for a refund, refund_of."
+      tags: [webhooks]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/WebhookEvent" }
+      responses:
+        "200": { description: Any 2xx answer means received; anything else is retried. }
+  partner_reward.created:
+    post:
+      operationId: webhook_partner_reward_created
+      summary: "A conversion earned a reward, or a fee or adjustment was logged; it waits out the program's hold. data has program_id, program_kind, partner_id, side (partner or referred), kind (cash, fee, action or adjustment), recipient_id, amount_cents, currency, conversion_id and, for an action, action and action_data."
+      tags: [webhooks]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/WebhookEvent" }
+      responses:
+        "200": { description: Any 2xx answer means received; anything else is retried. }
+  partner_reward.approved:
+    post:
+      operationId: webhook_partner_reward_approved
+      summary: "A reward was approved: cash now counts toward the partner's next payout; an action is for your system to carry out (data has action, action_data, recipient_id and recipient_customer_id, your own user id for them), then call POST .../partner-rewards/{id}/fulfil. data.by is auto, manual or refund."
+      tags: [webhooks]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/WebhookEvent" }
+      responses:
+        "200": { description: Any 2xx answer means received; anything else is retried. }
+  partner_reward.rejected:
+    post:
+      operationId: webhook_partner_reward_rejected
+      summary: "A held reward was rejected, by a person or because its sale was refunded. data.reason says why."
+      tags: [webhooks]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/WebhookEvent" }
+      responses:
+        "200": { description: Any 2xx answer means received; anything else is retried. }
+  partner_reward.reversed:
+    post:
+      operationId: webhook_partner_reward_reversed
+      summary: "A refund took back part or all of a reward: a new adjustment entry with a negative amount for cash, or, for an action, data.action and action_data for your system to take back. data has reverses_id and reason."
+      tags: [webhooks]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/WebhookEvent" }
+      responses:
+        "200": { description: Any 2xx answer means received; anything else is retried. }
+  partner_reward.fulfilled:
+    post:
+      operationId: webhook_partner_reward_fulfilled
+      summary: "Your system reported that it carried out an approved action reward."
+      tags: [webhooks]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/WebhookEvent" }
+      responses:
+        "200": { description: Any 2xx answer means received; anything else is retried. }
+  partner_payout.created:
+    post:
+      operationId: webhook_partner_payout_created
+      summary: "A payout is due: a partner's approved cash, fees and adjustments were gathered. Pay it from your own account or payout tool, then mark it paid. data has partner_id, program_id, amount_cents, currency and rewards."
+      tags: [webhooks]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/WebhookEvent" }
+      responses:
+        "200": { description: Any 2xx answer means received; anything else is retried. }
+  partner_payout.paid:
+    post:
+      operationId: webhook_partner_payout_paid
+      summary: "A payout was marked paid. data has partner_id, program_id, amount_cents, currency and reference."
+      tags: [webhooks]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/WebhookEvent" }
+      responses:
+        "200": { description: Any 2xx answer means received; anything else is retried. }
+  partner_payout.canceled:
+    post:
+      operationId: webhook_partner_payout_canceled
+      summary: "A due payout was canceled and its rewards went back into the partner's balance."
+      tags: [webhooks]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/WebhookEvent" }
+      responses:
+        "200": { description: Any 2xx answer means received; anything else is retried. }
   workspace.updated:
     post:
       operationId: webhook_workspace_updated
@@ -23919,7 +25314,7 @@ components:
       required: [id, type, created_at, workspace_id, actor, target, request_id, data]
       properties:
         id: { type: string, description: "Unique per event, and the webhook-id header. Use it to ignore repeats.", example: evt_48213 }
-        type: { type: string, enum: [lead.replied, lead.unsubscribed, inbox.replied, inbox.updated, inbox.classified, lead.bounced, mailbox.auto_paused, lead.created, lead.updated, lead.deleted, leads.imported, suppressions.added, suppression.removed, lead_list.created, lead_list.leads_added, lead_list.run_started, lead_list.build_done, lead_list.build_failed, lead_list.refresh_done, lead_list.refresh_failed, lead_list.enrich_done, lead_list.enrich_failed, import.done, import.failed, sequence.created, sequence.updated, sequence.activated, sequence.paused, sequence.archived, sequence.deleted, sequence.steps_updated, sequence.leads_enrolled, enrollment.stopped, mailbox.imported, mailbox.updated, mailbox.paused, mailbox.resumed, mailbox.stage_changed, mailbox.deleted, domain.added, domain.paused, domain.resumed, domain.removed, email.queued, email.sent, email.delivered, email.bounced, email.complained, email.failed, email.suppressed, email.cancelled, email.unsubscribed, email.opened, email.clicked, email.preferences_changed, email_domain.verified, email_domain.verification_failed, email_provider.events_failed, email_template.published, meeting.created, meeting.updated, meeting.deleted, deal.created, deal.updated, deal.deleted, spend.recorded, integration.connected, integration.updated, integration.disconnected, connect_request.created, deploy.detected, deploy.failed, digest.ready, ai_budget.warned, ai_budget.reached, connection_limit.warned, connection_limit.reached, experiment.started, experiment.concluded, project.created, project.updated, project.deleted, mission.created, mission.updated, mission.submitted, mission.approved, mission.paused, mission.resumed, mission.stopped, mission.completed, mission.action_held, mission.action_approved, mission.action_rejected, infra.plan_created, infra.plan_approved, infra.ordered, infra.order_failed, infra.domains_bought, infra.mailbox_joined, infra.plan_warming, infra.plan_ready, infra.plan_cancelled, fix.found, fix.updated, fix.started, fix.verify_requested, fix.confirmed, fix.reopened, record.created, record.bulk_created, record.bulk_updated, record.updated, record.merged, identity.verified, identity.closed, relationship.added, relationship.ended, consent.granted, consent.withdrawn, consent.bulk_withdrawn, brand.created, brand.updated, email_broadcast.created, email_broadcast.started, email_broadcast.sent, email_broadcast.failed, email_broadcast.cancelled, journey.created, journey.updated, journey_run.entered, journey_run.exited, rule.created, rule.updated, rule.activated, rule.paused, rule.archived, rule.fired, brand_setup.installed, brand_setup.install_failed, install.issue_opened, install.issue_resolved, seo_site.created, seo_site.verified, seo_site.unverified, seo_site.deleted, crawl.started, crawl.stopped, crawl.done, backlink.new, backlink.lost, backlink.regained, competitor.page_removed, link_prospect.found, link_prospect.checked, link_prospect.excluded, link_prospect.pitched, link_prospect.replied, link_prospect.agreed, link_prospect.live, link_prospect.declined, link_prospect.removed, link_prospect.reopened, link_prospect.updated, link_prospect.deleted, social_action.drafted, social_action.approved, social_action.rejected, social_action.done, social_action.failed, review.posted, review.replied, review.reply_drafted, review_momentum.changed, alert.raised, visitor.became_hot, workspace.updated, webhook.test] }
+        type: { type: string, enum: [lead.replied, lead.unsubscribed, inbox.replied, inbox.updated, inbox.classified, lead.bounced, mailbox.auto_paused, lead.created, lead.updated, lead.deleted, leads.imported, suppressions.added, suppression.removed, lead_list.created, lead_list.leads_added, lead_list.run_started, lead_list.build_done, lead_list.build_failed, lead_list.refresh_done, lead_list.refresh_failed, lead_list.enrich_done, lead_list.enrich_failed, import.done, import.failed, sequence.created, sequence.updated, sequence.activated, sequence.paused, sequence.archived, sequence.deleted, sequence.steps_updated, sequence.leads_enrolled, enrollment.stopped, mailbox.imported, mailbox.updated, mailbox.paused, mailbox.resumed, mailbox.stage_changed, mailbox.deleted, domain.added, domain.paused, domain.resumed, domain.removed, email.queued, email.sent, email.delivered, email.bounced, email.complained, email.failed, email.suppressed, email.cancelled, email.unsubscribed, email.opened, email.clicked, email.preferences_changed, email_domain.verified, email_domain.verification_failed, email_provider.events_failed, email_template.published, meeting.created, meeting.updated, meeting.deleted, deal.created, deal.updated, deal.deleted, spend.recorded, integration.connected, integration.updated, integration.disconnected, connect_request.created, deploy.detected, deploy.failed, digest.ready, ai_budget.warned, ai_budget.reached, connection_limit.warned, connection_limit.reached, experiment.started, experiment.concluded, project.created, project.updated, project.deleted, mission.created, mission.updated, mission.submitted, mission.approved, mission.paused, mission.resumed, mission.stopped, mission.completed, mission.action_held, mission.action_approved, mission.action_rejected, infra.plan_created, infra.plan_approved, infra.ordered, infra.order_failed, infra.domains_bought, infra.mailbox_joined, infra.plan_warming, infra.plan_ready, infra.plan_cancelled, fix.found, fix.updated, fix.started, fix.verify_requested, fix.confirmed, fix.reopened, record.created, record.bulk_created, record.bulk_updated, record.updated, record.merged, identity.verified, identity.closed, relationship.added, relationship.ended, consent.granted, consent.withdrawn, consent.bulk_withdrawn, brand.created, brand.updated, email_broadcast.created, email_broadcast.started, email_broadcast.sent, email_broadcast.failed, email_broadcast.cancelled, journey.created, journey.updated, journey_run.entered, journey_run.exited, rule.created, rule.updated, rule.activated, rule.paused, rule.archived, rule.fired, brand_setup.installed, brand_setup.install_failed, install.issue_opened, install.issue_resolved, seo_site.created, seo_site.verified, seo_site.unverified, seo_site.deleted, crawl.started, crawl.stopped, crawl.done, backlink.new, backlink.lost, backlink.regained, competitor.page_removed, link_prospect.found, link_prospect.checked, link_prospect.excluded, link_prospect.pitched, link_prospect.replied, link_prospect.agreed, link_prospect.live, link_prospect.declined, link_prospect.removed, link_prospect.reopened, link_prospect.updated, link_prospect.deleted, social_action.drafted, social_action.approved, social_action.rejected, social_action.done, social_action.failed, review.posted, review.replied, review.reply_drafted, review_momentum.changed, alert.raised, visitor.became_hot, partner_program.created, partner_program.updated, partner_program.rules_updated, partner.created, partner.updated, partner_referral.created, partner_conversion.created, partner_reward.created, partner_reward.approved, partner_reward.rejected, partner_reward.reversed, partner_reward.fulfilled, partner_payout.created, partner_payout.paid, partner_payout.canceled, workspace.updated, webhook.test] }
         created_at: { type: string, format: date-time }
         workspace_id: { type: string, format: uuid }
         actor: { $ref: "#/components/schemas/WebhookRef" }
@@ -24662,6 +26057,300 @@ components:
         touches: { type: integer, description: "Visits in the lookback before it." }
         matched_by: { type: string, enum: [record, anonymous, none], description: "How visits were tied to it: the person's record, the browser's anonymous id, or nothing." }
         credits: { type: array, items: { $ref: "#/components/schemas/AttributionCredit" } }
+    PartnerRule:
+      type: object
+      required: [id, group_id, trigger, side, kind, percent_bp, amount_cents, action, action_data, recurrence, months, min_sales, product_ids]
+      properties:
+        id: { type: string, format: uuid }
+        group_id: { type: [string, "null"], format: uuid, description: "Only partners in this group; null is everyone." }
+        trigger: { type: string, description: "The conversion that earns it: signup, sale, or a custom conversion's event_name (such as trial_started)." }
+        side: { type: string, enum: [partner, referred], description: "partner: the person who referred. referred: the customer they brought (two-sided rewards; always an action)." }
+        kind: { type: string, enum: [percent, fixed, action] }
+        percent_bp: { type: [integer, "null"], description: "percent: basis points of the conversion's value (2500 is 25%). Not for sign-ups." }
+        amount_cents: { type: [integer, "null"], format: int64, description: "fixed: the amount per conversion." }
+        action: { type: string, description: "action: what your system should do, such as grant_credit, delivered by partner_reward.approved." }
+        action_data: { type: object, additionalProperties: true, description: "action: the details your system needs, such as {\"gb\": 10}." }
+        recurrence: { type: string, enum: [first, every, months], description: "Sales: the customer's first sale only, every sale, or sales in their first months." }
+        months: { type: [integer, "null"] }
+        min_sales: { type: integer, description: "A tier: applies once the partner has made this many earlier sales in the program." }
+        product_ids: { type: array, items: { type: string }, description: Only these products; empty is all. }
+    PartnerRuleInput:
+      type: object
+      required: [trigger, kind]
+      properties:
+        group_id: { type: [string, "null"], format: uuid }
+        trigger: { type: string, maxLength: 80, description: "signup (or lead), sale, or a custom conversion's event_name." }
+        side: { type: string, enum: [partner, referred], description: "partner when left out." }
+        kind: { type: string, enum: [percent, fixed, action] }
+        percent_bp: { type: integer, minimum: 1, maximum: 10000 }
+        amount_cents: { type: integer, format: int64, minimum: 1 }
+        action: { type: string, maxLength: 60 }
+        action_data: { type: object, additionalProperties: true }
+        recurrence: { type: string, enum: [first, every, months], description: "Sales only; every when left out." }
+        months: { type: integer, minimum: 1, maximum: 120 }
+        min_sales: { type: integer, minimum: 0 }
+        product_ids: { type: array, maxItems: 50, items: { type: string } }
+    PartnerGroup:
+      type: object
+      required: [id, name]
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+    PartnerProgram:
+      type: object
+      required: [id, name, slug, kind, status, brand_id, landing_url, currency, credit_window_days, credit_model, codes_win, hold_days,
+        auto_approve, auto_accept, min_payout_cents, terms_url, sales_source, postback_hint, portal_enabled, portal_subdomain, portal, portal_url, rules, groups,
+        partners, created_at, updated_at]
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+        slug: { type: string, description: It never changes. }
+        kind: { type: string, enum: [referral, affiliate, influencer], description: The preset it started from. }
+        status: { type: string, enum: [active, paused, archived] }
+        brand_id: { type: [string, "null"], format: uuid }
+        landing_url: { type: string, description: "Where partner links land; '' for none (short links then answer 404)." }
+        currency: { type: string }
+        credit_window_days: { type: integer, description: How long after a visit or click a conversion still credits the partner. }
+        credit_model: { type: string, enum: [first, last], description: Which visit with a ref wins inside the window. }
+        codes_win: { type: boolean, description: A promo code beats a link when a conversion carries both. }
+        hold_days: { type: integer, description: Rewards wait this long before they can be approved; refunds inside it cancel them. }
+        auto_approve: { type: boolean, description: Approve rewards on their own once the hold ends. }
+        auto_accept: { type: boolean, description: Partners who sign up are accepted without review. }
+        min_payout_cents: { type: integer, format: int64 }
+        terms_url: { type: string }
+        sales_source: { type: string, description: "A billing connector (stripe) whose synced payments and refunds are also partner sales; '' for the API and postbacks only." }
+        postback_hint: { type: string, description: "The start of the postback URL's secret; '' when there is none." }
+        portal_enabled: { type: boolean, description: The hosted partner portal is open. }
+        portal_subdomain: { type: [string, "null"], description: "Its subdomain of the server's partners domain (OUTFLARE_PARTNERS_DOMAIN), if any." }
+        portal: { $ref: "#/components/schemas/PartnerPortalSettings" }
+        portal_url: { type: string, description: "Where partners sign up and sign in: the program's own domain, its subdomain, or /p/{id}/ on this server." }
+        rules: { type: array, items: { $ref: "#/components/schemas/PartnerRule" } }
+        groups: { type: array, items: { $ref: "#/components/schemas/PartnerGroup" }, description: "Empty in lists; GET the program for them." }
+        partners: { type: integer }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    PartnerPortalField:
+      type: object
+      required: [key, label, type]
+      properties:
+        key: { type: string, maxLength: 40, description: "Lowercase letters, digits and underscores, such as website." }
+        label: { type: string, maxLength: 200 }
+        type: { type: string, enum: [text, textarea, url, select] }
+        required: { type: boolean }
+        options: { type: array, maxItems: 20, items: { type: string }, description: "select only." }
+    PartnerPortalSettings:
+      type: object
+      properties:
+        title: { type: string, maxLength: 120, description: "The portal's name; the program's when empty." }
+        logo_url: { type: string, description: An https address of an image. }
+        color: { type: string, description: "The accent colour, such as #0f766e." }
+        custom_css: { type: string, maxLength: 20000 }
+        welcome: { type: string, maxLength: 4000, description: Shown on the sign-in page. Plain text. }
+        pages: { type: array, items: { type: string, enum: [dashboard, links, assets, referrals, payouts, settings] } }
+        signup_open: { type: boolean, description: Anyone can apply on the portal. }
+        signup_fields: { type: array, maxItems: 20, items: { $ref: "#/components/schemas/PartnerPortalField" } }
+        email_from: { type: string, description: "The sender of sign-in links, on a verified sending domain of the workspace's own email provider. The portal can't sign anyone in without it." }
+        sign_in_template: { type: string, description: "An email template's id or handle for the sign-in email, with sign_in_url, program_name and partner_name; Outflare's own wording when empty." }
+    PartnerAsset:
+      type: object
+      required: [id, kind, title, body, url, position, created_at]
+      properties:
+        id: { type: string, format: uuid }
+        kind: { type: string, enum: [image, text, link] }
+        title: { type: string }
+        body: { type: string, description: "Copy or an email swipe partners can paste." }
+        url: { type: string, description: "The image of a banner, or a link's page." }
+        position: { type: integer }
+        created_at: { type: string, format: date-time }
+    PartnerProgramInput:
+      type: object
+      properties:
+        name: { type: string, maxLength: 120 }
+        slug: { type: string, maxLength: 60, description: Create only; from the name when left out. }
+        kind: { type: string, enum: [referral, affiliate, influencer], description: Create only. }
+        status: { type: string, enum: [active, paused, archived], description: Update only. }
+        brand: { type: [string, "null"], description: "A brand's id or handle; empty for none." }
+        landing_url: { type: string, maxLength: 2000 }
+        currency: { type: string, description: "A three-letter code; USD when left out." }
+        credit_window_days: { type: integer, minimum: 1, maximum: 365 }
+        credit_model: { type: string, enum: [first, last] }
+        codes_win: { type: boolean }
+        hold_days: { type: integer, minimum: 0, maximum: 365 }
+        auto_approve: { type: boolean }
+        auto_accept: { type: boolean }
+        min_payout_cents: { type: integer, format: int64, minimum: 0 }
+        terms_url: { type: string, maxLength: 2000 }
+        sales_source: { type: string, description: "A billing connector's id (stripe): its synced payments and refunds become partner sales too. \"\" for none." }
+        rules: { type: array, maxItems: 50, items: { $ref: "#/components/schemas/PartnerRuleInput" }, description: "Create only: the preset's rules when left out." }
+    PartnerStats:
+      type: object
+      required: [clicks, referrals, customers, sales_cents, pending_cents, approved_cents, paid_cents, balance_cents, pending_actions]
+      properties:
+        clicks: { type: integer, description: Short link clicks. }
+        referrals: { type: integer, description: Customers credited to them. }
+        customers: { type: integer, description: Referred customers who bought. }
+        sales_cents: { type: integer, format: int64, description: Referred sales less refunds. }
+        pending_cents: { type: integer, format: int64, description: "Cash, fees and adjustments still on hold." }
+        approved_cents: { type: integer, format: int64, description: Approved and not yet paid (some may be in a due payout). }
+        paid_cents: { type: integer, format: int64 }
+        balance_cents: { type: integer, format: int64, description: "Approved, not yet in a payout: what the next payout gathers." }
+        pending_actions: { type: integer, description: Approved action rewards your system hasn't fulfilled. }
+    Partner:
+      type: object
+      required: [id, program_id, program, record_id, name, email, code, status, group_id, campaign_id, link, campaign_link, promo_codes,
+        payout_method, note, source, currency, stats, created_at, updated_at]
+      properties:
+        id: { type: string, format: uuid, description: The membership's id. }
+        program_id: { type: string, format: uuid }
+        program: { type: string, description: The program's slug. }
+        record_id: { type: string, format: uuid, description: The partner's customer record. }
+        name: { type: string }
+        email: { type: string }
+        code: { type: string, description: "The ref code links carry. It never changes." }
+        status: { type: string, enum: [pending, active, suspended, rejected] }
+        group_id: { type: [string, "null"], format: uuid }
+        campaign_id: { type: [string, "null"], format: uuid, description: "Their tracking campaign (channel affiliates)." }
+        link: { type: string, description: "The short link: /r/{code} on your tracking domain, or this server's /r/{workspace}/{code}. Add ?sub= for a sub-id, ?to=/path for another page on the site." }
+        campaign_link: { type: string, description: "The landing page tagged with their campaign and ref, with no redirect; '' without a landing page." }
+        promo_codes: { type: array, items: { $ref: "#/components/schemas/PartnerPromoCode" } }
+        payout_method: { type: string, description: "Free text, such as \"PayPal: ana@example.com\", stored sealed. Never bank details." }
+        note: { type: string }
+        source: { type: string, enum: [manual, api, signup, import] }
+        currency: { type: string }
+        stats: { $ref: "#/components/schemas/PartnerStats" }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    PartnerPromoCode:
+      type: object
+      required: [code, coupon, status, error]
+      properties:
+        code: { type: string, description: As customers type it at checkout. }
+        coupon: { type: string, description: "The billing account's coupon it was made for; '' when made there by you." }
+        status: { type: string, enum: [local, pending, created, failed], description: "local: kept in Outflare only (you made it in your billing system). pending, created or failed: Outflare making it in the workspace's billing account." }
+        error: { type: string, description: What went wrong when failed. }
+    PartnerInput:
+      type: object
+      properties:
+        program: { type: string, description: "Create only: the program's id or slug." }
+        record_id: { type: string, format: uuid, description: "Create only: the partner's customer record." }
+        email: { type: string, description: "Create only: the person with this email, made when nobody has it." }
+        name: { type: string, maxLength: 200, description: "Create only: set on the record when it has no name." }
+        code: { type: string, maxLength: 64, description: "Create only: letters, digits, hyphens and underscores; made from the name when left out." }
+        status: { type: string, enum: [pending, active, suspended, rejected], description: "active when left out." }
+        group_id: { type: [string, "null"], description: "A group of the program; \"\" for none." }
+        payout_method: { type: string, maxLength: 500 }
+        note: { type: string, maxLength: 2000 }
+    PartnerLedgerInput:
+      type: object
+      required: [amount_cents]
+      properties:
+        amount_cents: { type: integer, format: int64, description: "In the program's currency's smallest unit. A fee is positive; an adjustment either way." }
+        note: { type: string, maxLength: 2000, description: Why. Required for an adjustment. }
+    PartnerReward:
+      type: object
+      required: [id, program_id, partner_id, side, recipient_id, kind, conversion_id, rule_id, reverses_id, amount_cents, currency, action,
+        action_data, status, hold_until, payout_id, note, approved_at, created_at]
+      properties:
+        id: { type: string, format: uuid }
+        program_id: { type: string, format: uuid }
+        partner_id: { type: string, format: uuid }
+        side: { type: string, enum: [partner, referred] }
+        recipient_id: { type: string, format: uuid, description: "The record that gets it: the partner, or the referred customer." }
+        kind: { type: string, enum: [cash, fee, action, adjustment] }
+        conversion_id: { type: [string, "null"], format: uuid }
+        rule_id: { type: [string, "null"], format: uuid }
+        reverses_id: { type: [string, "null"], format: uuid, description: The entry an adjustment corrects. }
+        amount_cents: { type: integer, format: int64, description: "Negative for an adjustment that takes back; 0 for actions." }
+        currency: { type: string }
+        action: { type: string }
+        action_data: { type: object, additionalProperties: true }
+        status: { type: string, enum: [pending, approved, rejected, paid, fulfilled] }
+        hold_until: { type: string, format: date-time }
+        payout_id: { type: [string, "null"], format: uuid }
+        note: { type: string }
+        approved_at: { type: [string, "null"], format: date-time }
+        created_at: { type: string, format: date-time }
+    PartnerConversion:
+      type: object
+      required: [id, program_id, partner_id, referral_id, record_id, type, event_name, recurring, external_id, refund_of, amount_cents, currency, product_id, source, occurred_at, created_at]
+      properties:
+        id: { type: string, format: uuid }
+        program_id: { type: string, format: uuid }
+        partner_id: { type: string, format: uuid }
+        referral_id: { type: string, format: uuid }
+        record_id: { type: string, format: uuid, description: The referred customer. }
+        type: { type: string, enum: [signup, sale, refund, custom] }
+        event_name: { type: string, description: "A custom conversion's event name; '' otherwise." }
+        recurring: { type: boolean, description: A renewal of a subscription rather than a new purchase. }
+        external_id: { type: string }
+        refund_of: { type: [string, "null"], format: uuid, description: "A refund's sale (its conversion id)." }
+        amount_cents: { type: integer, format: int64 }
+        currency: { type: string }
+        product_id: { type: string }
+        source: { type: string, enum: [api, postback, billing, manual, import], description: "billing: a payment synced from the program's sales_source." }
+        occurred_at: { type: string, format: date-time }
+        created_at: { type: string, format: date-time }
+    PartnerConversionInput:
+      type: object
+      required: [type]
+      properties:
+        type: { type: string, enum: [signup, lead, sale, refund, custom], description: "lead is another name for signup." }
+        event_name: { type: string, maxLength: 80, description: "custom only: the conversion's name, such as trial_started (lowercase letters, digits, dots and underscores)." }
+        recurring: { type: boolean, description: "Sales: a subscription renewal rather than a new purchase." }
+        program: { type: string, description: "A program's id or slug, to keep the conversion to it." }
+        ref: { type: string, description: The partner's ref code. }
+        click_id: { type: string, format: uuid, description: "ref_click from a partner's short link." }
+        promo_code: { type: string }
+        customer_id: { type: string, maxLength: 200, description: Your own id for the customer. }
+        email: { type: string }
+        record_id: { type: string, format: uuid }
+        external_id: { type: string, maxLength: 200, description: "Your charge or order id; a retry with the same one is stored once." }
+        refund_of: { type: string, maxLength: 200, description: "Refunds: the sale's external_id." }
+        amount_cents: { type: integer, format: int64, minimum: 0, description: "Required for a sale. A refund without it refunds what is left of the sale." }
+        currency: { type: string, description: "The program's currency when left out; a sale in another is not credited." }
+        product_id: { type: string, maxLength: 200 }
+        sub_id: { type: string, maxLength: 100 }
+        occurred_at: { type: string, description: "RFC 3339 or Unix seconds; now when left out." }
+    PartnerConversionResult:
+      type: object
+      required: [credited, duplicate, partner_id, referral_id, conversion, rewards]
+      properties:
+        credited: { type: boolean }
+        reason: { type: string, enum: [no_partner, partner_inactive, program_inactive, self_referral, sale_not_found, currency] }
+        duplicate: { type: boolean, description: "Already recorded with this external_id (or, for a lead, already a lead)." }
+        partner_id: { type: [string, "null"], format: uuid }
+        referral_id: { type: [string, "null"], format: uuid }
+        conversion: { oneOf: [{ $ref: "#/components/schemas/PartnerConversion" }, { type: "null" }] }
+        rewards: { type: array, items: { $ref: "#/components/schemas/PartnerReward" } }
+    PartnerReferral:
+      type: object
+      required: [id, program_id, partner_id, record_id, via, sub_id, status, first_sale_at, sales_cents, created_at]
+      properties:
+        id: { type: string, format: uuid }
+        program_id: { type: string, format: uuid }
+        partner_id: { type: string, format: uuid }
+        record_id: { type: string, format: uuid, description: The referred customer. }
+        via: { type: string, enum: [ref, click, promo_code, visit, manual, import] }
+        sub_id: { type: string }
+        status: { type: string, enum: [lead, customer, refunded, rejected] }
+        first_sale_at: { type: [string, "null"], format: date-time }
+        sales_cents: { type: integer, format: int64 }
+        created_at: { type: string, format: date-time }
+    PartnerPayout:
+      type: object
+      required: [id, partner_id, program_id, amount_cents, currency, status, note, reference, rewards, paid_at, created_at]
+      properties:
+        id: { type: string, format: uuid }
+        partner_id: { type: string, format: uuid }
+        program_id: { type: string, format: uuid }
+        amount_cents: { type: integer, format: int64 }
+        currency: { type: string }
+        status: { type: string, enum: [due, paid, canceled] }
+        note: { type: string }
+        reference: { type: string }
+        rewards: { type: integer, description: Ledger entries it gathers. }
+        paid_at: { type: [string, "null"], format: date-time }
+        created_at: { type: string, format: date-time }
     TrackingCampaign:
       type: object
       required: [id, name, slug, code, channel, source, medium, brand_id, object_kind, object_id, landing_url, landing_link, status, links, created_at, updated_at]
@@ -25703,9 +27392,16 @@ components:
       type: object
       required: [kind]
       properties:
-        kind: { type: string, enum: [event, page] }
+        kind: { type: string, enum: [event, page, deal], description: "event: a product event. page: a view of a page. deal: a won deal (in US dollars) of the person the visitor's browser belongs to, closed after they joined." }
         name: { type: string, maxLength: 100, description: "For kind event: a product event's catalog name, such as signup_started.", example: signup_started }
         path: { type: string, maxLength: 500, description: "For kind page: a path such as /thanks; a trailing * matches every page under it (/docs/*).", example: /thanks }
+        metric:
+          type: string
+          enum: [conversion, count, value]
+          description: "What is measured per visitor. conversion (the default): whether they reached it, so versions compare rates. count: how many times (event and page goals). value: the total of property on the goal's events, such as revenue, or for a deal goal the deals' value in US dollars; versions compare the mean per visitor."
+        property: { type: string, maxLength: 64, description: "For a value goal on an event: the event property holding the number, such as revenue. Values below 0 count as 0.", example: revenue }
+        window_hours: { type: integer, minimum: 0, maximum: 8784, description: "Count only what happens within this many hours of the visitor first seeing their version; 0 or absent: until the test ends." }
+        cap: { type: number, minimum: 0, description: "For count and value goals: the most one visitor can add, so a few huge orders can't swing the result; 0 or absent: no cap." }
     ABTest:
       type: object
       required: [id, flag_id, flag_key, brand_id, name, hypothesis, status, control, goals, min_effect, baselines, started_at, ended_at, decision, created_at, updated_at]
@@ -25720,7 +27416,7 @@ components:
         control: { type: string, description: The flag variant the others are compared with. }
         goals: { type: array, items: { $ref: "#/components/schemas/ABTestGoal" }, description: The first is the one the test is judged on. }
         min_effect: { type: number, minimum: 0.01, maximum: 1, description: "The smallest relative change worth detecting: 0.25 is +25%. The always-valid p-value is tuned to find changes of about this size." }
-        baselines: { type: [array, "null"], items: { type: number }, description: "Each goal's conversion rate on the site over the 28 days before the test started, which fixes the test's tuning for its whole life; 0 for a goal with too little history (its live control rate is used). Null before the test starts." }
+        baselines: { type: [array, "null"], items: { type: number }, description: "Each goal's mean per visitor on the site (its conversion rate, for a conversion goal) over the 28 days before the test started, which fixes the test's tuning for its whole life; 0 for a goal with too little history (its live control mean is used). Null before the test starts." }
         started_at: { type: [string, "null"], format: date-time }
         ended_at: { type: [string, "null"], format: date-time }
         decision: { type: string, description: 'The variant chosen when it ended; "" for none.' }
@@ -25753,11 +27449,14 @@ components:
           properties:
             visitors: { type: integer, description: Visitors with a page view in the window. }
             converted: { type: integer, description: Of them, those who reached the goal after their first view. }
+            sum: { type: number, description: "For a count or value goal: the total of their counts or values, each capped as the goal says." }
         plan:
           type: object
-          required: [baseline, weekly_visitors, weekly_per_version, min_effect, rows, detectable_4_weeks, detectable_8_weeks, weeks]
+          required: [baseline, metric, weekly_visitors, weekly_per_version, min_effect, versions, rows, detectable_4_weeks, detectable_8_weeks, weeks]
           properties:
-            baseline: { type: number, description: The goal's rate among those visitors. }
+            baseline: { type: number, description: "The goal's mean per visitor among those visitors: its rate, for a conversion goal." }
+            metric: { type: string, enum: [conversion, count, value] }
+            versions: { type: integer, description: "Versions competing with the control. Past one, each needs more visitors, since the results are corrected for the extra chances of a false winner." }
             weekly_visitors: { type: number, description: "Visitors a week the flag reaches (its rollout applied)." }
             weekly_per_version: { type: number, description: "Visitors a week of the smallest version, which the comparison waits on." }
             min_effect: { type: number }
@@ -25806,16 +27505,19 @@ components:
         variant: { type: string }
         visitors: { type: integer, description: Visitors shown this version since the test started. }
         conversions: { type: integer, description: Of them, those who reached the goal after seeing it. }
+        sum: { type: number, description: "For a count or value goal: the total of the visitors' counts or values, each capped as the goal says." }
+        mean: { type: number, description: "For a count or value goal: sum per visitor, which the versions are compared on." }
     ABTestComparison:
       type: object
-      required: [variant, chance_to_beat, lift, lift_low, lift_high, p_value]
+      required: [variant, chance_to_beat, lift, lift_low, lift_high, p_value, raw_p_value]
       properties:
         variant: { type: string }
-        chance_to_beat: { type: number, minimum: 0, maximum: 1, description: "The chance this version's true rate is above the control's (Bayesian)." }
-        lift: { type: number, description: "Relative change of its rate over the control's: 0.18 is +18%." }
-        lift_low: { type: number, description: "Low end of the always-valid 95% range of the lift: from the same test as p_value, so the range leaves out 0 exactly when p_value is under 0.05. 0 with lift_high 0 while there is no evidence yet." }
+        chance_to_beat: { type: number, minimum: 0, maximum: 1, description: "The chance this version's true rate (or mean, for a count or value goal) is above the control's (Bayesian)." }
+        lift: { type: number, description: "Relative change of its rate (or mean) over the control's: 0.18 is +18%." }
+        lift_low: { type: number, description: "Low end of the always-valid 95% range of the lift: from the same test as p_value, corrected the same way, so the range leaves out 0 exactly when p_value is under 0.05. 0 with lift_high 0 while there is no evidence yet." }
         lift_high: { type: number, description: High end of the always-valid 95% range of the lift. }
-        p_value: { type: number, minimum: 0, maximum: 1, description: "Always-valid p-value, the lowest over the test's daily looks: below 0.05 it is safe to stop, however often you looked, and it never rises again." }
+        p_value: { type: number, minimum: 0, maximum: 1, description: "Always-valid p-value, the lowest over the test's daily looks, corrected for the number of versions compared with the control (raw_p_value times corrected_for, at most 1): below 0.05 it is safe to stop, however often you looked, and it never rises again." }
+        raw_p_value: { type: number, minimum: 0, maximum: 1, description: The always-valid p-value before the correction for several versions. }
     ABTestResults:
       type: object
       required: [test_id, status, control, winner, result]
@@ -25826,19 +27528,21 @@ components:
         winner: { type: string, description: 'The version the results favour on the first goal: one at least 95% likely to beat the control with p_value under 0.05, or the control when every other is that likely to be worse; "" while none is clear or the split looks wrong.' }
         result:
           type: object
-          required: [arms, goals, sample_ratio_p, sample_ratio_mismatch, min_effect, computed_at]
+          required: [arms, goals, sample_ratio_p, sample_ratio_mismatch, min_effect, corrected_for, computed_at]
           properties:
             arms: { type: array, items: { $ref: "#/components/schemas/ABTestArm" }, description: "Visitors per version, control first." }
             goals:
               type: array
               items:
                 type: object
-                required: [goal, arms, comparisons]
+                required: [goal, arms, comparisons, metric, exploratory]
                 properties:
                   goal: { $ref: "#/components/schemas/ABTestGoal" }
+                  metric: { type: string, enum: [conversion, count, value], description: What the arms measure. }
+                  exploratory: { type: boolean, description: "True for every goal after the first: watched for learning, never deciding the winner, since checking many goals turns up chance differences." }
                   arms: { type: array, items: { $ref: "#/components/schemas/ABTestArm" } }
                   comparisons: { type: [array, "null"], items: { $ref: "#/components/schemas/ABTestComparison" }, description: Each version against the control. }
-                  baseline: { type: number, description: "The control rate the test was tuned with; 0 when none was recorded." }
+                  baseline: { type: number, description: "The control mean (its rate, for a conversion goal) the test was tuned with; 0 when none was recorded." }
                   days:
                     type: array
                     description: "First goal only: the cumulative arms at the end of each day (UTC) that saw a visitor join or convert; the last is today so far."
@@ -25851,6 +27555,7 @@ components:
             sample_ratio_p: { type: number, description: "The chance of a split this uneven by luck." }
             sample_ratio_mismatch: { type: boolean, description: "True when sample_ratio_p is under 0.001: something (a redirect, a cache, bots) is breaking the split, so there is no winner." }
             min_effect: { type: number, description: The smallest change the p-values were tuned to detect. }
+            corrected_for: { type: integer, description: "Versions compared with the control. Past one, every p_value and range is corrected for that many chances of a false winner." }
             computed_at: { type: string, format: date-time }
     SiteKeyInput:
       type: object
@@ -29702,7 +31407,7 @@ components:
         invites: { type: integer, description: Pending invites for this role. }
     Scope:
       type: string
-      enum: [workspace.read, workspace.manage, context.manage, members.read, members.manage, members.remove, roles.manage, tokens.manage, audit.read, mailboxes.read, mailboxes.manage, leads.read, leads.manage, suppressions.manage, sequences.read, sequences.manage, inbox.read, inbox.manage, integrations.read, integrations.manage, outcomes.read, outcomes.manage, projects.read, projects.manage, infrastructure.read, infrastructure.manage, infrastructure.approve, analytics.read, analytics.manage, missions.read, missions.run, missions.approve, seo.read, seo.manage, social.read, social.manage, social.post, webhooks.read, webhooks.manage, emails.read, emails.send, emails.manage, customers.read, customers.manage, catalog.manage]
+      enum: [workspace.read, workspace.manage, context.manage, members.read, members.manage, members.remove, roles.manage, tokens.manage, audit.read, mailboxes.read, mailboxes.manage, leads.read, leads.manage, suppressions.manage, sequences.read, sequences.manage, inbox.read, inbox.manage, integrations.read, integrations.manage, outcomes.read, outcomes.manage, projects.read, projects.manage, infrastructure.read, infrastructure.manage, infrastructure.approve, analytics.read, analytics.manage, missions.read, missions.run, missions.approve, seo.read, seo.manage, social.read, social.manage, social.post, partners.read, partners.manage, partners.conversions, webhooks.read, webhooks.manage, emails.read, emails.send, emails.manage, customers.read, customers.manage, catalog.manage]
     Workspace:
       type: object
       required: [id, name, slug, test]
@@ -31719,6 +33424,88 @@ components:
         revenue_models: { type: array, items: { type: string }, description: "Ids from GET /v1/business-models; replaces the list." }
         logo_url: { type: string, maxLength: 2000, description: "An https address of the brand's own logo; empty for the company's." }
         colors: { $ref: "#/components/schemas/LookColors" }
+    SiteCookie:
+      type: object
+      required: [id, kind, name, host, vendor, vendor_name, category, purpose, retention, status, sources, before_consent, pages, reviewed_at, first_seen_at, last_seen_at]
+      properties:
+        id: { type: string, format: uuid }
+        kind: { type: string, enum: [cookie, local_storage, session_storage, script, iframe, pixel] }
+        name: { type: string, description: "A cookie's or storage key's name; for a script, embed or pixel its host and first path segment." }
+        host: { type: string, description: "The cookie's domain, or the script's host." }
+        vendor: { type: string, description: "The catalogue's vendor id, or empty when unknown." }
+        vendor_name: { type: string }
+        category: { type: string, enum: [necessary, analytics, marketing, preferences, unknown] }
+        purpose: { type: string }
+        retention: { type: string, example: 13 months }
+        status: { type: string, enum: [new, listed, ignored], description: "new: not looked at by a person (in the policy when its vendor is known); listed: confirmed; ignored: never listed." }
+        sources: { type: array, items: { type: string, enum: [crawl, browser] } }
+        before_consent: { type: boolean, description: "A browser had it before the visitor allowed its category: the tag may need data-category to wait for consent." }
+        pages: { type: array, items: { type: string }, description: A few pages it was on. }
+        reviewed_at: { type: [string, "null"], format: date-time }
+        first_seen_at: { type: string, format: date-time }
+        last_seen_at: { type: string, format: date-time }
+    SiteCookieInput:
+      type: object
+      additionalProperties: false
+      properties:
+        category: { type: string, enum: [necessary, analytics, marketing, preferences] }
+        purpose: { type: string, maxLength: 1000 }
+        retention: { type: string, maxLength: 100 }
+        status: { type: string, enum: [listed, ignored] }
+    CookieScan:
+      type: object
+      required: [id, site_key_id, status, trigger, pages, found, added, error, created_at, started_at, finished_at]
+      properties:
+        id: { type: string, format: uuid }
+        site_key_id: { type: string, format: uuid }
+        status: { type: string, enum: [queued, running, done, failed] }
+        trigger: { type: string, enum: [person, schedule, api] }
+        pages: { type: integer, description: Pages read. }
+        found: { type: integer }
+        added: { type: integer, description: New to the site. }
+        error: { type: string, description: "Why it failed, such as no page could be read." }
+        created_at: { type: string, format: date-time }
+        started_at: { type: [string, "null"], format: date-time }
+        finished_at: { type: [string, "null"], format: date-time }
+    CookiePolicy:
+      type: object
+      required: [version, published_at, site, categories, format, content, url]
+      properties:
+        version: { type: integer }
+        published_at: { type: string, format: date-time }
+        site: { type: string }
+        categories:
+          type: array
+          items:
+            type: object
+            required: [id, vendors]
+            properties:
+              id: { type: string, enum: [necessary, analytics, marketing, preferences] }
+              vendors:
+                type: array
+                items:
+                  type: object
+                  required: [id, name, company, privacy_url, purpose, items]
+                  properties:
+                    id: { type: string, description: "The catalogue's id; empty for the site's own." }
+                    name: { type: string }
+                    company: { type: string }
+                    privacy_url: { type: string }
+                    purpose: { type: string }
+                    items:
+                      type: array
+                      items:
+                        type: object
+                        required: [kind, name, host, purpose, retention]
+                        properties:
+                          kind: { type: string }
+                          name: { type: string }
+                          host: { type: string }
+                          purpose: { type: string }
+                          retention: { type: string }
+        format: { type: string, enum: [json, markdown, text, html] }
+        content: { type: string, description: "The policy in format; empty for json." }
+        url: { type: string, description: The hosted policy page. }
     ConsentBanner:
       type: object
       required: [site_key_id, config, version, consent_version, saved, look, updated_at]
@@ -32223,7 +34010,7 @@ components:
         updated_at: { type: string, format: date-time }
     TrackingDomain:
       type: object
-      required: [id, domain, status, error, target, last_checked_at, verified_at, created_at, dns_install, dns_connections, https_status, https_error]
+      required: [id, domain, status, error, target, last_checked_at, verified_at, created_at, dns_install, dns_connections, https_status, https_error, partner_program_id]
       properties:
         id: { type: string, format: uuid }
         domain: { type: string, example: links.acme-com.example }
@@ -32240,6 +34027,7 @@ components:
           enum: [pending, active, failed, null]
           description: "The HTTPS certificate the server is getting for the domain once its CNAME checks out: pending, active or failed. Links use the domain only once it is active. null when the server has no certificate provider and its own proxy serves HTTPS (self-hosted)."
         https_error: { type: string, description: "What to fix when https_status is failed, or why it is still pending." }
+        partner_program_id: { type: [string, "null"], format: uuid, description: "The partner program whose portal the domain serves (at its root); null for the workspace's email and partner links." }
     EnrollmentStatus:
       type: string
       enum: [active, completed, stopped, unsubscribed, bounced, replied, blocked, failed]

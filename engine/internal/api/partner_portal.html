@@ -1,0 +1,280 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>Partner portal</title>
+<style>
+:root { --accent: #111827; --bg: #f8fafc; --card: #fff; --text: #0f172a; --muted: #64748b; --line: #e2e8f0; }
+@media (prefers-color-scheme: dark) { :root { --bg: #0b0f17; --card: #111827; --text: #e5e7eb; --muted: #94a3b8; --line: #1f2937; } }
+* { box-sizing: border-box; }
+body { margin: 0; font: 14px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; background: var(--bg); color: var(--text); }
+header { display: flex; align-items: center; gap: 12px; padding: 14px 20px; border-bottom: 1px solid var(--line); background: var(--card); flex-wrap: wrap; }
+header img { height: 28px; }
+header h1 { font-size: 16px; margin: 0; }
+nav { display: flex; gap: 4px; flex-wrap: wrap; margin-left: auto; }
+nav a { padding: 6px 10px; border-radius: 6px; color: var(--muted); text-decoration: none; }
+nav a.on { background: var(--bg); color: var(--text); font-weight: 600; }
+main { max-width: 920px; margin: 0 auto; padding: 24px 16px 64px; }
+.card { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 18px; margin-bottom: 16px; }
+.stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px; margin-bottom: 16px; }
+.stat { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 14px; }
+.stat b { display: block; font-size: 22px; }
+.stat span { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: .04em; }
+label { display: block; margin: 10px 0 4px; font-weight: 600; }
+input, textarea, select { width: 100%; padding: 8px 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--card); color: var(--text); font: inherit; }
+button { background: var(--accent); color: #fff; border: 0; border-radius: 6px; padding: 8px 14px; font: inherit; font-weight: 600; cursor: pointer; }
+button.ghost { background: transparent; color: var(--text); border: 1px solid var(--line); }
+button:disabled { opacity: .5; cursor: default; }
+table { width: 100%; border-collapse: collapse; }
+th, td { text-align: left; padding: 8px 6px; border-bottom: 1px solid var(--line); }
+th { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: .04em; font-weight: 600; }
+code, .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12.5px; word-break: break-all; }
+.muted { color: var(--muted); }
+.row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.banner { padding: 10px 14px; border-radius: 8px; margin-bottom: 16px; background: #fef3c7; color: #92400e; }
+.ok { background: #dcfce7; color: #166534; }
+.err { color: #b91c1c; }
+.pill { display: inline-block; padding: 1px 8px; border-radius: 999px; border: 1px solid var(--line); font-size: 12px; }
+.narrow { max-width: 440px; margin: 40px auto; }
+</style>
+<style id="custom"></style>
+</head>
+<body>
+<header><img id="logo" alt="" hidden><h1 id="title">Partner portal</h1><nav id="nav"></nav></header>
+<main id="main"><p class="muted">Loading…</p></main>
+<script>
+(function () {
+  "use strict";
+  var BASE = "{{BASE}}";
+  var main = document.getElementById("main");
+  var program = null, me = null;
+  var labels = { dashboard: "Dashboard", links: "Links", assets: "Assets", referrals: "Referrals", payouts: "Payouts", settings: "Settings" };
+
+  function el(tag, attrs, kids) {
+    var e = document.createElement(tag);
+    Object.keys(attrs || {}).forEach(function (k) {
+      if (attrs[k] == null) return;
+      if (k === "text") e.textContent = attrs[k];
+      else if (k.slice(0, 2) === "on") e.addEventListener(k.slice(2), attrs[k]);
+      else e.setAttribute(k, attrs[k]);
+    });
+    (kids || []).forEach(function (c) { if (c) e.appendChild(typeof c === "string" ? document.createTextNode(c) : c); });
+    return e;
+  }
+  function api(method, path, body) {
+    return fetch(BASE + "api/" + path, {
+      method: method, credentials: "same-origin",
+      headers: body ? { "Content-Type": "application/json" } : {},
+      body: body ? JSON.stringify(body) : undefined
+    }).then(function (r) {
+      return r.json().catch(function () { return {}; }).then(function (j) {
+        if (!r.ok) { var e = new Error((j.error && j.error.message) || "Something went wrong"); e.status = r.status; throw e; }
+        return j;
+      });
+    });
+  }
+  function money(cents) {
+    try { return new Intl.NumberFormat(undefined, { style: "currency", currency: program.currency }).format(cents / 100); }
+    catch (e) { return (cents / 100).toFixed(2) + " " + program.currency; }
+  }
+  function date(s) { return s ? new Date(s).toLocaleDateString() : ""; }
+  function render(nodes) { main.textContent = ""; nodes.forEach(function (n) { if (n) main.appendChild(n); }); }
+  function copyBtn(text) {
+    return el("button", { "class": "ghost", type: "button", text: "Copy", onclick: function (e) {
+      navigator.clipboard && navigator.clipboard.writeText(typeof text === "function" ? text() : text);
+      e.target.textContent = "Copied"; setTimeout(function () { e.target.textContent = "Copy"; }, 1500);
+    } });
+  }
+  function table(cols, rows, empty) {
+    if (!rows.length) return el("p", { "class": "muted", text: empty });
+    return el("table", {}, [
+      el("thead", {}, [el("tr", {}, cols.map(function (c) { return el("th", { text: c[0] }); }))]),
+      el("tbody", {}, rows.map(function (r) { return el("tr", {}, cols.map(function (c) { var v = c[1](r); return el("td", {}, [typeof v === "string" ? v : v]); })); }))
+    ]);
+  }
+
+  function brand() {
+    document.title = program.title;
+    document.getElementById("title").textContent = program.title;
+    if (program.color) document.documentElement.style.setProperty("--accent", program.color);
+    if (program.logo_url) { var l = document.getElementById("logo"); l.src = program.logo_url; l.hidden = false; }
+    document.getElementById("custom").textContent = program.custom_css || "";
+  }
+  function nav() {
+    var n = document.getElementById("nav"); n.textContent = "";
+    if (!me) return;
+    var page = location.hash.slice(1) || "dashboard";
+    program.pages.forEach(function (p) {
+      n.appendChild(el("a", { href: "#" + p, "class": p === page ? "on" : "", text: labels[p] }));
+    });
+    if (!me.read_only) n.appendChild(el("a", { href: "#", text: "Sign out", onclick: function (e) {
+      e.preventDefault(); api("POST", "sign-out").then(function () { me = null; route(); });
+    } }));
+  }
+
+  // Signed out: sign in, or apply.
+  function signIn(msg) {
+    var email = el("input", { type: "email", required: "", placeholder: "you@example.com", autocomplete: "email" });
+    var note = el("p", { "class": "muted" });
+    var form = el("form", { onsubmit: function (e) {
+      e.preventDefault();
+      api("POST", "sign-in", { email: email.value }).then(function () {
+        note.className = "banner ok"; note.textContent = "If that address belongs to a partner, a sign-in link is on its way. It works once, for 30 minutes.";
+      }, function (err) { note.className = "err"; note.textContent = err.message; });
+    } }, [el("label", { text: "Email" }), email, el("p", {}, [el("button", { text: "Email me a sign-in link" })]), note]);
+    render([
+      el("div", { "class": "narrow" }, [
+        msg ? el("div", { "class": "banner", text: msg }) : null,
+        program.welcome ? el("div", { "class": "card" }, [el("p", { text: program.welcome })]) : null,
+        el("div", { "class": "card" }, [el("h2", { text: "Sign in" }), form]),
+        program.signup_open ? el("p", { "class": "muted" }, ["New here? ", el("a", { href: "#apply", text: "Apply to join" })]) : null
+      ])
+    ]);
+  }
+  function apply() {
+    var email = el("input", { type: "email", required: "", autocomplete: "email" });
+    var name = el("input", { required: "", maxlength: "200", autocomplete: "name" });
+    var inputs = {};
+    var fields = program.signup_fields.map(function (f) {
+      var i;
+      if (f.type === "textarea") i = el("textarea", { rows: "3" });
+      else if (f.type === "select") i = el("select", {}, [el("option", { value: "", text: "Choose…" })].concat(f.options.map(function (o) { return el("option", { value: o, text: o }); })));
+      else i = el("input", { type: f.type === "url" ? "url" : "text" });
+      if (f.required) i.setAttribute("required", "");
+      inputs[f.key] = i;
+      return el("div", {}, [el("label", { text: f.label + (f.required ? "" : " (optional)") }), i]);
+    });
+    var terms = el("input", { type: "checkbox", style: "width:auto" });
+    var note = el("p", {});
+    var form = el("form", { onsubmit: function (e) {
+      e.preventDefault();
+      var answers = {}; Object.keys(inputs).forEach(function (k) { answers[k] = inputs[k].value; });
+      api("POST", "signup", { email: email.value, name: name.value, answers: answers, accept_terms: terms.checked }).then(function () {
+        note.className = "banner ok"; note.textContent = "Thanks! Check your email for a link to sign in.";
+      }, function (err) { note.className = "err"; note.textContent = err.message; });
+    } }, [el("label", { text: "Name" }), name, el("label", { text: "Email" }), email].concat(fields).concat([
+      program.terms_url ? el("label", { style: "font-weight:400" }, [terms, " I accept the ", el("a", { href: program.terms_url, target: "_blank", rel: "noopener", text: "program terms" })]) : null,
+      el("p", {}, [el("button", { text: "Apply" })]), note
+    ]));
+    render([el("div", { "class": "narrow" }, [el("div", { "class": "card" }, [el("h2", { text: "Apply to " + program.title }), form]),
+      el("p", { "class": "muted" }, ["Already a partner? ", el("a", { href: "#", text: "Sign in" })])])]);
+  }
+
+  // Signed in.
+  function dashboard() {
+    var s = me.stats;
+    render([
+      me.read_only ? el("div", { "class": "banner", text: "You are seeing this portal as " + (me.name || me.email) + " sees it, read-only." }) : null,
+      me.status === "pending" ? el("div", { "class": "banner", text: "Your application is waiting for approval. Your links work once you're approved." }) : null,
+      me.status === "suspended" ? el("div", { "class": "banner", text: "Your partnership is paused. Contact the company to resume it." }) : null,
+      el("div", { "class": "stats" }, [
+        stat("Clicks", s.clicks), stat("Referred customers", s.customers + " of " + s.referrals), stat("Referred sales", money(s.sales_cents)),
+        stat("On hold", money(s.pending_cents)), stat("Due to you", money(s.balance_cents)), stat("Paid", money(s.paid_cents))
+      ]),
+      el("div", { "class": "card" }, [el("h3", { text: "Your link" }), el("div", { "class": "row" }, [el("code", { text: me.link }), copyBtn(me.link)]),
+        el("p", { "class": "muted", text: (me.hold_days ? "Rewards wait " + me.hold_days + " days for refunds, then are approved. " : "Rewards are approved right away. ") +
+          "Payouts are made once your balance reaches " + money(me.min_payout_cents) + "." })])
+    ]);
+  }
+  function stat(label, value) { return el("div", { "class": "stat" }, [el("span", { text: label }), el("b", { text: String(value) })]); }
+  function links() {
+    var to = el("input", { placeholder: "/pricing" }), sub = el("input", { placeholder: "youtube-review" });
+    var out = el("code", { text: me.link });
+    function build() {
+      var q = [];
+      if (to.value.trim()) q.push("to=" + encodeURIComponent(to.value.trim()));
+      if (sub.value.trim()) q.push("sub=" + encodeURIComponent(sub.value.trim()));
+      out.textContent = me.link + (q.length ? "?" + q.join("&") : "");
+    }
+    to.addEventListener("input", build); sub.addEventListener("input", build);
+    render([
+      el("div", { "class": "card" }, [el("h3", { text: "Make a link" }),
+        el("label", { text: "Page on the site (optional)" }), to,
+        el("label", { text: "Sub-id, to tell your placements apart (optional)" }), sub,
+        el("p", { "class": "row" }, [out, copyBtn(function () { return out.textContent; })])]),
+      me.campaign_link ? el("div", { "class": "card" }, [el("h3", { text: "Direct link (no redirect)" }), el("div", { "class": "row" }, [el("code", { text: me.campaign_link }), copyBtn(me.campaign_link)])]) : null,
+      el("div", { "class": "card" }, [el("h3", { text: "Promo codes" }), me.promo_codes.length ? el("p", {}, me.promo_codes.map(function (c) { return el("span", { "class": "pill mono", text: c + " " }); })) : el("p", { "class": "muted", text: "None yet." })])
+    ]);
+  }
+  function assets() {
+    api("GET", "assets").then(function (r) {
+      render(r.data.length ? r.data.map(function (a) {
+        return el("div", { "class": "card" }, [el("h3", { text: a.title }),
+          a.kind === "image" ? el("p", {}, [el("img", { src: a.url, alt: a.title, style: "max-width:100%" })]) : null,
+          a.body ? el("pre", { style: "white-space:pre-wrap", text: a.body }) : null,
+          a.url ? el("div", { "class": "row" }, [el("code", { text: a.url }), copyBtn(a.url)]) : null,
+          a.body ? copyBtn(a.body) : null]);
+      }) : [el("p", { "class": "muted", text: "No assets yet." })]);
+    }, fail);
+  }
+  function referrals() {
+    api("GET", "referrals").then(function (r) {
+      render([el("div", { "class": "card" }, [table([["Customer", function (x) { return x.label; }], ["Status", function (x) { return x.status; }],
+        ["Via", function (x) { return x.via; }], ["Sub-id", function (x) { return x.sub_id; }], ["Sales", function (x) { return money(x.sales_cents); }],
+        ["Since", function (x) { return date(x.created_at); }]], r.data, "No referred customers yet.")])]);
+    }, fail);
+  }
+  function payouts() {
+    Promise.all([api("GET", "rewards"), api("GET", "payouts")]).then(function (r) {
+      render([
+        el("div", { "class": "card" }, [el("h3", { text: "Rewards" }), table([["Reward", function (x) { return x.action || x.kind; }],
+          ["Amount", function (x) { return x.kind === "action" ? "" : money(x.amount_cents); }], ["Status", function (x) { return x.status; }],
+          ["Held until", function (x) { return x.status === "pending" ? date(x.hold_until) : ""; }], ["Note", function (x) { return x.note; }],
+          ["Made", function (x) { return date(x.created_at); }]], r[0].data, "No rewards yet.")]),
+        el("div", { "class": "card" }, [el("h3", { text: "Payouts" }), table([["Amount", function (x) { return money(x.amount_cents); }],
+          ["Status", function (x) { return x.status; }], ["Reference", function (x) { return x.reference; }],
+          ["Paid", function (x) { return date(x.paid_at); }]], r[1].data, "No payouts yet.")])
+      ]);
+    }, fail);
+  }
+  function settings() {
+    var method = el("textarea", { rows: "2", maxlength: "500", placeholder: "PayPal: you@example.com" });
+    method.value = me.payout_method || "";
+    var conv = el("input", { type: "checkbox", style: "width:auto" }), pay = el("input", { type: "checkbox", style: "width:auto" });
+    conv.checked = me.notify.conversions !== false; pay.checked = me.notify.payouts !== false;
+    var note = el("p", {});
+    render([el("div", { "class": "card" }, [el("form", { onsubmit: function (e) {
+      e.preventDefault();
+      api("PATCH", "me", { payout_method: method.value, notify: { conversions: conv.checked, payouts: pay.checked } }).then(function (r) {
+        me = r; note.className = "banner ok"; note.textContent = "Saved.";
+      }, function (err) { note.className = "err"; note.textContent = err.message; });
+    } }, [
+      el("label", { text: "How you'd like to be paid" }), method,
+      el("p", { "class": "muted", text: "Free text, kept encrypted. Never put bank account numbers here." }),
+      el("label", { style: "font-weight:400" }, [conv, " Email me about new conversions"]),
+      el("label", { style: "font-weight:400" }, [pay, " Email me about payouts"]),
+      el("p", {}, [el("button", { text: "Save", disabled: me.read_only ? "" : null })]), note
+    ])])]);
+  }
+  function fail(err) {
+    if (err.status === 401) { me = null; return route(); }
+    render([el("p", { "class": "err", text: err.message })]);
+  }
+
+  var pages = { dashboard: dashboard, links: links, assets: assets, referrals: referrals, payouts: payouts, settings: settings };
+  function route() {
+    var page = location.hash.slice(1);
+    nav();
+    if (!me) return page === "apply" && program.signup_open ? apply() : signIn();
+    if (program.pages.indexOf(page) < 0) page = "dashboard";
+    pages[page]();
+  }
+  window.addEventListener("hashchange", route);
+
+  function start() {
+    var m = /^#signin=(ofpl_[A-Za-z0-9_-]+)$/.exec(location.hash);
+    var signedIn = m ? api("POST", "session", { token: m[1] }).then(function () { history.replaceState(null, "", location.pathname); }, function (err) { return err.message; }) : Promise.resolve();
+    signedIn.then(function (linkErr) {
+      return api("GET", "program").then(function (p) {
+        program = p; brand();
+        return api("GET", "me").then(function (x) { me = x; route(); }, function () { me = null; route(); if (linkErr) signIn(linkErr); });
+      });
+    }).catch(function (err) { render([el("div", { "class": "narrow" }, [el("div", { "class": "card" }, [el("p", { text: err.message })])])]); });
+  }
+  start();
+})();
+</script>
+</body>
+</html>

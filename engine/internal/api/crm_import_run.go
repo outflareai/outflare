@@ -248,6 +248,9 @@ func startCRMImport(ctx context.Context, tx pgx.Tx, a *access, integrationID, co
 func (s *Server) RegisterJobs(q *jobs.Queue) {
 	q.Handle(jobCRMImport, s.crmImportJob)
 	q.Handle(jobPaymentsSync, s.paymentsSyncJob)
+	q.Handle(jobPartnerNotify, s.partnerNotifyJob)
+	q.Handle(jobPartnerBillingConversion, s.partnerBillingConversionJob)
+	q.Handle(jobPartnerPromoCode, s.partnerPromoCodeJob)
 	q.Handle(jobSetupInstall, s.setupInstallJob)
 	q.Handle(jobDNSAdd, s.dnsAddJob)
 	q.Handle(jobTrackingCheck, s.trackingCheckJob)

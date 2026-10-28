@@ -115,6 +115,13 @@ const (
 	ScopeSocialRead   = "social.read"
 	ScopeSocialManage = "social.manage"
 	ScopeSocialPost   = "social.post"
+	// Partner programs (referrals, affiliates, influencers): reading them,
+	// running them (partners, rewards, payouts), and reporting conversions
+	// from the workspace's own backend (partners.conversions), the one
+	// scope a server-to-server token needs.
+	ScopePartnersRead        = "partners.read"
+	ScopePartnersManage      = "partners.manage"
+	ScopePartnersConversions = "partners.conversions"
 )
 
 // AllScopes lists every scope that exists, in display order.
@@ -164,6 +171,9 @@ var AllScopes = []string{
 	ScopeSocialRead,
 	ScopeSocialManage,
 	ScopeSocialPost,
+	ScopePartnersRead,
+	ScopePartnersManage,
+	ScopePartnersConversions,
 }
 
 const (
@@ -182,8 +192,8 @@ var roleScopes = map[string][]string{
 	RoleOwner: AllScopes,
 	// Admins do everything except take people's access away.
 	RoleAdmin:    slices.DeleteFunc(slices.Clone(AllScopes), func(s string) bool { return s == ScopeMembersRemove }),
-	RoleOperator: {ScopeWorkspaceRead, ScopeContextManage, ScopeMembersRead, ScopeMailboxesRead, ScopeMailboxesManage, ScopeLeadsRead, ScopeLeadsManage, ScopeSequencesRead, ScopeSequencesManage, ScopeInboxRead, ScopeInboxManage, ScopeIntegrationsRead, ScopeIntegrationsManage, ScopeOutcomesRead, ScopeOutcomesManage, ScopeProjectsRead, ScopeProjectsManage, ScopeInfraRead, ScopeInfraManage, ScopeAnalyticsRead, ScopeAnalyticsManage, ScopeMissionsRead, ScopeMissionsRun, ScopeMissionsApprove, ScopeSEORead, ScopeSEOManage, ScopeWebhooksRead, ScopeEmailsRead, ScopeEmailsSend, ScopeEmailsManage, ScopeCustomersRead, ScopeCustomersManage, ScopeSocialRead, ScopeSocialManage, ScopeSocialPost},
-	RoleViewer:   {ScopeWorkspaceRead, ScopeMembersRead, ScopeMailboxesRead, ScopeLeadsRead, ScopeSequencesRead, ScopeInboxRead, ScopeIntegrationsRead, ScopeOutcomesRead, ScopeProjectsRead, ScopeInfraRead, ScopeAnalyticsRead, ScopeMissionsRead, ScopeSEORead, ScopeWebhooksRead, ScopeEmailsRead, ScopeCustomersRead, ScopeSocialRead},
+	RoleOperator: {ScopeWorkspaceRead, ScopeContextManage, ScopeMembersRead, ScopeMailboxesRead, ScopeMailboxesManage, ScopeLeadsRead, ScopeLeadsManage, ScopeSequencesRead, ScopeSequencesManage, ScopeInboxRead, ScopeInboxManage, ScopeIntegrationsRead, ScopeIntegrationsManage, ScopeOutcomesRead, ScopeOutcomesManage, ScopeProjectsRead, ScopeProjectsManage, ScopeInfraRead, ScopeInfraManage, ScopeAnalyticsRead, ScopeAnalyticsManage, ScopeMissionsRead, ScopeMissionsRun, ScopeMissionsApprove, ScopeSEORead, ScopeSEOManage, ScopeWebhooksRead, ScopeEmailsRead, ScopeEmailsSend, ScopeEmailsManage, ScopeCustomersRead, ScopeCustomersManage, ScopeSocialRead, ScopeSocialManage, ScopeSocialPost, ScopePartnersRead, ScopePartnersManage, ScopePartnersConversions},
+	RoleViewer:   {ScopeWorkspaceRead, ScopeMembersRead, ScopeMailboxesRead, ScopeLeadsRead, ScopeSequencesRead, ScopeInboxRead, ScopeIntegrationsRead, ScopeOutcomesRead, ScopeProjectsRead, ScopeInfraRead, ScopeAnalyticsRead, ScopeMissionsRead, ScopeSEORead, ScopeWebhooksRead, ScopeEmailsRead, ScopeCustomersRead, ScopeSocialRead, ScopePartnersRead},
 }
 
 // workspaceWide are scopes about the whole workspace: settings, people,
@@ -261,6 +271,13 @@ const (
 	// A site's own proxy sends its proxy secret with each forwarded
 	// request, so the visitor's address it passes on can be trusted.
 	PrefixSiteProxy = "ofp_"
+	// A partner program's incoming postback URL carries one, so a partner's
+	// tracker or the workspace's backend can report conversions by URL.
+	PrefixPostback = "ofb_"
+	// Partner portals: the one-time sign-in link a partner is emailed, and
+	// the session it starts on that portal.
+	PrefixPartnerLink    = "ofpl_"
+	PrefixPartnerSession = "ofps_"
 	// One-time links in account emails.
 	PrefixVerifyEmail   = "ofv_"
 	PrefixResetPassword = "ofr_"

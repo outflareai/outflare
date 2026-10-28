@@ -18,16 +18,35 @@ A/B tests are separate from SEO experiments, which compare groups of pages rathe
    }
    ```
 
-   - **Goals.** One to five. The first is the one the test is judged on; the rest are watched alongside it. A goal is a product event by its catalog name (`{"kind": "event", "name": "signup_started"}`) or a view of a page by path (`{"kind": "page", "path": "/thanks"}`; `/docs/*` matches every page under `/docs`).
+   - **Goals.** One to five. The first is the one the test is judged on; the rest are exploratory (below). A goal is a product event by its catalog name (`{"kind": "event", "name": "signup_started"}`), a view of a page by path (`{"kind": "page", "path": "/thanks"}`; `/docs/*` matches every page under `/docs`), or a won deal (`{"kind": "deal"}`, below). Each goal measures one thing per visitor (see "What a goal measures").
    - **Control.** The version the others are compared with. Without it, `control` if the flag has one, else its first version.
    - **Smallest change worth finding** (`min_effect`). The relative change the test is tuned to detect: `0.1` (+10%) for small tweaks on a busy site, `0.25` (+25%, the default) for most tests, `0.5` (+50%) for bold changes on a small site. A test tuned for bigger changes stops a little sooner when the change really is big, and later when it is small. For example, at a 4% sign-up rate, a version that truly lifts it by 50% is safe to stop after about 2,400 visitors per version when tuned for +25%, against 3,900 when tuned for +10%. A true +10% lift takes about 52,000 per version when tuned for +25%, against 47,000 when tuned for +10%.
 3. Check how long it will take (below), then start it (`POST .../ab-tests/{id}/start`, MCP `start_ab_test`). The flag must be live with at least two versions, the control among them. A flag that is off is turned on. A flag runs one test at a time. The control, goals and smallest change are fixed from here on, so the results can't be reshaped after the fact; the name and hypothesis can still change. Starting also records each goal's rate on the site over the last 28 days, which fixes the test's tuning for its whole life (a goal with under 200 visitors of history, or no conversions, uses the control's live rate instead).
 4. Watch the results (`GET .../ab-tests/{id}/results`, MCP `get_ab_test_results`).
 5. End it with the version you chose (`POST .../ab-tests/{id}/end` with `{"decision": "faster"}`, or `""` for none). The results are kept as they stood. The flag is left as it is: ship the winner by changing the flag's weights, or archive it once the code no longer asks for it.
 
+## What a goal measures
+
+A goal's `metric` says what is measured for each visitor, and the versions are compared on it:
+
+| `metric` | Per visitor | Compared on | Goals |
+|---|---|---|---|
+| `conversion` (the default) | whether they reached it | the rate | event, page, deal |
+| `count` | how many times they reached it | times per visitor | event, page |
+| `value` | the total of a number: `property` on the goal's events (such as `revenue`), or a deal's value | value per visitor, such as revenue per visitor | event, deal |
+
+```json
+{ "kind": "event", "name": "order_completed", "metric": "value", "property": "revenue", "cap": 1000, "window_hours": 168 }
+```
+
+- **Deal goals** count won deals of the person a visitor's browser belongs to, closed after they first saw their version, in US dollars for `value` (other currencies are left out). A browser is linked to its person once the site knows who they are: they sign in, or click a tracked link in an email. A person seen on two browsers counts on each.
+- **`window_hours`**: count only what happens within that many hours of the visitor first seeing their version, such as 168 for a week. Without it, everything until the test ends counts.
+- **`cap`**: for `count` and `value`, the most one visitor can add, so a few huge orders can't swing the result. Each visitor's running total is capped.
+- A value below zero counts as zero, and a property that isn't a number counts as a hit worth nothing.
+
 ## How long it will take
 
-Before starting, the planner (in the new-test form and a draft test, `POST /v1/workspaces/{ws}/ab-tests/plan`, MCP `plan_ab_test`) reads the last 28 days of page views, on the page the test changes if you give one, and the goal's rate among those visitors. With the flag's rollout and split, it shows how many visitors each version needs, and how many weeks that is, if the change truly moves the goal by +5%, +10%, +25% or +50%. It also gives the smallest change findable in 4 and in 8 weeks, and warns when the smallest change worth finding won't be safe to stop within 8 weeks. Small sites can only find big changes: at 2,000 visitors a week per version and a 4% sign-up rate, +25% takes about four weeks and +10% over half a year.
+Before starting, the planner (in the new-test form and a draft test, `POST /v1/workspaces/{ws}/ab-tests/plan`, MCP `plan_ab_test`) reads the last 28 days of page views, on the page the test changes if you give one, and the goal's rate among those visitors (or, for a count or value goal, the mean per visitor and how much it varies). With the flag's rollout and split, it shows how many visitors each version needs, and how many weeks that is, if the change truly moves the goal by +5%, +10%, +25% or +50%. It also gives the smallest change findable in 4 and in 8 weeks, and warns when the smallest change worth finding won't be safe to stop within 8 weeks. Small sites can only find big changes: at 2,000 visitors a week per version and a 4% sign-up rate, +25% takes about four weeks and +10% over half a year. Revenue varies more from visitor to visitor than a yes or no, so a revenue goal usually needs more visitors than the conversion behind it. With more than one version against the control, each version needs more visitors, since the results are corrected for the extra chances of a false winner (below).
 
 These are typical stopping points from the same test the results use: half of tests finish sooner, half later. Nothing is stored.
 
@@ -54,16 +73,18 @@ A visitor's version is the first one they saw. A conversion counts when a goal e
 
 For each goal and each version against the control:
 
-- **Visitors and conversions**, and the rate.
-- **Chance to beat the control**: the chance the version's true rate is above the control's (Bayesian, with a flat prior). "97% likely to beat Control" means what it says.
-- **Lift**: the relative change of its rate over the control's, with a 95% range (`+18%, range +4% to +33%`). The range comes from the same sequential test as the p-value, so it stays honest however often you look, and it leaves out zero exactly when the result is safe to stop.
+- **Visitors and conversions**, and the rate; for a count or value goal, the total (`sum`) and the mean per visitor (`mean`).
+- **Chance to beat the control**: the chance the version's true rate (or mean) is above the control's (Bayesian, with a flat prior for a rate; the normal approximation for a mean). "97% likely to beat Control" means what it says.
+- **Lift**: the relative change of its rate (or mean) over the control's, with a 95% range (`+18%, range +4% to +33%`). The range comes from the same sequential test as the p-value, so it stays honest however often you look, and it leaves out zero exactly when the result is safe to stop.
 - **p-value**: an *always-valid* p-value (a mixture sequential test, tuned by the test's smallest change worth finding and the goal's recorded rate). A classic p-value turns up false winners when people look every day and stop at the first good-looking result; this one stays honest however often you look. Below 0.05 it is **safe to stop**. It is the lowest over the test's daily looks, so a version that was safe to stop stays so. That honesty costs traffic: it needs two to three times the visitors of a classic test that is only looked at once.
-- **Day by day**: each version's rate, cumulative, for the first goal (`days` in the results).
+- **Day by day**: each version's rate (or mean), cumulative, for the first goal (`days` in the results).
+- **Several versions**: when two or more versions compete with the control, each comparison is another chance of a false winner. The results correct for it (Bonferroni): `p_value` is the raw always-valid p-value (`raw_p_value`) times the number of versions, and the range is widened to match, so it still leaves out zero exactly when the result is safe to stop. `corrected_for` says how many versions that is.
+- **Exploratory goals**: every goal after the first is marked `exploratory`. Checking many goals turns up chance differences, so they are for learning, and never decide the winner.
 - **Sample ratio check**: if the split between versions is far from the flag's weights (a chance under 0.001 of happening by luck), something is losing or double-counting visitors, such as a redirect, a cache or bots. The results then shouldn't be trusted, and there is no winner.
 
-The **winner** is a version at least 95% likely to beat the control with a p-value under 0.05 on the first goal; or the control, when every other version is at most 5% likely to beat it with the same proof; otherwise none yet. The maths is exact, with no sampling, so every reload gives the same numbers. A simulation in the engine's tests (identical versions, results checked every day, stopping at the first winner, at 1–5% base rates and 200–5,000 visitors a day) finds false winners well under 5% of the time.
+The **winner** is a version at least 95% likely to beat the control with a p-value under 0.05 on the first goal; or the control, when every other version is at most 5% likely to beat it with the same proof; otherwise none yet. The maths is exact, with no sampling, so every reload gives the same numbers. A simulation in the engine's tests (identical versions, results checked every day, stopping at the first winner, at 1–5% base rates and 200–5,000 visitors a day) finds false winners well under 5% of the time; so does one for revenue per visitor (few buyers, skewed amounts, one to three versions against the control).
 
-Only conversion-rate goals are supported today. Revenue and other averages, and variance reduction (CUPED), are planned.
+Variance reduction (CUPED), breakdowns by device and source, and guardrail metrics are planned.
 
 ## AI help
 

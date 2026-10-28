@@ -16,7 +16,18 @@ import (
 const (
 	CategoryPayments = "payments"
 	CapPayments      = "payments.read" // implements PaymentReader
+	// CapPromoCodes creates promotion codes for a partner (PromoCodeWriter):
+	// the one thing a payment connector writes, and only when the
+	// workspace's key allows it.
+	CapPromoCodes = "promo_codes.write"
 )
+
+// PromoCodeWriter makes a promotion code customers type at checkout, for
+// a discount (coupon) the workspace already has in its billing account.
+type PromoCodeWriter interface {
+	// CreatePromoCode makes code for coupon and returns its id.
+	CreatePromoCode(ctx context.Context, cl *Client, creds Creds, code, coupon string, metadata map[string]string) (string, error)
+}
 
 // Kinds of objects a PaymentReader lists, in the order a first sync reads
 // them, so a subscription or payment finds its customer already stored.

@@ -301,6 +301,17 @@ var Follows = []Ref{
 	{"ad_conversion_sends", "record_id"}, {"attribution_conversions", "record_id"}, {"link_prospects", "record_id"},
 	{"rule_firings", "record_id"}, {"coverage", "record_id"},
 	{"link_prospect_contacts", "record_id"},
+	{"partner_memberships", "record_id"}, {"partner_referrals", "record_id"}, {"partner_conversions", "record_id"},
+	{"partner_rewards", "recipient_id"}, {"partner_sign_in_links", "record_id"}, {"partner_sessions", "record_id"},
+}
+
+// followOnce are Follows tables that hold one row per record and parent
+// (a partner per program, a referral per program): a row moves only when
+// the record kept has none of its own there.
+var followOnce = map[string]string{
+	"email_broadcast_recipients": "broadcast_id",
+	"partner_memberships":        "program_id",
+	"partner_referrals":          "program_id",
 }
 
 // Owned are the record columns a merge handles itself (identities, links,
@@ -324,8 +335,8 @@ var Owned = []Ref{
 
 // Follow moves every Follows column from one record to another and
 // returns how many rows moved, by table. Tables not created yet are
-// skipped. A broadcast that reached both
-// keeps the row it has for the record kept. A journey both are in keeps
+// skipped. A broadcast that reached both, or a program both are partners
+// in or were referred to, keeps the row it has for the record kept. A journey both are in keeps
 // the kept record's run; the other's ends with exit_reason "merged".
 func Follow(ctx context.Context, tx pgx.Tx, workspaceID, fromID, intoID string) (map[string]int, error) {
 	moved := map[string]int{}
@@ -345,8 +356,8 @@ func Follow(ctx context.Context, tx pgx.Tx, workspaceID, fromID, intoID string) 
 			continue
 		}
 		sql := `UPDATE ` + r.Table + ` SET ` + r.Column + ` = $2 WHERE workspace_id = $3 AND ` + r.Column + ` = $1`
-		if r.Table == "email_broadcast_recipients" {
-			sql += ` AND NOT EXISTS (SELECT 1 FROM email_broadcast_recipients o WHERE o.broadcast_id = email_broadcast_recipients.broadcast_id AND o.record_id = $2)`
+		if parent, ok := followOnce[r.Table]; ok {
+			sql += ` AND NOT EXISTS (SELECT 1 FROM ` + r.Table + ` o WHERE o.` + parent + ` = ` + r.Table + `.` + parent + ` AND o.` + r.Column + ` = $2)`
 		}
 		// A rule that fired for both in the same episode keeps the kept
 		// record's firing.

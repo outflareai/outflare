@@ -1,0 +1,107 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>Refer a friend</title>
+<style>
+:root { --accent: #111827; --bg: #fff; --text: #0f172a; --muted: #64748b; --line: #e2e8f0; }
+@media (prefers-color-scheme: dark) { :root { --bg: #111827; --text: #e5e7eb; --muted: #94a3b8; --line: #1f2937; } }
+* { box-sizing: border-box; }
+html, body { margin: 0; background: var(--bg); color: var(--text); font: 14px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; }
+main { padding: 16px; }
+h1 { font-size: 16px; margin: 0 0 4px; }
+p { margin: 0 0 12px; }
+.muted { color: var(--muted); }
+.row { display: flex; gap: 8px; align-items: center; }
+input { flex: 1; min-width: 0; padding: 8px 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); color: var(--text); font: 12.5px ui-monospace, SFMono-Regular, Menlo, monospace; }
+button { background: var(--accent); color: #fff; border: 0; border-radius: 6px; padding: 8px 14px; font: inherit; font-weight: 600; cursor: pointer; }
+.stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(100px, 1fr)); gap: 8px; margin-top: 14px; }
+.stat { border: 1px solid var(--line); border-radius: 8px; padding: 10px; }
+.stat b { display: block; font-size: 18px; }
+.stat span { color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .04em; }
+.code { margin-top: 10px; }
+</style>
+<style id="custom"></style>
+</head>
+<body>
+<main id="main"><p class="muted">Loading…</p></main>
+<script>
+(function () {
+  "use strict";
+  var BASE = "{{BASE}}";
+  var main = document.getElementById("main");
+  // The session token comes after #, so it never reaches a server log;
+  // it is kept in memory and taken off the address.
+  var token = (location.hash.match(/token=([A-Za-z0-9_\-]+)/) || [])[1] || "";
+  try { history.replaceState(null, "", location.pathname); } catch (e) {}
+
+  function el(tag, attrs, kids) {
+    var e = document.createElement(tag);
+    Object.keys(attrs || {}).forEach(function (k) {
+      if (attrs[k] == null) return;
+      if (k === "text") e.textContent = attrs[k];
+      else if (k.slice(0, 2) === "on") e.addEventListener(k.slice(2), attrs[k]);
+      else e.setAttribute(k, attrs[k]);
+    });
+    (kids || []).forEach(function (c) { if (c) e.appendChild(typeof c === "string" ? document.createTextNode(c) : c); });
+    return e;
+  }
+  function api(path) {
+    return fetch(BASE + "api/" + path, { credentials: "omit", headers: { Authorization: "Bearer " + token } }).then(function (r) {
+      return r.json().catch(function () { return {}; }).then(function (j) {
+        if (!r.ok) throw new Error((j.error && j.error.message) || "Something went wrong");
+        return j;
+      });
+    });
+  }
+  function money(cents, currency) {
+    try { return new Intl.NumberFormat(undefined, { style: "currency", currency: currency }).format(cents / 100); }
+    catch (e) { return (cents / 100).toFixed(2) + " " + currency; }
+  }
+  // Tell the page around the widget how tall it is, so its iframe can fit.
+  function resize() {
+    try { parent.postMessage({ type: "outflare:partner-widget", height: document.documentElement.scrollHeight }, "*"); } catch (e) {}
+  }
+  function show(nodes) { main.textContent = ""; nodes.forEach(function (n) { if (n) main.appendChild(n); }); resize(); }
+  function copy(input, button) {
+    return function () {
+      input.select();
+      if (navigator.clipboard) navigator.clipboard.writeText(input.value); else document.execCommand("copy");
+      button.textContent = "Copied"; setTimeout(function () { button.textContent = "Copy"; }, 1500);
+    };
+  }
+  function stat(value, label) { return el("div", { "class": "stat" }, [el("b", { text: value }), el("span", { text: label })]); }
+
+  if (!token) { show([el("p", { "class": "muted", text: "This referral widget needs a session from your app." })]); return; }
+  api("me").then(function (me) {
+    var p = me.program;
+    if (p.color) document.documentElement.style.setProperty("--accent", p.color);
+    document.getElementById("custom").textContent = p.custom_css || "";
+    if (me.status !== "active") {
+      show([el("h1", { text: p.title }), el("p", { "class": "muted", text: me.status === "pending" ? "Your referral link is on its way: it's being reviewed." : "Referrals aren't available on your account." })]);
+      return;
+    }
+    var link = el("input", { readonly: "", value: me.link, "aria-label": "Your referral link" });
+    var btn = el("button", { type: "button", text: "Copy" });
+    btn.addEventListener("click", copy(link, btn));
+    var s = me.stats, c = me.currency;
+    show([
+      el("h1", { text: p.title }),
+      p.welcome ? el("p", { "class": "muted", text: p.welcome }) : null,
+      el("div", { "class": "row" }, [link, btn]),
+      me.promo_codes && me.promo_codes.length ? el("p", { "class": "code muted", text: "Or share your code: " + me.promo_codes.join(", ") }) : null,
+      el("div", { "class": "stats" }, [
+        stat(String(s.referrals), "Referred"),
+        stat(String(s.customers), "Became customers"),
+        stat(money(s.pending_cents + s.approved_cents + s.paid_cents, c), "Earned"),
+        stat(money(s.paid_cents, c), "Paid out")
+      ])
+    ]);
+  }).catch(function (e) { show([el("p", { "class": "muted", text: e.message })]); });
+  window.addEventListener("resize", resize);
+})();
+</script>
+</body>
+</html>

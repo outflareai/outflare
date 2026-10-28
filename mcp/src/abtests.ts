@@ -14,9 +14,16 @@ const write = { readOnlyHint: false, destructiveHint: false, openWorldHint: fals
 const testRef = z.string().uuid().describe("The test's id, from list_ab_tests.");
 
 const goal = z.object({
-  kind: z.enum(["event", "page"]),
+  kind: z.enum(["event", "page", "deal"]).describe("event: a product event. page: a view of a page. deal: won deals (US dollars) of the person the visitor's browser belongs to."),
   name: z.string().max(100).optional().describe("For an event goal: the product event's catalog name, such as signup_started."),
   path: z.string().max(500).optional().describe("For a page goal: a path such as /thanks, or /docs/* for every page under it."),
+  metric: z
+    .enum(["conversion", "count", "value"])
+    .optional()
+    .describe("conversion (default): whether each visitor reached it. count: how many times. value: the total of property (or a deal's value) per visitor, such as revenue per visitor."),
+  property: z.string().max(64).optional().describe("For a value goal on an event: the property with the number, such as revenue."),
+  window_hours: z.number().int().min(0).max(8784).optional().describe("Count only what happens within this many hours of first seeing a version."),
+  cap: z.number().min(0).optional().describe("For count and value goals: the most one visitor can add, so a few huge orders can't swing the result."),
 });
 const fields = {
   name: z.string().max(200).optional().describe("Default: the flag's name."),
@@ -67,7 +74,7 @@ export function registerABTestTools(
     {
       title: "Get an A/B test's results",
       description:
-        "Visitors and conversions per version for each goal, each version's chance to beat the control, its lift with a 95% range, an always-valid p_value (below 0.05 it is safe to stop, however often you looked), a sample-ratio warning, and the winner if one is clear. Live while running; as it stood when it ended once done.",
+        "Visitors and conversions (or the mean count or value per visitor) per version for each goal, each version's chance to beat the control, its lift with a 95% range, an always-valid p_value (below 0.05 it is safe to stop, however often you looked; corrected when several versions compete), a sample-ratio warning, and the winner if one is clear. Goals after the first are exploratory and never decide. Live while running; as it stood when it ended once done.",
       inputSchema: { test: testRef },
       annotations: read,
     },

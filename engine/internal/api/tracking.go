@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"slices"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -33,11 +34,15 @@ type trackingDomainView struct {
 	tracking.Domain
 	DNSInstall     *connectors.DNSInstall `json:"dns_install"`
 	DNSConnections []string               `json:"dns_connections"`
+	// PartnerProgramID is the partner program whose portal the domain
+	// serves; null for the workspace's email and partner links.
+	PartnerProgramID *string `json:"partner_program_id"`
 }
 
 func (s *Server) trackingDomains(ctx context.Context, ws string, id *string) ([]trackingDomainView, error) {
 	rows, err := s.pool.Query(ctx, `
-		SELECT id, domain, status, error, last_checked_at, verified_at, created_at, dns_install, https_status, https_error FROM tracking_domains
+		SELECT id, domain, status, error, last_checked_at, verified_at, created_at, dns_install, https_status, https_error,
+			(SELECT p.id::text FROM partner_programs p WHERE p.portal_domain_id = d.id) FROM tracking_domains d
 		WHERE workspace_id = $1 AND ($2::uuid IS NULL OR id = $2) ORDER BY created_at`, ws, id)
 	if err != nil {
 		return nil, err
@@ -45,7 +50,7 @@ func (s *Server) trackingDomains(ctx context.Context, ws string, id *string) ([]
 	target := s.trackingHost()
 	list, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (trackingDomainView, error) {
 		v := trackingDomainView{Domain: tracking.Domain{Target: target}}
-		err := row.Scan(&v.ID, &v.Domain.Domain, &v.Status, &v.Error, &v.LastCheckedAt, &v.VerifiedAt, &v.CreatedAt, &v.DNSInstall, &v.HTTPSStatus, &v.HTTPSError)
+		err := row.Scan(&v.ID, &v.Domain.Domain, &v.Status, &v.Error, &v.LastCheckedAt, &v.VerifiedAt, &v.CreatedAt, &v.DNSInstall, &v.HTTPSStatus, &v.HTTPSError, &v.PartnerProgramID)
 		return v, err
 	})
 	if err != nil || len(list) == 0 {
@@ -74,10 +79,33 @@ func (s *Server) trackingDomain(ctx context.Context, ws, id string) (trackingDom
 
 func (s *Server) listTrackingDomains(w http.ResponseWriter, r *http.Request) {
 	a := accessFrom(r.Context())
+	sel, ok := s.brandFilter(w, r)
+	if !ok {
+		return
+	}
 	list, err := s.trackingDomains(r.Context(), a.WorkspaceID, nil)
 	if err != nil {
 		s.internal(w, r, err)
 		return
+	}
+	// A domain tied to a partner program belongs to that program's brand;
+	// the rest serve every brand.
+	if sel.id != "" || sel.in != nil {
+		rows, err := s.pool.Query(r.Context(), `SELECT id::text, brand_id::text FROM partner_programs WHERE workspace_id = $1`, a.WorkspaceID)
+		if err != nil {
+			s.internal(w, r, err)
+			return
+		}
+		brands := map[string]*string{}
+		var id string
+		var brand *string
+		if _, err := pgx.ForEachRow(rows, []any{&id, &brand}, func() error { brands[id] = brand; return nil }); err != nil {
+			s.internal(w, r, err)
+			return
+		}
+		list = slices.DeleteFunc(list, func(d trackingDomainView) bool {
+			return d.PartnerProgramID != nil && !sel.matches(brands[*d.PartnerProgramID])
+		})
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"data": list, "target": s.trackingHost()})
 }
@@ -105,6 +133,8 @@ func (s *Server) addTrackingDomain(w http.ResponseWriter, r *http.Request) {
 	a := accessFrom(r.Context())
 	var req struct {
 		Domain string `json:"domain"`
+		// A partner program's id or slug: the domain serves its portal.
+		PartnerProgram string `json:"partner_program"`
 	}
 	if !decode(w, r, &req) {
 		return
@@ -119,14 +149,44 @@ func (s *Server) addTrackingDomain(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ctx := r.Context()
+	var program *string
+	if req.PartnerProgram != "" {
+		if !a.has(auth.ScopePartnersManage) {
+			writeError(w, r, http.StatusForbidden, "forbidden", s.missingScope(a, auth.ScopePartnersManage))
+			return
+		}
+		var id string
+		err := s.pool.QueryRow(ctx, `SELECT id::text FROM partner_programs WHERE workspace_id = $1 AND (id::text = lower($2) OR slug = lower($2))`,
+			a.WorkspaceID, req.PartnerProgram).Scan(&id)
+		if errors.Is(err, pgx.ErrNoRows) {
+			writeError(w, r, http.StatusBadRequest, "invalid_request", "partner_program: no such partner program")
+			return
+		}
+		if err != nil {
+			s.internal(w, r, err)
+			return
+		}
+		program = &id
+	}
 	var id string
 	err := pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
-		err := tx.QueryRow(ctx, `INSERT INTO tracking_domains (workspace_id, domain) VALUES ($1, $2) ON CONFLICT (domain) DO NOTHING RETURNING id`, a.WorkspaceID, domain).Scan(&id)
+		err := tx.QueryRow(ctx, `INSERT INTO tracking_domains (workspace_id, domain) VALUES ($1, $2) ON CONFLICT (domain) DO NOTHING RETURNING id`,
+			a.WorkspaceID, domain).Scan(&id)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return errInvalid(domain + " is already in use")
 		}
 		if err != nil {
 			return err
+		}
+		if program != nil {
+			tag, err := tx.Exec(ctx, `UPDATE partner_programs SET portal_domain_id = $2, updated_at = now() WHERE id = $1 AND portal_domain_id IS NULL`, *program, id)
+			if err != nil {
+				return err
+			}
+			if tag.RowsAffected() == 0 {
+				return errInvalid("the partner program already has a domain; remove it first")
+			}
+			s.forgetHosts()
 		}
 		return record(ctx, tx, &a.principal, a.WorkspaceID, "tracking_domain.added", "tracking_domain", id, map[string]any{"domain": domain})
 	})

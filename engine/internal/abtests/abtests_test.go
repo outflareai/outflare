@@ -25,6 +25,17 @@ func TestCheckGoals(t *testing.T) {
 		{[]abtests.Goal{{Kind: "page", Path: "/a/*/b"}}, false},
 		{[]abtests.Goal{{Kind: "click"}}, false},
 		{make([]abtests.Goal, abtests.MaxGoals+1), false},
+		{[]abtests.Goal{{Kind: "event", Name: "order_completed", Metric: "value", Property: "revenue", Cap: 1000, WindowHours: 72}}, true},
+		{[]abtests.Goal{{Kind: "page", Path: "/pricing", Metric: "count"}}, true},
+		{[]abtests.Goal{{Kind: "deal", Metric: "value"}, {Kind: "deal"}}, true},
+		{[]abtests.Goal{{Kind: "event", Name: "order_completed", Metric: "value"}}, false},
+		{[]abtests.Goal{{Kind: "event", Name: "order_completed", Metric: "value", Property: "a b"}}, false},
+		{[]abtests.Goal{{Kind: "event", Name: "signup", Property: "revenue"}}, false},
+		{[]abtests.Goal{{Kind: "page", Path: "/thanks", Metric: "value"}}, false},
+		{[]abtests.Goal{{Kind: "deal", Metric: "count"}}, false},
+		{[]abtests.Goal{{Kind: "event", Name: "signup", Metric: "mean"}}, false},
+		{[]abtests.Goal{{Kind: "event", Name: "signup", Cap: 5}}, false},
+		{[]abtests.Goal{{Kind: "event", Name: "signup", WindowHours: -1}}, false},
 	} {
 		if got := abtests.CheckGoals(c.goals) == ""; got != c.ok {
 			t.Errorf("CheckGoals(%+v) ok = %v, want %v", c.goals, got, c.ok)
@@ -170,5 +181,126 @@ func TestResults(t *testing.T) {
 		if tr.Visitors != tc.visitors || tr.Converted != tc.converted {
 			t.Errorf("traffic on %q = %+v, want %d/%d", tc.page, tr, tc.converted, tc.visitors)
 		}
+	}
+}
+
+// TestResultsMetrics checks goals measured per visitor: how many times
+// each reached the goal, the value on their events (capped), a conversion
+// window, and the value of won deals of the person a browser belongs to.
+func TestResultsMetrics(t *testing.T) {
+	url := os.Getenv("TEST_DATABASE_URL")
+	if url == "" {
+		t.Skip("TEST_DATABASE_URL not set")
+	}
+	ctx := context.Background()
+	pool, err := db.Connect(ctx, url)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(pool.Close)
+	if _, err := db.Migrate(ctx, pool); err != nil {
+		t.Fatal(err)
+	}
+	var ws string
+	if err := pool.QueryRow(ctx, `INSERT INTO workspaces (name, slug) VALUES ('AB', 'ab-' || substr(gen_random_uuid()::text, 1, 8)) RETURNING id::text`).Scan(&ws); err != nil {
+		t.Fatal(err)
+	}
+	start := time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC)
+	at := func(h int) time.Time { return start.Add(time.Duration(h) * time.Hour) }
+	exec := func(sql string, args ...any) {
+		t.Helper()
+		if _, err := pool.Exec(ctx, sql, args...); err != nil {
+			t.Fatal(err)
+		}
+	}
+	add := func(anon, name string, h int, props string) {
+		exec(`INSERT INTO customer_events (workspace_id, kind, name, anonymous_id, properties, occurred_at) VALUES ($1, 'track', $2, $3, $4, $5)`,
+			ws, name, anon, props, at(h))
+	}
+	order := func(anon string, h int, revenue string) { add(anon, "order_completed", h, `{"revenue": `+revenue+`}`) }
+	for _, v := range []struct{ anon, variant string }{{"c0", "control"}, {"c1", "control"}, {"n0", "new"}, {"n1", "new"}} {
+		add(v.anon, abtests.ExposureEvent, 1, fmt.Sprintf(`{"flag": "checkout", "variant": %q}`, v.variant))
+	}
+	// c0 buys twice on day one (50 + 30); c1 buys nothing. n0 buys 500 on
+	// day one and 20 a day later; n1 sends a revenue that isn't a number,
+	// and buys 40 more than 3 days after joining.
+	order("c0", 2, "50")
+	order("c0", 3, "30")
+	order("n0", 2, "500")
+	order("n0", 26, "20")
+	order("n1", 2, `"lots"`)
+	order("n1", 80, "40")
+	// c1's browser belongs to a person with a won deal of $1,200 after they
+	// joined, an open one, and a won one before they joined.
+	var person string
+	if err := pool.QueryRow(ctx, `INSERT INTO records (workspace_id, record_type, name) VALUES ($1, 'person', 'Ana') RETURNING id::text`, ws).Scan(&person); err != nil {
+		t.Fatal(err)
+	}
+	exec(`INSERT INTO site_visitors (workspace_id, anonymous_id, record_id, first_seen_at, last_seen_at) VALUES ($1, 'c1', $2, $3, $3)`, ws, person, at(0))
+	for _, d := range []struct {
+		state string
+		cents int
+		h     int
+	}{{"won", 120000, 30}, {"open", 90000, 30}, {"won", 70000, 0}} {
+		exec(`INSERT INTO deals (workspace_id, source, state, amount_cents, currency, record_id, closed_at) VALUES ($1, 'manual', $2, $3, 'USD', $4, $5)`,
+			ws, d.state, d.cents, person, at(d.h))
+	}
+
+	goals := []abtests.Goal{
+		{Kind: "event", Name: "order_completed", Metric: abtests.MetricCount},
+		{Kind: "event", Name: "order_completed", Metric: abtests.MetricValue, Property: "revenue"},
+		{Kind: "event", Name: "order_completed", Metric: abtests.MetricValue, Property: "revenue", Cap: 100, WindowHours: 72},
+		{Kind: "deal", Metric: abtests.MetricValue},
+		{Kind: "deal"},
+	}
+	res, err := abtests.Results(ctx, pool, ws, abtests.Spec{FlagKey: "checkout", Variants: []string{"control", "new"}, Weights: []int{50, 50},
+		Control: "control", Goals: goals, From: start, To: at(24 * 7)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := func(g int, conversions []int64, sums []float64) {
+		t.Helper()
+		gr := res.Goals[g]
+		for i, a := range gr.Arms {
+			if a.Visitors != 2 || a.Conversions != conversions[i] || a.Sum != sums[i] {
+				t.Errorf("goal %d %s: %d visitors, %d converted, sum %v; want 2, %d, %v", g, a.Variant, a.Visitors, a.Conversions, a.Sum, conversions[i], sums[i])
+			}
+		}
+		if gr.Metric != goals[g].MetricOf() || gr.Exploratory != (g > 0) {
+			t.Errorf("goal %d: metric %q, exploratory %v", g, gr.Metric, gr.Exploratory)
+		}
+	}
+	want(0, []int64{1, 2}, []float64{2, 4})
+	want(1, []int64{1, 2}, []float64{80, 560})
+	// Capped at 100 each: c0 80, n0 100; n1's 40 is past the window.
+	want(2, []int64{1, 1}, []float64{80, 100})
+	want(3, []int64{1, 0}, []float64{1200, 0})
+	want(4, []int64{1, 0}, []float64{0, 0})
+	if m := res.Goals[1].Arms[1].Mean; m != 280 {
+		t.Errorf("mean revenue per visitor of new = %v, want 280", m)
+	}
+	// The count goal's days: new's orders grow 2, 3, 4 over 1, 2 and 4
+	// October, and the sum of squares follows each visitor's running total
+	// (1+1, then 4+1, then 4+4).
+	d := res.Goals[0].Days
+	if len(d) != 3 || d[2].Date != "2026-10-04" || d[1].Arms[1].Sum != 3 || d[1].Arms[1].SumSq != 5 || d[2].Arms[1].SumSq != 8 {
+		t.Errorf("count goal days = %+v", d)
+	}
+	if res.CorrectedFor != 1 || len(res.Goals[1].Comparisons) != 1 {
+		t.Errorf("corrected for %d, comparisons %+v", res.CorrectedFor, res.Goals[1].Comparisons)
+	}
+
+	// The planner reads the same values from recent traffic.
+	add("c0", "page.viewed", 0, `{}`)
+	add("n0", "page.viewed", 0, `{}`)
+	tr, err := abtests.ReadTraffic(ctx, pool, ws, goals[1], "", start, at(24*7))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if tr.Visitors != 2 || tr.Converted != 2 || tr.Sum != 600 || tr.SumSq != 80*80+520*520 {
+		t.Errorf("traffic = %+v", tr)
+	}
+	if b := abtests.Baseline(tr, abtests.MetricValue); b != 0 {
+		t.Errorf("2 visitors is too few for a baseline, got %v", b)
 	}
 }

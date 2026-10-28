@@ -169,7 +169,7 @@ Connectors with the `import.campaigns` capability (Instantly, Smartlead) impleme
 
 ## Payments
 
-Connectors with the `payments.read` capability (Stripe) implement `connectors.PaymentReader`. They only read: Outflare never charges, refunds or changes anything in the billing account, and never holds money.
+Connectors with the `payments.read` capability (Stripe) implement `connectors.PaymentReader`. Outflare never charges, refunds or changes payments in the billing account, and never holds money. The one thing a payment connector may write is a promotion code for a partner (`promo_codes.write`, `connectors.PromoCodeWriter`), for a coupon the workspace already has, and only when its key allows it ([partners.md](partners.md#sales-from-your-billing-account)).
 
 - **Connect.** Create a restricted key in Stripe (Developers, API keys, Create restricted key) with Read access to Customers, Charges, Events, Products, Prices and Subscriptions, and nothing else, then connect it on the Connectors page. A test-mode key reads test data.
 - **Sync.** Every connected payment account is read every five minutes. The first sync takes Stripe's change cursor, then lists every customer, subscription, payment and refund; later syncs read only Stripe's events since the last one. A run stops after about 90 seconds and carries on next time. If Stripe has forgotten the cursor (it keeps events for 30 days), the next run lists everything again, without doubling anything. `GET /v1/workspaces/{ws}/integrations/{id}/payment-sync` (scope `integrations.read`, MCP `get_payment_sync`) shows the phase, totals and last error; `POST` on the same path (scope `integrations.manage`, MCP `run_payment_sync`) syncs now. A key Stripe refuses marks the connection as needing attention.

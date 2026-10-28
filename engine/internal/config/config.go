@@ -35,6 +35,11 @@ type Config struct {
 	// TrackingTarget is OUTFLARE_TRACKING_TARGET: the host workspaces point
 	// their tracking domains' CNAME records at, when it isn't PUBLIC_URL's.
 	TrackingTarget string
+	// PartnersDomain is OUTFLARE_PARTNERS_DOMAIN: partner portals are served
+	// at <subdomain>.<it> (such as partners.example.com), with wildcard DNS
+	// and a wildcard certificate the operator sets up. Empty serves them at
+	// /p/<program>/ on PUBLIC_URL and on programs' own domains only.
+	PartnersDomain string
 	// EdgeSecret is OUTFLARE_EDGE_SECRET: shared with an edge in front of
 	// tracking domains, which signs the domain and visitor address it
 	// passes on with it. Empty turns that off.
@@ -164,6 +169,7 @@ func Load() (Config, error) {
 
 		ClientIPHeader:         os.Getenv("CLIENT_IP_HEADER"),
 		TrackingTarget:         strings.ToLower(strings.TrimSpace(os.Getenv("OUTFLARE_TRACKING_TARGET"))),
+		PartnersDomain:         strings.Trim(strings.ToLower(strings.TrimSpace(os.Getenv("OUTFLARE_PARTNERS_DOMAIN"))), "."),
 		EdgeSecret:             os.Getenv("OUTFLARE_EDGE_SECRET"),
 		WebhooksAllowPrivate:   os.Getenv("WEBHOOKS_ALLOW_PRIVATE") == "true",
 		CrawlAllowPrivate:      os.Getenv("OUTFLARE_CRAWL_ALLOW_PRIVATE") == "true",

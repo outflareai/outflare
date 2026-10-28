@@ -415,8 +415,10 @@ func (s *Server) readReviewPage(ctx context.Context, ws string, o *connectors.Op
 			first = r
 		}
 		fresh := 0
+		repeat := 0
 		for _, x := range r.Reviews {
 			if seen[x.ExternalID] {
+				repeat++
 				continue
 			}
 			seen[x.ExternalID] = true
@@ -426,10 +428,15 @@ func (s *Server) readReviewPage(ctx context.Context, ws string, o *connectors.Op
 			known[x.ExternalID] = true
 			found = append(found, x)
 		}
-		// A daily read stops at the first page with a review it has, and
-		// any read stops at a page with nothing new (a site that ignores
-		// the page number).
-		if !r.More || fresh == 0 || (p.backfilled && fresh < len(r.Reviews)) {
+		// Any read stops at a page it already read (a site that ignores
+		// the page number). On a site that lists the newest first, a read
+		// stops at a page with nothing new, and a daily read at the first
+		// review it has; elsewhere (Capterra) a daily read takes its pages
+		// in full.
+		if !r.More || len(r.Reviews) == 0 || repeat == len(r.Reviews) {
+			break
+		}
+		if reviews.NewestFirst(p.platform) && (fresh == 0 || (p.backfilled && fresh < len(r.Reviews))) {
 			break
 		}
 	}

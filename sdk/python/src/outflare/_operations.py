@@ -506,6 +506,84 @@ class Operations(_Mixin):
             idempotency_key=idempotency_key,
         )
 
+    def add_partner_adjustment(
+        self,
+        id: str,
+        *,
+        ws: str | None = None,
+        amount_cents: int,
+        note: str | None = None,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Correct what a partner is owed.
+
+        Scope: partners.manage. Positive adds, negative takes away; it nets in their next payout. note (why) is required. The ledger never edits an entry: corrections are new entries.
+
+        Needs: the partners.manage scope.
+        POST /v1/workspaces/{ws}/partners/{id}/adjustments
+        """
+        return self._call(
+            "POST",
+            "/v1/workspaces/{ws}/partners/{id}/adjustments",
+            path={"id": id, "ws": ws},
+            body={"amount_cents": amount_cents, "note": note},
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
+    def add_partner_fee(
+        self,
+        id: str,
+        *,
+        ws: str | None = None,
+        amount_cents: int,
+        note: str | None = None,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Log a fixed fee for a partner.
+
+        Scope: partners.manage. Such as an influencer's fee for a post or a month. Approved at once, counted toward their next payout and logged as a cost (channel affiliates), so cost per sale works.
+
+        Needs: the partners.manage scope.
+        POST /v1/workspaces/{ws}/partners/{id}/fees
+        """
+        return self._call(
+            "POST",
+            "/v1/workspaces/{ws}/partners/{id}/fees",
+            path={"id": id, "ws": ws},
+            body={"amount_cents": amount_cents, "note": note},
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
+    def add_partner_promo_code(
+        self,
+        id: str,
+        *,
+        ws: str | None = None,
+        code: str,
+        coupon: str | None = None,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Tie a promo code to a partner.
+
+        Scope: partners.manage. The code as customers type it at checkout (matched in any case). A conversion that reports it (promo_code) credits the partner. Make the code in your billing system yourself, or pass coupon to have Outflare make it there (status shows how that went).
+
+        Needs: the partners.manage scope.
+        POST /v1/workspaces/{ws}/partners/{id}/promo-codes
+        """
+        return self._call(
+            "POST",
+            "/v1/workspaces/{ws}/partners/{id}/promo-codes",
+            path={"id": id, "ws": ws},
+            body={"code": code, "coupon": coupon},
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
     def add_record_identity(
         self,
         record: str,
@@ -865,6 +943,7 @@ class Operations(_Mixin):
         *,
         ws: str | None = None,
         domain: str,
+        partner_program: str | None = None,
         extra_body: dict[str, Any] | None = None,
         idempotency_key: str | None = None,
     ) -> Any:
@@ -879,7 +958,7 @@ class Operations(_Mixin):
             "POST",
             "/v1/workspaces/{ws}/tracking-domains",
             path={"ws": ws},
-            body={"domain": domain},
+            body={"domain": domain, "partner_program": partner_program},
             extra_body=extra_body,
             idempotency_key=idempotency_key,
         )
@@ -1117,6 +1196,30 @@ class Operations(_Mixin):
             "/v1/workspaces/{ws}/missions/{id}/actions/{action}/approve",
             path={"id": id, "action": action, "ws": ws},
             body={"note": note},
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
+    def approve_partner_reward(
+        self,
+        id: str,
+        *,
+        ws: str | None = None,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Approve a held reward now.
+
+        Scope: partners.manage. Even before its hold ends. Cash is logged as a cost and counts toward the next payout; an action fires partner_reward.approved for your system.
+
+        Needs: the partners.manage scope.
+        POST /v1/workspaces/{ws}/partner-rewards/{id}/approve
+        """
+        return self._call(
+            "POST",
+            "/v1/workspaces/{ws}/partner-rewards/{id}/approve",
+            path={"id": id, "ws": ws},
+            body={},
             extra_body=extra_body,
             idempotency_key=idempotency_key,
         )
@@ -1449,6 +1552,31 @@ class Operations(_Mixin):
             "POST",
             "/v1/workspaces/{ws}/list-runs/{run}/cancel",
             path={"run": run, "ws": ws},
+            idempotency_key=idempotency_key,
+        )
+
+    def cancel_partner_payout(
+        self,
+        id: str,
+        *,
+        ws: str | None = None,
+        note: str | None = None,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Cancel a due payout.
+
+        Scope: partners.manage. Its rewards go back into the partner's balance.
+
+        Needs: the partners.manage scope.
+        POST /v1/workspaces/{ws}/partner-payouts/{id}/cancel
+        """
+        return self._call(
+            "POST",
+            "/v1/workspaces/{ws}/partner-payouts/{id}/cancel",
+            path={"id": id, "ws": ws},
+            body={"note": note},
+            extra_body=extra_body,
             idempotency_key=idempotency_key,
         )
 
@@ -3349,6 +3477,296 @@ class Operations(_Mixin):
             idempotency_key=idempotency_key,
         )
 
+    def create_partner(
+        self,
+        *,
+        ws: str | None = None,
+        code: str | None = None,
+        email: str | None = None,
+        group_id: str | None = None,
+        name: str | None = None,
+        note: str | None = None,
+        payout_method: str | None = None,
+        program: str | None = None,
+        record_id: str | None = None,
+        status: Literal["pending", "active", "suspended", "rejected"] | None = None,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Add a partner to a program.
+
+        Scope: partners.manage. A partner is a customer record: pass record_id, or an email (the person with it, made
+        when nobody has it). code is their ref code; one is made from their name when left out. Each partner gets a
+        tracking campaign (channel affiliates, named after the code), a short link (/r/{code} on your tracking domain)
+        and a campaign link to the program's landing page.
+
+        Needs: the partners.manage scope.
+        POST /v1/workspaces/{ws}/partners
+        """
+        return self._call(
+            "POST",
+            "/v1/workspaces/{ws}/partners",
+            path={"ws": ws},
+            body={
+                "code": code,
+                "email": email,
+                "group_id": group_id,
+                "name": name,
+                "note": note,
+                "payout_method": payout_method,
+                "program": program,
+                "record_id": record_id,
+                "status": status,
+            },
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
+    def create_partner_asset(
+        self,
+        id: str,
+        *,
+        ws: str | None = None,
+        body: str | None = None,
+        kind: Literal["image", "text", "link"],
+        position: int | None = None,
+        title: str,
+        url: str | None = None,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Add an asset for partners.
+
+        Scope: partners.manage. image: a banner's https address. text: copy or an email swipe. link: a page to promote.
+
+        Needs: the partners.manage scope.
+        POST /v1/workspaces/{ws}/partner-programs/{id}/assets
+        """
+        return self._call(
+            "POST",
+            "/v1/workspaces/{ws}/partner-programs/{id}/assets",
+            path={"id": id, "ws": ws},
+            body={"body": body, "kind": kind, "position": position, "title": title, "url": url},
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
+    def create_partner_conversion(
+        self,
+        *,
+        ws: str | None = None,
+        amount_cents: int | None = None,
+        click_id: str | None = None,
+        currency: str | None = None,
+        customer_id: str | None = None,
+        email: str | None = None,
+        event_name: str | None = None,
+        external_id: str | None = None,
+        occurred_at: str | None = None,
+        product_id: str | None = None,
+        program: str | None = None,
+        promo_code: str | None = None,
+        record_id: str | None = None,
+        recurring: bool | None = None,
+        ref: str | None = None,
+        refund_of: str | None = None,
+        sub_id: str | None = None,
+        type: Literal["signup", "lead", "sale", "refund", "custom"],
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Report a sign-up, sale, refund or custom conversion from your backend.
+
+        Scope: partners.conversions, the one scope a server-to-server token needs. Report every sign-up, sale, refund
+        and custom conversion. Each one becomes a customer event on the customer's timeline, under the names attribution
+        reads (signed_up; payment.succeeded with payment_id = external_id and amount_minor; payment.refunded; or a custom
+        conversion's event_name), whether or not a partner referred them. Outflare also credits the referred ones. The partner is found from, in order: promo_code (when the program's
+        codes_win is on), ref (the code from the link, such as a cookie you kept), click_id (ref_click from a short link);
+        then a referral already bound to this customer in the program (the first partner keeps them); then the
+        customer's own website visits that carried a ref, inside the program's window, first or last as it says. A visit
+        only proposes a partner: this call binds it. Identify the customer with customer_id (your own user id),
+        email or record_id, the same way each time. external_id (your charge or order id) makes a retry safe and is what
+        a refund's refund_of names. Not credited is not an error: the answer is 200 with credited false and a reason
+        (no_partner, partner_inactive, program_inactive, self_referral, sale_not_found or currency). 201 means it was
+        credited, with the rewards it earned.
+
+        Needs: the partners.conversions scope.
+        POST /v1/workspaces/{ws}/partner-conversions
+        """
+        return self._call(
+            "POST",
+            "/v1/workspaces/{ws}/partner-conversions",
+            path={"ws": ws},
+            body={
+                "amount_cents": amount_cents,
+                "click_id": click_id,
+                "currency": currency,
+                "customer_id": customer_id,
+                "email": email,
+                "event_name": event_name,
+                "external_id": external_id,
+                "occurred_at": occurred_at,
+                "product_id": product_id,
+                "program": program,
+                "promo_code": promo_code,
+                "record_id": record_id,
+                "recurring": recurring,
+                "ref": ref,
+                "refund_of": refund_of,
+                "sub_id": sub_id,
+                "type": type,
+            },
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
+    def create_partner_group(
+        self,
+        id: str,
+        *,
+        ws: str | None = None,
+        name: str,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Add a partner group (a tier with its own rates).
+
+        Scope: partners.manage. Then give the group its own rules (group_id) and move partners into it.
+
+        Needs: the partners.manage scope.
+        POST /v1/workspaces/{ws}/partner-programs/{id}/groups
+        """
+        return self._call(
+            "POST",
+            "/v1/workspaces/{ws}/partner-programs/{id}/groups",
+            path={"id": id, "ws": ws},
+            body={"name": name},
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
+    def create_partner_payouts(
+        self,
+        *,
+        ws: str | None = None,
+        partner_id: str | None = None,
+        program: str | None = None,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Make the payouts that are due.
+
+        Scope: partners.manage. For each partner (one with partner_id, one program, or all) whose approved, unpaid cash,
+        fees and adjustments reach the program's minimum, one payout gathers them and partner_payout.created fires.
+        Outflare never holds or sends money: pay from your own account or payout tool, then mark it paid.
+
+        Needs: the partners.manage scope.
+        POST /v1/workspaces/{ws}/partner-payouts
+        """
+        return self._call(
+            "POST",
+            "/v1/workspaces/{ws}/partner-payouts",
+            path={"ws": ws},
+            body={"partner_id": partner_id, "program": program},
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
+    def create_partner_program(
+        self,
+        *,
+        ws: str | None = None,
+        auto_accept: bool | None = None,
+        auto_approve: bool | None = None,
+        brand: str | None = None,
+        codes_win: bool | None = None,
+        credit_model: Literal["first", "last"] | None = None,
+        credit_window_days: int | None = None,
+        currency: str | None = None,
+        hold_days: int | None = None,
+        kind: Literal["referral", "affiliate", "influencer"] | None = None,
+        landing_url: str | None = None,
+        min_payout_cents: int | None = None,
+        name: str | None = None,
+        rules: list[dict[str, Any]] | None = None,
+        sales_source: str | None = None,
+        slug: str | None = None,
+        status: Literal["active", "paused", "archived"] | None = None,
+        terms_url: str | None = None,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Create a partner program from a preset.
+
+        Scope: partners.manage. kind picks the preset; every setting it fills in can be changed. referral: two-sided
+        action rewards on the first sale (your system grants them), a 60-day window, a 14-day hold, partners accepted
+        at once. affiliate: 20% of every sale, a 30-day window, a 30-day hold, a $50 minimum payout. influencer: track
+        only (log fees by hand), no hold. The credit rule (window, first or last, codes_win) belongs to the program and
+        never follows the workspace's attribution settings. Pass rules to start with your own.
+
+        Needs: the partners.manage scope.
+        POST /v1/workspaces/{ws}/partner-programs
+        """
+        return self._call(
+            "POST",
+            "/v1/workspaces/{ws}/partner-programs",
+            path={"ws": ws},
+            body={
+                "auto_accept": auto_accept,
+                "auto_approve": auto_approve,
+                "brand": brand,
+                "codes_win": codes_win,
+                "credit_model": credit_model,
+                "credit_window_days": credit_window_days,
+                "currency": currency,
+                "hold_days": hold_days,
+                "kind": kind,
+                "landing_url": landing_url,
+                "min_payout_cents": min_payout_cents,
+                "name": name,
+                "rules": rules,
+                "sales_source": sales_source,
+                "slug": slug,
+                "status": status,
+                "terms_url": terms_url,
+            },
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
+    def create_partner_widget_session(
+        self,
+        id: str,
+        *,
+        ws: str | None = None,
+        customer_id: str | None = None,
+        email: str | None = None,
+        name: str | None = None,
+        record_id: str | None = None,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Open the referral widget for a customer signed in to your app.
+
+        Scope: partners.conversions. Call it from your backend when a signed-in customer opens the page that shows the
+        widget, and put embed_url in an iframe. The customer becomes a partner in the program if they aren't one (active
+        when the program accepts partners on its own, otherwise pending), identified with customer_id, email or
+        record_id the same way as conversions. The widget shows their link, promo codes and earnings, and uses a session
+        that lasts 12 hours; never cache embed_url or show it to anyone else. The widget posts
+        {type: "outflare:partner-widget", height} to its parent page whenever its height changes.
+
+        Needs: the partners.conversions scope.
+        POST /v1/workspaces/{ws}/partner-programs/{id}/widget-sessions
+        """
+        return self._call(
+            "POST",
+            "/v1/workspaces/{ws}/partner-programs/{id}/widget-sessions",
+            path={"id": id, "ws": ws},
+            body={"customer_id": customer_id, "email": email, "name": name, "record_id": record_id},
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
     def create_project(
         self,
         *,
@@ -4677,6 +5095,50 @@ class Operations(_Mixin):
             idempotency_key=idempotency_key,
         )
 
+    def delete_partner_asset(
+        self,
+        id: str,
+        asset: str,
+        *,
+        ws: str | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Remove an asset.
+
+        Scope: partners.manage.
+
+        Needs: the partners.manage scope.
+        DELETE /v1/workspaces/{ws}/partner-programs/{id}/assets/{asset}
+        """
+        return self._call(
+            "DELETE",
+            "/v1/workspaces/{ws}/partner-programs/{id}/assets/{asset}",
+            path={"id": id, "asset": asset, "ws": ws},
+            idempotency_key=idempotency_key,
+        )
+
+    def delete_partner_group(
+        self,
+        id: str,
+        group: str,
+        *,
+        ws: str | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Remove a partner group.
+
+        Scope: partners.manage. Its own rules go with it; its partners move to no group.
+
+        Needs: the partners.manage scope.
+        DELETE /v1/workspaces/{ws}/partner-programs/{id}/groups/{group}
+        """
+        return self._call(
+            "DELETE",
+            "/v1/workspaces/{ws}/partner-programs/{id}/groups/{group}",
+            path={"id": id, "group": group, "ws": ws},
+            idempotency_key=idempotency_key,
+        )
+
     def delete_project(
         self,
         id: str,
@@ -5521,6 +5983,31 @@ class Operations(_Mixin):
                 "brand": brand,
                 "currency": currency,
             },
+        )
+
+    def fulfil_partner_reward(
+        self,
+        id: str,
+        *,
+        ws: str | None = None,
+        note: str | None = None,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Report that your system carried out an action reward.
+
+        Scope: partners.conversions. After partner_reward.approved told your system to grant something (credit, a free month), call this so the ledger shows it done.
+
+        Needs: the partners.conversions scope.
+        POST /v1/workspaces/{ws}/partner-rewards/{id}/fulfil
+        """
+        return self._call(
+            "POST",
+            "/v1/workspaces/{ws}/partner-rewards/{id}/fulfil",
+            path={"id": id, "ws": ws},
+            body={"note": note},
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
         )
 
     def get_ab_test(
@@ -6448,6 +6935,32 @@ class Operations(_Mixin):
             "/v1/workspaces/{ws}/context",
             path={"ws": ws},
             query={"brand": brand},
+        )
+
+    def get_cookie_policy(
+        self,
+        id: str,
+        *,
+        ws: str | None = None,
+        format: Literal["markdown", "text", "html"] | None = None,
+        version: int | None = None,
+    ) -> Any:
+        """Get a site's cookie policy.
+
+        Scope: customers.read. The site's cookie policy as published: its latest version, or an earlier one with version. It
+        lists what was found on the site by category and vendor, everything not ignored and seen in the last 30 days, with its
+        purpose and how long it is kept. content is the policy in format (markdown, text or html). Published again on its own
+        whenever what the site uses changes; a version that adds a vendor needing consent asks visitors again. 404 until the
+        first scan or browser report.
+
+        Needs: the customers.read scope.
+        GET /v1/workspaces/{ws}/site-keys/{id}/cookie-policy
+        """
+        return self._call(
+            "GET",
+            "/v1/workspaces/{ws}/site-keys/{id}/cookie-policy",
+            path={"id": id, "ws": ws},
+            query={"format": format, "version": version},
         )
 
     def get_crawl(
@@ -7695,6 +8208,44 @@ class Operations(_Mixin):
             "/v1/openapi.yaml",
         )
 
+    def get_partner(
+        self,
+        id: str,
+        *,
+        ws: str | None = None,
+    ) -> Any:
+        """Get a partner.
+
+        Scope: partners.read.
+
+        Needs: the partners.read scope.
+        GET /v1/workspaces/{ws}/partners/{id}
+        """
+        return self._call(
+            "GET",
+            "/v1/workspaces/{ws}/partners/{id}",
+            path={"id": id, "ws": ws},
+        )
+
+    def get_partner_program(
+        self,
+        id: str,
+        *,
+        ws: str | None = None,
+    ) -> Any:
+        """Get a partner program.
+
+        Scope: partners.read. With its reward rules and groups.
+
+        Needs: the partners.read scope.
+        GET /v1/workspaces/{ws}/partner-programs/{id}
+        """
+        return self._call(
+            "GET",
+            "/v1/workspaces/{ws}/partner-programs/{id}",
+            path={"id": id, "ws": ws},
+        )
+
     def get_payment_sync(
         self,
         id: str,
@@ -8418,6 +8969,27 @@ class Operations(_Mixin):
             query={"from": from_, "to": to, "sort": sort, "limit": limit},
         )
 
+    def get_site_cookie_policy(
+        self,
+        *,
+        key: str,
+        format: Literal["json", "markdown", "text", "html"] | None = None,
+    ) -> Any:
+        """Get a site's cookie policy, publicly.
+
+        Public: the site key (ofk_) is the authority. The site's latest cookie policy, for its own pages: json (the policy),
+        markdown, text or html (a fragment for a page, with a button that opens the consent banner). The website script fills
+        elements with data-outflare-cookie-policy from it; the same policy as a whole page is at /cookie-policy/{site key id}.
+        404 until the site's first scan or browser report.
+
+        GET /v1/site/cookie-policy
+        """
+        return self._call(
+            "GET",
+            "/v1/site/cookie-policy",
+            query={"key": key, "format": format},
+        )
+
     def get_site_fix_autonomy(
         self,
         site: str,
@@ -9114,6 +9686,28 @@ class Operations(_Mixin):
         return self._call(
             "GET",
             "/v1/auth/google/callback",
+        )
+
+    def impersonate_partner(
+        self,
+        id: str,
+        *,
+        ws: str | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """See the portal as a partner does.
+
+        Scope: partners.manage. A one-time link that opens the program's portal as the partner sees it, read-only, for an
+        hour, even while the portal is closed. Recorded in the audit log (partner.impersonated).
+
+        Needs: the partners.manage scope.
+        POST /v1/workspaces/{ws}/partners/{id}/impersonate
+        """
+        return self._call(
+            "POST",
+            "/v1/workspaces/{ws}/partners/{id}/impersonate",
+            path={"id": id, "ws": ws},
+            idempotency_key=idempotency_key,
         )
 
     def import_leads(
@@ -10361,6 +10955,25 @@ class Operations(_Mixin):
             "/v1/workspaces/{ws}/connectors",
             path={"ws": ws},
             query={"category": category},
+        )
+
+    def list_cookie_policy_versions(
+        self,
+        id: str,
+        *,
+        ws: str | None = None,
+    ) -> Any:
+        """List a site's cookie policy versions.
+
+        Scope: customers.read. Every version, newest first, with what it added and removed (kind:name) and whether it asked visitors again.
+
+        Needs: the customers.read scope.
+        GET /v1/workspaces/{ws}/site-keys/{id}/cookie-policy/versions
+        """
+        return self._call(
+            "GET",
+            "/v1/workspaces/{ws}/site-keys/{id}/cookie-policy/versions",
+            path={"id": id, "ws": ws},
         )
 
     def list_coverage(
@@ -12342,6 +12955,228 @@ class Operations(_Mixin):
             query={"status": status},
         )
 
+    def list_partner_assets(
+        self,
+        id: str,
+        *,
+        ws: str | None = None,
+    ) -> Any:
+        """List a program's assets for partners.
+
+        Scope: partners.read. Banners, copy, email swipes and links shown on the portal's Assets page.
+
+        Needs: the partners.read scope.
+        GET /v1/workspaces/{ws}/partner-programs/{id}/assets
+        """
+        return self._call(
+            "GET",
+            "/v1/workspaces/{ws}/partner-programs/{id}/assets",
+            path={"id": id, "ws": ws},
+        )
+
+    def list_partner_conversions(
+        self,
+        *,
+        ws: str | None = None,
+        brand: str | None = None,
+        type: Literal["signup", "sale", "refund", "custom"] | None = None,
+        partner_id: str | None = None,
+        program: str | None = None,
+        limit: int | None = None,
+        before: str | None = None,
+        cursor: str | None = None,
+        fields: list[str] | None = None,
+    ) -> Any:
+        """List partner conversions, newest first.
+
+        Scope: partners.read. Leads, sales and refunds credited to partners.
+
+        Needs: the partners.read scope.
+        GET /v1/workspaces/{ws}/partner-conversions
+        """
+        return self._call(
+            "GET",
+            "/v1/workspaces/{ws}/partner-conversions",
+            path={"ws": ws},
+            query={
+                "brand": brand,
+                "type": type,
+                "partner_id": partner_id,
+                "program": program,
+                "limit": limit,
+                "before": before,
+                "cursor": cursor,
+                "fields": fields,
+            },
+        )
+
+    def list_partner_payouts(
+        self,
+        *,
+        ws: str | None = None,
+        brand: str | None = None,
+        status: Literal["due", "paid", "canceled"] | None = None,
+        partner_id: str | None = None,
+        limit: int | None = None,
+        before: str | None = None,
+        cursor: str | None = None,
+        fields: list[str] | None = None,
+    ) -> Any:
+        """List partner payouts, newest first.
+
+        Scope: partners.read.
+
+        Needs: the partners.read scope.
+        GET /v1/workspaces/{ws}/partner-payouts
+        """
+        return self._call(
+            "GET",
+            "/v1/workspaces/{ws}/partner-payouts",
+            path={"ws": ws},
+            query={
+                "brand": brand,
+                "status": status,
+                "partner_id": partner_id,
+                "limit": limit,
+                "before": before,
+                "cursor": cursor,
+                "fields": fields,
+            },
+        )
+
+    def list_partner_programs(
+        self,
+        *,
+        ws: str | None = None,
+        brand: str | None = None,
+        status: Literal["active", "paused", "archived"] | None = None,
+    ) -> Any:
+        """List partner programs.
+
+        Scope: partners.read. Referral, affiliate and influencer programs, oldest first, with their reward rules.
+
+        Needs: the partners.read scope.
+        GET /v1/workspaces/{ws}/partner-programs
+        """
+        return self._call(
+            "GET",
+            "/v1/workspaces/{ws}/partner-programs",
+            path={"ws": ws},
+            query={"brand": brand, "status": status},
+        )
+
+    def list_partner_referrals(
+        self,
+        *,
+        ws: str | None = None,
+        brand: str | None = None,
+        partner_id: str | None = None,
+        record_id: str | None = None,
+        status: Literal["lead", "customer", "refunded", "rejected"] | None = None,
+        limit: int | None = None,
+        before: str | None = None,
+        cursor: str | None = None,
+        fields: list[str] | None = None,
+    ) -> Any:
+        """List referred customers, newest first.
+
+        Scope: partners.read. Each customer a partner was credited with, once per program, with their net sales.
+
+        Needs: the partners.read scope.
+        GET /v1/workspaces/{ws}/partner-referrals
+        """
+        return self._call(
+            "GET",
+            "/v1/workspaces/{ws}/partner-referrals",
+            path={"ws": ws},
+            query={
+                "brand": brand,
+                "partner_id": partner_id,
+                "record_id": record_id,
+                "status": status,
+                "limit": limit,
+                "before": before,
+                "cursor": cursor,
+                "fields": fields,
+            },
+        )
+
+    def list_partner_rewards(
+        self,
+        *,
+        ws: str | None = None,
+        brand: str | None = None,
+        status: Literal["pending", "approved", "rejected", "paid", "fulfilled"] | None = None,
+        kind: Literal["cash", "fee", "action", "adjustment"] | None = None,
+        partner_id: str | None = None,
+        payout_id: str | None = None,
+        program: str | None = None,
+        limit: int | None = None,
+        before: str | None = None,
+        cursor: str | None = None,
+        fields: list[str] | None = None,
+    ) -> Any:
+        """List the reward ledger, newest first.
+
+        Scope: partners.read. Cash, fees, actions and adjustments. status pending is still on hold or waiting for a person; approved cash counts toward the next payout; an approved action waits for your system to fulfil it.
+
+        Needs: the partners.read scope.
+        GET /v1/workspaces/{ws}/partner-rewards
+        """
+        return self._call(
+            "GET",
+            "/v1/workspaces/{ws}/partner-rewards",
+            path={"ws": ws},
+            query={
+                "brand": brand,
+                "status": status,
+                "kind": kind,
+                "partner_id": partner_id,
+                "payout_id": payout_id,
+                "program": program,
+                "limit": limit,
+                "before": before,
+                "cursor": cursor,
+                "fields": fields,
+            },
+        )
+
+    def list_partners(
+        self,
+        *,
+        ws: str | None = None,
+        brand: str | None = None,
+        program: str | None = None,
+        status: Literal["pending", "active", "suspended", "rejected"] | None = None,
+        record_id: str | None = None,
+        limit: int | None = None,
+        before: str | None = None,
+        cursor: str | None = None,
+        fields: list[str] | None = None,
+    ) -> Any:
+        """List partners, newest first.
+
+        Scope: partners.read. Each partner's membership in one program, with their links, promo codes and totals.
+
+        Needs: the partners.read scope.
+        GET /v1/workspaces/{ws}/partners
+        """
+        return self._call(
+            "GET",
+            "/v1/workspaces/{ws}/partners",
+            path={"ws": ws},
+            query={
+                "brand": brand,
+                "program": program,
+                "status": status,
+                "record_id": record_id,
+                "limit": limit,
+                "before": before,
+                "cursor": cursor,
+                "fields": fields,
+            },
+        )
+
     def list_pending_mission_actions(
         self,
         *,
@@ -13077,6 +13912,29 @@ class Operations(_Mixin):
             "/v1/workspaces/{ws}/sequences",
             path={"ws": ws},
             query={"brand": brand, "project_id": project_id},
+        )
+
+    def list_site_cookies(
+        self,
+        id: str,
+        *,
+        ws: str | None = None,
+    ) -> Any:
+        """List a site's cookies and scripts.
+
+        Scope: customers.read. Every cookie, storage key, script, embed and pixel found on the site key's site, from scans of
+        its pages and from what the website script sees in visitors' browsers (names only, never values), each matched to a
+        vendor in Outflare's catalogue. Ones the catalogue doesn't know have category unknown and status new: classify them
+        (PATCH .../cookies/{cookie}) for them to be in the cookie policy. before_consent marks one a browser had before the
+        visitor allowed its category. counts.to_review is how many wait for a person.
+
+        Needs: the customers.read scope.
+        GET /v1/workspaces/{ws}/site-keys/{id}/cookies
+        """
+        return self._call(
+            "GET",
+            "/v1/workspaces/{ws}/site-keys/{id}/cookies",
+            path={"id": id, "ws": ws},
         )
 
     def list_site_keys(
@@ -13955,6 +14813,33 @@ class Operations(_Mixin):
             idempotency_key=idempotency_key,
         )
 
+    def mark_partner_payout_paid(
+        self,
+        id: str,
+        *,
+        ws: str | None = None,
+        note: str | None = None,
+        paid_at: str | None = None,
+        reference: str | None = None,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Mark a payout paid.
+
+        Scope: partners.manage. After you paid it from your own account: a note and the payment's reference (a PayPal or Wise transfer id, an invoice number).
+
+        Needs: the partners.manage scope.
+        POST /v1/workspaces/{ws}/partner-payouts/{id}/paid
+        """
+        return self._call(
+            "POST",
+            "/v1/workspaces/{ws}/partner-payouts/{id}/paid",
+            path={"id": id, "ws": ws},
+            body={"note": note, "paid_at": paid_at, "reference": reference},
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
     def mark_review_replied(
         self,
         id: str,
@@ -14118,6 +15003,75 @@ class Operations(_Mixin):
                 "mission_id": mission_id,
                 "currency": currency,
             },
+        )
+
+    def partner_postback(
+        self,
+        token: str,
+        *,
+        type: Literal["signup", "lead", "sale", "refund", "custom"] | None = None,
+        event_name: str | None = None,
+        recurring: str | None = None,
+        ref: str | None = None,
+        click_id: str | None = None,
+        promo_code: str | None = None,
+        customer_id: str | None = None,
+        email: str | None = None,
+        external_id: str | None = None,
+        refund_of: str | None = None,
+        amount: str | None = None,
+        currency: str | None = None,
+    ) -> Any:
+        """Report a conversion by URL (incoming postback).
+
+        The program's postback URL, for trackers and backends that can only call a URL. Takes the same fields as
+        POST .../partner-conversions from the query string, with the names affiliate networks use as aliases: type
+        (or event, goal), ref, click_id (or ref_click, clickid), promo_code (or coupon), customer_id (or user_id),
+        email, external_id (or order_id, transaction_id, charge_id, txid), refund_of, amount (in the currency's main
+        unit, such as 49.90; or amount_cents), currency, product_id, sub_id and occurred_at.
+
+        GET /v1/partner-postbacks/{token}
+        """
+        return self._call(
+            "GET",
+            "/v1/partner-postbacks/{token}",
+            path={"token": token},
+            query={
+                "type": type,
+                "event_name": event_name,
+                "recurring": recurring,
+                "ref": ref,
+                "click_id": click_id,
+                "promo_code": promo_code,
+                "customer_id": customer_id,
+                "email": email,
+                "external_id": external_id,
+                "refund_of": refund_of,
+                "amount": amount,
+                "currency": currency,
+            },
+        )
+
+    def partner_postback_post(
+        self,
+        token: str,
+        *,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Report a conversion by URL, with a form or JSON body.
+
+        The same as the GET, with the fields in a form (application/x-www-form-urlencoded) or a JSON object; body fields win over the query string.
+
+        POST /v1/partner-postbacks/{token}
+        """
+        return self._call(
+            "POST",
+            "/v1/partner-postbacks/{token}",
+            path={"token": token},
+            body={},
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
         )
 
     def passkey_sign_in(
@@ -15052,6 +16006,31 @@ class Operations(_Mixin):
             idempotency_key=idempotency_key,
         )
 
+    def reject_partner_reward(
+        self,
+        id: str,
+        *,
+        ws: str | None = None,
+        note: str | None = None,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Reject a held reward.
+
+        Scope: partners.manage. Only a pending one; take back an approved one with an adjustment. note says why, for the partner.
+
+        Needs: the partners.manage scope.
+        POST /v1/workspaces/{ws}/partner-rewards/{id}/reject
+        """
+        return self._call(
+            "POST",
+            "/v1/workspaces/{ws}/partner-rewards/{id}/reject",
+            path={"id": id, "ws": ws},
+            body={"note": note},
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
     def reject_social_action(
         self,
         id: str,
@@ -15278,6 +16257,28 @@ class Operations(_Mixin):
             "DELETE",
             "/v1/workspaces/{ws}/members/{user}",
             path={"user": user, "ws": ws},
+            idempotency_key=idempotency_key,
+        )
+
+    def remove_partner_promo_code(
+        self,
+        id: str,
+        code: str,
+        *,
+        ws: str | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Remove a partner's promo code.
+
+        Scope: partners.manage.
+
+        Needs: the partners.manage scope.
+        DELETE /v1/workspaces/{ws}/partners/{id}/promo-codes/{code}
+        """
+        return self._call(
+            "DELETE",
+            "/v1/workspaces/{ws}/partners/{id}/promo-codes/{code}",
+            path={"id": id, "code": code, "ws": ws},
             idempotency_key=idempotency_key,
         )
 
@@ -15932,6 +16933,29 @@ class Operations(_Mixin):
             idempotency_key=idempotency_key,
         )
 
+    def rotate_partner_postback(
+        self,
+        id: str,
+        *,
+        ws: str | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Make the program's incoming postback URL.
+
+        Scope: partners.manage. Shown once; making another retires the last. Partners' trackers and backends that can
+        only call a URL report conversions to it (GET or POST /v1/partner-postbacks/{token}). Treat it like a password:
+        anyone with it can report conversions to this program.
+
+        Needs: the partners.manage scope.
+        POST /v1/workspaces/{ws}/partner-programs/{id}/postback
+        """
+        return self._call(
+            "POST",
+            "/v1/workspaces/{ws}/partner-programs/{id}/postback",
+            path={"id": id, "ws": ws},
+            idempotency_key=idempotency_key,
+        )
+
     def rotate_site_key(
         self,
         id: str,
@@ -16310,6 +17334,46 @@ class Operations(_Mixin):
             idempotency_key=idempotency_key,
         )
 
+    def send_site_cookies(
+        self,
+        *,
+        cookies: list[str] | None = None,
+        granted: dict[str, Any] | None = None,
+        iframes: list[str] | None = None,
+        key: str,
+        local: list[str] | None = None,
+        path: str | None = None,
+        scripts: list[str] | None = None,
+        session: list[str] | None = None,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Report a site's cookies from a browser.
+
+        Public: the site key (ofk_) in the body is the authority. What the website script sends at most once a day per browser:
+        the names of the page's cookies and storage keys and the host and first path segment of its scripts and iframes, never
+        a value, a query string or who the visitor is. granted is the visitor's choice when the consent banner is on, so what
+        was there before they allowed it is flagged. Send the JSON as text/plain to skip the CORS preflight.
+
+        POST /v1/site/cookies
+        """
+        return self._call(
+            "POST",
+            "/v1/site/cookies",
+            body={
+                "cookies": cookies,
+                "granted": granted,
+                "iframes": iframes,
+                "key": key,
+                "local": local,
+                "path": path,
+                "scripts": scripts,
+                "session": session,
+            },
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
     def send_site_events(
         self,
         *,
@@ -16661,6 +17725,64 @@ class Operations(_Mixin):
             idempotency_key=idempotency_key,
         )
 
+    def set_partner_portal(
+        self,
+        id: str,
+        *,
+        ws: str | None = None,
+        enabled: bool | None = None,
+        settings: dict[str, Any] | None = None,
+        subdomain: str | None = None,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Open, close or set up a program's partner portal.
+
+        Scope: partners.manage. The portal is where partners apply, sign in with a link emailed through the workspace's own
+        email provider (settings.email_from), and see their links, codes, masked referred customers, rewards and payouts. It
+        is served at {subdomain}.{the server's partners domain}, on a tracking domain tied to the program
+        (POST .../tracking-domains with partner_program), or at /p/{id}/ on this server. settings, when sent, replace the
+        stored ones; a kind's defaults fill in pages and sign-up.
+
+        Needs: the partners.manage scope.
+        PUT /v1/workspaces/{ws}/partner-programs/{id}/portal
+        """
+        return self._call(
+            "PUT",
+            "/v1/workspaces/{ws}/partner-programs/{id}/portal",
+            path={"id": id, "ws": ws},
+            body={"enabled": enabled, "settings": settings, "subdomain": subdomain},
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
+    def set_partner_rules(
+        self,
+        id: str,
+        *,
+        ws: str | None = None,
+        rules: list[dict[str, Any]],
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Replace a partner program's reward rules.
+
+        Scope: partners.manage. Rules stack: every rule a conversion matches gives a reward, except that only the best
+        cash rule (percent or fixed) for the partner counts: a group's own rule beats one for everyone, then the highest
+        tier (min_sales) reached. [] makes the program track only. Rewards already in the ledger keep what they earned.
+
+        Needs: the partners.manage scope.
+        PUT /v1/workspaces/{ws}/partner-programs/{id}/rules
+        """
+        return self._call(
+            "PUT",
+            "/v1/workspaces/{ws}/partner-programs/{id}/rules",
+            path={"id": id, "ws": ws},
+            body={"rules": rules},
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
     def set_reply_rules(
         self,
         *,
@@ -16976,6 +18098,30 @@ class Operations(_Mixin):
             "POST",
             "/v1/workspaces/{ws}/ai-cohorts/{cohort}/runs",
             path={"cohort": cohort, "ws": ws},
+            idempotency_key=idempotency_key,
+        )
+
+    def start_cookie_scan(
+        self,
+        id: str,
+        *,
+        ws: str | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Scan a site for cookies.
+
+        Scope: customers.manage. Reads up to 20 of the site's pages as OutflareBot (each origin's home page, then the pages visits
+        land on most), following robots.txt, and records the cookies its server sets and the third-party scripts, embeds and
+        pixels in its HTML. Cookies that scripts set come from visitors' browsers instead. Sites with the consent banner on are
+        scanned every week. Answers 201 with the new scan, or 200 with one already waiting or running. Records cookie_scan.started.
+
+        Needs: the customers.manage scope.
+        POST /v1/workspaces/{ws}/site-keys/{id}/cookie-scans
+        """
+        return self._call(
+            "POST",
+            "/v1/workspaces/{ws}/site-keys/{id}/cookie-scans",
+            path={"id": id, "ws": ws},
             idempotency_key=idempotency_key,
         )
 
@@ -20063,6 +21209,108 @@ class Operations(_Mixin):
             idempotency_key=idempotency_key,
         )
 
+    def update_partner(
+        self,
+        id: str,
+        *,
+        ws: str | None = None,
+        code: str | None = None,
+        email: str | None = None,
+        group_id: str | None = None,
+        name: str | None = None,
+        note: str | None = None,
+        payout_method: str | None = None,
+        program: str | None = None,
+        record_id: str | None = None,
+        status: Literal["pending", "active", "suspended", "rejected"] | None = None,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Approve, suspend or reject a partner, or change their group, payout method or note.
+
+        Scope: partners.manage. Send only what changes. A partner who isn't active earns nothing new; their links still land. The code can't change: add a promo code instead. group_id "" is no group.
+
+        Needs: the partners.manage scope.
+        PATCH /v1/workspaces/{ws}/partners/{id}
+        """
+        return self._call(
+            "PATCH",
+            "/v1/workspaces/{ws}/partners/{id}",
+            path={"id": id, "ws": ws},
+            body={
+                "code": code,
+                "email": email,
+                "group_id": group_id,
+                "name": name,
+                "note": note,
+                "payout_method": payout_method,
+                "program": program,
+                "record_id": record_id,
+                "status": status,
+            },
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
+    def update_partner_program(
+        self,
+        id: str,
+        *,
+        ws: str | None = None,
+        auto_accept: bool | None = None,
+        auto_approve: bool | None = None,
+        brand: str | None = None,
+        codes_win: bool | None = None,
+        credit_model: Literal["first", "last"] | None = None,
+        credit_window_days: int | None = None,
+        currency: str | None = None,
+        hold_days: int | None = None,
+        kind: Literal["referral", "affiliate", "influencer"] | None = None,
+        landing_url: str | None = None,
+        min_payout_cents: int | None = None,
+        name: str | None = None,
+        rules: list[dict[str, Any]] | None = None,
+        sales_source: str | None = None,
+        slug: str | None = None,
+        status: Literal["active", "paused", "archived"] | None = None,
+        terms_url: str | None = None,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Change a partner program's settings, or pause, archive or restore it.
+
+        Scope: partners.manage. Send only what changes. kind and slug can't change; currency can't once there are rewards. A paused program credits nothing new; its links still land.
+
+        Needs: the partners.manage scope.
+        PATCH /v1/workspaces/{ws}/partner-programs/{id}
+        """
+        return self._call(
+            "PATCH",
+            "/v1/workspaces/{ws}/partner-programs/{id}",
+            path={"id": id, "ws": ws},
+            body={
+                "auto_accept": auto_accept,
+                "auto_approve": auto_approve,
+                "brand": brand,
+                "codes_win": codes_win,
+                "credit_model": credit_model,
+                "credit_window_days": credit_window_days,
+                "currency": currency,
+                "hold_days": hold_days,
+                "kind": kind,
+                "landing_url": landing_url,
+                "min_payout_cents": min_payout_cents,
+                "name": name,
+                "rules": rules,
+                "sales_source": sales_source,
+                "slug": slug,
+                "status": status,
+                "terms_url": terms_url,
+            },
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
     def update_project(
         self,
         id: str,
@@ -20630,6 +21878,37 @@ class Operations(_Mixin):
                 "unsubscribe_header": unsubscribe_header,
                 "status": status,
             },
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
+    def update_site_cookie(
+        self,
+        id: str,
+        cookie: str,
+        *,
+        ws: str | None = None,
+        category: Literal["necessary", "analytics", "marketing", "preferences"] | None = None,
+        purpose: str | None = None,
+        retention: str | None = None,
+        status: Literal["listed", "ignored"] | None = None,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Classify a cookie or script.
+
+        Scope: customers.manage. Say what it is: its category, purpose and how long it is kept, and status listed (in the
+        policy) or ignored (never listed, such as a test cookie). A person's word stands over the catalogue's from then on.
+        The policy is published again when it changes. Records site_cookie.classified.
+
+        Needs: the customers.manage scope.
+        PATCH /v1/workspaces/{ws}/site-keys/{id}/cookies/{cookie}
+        """
+        return self._call(
+            "PATCH",
+            "/v1/workspaces/{ws}/site-keys/{id}/cookies/{cookie}",
+            path={"id": id, "cookie": cookie, "ws": ws},
+            body={"category": category, "purpose": purpose, "retention": retention, "status": status},
             extra_body=extra_body,
             idempotency_key=idempotency_key,
         )

@@ -183,3 +183,84 @@ func TestABTests(t *testing.T) {
 		t.Errorf("ended event: %v", ended)
 	}
 }
+
+// A test judged on revenue per visitor, with two versions against the
+// control: results compare means, correct for the two versions, and mark
+// the second goal exploratory; the planner plans in revenue too.
+func TestABTestsRevenue(t *testing.T) {
+	e := freshEnv(t)
+	owner, ws := setupOwner(t, e.h)
+	base := "/v1/workspaces/" + ws
+	owner.must(201, "POST", base+"/flags", map[string]any{"key": "checkout", "name": "Checkout",
+		"variants": []map[string]any{{"key": "control", "weight": 34}, {"key": "bundle", "weight": 33}, {"key": "discount", "weight": 33}}})
+	revenue := map[string]any{"kind": "event", "name": "order_completed", "metric": "value", "property": "revenue", "cap": 500}
+	for _, g := range []map[string]any{
+		{"kind": "event", "name": "order_completed", "metric": "value"},
+		{"kind": "page", "path": "/thanks", "metric": "value"},
+		{"kind": "deal", "metric": "count"},
+		{"kind": "event", "name": "order_completed", "cap": 10},
+	} {
+		owner.must(400, "POST", base+"/ab-tests", map[string]any{"flag": "checkout", "goals": []any{g}})
+	}
+	ab := owner.must(201, "POST", base+"/ab-tests", map[string]any{"flag": "checkout",
+		"goals": []any{revenue, map[string]any{"kind": "event", "name": "order_completed", "metric": "count"}}})
+	id := ab["id"].(string)
+
+	// Recent history for the planner: 1,000 visitors, 5% buying 100 each.
+	if _, err := e.pool.Exec(t.Context(), `
+		INSERT INTO customer_events (workspace_id, kind, name, anonymous_id, properties, context, occurred_at)
+		SELECT $1::uuid, 'page', 'page.viewed', 'hist-' || i, '{}'::jsonb, '{"page": {"path": "/"}}'::jsonb, now() - interval '3 days' FROM generate_series(1, 1000) i
+		UNION ALL
+		SELECT $1::uuid, 'track', 'order_completed', 'hist-' || i, '{"revenue": 100}'::jsonb, '{}'::jsonb, now() - interval '2 days' FROM generate_series(1, 1000) i WHERE i % 20 = 0`, ws); err != nil {
+		t.Fatal(err)
+	}
+	plan := owner.must(200, "POST", base+"/ab-tests/plan", map[string]any{"flag": "checkout", "goal": revenue})
+	pl := plan["plan"].(map[string]any)
+	if pl["metric"] != "value" || pl["baseline"] != 5.0 || pl["versions"] != 2.0 || plan["traffic"].(map[string]any)["sum"] != 5000.0 {
+		t.Fatalf("revenue plan: %v", plan)
+	}
+	ab = owner.must(200, "POST", base+"/ab-tests/"+id+"/start", nil)
+	if b := ab["baselines"].([]any); b[0] != 5.0 {
+		t.Fatalf("baselines: %v", b)
+	}
+
+	// 3,000 visitors a version. Control and bundle: 5% buy 100. Discount:
+	// 10% buy 100, and one buys 10,000, capped at 500.
+	if _, err := e.pool.Exec(t.Context(), `
+		WITH v AS (SELECT i, (ARRAY['control', 'bundle', 'discount'])[i % 3 + 1] AS variant FROM generate_series(1, 9000) i)
+		INSERT INTO customer_events (workspace_id, kind, name, anonymous_id, properties, context, occurred_at)
+		SELECT $1::uuid, 'track', 'experiment_viewed', 'v-' || i, jsonb_build_object('flag', 'checkout', 'variant', variant), '{}'::jsonb, now() FROM v
+		UNION ALL
+		SELECT $1::uuid, 'track', 'order_completed', 'v-' || i,
+			jsonb_build_object('revenue', CASE WHEN i = 2 THEN 10000 ELSE 100 END), '{}'::jsonb, now() FROM v
+		WHERE i % 60 < 3 OR (variant = 'discount' AND i % 60 < 6)`, ws); err != nil {
+		t.Fatal(err)
+	}
+	res := owner.must(200, "GET", base+"/ab-tests/"+id+"/results", nil)
+	r := res["result"].(map[string]any)
+	if r["corrected_for"] != 2.0 {
+		t.Fatalf("corrected_for: %v", r["corrected_for"])
+	}
+	goals := r["goals"].([]any)
+	first, second := goals[0].(map[string]any), goals[1].(map[string]any)
+	if first["metric"] != "value" || first["exploratory"] != false || second["exploratory"] != true || second["metric"] != "count" {
+		t.Fatalf("goals: %v", goals)
+	}
+	byVariant := map[string]map[string]any{}
+	for _, a := range first["arms"].([]any) {
+		byVariant[a.(map[string]any)["variant"].(string)] = a.(map[string]any)
+	}
+	// 300 discount buyers: 299 × 100, and 500 for the capped one.
+	if d := byVariant["discount"]; d["sum"] != 30400.0 || d["visitors"] != 3000.0 || d["conversions"] != 300.0 {
+		t.Fatalf("discount arm: %v", d)
+	}
+	for _, c := range first["comparisons"].([]any) {
+		c := c.(map[string]any)
+		if p, raw := c["p_value"].(float64), c["raw_p_value"].(float64); p != min(1, raw*2) {
+			t.Errorf("%s: p %v, raw %v", c["variant"], p, raw)
+		}
+	}
+	if res["winner"] != "discount" {
+		t.Fatalf("winner: %v", res["winner"])
+	}
+}

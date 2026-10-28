@@ -39,6 +39,10 @@ func TestPageURL(t *testing.T) {
 	if got := PageURL(p, 2); got != "https://www.trustpilot.com/review/northpeak.example?page=2&sort=recency" {
 		t.Fatal(got)
 	}
+	c, _ := ParsePage("https://www.capterra.com/p/123456/Northpeak/")
+	if PageURL(c, 1) != "https://www.capterra.com/p/123456/Northpeak/reviews/" || PageURL(c, 3) != "https://www.capterra.com/p/123456/Northpeak/reviews/?page=3" {
+		t.Fatal(PageURL(c, 1), PageURL(c, 3))
+	}
 }
 
 func TestMatches(t *testing.T) {
@@ -99,6 +103,37 @@ func TestParseCapterra(t *testing.T) {
 	}
 	if x := r.Reviews[0]; x.Rating != 5 || x.Author != "Lee" || x.ExternalID == "" {
 		t.Fatalf("%+v", x)
+	}
+}
+
+// Capterra's JSON-LD has no dates or ids, so its reviews come from the
+// data the page carries for the browser: the reviews page, and the
+// product page it sends a product with few reviews to.
+func TestParseCapterraPageData(t *testing.T) {
+	r := Parse(Capterra, read(t, "capterra_reviews.html"), time.Now())
+	if r.Score == nil || *r.Score != 4.5 || r.Count == nil || *r.Count != 98 || r.Name != "Northpeak" || !r.More || len(r.Reviews) != 2 {
+		t.Fatalf("%+v", r)
+	}
+	a, b := r.Reviews[0], r.Reviews[1]
+	if a.ExternalID != "Capterra___1001" || a.Rating != 4 || a.Author != "Lee M." || !a.Verified || a.PostedAt.Format("2006-01-02") != "2026-09-05" ||
+		a.Body != "We plan every launch in it.\n\nPros: Fast setup\n\nCons: Few reports" || a.Reply != "" {
+		t.Fatalf("first: %+v", a)
+	}
+	if b.Rating != 2 || b.Reply == "" || b.RepliedAt == nil || b.RepliedAt.Format("2006-01-02") != "2026-08-20" {
+		t.Fatalf("second: %+v", b)
+	}
+	p := Parse(Capterra, read(t, "capterra_product.html"), time.Now())
+	if p.Count == nil || *p.Count != 1 || p.More || len(p.Reviews) != 1 {
+		t.Fatalf("product page: %+v", p)
+	}
+	if x := p.Reviews[0]; x.ExternalID != "Capterra___2001" || x.Rating != 5 || x.Author != "Ana P." || x.PostedAt.Format("2006-01-02") != "2025-10-28" || x.Reply != "Thank you, Ana!" {
+		t.Fatalf("product review: %+v", x)
+	}
+}
+
+func TestPlatformRules(t *testing.T) {
+	if !RenderJS(G2) || !RenderJS(Google) || RenderJS(Trustpilot) || NewestFirst(Capterra) || !NewestFirst(Trustpilot) {
+		t.Fatal("platform reading rules")
 	}
 }
 

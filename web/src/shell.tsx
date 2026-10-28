@@ -45,6 +45,7 @@ export const tabNames: Record<Tab, string> = {
   reports: "Sending reports",
   analytics: "Website analytics",
   links: "Campaign links",
+  partners: "Partners",
   channels: "Channels",
   tracking: "Website tracking",
   flags: "Feature flags",
@@ -150,6 +151,7 @@ export const tabBlurbs: Record<Tab, string> = {
   "ab-tests": "See which version of a flag wins at a goal, with numbers that stay honest however often you check.",
   channels: "Visits, sign-ups, revenue and cost for every channel, credited the same way in every report.",
   links: "Tag every link with one channel, source and campaign, so each visit, lead and sale is credited to the right place.",
+  partners: "Referral, affiliate and influencer programs: partners' links and codes, the sales they bring, their rewards and payouts.",
   "seo-overview": "Is each brand growing in search: branded search, visitors, domain rating and links, with their trends.",
   experiments: "Did a change help? Hold back a matched group of pages and measure the difference from Search Console.",
   audits: "OutflareBot crawls your websites, scores their health and finds what to fix, page by page.",
@@ -217,6 +219,7 @@ export const tabDocs: Partial<Record<Tab, string>> = {
   analytics: "/docs/integrations/analytics/",
   experiments: "/docs/guides/seo-experiments/",
   links: "/docs/guides/campaign-links/",
+  partners: "/docs/guides/partners/",
   channels: "/docs/guides/attribution/",
   tracking: "/docs/guides/website-tracking/",
   flags: "/docs/guides/feature-flags/",
@@ -271,7 +274,7 @@ export const modules: Module[] = [
   { id: "social", label: "Social", icon: "social", tabs: ["social", "reddit"] },
   { id: "reviews", label: "Reviews", icon: "reviews", tabs: ["reviews"] },
   { id: "ads", label: "Paid ads", icon: "ads", tabs: ["ads"] },
-  // Partners goes here when its pages land.
+  { id: "partners", label: "Partners", icon: "partners", tabs: ["partners"] },
   { id: "analytics", label: "Analytics", icon: "reports", tabs: ["channels", "outcomes", "analytics", "tracking", "flags", "ab-tests", "links"] },
   // Playbooks: recipes that use every module above, from playbooks/ in the repository.
   { id: "playbooks", label: "Playbooks", icon: "playbooks", tabs: ["playbooks"] },
@@ -921,6 +924,8 @@ function callFor(tab: Tab, ws: string, item?: string): Call {
       return { title: "A/B tests", path: "/v1/workspaces/{ws}/ab-tests", params: base, mcp: "list_ab_tests", ask: "How is our pricing headline test doing, and is it safe to stop?", scope: "analytics.read" };
     case "channels":
       return { title: "Visits, conversions, revenue and cost per channel", path: "/v1/workspaces/{ws}/attribution/channels", params: base, mcp: "get_attribution_channels", ask: "Which channel brought the most revenue this month, and what did each sign-up cost us per channel?", scope: "analytics.read" };
+    case "partners":
+      return { title: "Partners and what they earned", path: "/v1/workspaces/{ws}/partners", params: base, mcp: "list_partners", ask: "Which partners brought the most sales this month, and whose payouts are due?", scope: "partners.read" };
     case "links":
       return { title: "Campaign links", path: "/v1/workspaces/{ws}/tracking-campaigns", params: base, query: { status: "active" }, mcp: "list_tracking_campaigns", ask: "Make a tagged link for our spring launch on LinkedIn ads, pointing at the pricing page.", scope: "analytics.read" };
     case "inbox":

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"os/exec"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -22,6 +23,9 @@ type siteBannerOut struct {
 	Cookies  map[string]string `json:"cookies"`
 	Requests int               `json:"posts"`
 	Asks     int               `json:"bannerAsks"`
+	Reports  []map[string]any  `json:"cookieReports"`
+	Policy   []string          `json:"policy"`
+	Local    map[string]string `json:"local"`
 }
 
 // runSiteBanner runs site.js in the stand-in browser, in a time zone.
@@ -184,4 +188,49 @@ func TestSiteConsentBanner(t *testing.T) {
 		out.Consent["rule"] != "opt_in" {
 		t.Fatalf("data-banner off: %+v", out)
 	}
+}
+
+// The script reports the page's cookies, storage keys and scripts once a
+// day, by name only, and fills the cookie policy into the page.
+func TestSiteCookieReport(t *testing.T) {
+	page := map[string]any{"loaded": true, "consent": "auto", "cookie": "_ga=GA1.1.1; sid=secret-value", "local": map[string]any{"ajs_user_id": "u_1"},
+		"policySpots": 2, "banner": testBanner(nil),
+		"tags": []map[string]any{{"tag": "script", "src": "https://www.googletagmanager.com/gtm.js?id=GTM-TEST"}, {"tag": "script", "src": "/app.js?v=3"},
+			{"tag": "iframe", "src": "https://www.youtube-nocookie.com/embed/abc?autoplay=1"}}}
+	out := runSiteBanner(t, "Europe/Berlin", page)
+	if len(out.Reports) != 1 {
+		t.Fatalf("reports: %v", out.Reports)
+	}
+	r := out.Reports[0]
+	b, _ := json.Marshal(r)
+	if strings.Contains(string(b), "secret-value") || strings.Contains(string(b), "u_1") || strings.Contains(string(b), "GTM-TEST") || strings.Contains(string(b), "autoplay") {
+		t.Fatalf("a value or query string left the browser: %s", b)
+	}
+	if !slices.Equal(anyStrings(r["cookies"]), []string{"_ga", "sid"}) || !slices.Contains(anyStrings(r["local"]), "ajs_user_id") ||
+		!slices.Equal(anyStrings(r["scripts"]), []string{"www.googletagmanager.com/gtm.js", "www.northpeak.example/app.js"}) ||
+		!slices.Equal(anyStrings(r["iframes"]), []string{"www.youtube-nocookie.com/embed"}) || r["path"] != "/pricing" ||
+		r["granted"].(map[string]any)["marketing"] != false {
+		t.Fatalf("report: %s", b)
+	}
+	if len(out.Policy) != 2 || out.Policy[0] != "<div>policy</div>" {
+		t.Fatalf("policy: %v", out.Policy)
+	}
+	// Not again the same day, and never with data-cookies="off".
+	page["local"] = map[string]any{"of_cs": out.Local["of_cs"]}
+	if out := runSiteBanner(t, "Europe/Berlin", page); len(out.Reports) != 0 {
+		t.Fatalf("reported twice in a day: %v", out.Reports)
+	}
+	page["local"], page["cookiesOff"] = map[string]any{}, true
+	if out := runSiteBanner(t, "Europe/Berlin", page); len(out.Reports) != 0 {
+		t.Fatalf("reported with data-cookies off: %v", out.Reports)
+	}
+}
+
+func anyStrings(v any) []string {
+	var out []string
+	list, _ := v.([]any)
+	for _, x := range list {
+		out = append(out, x.(string))
+	}
+	return out
 }

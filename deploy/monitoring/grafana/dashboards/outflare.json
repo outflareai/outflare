@@ -4530,7 +4530,7 @@
     },
     {
       "type": "row",
-      "title": "Consent banner",
+      "title": "Consent banner and cookie policy",
       "id": 115,
       "collapsed": false,
       "gridPos": {
@@ -4698,6 +4698,165 @@
       }
     },
     {
+      "type": "timeseries",
+      "title": "Cookie scans, by outcome",
+      "description": "Scans of websites for their cookie policy, per hour: ok read at least one page; failed read none (the site was down or blocked OutflareBot). Sites with the consent banner on are scanned weekly, so a few an hour is normal.",
+      "id": 119,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 0,
+        "y": 317
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (outcome) (increase(outflare_cookie_scan_scans_total{job=\"$job\"}[1h]))",
+          "legendFormat": "{{outcome}}",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "fillOpacity": 10,
+            "stacking": {
+              "mode": "normal"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "mean",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Cookie reports from browsers, by outcome",
+      "description": "Reports per minute of a site's cookie and script names from visitors' browsers (at most one a day per browser). Mostly ok is normal; refused is a bad key or origin, error a failure to write to Postgres.",
+      "id": 120,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 8,
+        "y": 317
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (outcome) (rate(outflare_cookie_scan_reports_total{job=\"$job\"}[5m])) * 60",
+          "legendFormat": "{{outcome}}",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "fillOpacity": 10,
+            "stacking": {
+              "mode": "normal"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "mean",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Cookies and scripts new to a site",
+      "description": "Things found on a site for the first time, per hour: known ones go straight into its cookie policy, unknown ones wait for a person to classify them. A steady stream of unknown ones means the vendor catalogue is missing something common.",
+      "id": 121,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 317
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (known) (increase(outflare_cookie_scan_new_total{job=\"$job\"}[1h]))",
+          "legendFormat": "{{known}}",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "fillOpacity": 10,
+            "stacking": {
+              "mode": "normal"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "mean",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
       "type": "row",
       "title": "Reviews (review pages read daily)",
       "id": 87,
@@ -4706,7 +4865,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 317
+        "y": 325
       },
       "panels": []
     },
@@ -4723,7 +4882,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 318
+        "y": 326
       },
       "targets": [
         {
@@ -4773,7 +4932,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 318
+        "y": 326
       },
       "targets": [
         {
@@ -4823,7 +4982,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 326
+        "y": 334
       },
       "targets": [
         {
@@ -4873,7 +5032,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 326
+        "y": 334
       },
       "targets": [
         {
@@ -4923,7 +5082,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 334
+        "y": 342
       },
       "targets": [
         {
@@ -4969,7 +5128,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 342
+        "y": 350
       },
       "panels": []
     },
@@ -4986,7 +5145,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 343
+        "y": 351
       },
       "targets": [
         {
@@ -5036,7 +5195,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 343
+        "y": 351
       },
       "targets": [
         {
@@ -5082,7 +5241,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 351
+        "y": 359
       },
       "panels": []
     },
@@ -5099,7 +5258,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 352
+        "y": 360
       },
       "targets": [
         {
@@ -5149,7 +5308,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 352
+        "y": 360
       },
       "targets": [
         {
@@ -5199,7 +5358,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 360
+        "y": 368
       },
       "targets": [
         {
@@ -5245,7 +5404,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 368
+        "y": 376
       },
       "panels": []
     },
@@ -5262,7 +5421,7 @@
         "h": 8,
         "w": 24,
         "x": 0,
-        "y": 369
+        "y": 377
       },
       "targets": [
         {
@@ -5312,7 +5471,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 377
+        "y": 385
       },
       "targets": [
         {
@@ -5362,7 +5521,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 377
+        "y": 385
       },
       "targets": [
         {
@@ -5407,7 +5566,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 385
+        "y": 393
       },
       "collapsed": false,
       "panels": []
@@ -5425,7 +5584,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 386
+        "y": 394
       },
       "targets": [
         {
@@ -5475,7 +5634,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 386
+        "y": 394
       },
       "targets": [
         {
@@ -5534,13 +5693,235 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 394
+        "y": 402
       },
       "targets": [
         {
           "refId": "A",
           "expr": "max(outflare_news_search_overdue_seconds{job=\"$job\"})",
           "legendFormat": "overdue",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "custom": {
+            "fillOpacity": 10
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "mean",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "type": "row",
+      "title": "Partners (referrals, affiliates, influencers)",
+      "id": 124,
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 410
+      },
+      "panels": []
+    },
+    {
+      "type": "timeseries",
+      "title": "Partner conversions, by outcome",
+      "description": "Sign-ups, sales, refunds and custom conversions per minute reported by workspaces' backends (api) and postback URLs, by type and outcome. not_credited is normal (most customers weren't referred); rejected is bad input from the sender; error is ours.",
+      "id": 125,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 411
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (type, source, outcome) (rate(outflare_partners_conversions_total{job=\"$job\"}[5m])) * 60",
+          "legendFormat": "{{type}} {{source}} {{outcome}}",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "fillOpacity": 10,
+            "stacking": {
+              "mode": "normal"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "mean",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Partner link clicks, by outcome",
+      "description": "Clicks per minute on partners' short links (/r/<code>). tracked is normal; inactive is a paused program or partner (the visitor still lands); not_found is an unknown code; error means the click wasn't stored.",
+      "id": 126,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 411
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (outcome) (rate(outflare_partners_clicks_total{job=\"$job\"}[5m])) * 60",
+          "legendFormat": "{{outcome}}",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "fillOpacity": 10,
+            "stacking": {
+              "mode": "normal"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "mean",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Reward ledger changes",
+      "description": "Ledger entries per minute by kind and event: created by conversions, approved when their hold ends, reversed by refunds, paid through payouts.",
+      "id": 122,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 419
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (kind, event) (rate(outflare_partners_rewards_total{job=\"$job\"}[5m])) * 60",
+          "legendFormat": "{{kind}} {{event}}",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "fillOpacity": 10,
+            "stacking": {
+              "mode": "normal"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "mean",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Oldest reward past its hold",
+      "description": "How long the oldest reward that should approve on its own has waited past its hold. Normal is under two minutes: the approver runs every minute.",
+      "id": 123,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 419
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "max(outflare_partners_rewards_overdue_seconds{job=\"$job\"})",
+          "legendFormat": "oldest",
           "datasource": {
             "type": "prometheus",
             "uid": "${datasource}"

@@ -58,10 +58,13 @@ const (
 // "2 weeks ago".
 func Parse(platform, page string, now time.Time) Read {
 	var r Read
-	if platform == Trustpilot {
+	switch platform {
+	case Trustpilot:
 		r = trustpilotNextData(page)
+	case Capterra:
+		r = capterraData(page)
 	}
-	if !r.Found() {
+	if r.Score == nil || r.Count == nil || len(r.Reviews) == 0 {
 		r = mergeRead(r, jsonLD(page))
 	}
 	if platform == Google {
@@ -334,6 +337,104 @@ func trustpilotNextData(page string) Read {
 }
 
 var (
+	nextFlight   = regexp.MustCompile(`self\.__next_f\.push\(\[1,("(?:[^"\\]|\\.)*")\]\)`)
+	capterraNext = regexp.MustCompile(`href="[^"]*/reviews/\?(?:[^"]*&(?:amp;)?)?page=[0-9]+"`)
+)
+
+// capterraData reads the reviews in the data Capterra's pages carry for
+// the browser (its JSON-LD has no dates or ids): each review's id, stars,
+// date, text, reviewer and the vendor's reply. The reviews page and the
+// product page, where Capterra sends a product with few reviews, name
+// the same things differently, so both are read.
+func capterraData(page string) Read {
+	var r Read
+	var b strings.Builder
+	for _, m := range nextFlight.FindAllStringSubmatch(page, -1) {
+		var chunk string
+		if json.Unmarshal([]byte(m[1]), &chunk) == nil {
+			b.WriteString(chunk)
+		}
+	}
+	data := b.String()
+	seen := map[string]bool{}
+	const key = `"textReviews":`
+	for rest := data; ; {
+		i := strings.Index(rest, key)
+		if i < 0 {
+			break
+		}
+		rest = rest[i+len(key):]
+		var list []map[string]any
+		if json.NewDecoder(strings.NewReader(rest)).Decode(&list) != nil {
+			continue
+		}
+		for _, v := range list {
+			x, ok := capterraReview(v)
+			if !ok || seen[x.ExternalID] {
+				continue
+			}
+			seen[x.ExternalID] = true
+			r.Reviews = append(r.Reviews, x)
+			if len(r.Reviews) >= 200 {
+				break
+			}
+		}
+	}
+	r.More = len(r.Reviews) > 0 && capterraNext.MatchString(page)
+	return r
+}
+
+func capterraReview(v map[string]any) (Review, bool) {
+	var x Review
+	x.ExternalID = text(v["reviewId"])
+	if x.ExternalID == "" {
+		x.ExternalID = text(v["id"])
+	}
+	s := num(v["overallRating"])
+	if s == nil {
+		s = num(v["rating"])
+	}
+	if x.ExternalID == "" || s == nil || *s < 1 {
+		return x, false
+	}
+	x.Rating, x.RatingNative, x.RatingScale = toFive(*s, nil), *s, 5
+	x.Title = text(v["title"])
+	x.PostedAt = date(firstText(v, "writtenOn", "date"))
+	var parts []string
+	if t := firstText(v, "generalComments", "content"); t != "" {
+		parts = append(parts, t)
+	}
+	if t := firstText(v, "prosText", "pros"); t != "" {
+		parts = append(parts, "Pros: "+t)
+	}
+	if t := firstText(v, "consText", "cons"); t != "" {
+		parts = append(parts, "Cons: "+t)
+	}
+	x.Body = strings.Join(parts, "\n\n")
+	if who, ok := v["reviewer"].(map[string]any); ok {
+		x.Author = firstText(who, "fullName", "name")
+		x.Verified, _ = who["isValidated"].(bool)
+	}
+	if rep, ok := v["vendorResponse"].(map[string]any); ok {
+		x.Reply = firstText(rep, "response", "text", "message", "content")
+		if d := date(firstText(rep, "date", "writtenOn", "createdAt")); x.Reply != "" && !d.IsZero() {
+			x.RepliedAt = &d
+		}
+	}
+	return x, true
+}
+
+// firstText is the first of a map's keys that holds text.
+func firstText(m map[string]any, keys ...string) string {
+	for _, k := range keys {
+		if t := text(m[k]); t != "" {
+			return t
+		}
+	}
+	return ""
+}
+
+var (
 	gScore   = regexp.MustCompile(`(?i)aria-label="([1-5](?:[.,][0-9])?) stars?\s*"`)
 	gCount   = regexp.MustCompile(`(?i)([0-9][0-9,.\s]{0,12})\s+reviews?\b`)
 	gReview  = regexp.MustCompile(`(?is)data-review-id="([^"]{4,200})"(.*?)(?:data-review-id="|$)`)
@@ -473,10 +574,11 @@ func text(v any) string {
 	return strings.TrimSpace(s)
 }
 
-// date reads the dates review pages use: RFC 3339, or a bare day.
+// date reads the dates review pages use: RFC 3339, a bare day, or
+// Capterra's "September 5, 2026".
 func date(s string) time.Time {
 	s = strings.TrimSpace(s)
-	for _, layout := range []string{time.RFC3339Nano, time.RFC3339, "2006-01-02T15:04:05", "2006-01-02"} {
+	for _, layout := range []string{time.RFC3339Nano, time.RFC3339, "2006-01-02T15:04:05", "2006-01-02", "January 2, 2006", "Jan 2, 2006"} {
 		if t, err := time.Parse(layout, s); err == nil {
 			return t.UTC()
 		}

@@ -28,6 +28,7 @@ import (
 	"github.com/outflareai/outflare/engine/internal/analyticsync"
 	"github.com/outflareai/outflare/engine/internal/classify"
 	"github.com/outflareai/outflare/engine/internal/connectors"
+	"github.com/outflareai/outflare/engine/internal/cookies"
 	"github.com/outflareai/outflare/engine/internal/crawl"
 	"github.com/outflareai/outflare/engine/internal/domainconnect"
 	"github.com/outflareai/outflare/engine/internal/emailfind"
@@ -92,6 +93,7 @@ type Server struct {
 	// What tracking domains point at, who gets their certificates, and
 	// the secret the edge in front of them signs its headers with.
 	trackingTarget  string
+	partnersDomain  string
 	trackingCerts   TrackingCerts
 	edgeSecret      string
 	dc              *domainconnect.Client
@@ -117,11 +119,15 @@ type Server struct {
 	siteInbox        bool
 	inboxWake        chan struct{}
 	siteVisitorLimit *rateLimiter
+	// portalLimit caps partner portal sign-ups and sign-in emails per address.
+	portalLimit *rateLimiter
 	// siteFlagLimit caps the website script's flag requests per key.
 	siteFlagLimit *rateLimiter
 	// siteConsentLimit caps the consent banner's requests per key.
 	siteConsentLimit *rateLimiter
-	flagCache        flagCache
+	// cookieReports takes what browsers see of a site's cookies.
+	cookieReports *cookies.Reporter
+	flagCache     flagCache
 	// Which hosts are tracking domains, for trackingHostsOnly.
 	trackingHosts trackingHostCache
 	mcp           *MCPUpstream
@@ -247,6 +253,9 @@ type Options struct {
 	// TrackingTarget is the host tracking domains' CNAME records point at;
 	// empty for PUBLIC_URL's host.
 	TrackingTarget string
+	// PartnersDomain serves partner portals at <subdomain>.<it>; empty for
+	// /p/<program>/ only.
+	PartnersDomain string
 	// TrackingCerts gets HTTPS certificates for tracking domains; nil when
 	// the operator's own proxy serves them.
 	TrackingCerts TrackingCerts
@@ -308,6 +317,7 @@ func NewServer(pool *pgxpool.Pool, log *slog.Logger, opts Options) *Server {
 		webauthn:       newWebAuthn(publicURL, opts.Passkeys && opts.Box != nil),
 		cname:          cname,
 		trackingTarget: opts.TrackingTarget,
+		partnersDomain: opts.PartnersDomain,
 		trackingCerts:  opts.TrackingCerts,
 		edgeSecret:     opts.EdgeSecret,
 		dc:             dc,
@@ -319,8 +329,10 @@ func NewServer(pool *pgxpool.Pool, log *slog.Logger, opts Options) *Server {
 		siteIPLimit:      &rateLimiter{name: "site_ip", limit: 300, window: time.Minute},
 		siteKeyLimit:     &rateLimiter{name: "site_key", limit: 6000, window: time.Minute},
 		siteVisitorLimit: &rateLimiter{name: "site_visitor", limit: 600, window: time.Minute},
+		portalLimit:      &rateLimiter{name: "partner_portal", limit: 20, window: time.Minute},
 		siteFlagLimit:    &rateLimiter{name: "site_flags", limit: 6000, window: time.Minute},
 		siteConsentLimit: &rateLimiter{name: "site_consent", limit: 6000, window: time.Minute},
+		cookieReports:    &cookies.Reporter{Pool: pool},
 		siteInbox:        opts.SiteInbox,
 		inboxWake:        make(chan struct{}, 1),
 		mcp:              opts.MCP,
@@ -487,6 +499,7 @@ func (s *Server) buildHandler() http.Handler {
 	s.routesConnectionHooks(mux)
 	s.routesSiteKeys(mux)
 	s.routesConsentBanner(mux)
+	s.routesCookiePolicy(mux)
 	s.routesFlags(mux)
 	s.routesABTests(mux)
 	s.routesABTestAI(mux)
@@ -496,6 +509,7 @@ func (s *Server) buildHandler() http.Handler {
 	s.routesAgencies(mux)
 	s.routesTracking(mux)
 	s.routesCampaignLinks(mux)
+	s.routesPartners(mux)
 	s.routesAttribution(mux)
 	s.routesCustomerProfiles(mux)
 	s.routesVerification(mux)

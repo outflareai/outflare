@@ -15,6 +15,7 @@ import { registerContextTools } from "./context.js";
 import { registerFlagTools } from "./flags.js";
 import { registerABTestTools } from "./abtests.js";
 import { registerSupplierTools } from "./suppliers.js";
+import { registerPartnerTools } from "./partners.js";
 
 const inboxCategories = [
   "interested", "meeting_booked", "question", "referral", "not_now", "objection",
@@ -1377,6 +1378,7 @@ export function createServer({ client: gtm, workspace, agency, readOnly = false,
     },
   );
   registerSupplierTools(server, gtm, () => ws, readOnly, call);
+  registerPartnerTools(server, gtm, () => ws, readOnly, call);
 
   // Outcomes: what outreach produced and what it cost.
 
@@ -6761,6 +6763,75 @@ export function createServer({ client: gtm, workspace, agency, readOnly = false,
       annotations: write,
     },
     ({ site_key_id }) => call(() => gtm.POST("/v1/workspaces/{ws}/site-keys/{id}/consent-banner/reask", { params: { path: { ws, id: site_key_id } } })),
+  );
+
+  server.registerTool(
+    "list_site_cookies",
+    {
+      title: "List a website's cookies and scripts",
+      description:
+        "Every cookie, storage key, script, embed and pixel found on a site key's site, from scans and visitors' browsers (names only), matched to " +
+        "Outflare's vendor catalogue with category, purpose and how long it is kept. category unknown with status new means a person must say what " +
+        "it is (classify_site_cookie) before the cookie policy lists it. before_consent true means a browser had it before the visitor allowed its " +
+        "category: suggest holding that tag back with type=\"text/plain\" data-category. counts.to_review is how many wait.",
+      inputSchema: { site_key_id: id },
+      annotations: read,
+    },
+    ({ site_key_id }) => call(() => gtm.GET("/v1/workspaces/{ws}/site-keys/{id}/cookies", { params: { path: { ws, id: site_key_id } } })),
+  );
+
+  server.registerTool(
+    "scan_site_cookies",
+    {
+      title: "Scan a website for cookies",
+      description:
+        "Reads up to 20 of the site's pages as OutflareBot (home pages and the pages visits land on most), following robots.txt, and records the " +
+        "cookies and third-party scripts it finds; the cookie policy is published again when they change. Runs in the background: check " +
+        "list_site_cookies (scan.status) after a minute. Sites with the consent banner on are scanned every week anyway.",
+      inputSchema: { site_key_id: id },
+      annotations: write,
+    },
+    ({ site_key_id }) => call(() => gtm.POST("/v1/workspaces/{ws}/site-keys/{id}/cookie-scans", { params: { path: { ws, id: site_key_id } } })),
+  );
+
+  server.registerTool(
+    "classify_site_cookie",
+    {
+      title: "Say what a cookie or script is",
+      description:
+        "Sets a found cookie's or script's category, purpose and how long it is kept, which lists it in the cookie policy (status listed), or " +
+        "status ignored to leave it out (a test cookie, say). Ask the user when you can't tell what something is; never guess a category for " +
+        "something that tracks people.",
+      inputSchema: {
+        site_key_id: id,
+        cookie_id: id.describe("The id from list_site_cookies."),
+        category: z.enum(["necessary", "analytics", "marketing", "preferences"]).optional(),
+        purpose: z.string().max(1000).optional(),
+        retention: z.string().max(100).optional().describe("How long it is kept, such as 1 year or Session."),
+        status: z.enum(["listed", "ignored"]).optional(),
+      },
+      annotations: write,
+    },
+    ({ site_key_id, cookie_id, ...body }) =>
+      call(() => gtm.PATCH("/v1/workspaces/{ws}/site-keys/{id}/cookies/{cookie}", { params: { path: { ws, id: site_key_id, cookie: cookie_id } }, body })),
+  );
+
+  server.registerTool(
+    "get_cookie_policy",
+    {
+      title: "Get a website's cookie policy",
+      description:
+        "The site's cookie policy as published, kept up to date from what the site uses: by category and vendor, with purpose and how long each " +
+        "thing is kept. content is Markdown by default (or text or html). url is the hosted page the site can link to; a page on the site can " +
+        "show it with <div data-outflare-cookie-policy></div>. version asks for an earlier version.",
+      inputSchema: {
+        site_key_id: id,
+        format: z.enum(["markdown", "text", "html"]).optional(),
+        version: z.number().int().min(1).optional(),
+      },
+      annotations: read,
+    },
+    ({ site_key_id, ...query }) => call(() => gtm.GET("/v1/workspaces/{ws}/site-keys/{id}/cookie-policy", { params: { path: { ws, id: site_key_id }, query } })),
   );
 
   server.registerTool(

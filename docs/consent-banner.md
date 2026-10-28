@@ -96,6 +96,40 @@ Before the visitor is known, the consents are kept on their anonymous id. When y
 - Starting to ask about a new category asks every visitor again.
 - **Ask again** (`POST .../consent-banner/reask`, MCP `reask_consent_banner`) raises `consent_version`, for example after your site starts using a new kind of cookie.
 
+## The cookie policy
+
+Outflare keeps a cookie policy for each site up to date on its own. It lists every cookie, browser storage key and third-party script, embed and pixel the site uses, why, and for how long.
+
+**How it finds them**
+
+- **Scans.** The site crawler reads up to 20 pages as OutflareBot: each site's home page, then the pages visits land on most. It follows `robots.txt`. It records the cookies your server sets and the third-party scripts, embeds and pixels in your HTML, including the addresses inline snippets load. Sites with the banner on are scanned every week, and **Scan now** (`POST .../site-keys/{id}/cookie-scans`, MCP `scan_site_cookies`) runs one straight away.
+- **Visitors' browsers.** Once a day per browser, the snippet reports the *names* of the page's cookies, local and session storage keys, scripts and iframes, three seconds after the page loads. This catches what scripts and tag managers set, which a scan of the HTML can't see. It never sends a value, a query string or who the visitor is. Add `data-cookies="off"` to the snippet to stop it.
+
+Each one is matched to Outflare's catalogue of known vendors (Google, Meta, TikTok, LinkedIn, Microsoft, HubSpot, Hotjar, Stripe and around 40 more), which gives its category, purpose and how long it is kept.
+
+**Reviewing**
+
+Open **Cookies** next to the site on **Analytics → Website tracking** (or use `GET .../site-keys/{id}/cookies` or MCP `list_site_cookies`).
+
+- Known items go into the policy straight away.
+- Items the catalogue doesn't know wait under **To review**. Give them a category and a purpose to list them, or choose **Leave out** (`PATCH .../cookies/{cookie}`, MCP `classify_site_cookie`). A person's answer always overrides the catalogue's.
+- **Set before consent** marks something a visitor's browser had before they allowed its category. It usually means a tag that isn't held back yet: give it `type="text/plain" data-category="..."`.
+- Something unseen for 30 days drops out of the policy.
+
+**Versions and asking again**
+
+- Whenever what the policy lists changes, a new version is published (`GET .../cookie-policy/versions`). Each version records what was added and removed, and the audit event is `cookie_policy.published`.
+- A version that adds a vendor new to analytics, marketing or preferences raises the banner's `consent_version`. Visitors who chose before are then asked again where their region's rule asks first, because what they agreed to has changed. A cookie disappearing doesn't ask anyone again.
+
+**Showing it**
+
+- **On your own page:** add `<div data-outflare-cookie-policy></div>` and the snippet fills it in, with a "Change your cookie choices" button that opens the banner.
+- **Hosted page:** `https://app.outflare.ai/cookie-policy/{site key id}`, linked from the Cookies panel.
+- **API:** `GET .../site-keys/{id}/cookie-policy?format=markdown|text|html` for the workspace, or the public `GET /v1/site/cookie-policy?key=ofk_...&format=json|markdown|text|html`.
+- **MCP:** `get_cookie_policy`.
+
+The policy's own text is in English for now.
+
 ## IAB TCF
 
 The banner doesn't speak IAB's Transparency and Consent Framework (`__tcfapi`), which mostly matters to publishers selling ads through programmatic exchanges. Only a consent platform registered with IAB Europe may run it, so it can be added later if a publisher needs it.

@@ -6,6 +6,25 @@ Each pull request that changes what Outflare does adds a change note in [changes
 
 ## [Unreleased]
 
+## [0.22.0] - 2026-10-28
+
+### Added
+
+- Cookie policy that keeps itself up to date: Outflare scans your site and learns from visitors' browsers which cookies and scripts it uses, matches them to known vendors, flags unknown ones for review, and publishes a versioned policy for your own page, a hosted page, the API and MCP, asking visitors again when a new vendor needs consent.
+- Partners: run referral, affiliate and influencer programs. Partners get ref codes, short links, promo codes and a portal (or a widget in your app); your backend reports sign-ups, sales and refunds by API or postback URL (each also counted in attribution); rewards (cash, fees, or actions your own system grants, for one or both sides) wait out a hold, then are approved and marked paid.
+
+### Changed
+
+- A/B tests can now be judged on revenue per visitor, deal value or how many times visitors do something, with a conversion window and a cap per visitor. Tests with several versions are corrected for the extra chances of a false winner, and goals after the first are marked exploratory.
+
+### Fixed
+
+- Reviews now reads G2 and Capterra: G2 pages are always read in a browser to get past its bot check, and Capterra reviews are kept with their dates and the vendor's replies instead of only the score.
+
+### Upgrading
+
+- runs migration 0235. Set `OUTFLARE_PARTNERS_DOMAIN` (with wildcard DNS and a wildcard certificate) to serve partner portals at `<subdomain>.<that domain>`; without it, portals are at `/p/<program>/` and on programs' own domains.
+
 ## [0.21.0] - 2026-10-28
 
 ### Added

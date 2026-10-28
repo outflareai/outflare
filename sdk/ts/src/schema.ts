@@ -13029,6 +13029,140 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/workspaces/{ws}/site-keys/{id}/cookies": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        /**
+         * List a site's cookies and scripts
+         * @description Scope: customers.read. Every cookie, storage key, script, embed and pixel found on the site key's site, from scans of
+         *     its pages and from what the website script sees in visitors' browsers (names only, never values), each matched to a
+         *     vendor in Outflare's catalogue. Ones the catalogue doesn't know have category unknown and status new: classify them
+         *     (PATCH .../cookies/{cookie}) for them to be in the cookie policy. before_consent marks one a browser had before the
+         *     visitor allowed its category. counts.to_review is how many wait for a person.
+         */
+        get: operations["listSiteCookies"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/workspaces/{ws}/site-keys/{id}/cookies/{cookie}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                id: string;
+                cookie: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Classify a cookie or script
+         * @description Scope: customers.manage. Say what it is: its category, purpose and how long it is kept, and status listed (in the
+         *     policy) or ignored (never listed, such as a test cookie). A person's word stands over the catalogue's from then on.
+         *     The policy is published again when it changes. Records site_cookie.classified.
+         */
+        patch: operations["updateSiteCookie"];
+        trace?: never;
+    };
+    "/v1/workspaces/{ws}/site-keys/{id}/cookie-scans": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Scan a site for cookies
+         * @description Scope: customers.manage. Reads up to 20 of the site's pages as OutflareBot (each origin's home page, then the pages visits
+         *     land on most), following robots.txt, and records the cookies its server sets and the third-party scripts, embeds and
+         *     pixels in its HTML. Cookies that scripts set come from visitors' browsers instead. Sites with the consent banner on are
+         *     scanned every week. Answers 201 with the new scan, or 200 with one already waiting or running. Records cookie_scan.started.
+         */
+        post: operations["startCookieScan"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/workspaces/{ws}/site-keys/{id}/cookie-policy": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        /**
+         * Get a site's cookie policy
+         * @description Scope: customers.read. The site's cookie policy as published: its latest version, or an earlier one with version. It
+         *     lists what was found on the site by category and vendor, everything not ignored and seen in the last 30 days, with its
+         *     purpose and how long it is kept. content is the policy in format (markdown, text or html). Published again on its own
+         *     whenever what the site uses changes; a version that adds a vendor needing consent asks visitors again. 404 until the
+         *     first scan or browser report.
+         */
+        get: operations["getCookiePolicy"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/workspaces/{ws}/site-keys/{id}/cookie-policy/versions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        /**
+         * List a site's cookie policy versions
+         * @description Scope: customers.read. Every version, newest first, with what it added and removed (kind:name) and whether it asked visitors again.
+         */
+        get: operations["listCookiePolicyVersions"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/workspaces/{ws}/visitors": {
         parameters: {
             query?: never;
@@ -13245,6 +13379,56 @@ export interface paths {
          * @description Public. Any origin may send; the key, not the page, is checked.
          */
         options: operations["sendSiteConsentPreflight"];
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/site/cookie-policy": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get a site's cookie policy, publicly
+         * @description Public: the site key (ofk_) is the authority. The site's latest cookie policy, for its own pages: json (the policy),
+         *     markdown, text or html (a fragment for a page, with a button that opens the consent banner). The website script fills
+         *     elements with data-outflare-cookie-policy from it; the same policy as a whole page is at /cookie-policy/{site key id}.
+         *     404 until the site's first scan or browser report.
+         */
+        get: operations["getSiteCookiePolicy"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/site/cookies": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Report a site's cookies from a browser
+         * @description Public: the site key (ofk_) in the body is the authority. What the website script sends at most once a day per browser:
+         *     the names of the page's cookies and storage keys and the host and first path segment of its scripts and iframes, never
+         *     a value, a query string or who the visitor is. granted is the visitor's choice when the consent banner is on, so what
+         *     was there before they allowed it is flagged. Send the JSON as text/plain to skip the CORS preflight.
+         */
+        post: operations["sendSiteCookies"];
+        delete?: never;
+        /**
+         * CORS preflight for cookie reports
+         * @description Public. Any origin may send; the key, not the page, is checked.
+         */
+        options: operations["sendSiteCookiesPreflight"];
         head?: never;
         patch?: never;
         trace?: never;
@@ -16229,6 +16413,729 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/workspaces/{ws}/partner-programs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+            };
+            cookie?: never;
+        };
+        /**
+         * List partner programs
+         * @description Scope: partners.read. Referral, affiliate and influencer programs, oldest first, with their reward rules.
+         */
+        get: operations["listPartnerPrograms"];
+        put?: never;
+        /**
+         * Create a partner program from a preset
+         * @description Scope: partners.manage. kind picks the preset; every setting it fills in can be changed. referral: two-sided
+         *     action rewards on the first sale (your system grants them), a 60-day window, a 14-day hold, partners accepted
+         *     at once. affiliate: 20% of every sale, a 30-day window, a 30-day hold, a $50 minimum payout. influencer: track
+         *     only (log fees by hand), no hold. The credit rule (window, first or last, codes_win) belongs to the program and
+         *     never follows the workspace's attribution settings. Pass rules to start with your own.
+         */
+        post: operations["createPartnerProgram"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/workspaces/{ws}/partner-programs/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                /** @description The program's id or slug. */
+                id: string;
+            };
+            cookie?: never;
+        };
+        /**
+         * Get a partner program
+         * @description Scope: partners.read. With its reward rules and groups.
+         */
+        get: operations["getPartnerProgram"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Change a partner program's settings, or pause, archive or restore it
+         * @description Scope: partners.manage. Send only what changes. kind and slug can't change; currency can't once there are rewards. A paused program credits nothing new; its links still land.
+         */
+        patch: operations["updatePartnerProgram"];
+        trace?: never;
+    };
+    "/v1/workspaces/{ws}/partner-programs/{id}/rules": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                /** @description The program's id or slug. */
+                id: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Replace a partner program's reward rules
+         * @description Scope: partners.manage. Rules stack: every rule a conversion matches gives a reward, except that only the best
+         *     cash rule (percent or fixed) for the partner counts: a group's own rule beats one for everyone, then the highest
+         *     tier (min_sales) reached. [] makes the program track only. Rewards already in the ledger keep what they earned.
+         */
+        put: operations["setPartnerRules"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/workspaces/{ws}/partner-programs/{id}/groups": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                /** @description The program's id or slug. */
+                id: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Add a partner group (a tier with its own rates)
+         * @description Scope: partners.manage. Then give the group its own rules (group_id) and move partners into it.
+         */
+        post: operations["createPartnerGroup"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/workspaces/{ws}/partner-programs/{id}/groups/{group}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                /** @description The program's id or slug. */
+                id: string;
+                group: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Remove a partner group
+         * @description Scope: partners.manage. Its own rules go with it; its partners move to no group.
+         */
+        delete: operations["deletePartnerGroup"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/workspaces/{ws}/partner-programs/{id}/postback": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                /** @description The program's id or slug. */
+                id: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Make the program's incoming postback URL
+         * @description Scope: partners.manage. Shown once; making another retires the last. Partners' trackers and backends that can
+         *     only call a URL report conversions to it (GET or POST /v1/partner-postbacks/{token}). Treat it like a password:
+         *     anyone with it can report conversions to this program.
+         */
+        post: operations["rotatePartnerPostback"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/workspaces/{ws}/partner-programs/{id}/widget-sessions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                /** @description A program's id or slug. */
+                id: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Open the referral widget for a customer signed in to your app
+         * @description Scope: partners.conversions. Call it from your backend when a signed-in customer opens the page that shows the
+         *     widget, and put embed_url in an iframe. The customer becomes a partner in the program if they aren't one (active
+         *     when the program accepts partners on its own, otherwise pending), identified with customer_id, email or
+         *     record_id the same way as conversions. The widget shows their link, promo codes and earnings, and uses a session
+         *     that lasts 12 hours; never cache embed_url or show it to anyone else. The widget posts
+         *     {type: "outflare:partner-widget", height} to its parent page whenever its height changes.
+         */
+        post: operations["createPartnerWidgetSession"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/workspaces/{ws}/partner-programs/{id}/portal": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                /** @description The program's id or slug. */
+                id: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Open, close or set up a program's partner portal
+         * @description Scope: partners.manage. The portal is where partners apply, sign in with a link emailed through the workspace's own
+         *     email provider (settings.email_from), and see their links, codes, masked referred customers, rewards and payouts. It
+         *     is served at {subdomain}.{the server's partners domain}, on a tracking domain tied to the program
+         *     (POST .../tracking-domains with partner_program), or at /p/{id}/ on this server. settings, when sent, replace the
+         *     stored ones; a kind's defaults fill in pages and sign-up.
+         */
+        put: operations["setPartnerPortal"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/workspaces/{ws}/partner-programs/{id}/assets": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                /** @description The program's id or slug. */
+                id: string;
+            };
+            cookie?: never;
+        };
+        /**
+         * List a program's assets for partners
+         * @description Scope: partners.read. Banners, copy, email swipes and links shown on the portal's Assets page.
+         */
+        get: operations["listPartnerAssets"];
+        put?: never;
+        /**
+         * Add an asset for partners
+         * @description Scope: partners.manage. image: a banner's https address. text: copy or an email swipe. link: a page to promote.
+         */
+        post: operations["createPartnerAsset"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/workspaces/{ws}/partner-programs/{id}/assets/{asset}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                /** @description The program's id or slug. */
+                id: string;
+                asset: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Remove an asset
+         * @description Scope: partners.manage.
+         */
+        delete: operations["deletePartnerAsset"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/workspaces/{ws}/partners/{id}/impersonate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * See the portal as a partner does
+         * @description Scope: partners.manage. A one-time link that opens the program's portal as the partner sees it, read-only, for an
+         *     hour, even while the portal is closed. Recorded in the audit log (partner.impersonated).
+         */
+        post: operations["impersonatePartner"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/workspaces/{ws}/partners": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+            };
+            cookie?: never;
+        };
+        /**
+         * List partners, newest first
+         * @description Scope: partners.read. Each partner's membership in one program, with their links, promo codes and totals.
+         */
+        get: operations["listPartners"];
+        put?: never;
+        /**
+         * Add a partner to a program
+         * @description Scope: partners.manage. A partner is a customer record: pass record_id, or an email (the person with it, made
+         *     when nobody has it). code is their ref code; one is made from their name when left out. Each partner gets a
+         *     tracking campaign (channel affiliates, named after the code), a short link (/r/{code} on your tracking domain)
+         *     and a campaign link to the program's landing page.
+         */
+        post: operations["createPartner"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/workspaces/{ws}/partners/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        /**
+         * Get a partner
+         * @description Scope: partners.read.
+         */
+        get: operations["getPartner"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Approve, suspend or reject a partner, or change their group, payout method or note
+         * @description Scope: partners.manage. Send only what changes. A partner who isn't active earns nothing new; their links still land. The code can't change: add a promo code instead. group_id "" is no group.
+         */
+        patch: operations["updatePartner"];
+        trace?: never;
+    };
+    "/v1/workspaces/{ws}/partners/{id}/promo-codes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Tie a promo code to a partner
+         * @description Scope: partners.manage. The code as customers type it at checkout (matched in any case). A conversion that reports it (promo_code) credits the partner. Make the code in your billing system yourself, or pass coupon to have Outflare make it there (status shows how that went).
+         */
+        post: operations["addPartnerPromoCode"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/workspaces/{ws}/partners/{id}/promo-codes/{code}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                id: string;
+                code: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Remove a partner's promo code
+         * @description Scope: partners.manage.
+         */
+        delete: operations["removePartnerPromoCode"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/workspaces/{ws}/partners/{id}/fees": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Log a fixed fee for a partner
+         * @description Scope: partners.manage. Such as an influencer's fee for a post or a month. Approved at once, counted toward their next payout and logged as a cost (channel affiliates), so cost per sale works.
+         */
+        post: operations["addPartnerFee"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/workspaces/{ws}/partners/{id}/adjustments": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Correct what a partner is owed
+         * @description Scope: partners.manage. Positive adds, negative takes away; it nets in their next payout. note (why) is required. The ledger never edits an entry: corrections are new entries.
+         */
+        post: operations["addPartnerAdjustment"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/workspaces/{ws}/partner-conversions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+            };
+            cookie?: never;
+        };
+        /**
+         * List partner conversions, newest first
+         * @description Scope: partners.read. Leads, sales and refunds credited to partners.
+         */
+        get: operations["listPartnerConversions"];
+        put?: never;
+        /**
+         * Report a sign-up, sale, refund or custom conversion from your backend
+         * @description Scope: partners.conversions, the one scope a server-to-server token needs. Report every sign-up, sale, refund
+         *     and custom conversion. Each one becomes a customer event on the customer's timeline, under the names attribution
+         *     reads (signed_up; payment.succeeded with payment_id = external_id and amount_minor; payment.refunded; or a custom
+         *     conversion's event_name), whether or not a partner referred them. Outflare also credits the referred ones. The partner is found from, in order: promo_code (when the program's
+         *     codes_win is on), ref (the code from the link, such as a cookie you kept), click_id (ref_click from a short link);
+         *     then a referral already bound to this customer in the program (the first partner keeps them); then the
+         *     customer's own website visits that carried a ref, inside the program's window, first or last as it says. A visit
+         *     only proposes a partner: this call binds it. Identify the customer with customer_id (your own user id),
+         *     email or record_id, the same way each time. external_id (your charge or order id) makes a retry safe and is what
+         *     a refund's refund_of names. Not credited is not an error: the answer is 200 with credited false and a reason
+         *     (no_partner, partner_inactive, program_inactive, self_referral, sale_not_found or currency). 201 means it was
+         *     credited, with the rewards it earned.
+         */
+        post: operations["createPartnerConversion"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/partner-postbacks/{token}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The program's postback secret (ofb_...). */
+                token: string;
+            };
+            cookie?: never;
+        };
+        /**
+         * Report a conversion by URL (incoming postback)
+         * @description The program's postback URL, for trackers and backends that can only call a URL. Takes the same fields as
+         *     POST .../partner-conversions from the query string, with the names affiliate networks use as aliases: type
+         *     (or event, goal), ref, click_id (or ref_click, clickid), promo_code (or coupon), customer_id (or user_id),
+         *     email, external_id (or order_id, transaction_id, charge_id, txid), refund_of, amount (in the currency's main
+         *     unit, such as 49.90; or amount_cents), currency, product_id, sub_id and occurred_at.
+         */
+        get: operations["partnerPostback"];
+        put?: never;
+        /**
+         * Report a conversion by URL, with a form or JSON body
+         * @description The same as the GET, with the fields in a form (application/x-www-form-urlencoded) or a JSON object; body fields win over the query string.
+         */
+        post: operations["partnerPostbackPost"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/workspaces/{ws}/partner-referrals": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+            };
+            cookie?: never;
+        };
+        /**
+         * List referred customers, newest first
+         * @description Scope: partners.read. Each customer a partner was credited with, once per program, with their net sales.
+         */
+        get: operations["listPartnerReferrals"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/workspaces/{ws}/partner-rewards": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+            };
+            cookie?: never;
+        };
+        /**
+         * List the reward ledger, newest first
+         * @description Scope: partners.read. Cash, fees, actions and adjustments. status pending is still on hold or waiting for a person; approved cash counts toward the next payout; an approved action waits for your system to fulfil it.
+         */
+        get: operations["listPartnerRewards"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/workspaces/{ws}/partner-rewards/{id}/approve": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Approve a held reward now
+         * @description Scope: partners.manage. Even before its hold ends. Cash is logged as a cost and counts toward the next payout; an action fires partner_reward.approved for your system.
+         */
+        post: operations["approvePartnerReward"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/workspaces/{ws}/partner-rewards/{id}/reject": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Reject a held reward
+         * @description Scope: partners.manage. Only a pending one; take back an approved one with an adjustment. note says why, for the partner.
+         */
+        post: operations["rejectPartnerReward"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/workspaces/{ws}/partner-rewards/{id}/fulfil": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Report that your system carried out an action reward
+         * @description Scope: partners.conversions. After partner_reward.approved told your system to grant something (credit, a free month), call this so the ledger shows it done.
+         */
+        post: operations["fulfilPartnerReward"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/workspaces/{ws}/partner-payouts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+            };
+            cookie?: never;
+        };
+        /**
+         * List partner payouts, newest first
+         * @description Scope: partners.read.
+         */
+        get: operations["listPartnerPayouts"];
+        put?: never;
+        /**
+         * Make the payouts that are due
+         * @description Scope: partners.manage. For each partner (one with partner_id, one program, or all) whose approved, unpaid cash,
+         *     fees and adjustments reach the program's minimum, one payout gathers them and partner_payout.created fires.
+         *     Outflare never holds or sends money: pay from your own account or payout tool, then mark it paid.
+         */
+        post: operations["createPartnerPayouts"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/workspaces/{ws}/partner-payouts/{id}/paid": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Mark a payout paid
+         * @description Scope: partners.manage. After you paid it from your own account: a note and the payment's reference (a PayPal or Wise transfer id, an invoice number).
+         */
+        post: operations["markPartnerPayoutPaid"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/workspaces/{ws}/partner-payouts/{id}/cancel": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Cancel a due payout
+         * @description Scope: partners.manage. Its rewards go back into the partner's balance.
+         */
+        post: operations["cancelPartnerPayout"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export interface webhooks {
     "lead.replied": {
@@ -19206,6 +20113,261 @@ export interface webhooks {
         patch?: never;
         trace?: never;
     };
+    "partner_program.created": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** A partner program (referral, affiliate or influencer) was created. data has kind, brand_id and rules (how many). */
+        post: operations["webhook_partner_program_created"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "partner_program.updated": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** A partner program's settings changed, or it was paused, archived or restored. data has kind, status and changed (the settings sent). */
+        post: operations["webhook_partner_program_updated"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "partner_program.rules_updated": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** A partner program's reward rules were replaced. Rewards already in the ledger keep what they earned. data has kind and rules (how many). */
+        post: operations["webhook_partner_program_rules_updated"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "partner.created": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Someone joined a partner program. data has program_id, program_kind, record_id (the partner's customer record), status (pending waits for approval) and source. */
+        post: operations["webhook_partner_created"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "partner.updated": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** A partner was approved, suspended or rejected, moved to another group, or their payout method or note changed. data has program_id, record_id, status, previous_status and group_id. */
+        post: operations["webhook_partner_updated"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "partner_referral.created": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** A partner was credited with a customer, bound by a lead or sale from your backend. data has program_id, partner_id, record_id (the customer), via (ref, click, promo_code or visit) and source. */
+        post: operations["webhook_partner_referral_created"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "partner_conversion.created": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** A sign-up, sale, refund or custom conversion was recorded for a referred customer. data has program_id, partner_id, referral_id, record_id, type, event_name (custom only), recurring, amount_cents, currency, product_id, source and, for a refund, refund_of. */
+        post: operations["webhook_partner_conversion_created"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "partner_reward.created": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** A conversion earned a reward, or a fee or adjustment was logged; it waits out the program's hold. data has program_id, program_kind, partner_id, side (partner or referred), kind (cash, fee, action or adjustment), recipient_id, amount_cents, currency, conversion_id and, for an action, action and action_data. */
+        post: operations["webhook_partner_reward_created"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "partner_reward.approved": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** A reward was approved: cash now counts toward the partner's next payout; an action is for your system to carry out (data has action, action_data, recipient_id and recipient_customer_id, your own user id for them), then call POST .../partner-rewards/{id}/fulfil. data.by is auto, manual or refund. */
+        post: operations["webhook_partner_reward_approved"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "partner_reward.rejected": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** A held reward was rejected, by a person or because its sale was refunded. data.reason says why. */
+        post: operations["webhook_partner_reward_rejected"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "partner_reward.reversed": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** A refund took back part or all of a reward: a new adjustment entry with a negative amount for cash, or, for an action, data.action and action_data for your system to take back. data has reverses_id and reason. */
+        post: operations["webhook_partner_reward_reversed"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "partner_reward.fulfilled": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Your system reported that it carried out an approved action reward. */
+        post: operations["webhook_partner_reward_fulfilled"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "partner_payout.created": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** A payout is due: a partner's approved cash, fees and adjustments were gathered. Pay it from your own account or payout tool, then mark it paid. data has partner_id, program_id, amount_cents, currency and rewards. */
+        post: operations["webhook_partner_payout_created"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "partner_payout.paid": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** A payout was marked paid. data has partner_id, program_id, amount_cents, currency and reference. */
+        post: operations["webhook_partner_payout_paid"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "partner_payout.canceled": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** A due payout was canceled and its rewards went back into the partner's balance. */
+        post: operations["webhook_partner_payout_canceled"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "workspace.updated": {
         parameters: {
             query?: never;
@@ -19479,7 +20641,7 @@ export interface components {
              */
             id: string;
             /** @enum {string} */
-            type: "lead.replied" | "lead.unsubscribed" | "inbox.replied" | "inbox.updated" | "inbox.classified" | "lead.bounced" | "mailbox.auto_paused" | "lead.created" | "lead.updated" | "lead.deleted" | "leads.imported" | "suppressions.added" | "suppression.removed" | "lead_list.created" | "lead_list.leads_added" | "lead_list.run_started" | "lead_list.build_done" | "lead_list.build_failed" | "lead_list.refresh_done" | "lead_list.refresh_failed" | "lead_list.enrich_done" | "lead_list.enrich_failed" | "import.done" | "import.failed" | "sequence.created" | "sequence.updated" | "sequence.activated" | "sequence.paused" | "sequence.archived" | "sequence.deleted" | "sequence.steps_updated" | "sequence.leads_enrolled" | "enrollment.stopped" | "mailbox.imported" | "mailbox.updated" | "mailbox.paused" | "mailbox.resumed" | "mailbox.stage_changed" | "mailbox.deleted" | "domain.added" | "domain.paused" | "domain.resumed" | "domain.removed" | "email.queued" | "email.sent" | "email.delivered" | "email.bounced" | "email.complained" | "email.failed" | "email.suppressed" | "email.cancelled" | "email.unsubscribed" | "email.opened" | "email.clicked" | "email.preferences_changed" | "email_domain.verified" | "email_domain.verification_failed" | "email_provider.events_failed" | "email_template.published" | "meeting.created" | "meeting.updated" | "meeting.deleted" | "deal.created" | "deal.updated" | "deal.deleted" | "spend.recorded" | "integration.connected" | "integration.updated" | "integration.disconnected" | "connect_request.created" | "deploy.detected" | "deploy.failed" | "digest.ready" | "ai_budget.warned" | "ai_budget.reached" | "connection_limit.warned" | "connection_limit.reached" | "experiment.started" | "experiment.concluded" | "project.created" | "project.updated" | "project.deleted" | "mission.created" | "mission.updated" | "mission.submitted" | "mission.approved" | "mission.paused" | "mission.resumed" | "mission.stopped" | "mission.completed" | "mission.action_held" | "mission.action_approved" | "mission.action_rejected" | "infra.plan_created" | "infra.plan_approved" | "infra.ordered" | "infra.order_failed" | "infra.domains_bought" | "infra.mailbox_joined" | "infra.plan_warming" | "infra.plan_ready" | "infra.plan_cancelled" | "fix.found" | "fix.updated" | "fix.started" | "fix.verify_requested" | "fix.confirmed" | "fix.reopened" | "record.created" | "record.bulk_created" | "record.bulk_updated" | "record.updated" | "record.merged" | "identity.verified" | "identity.closed" | "relationship.added" | "relationship.ended" | "consent.granted" | "consent.withdrawn" | "consent.bulk_withdrawn" | "brand.created" | "brand.updated" | "email_broadcast.created" | "email_broadcast.started" | "email_broadcast.sent" | "email_broadcast.failed" | "email_broadcast.cancelled" | "journey.created" | "journey.updated" | "journey_run.entered" | "journey_run.exited" | "rule.created" | "rule.updated" | "rule.activated" | "rule.paused" | "rule.archived" | "rule.fired" | "brand_setup.installed" | "brand_setup.install_failed" | "install.issue_opened" | "install.issue_resolved" | "seo_site.created" | "seo_site.verified" | "seo_site.unverified" | "seo_site.deleted" | "crawl.started" | "crawl.stopped" | "crawl.done" | "backlink.new" | "backlink.lost" | "backlink.regained" | "competitor.page_removed" | "link_prospect.found" | "link_prospect.checked" | "link_prospect.excluded" | "link_prospect.pitched" | "link_prospect.replied" | "link_prospect.agreed" | "link_prospect.live" | "link_prospect.declined" | "link_prospect.removed" | "link_prospect.reopened" | "link_prospect.updated" | "link_prospect.deleted" | "social_action.drafted" | "social_action.approved" | "social_action.rejected" | "social_action.done" | "social_action.failed" | "review.posted" | "review.replied" | "review.reply_drafted" | "review_momentum.changed" | "alert.raised" | "visitor.became_hot" | "workspace.updated" | "webhook.test";
+            type: "lead.replied" | "lead.unsubscribed" | "inbox.replied" | "inbox.updated" | "inbox.classified" | "lead.bounced" | "mailbox.auto_paused" | "lead.created" | "lead.updated" | "lead.deleted" | "leads.imported" | "suppressions.added" | "suppression.removed" | "lead_list.created" | "lead_list.leads_added" | "lead_list.run_started" | "lead_list.build_done" | "lead_list.build_failed" | "lead_list.refresh_done" | "lead_list.refresh_failed" | "lead_list.enrich_done" | "lead_list.enrich_failed" | "import.done" | "import.failed" | "sequence.created" | "sequence.updated" | "sequence.activated" | "sequence.paused" | "sequence.archived" | "sequence.deleted" | "sequence.steps_updated" | "sequence.leads_enrolled" | "enrollment.stopped" | "mailbox.imported" | "mailbox.updated" | "mailbox.paused" | "mailbox.resumed" | "mailbox.stage_changed" | "mailbox.deleted" | "domain.added" | "domain.paused" | "domain.resumed" | "domain.removed" | "email.queued" | "email.sent" | "email.delivered" | "email.bounced" | "email.complained" | "email.failed" | "email.suppressed" | "email.cancelled" | "email.unsubscribed" | "email.opened" | "email.clicked" | "email.preferences_changed" | "email_domain.verified" | "email_domain.verification_failed" | "email_provider.events_failed" | "email_template.published" | "meeting.created" | "meeting.updated" | "meeting.deleted" | "deal.created" | "deal.updated" | "deal.deleted" | "spend.recorded" | "integration.connected" | "integration.updated" | "integration.disconnected" | "connect_request.created" | "deploy.detected" | "deploy.failed" | "digest.ready" | "ai_budget.warned" | "ai_budget.reached" | "connection_limit.warned" | "connection_limit.reached" | "experiment.started" | "experiment.concluded" | "project.created" | "project.updated" | "project.deleted" | "mission.created" | "mission.updated" | "mission.submitted" | "mission.approved" | "mission.paused" | "mission.resumed" | "mission.stopped" | "mission.completed" | "mission.action_held" | "mission.action_approved" | "mission.action_rejected" | "infra.plan_created" | "infra.plan_approved" | "infra.ordered" | "infra.order_failed" | "infra.domains_bought" | "infra.mailbox_joined" | "infra.plan_warming" | "infra.plan_ready" | "infra.plan_cancelled" | "fix.found" | "fix.updated" | "fix.started" | "fix.verify_requested" | "fix.confirmed" | "fix.reopened" | "record.created" | "record.bulk_created" | "record.bulk_updated" | "record.updated" | "record.merged" | "identity.verified" | "identity.closed" | "relationship.added" | "relationship.ended" | "consent.granted" | "consent.withdrawn" | "consent.bulk_withdrawn" | "brand.created" | "brand.updated" | "email_broadcast.created" | "email_broadcast.started" | "email_broadcast.sent" | "email_broadcast.failed" | "email_broadcast.cancelled" | "journey.created" | "journey.updated" | "journey_run.entered" | "journey_run.exited" | "rule.created" | "rule.updated" | "rule.activated" | "rule.paused" | "rule.archived" | "rule.fired" | "brand_setup.installed" | "brand_setup.install_failed" | "install.issue_opened" | "install.issue_resolved" | "seo_site.created" | "seo_site.verified" | "seo_site.unverified" | "seo_site.deleted" | "crawl.started" | "crawl.stopped" | "crawl.done" | "backlink.new" | "backlink.lost" | "backlink.regained" | "competitor.page_removed" | "link_prospect.found" | "link_prospect.checked" | "link_prospect.excluded" | "link_prospect.pitched" | "link_prospect.replied" | "link_prospect.agreed" | "link_prospect.live" | "link_prospect.declined" | "link_prospect.removed" | "link_prospect.reopened" | "link_prospect.updated" | "link_prospect.deleted" | "social_action.drafted" | "social_action.approved" | "social_action.rejected" | "social_action.done" | "social_action.failed" | "review.posted" | "review.replied" | "review.reply_drafted" | "review_momentum.changed" | "alert.raised" | "visitor.became_hot" | "partner_program.created" | "partner_program.updated" | "partner_program.rules_updated" | "partner.created" | "partner.updated" | "partner_referral.created" | "partner_conversion.created" | "partner_reward.created" | "partner_reward.approved" | "partner_reward.rejected" | "partner_reward.reversed" | "partner_reward.fulfilled" | "partner_payout.created" | "partner_payout.paid" | "partner_payout.canceled" | "workspace.updated" | "webhook.test";
             /** Format: date-time */
             created_at: string;
             /** Format: uuid */
@@ -20337,6 +21499,522 @@ export interface components {
              */
             matched_by: "record" | "anonymous" | "none";
             credits: components["schemas"]["AttributionCredit"][];
+        };
+        PartnerRule: {
+            /** Format: uuid */
+            id: string;
+            /**
+             * Format: uuid
+             * @description Only partners in this group; null is everyone.
+             */
+            group_id: string | null;
+            /** @description The conversion that earns it: signup, sale, or a custom conversion's event_name (such as trial_started). */
+            trigger: string;
+            /**
+             * @description partner: the person who referred. referred: the customer they brought (two-sided rewards; always an action).
+             * @enum {string}
+             */
+            side: "partner" | "referred";
+            /** @enum {string} */
+            kind: "percent" | "fixed" | "action";
+            /** @description percent: basis points of the conversion's value (2500 is 25%). Not for sign-ups. */
+            percent_bp: number | null;
+            /**
+             * Format: int64
+             * @description fixed: the amount per conversion.
+             */
+            amount_cents: number | null;
+            /** @description action: what your system should do, such as grant_credit, delivered by partner_reward.approved. */
+            action: string;
+            /** @description action: the details your system needs, such as {"gb": 10}. */
+            action_data: {
+                [key: string]: unknown;
+            };
+            /**
+             * @description Sales: the customer's first sale only, every sale, or sales in their first months.
+             * @enum {string}
+             */
+            recurrence: "first" | "every" | "months";
+            months: number | null;
+            /** @description A tier: applies once the partner has made this many earlier sales in the program. */
+            min_sales: number;
+            /** @description Only these products; empty is all. */
+            product_ids: string[];
+        };
+        PartnerRuleInput: {
+            /** Format: uuid */
+            group_id?: string | null;
+            /** @description signup (or lead), sale, or a custom conversion's event_name. */
+            trigger: string;
+            /**
+             * @description partner when left out.
+             * @enum {string}
+             */
+            side?: "partner" | "referred";
+            /** @enum {string} */
+            kind: "percent" | "fixed" | "action";
+            percent_bp?: number;
+            /** Format: int64 */
+            amount_cents?: number;
+            action?: string;
+            action_data?: {
+                [key: string]: unknown;
+            };
+            /**
+             * @description Sales only; every when left out.
+             * @enum {string}
+             */
+            recurrence?: "first" | "every" | "months";
+            months?: number;
+            min_sales?: number;
+            product_ids?: string[];
+        };
+        PartnerGroup: {
+            /** Format: uuid */
+            id: string;
+            name: string;
+        };
+        PartnerProgram: {
+            /** Format: uuid */
+            id: string;
+            name: string;
+            /** @description It never changes. */
+            slug: string;
+            /**
+             * @description The preset it started from.
+             * @enum {string}
+             */
+            kind: "referral" | "affiliate" | "influencer";
+            /** @enum {string} */
+            status: "active" | "paused" | "archived";
+            /** Format: uuid */
+            brand_id: string | null;
+            /** @description Where partner links land; '' for none (short links then answer 404). */
+            landing_url: string;
+            currency: string;
+            /** @description How long after a visit or click a conversion still credits the partner. */
+            credit_window_days: number;
+            /**
+             * @description Which visit with a ref wins inside the window.
+             * @enum {string}
+             */
+            credit_model: "first" | "last";
+            /** @description A promo code beats a link when a conversion carries both. */
+            codes_win: boolean;
+            /** @description Rewards wait this long before they can be approved; refunds inside it cancel them. */
+            hold_days: number;
+            /** @description Approve rewards on their own once the hold ends. */
+            auto_approve: boolean;
+            /** @description Partners who sign up are accepted without review. */
+            auto_accept: boolean;
+            /** Format: int64 */
+            min_payout_cents: number;
+            terms_url: string;
+            /** @description A billing connector (stripe) whose synced payments and refunds are also partner sales; '' for the API and postbacks only. */
+            sales_source: string;
+            /** @description The start of the postback URL's secret; '' when there is none. */
+            postback_hint: string;
+            /** @description The hosted partner portal is open. */
+            portal_enabled: boolean;
+            /** @description Its subdomain of the server's partners domain (OUTFLARE_PARTNERS_DOMAIN), if any. */
+            portal_subdomain: string | null;
+            portal: components["schemas"]["PartnerPortalSettings"];
+            /** @description Where partners sign up and sign in: the program's own domain, its subdomain, or /p/{id}/ on this server. */
+            portal_url: string;
+            rules: components["schemas"]["PartnerRule"][];
+            /** @description Empty in lists; GET the program for them. */
+            groups: components["schemas"]["PartnerGroup"][];
+            partners: number;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            updated_at: string;
+        };
+        PartnerPortalField: {
+            /** @description Lowercase letters, digits and underscores, such as website. */
+            key: string;
+            label: string;
+            /** @enum {string} */
+            type: "text" | "textarea" | "url" | "select";
+            required?: boolean;
+            /** @description select only. */
+            options?: string[];
+        };
+        PartnerPortalSettings: {
+            /** @description The portal's name; the program's when empty. */
+            title?: string;
+            /** @description An https address of an image. */
+            logo_url?: string;
+            /** @description The accent colour, such as #0f766e. */
+            color?: string;
+            custom_css?: string;
+            /** @description Shown on the sign-in page. Plain text. */
+            welcome?: string;
+            pages?: ("dashboard" | "links" | "assets" | "referrals" | "payouts" | "settings")[];
+            /** @description Anyone can apply on the portal. */
+            signup_open?: boolean;
+            signup_fields?: components["schemas"]["PartnerPortalField"][];
+            /** @description The sender of sign-in links, on a verified sending domain of the workspace's own email provider. The portal can't sign anyone in without it. */
+            email_from?: string;
+            /** @description An email template's id or handle for the sign-in email, with sign_in_url, program_name and partner_name; Outflare's own wording when empty. */
+            sign_in_template?: string;
+        };
+        PartnerAsset: {
+            /** Format: uuid */
+            id: string;
+            /** @enum {string} */
+            kind: "image" | "text" | "link";
+            title: string;
+            /** @description Copy or an email swipe partners can paste. */
+            body: string;
+            /** @description The image of a banner, or a link's page. */
+            url: string;
+            position: number;
+            /** Format: date-time */
+            created_at: string;
+        };
+        PartnerProgramInput: {
+            name?: string;
+            /** @description Create only; from the name when left out. */
+            slug?: string;
+            /**
+             * @description Create only.
+             * @enum {string}
+             */
+            kind?: "referral" | "affiliate" | "influencer";
+            /**
+             * @description Update only.
+             * @enum {string}
+             */
+            status?: "active" | "paused" | "archived";
+            /** @description A brand's id or handle; empty for none. */
+            brand?: string | null;
+            landing_url?: string;
+            /** @description A three-letter code; USD when left out. */
+            currency?: string;
+            credit_window_days?: number;
+            /** @enum {string} */
+            credit_model?: "first" | "last";
+            codes_win?: boolean;
+            hold_days?: number;
+            auto_approve?: boolean;
+            auto_accept?: boolean;
+            /** Format: int64 */
+            min_payout_cents?: number;
+            terms_url?: string;
+            /** @description A billing connector's id (stripe): its synced payments and refunds become partner sales too. "" for none. */
+            sales_source?: string;
+            /** @description Create only: the preset's rules when left out. */
+            rules?: components["schemas"]["PartnerRuleInput"][];
+        };
+        PartnerStats: {
+            /** @description Short link clicks. */
+            clicks: number;
+            /** @description Customers credited to them. */
+            referrals: number;
+            /** @description Referred customers who bought. */
+            customers: number;
+            /**
+             * Format: int64
+             * @description Referred sales less refunds.
+             */
+            sales_cents: number;
+            /**
+             * Format: int64
+             * @description Cash, fees and adjustments still on hold.
+             */
+            pending_cents: number;
+            /**
+             * Format: int64
+             * @description Approved and not yet paid (some may be in a due payout).
+             */
+            approved_cents: number;
+            /** Format: int64 */
+            paid_cents: number;
+            /**
+             * Format: int64
+             * @description Approved, not yet in a payout: what the next payout gathers.
+             */
+            balance_cents: number;
+            /** @description Approved action rewards your system hasn't fulfilled. */
+            pending_actions: number;
+        };
+        Partner: {
+            /**
+             * Format: uuid
+             * @description The membership's id.
+             */
+            id: string;
+            /** Format: uuid */
+            program_id: string;
+            /** @description The program's slug. */
+            program: string;
+            /**
+             * Format: uuid
+             * @description The partner's customer record.
+             */
+            record_id: string;
+            name: string;
+            email: string;
+            /** @description The ref code links carry. It never changes. */
+            code: string;
+            /** @enum {string} */
+            status: "pending" | "active" | "suspended" | "rejected";
+            /** Format: uuid */
+            group_id: string | null;
+            /**
+             * Format: uuid
+             * @description Their tracking campaign (channel affiliates).
+             */
+            campaign_id: string | null;
+            /** @description The short link: /r/{code} on your tracking domain, or this server's /r/{workspace}/{code}. Add ?sub= for a sub-id, ?to=/path for another page on the site. */
+            link: string;
+            /** @description The landing page tagged with their campaign and ref, with no redirect; '' without a landing page. */
+            campaign_link: string;
+            promo_codes: components["schemas"]["PartnerPromoCode"][];
+            /** @description Free text, such as "PayPal: ana@example.com", stored sealed. Never bank details. */
+            payout_method: string;
+            note: string;
+            /** @enum {string} */
+            source: "manual" | "api" | "signup" | "import";
+            currency: string;
+            stats: components["schemas"]["PartnerStats"];
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            updated_at: string;
+        };
+        PartnerPromoCode: {
+            /** @description As customers type it at checkout. */
+            code: string;
+            /** @description The billing account's coupon it was made for; '' when made there by you. */
+            coupon: string;
+            /**
+             * @description local: kept in Outflare only (you made it in your billing system). pending, created or failed: Outflare making it in the workspace's billing account.
+             * @enum {string}
+             */
+            status: "local" | "pending" | "created" | "failed";
+            /** @description What went wrong when failed. */
+            error: string;
+        };
+        PartnerInput: {
+            /** @description Create only: the program's id or slug. */
+            program?: string;
+            /**
+             * Format: uuid
+             * @description Create only: the partner's customer record.
+             */
+            record_id?: string;
+            /** @description Create only: the person with this email, made when nobody has it. */
+            email?: string;
+            /** @description Create only: set on the record when it has no name. */
+            name?: string;
+            /** @description Create only: letters, digits, hyphens and underscores; made from the name when left out. */
+            code?: string;
+            /**
+             * @description active when left out.
+             * @enum {string}
+             */
+            status?: "pending" | "active" | "suspended" | "rejected";
+            /** @description A group of the program; "" for none. */
+            group_id?: string | null;
+            payout_method?: string;
+            note?: string;
+        };
+        PartnerLedgerInput: {
+            /**
+             * Format: int64
+             * @description In the program's currency's smallest unit. A fee is positive; an adjustment either way.
+             */
+            amount_cents: number;
+            /** @description Why. Required for an adjustment. */
+            note?: string;
+        };
+        PartnerReward: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            program_id: string;
+            /** Format: uuid */
+            partner_id: string;
+            /** @enum {string} */
+            side: "partner" | "referred";
+            /**
+             * Format: uuid
+             * @description The record that gets it: the partner, or the referred customer.
+             */
+            recipient_id: string;
+            /** @enum {string} */
+            kind: "cash" | "fee" | "action" | "adjustment";
+            /** Format: uuid */
+            conversion_id: string | null;
+            /** Format: uuid */
+            rule_id: string | null;
+            /**
+             * Format: uuid
+             * @description The entry an adjustment corrects.
+             */
+            reverses_id: string | null;
+            /**
+             * Format: int64
+             * @description Negative for an adjustment that takes back; 0 for actions.
+             */
+            amount_cents: number;
+            currency: string;
+            action: string;
+            action_data: {
+                [key: string]: unknown;
+            };
+            /** @enum {string} */
+            status: "pending" | "approved" | "rejected" | "paid" | "fulfilled";
+            /** Format: date-time */
+            hold_until: string;
+            /** Format: uuid */
+            payout_id: string | null;
+            note: string;
+            /** Format: date-time */
+            approved_at: string | null;
+            /** Format: date-time */
+            created_at: string;
+        };
+        PartnerConversion: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            program_id: string;
+            /** Format: uuid */
+            partner_id: string;
+            /** Format: uuid */
+            referral_id: string;
+            /**
+             * Format: uuid
+             * @description The referred customer.
+             */
+            record_id: string;
+            /** @enum {string} */
+            type: "signup" | "sale" | "refund" | "custom";
+            /** @description A custom conversion's event name; '' otherwise. */
+            event_name: string;
+            /** @description A renewal of a subscription rather than a new purchase. */
+            recurring: boolean;
+            external_id: string;
+            /**
+             * Format: uuid
+             * @description A refund's sale (its conversion id).
+             */
+            refund_of: string | null;
+            /** Format: int64 */
+            amount_cents: number;
+            currency: string;
+            product_id: string;
+            /**
+             * @description billing: a payment synced from the program's sales_source.
+             * @enum {string}
+             */
+            source: "api" | "postback" | "billing" | "manual" | "import";
+            /** Format: date-time */
+            occurred_at: string;
+            /** Format: date-time */
+            created_at: string;
+        };
+        PartnerConversionInput: {
+            /**
+             * @description lead is another name for signup.
+             * @enum {string}
+             */
+            type: "signup" | "lead" | "sale" | "refund" | "custom";
+            /** @description custom only: the conversion's name, such as trial_started (lowercase letters, digits, dots and underscores). */
+            event_name?: string;
+            /** @description Sales: a subscription renewal rather than a new purchase. */
+            recurring?: boolean;
+            /** @description A program's id or slug, to keep the conversion to it. */
+            program?: string;
+            /** @description The partner's ref code. */
+            ref?: string;
+            /**
+             * Format: uuid
+             * @description ref_click from a partner's short link.
+             */
+            click_id?: string;
+            promo_code?: string;
+            /** @description Your own id for the customer. */
+            customer_id?: string;
+            email?: string;
+            /** Format: uuid */
+            record_id?: string;
+            /** @description Your charge or order id; a retry with the same one is stored once. */
+            external_id?: string;
+            /** @description Refunds: the sale's external_id. */
+            refund_of?: string;
+            /**
+             * Format: int64
+             * @description Required for a sale. A refund without it refunds what is left of the sale.
+             */
+            amount_cents?: number;
+            /** @description The program's currency when left out; a sale in another is not credited. */
+            currency?: string;
+            product_id?: string;
+            sub_id?: string;
+            /** @description RFC 3339 or Unix seconds; now when left out. */
+            occurred_at?: string;
+        };
+        PartnerConversionResult: {
+            credited: boolean;
+            /** @enum {string} */
+            reason?: "no_partner" | "partner_inactive" | "program_inactive" | "self_referral" | "sale_not_found" | "currency";
+            /** @description Already recorded with this external_id (or, for a lead, already a lead). */
+            duplicate: boolean;
+            /** Format: uuid */
+            partner_id: string | null;
+            /** Format: uuid */
+            referral_id: string | null;
+            conversion: components["schemas"]["PartnerConversion"] | null;
+            rewards: components["schemas"]["PartnerReward"][];
+        };
+        PartnerReferral: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            program_id: string;
+            /** Format: uuid */
+            partner_id: string;
+            /**
+             * Format: uuid
+             * @description The referred customer.
+             */
+            record_id: string;
+            /** @enum {string} */
+            via: "ref" | "click" | "promo_code" | "visit" | "manual" | "import";
+            sub_id: string;
+            /** @enum {string} */
+            status: "lead" | "customer" | "refunded" | "rejected";
+            /** Format: date-time */
+            first_sale_at: string | null;
+            /** Format: int64 */
+            sales_cents: number;
+            /** Format: date-time */
+            created_at: string;
+        };
+        PartnerPayout: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            partner_id: string;
+            /** Format: uuid */
+            program_id: string;
+            /** Format: int64 */
+            amount_cents: number;
+            currency: string;
+            /** @enum {string} */
+            status: "due" | "paid" | "canceled";
+            note: string;
+            reference: string;
+            /** @description Ledger entries it gathers. */
+            rewards: number;
+            /** Format: date-time */
+            paid_at: string | null;
+            /** Format: date-time */
+            created_at: string;
         };
         TrackingCampaign: {
             /** Format: uuid */
@@ -21701,8 +23379,11 @@ export interface components {
             };
         };
         ABTestGoal: {
-            /** @enum {string} */
-            kind: "event" | "page";
+            /**
+             * @description event: a product event. page: a view of a page. deal: a won deal (in US dollars) of the person the visitor's browser belongs to, closed after they joined.
+             * @enum {string}
+             */
+            kind: "event" | "page" | "deal";
             /**
              * @description For kind event: a product event's catalog name, such as signup_started.
              * @example signup_started
@@ -21713,6 +23394,20 @@ export interface components {
              * @example /thanks
              */
             path?: string;
+            /**
+             * @description What is measured per visitor. conversion (the default): whether they reached it, so versions compare rates. count: how many times (event and page goals). value: the total of property on the goal's events, such as revenue, or for a deal goal the deals' value in US dollars; versions compare the mean per visitor.
+             * @enum {string}
+             */
+            metric?: "conversion" | "count" | "value";
+            /**
+             * @description For a value goal on an event: the event property holding the number, such as revenue. Values below 0 count as 0.
+             * @example revenue
+             */
+            property?: string;
+            /** @description Count only what happens within this many hours of the visitor first seeing their version; 0 or absent: until the test ends. */
+            window_hours?: number;
+            /** @description For count and value goals: the most one visitor can add, so a few huge orders can't swing the result; 0 or absent: no cap. */
+            cap?: number;
         };
         ABTest: {
             /** Format: uuid */
@@ -21737,7 +23432,7 @@ export interface components {
             goals: components["schemas"]["ABTestGoal"][];
             /** @description The smallest relative change worth detecting: 0.25 is +25%. The always-valid p-value is tuned to find changes of about this size. */
             min_effect: number;
-            /** @description Each goal's conversion rate on the site over the 28 days before the test started, which fixes the test's tuning for its whole life; 0 for a goal with too little history (its live control rate is used). Null before the test starts. */
+            /** @description Each goal's mean per visitor on the site (its conversion rate, for a conversion goal) over the 28 days before the test started, which fixes the test's tuning for its whole life; 0 for a goal with too little history (its live control mean is used). Null before the test starts. */
             baselines: number[] | null;
             /** Format: date-time */
             started_at: string | null;
@@ -21773,10 +23468,16 @@ export interface components {
                 visitors: number;
                 /** @description Of them */
                 converted: number;
+                /** @description For a count or value goal: the total of their counts or values, each capped as the goal says. */
+                sum?: number;
             };
             plan: {
-                /** @description The goal's rate among those visitors. */
+                /** @description The goal's mean per visitor among those visitors: its rate, for a conversion goal. */
                 baseline: number;
+                /** @enum {string} */
+                metric: "conversion" | "count" | "value";
+                /** @description Versions competing with the control. Past one, each needs more visitors, since the results are corrected for the extra chances of a false winner. */
+                versions: number;
                 /** @description Visitors a week the flag reaches (its rollout applied). */
                 weekly_visitors: number;
                 /** @description Visitors a week of the smallest version, which the comparison waits on. */
@@ -21840,19 +23541,25 @@ export interface components {
             visitors: number;
             /** @description Of them */
             conversions: number;
+            /** @description For a count or value goal: the total of the visitors' counts or values, each capped as the goal says. */
+            sum?: number;
+            /** @description For a count or value goal: sum per visitor, which the versions are compared on. */
+            mean?: number;
         };
         ABTestComparison: {
             variant: string;
-            /** @description The chance this version's true rate is above the control's (Bayesian). */
+            /** @description The chance this version's true rate (or mean, for a count or value goal) is above the control's (Bayesian). */
             chance_to_beat: number;
-            /** @description Relative change of its rate over the control's: 0.18 is +18%. */
+            /** @description Relative change of its rate (or mean) over the control's: 0.18 is +18%. */
             lift: number;
-            /** @description Low end of the always-valid 95% range of the lift: from the same test as p_value, so the range leaves out 0 exactly when p_value is under 0.05. 0 with lift_high 0 while there is no evidence yet. */
+            /** @description Low end of the always-valid 95% range of the lift: from the same test as p_value, corrected the same way, so the range leaves out 0 exactly when p_value is under 0.05. 0 with lift_high 0 while there is no evidence yet. */
             lift_low: number;
             /** @description High end of the always-valid 95% range of the lift. */
             lift_high: number;
-            /** @description Always-valid p-value, the lowest over the test's daily looks: below 0.05 it is safe to stop, however often you looked, and it never rises again. */
+            /** @description Always-valid p-value, the lowest over the test's daily looks, corrected for the number of versions compared with the control (raw_p_value times corrected_for, at most 1): below 0.05 it is safe to stop, however often you looked, and it never rises again. */
             p_value: number;
+            /** @description The always-valid p-value before the correction for several versions. */
+            raw_p_value: number;
         };
         ABTestResults: {
             /** Format: uuid */
@@ -21867,10 +23574,17 @@ export interface components {
                 arms: components["schemas"]["ABTestArm"][];
                 goals: {
                     goal: components["schemas"]["ABTestGoal"];
+                    /**
+                     * @description What the arms measure.
+                     * @enum {string}
+                     */
+                    metric: "conversion" | "count" | "value";
+                    /** @description True for every goal after the first: watched for learning, never deciding the winner, since checking many goals turns up chance differences. */
+                    exploratory: boolean;
                     arms: components["schemas"]["ABTestArm"][];
                     /** @description Each version against the control. */
                     comparisons: components["schemas"]["ABTestComparison"][] | null;
-                    /** @description The control rate the test was tuned with; 0 when none was recorded. */
+                    /** @description The control mean (its rate, for a conversion goal) the test was tuned with; 0 when none was recorded. */
                     baseline?: number;
                     /** @description First goal only: the cumulative arms at the end of each day (UTC) that saw a visitor join or convert; the last is today so far. */
                     days?: {
@@ -21885,6 +23599,8 @@ export interface components {
                 sample_ratio_mismatch: boolean;
                 /** @description The smallest change the p-values were tuned to detect. */
                 min_effect: number;
+                /** @description Versions compared with the control. Past one, every p_value and range is corrected for that many chances of a false winner. */
+                corrected_for: number;
                 /** Format: date-time */
                 computed_at: string;
             };
@@ -26558,7 +28274,7 @@ export interface components {
             invites: number;
         };
         /** @enum {string} */
-        Scope: "workspace.read" | "workspace.manage" | "context.manage" | "members.read" | "members.manage" | "members.remove" | "roles.manage" | "tokens.manage" | "audit.read" | "mailboxes.read" | "mailboxes.manage" | "leads.read" | "leads.manage" | "suppressions.manage" | "sequences.read" | "sequences.manage" | "inbox.read" | "inbox.manage" | "integrations.read" | "integrations.manage" | "outcomes.read" | "outcomes.manage" | "projects.read" | "projects.manage" | "infrastructure.read" | "infrastructure.manage" | "infrastructure.approve" | "analytics.read" | "analytics.manage" | "missions.read" | "missions.run" | "missions.approve" | "seo.read" | "seo.manage" | "social.read" | "social.manage" | "social.post" | "webhooks.read" | "webhooks.manage" | "emails.read" | "emails.send" | "emails.manage" | "customers.read" | "customers.manage" | "catalog.manage";
+        Scope: "workspace.read" | "workspace.manage" | "context.manage" | "members.read" | "members.manage" | "members.remove" | "roles.manage" | "tokens.manage" | "audit.read" | "mailboxes.read" | "mailboxes.manage" | "leads.read" | "leads.manage" | "suppressions.manage" | "sequences.read" | "sequences.manage" | "inbox.read" | "inbox.manage" | "integrations.read" | "integrations.manage" | "outcomes.read" | "outcomes.manage" | "projects.read" | "projects.manage" | "infrastructure.read" | "infrastructure.manage" | "infrastructure.approve" | "analytics.read" | "analytics.manage" | "missions.read" | "missions.run" | "missions.approve" | "seo.read" | "seo.manage" | "social.read" | "social.manage" | "social.post" | "partners.read" | "partners.manage" | "partners.conversions" | "webhooks.read" | "webhooks.manage" | "emails.read" | "emails.send" | "emails.manage" | "customers.read" | "customers.manage" | "catalog.manage";
         Workspace: {
             /** Format: uuid */
             id: string;
@@ -29202,6 +30918,102 @@ export interface components {
             logo_url?: string;
             colors?: components["schemas"]["LookColors"];
         };
+        SiteCookie: {
+            /** Format: uuid */
+            id: string;
+            /** @enum {string} */
+            kind: "cookie" | "local_storage" | "session_storage" | "script" | "iframe" | "pixel";
+            /** @description A cookie's or storage key's name; for a script, embed or pixel its host and first path segment. */
+            name: string;
+            /** @description The cookie's domain, or the script's host. */
+            host: string;
+            /** @description The catalogue's vendor id, or empty when unknown. */
+            vendor: string;
+            vendor_name: string;
+            /** @enum {string} */
+            category: "necessary" | "analytics" | "marketing" | "preferences" | "unknown";
+            purpose: string;
+            /** @example 13 months */
+            retention: string;
+            /**
+             * @description new: not looked at by a person (in the policy when its vendor is known); listed: confirmed; ignored: never listed.
+             * @enum {string}
+             */
+            status: "new" | "listed" | "ignored";
+            sources: ("crawl" | "browser")[];
+            /** @description A browser had it before the visitor allowed its category: the tag may need data-category to wait for consent. */
+            before_consent: boolean;
+            /** @description A few pages it was on. */
+            pages: string[];
+            /** Format: date-time */
+            reviewed_at: string | null;
+            /** Format: date-time */
+            first_seen_at: string;
+            /** Format: date-time */
+            last_seen_at: string;
+        };
+        SiteCookieInput: {
+            /** @enum {string} */
+            category?: "necessary" | "analytics" | "marketing" | "preferences";
+            purpose?: string;
+            retention?: string;
+            /** @enum {string} */
+            status?: "listed" | "ignored";
+        };
+        CookieScan: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            site_key_id: string;
+            /** @enum {string} */
+            status: "queued" | "running" | "done" | "failed";
+            /** @enum {string} */
+            trigger: "person" | "schedule" | "api";
+            /** @description Pages read. */
+            pages: number;
+            found: number;
+            /** @description New to the site. */
+            added: number;
+            /** @description Why it failed, such as no page could be read. */
+            error: string;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            started_at: string | null;
+            /** Format: date-time */
+            finished_at: string | null;
+        };
+        CookiePolicy: {
+            version: number;
+            /** Format: date-time */
+            published_at: string;
+            site: string;
+            categories: {
+                /** @enum {string} */
+                id: "necessary" | "analytics" | "marketing" | "preferences";
+                vendors: {
+                    /** @description The catalogue's id; empty for the site's own. */
+                    id: string;
+                    name: string;
+                    company: string;
+                    privacy_url: string;
+                    purpose: string;
+                    items: {
+                        kind: string;
+                        name: string;
+                        host: string;
+                        purpose: string;
+                        retention: string;
+                    }[];
+                }[];
+            }[];
+            /** @enum {string} */
+            format: "json" | "markdown" | "text" | "html";
+            /** @description The policy in format; empty for json. */
+            content: string;
+            /** @description The hosted policy page. */
+            url: string;
+        };
         ConsentBanner: {
             /** Format: uuid */
             site_key_id: string;
@@ -29911,6 +31723,11 @@ export interface components {
             https_status: "pending" | "active" | "failed" | null;
             /** @description What to fix when https_status is failed, or why it is still pending. */
             https_error: string;
+            /**
+             * Format: uuid
+             * @description The partner program whose portal the domain serves (at its root); null for the workspace's email and partner links.
+             */
+            partner_program_id: string | null;
         };
         /**
          * @description replied means the lead answered and the sequence stops on reply. unsubscribed also covers a reply asking to be removed.
@@ -35147,6 +36964,8 @@ export interface operations {
                 "application/json": {
                     /** @example links.acme-com.example */
                     domain: string;
+                    /** @description A partner program's id or slug: the domain serves its portal instead (also needs partners.manage), such as partners.acme-com.example. A program has one; 409 when it already has a domain. */
+                    partner_program?: string;
                 };
             };
         };
@@ -54770,6 +56589,180 @@ export interface operations {
             default: components["responses"]["Error"];
         };
     };
+    listSiteCookies: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description What was found, the last scan and the policy's latest version. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["SiteCookie"][];
+                        counts: {
+                            total: number;
+                            /** @description In the cookie policy. */
+                            listed: number;
+                            /** @description Unknown to the catalogue and not yet classified. */
+                            to_review: number;
+                            /** @description Seen in a browser before the visitor allowed their category. */
+                            before_consent: number;
+                        };
+                        /** @description The latest scan. */
+                        scan: components["schemas"]["CookieScan"] | null;
+                        policy: null | {
+                            version: number;
+                            /** Format: date-time */
+                            published_at: string;
+                            /** @description The hosted policy page. */
+                            url: string;
+                        };
+                    };
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    updateSiteCookie: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                id: string;
+                cookie: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SiteCookieInput"];
+            };
+        };
+        responses: {
+            /** @description The item. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SiteCookie"];
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            default: components["responses"]["Error"];
+        };
+    };
+    startCookieScan: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description A scan was already waiting or running. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CookieScan"];
+                };
+            };
+            /** @description Queued. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CookieScan"];
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            default: components["responses"]["Error"];
+        };
+    };
+    getCookiePolicy: {
+        parameters: {
+            query?: {
+                /** @description content's format. Default markdown. */
+                format?: "markdown" | "text" | "html";
+                version?: number;
+            };
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The policy. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CookiePolicy"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    listCookiePolicyVersions: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Versions. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: {
+                            version: number;
+                            /** Format: date-time */
+                            published_at: string;
+                            added: string[];
+                            removed: string[];
+                            reasked: boolean;
+                        }[];
+                    };
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
     listVisitors: {
         parameters: {
             query?: {
@@ -55139,6 +57132,97 @@ export interface operations {
         };
     };
     sendSiteConsentPreflight: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Allowed. */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    getSiteCookiePolicy: {
+        parameters: {
+            query: {
+                /** @example ofk_test_not_a_real_key */
+                key: string;
+                /** @description Default json. */
+                format?: "json" | "markdown" | "text" | "html";
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The policy. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CookiePolicy"];
+                    "text/markdown": string;
+                    "text/plain": string;
+                    "text/html": string;
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    sendSiteCookies: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "text/plain": string;
+                "application/json": {
+                    /** @example ofk_test_not_a_real_key */
+                    key: string;
+                    cookies?: string[];
+                    local?: string[];
+                    session?: string[];
+                    scripts?: string[];
+                    iframes?: string[];
+                    path?: string;
+                    granted?: {
+                        analytics?: boolean;
+                        marketing?: boolean;
+                        preferences?: boolean;
+                    };
+                };
+            };
+        };
+        responses: {
+            /** @description Taken. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @description Names new to the site. */
+                        added: number;
+                    };
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    sendSiteCookiesPreflight: {
         parameters: {
             query?: never;
             header?: never;
@@ -60435,6 +62519,1478 @@ export interface operations {
             default: components["responses"]["Error"];
         };
     };
+    listPartnerPrograms: {
+        parameters: {
+            query?: {
+                /** @description Only records of this brand: its id or handle, none for records shared by every brand, or all (the default). */
+                brand?: components["parameters"]["Brand"];
+                status?: "active" | "paused" | "archived";
+            };
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Programs. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["PartnerProgram"][];
+                    };
+                };
+            };
+            400: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    createPartnerProgram: {
+        parameters: {
+            query?: never;
+            header?: {
+                /**
+                 * @description Makes the write safe to retry. A repeat with the same key from the same caller within 24 hours gets the first
+                 *     answer back (with `Idempotent-Replayed: true`) instead of running again. The same key for a different request
+                 *     is refused with 422 `idempotency_key_reused`; while the first is still running, 409 `idempotency_in_progress`.
+                 *     Use a new random key, such as a UUID, for each distinct write.
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PartnerProgramInput"];
+            };
+        };
+        responses: {
+            /** @description The program. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PartnerProgram"];
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            400: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    getPartnerProgram: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                /** @description The program's id or slug. */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The program. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PartnerProgram"];
+                };
+            };
+            404: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    updatePartnerProgram: {
+        parameters: {
+            query?: never;
+            header?: {
+                /**
+                 * @description Makes the write safe to retry. A repeat with the same key from the same caller within 24 hours gets the first
+                 *     answer back (with `Idempotent-Replayed: true`) instead of running again. The same key for a different request
+                 *     is refused with 422 `idempotency_key_reused`; while the first is still running, 409 `idempotency_in_progress`.
+                 *     Use a new random key, such as a UUID, for each distinct write.
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                /** @description The program's id or slug. */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PartnerProgramInput"];
+            };
+        };
+        responses: {
+            /** @description The program. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PartnerProgram"];
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            400: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    setPartnerRules: {
+        parameters: {
+            query?: never;
+            header?: {
+                /**
+                 * @description Makes the write safe to retry. A repeat with the same key from the same caller within 24 hours gets the first
+                 *     answer back (with `Idempotent-Replayed: true`) instead of running again. The same key for a different request
+                 *     is refused with 422 `idempotency_key_reused`; while the first is still running, 409 `idempotency_in_progress`.
+                 *     Use a new random key, such as a UUID, for each distinct write.
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                /** @description The program's id or slug. */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    rules: components["schemas"]["PartnerRuleInput"][];
+                };
+            };
+        };
+        responses: {
+            /** @description The program. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PartnerProgram"];
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            400: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    createPartnerGroup: {
+        parameters: {
+            query?: never;
+            header?: {
+                /**
+                 * @description Makes the write safe to retry. A repeat with the same key from the same caller within 24 hours gets the first
+                 *     answer back (with `Idempotent-Replayed: true`) instead of running again. The same key for a different request
+                 *     is refused with 422 `idempotency_key_reused`; while the first is still running, 409 `idempotency_in_progress`.
+                 *     Use a new random key, such as a UUID, for each distinct write.
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                /** @description The program's id or slug. */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    name: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The group. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PartnerGroup"];
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            400: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    deletePartnerGroup: {
+        parameters: {
+            query?: never;
+            header?: {
+                /**
+                 * @description Makes the write safe to retry. A repeat with the same key from the same caller within 24 hours gets the first
+                 *     answer back (with `Idempotent-Replayed: true`) instead of running again. The same key for a different request
+                 *     is refused with 422 `idempotency_key_reused`; while the first is still running, 409 `idempotency_in_progress`.
+                 *     Use a new random key, such as a UUID, for each distinct write.
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                /** @description The program's id or slug. */
+                id: string;
+                group: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            202: components["responses"]["MissionHeld"];
+            /** @description Removed. */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            404: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    rotatePartnerPostback: {
+        parameters: {
+            query?: never;
+            header?: {
+                /**
+                 * @description Makes the write safe to retry. A repeat with the same key from the same caller within 24 hours gets the first
+                 *     answer back (with `Idempotent-Replayed: true`) instead of running again. The same key for a different request
+                 *     is refused with 422 `idempotency_key_reused`; while the first is still running, 409 `idempotency_in_progress`.
+                 *     Use a new random key, such as a UUID, for each distinct write.
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                /** @description The program's id or slug. */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The URL. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @description The postback URL */
+                        url: string;
+                        /** @description The start of the secret, shown later as postback_hint. */
+                        hint: string;
+                    };
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            404: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    createPartnerWidgetSession: {
+        parameters: {
+            query?: never;
+            header?: {
+                /**
+                 * @description Makes the write safe to retry. A repeat with the same key from the same caller within 24 hours gets the first
+                 *     answer back (with `Idempotent-Replayed: true`) instead of running again. The same key for a different request
+                 *     is refused with 422 `idempotency_key_reused`; while the first is still running, 409 `idempotency_in_progress`.
+                 *     Use a new random key, such as a UUID, for each distinct write.
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                /** @description A program's id or slug. */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @description Your own id for the customer. */
+                    customer_id?: string;
+                    /** Format: email */
+                    email?: string;
+                    /** Format: uuid */
+                    record_id?: string;
+                    /** @description Set on a new customer record only. */
+                    name?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The widget session. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @description The session; embed_url carries it. */
+                        token: string;
+                        embed_url: string;
+                        expires_in_seconds: number;
+                        /** Format: uuid */
+                        partner_id: string;
+                        /** @enum {string} */
+                        status: "pending" | "active" | "suspended" | "rejected";
+                        code: string;
+                        link: string;
+                    };
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            400: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    setPartnerPortal: {
+        parameters: {
+            query?: never;
+            header?: {
+                /**
+                 * @description Makes the write safe to retry. A repeat with the same key from the same caller within 24 hours gets the first
+                 *     answer back (with `Idempotent-Replayed: true`) instead of running again. The same key for a different request
+                 *     is refused with 422 `idempotency_key_reused`; while the first is still running, 409 `idempotency_in_progress`.
+                 *     Use a new random key, such as a UUID, for each distinct write.
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                /** @description The program's id or slug. */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    enabled?: boolean;
+                    /** @description Lowercase letters, digits and hyphens; "" for none. */
+                    subdomain?: string | null;
+                    settings?: components["schemas"]["PartnerPortalSettings"];
+                };
+            };
+        };
+        responses: {
+            /** @description The program. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PartnerProgram"];
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            400: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    listPartnerAssets: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                /** @description The program's id or slug. */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Assets. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["PartnerAsset"][];
+                    };
+                };
+            };
+            404: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    createPartnerAsset: {
+        parameters: {
+            query?: never;
+            header?: {
+                /**
+                 * @description Makes the write safe to retry. A repeat with the same key from the same caller within 24 hours gets the first
+                 *     answer back (with `Idempotent-Replayed: true`) instead of running again. The same key for a different request
+                 *     is refused with 422 `idempotency_key_reused`; while the first is still running, 409 `idempotency_in_progress`.
+                 *     Use a new random key, such as a UUID, for each distinct write.
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                /** @description The program's id or slug. */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @enum {string} */
+                    kind: "image" | "text" | "link";
+                    title: string;
+                    body?: string;
+                    url?: string;
+                    position?: number;
+                };
+            };
+        };
+        responses: {
+            /** @description The asset. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PartnerAsset"];
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            400: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    deletePartnerAsset: {
+        parameters: {
+            query?: never;
+            header?: {
+                /**
+                 * @description Makes the write safe to retry. A repeat with the same key from the same caller within 24 hours gets the first
+                 *     answer back (with `Idempotent-Replayed: true`) instead of running again. The same key for a different request
+                 *     is refused with 422 `idempotency_key_reused`; while the first is still running, 409 `idempotency_in_progress`.
+                 *     Use a new random key, such as a UUID, for each distinct write.
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                /** @description The program's id or slug. */
+                id: string;
+                asset: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            202: components["responses"]["MissionHeld"];
+            /** @description Removed. */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            404: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    impersonatePartner: {
+        parameters: {
+            query?: never;
+            header?: {
+                /**
+                 * @description Makes the write safe to retry. A repeat with the same key from the same caller within 24 hours gets the first
+                 *     answer back (with `Idempotent-Replayed: true`) instead of running again. The same key for a different request
+                 *     is refused with 422 `idempotency_key_reused`; while the first is still running, 409 `idempotency_in_progress`.
+                 *     Use a new random key, such as a UUID, for each distinct write.
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The link. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        url: string;
+                        read_only: boolean;
+                        /** @description How long the link works; the session it opens lasts an hour. */
+                        expires_in_seconds: number;
+                    };
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    listPartners: {
+        parameters: {
+            query?: {
+                /** @description Only records of this brand: its id or handle, none for records shared by every brand, or all (the default). */
+                brand?: components["parameters"]["Brand"];
+                /** @description A program's id or slug. */
+                program?: string;
+                status?: "pending" | "active" | "suspended" | "rejected";
+                /** @description The partner's customer record. */
+                record_id?: string;
+                limit?: number;
+                before?: string;
+                /**
+                 * @description next_cursor from the previous page, unchanged. Every paged list takes it, so one loop pages them all:
+                 *     call, then call again with cursor=next_cursor until next_cursor is null. Cursors are opaque; don't build them.
+                 */
+                cursor?: components["parameters"]["Cursor"];
+                /**
+                 * @description Only these fields of each item, comma separated (fields=id,email,status); id always comes back.
+                 *     Paging fields stay. A field the items don't have answers 400 naming the ones they do. Any GET takes it.
+                 */
+                fields?: components["parameters"]["Fields"];
+            };
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Partners. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["Partner"][];
+                        /** Format: date-time */
+                        next_before: string | null;
+                        next_cursor?: components["schemas"]["NextCursor"];
+                    };
+                };
+            };
+            400: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    createPartner: {
+        parameters: {
+            query?: never;
+            header?: {
+                /**
+                 * @description Makes the write safe to retry. A repeat with the same key from the same caller within 24 hours gets the first
+                 *     answer back (with `Idempotent-Replayed: true`) instead of running again. The same key for a different request
+                 *     is refused with 422 `idempotency_key_reused`; while the first is still running, 409 `idempotency_in_progress`.
+                 *     Use a new random key, such as a UUID, for each distinct write.
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PartnerInput"];
+            };
+        };
+        responses: {
+            /** @description The partner. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Partner"];
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            400: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    getPartner: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The partner. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Partner"];
+                };
+            };
+            404: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    updatePartner: {
+        parameters: {
+            query?: never;
+            header?: {
+                /**
+                 * @description Makes the write safe to retry. A repeat with the same key from the same caller within 24 hours gets the first
+                 *     answer back (with `Idempotent-Replayed: true`) instead of running again. The same key for a different request
+                 *     is refused with 422 `idempotency_key_reused`; while the first is still running, 409 `idempotency_in_progress`.
+                 *     Use a new random key, such as a UUID, for each distinct write.
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PartnerInput"];
+            };
+        };
+        responses: {
+            /** @description The partner. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Partner"];
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            400: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    addPartnerPromoCode: {
+        parameters: {
+            query?: never;
+            header?: {
+                /**
+                 * @description Makes the write safe to retry. A repeat with the same key from the same caller within 24 hours gets the first
+                 *     answer back (with `Idempotent-Replayed: true`) instead of running again. The same key for a different request
+                 *     is refused with 422 `idempotency_key_reused`; while the first is still running, 409 `idempotency_in_progress`.
+                 *     Use a new random key, such as a UUID, for each distinct write.
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    code: string;
+                    /** @description A coupon's id in the workspace's billing account (Stripe): Outflare makes the code there too, with the workspace's own key, which needs Write access to Promotion codes. Leave it out when you make the code yourself. */
+                    coupon?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The partner. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Partner"];
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            400: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    removePartnerPromoCode: {
+        parameters: {
+            query?: never;
+            header?: {
+                /**
+                 * @description Makes the write safe to retry. A repeat with the same key from the same caller within 24 hours gets the first
+                 *     answer back (with `Idempotent-Replayed: true`) instead of running again. The same key for a different request
+                 *     is refused with 422 `idempotency_key_reused`; while the first is still running, 409 `idempotency_in_progress`.
+                 *     Use a new random key, such as a UUID, for each distinct write.
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                id: string;
+                code: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            202: components["responses"]["MissionHeld"];
+            /** @description Removed. */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            404: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    addPartnerFee: {
+        parameters: {
+            query?: never;
+            header?: {
+                /**
+                 * @description Makes the write safe to retry. A repeat with the same key from the same caller within 24 hours gets the first
+                 *     answer back (with `Idempotent-Replayed: true`) instead of running again. The same key for a different request
+                 *     is refused with 422 `idempotency_key_reused`; while the first is still running, 409 `idempotency_in_progress`.
+                 *     Use a new random key, such as a UUID, for each distinct write.
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PartnerLedgerInput"];
+            };
+        };
+        responses: {
+            /** @description The ledger entry. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PartnerReward"];
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            400: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    addPartnerAdjustment: {
+        parameters: {
+            query?: never;
+            header?: {
+                /**
+                 * @description Makes the write safe to retry. A repeat with the same key from the same caller within 24 hours gets the first
+                 *     answer back (with `Idempotent-Replayed: true`) instead of running again. The same key for a different request
+                 *     is refused with 422 `idempotency_key_reused`; while the first is still running, 409 `idempotency_in_progress`.
+                 *     Use a new random key, such as a UUID, for each distinct write.
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PartnerLedgerInput"];
+            };
+        };
+        responses: {
+            /** @description The ledger entry. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PartnerReward"];
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            400: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    listPartnerConversions: {
+        parameters: {
+            query?: {
+                /** @description Only records of this brand: its id or handle, none for records shared by every brand, or all (the default). */
+                brand?: components["parameters"]["Brand"];
+                type?: "signup" | "sale" | "refund" | "custom";
+                partner_id?: string;
+                /** @description A program's id or slug. */
+                program?: string;
+                limit?: number;
+                before?: string;
+                /**
+                 * @description next_cursor from the previous page, unchanged. Every paged list takes it, so one loop pages them all:
+                 *     call, then call again with cursor=next_cursor until next_cursor is null. Cursors are opaque; don't build them.
+                 */
+                cursor?: components["parameters"]["Cursor"];
+                /**
+                 * @description Only these fields of each item, comma separated (fields=id,email,status); id always comes back.
+                 *     Paging fields stay. A field the items don't have answers 400 naming the ones they do. Any GET takes it.
+                 */
+                fields?: components["parameters"]["Fields"];
+            };
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Conversions. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["PartnerConversion"][];
+                        /** Format: date-time */
+                        next_before: string | null;
+                        next_cursor?: components["schemas"]["NextCursor"];
+                    };
+                };
+            };
+            400: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    createPartnerConversion: {
+        parameters: {
+            query?: never;
+            header?: {
+                /**
+                 * @description Makes the write safe to retry. A repeat with the same key from the same caller within 24 hours gets the first
+                 *     answer back (with `Idempotent-Replayed: true`) instead of running again. The same key for a different request
+                 *     is refused with 422 `idempotency_key_reused`; while the first is still running, 409 `idempotency_in_progress`.
+                 *     Use a new random key, such as a UUID, for each distinct write.
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PartnerConversionInput"];
+            };
+        };
+        responses: {
+            /** @description Not credited, or already recorded (duplicate). */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PartnerConversionResult"];
+                };
+            };
+            /** @description Credited. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PartnerConversionResult"];
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            400: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    partnerPostback: {
+        parameters: {
+            query?: {
+                type?: "signup" | "lead" | "sale" | "refund" | "custom";
+                event_name?: string;
+                recurring?: string;
+                ref?: string;
+                click_id?: string;
+                promo_code?: string;
+                customer_id?: string;
+                email?: string;
+                external_id?: string;
+                refund_of?: string;
+                amount?: string;
+                currency?: string;
+            };
+            header?: never;
+            path: {
+                /** @description The program's postback secret (ofb_...). */
+                token: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Not credited, or already recorded. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PartnerConversionResult"];
+                };
+            };
+            /** @description Credited. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PartnerConversionResult"];
+                };
+            };
+            400: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    partnerPostbackPost: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The program's postback secret (ofb_...). */
+                token: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/x-www-form-urlencoded": {
+                    [key: string]: string;
+                };
+                "application/json": {
+                    [key: string]: unknown;
+                };
+            };
+        };
+        responses: {
+            /** @description Not credited, or already recorded. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PartnerConversionResult"];
+                };
+            };
+            /** @description Credited. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PartnerConversionResult"];
+                };
+            };
+            400: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    listPartnerReferrals: {
+        parameters: {
+            query?: {
+                /** @description Only records of this brand: its id or handle, none for records shared by every brand, or all (the default). */
+                brand?: components["parameters"]["Brand"];
+                partner_id?: string;
+                /** @description The referred customer. */
+                record_id?: string;
+                status?: "lead" | "customer" | "refunded" | "rejected";
+                limit?: number;
+                before?: string;
+                /**
+                 * @description next_cursor from the previous page, unchanged. Every paged list takes it, so one loop pages them all:
+                 *     call, then call again with cursor=next_cursor until next_cursor is null. Cursors are opaque; don't build them.
+                 */
+                cursor?: components["parameters"]["Cursor"];
+                /**
+                 * @description Only these fields of each item, comma separated (fields=id,email,status); id always comes back.
+                 *     Paging fields stay. A field the items don't have answers 400 naming the ones they do. Any GET takes it.
+                 */
+                fields?: components["parameters"]["Fields"];
+            };
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Referrals. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["PartnerReferral"][];
+                        /** Format: date-time */
+                        next_before: string | null;
+                        next_cursor?: components["schemas"]["NextCursor"];
+                    };
+                };
+            };
+            400: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    listPartnerRewards: {
+        parameters: {
+            query?: {
+                /** @description Only records of this brand: its id or handle, none for records shared by every brand, or all (the default). */
+                brand?: components["parameters"]["Brand"];
+                status?: "pending" | "approved" | "rejected" | "paid" | "fulfilled";
+                kind?: "cash" | "fee" | "action" | "adjustment";
+                partner_id?: string;
+                payout_id?: string;
+                /** @description A program's id or slug. */
+                program?: string;
+                limit?: number;
+                before?: string;
+                /**
+                 * @description next_cursor from the previous page, unchanged. Every paged list takes it, so one loop pages them all:
+                 *     call, then call again with cursor=next_cursor until next_cursor is null. Cursors are opaque; don't build them.
+                 */
+                cursor?: components["parameters"]["Cursor"];
+                /**
+                 * @description Only these fields of each item, comma separated (fields=id,email,status); id always comes back.
+                 *     Paging fields stay. A field the items don't have answers 400 naming the ones they do. Any GET takes it.
+                 */
+                fields?: components["parameters"]["Fields"];
+            };
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Ledger entries. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["PartnerReward"][];
+                        /** Format: date-time */
+                        next_before: string | null;
+                        next_cursor?: components["schemas"]["NextCursor"];
+                    };
+                };
+            };
+            400: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    approvePartnerReward: {
+        parameters: {
+            query?: never;
+            header?: {
+                /**
+                 * @description Makes the write safe to retry. A repeat with the same key from the same caller within 24 hours gets the first
+                 *     answer back (with `Idempotent-Replayed: true`) instead of running again. The same key for a different request
+                 *     is refused with 422 `idempotency_key_reused`; while the first is still running, 409 `idempotency_in_progress`.
+                 *     Use a new random key, such as a UUID, for each distinct write.
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": Record<string, never>;
+            };
+        };
+        responses: {
+            /** @description The ledger entry. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PartnerReward"];
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            400: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    rejectPartnerReward: {
+        parameters: {
+            query?: never;
+            header?: {
+                /**
+                 * @description Makes the write safe to retry. A repeat with the same key from the same caller within 24 hours gets the first
+                 *     answer back (with `Idempotent-Replayed: true`) instead of running again. The same key for a different request
+                 *     is refused with 422 `idempotency_key_reused`; while the first is still running, 409 `idempotency_in_progress`.
+                 *     Use a new random key, such as a UUID, for each distinct write.
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": {
+                    note?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The ledger entry. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PartnerReward"];
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            400: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    fulfilPartnerReward: {
+        parameters: {
+            query?: never;
+            header?: {
+                /**
+                 * @description Makes the write safe to retry. A repeat with the same key from the same caller within 24 hours gets the first
+                 *     answer back (with `Idempotent-Replayed: true`) instead of running again. The same key for a different request
+                 *     is refused with 422 `idempotency_key_reused`; while the first is still running, 409 `idempotency_in_progress`.
+                 *     Use a new random key, such as a UUID, for each distinct write.
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": {
+                    note?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The ledger entry. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PartnerReward"];
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            400: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    listPartnerPayouts: {
+        parameters: {
+            query?: {
+                /** @description Only records of this brand: its id or handle, none for records shared by every brand, or all (the default). */
+                brand?: components["parameters"]["Brand"];
+                status?: "due" | "paid" | "canceled";
+                partner_id?: string;
+                limit?: number;
+                before?: string;
+                /**
+                 * @description next_cursor from the previous page, unchanged. Every paged list takes it, so one loop pages them all:
+                 *     call, then call again with cursor=next_cursor until next_cursor is null. Cursors are opaque; don't build them.
+                 */
+                cursor?: components["parameters"]["Cursor"];
+                /**
+                 * @description Only these fields of each item, comma separated (fields=id,email,status); id always comes back.
+                 *     Paging fields stay. A field the items don't have answers 400 naming the ones they do. Any GET takes it.
+                 */
+                fields?: components["parameters"]["Fields"];
+            };
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Payouts. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["PartnerPayout"][];
+                        /** Format: date-time */
+                        next_before: string | null;
+                        next_cursor?: components["schemas"]["NextCursor"];
+                    };
+                };
+            };
+            400: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    createPartnerPayouts: {
+        parameters: {
+            query?: never;
+            header?: {
+                /**
+                 * @description Makes the write safe to retry. A repeat with the same key from the same caller within 24 hours gets the first
+                 *     answer back (with `Idempotent-Replayed: true`) instead of running again. The same key for a different request
+                 *     is refused with 422 `idempotency_key_reused`; while the first is still running, 409 `idempotency_in_progress`.
+                 *     Use a new random key, such as a UUID, for each distinct write.
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": {
+                    /** Format: uuid */
+                    partner_id?: string;
+                    /** @description A program's id or slug. */
+                    program?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The payouts made now (none when nothing is due). */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["PartnerPayout"][];
+                    };
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            400: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    markPartnerPayoutPaid: {
+        parameters: {
+            query?: never;
+            header?: {
+                /**
+                 * @description Makes the write safe to retry. A repeat with the same key from the same caller within 24 hours gets the first
+                 *     answer back (with `Idempotent-Replayed: true`) instead of running again. The same key for a different request
+                 *     is refused with 422 `idempotency_key_reused`; while the first is still running, 409 `idempotency_in_progress`.
+                 *     Use a new random key, such as a UUID, for each distinct write.
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": {
+                    note?: string;
+                    reference?: string;
+                    /**
+                     * Format: date-time
+                     * @description When it was paid; now when left out.
+                     */
+                    paid_at?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The payout. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PartnerPayout"];
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            400: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    cancelPartnerPayout: {
+        parameters: {
+            query?: never;
+            header?: {
+                /**
+                 * @description Makes the write safe to retry. A repeat with the same key from the same caller within 24 hours gets the first
+                 *     answer back (with `Idempotent-Replayed: true`) instead of running again. The same key for a different request
+                 *     is refused with 422 `idempotency_key_reused`; while the first is still running, 409 `idempotency_in_progress`.
+                 *     Use a new random key, such as a UUID, for each distinct write.
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": {
+                    note?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The payout. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PartnerPayout"];
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            400: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
     webhook_lead_replied: {
         parameters: {
             query?: never;
@@ -64252,6 +67808,336 @@ export interface operations {
         };
     };
     webhook_visitor_became_hot: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["WebhookEvent"];
+            };
+        };
+        responses: {
+            /** @description Any 2xx answer means received; anything else is retried. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    webhook_partner_program_created: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["WebhookEvent"];
+            };
+        };
+        responses: {
+            /** @description Any 2xx answer means received; anything else is retried. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    webhook_partner_program_updated: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["WebhookEvent"];
+            };
+        };
+        responses: {
+            /** @description Any 2xx answer means received; anything else is retried. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    webhook_partner_program_rules_updated: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["WebhookEvent"];
+            };
+        };
+        responses: {
+            /** @description Any 2xx answer means received; anything else is retried. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    webhook_partner_created: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["WebhookEvent"];
+            };
+        };
+        responses: {
+            /** @description Any 2xx answer means received; anything else is retried. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    webhook_partner_updated: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["WebhookEvent"];
+            };
+        };
+        responses: {
+            /** @description Any 2xx answer means received; anything else is retried. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    webhook_partner_referral_created: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["WebhookEvent"];
+            };
+        };
+        responses: {
+            /** @description Any 2xx answer means received; anything else is retried. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    webhook_partner_conversion_created: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["WebhookEvent"];
+            };
+        };
+        responses: {
+            /** @description Any 2xx answer means received; anything else is retried. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    webhook_partner_reward_created: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["WebhookEvent"];
+            };
+        };
+        responses: {
+            /** @description Any 2xx answer means received; anything else is retried. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    webhook_partner_reward_approved: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["WebhookEvent"];
+            };
+        };
+        responses: {
+            /** @description Any 2xx answer means received; anything else is retried. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    webhook_partner_reward_rejected: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["WebhookEvent"];
+            };
+        };
+        responses: {
+            /** @description Any 2xx answer means received; anything else is retried. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    webhook_partner_reward_reversed: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["WebhookEvent"];
+            };
+        };
+        responses: {
+            /** @description Any 2xx answer means received; anything else is retried. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    webhook_partner_reward_fulfilled: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["WebhookEvent"];
+            };
+        };
+        responses: {
+            /** @description Any 2xx answer means received; anything else is retried. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    webhook_partner_payout_created: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["WebhookEvent"];
+            };
+        };
+        responses: {
+            /** @description Any 2xx answer means received; anything else is retried. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    webhook_partner_payout_paid: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["WebhookEvent"];
+            };
+        };
+        responses: {
+            /** @description Any 2xx answer means received; anything else is retried. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    webhook_partner_payout_canceled: {
         parameters: {
             query?: never;
             header?: never;

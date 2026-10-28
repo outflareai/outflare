@@ -75,6 +75,7 @@ import { Reddit } from "./pages/Reddit";
 import { Social } from "./pages/Social";
 import { Reviews } from "./pages/Reviews";
 import { Ads } from "./pages/Ads";
+import { Partners } from "./pages/Partners";
 import { Visitors } from "./pages/Visitors";
 import { SEOOverview } from "./pages/SEOOverview";
 import { AIVisibility } from "./pages/AIVisibility";
@@ -543,6 +544,7 @@ function Shell({ me, onSignOut, onReload }: { me: Me; onSignOut: () => void; onR
         {ready && ws && tab === "social" && <Social key={ws.id} ws={ws.id} canManage={writer} go={setTab} />}
         {ready && ws && tab === "reviews" && <Reviews key={ws.id} ws={ws.id} canManage={writer} go={setTab} />}
         {ready && ws && tab === "ads" && <Ads key={ws.id} ws={ws.id} canManage={writer} go={setTab} />}
+        {ready && ws && tab === "partners" && <Partners key={ws.id} ws={ws.id} canManage={writer} />}
         {ready && ws && tab === "visitors" && <Visitors key={ws.id} ws={ws.id} canManage={writer} go={setTab} />}
         {ready && ws && tab === "reddit" && <Reddit key={ws.id} ws={ws.id} canManage={writer} go={setTab} />}
         {ready && ws && tab === "seo" && <SEO key={ws.id} ws={ws.id} canManage={isAdmin} go={setTab} />}

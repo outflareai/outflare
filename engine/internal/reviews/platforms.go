@@ -208,17 +208,26 @@ func PageURL(p Page, n int) string {
 		}
 		return p.URL + "?order=most_recent&page=" + strconv.Itoa(n)
 	case Capterra:
+		// Capterra sorts in the browser and ignores a sort in the address,
+		// so pages are read in its own order (see NewestFirst).
 		if n <= 1 {
-			return p.URL + "?sort=most_recent"
+			return p.URL
 		}
-		return p.URL + "?sort=most_recent&page=" + strconv.Itoa(n)
+		return p.URL + "?page=" + strconv.Itoa(n)
 	}
 	return p.URL
 }
 
-// RenderJS says whether a platform's page is built in the browser, so the
-// page reader must run it.
-func RenderJS(platform string) bool { return platform == Google }
+// RenderJS says whether a platform's page must be read in a browser that
+// runs its scripts: Google builds the page in the browser, and G2 answers
+// anything else with a bot check. Other platforms are read without, and
+// again in a browser when a read shows no reviews.
+func RenderJS(platform string) bool { return platform == Google || platform == G2 }
+
+// NewestFirst says whether a platform's pages list reviews newest first,
+// so a daily read can stop at the first review it already has. Capterra's
+// pages list the most helpful first.
+func NewestFirst(platform string) bool { return platform != Capterra }
 
 // SearchQueries are the web searches that find a brand's page on each
 // platform it can be searched for. Google places are added by pasting

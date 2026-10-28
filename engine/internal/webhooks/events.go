@@ -219,6 +219,22 @@ var Catalog = []Event{
 	{"alert.raised", "alerts", "Something needs a person now: a hot reply (reply.hot), a hot website visitor (visitor.hot) or another kind a module raises, at most once per thing. data has alert_id, kind, target_type, target_id, record_id, owner_id (the user it is for, or null), brand_id and the kind's own ids; GET .../alerts has what it says."},
 	// Website visitors
 	{"visitor.became_hot", "visitors", "A known person, or their company, reached the workspace's hot score on its website (at most once a week each). data has record_id, kind (person or company), score, hot_score, pageviews, key_pageviews, sessions and people."},
+	// Partners: referral, affiliate and influencer programs
+	{"partner_program.created", "partners", "A partner program (referral, affiliate or influencer) was created. data has kind, brand_id and rules (how many)."},
+	{"partner_program.updated", "partners", "A partner program's settings changed, or it was paused, archived or restored. data has kind, status and changed (the settings sent)."},
+	{"partner_program.rules_updated", "partners", "A partner program's reward rules were replaced. Rewards already in the ledger keep what they earned. data has kind and rules (how many)."},
+	{"partner.created", "partners", "Someone joined a partner program. data has program_id, program_kind, record_id (the partner's customer record), status (pending waits for approval) and source."},
+	{"partner.updated", "partners", "A partner was approved, suspended or rejected, moved to another group, or their payout method or note changed. data has program_id, record_id, status, previous_status and group_id."},
+	{"partner_referral.created", "partners", "A partner was credited with a customer, bound by a lead or sale from your backend. data has program_id, partner_id, record_id (the customer), via (ref, click, promo_code or visit) and source."},
+	{"partner_conversion.created", "partners", "A sign-up, sale, refund or custom conversion was recorded for a referred customer. data has program_id, partner_id, referral_id, record_id, type, event_name (custom only), recurring, amount_cents, currency, product_id, source and, for a refund, refund_of."},
+	{"partner_reward.created", "partners", "A conversion earned a reward, or a fee or adjustment was logged; it waits out the program's hold. data has program_id, program_kind, partner_id, side (partner or referred), kind (cash, fee, action or adjustment), recipient_id, amount_cents, currency, conversion_id and, for an action, action and action_data."},
+	{"partner_reward.approved", "partners", "A reward was approved: cash now counts toward the partner's next payout; an action is for your system to carry out (data has action, action_data, recipient_id and recipient_customer_id, your own user id for them), then call POST .../partner-rewards/{id}/fulfil. data.by is auto, manual or refund."},
+	{"partner_reward.rejected", "partners", "A held reward was rejected, by a person or because its sale was refunded. data.reason says why."},
+	{"partner_reward.reversed", "partners", "A refund took back part or all of a reward: a new adjustment entry with a negative amount for cash, or, for an action, data.action and action_data for your system to take back. data has reverses_id and reason."},
+	{"partner_reward.fulfilled", "partners", "Your system reported that it carried out an approved action reward."},
+	{"partner_payout.created", "partners", "A payout is due: a partner's approved cash, fees and adjustments were gathered. Pay it from your own account or payout tool, then mark it paid. data has partner_id, program_id, amount_cents, currency and rewards."},
+	{"partner_payout.paid", "partners", "A payout was marked paid. data has partner_id, program_id, amount_cents, currency and reference."},
+	{"partner_payout.canceled", "partners", "A due payout was canceled and its rewards went back into the partner's balance."},
 	// Workspace
 	{"workspace.updated", "workspace", "The workspace was renamed or its slug (its name in URLs) changed. data has the new and previous values."},
 	// Webhooks

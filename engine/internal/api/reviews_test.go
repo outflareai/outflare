@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -65,6 +66,8 @@ func (f *fakeReviewSite) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case strings.HasPrefix(req.URL, "https://www.g2.com/products/northpeak/") && req.Render && f.g2 != "":
 			page, status = f.g2, 200
+		case strings.HasPrefix(req.URL, "https://www.capterra.com/p/777/") && req.Render:
+			page, status = capterraPage(), 200
 		case strings.HasPrefix(req.URL, "https://www.capterra.com/p/404/"):
 			page, status = `<html><title>Page not found</title></html>`, 404
 		}
@@ -80,6 +83,24 @@ func (f *fakeReviewSite) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	default:
 		http.NotFound(w, r)
 	}
+}
+
+// capterraPage is a Capterra reviews page: its JSON-LD headline, and its
+// reviews in the data the page carries for the browser.
+func capterraPage() string {
+	day := func(d int) string { return time.Now().UTC().AddDate(0, 0, -d).Format("January 2, 2006") }
+	data, _ := json.Marshal(map[string]any{"reviewSummary": map[string]any{"overallRating": "4.5", "totalReviews": 98}, "textReviews": []any{
+		map[string]any{"reviewId": "Capterra___1001", "title": "Saves us hours", "writtenOn": day(3), "generalComments": "We plan every launch in it.",
+			"prosText": "Fast", "consText": "", "overallRating": "5.0", "reviewer": map[string]any{"fullName": "Lee M.", "isValidated": true},
+			"vendorResponse": map[string]any{"response": "Thanks Lee!", "date": day(2)}},
+		map[string]any{"reviewId": "Capterra___1002", "title": "Too pricey", "writtenOn": day(9), "generalComments": "Works, costs a lot.",
+			"overallRating": "2.0", "reviewer": map[string]any{"fullName": "Verified Reviewer"}, "vendorResponse": map[string]any{}},
+	}})
+	chunk, _ := json.Marshal(`7:["$","div",null,` + string(data) + `]`)
+	return `<html><head><script type="application/ld+json">{"@context":"https://schema.org","@type":"SoftwareApplication","name":"Northpeak",` +
+		`"aggregateRating":{"@type":"AggregateRating","reviewCount":98,"ratingValue":4.5,"bestRating":5},` +
+		`"review":[{"@type":"Review","author":{"@type":"Person","name":"Lee M."},"reviewBody":"We plan every launch in it.","reviewRating":{"@type":"Rating","ratingValue":5}}]}</script></head>` +
+		`<body><script>self.__next_f.push([1,` + string(chunk) + `])</script></body></html>`
 }
 
 func trustpilotReview(id string, stars int, author string, age time.Duration, reply string) map[string]any {
@@ -343,6 +364,7 @@ func TestReviewPageReadRetries(t *testing.T) {
 		{"kind": "g2", "url": "https://www.g2.com/products/northpeak/reviews"},
 		{"kind": "capterra", "url": "https://www.capterra.com/p/123456/Northpeak/reviews/"},
 		{"kind": "capterra", "url": "https://www.capterra.com/p/404/Gone/reviews/"},
+		{"kind": "capterra", "url": "https://www.capterra.com/p/777/Northpeak/"},
 	}})
 	gn := owner.must(201, "POST", base+"/integrations", map[string]any{"connector": "geonode", "credentials": map[string]string{"api_key": "gn-key"}})["id"].(string)
 	if err := e.srv.ReadReviewPages(ctx, ws, gn); err != nil {
@@ -353,11 +375,16 @@ func TestReviewPageReadRetries(t *testing.T) {
 		x := x.(map[string]any)
 		pages[x["external_id"].(string)] = x
 	}
-	g2p, blocked, gone := pages["northpeak"], pages["123456"], pages["404"]
-	if g2p == nil || blocked == nil || gone == nil {
+	g2p, blocked, gone, capterra := pages["northpeak"], pages["123456"], pages["404"], pages["777"]
+	if g2p == nil || blocked == nil || gone == nil || capterra == nil {
 		t.Fatalf("pages: %v", pages)
 	}
-	// G2 showed a bot check, then its reviews in a browser.
+	// G2 is read in a browser from the start: it shows anything else a bot check.
+	for _, u := range site.fetches {
+		if strings.HasPrefix(u, "https://www.g2.com/") && !slices.Contains(site.rendered, u) {
+			t.Fatalf("g2 read without a browser: %v", site.fetches)
+		}
+	}
 	if g2p["last_error"] != nil || g2p["score"] == nil || g2p["failures"] != 0.0 || g2p["last_read_at"] == nil {
 		t.Fatalf("g2 page: %v", g2p)
 	}
@@ -366,7 +393,21 @@ func TestReviewPageReadRetries(t *testing.T) {
 	if !render {
 		t.Fatal("the g2 page should be read in a browser from now on")
 	}
-	// Capterra blocks in a browser too: tried again in 15 minutes.
+	// Capterra showed a bot check, then its reviews in a browser, read from
+	// the page's own data with their dates and the vendor's reply.
+	if capterra["last_error"] != nil || capterra["score"] != 4.5 || capterra["review_count"] != 98.0 {
+		t.Fatalf("capterra page: %v", capterra)
+	}
+	byTitle := map[string]map[string]any{}
+	for _, x := range owner.must(200, "GET", base+"/reviews?platform=capterra", nil)["data"].([]any) {
+		x := x.(map[string]any)
+		byTitle[x["title"].(string)] = x
+	}
+	if r := byTitle["Saves us hours"]; len(byTitle) != 2 || r == nil || r["rating"] != 5.0 || r["reply_body"] != "Thanks Lee!" || r["replied_at"] == nil ||
+		!strings.Contains(r["body"].(string), "Pros: Fast") || byTitle["Too pricey"]["sentiment"] != "negative" {
+		t.Fatalf("capterra reviews: %v", byTitle)
+	}
+	// Another Capterra page blocks in a browser too: tried again in 15 minutes.
 	next, _ := time.Parse(time.RFC3339Nano, blocked["next_read_at"].(string))
 	if blocked["last_error_code"] != "blocked" || blocked["failures"] != 1.0 || blocked["last_failed_at"] == nil ||
 		time.Until(next) < 10*time.Minute || time.Until(next) > 20*time.Minute {

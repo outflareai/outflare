@@ -31,6 +31,7 @@ var sealedColumns = []sealedColumn{
 	{"connection_hooks", "integration_id", "signing_secrets"},
 	{"connection_hook_events", "id", "payload"},
 	{"domain_connect_keys", "id", "private_key"},
+	{"partner_memberships", "id", "payout_method"},
 }
 
 // ResealResult counts what ResealStored did.

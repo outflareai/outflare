@@ -268,11 +268,12 @@ func applyABInput(t *abTestView, f flagView, in abTestInput) error {
 // (ids, enums and counts):
 // never its name, hypothesis or goal names.
 func abAuditData(t abTestView) map[string]any {
-	kinds := make([]string, len(t.Goals))
+	kinds, metrics := make([]string, len(t.Goals)), make([]string, len(t.Goals))
 	for i, g := range t.Goals {
-		kinds[i] = g.Kind
+		kinds[i], metrics[i] = g.Kind, g.MetricOf()
 	}
-	return map[string]any{"flag_id": t.FlagID, "status": t.Status, "goals": len(t.Goals), "goal_kinds": kinds, "min_effect": t.MinEffect, "brand_id": t.BrandID}
+	return map[string]any{"flag_id": t.FlagID, "status": t.Status, "goals": len(t.Goals), "goal_kinds": kinds, "goal_metrics": metrics,
+		"min_effect": t.MinEffect, "brand_id": t.BrandID}
 }
 
 func (s *Server) createABTest(w http.ResponseWriter, r *http.Request) {
@@ -431,7 +432,7 @@ func (s *Server) startABTest(w http.ResponseWriter, r *http.Request) {
 			if err != nil {
 				return err
 			}
-			if baselines[i] = abtests.Baseline(tr); baselines[i] > 0 {
+			if baselines[i] = abtests.Baseline(tr, g.MetricOf()); baselines[i] > 0 {
 				recorded++
 			}
 		}
@@ -601,7 +602,8 @@ func (s *Server) planABTest(w http.ResponseWriter, r *http.Request) {
 		weights[i] = v.Weight
 	}
 	weekly := float64(tr.Visitors) / 4 * float64(f.Rollout) / 100
-	plan := abtests.MakePlan(tr.Rate(), weekly, weights, in.MinEffect)
+	m := in.Goal.MetricOf()
+	plan := abtests.MakePlan(tr.Moments(m), m, weekly, weights, in.MinEffect)
 	writeJSON(w, http.StatusOK, map[string]any{
 		"flag_id": f.ID, "page": in.Page, "window_days": 28, "traffic": tr, "plan": plan, "warning": planWarning(f, tr, plan),
 	})

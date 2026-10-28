@@ -8,6 +8,14 @@ import type { ABTestAIRun, ABTestGoal, ABTestPlan, ABTestResults, Flag, FlagVari
 import { api, errorMessage } from "../api";
 import { Badge, Button, ErrorText, field, toast } from "../ui";
 
+// measured is true for a goal compared on its mean per visitor.
+export const measured = (g: ABTestGoal) => g.metric === "count" || g.metric === "value";
+
+// perVisitor shows an arm's mean per visitor: dollars for deals.
+export function perVisitor(g: ABTestGoal, mean: number): string {
+  if (g.kind === "deal" && g.metric === "value") return `$${mean.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  return mean.toLocaleString(undefined, { maximumFractionDigits: mean < 10 ? 3 : 2 });
+}
 const signed = (n: number) => `${n >= 0 ? "+" : "−"}${Math.abs(Math.round(n * 100))}%`;
 const weeksText = (w: number) => (w <= 0 ? "over a year" : w < 1 ? "under a week" : `${w.toFixed(w < 10 ? 1 : 0)} weeks`);
 
@@ -44,7 +52,7 @@ export function PlanPanel({ ws, flag, goal, minEffect }: { ws: string; flag: str
   const [page, setPage] = useState("");
   const [plan, setPlan] = useState<ABTestPlan | null>(null);
   const [error, setError] = useState("");
-  const usable = !!flag && !!goal && (goal.kind === "event" ? !!goal.name : !!goal.path?.startsWith("/"));
+  const usable = !!flag && !!goal && (goal.kind === "event" ? !!goal.name && (goal.metric !== "value" || !!goal.property) : goal.kind === "deal" || !!goal.path?.startsWith("/"));
   useEffect(() => {
     if (!usable) return setPlan(null);
     const t = window.setTimeout(async () => {
@@ -56,7 +64,7 @@ export function PlanPanel({ ws, flag, goal, minEffect }: { ws: string; flag: str
       setPlan(data ?? null);
     }, 400);
     return () => window.clearTimeout(t);
-  }, [ws, flag, goal?.kind, goal?.name, goal?.path, minEffect, page, usable]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [ws, flag, JSON.stringify(goal), minEffect, page, usable]); // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
     <div className="space-y-2 rounded-md border p-3">
@@ -76,8 +84,10 @@ export function PlanPanel({ ws, flag, goal, minEffect }: { ws: string; flag: str
       ) : (
         <>
           <p className="text-[12px] text-muted-foreground">
-            Last 28 days: {plan.traffic.visitors.toLocaleString()} visitors, {(plan.plan.baseline * 100).toFixed(1)}% reached the goal. About{" "}
+            Last 28 days: {plan.traffic.visitors.toLocaleString()} visitors,{" "}
+            {goal && measured(goal) ? `${perVisitor(goal, plan.plan.baseline)} per visitor` : `${(plan.plan.baseline * 100).toFixed(1)}% reached the goal`}. About{" "}
             {Math.round(plan.plan.weekly_per_version).toLocaleString()} a week per version.
+            {plan.plan.versions > 1 && ` With ${plan.plan.versions} versions against the control, each needs more visitors, since the results are corrected for the extra chances of a false winner.`}
           </p>
           {plan.plan.rows.length > 0 && (
             <div className="overflow-x-auto">
@@ -229,22 +239,25 @@ export function SummaryPanel({ ws, testID }: { ws: string; testID: string }) {
 
 const lineColors = ["text-muted-foreground", "text-blue-600 dark:text-blue-400", "text-green-600 dark:text-green-400", "text-amber-600 dark:text-amber-400", "text-purple-600 dark:text-purple-400"];
 
-// DayChart shows each version's conversion rate, cumulative, day by day.
-export function DayChart({ days, control }: { days: NonNullable<ABTestResults["result"]["goals"][number]["days"]>; control: string }) {
+// DayChart shows each version's conversion rate (or mean per visitor, for a
+// count or value goal), cumulative, day by day.
+export function DayChart({ days, control, goal }: { days: NonNullable<ABTestResults["result"]["goals"][number]["days"]>; control: string; goal: ABTestGoal }) {
   if (days.length < 2) return null;
   const W = 560, H = 160, pad = { l: 40, r: 8, t: 8, b: 20 };
-  const rate = (a: { visitors: number; conversions: number }) => (a.visitors ? a.conversions / a.visitors : 0);
+  const mean = measured(goal);
+  const rate = (a: { visitors: number; conversions: number; mean?: number }) => (mean ? a.mean ?? 0 : a.visitors ? a.conversions / a.visitors : 0);
+  const tick = (v: number) => (mean ? perVisitor(goal, v) : `${(v * 100).toFixed(1)}%`);
   const max = Math.max(0.0001, ...days.flatMap((d) => d.arms.map(rate))) * 1.1;
   const x = (i: number) => pad.l + (i / (days.length - 1)) * (W - pad.l - pad.r);
   const y = (v: number) => pad.t + (1 - v / max) * (H - pad.t - pad.b);
   const variants = days[days.length - 1].arms.map((a) => a.variant);
   return (
     <div className="space-y-1">
-      <svg viewBox={`0 0 ${W} ${H}`} className="w-full" role="img" aria-label="Conversion rate by day, cumulative">
+      <svg viewBox={`0 0 ${W} ${H}`} className="w-full" role="img" aria-label={mean ? "Mean per visitor by day, cumulative" : "Conversion rate by day, cumulative"}>
         {[0, 0.5, 1].map((f) => (
           <g key={f} className="text-muted-foreground">
             <line x1={pad.l} x2={W - pad.r} y1={y(max * f)} y2={y(max * f)} stroke="currentColor" strokeOpacity={0.15} />
-            <text x={pad.l - 4} y={y(max * f) + 3} textAnchor="end" fontSize="9" fill="currentColor">{(max * f * 100).toFixed(1)}%</text>
+            <text x={pad.l - 4} y={y(max * f) + 3} textAnchor="end" fontSize="9" fill="currentColor">{tick(max * f)}</text>
           </g>
         ))}
         <text x={pad.l} y={H - 4} fontSize="9" className="text-muted-foreground" fill="currentColor">{days[0].date}</text>

@@ -79,18 +79,22 @@ sends are never tagged.
 ## Partner links and `ref`
 
 Partner links also carry the partner's referral code as `ref`, written last
-(after `ofc`). The affiliate module makes one campaign per partner program
+(after `ofc`). [Partners](partners.md) makes one campaign per partner program
 membership (`object_kind` `partner_program`), not per partner, because one
 partner can promote several brands and a campaign has one brand. Its name is
 the partner's ref code, so a partner's real name never appears in
-`utm_campaign`.
+`utm_campaign`. A partner's short link (`/r/<code>`) adds `ref_click`, the
+click's id, after `ref`.
 
 Two readers use these tags differently, on purpose:
 
 - **Channel and campaign reporting** (the CMO view) credits by `ofc` first,
   then the UTM tags.
 - **Commissions** credit the partner by `ref` first, then `ofc`, because
-  links imported from other affiliate tools have a `ref` but no `ofc`.
+  links imported from other affiliate tools have a `ref` but no `ofc`. Each
+  program also keeps its own window and first or last rule, which never
+  follow the workspace's attribution settings, and a conversion from the
+  workspace's backend binds the partner: a visit alone only proposes one.
 
 Keep the two rules separate: merging them would either pay partners for
 traffic their code didn't bring, or lose imported partner links.

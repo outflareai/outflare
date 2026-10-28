@@ -464,6 +464,10 @@ To learn whether a change helped, run an SEO experiment: Outflare splits a site'
 
 Agents in a mission can work through the fixes list on their own as far as you allow: copilot (the default) holds every fix for a person, rules lets the kinds of fix you pick through, and autonomous lets all of them through, except fixes to redirects, canonicals, indexing, robots.txt or URLs, which always wait for a person. See [docs/fix-autonomy.md](docs/fix-autonomy.md).
 
+## Partners: referrals, affiliates and influencers
+
+Run customer referral, affiliate and influencer programs from one place (Partners). Each program starts from a preset and keeps its own credit rule. Partners are customer records with a ref code, a short link, a campaign link and promo codes. Your backend reports sign-ups, sales and refunds server to server, or through a postback URL, the way it would call Tolt. Rewards stack: a share of the sale, a fixed amount, tiers, a fixed fee, or an action your own system carries out (such as granting credit), for the partner and the friend they brought. Each reward waits out a hold, refunds claw it back, and payouts are marked paid with a reference once you've paid from your own account. Outflare never holds money. Each program can open a hosted partner portal where partners apply, sign in with a link sent through your own email provider, and see their links, masked referred customers, rewards and payouts. It is served on your own domain, on a subdomain of the server's partners domain (`OUTFLARE_PARTNERS_DOMAIN`), or at `/p/<program>/`. See [docs/partners.md](docs/partners.md).
+
 ## Social: Reddit, X and LinkedIn
 
 Watch Reddit for threads where your brand can genuinely help ("which proxy", "passive income app"), have your own AI model draft a reply that answers the question and says who you are, and approve each one before it posts from the brand's own account through your own Reddit app. Each reply's link is tagged, so the visitors and sign-ups it brings show beside it. No bought upvotes, other accounts or undisclosed posts, and only a person can approve. See [docs/social.md](docs/social.md).

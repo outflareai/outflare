@@ -13,7 +13,7 @@ import { BrandBadge } from "@/components/brand-badge";
 import { DataTable } from "@/components/data-table";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import type { Tab } from "@/lib/paths";
-import { DayChart, PlanPanel, SuggestPanel, SummaryPanel, VersionsPanel } from "./ABTestsAI";
+import { DayChart, measured, perVisitor, PlanPanel, SuggestPanel, SummaryPanel, VersionsPanel } from "./ABTestsAI";
 
 type Props = { ws: string; canManage: boolean; go: (t: Tab) => void };
 
@@ -27,7 +27,18 @@ export function testFlag(key: string) {
 const statusTone: Record<ABTest["status"], keyof typeof tones> = { draft: "grey", running: "blue", done: "green" };
 const statusText: Record<ABTest["status"], string> = { draft: "Draft", running: "Running", done: "Done" };
 
-export const goalText = (g: ABTestGoal) => (g.kind === "event" ? g.name ?? "" : `Viewed ${g.path}`);
+// goalText names a goal and what it measures per visitor.
+export function goalText(g: ABTestGoal): string {
+  const what = g.kind === "event" ? g.name ?? "" : g.kind === "page" ? `Viewed ${g.path}` : "Won deals";
+  switch (g.metric) {
+    case "count":
+      return `${what} (times per visitor)`;
+    case "value":
+      return g.kind === "deal" ? "Deal value per visitor" : `${g.property} per visitor (${what})`;
+  }
+  return what;
+}
+
 const pct = (n: number, digits = 1) => `${(n * 100).toFixed(digits)}%`;
 // A chance never reads as certain: 99.96% is "over 99%".
 const chance = (n: number) => (n > 0.99 ? "over 99%" : n < 0.01 ? "under 1%" : pct(n, 0));
@@ -155,16 +166,46 @@ function GoalsEditor({ goals, setGoals, events }: { goals: ABTestGoal[]; setGoal
       {goals.map((g, i) => (
         <div key={i} className="flex flex-wrap items-center gap-2 rounded-md border p-2">
           <span className="w-16 text-[12px] text-muted-foreground">{i === 0 ? "Judged on" : "Also"}</span>
-          <select aria-label="Kind" className={field} value={g.kind} onChange={(e) => set(i, e.target.value === "page" ? { kind: "page", path: "/" } : { kind: "event", name: "" })}>
+          <select aria-label="Kind" className={field} value={g.kind} onChange={(e) => set(i, e.target.value === "page" ? { kind: "page", path: "/" } : e.target.value === "deal" ? { kind: "deal", metric: "value" } : { kind: "event", name: "" })}>
             <option value="event">Event</option>
             <option value="page">Page viewed</option>
+            <option value="deal">Won deal</option>
           </select>
           {g.kind === "event" ? (
-            <input aria-label="Event" list="ab-events" className={`${field} min-w-40 flex-1 font-mono`} required pattern="[a-z][a-z0-9_]*(\.[a-z0-9_]+)*" placeholder="signup_started" value={g.name ?? ""} onChange={(e) => set(i, { kind: "event", name: e.target.value.trim() })} />
+            <input aria-label="Event" list="ab-events" className={`${field} min-w-40 flex-1 font-mono`} required pattern="[a-z][a-z0-9_]*(\.[a-z0-9_]+)*" placeholder="signup_started" value={g.name ?? ""} onChange={(e) => set(i, { ...g, name: e.target.value.trim() })} />
+          ) : g.kind === "page" ? (
+            <input aria-label="Path" className={`${field} min-w-40 flex-1 font-mono`} required pattern="/.*" placeholder="/thanks or /docs/*" value={g.path ?? ""} onChange={(e) => set(i, { ...g, path: e.target.value.trim() })} />
           ) : (
-            <input aria-label="Path" className={`${field} min-w-40 flex-1 font-mono`} required pattern="/.*" placeholder="/thanks or /docs/*" value={g.path ?? ""} onChange={(e) => set(i, { kind: "page", path: e.target.value.trim() })} />
+            <span className="flex-1 text-[12px] text-muted-foreground">of the person the visitor's browser belongs to</span>
+          )}
+          <select aria-label="Measure" className={field} value={g.metric ?? "conversion"}
+            onChange={(e) => set(i, { ...g, metric: e.target.value as ABTestGoal["metric"], property: e.target.value === "value" && g.kind === "event" ? g.property ?? "revenue" : undefined, cap: e.target.value === "conversion" ? undefined : g.cap })}>
+            <option value="conversion">{g.kind === "deal" ? "Won one" : "Reached it"}</option>
+            {g.kind !== "deal" && <option value="count">Times per visitor</option>}
+            {g.kind !== "page" && <option value="value">Value per visitor</option>}
+          </select>
+          {g.kind === "event" && g.metric === "value" && (
+            <input aria-label="Property" className={`${field} w-28 font-mono`} required pattern="[A-Za-z_][A-Za-z0-9_]*" placeholder="revenue" value={g.property ?? ""} onChange={(e) => set(i, { ...g, property: e.target.value.trim() })} />
           )}
           {goals.length > 1 && <Button type="button" variant="ghost" onClick={() => setGoals(goals.filter((_, k) => k !== i))}>Remove</Button>}
+          <details className="basis-full text-[12px] text-muted-foreground">
+            <summary className="cursor-pointer">Window{measured(g) ? " and cap" : ""}{g.window_hours ? ` · ${g.window_hours} h` : ""}{g.cap ? ` · cap ${g.cap}` : ""}</summary>
+            <div className="mt-2 flex flex-wrap items-center gap-3">
+              <label className="flex items-center gap-2">
+                Count only within
+                <input aria-label="Window in hours" type="number" min={0} max={8784} className={`${field} w-20`} value={g.window_hours ?? ""} placeholder="any"
+                  onChange={(e) => set(i, { ...g, window_hours: e.target.value ? Number(e.target.value) : undefined })} />
+                hours of seeing the version
+              </label>
+              {measured(g) && (
+                <label className="flex items-center gap-2">
+                  Cap each visitor at
+                  <input aria-label="Cap per visitor" type="number" min={0} step="any" className={`${field} w-24`} value={g.cap ?? ""} placeholder="no cap"
+                    onChange={(e) => set(i, { ...g, cap: e.target.value ? Number(e.target.value) : undefined })} />
+                </label>
+              )}
+            </div>
+          </details>
         </div>
       ))}
       {goals.length < 5 && <Button type="button" variant="ghost" onClick={() => setGoals([...goals, { kind: "event", name: "" }])}>Watch another goal</Button>}
@@ -262,7 +303,7 @@ function NewTestSheet({ ws, flags, flag: initial, seed, go, onClose, onSaved, on
             <div className="space-y-2">
               <span className="block font-medium">Goals</span>
               <GoalsEditor goals={goals} setGoals={setGoals} events={events} />
-              <p className="text-[12px] text-muted-foreground">A visitor converts when they reach a goal after seeing their version. The first goal decides the winner; the rest are watched alongside it. Goals can't change once the test starts.</p>
+              <p className="text-[12px] text-muted-foreground">A visitor converts when they reach a goal after seeing their version; measure times or value per visitor to compare averages, such as revenue per visitor. The first goal decides the winner; the rest are exploratory. Goals can't change once the test starts.</p>
             </div>
             <EffectPicker value={minEffect} onChange={setMinEffect} />
             <PlanPanel ws={ws} flag={flagKey} goal={goals[0]} minEffect={minEffect} />
@@ -412,19 +453,20 @@ function TestSheet({ ws, test, flag, canManage, onClose, onChanged, onFlagChange
               {v && v.text && <div className={`rounded-md border px-3 py-2 ${toneClass[v.tone]}`}>{v.text}</div>}
               {canManage && <SummaryPanel ws={ws} testID={test.id} />}
               {results.result.goals[0]?.days && results.result.goals[0].days.length > 1 && (
-                <Card title={`${goalText(results.result.goals[0].goal)} rate, day by day`}>
-                  <DayChart days={results.result.goals[0].days} control={test.control} />
+                <Card title={`${goalText(results.result.goals[0].goal)}${measured(results.result.goals[0].goal) ? "" : " rate"}, day by day`}>
+                  <DayChart days={results.result.goals[0].days} control={test.control} goal={results.result.goals[0].goal} />
                 </Card>
               )}
               {results.result.goals.map((g, gi) => (
-                <Card key={gi} title={gi === 0 ? `Judged on ${goalText(g.goal)}` : goalText(g.goal)}>
-                  <GoalTable arms={g.arms} comparisons={g.comparisons ?? []} control={test.control} names={names} />
+                <Card key={gi} title={gi === 0 ? `Judged on ${goalText(g.goal)}` : `${goalText(g.goal)} · exploratory`}>
+                  <GoalTable goal={g.goal} arms={g.arms} comparisons={g.comparisons ?? []} control={test.control} names={names} />
                 </Card>
               ))}
               <p className="text-[12px] text-muted-foreground">
                 Visitors split {results.result.arms.map((a) => `${a.variant} ${a.visitors.toLocaleString()}`).join(" · ")}
                 {results.result.sample_ratio_mismatch ? " — further from the flag's weights than luck explains." : " — in line with the flag's weights."}{" "}
                 Tuned to find changes of {signed(results.result.min_effect)} or more.{" "}
+                {results.result.corrected_for > 1 && `${results.result.corrected_for} versions compete with the control, so the results are corrected for that many chances of a false winner. `}
                 {test.status === "running" ? `Counted ${ago(results.result.computed_at)}; reload for the latest.` : "As they stood when the test ended."}
               </p>
               {test.status === "running" && canManage && (
@@ -455,7 +497,8 @@ const toneClass: Record<keyof typeof tones, string> = {
   blue: "border-blue-600/25 bg-blue-500/10",
 };
 
-function GoalTable({ arms, comparisons, control, names }: { arms: ABTestResults["result"]["arms"]; comparisons: ABTestComparison[]; control: string; names: (v: string) => string }) {
+function GoalTable({ goal, arms, comparisons, control, names }: { goal: ABTestGoal; arms: ABTestResults["result"]["arms"]; comparisons: ABTestComparison[]; control: string; names: (v: string) => string }) {
+  const mean = measured(goal);
   return (
     <div className="overflow-x-auto">
       <table className="w-full text-[13px] tabular-nums">
@@ -463,8 +506,8 @@ function GoalTable({ arms, comparisons, control, names }: { arms: ABTestResults[
           <tr>
             <th className="py-1 pr-3 font-normal">Version</th>
             <th className="py-1 pr-3 text-right font-normal">Visitors</th>
-            <th className="py-1 pr-3 text-right font-normal">Converted</th>
-            <th className="py-1 pr-3 text-right font-normal">Rate</th>
+            <th className="py-1 pr-3 text-right font-normal">{mean ? "Reached it" : "Converted"}</th>
+            <th className="py-1 pr-3 text-right font-normal">{mean ? "Per visitor" : "Rate"}</th>
             <th className="py-1 pr-3 text-right font-normal">Chance to beat</th>
             <th className="py-1 pr-3 text-right font-normal" title="The range stays honest however often you look, and leaves out 0 exactly when the result is safe to stop.">Lift (95% range)</th>
             <th className="py-1 font-normal"></th>
@@ -481,7 +524,7 @@ function GoalTable({ arms, comparisons, control, names }: { arms: ABTestResults[
                 <td className="py-1.5 pr-3 font-mono">{names(a.variant)}</td>
                 <td className="py-1.5 pr-3 text-right">{a.visitors.toLocaleString()}</td>
                 <td className="py-1.5 pr-3 text-right">{a.conversions.toLocaleString()}</td>
-                <td className="py-1.5 pr-3 text-right">{pct(rate)}</td>
+                <td className="py-1.5 pr-3 text-right">{mean ? perVisitor(goal, a.mean ?? 0) : pct(rate)}</td>
                 <td className="py-1.5 pr-3 text-right">{a.variant === control || !c || noneConverted ? "—" : chance(c.chance_to_beat)}</td>
                 <td className="py-1.5 pr-3 text-right">{a.variant === control || !c || a.visitors === 0 ? "—" : c.lift_low === 0 && c.lift_high === 0 ? `${signed(c.lift)} (range not yet)` : `${signed(c.lift)} (${signed(c.lift_low)} to ${signed(c.lift_high)})`}</td>
                 <td className="py-1.5">{c && c.p_value < 0.05 && <Badge tone={c.lift >= 0 ? "green" : "amber"} title={`Always-valid p-value ${c.p_value.toFixed(3)}: safe to stop, however often you looked.`}>Safe to stop</Badge>}</td>

@@ -317,6 +317,10 @@ func (r *paymentRun) apply(ctx context.Context, page connectors.PaymentPage) err
 	return pgx.BeginFunc(ctx, r.s.pool, func(tx pgx.Tx) error {
 		var n paymentTotals
 		touched := map[string]bool{}
+		partnerSales, err := billingSalesOn(ctx, tx, r.ws, r.provider)
+		if err != nil {
+			return err
+		}
 		for _, cust := range page.Customers {
 			if cust.Deleted {
 				continue
@@ -363,6 +367,12 @@ func (r *paymentRun) apply(ctx context.Context, page connectors.PaymentPage) err
 			if added {
 				n.Payments++
 				touched[rec] = true
+				if partnerSales {
+					if err := enqueueBillingConversion(ctx, tx, r.ws, partnerBillingConversion{Provider: r.provider, Type: "sale", RecordID: rec,
+						ExternalID: ch.ID, AmountMinor: ch.AmountMinor, Currency: ch.Currency, At: ch.Created}); err != nil {
+						return err
+					}
+				}
 			}
 		}
 		for _, rf := range page.Refunds {
@@ -383,6 +393,12 @@ func (r *paymentRun) apply(ctx context.Context, page connectors.PaymentPage) err
 			if added {
 				n.Refunds++
 				touched[rec] = true
+				if partnerSales {
+					if err := enqueueBillingConversion(ctx, tx, r.ws, partnerBillingConversion{Provider: r.provider, Type: "refund", RecordID: rec,
+						ExternalID: rf.ID, RefundOf: rf.ChargeID, AmountMinor: rf.AmountMinor, Currency: rf.Currency, At: rf.Created}); err != nil {
+						return err
+					}
+				}
 			}
 		}
 		if len(touched) > 0 {

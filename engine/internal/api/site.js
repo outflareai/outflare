@@ -41,6 +41,11 @@
 // choice is kept in Outflare as the visitor's consent, and joins their
 // record when they sign up. data-banner="off" keeps the banner off.
 //
+// Cookie policy: an element with data-outflare-cookie-policy shows the
+// site's cookie policy, which Outflare keeps up to date. Once a day a
+// browser reports the names (never the values) of the page's cookies,
+// storage keys, scripts and embeds for it; data-cookies="off" stops that.
+//
 // Feature flags and A/B tests: with data-flags on the tag (or the first
 // call to outflare.flag), the script asks for the visitor's variants.
 // outflare.onFlags(fn) runs fn once they are known; outflare.flag("key")
@@ -633,6 +638,70 @@
     try { new MutationObserver(function () { unblock(); }).observe(d.documentElement, { childList: true, subtree: true }); } catch (e) {}
   }
   w.addEventListener("load", function () { vendorSignals(!decided() && rule() === "opt_in"); unblock(); });
+
+  // ---- Cookie policy ----
+  // Elements with data-outflare-cookie-policy show the site's cookie
+  // policy, which Outflare keeps up to date from what the site uses.
+  function showPolicy() {
+    var spots = d.querySelectorAll ? d.querySelectorAll("[data-outflare-cookie-policy]") : [];
+    if (!spots.length || !w.fetch) return;
+    fetch(api + "/v1/site/cookie-policy?format=html&key=" + encodeURIComponent(key))
+      .then(function (res) { return res.ok ? res.text() : ""; })
+      .then(function (htmlText) {
+        if (!htmlText) return;
+        for (var i = 0; i < spots.length; i++) {
+          spots[i].innerHTML = htmlText;
+          // Without the banner there is nothing for the button to open.
+          if (!on()) {
+            var b = spots[i].querySelector(".of-cookie-policy-settings");
+            if (b && b.parentNode) b.parentNode.removeChild(b);
+          }
+        }
+      }, function () {});
+  }
+  // Once a day, a browser tells Outflare which cookies, storage keys,
+  // scripts and embeds the page has, so the policy lists what the site
+  // really uses, including what scripts set after the page loaded. Only
+  // names go, never a value, a query string or who the visitor is.
+  // data-cookies="off" stops it.
+  var REPORTED = "of_cs";
+  function nameOf(src) {
+    try {
+      var u = new URL(src, location.href);
+      if (!/^https?:$/.test(u.protocol)) return "";
+      return u.hostname.toLowerCase() + "/" + u.pathname.split("/")[1];
+    } catch (e) { return ""; }
+  }
+  function reportCookies() {
+    if (script.getAttribute("data-cookies") === "off" || !w.fetch) return;
+    try {
+      var last = Number(localStorage.getItem(REPORTED) || 0);
+      if (Date.now() - last < 86400000) return;
+      localStorage.setItem(REPORTED, String(Date.now()));
+    } catch (e) { return; }
+    var body = { key: key, path: location.pathname, cookies: [], local: [], session: [], scripts: [], iframes: [] }, i, n;
+    d.cookie.split(";").forEach(function (c) {
+      n = c.split("=")[0].replace(/^\s+|\s+$/g, "");
+      if (n && body.cookies.indexOf(n) < 0) body.cookies.push(n);
+    });
+    try { for (i = 0; i < localStorage.length; i++) body.local.push(localStorage.key(i)); } catch (e) {}
+    try { for (i = 0; i < sessionStorage.length; i++) body.session.push(sessionStorage.key(i)); } catch (e) {}
+    var tags = d.querySelectorAll ? d.querySelectorAll("script[src],iframe[src]") : [];
+    for (i = 0; i < tags.length; i++) {
+      n = nameOf(tags[i].getAttribute("src"));
+      var list = tags[i].tagName === "IFRAME" ? body.iframes : body.scripts;
+      if (n && list.indexOf(n) < 0) list.push(n);
+    }
+    ["cookies", "local", "session", "scripts"].forEach(function (k) { body[k] = body[k].slice(0, 200); });
+    body.iframes = body.iframes.slice(0, 100);
+    if (on()) body.granted = { analytics: cats.analytics, marketing: cats.marketing, preferences: cats.preferences };
+    try { fetch(api + "/v1/site/cookies", { method: "POST", body: JSON.stringify(body), keepalive: true, headers: { "Content-Type": "text/plain" } }).then(null, function () {}); } catch (e) {}
+  }
+  function whenLoaded(fn) {
+    if (d.readyState === "complete") fn();
+    else w.addEventListener("load", fn);
+  }
+  whenLoaded(function () { showPolicy(); setTimeout(reportCookies, 3000); });
 
   var queued = Array.isArray(w.outflare) ? w.outflare : [];
   w.outflare = {

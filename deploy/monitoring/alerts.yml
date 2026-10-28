@@ -79,6 +79,19 @@ groups:
         annotations:
           summary: "Consent banner requests take over 500 ms at the 95th percentile, so the banner shows late on a visitor's first page. Check the database pool and the Consent banner row."
 
+      - alert: OutflareCookieScansFailing
+        expr: sum(increase(outflare_cookie_scan_scans_total{outcome="failed"}[6h])) / clamp_min(sum(increase(outflare_cookie_scan_scans_total[6h])), 1) > 0.5 and sum(increase(outflare_cookie_scan_scans_total[6h])) > 5
+        for: 30m
+        labels: { severity: warning }
+        annotations:
+          summary: "Over half of cookie scans in the last 6 hours read no page: OutflareBot may be blocked, or outbound requests from the server failing. See cookie_scan.finished failures in the logs."
+
+      - alert: OutflareCookieReportsFailing
+        expr: sum(rate(outflare_cookie_scan_reports_total{outcome="error"}[10m])) / clamp_min(sum(rate(outflare_cookie_scan_reports_total[10m])), 1e-9) > 0.05
+        for: 15m
+        labels: { severity: warning }
+        annotations:
+          summary: "Over 5% of browsers' cookie reports fail to be kept, so cookie policies stop learning what sites use. Look for errors on POST /v1/site/cookies in the logs (usually the database)."
       - alert: OutflareABResultsSlow
         expr: histogram_quantile(0.95, sum by (le) (rate(outflare_ab_results_seconds_bucket[30m]))) > 10
         for: 30m
@@ -334,6 +347,33 @@ groups:
         labels: { severity: warning }
         annotations:
           summary: "A conversion has waited over 30 minutes to go to its ad platform; check the jobs queue for ads.conversions_send and the engine log for ad_conversions."
+
+      - alert: OutflarePartnerRewardsBehind
+        # Rewards past their hold aren't being approved: the approver loop
+        # is stuck or failing, so partners' balances and action webhooks lag.
+        expr: max(outflare_partners_rewards_overdue_seconds) > 1800
+        for: 10m
+        labels: { severity: warning }
+        annotations:
+          summary: "A partner reward has waited over 30 minutes past its hold to be approved; check the engine log and partner_reward.approve_failed events for the error."
+
+      - alert: OutflarePartnerConversionsFailing
+        # Our errors (not bad input) recording conversions from workspaces'
+        # backends: they retry, but referred sales go uncredited meanwhile.
+        expr: sum(increase(outflare_partners_conversions_total{outcome="error"}[15m])) > 5
+        for: 10m
+        labels: { severity: critical }
+        annotations:
+          summary: "Partner conversions are failing with server errors; check the engine log for partner-conversions and partner-postbacks requests (api.called events with error_code internal)."
+
+      - alert: OutflarePartnerClicksNotStored
+        # Visitors still land, but clicks (and the click ids conversions use)
+        # are lost.
+        expr: sum(increase(outflare_partners_clicks_total{outcome="error"}[15m])) > 20
+        for: 10m
+        labels: { severity: warning }
+        annotations:
+          summary: "Partner link clicks aren't being stored (visitors still land); check the engine log for 'partners: store click'."
 
       - alert: OutflareReviewPagesNotRead
         # Pages are read once a day; two days without a read means the

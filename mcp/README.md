@@ -141,7 +141,7 @@ Read (always available):
 | `list_lead_list_members` | A list's leads with their ICP fit score and reasons, best first |
 | `list_smart_lists`, `get_smart_list`, `list_smart_list_members`, `preview_smart_list` | Smart lists: people on customer records who match rules now (a field, an event in the last N days, being in a lead list), who is in each, and how many a set of rules would pick |
 | `list_flags`, `get_flag`, `evaluate_flags` | Feature flags: switches and splits (A/B tests) the website script and servers read, and which version a given visitor gets and why |
-| `list_ab_tests`, `get_ab_test`, `get_ab_test_results` | A/B tests of feature flags, and how each version is doing: chance to beat the control, lift with its range, whether it is safe to stop, and the winner |
+| `list_ab_tests`, `get_ab_test`, `get_ab_test_results` | A/B tests of feature flags, and how each version is doing on conversion, count or revenue per visitor: chance to beat the control, lift with its range, whether it is safe to stop, and the winner |
 | `plan_ab_test`, `get_ab_test_ai_run` | How long a test would take from the site's real traffic, and the answer of an AI run |
 | `list_data_providers` | Connected data providers that search, find emails or enrich, and the filters each understands |
 | `list_list_runs`, `get_list_run` | Builds, refreshes and enrichments: found, added, skipped by reason, credits spent |
@@ -171,6 +171,7 @@ Read (always available):
 | `list_hook_events`, `replay_hook_event` | The events connectors sent by webhook, with what happened to each, and handling one again |
 | `list_site_keys`, `create_site_key`, `update_site_key`, `rotate_site_key`, `revoke_site_key`, `create_site_proxy_secret` | Website tracking keys (ofk_) and their snippet: anonymous page views with the landing page's campaign tags, click ids and referral code; a proxy secret (ofp_) for sites that forward tracking through their own domain |
 | `get_consent_banner`, `update_consent_banner`, `reask_consent_banner` | The cookie consent banner a site key's script shows: region rules (EEA opt-in, US opt-out), Global Privacy Control, Google Consent Mode v2, the Meta, TikTok and Microsoft signals, categories, look and words; visitors' choices are consents on their records |
+| `list_site_cookies`, `scan_site_cookies`, `classify_site_cookie`, `get_cookie_policy` | The cookie policy that keeps itself up to date: every cookie, storage key and third-party script found on a site (scans and visitors' browsers, names only), matched to a vendor catalogue, with unknown ones to classify, and the published policy as Markdown, text or HTML |
 | `list_website_visitors`, `get_visitor_settings`, `update_visitor_settings`, `add_visitor_company` | The companies and people on the website, scored for buying intent (key pages, return visits), known from the product, from clicks on tracked links in Outflare email, or (when turned on) from the company behind their address with the workspace's own People Data Labs or Snitcher key, or by name from the workspace's own RB2B, Vector or Warmly; key pages, hot score, lookups, people reveal and who is left out; add a looked-up company to the CRM |
 | `get_ai_settings`, `list_ai_models` | Which AI model (Claude, OpenAI, Gemini, Mistral, xAI, DeepSeek, OpenRouter, Vercel AI Gateway, Requesty) plans missions and runs Outflare's agent, its price, the monthly AI limit and spend; the models a connection can use |
 | `get_ai_usage` | Where the workspace's AI spend goes in a month: by tool, provider, model and day, each tool's own limit, and the latest calls with tokens and cost |
@@ -210,6 +211,11 @@ Read (always available):
 | `preview_infra_plan` | Try a goal ("10 domains, 30 mailboxes by the 14th") without saving: names, timeline, capacity, warnings |
 | `list_infra_plans`, `get_infra_plan` | Infrastructure plans, and every domain and mailbox in one with what is left to do |
 | `list_supplier_mailboxes` | Every mailbox a connected supplier (Cheap Inboxes) holds, and where each import stands |
+| `list_partner_programs`, `get_partner_program` | Referral, affiliate and influencer programs with their credit rule, hold, minimum payout, reward rules and groups |
+| `list_partners`, `get_partner` | Partners with their ref code, short link, campaign link, promo codes and totals (clicks, referrals, customers, sales, cash pending, approved, paid and due) |
+| `list_partner_conversions`, `list_partner_referrals` | Leads, sales and refunds credited to partners, and each referred customer with how they were credited |
+| `list_partner_rewards`, `list_partner_payouts` | The reward ledger (cash, fees, actions, adjustments) and payouts |
+| `list_partner_assets` | Banners, copy and links a program shows partners on its portal |
 
 Write (left out when `OUTFLARE_MCP_READ_ONLY=1`):
 
@@ -332,6 +338,14 @@ Write (left out when `OUTFLARE_MCP_READ_ONLY=1`):
 | `push_supplier_mailboxes` | Have the supplier send mailboxes in through its push connection, the way it sends them to a sequencer |
 | `sync_supplier_mailboxes` | Read the supplier's mailboxes again now, e.g. right after ordering more |
 | `update_supplier_sync` | Auto-import new mailboxes, Google app passwords on or off, daily cap for imported mailboxes, push on or off |
+| `create_partner_program`, `update_partner_program` | Start a referral, affiliate or influencer program from its preset, or change, pause or archive one |
+| `set_partner_rules`, `create_partner_group` | Replace a program's stackable reward rules (cash, fixed, action, two-sided, tiers), or add a group with its own rates |
+| `add_partner`, `update_partner`, `add_partner_promo_code` | Add a customer record as a partner, approve, suspend or move them, and tie promo codes to them |
+| `log_partner_fee`, `adjust_partner_balance` | Log a fixed fee (an influencer's post) or correct what a partner is owed |
+| `report_partner_conversion` | Report a lead, sale or refund the way the workspace's backend does |
+| `approve_partner_reward`, `reject_partner_reward`, `fulfil_partner_reward` | Approve or reject a held reward, or mark an action reward done |
+| `set_partner_portal`, `add_partner_asset` | Open and set up a program's partner portal (subdomain, look, sign-up form, sender), and add assets for partners |
+| `create_partner_payouts`, `mark_partner_payout_paid`, `cancel_partner_payout` | Gather what's due into payouts, then mark each paid (with a reference) once the workspace has paid it |
 | `set_analytics_site` | Pick the site an analytics connection reads by default |
 | `set_analytics_site_brand` | Pick the brand an analytics site reports for, or make it shared |
 | `list_analytics_site_brands` | Which brand each analytics site reports for (matched by domain unless picked) |

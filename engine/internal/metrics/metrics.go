@@ -120,6 +120,30 @@ var (
 		Namespace: namespace, Subsystem: "site_consent", Name: "request_seconds",
 		Help: "Time to answer a consent banner request, by endpoint.", Buckets: requestBuckets,
 	}, []string{"endpoint"})
+	cookieScans = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Namespace: namespace, Subsystem: "cookie_scan", Name: "scans_total",
+		Help: "Scans of websites for cookies and scripts, by outcome (ok, failed: no page could be read).",
+	}, []string{"outcome"})
+	cookieScanPages = prometheus.NewCounter(prometheus.CounterOpts{
+		Namespace: namespace, Subsystem: "cookie_scan", Name: "pages_total",
+		Help: "Pages cookie scans read.",
+	})
+	cookieScanFound = prometheus.NewCounter(prometheus.CounterOpts{
+		Namespace: namespace, Subsystem: "cookie_scan", Name: "found_total",
+		Help: "Cookies, scripts and embeds cookie scans found (seen again counts again).",
+	})
+	cookieScanDuration = prometheus.NewHistogram(prometheus.HistogramOpts{
+		Namespace: namespace, Subsystem: "cookie_scan", Name: "seconds",
+		Help: "Time one cookie scan takes, pauses between pages included.", Buckets: []float64{1, 5, 15, 30, 60, 120, 300},
+	})
+	cookieReports = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Namespace: namespace, Subsystem: "cookie_scan", Name: "reports_total",
+		Help: "Reports from visitors' browsers of a site's cookies and scripts, by outcome (ok, refused, error).",
+	}, []string{"outcome"})
+	cookieNew = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Namespace: namespace, Subsystem: "cookie_scan", Name: "new_total",
+		Help: "Cookies, storage keys and scripts found on a site for the first time, by whether the catalogue knew them (known, unknown).",
+	}, []string{"known"})
 	consentChoices = prometheus.NewCounterVec(prometheus.CounterOpts{
 		Namespace: namespace, Subsystem: "site_consent", Name: "choices_total",
 		Help: "Consent choices kept, by action (accept_all, reject_all, custom, opt_out, gpc, api) and region (eea, us, other).",
@@ -259,6 +283,25 @@ var (
 		Help: "Reads of who links to a page or domain, by reason (requested, dead_page) and outcome (success, budget_reached, connector_auth, invalid_request, provider_error, internal).",
 	}, []string{"reason", "outcome"})
 
+	// Partner programs: short link clicks, conversions reported by the
+	// workspace's backend or a postback, and the reward ledger.
+	partnerClicks = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Namespace: namespace, Subsystem: "partners", Name: "clicks_total",
+		Help: "Partner short link clicks, by outcome (tracked, inactive, not_found, error).",
+	}, []string{"outcome"})
+	partnerConversions = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Namespace: namespace, Subsystem: "partners", Name: "conversions_total",
+		Help: "Partner conversions reported, by type (signup, sale, refund, custom), source (api, postback) and outcome (credited, not_credited, duplicate, rejected, error).",
+	}, []string{"type", "source", "outcome"})
+	partnerRewards = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Namespace: namespace, Subsystem: "partners", Name: "rewards_total",
+		Help: "Reward ledger changes, by kind (cash, fee, action, adjustment) and event (created, approved, rejected, reversed, fulfilled, paid).",
+	}, []string{"kind", "event"})
+	partnerRewardsOverdue = prometheus.NewGauge(prometheus.GaugeOpts{
+		Namespace: namespace, Subsystem: "partners", Name: "rewards_overdue_seconds",
+		Help: "How long past its hold the oldest reward that should approve on its own has waited, as of this process's last round.",
+	})
+
 	// News watch: saved news searches run through the workspace's own
 	// web search connection.
 	newsRuns = prometheus.NewCounterVec(prometheus.CounterOpts{
@@ -293,6 +336,7 @@ var own = []prometheus.Collector{
 	siteEvents, inboxEvents, inboxBatch,
 	flagRequests, flagDuration, flagCache, abResults, abResultsDuration,
 	consentRequests, consentDuration, consentChoices,
+	cookieScans, cookieScanPages, cookieScanFound, cookieScanDuration, cookieReports, cookieNew,
 	pipelineItems, pipelineCodes, pipelineBatch, pipelineBatchSize, pipelineWait, pipelineLimitWaits, pipelineLimitReports,
 	aiCalls, aiTokens, aiCost, aiBudgetAlerts,
 	connectionLimitAlerts, connectionLimitStops,
@@ -304,6 +348,7 @@ var own = []prometheus.Collector{
 	adConversions, adConversionsOldest,
 	reviewReads, reviewsFound, socialReads, linkReads, linkPageChecks, archiveLookups,
 	socialPublishes,
+	partnerClicks, partnerConversions, partnerRewards, partnerRewardsOverdue,
 	newsRuns, newsFound,
 	buildInfo,
 }
@@ -389,6 +434,24 @@ func SiteEventsCapped(n int) { siteEvents.WithLabelValues("capped").Add(float64(
 func SiteConsentRequest(endpoint, outcome string, d time.Duration) {
 	consentRequests.WithLabelValues(endpoint, outcome).Inc()
 	consentDuration.WithLabelValues(endpoint).Observe(d.Seconds())
+}
+
+// CookieScanned records one cookie scan: its outcome, the pages it read,
+// what it found and how long it took.
+func CookieScanned(outcome string, pages, found int, d time.Duration) {
+	cookieScans.WithLabelValues(outcome).Inc()
+	cookieScanPages.Add(float64(pages))
+	cookieScanFound.Add(float64(found))
+	cookieScanDuration.Observe(d.Seconds())
+}
+
+// CookieReport counts one browser's report of a site's cookies.
+func CookieReport(outcome string) { cookieReports.WithLabelValues(outcome).Inc() }
+
+// CookiesNew counts what was found on a site for the first time.
+func CookiesNew(known, unknown int) {
+	cookieNew.WithLabelValues("known").Add(float64(known))
+	cookieNew.WithLabelValues("unknown").Add(float64(unknown))
 }
 
 // SiteConsentChoice counts one visitor's consent choice kept.
@@ -562,3 +625,22 @@ func AdConversions(connector string, sent, skipped, failed int) {
 // AdConversionsOldest records how long the oldest waiting conversion has
 // waited.
 func AdConversionsOldest(d time.Duration) { adConversionsOldest.Set(d.Seconds()) }
+
+// PartnerClick counts a partner short link click by outcome.
+func PartnerClick(outcome string) { partnerClicks.WithLabelValues(outcome).Inc() }
+
+// PartnerConversion counts a reported partner conversion.
+func PartnerConversion(typ, source, outcome string) {
+	partnerConversions.WithLabelValues(typ, source, outcome).Inc()
+}
+
+// PartnerRewards counts n reward ledger changes.
+func PartnerRewards(kind, event string, n int) {
+	if n > 0 {
+		partnerRewards.WithLabelValues(kind, event).Add(float64(n))
+	}
+}
+
+// PartnerRewardsOverdue records how long the oldest reward due to approve
+// on its own has waited past its hold.
+func PartnerRewardsOverdue(d time.Duration) { partnerRewardsOverdue.Set(d.Seconds()) }

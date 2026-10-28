@@ -59,6 +59,13 @@ func fakeStripe(t *testing.T) *httptest.Server {
 			default:
 				out = list([]any{cust("cus_cy", "cy@acme.example", "Cy", "")}, false)
 			}
+		case "/v1/promotion_codes":
+			if r.Method != http.MethodPost || r.FormValue("coupon") != "co_partner" || r.Header.Get("Idempotency-Key") == "" {
+				w.WriteHeader(400)
+				_, _ = w.Write([]byte(`{"error":{"code":"resource_missing","message":"No such coupon"}}`))
+				return
+			}
+			out = map[string]any{"id": "promo_" + strings.ToLower(r.FormValue("code")), "code": r.FormValue("code")}
 		case "/v1/customers/cus_zed":
 			out = cust("cus_zed", "", "Zed", "")
 		case "/v1/products/prod_pro":

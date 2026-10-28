@@ -147,6 +147,9 @@ var errorCodes = []errorCode{
 	// Search.
 	{"semantic_search_unavailable", []int{503}, "Meaning-based search needs the pgvector extension in the server's Postgres database, and it isn't there. Word search works without it.", false},
 	{"semantic_search_off", []int{409}, "Meaning-based search is off in this workspace. An admin turns it on with PUT .../semantic-search.", false},
+
+	// Partner portals.
+	{"portal_email_unavailable", []int{409}, "The partner portal can't send sign-in emails: the program has no sender on a verified sending domain of the workspace's own email provider.", false},
 }
 
 func (s *Server) listErrorCodes(w http.ResponseWriter, r *http.Request) {

@@ -654,7 +654,8 @@ func (s *Server) abSuggestPrompt(ctx context.Context, ws string, run abAIRun) (s
 			if err != nil {
 				return nil, nil, err
 			}
-			p := abtests.MakePlan(tr.Rate(), float64(tr.Visitors)/4, []int{50, 50}, 0)
+			m := sg.Goal.MetricOf()
+			p := abtests.MakePlan(tr.Moments(m), m, float64(tr.Visitors)/4, []int{50, 50}, 0)
 			sg.Weeks, sg.Detectable8Weeks, sg.WeeklyVisitors, sg.Baseline = p.Weeks, p.Detectable8Weeks, p.WeeklyVisitors, p.Baseline
 			sg.Warning = planWarning(flagView{Variants: []flags.Variant{{Key: "control"}, {Key: "b"}}}, tr, p)
 			kept = append(kept, sg)
@@ -792,14 +793,24 @@ func (s *Server) abSummaryPrompt(ctx context.Context, ws string, run abAIRun) (s
 	if res.SampleRatio {
 		fmt.Fprintf(&b, "The split between versions is broken (chance by luck %.4f).\n", res.SampleRatioP)
 	}
+	if res.CorrectedFor > 1 {
+		fmt.Fprintf(&b, "%d versions compete with %s, so every p-value and range is corrected for %d chances of a false winner.\n", res.CorrectedFor, t.Control, res.CorrectedFor)
+	}
 	for i, g := range res.Goals {
 		label := "Decides the test"
-		if i > 0 {
-			label = "Watched alongside"
+		if g.Exploratory {
+			label = "Exploratory: watched alongside, never decides"
 		}
-		fmt.Fprintf(&b, "\n## Goal %d (%s): %s%s\n", i+1, label, g.Goal.Name, g.Goal.Path)
+		fmt.Fprintf(&b, "\n## Goal %d (%s): %s\n", i+1, label, describeGoal(g.Goal))
 		for _, a := range g.Arms {
-			fmt.Fprintf(&b, "%s: %d visitors, %d converted (%.2f%%)\n", a.Variant, a.Visitors, a.Conversions, a.Rate()*100)
+			switch g.Metric {
+			case abtests.MetricCount:
+				fmt.Fprintf(&b, "%s: %d visitors, %d reached it, %.3f times per visitor\n", a.Variant, a.Visitors, a.Conversions, a.Mean)
+			case abtests.MetricValue:
+				fmt.Fprintf(&b, "%s: %d visitors, %d with a value, %.2f per visitor (total %.2f)\n", a.Variant, a.Visitors, a.Conversions, a.Mean, a.Sum)
+			default:
+				fmt.Fprintf(&b, "%s: %d visitors, %d converted (%.2f%%)\n", a.Variant, a.Visitors, a.Conversions, a.Rate()*100)
+			}
 		}
 		for _, c := range g.Comparisons {
 			fmt.Fprintf(&b, "%s vs %s: chance to beat %.1f%%, lift %+.1f%% (always-valid range %+.1f%% to %+.1f%%), always-valid p %.4f, safe to stop: %v\n",
@@ -830,4 +841,34 @@ func (s *Server) abSummaryPrompt(ctx context.Context, ws string, run abAIRun) (s
 			map[string]any{"recommendation": rec, "had_winner": winner != ""}, nil
 	}
 	return b.String(), finish, nil
+}
+
+// describeGoal says what a goal measures, for a prompt.
+func describeGoal(g abtests.Goal) string {
+	what := g.Name
+	switch g.Kind {
+	case "page":
+		what = "a view of " + g.Path
+	case "deal":
+		what = "won deals"
+	}
+	switch g.MetricOf() {
+	case abtests.MetricCount:
+		what = "times per visitor of " + what
+	case abtests.MetricValue:
+		if g.Kind == "deal" {
+			what = "US dollars per visitor of " + what
+		} else {
+			what = "total " + g.Property + " per visitor on " + what
+		}
+	default:
+		what = "share of visitors reaching " + what
+	}
+	if g.WindowHours > 0 {
+		what += fmt.Sprintf(", within %d hours of first seeing their version", g.WindowHours)
+	}
+	if g.Cap > 0 {
+		what += fmt.Sprintf(", each visitor capped at %g", g.Cap)
+	}
+	return what
 }

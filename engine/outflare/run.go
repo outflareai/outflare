@@ -42,6 +42,7 @@ import (
 	"github.com/outflareai/outflare/engine/internal/connectors/catalog"
 	"github.com/outflareai/outflare/engine/internal/connectors/cheapinboxes"
 	"github.com/outflareai/outflare/engine/internal/connectors/verifiers"
+	"github.com/outflareai/outflare/engine/internal/cookies"
 	"github.com/outflareai/outflare/engine/internal/crawl"
 	"github.com/outflareai/outflare/engine/internal/customers"
 	"github.com/outflareai/outflare/engine/internal/db"
@@ -293,6 +294,9 @@ func Run(ctx context.Context, log *slog.Logger, cmd string, exts ...Extension) e
 		Fallback: &crawl.ConnectorFallback{Store: integrations, Pool: pool, Ledger: pool}, AfterAudit: seointel.AfterAudit,
 		AfterCrawl: indexability.AfterCrawl}
 	crawler.Register(queue)
+	// Scans of websites for the cookies and scripts their cookie policy lists.
+	cookieScans := &cookies.Service{Pool: pool, Log: log, AllowPrivate: cfg.CrawlAllowPrivate}
+	cookieScans.Register(queue)
 	// Link building: OutflareBot's checks of link prospects' pages.
 	linkChecker := &linkbuild.Service{Pool: pool, Log: log, Crawl: crawler, Emails: emailFinder}
 	linkChecker.Register(queue)
@@ -366,7 +370,7 @@ func Run(ctx context.Context, log *slog.Logger, cmd string, exts ...Extension) e
 	apiServer := api.NewServer(pool, log, api.Options{
 		WebDir: cfg.WebDir, PublicURL: cfg.PublicURL, Mailboxes: mail, Sending: send, Inbox: syncer, OAuth: tokens, Allocation: alloc,
 		Box: box, Integrations: integrations, Verify: verifier, EmailFinder: emailFinder, Imports: importer, Platforms: plat, Lists: lister, Outcomes: results, AnalyticsSync: analyticsSync, SEOSync: seoSync, AdSync: adSync, Crawl: crawler, Vendors: vendors, Inbound: liveUpdates, Telemetry: tel, Mailer: mailer, Webhooks: hooks, Emails: lifecycle, Research: researcher, RateLimit: cfg.RateLimit, Passkeys: cfg.PasskeysOn(), ClientIPHeader: cfg.ClientIPHeader,
-		TrackingTarget: cfg.TrackingTarget, TrackingCerts: host.trackingCerts, EdgeSecret: cfg.EdgeSecret,
+		TrackingTarget: cfg.TrackingTarget, PartnersDomain: cfg.PartnersDomain, TrackingCerts: host.trackingCerts, EdgeSecret: cfg.EdgeSecret,
 		PostHogKey: cfg.PostHogKey, PostHogHost: cfg.PostHogHost, MCP: mcpUpstream, PrivacyURL: cfg.PrivacyURL, TermsURL: cfg.TermsURL, CommunityLinks: cfg.CommunityLinks, CommunityXURL: cfg.CommunityXURL, SignedInCookieDomain: cfg.SignedInCookieDomain,
 		SiteInbox: true, QueryConnections: queryConnections(cfg.QueryConnections),
 		Routes: host.registerRoutes, Middleware: host.middleware, Capabilities: host.capabilities, WorkspaceRoutes: host.workspaceRoutes, MenuLinks: host.menuLinks, AITools: host.aiTools,
@@ -609,6 +613,11 @@ func Run(ctx context.Context, log *slog.Logger, cmd string, exts ...Extension) e
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
+			apiServer.RunPartnerRewards(ctx)
+		}()
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
 			experiment.Run(ctx)
 		}()
 		wg.Add(1)
@@ -635,6 +644,11 @@ func Run(ctx context.Context, log *slog.Logger, cmd string, exts ...Extension) e
 		go func() {
 			defer wg.Done()
 			crawler.Run(ctx)
+		}()
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			cookieScans.Run(ctx)
 		}()
 		wg.Add(1)
 		go func() {

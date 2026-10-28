@@ -3,6 +3,7 @@ package abtests
 import (
 	"math"
 	"math/rand/v2"
+	"slices"
 	"testing"
 )
 
@@ -128,7 +129,7 @@ func TestRangeMatchesPValue(t *testing.T) {
 			b.Conversions += binomial(rng, n, rate*(1+lift))
 			looks = append(looks, []Arm{ctl, b})
 		}
-		c := CompareSeries(looks, 0.25, rate)[0]
+		c := CompareSeries(looks, MetricConversion, 0.25, rate)[0]
 		if ctl.Conversions == 0 || c.LiftLow == 0 && c.LiftHigh == 0 {
 			continue
 		}
@@ -145,8 +146,8 @@ func TestPValueNeverRises(t *testing.T) {
 		{{Visitors: 2000, Conversions: 80}, {Visitors: 2000, Conversions: 150}},
 		{{Visitors: 4000, Conversions: 200}, {Visitors: 4000, Conversions: 215}},
 	}
-	first := CompareSeries(looks[:1], 0.25, 0.04)[0].PValue
-	both := CompareSeries(looks, 0.25, 0.04)[0].PValue
+	first := CompareSeries(looks[:1], MetricConversion, 0.25, 0.04)[0].PValue
+	both := CompareSeries(looks, MetricConversion, 0.25, 0.04)[0].PValue
 	if both != first || first >= Alpha {
 		t.Fatalf("first look p = %v, after the second = %v", first, both)
 	}
@@ -182,7 +183,7 @@ func TestAAFalseWinners(t *testing.T) {
 				ctl.Conversions += binomial(rng, tc.daily, tc.rate)
 				b.Conversions += binomial(rng, tc.daily, tc.rate)
 				looks = append(looks, []Arm{ctl, b})
-				c := CompareSeries(looks, 0.25, base)[0]
+				c := CompareSeries(looks, MetricConversion, 0.25, base)[0]
 				if c.PValue < Alpha && (c.ChanceToBeat >= 0.95 || c.ChanceToBeat <= 0.05) {
 					wins++
 					break
@@ -205,4 +206,133 @@ func binomial(rng *rand.Rand, n int64, p float64) int64 {
 		}
 	}
 	return k
+}
+
+// With several versions, each p-value is corrected for their number, and
+// the range (at the corrected level) still leaves out zero exactly when the
+// corrected p-value is under 0.05. A count or value goal keeps the same
+// promise.
+func TestCorrectionAndMeans(t *testing.T) {
+	rng := rand.New(rand.NewPCG(5, 3))
+	for i := range 400 {
+		metric := MetricConversion
+		if i%2 == 1 {
+			metric = MetricValue
+		}
+		versions := 1 + rng.IntN(3)
+		arms := make([]Arm, versions+1)
+		var looks [][]Arm
+		rate := 0.02 + rng.Float64()*0.08
+		lift := (rng.Float64() - 0.3) * 0.6
+		for range 1 + rng.IntN(15) {
+			for j := range arms {
+				l := 0.0
+				if j > 0 {
+					l = lift
+				}
+				addVisitors(rng, &arms[j], int64(50+rng.IntN(400)), rate*(1+l), 80)
+			}
+			looks = append(looks, slices.Clone(arms))
+		}
+		cs := CompareSeries(looks, metric, 0.25, 0)
+		if len(cs) != versions {
+			t.Fatalf("%d comparisons for %d versions", len(cs), versions)
+		}
+		for _, c := range cs {
+			if want := math.Min(1, c.RawPValue*float64(versions)); math.Abs(c.PValue-want) > 1e-12 {
+				t.Fatalf("p = %v, raw %v × %d versions", c.PValue, c.RawPValue, versions)
+			}
+			if c.LiftLow == 0 && c.LiftHigh == 0 {
+				continue
+			}
+			if excludes := c.LiftLow > 0 || c.LiftHigh < 0; excludes != (c.PValue < Alpha) {
+				t.Fatalf("%s, %d versions: range %.3f..%.3f but p = %.4f", metric, versions, c.LiftLow, c.LiftHigh, c.PValue)
+			}
+		}
+	}
+}
+
+// addVisitors adds n visitors to a: each buys with chance p, spending an
+// amount from an exponential distribution with the given mean, so the
+// values are as skewed as real revenue.
+func addVisitors(rng *rand.Rand, a *Arm, n int64, p, mean float64) {
+	a.Visitors += n
+	for range n {
+		if rng.Float64() < p {
+			v := rng.ExpFloat64() * mean
+			a.Conversions++
+			a.Sum += v
+			a.SumSq += v * v
+		}
+	}
+}
+
+// A/A simulation for revenue per visitor with three versions against the
+// control: few buyers, skewed amounts, daily looks, stop at the first
+// winner of any version. The correction keeps false winners near 5% for the
+// whole test.
+func TestAAFalseWinnersValue(t *testing.T) {
+	if testing.Short() {
+		t.Skip("simulation")
+	}
+	rng := rand.New(rand.NewPCG(2026, 11))
+	for _, tc := range []struct {
+		rate     float64
+		daily    int64
+		versions int
+	}{{0.03, 300, 3}, {0.05, 1000, 1}, {0.02, 2000, 2}} {
+		const sims, days = 150, 35
+		wins := 0
+		for range sims {
+			arms := make([]Arm, tc.versions+1)
+			var looks [][]Arm
+		day:
+			for range days {
+				for j := range arms {
+					addVisitors(rng, &arms[j], tc.daily, tc.rate, 120)
+				}
+				looks = append(looks, slices.Clone(arms))
+				for _, c := range CompareSeries(looks, MetricValue, 0.25, 0) {
+					if c.PValue < Alpha && (c.ChanceToBeat >= 0.95 || c.ChanceToBeat <= 0.05) {
+						wins++
+						break day
+					}
+				}
+			}
+		}
+		if got := float64(wins) / sims; got > 0.08 {
+			t.Errorf("rate %.2f, %d a day, %d versions: false winners %.1f%%, want about 5%% or less", tc.rate, tc.daily, tc.versions, got*100)
+		} else {
+			t.Logf("rate %.2f, %d a day, %d versions: false winners %.1f%%", tc.rate, tc.daily, tc.versions, got*100)
+		}
+	}
+}
+
+// A real +40% in revenue per visitor is found, and the planner's estimate
+// for it is in the right range.
+func TestValueFindsLift(t *testing.T) {
+	rng := rand.New(rand.NewPCG(9, 9))
+	ctl, b := Arm{}, Arm{}
+	var looks [][]Arm
+	found := 0
+	for day := range 60 {
+		addVisitors(rng, &ctl, 1000, 0.04, 100)
+		addVisitors(rng, &b, 1000, 0.04*1.4, 100)
+		looks = append(looks, []Arm{ctl, b})
+		if c := CompareSeries(looks, MetricValue, 0.25, 4)[0]; c.PValue < Alpha && c.ChanceToBeat > 0.95 {
+			found = day + 1
+			break
+		}
+	}
+	if found == 0 {
+		t.Fatal("+40% revenue per visitor never found in 60 days of 1,000 a day")
+	}
+	// Each visitor's value: 4% buy, exponential with mean 100, so mean 4
+	// and variance 0.04 × 2 × 100² − 4².
+	base := Moments{4, 0.04*2*100*100 - 16}
+	need := VisitorsNeeded(base, MetricValue, 0.4, 0.25, Alpha)
+	if need < 3_000 || need > 60_000 {
+		t.Errorf("planner: %d visitors per version for +40%%, found after %d", need, found*1000)
+	}
+	t.Logf("found after %d days; planner said %d visitors", found, need)
 }
