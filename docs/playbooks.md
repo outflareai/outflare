@@ -26,7 +26,7 @@ Some playbooks need things set up before their first run, such as a pipeline in 
 
 A kit only adds. Nothing you already have changes, email drafts are added unpublished so you read and publish them first, and while anything conflicts it changes nothing. Applying it again changes nothing. Applying needs `catalog.manage`, and `emails.manage` when it adds email drafts.
 
-The first kit, **Creator partnerships**, adds a Partnerships record type with a stage field (Found, Vetted, Pitched, Negotiating, Agreed, Live, Measured, Renewed, Declined), the creator, deal type, fee, deliverables, platform, go-live date, post, content rights, tracked link and promo code; creator fields on people (platforms, audience size, topics, rate card, past sponsors); and four email drafts (brief, go-live reminder, thanks and results, an invite for customers who create). The playbook **Run creator partnerships from first find to results** uses it.
+The first kit, **Creator partnerships**, adds a Partnerships record type with a stage field (Found, Vetted, Pitched, Negotiating, Agreed, Live, Measured, Renewed, Declined), the creator, deal type, fee, deliverables, platform, go-live date, post, content rights, tracked link and promo code; creator fields on people (platforms, audience size, topics, rate card, past sponsors); and four email drafts (brief, go-live reminder, thanks and results, an invite for customers who create). Five playbooks use it: **Run creator partnerships from first find to results**, **Find creators who already cover your competitors**, **Sponsor newsletters and podcasts that pay back**, **Seed your product to creators**, **Renew the creator deals that pay back** and **Recruit affiliates and creators from your own sign-ups**.
 
 ## API
 

@@ -53,6 +53,7 @@ import { CampaignLinks } from "./pages/CampaignLinks";
 import { IdealCustomers } from "./pages/IdealCustomers";
 import { Agency } from "./pages/Agency";
 import { LeadFinder } from "./pages/LeadFinder";
+import { EmailFinder } from "./pages/EmailFinder";
 import { CloudPage } from "./pages/CloudLocked";
 import { cloudFeature } from "./lib/cloud";
 import { Missions } from "./pages/Missions";
@@ -541,6 +542,7 @@ function Shell({ me, onSignOut, onReload }: { me: Me; onSignOut: () => void; onR
             <LeadFinder key={ws.id} ws={ws.id} canManage={writer} onConnectors={() => setTab("connectors")} onProfiles={() => setTab("ideal-customers")} />
           </CloudPage>
         )}
+        {ready && ws && tab === "email-finder" && <EmailFinder key={ws.id} ws={ws.id} canManage={writer} />}
         {ready && ws && tab === "suppression" && <Suppression key={ws.id} ws={ws.id} canAdd={writer} canRemove={isAdmin} />}
         {ready && ws && tab === "connectors" && <Connectors key={ws.id} ws={ws.id} canManage={isAdmin} canVerify={writer} canImport={writer} open={item} setOpen={setItem} go={setTab} />}
         {ready && ws && tab === "company" && <Company key={ws.id} ws={ws.id} canManage={writer} />}

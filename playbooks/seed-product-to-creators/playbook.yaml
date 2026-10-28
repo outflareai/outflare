@@ -1,0 +1,68 @@
+id: seed-product-to-creators
+version: 1
+title: Seed your product to creators
+summary: Offer free product or credits to a vetted list of creators, give each a code and link, and follow up when they post.
+description: |
+  Many creators will try a product for free and talk about it if they
+  like it. Seeding costs little, but it only works if the list is right,
+  the offer is clear and nobody is left without a follow-up. This
+  playbook picks creators who fit, sends a short offer, gives everyone
+  who accepts their own link and code, records what the product cost
+  you, and checks back when they post.
+tier: clever
+goals: [customers, partners]
+publisher: outflare
+author: { github: outflareai }
+kit: creators-partnerships
+needs:
+  data:
+    - { check: mailboxes, label: A mailbox to send offers from }
+  connections:
+    - capability: payments.read
+      label: Payments, to see which codes turn into paying customers
+      optional: true
+      recommended: [stripe]
+    - capability: plan
+      label: An AI model, unless you run this from your own AI app
+      optional: true
+      recommended: [claude, openai]
+inputs:
+  - name: brand
+    label: Brand
+    example: Northpeak
+  - name: offer
+    label: What you give
+    example: a free pair of trail shoes
+  - name: how_many
+    label: How many creators
+    example: "20"
+steps:
+  - say: Read the brand's context, and check its setup kit is applied so the Partnerships board and creator fields are there.
+    tools: [getBrandContext, listRecordTypes]
+  - say: Pick creators from the board at Found or Vetted who fit the offer, and suggest more from your own records who create, up to the number given.
+    tools: [listRecords, searchWorkspace]
+  - say: Draft a short offer that says what they get and that there's no obligation to post, as a sequence held until a person approves it.
+    tools: [createSequence, replaceSequenceSteps, previewSequence]
+  - say: For each creator who accepts, set the deal type to free product, make their tracked link, save it and their promo code on the partnership, record what the product cost as spend, and move it to Agreed.
+    tools: [updateRecord, createTrackingLink, recordSpend]
+  - say: Two weeks later, check who posted, save the post link and move them to Live; suggest a friendly nudge for the rest.
+    tools: [listSocialItems, updateRecord]
+  - say: After a month, report visits, sign-ups and paying customers per creator, and say who to offer a paid deal.
+    tools: [getAnalyticsReport, outcomesReport]
+guardrails:
+  - Never send an offer or ship anything without a person's approval.
+  - Never ask for a positive review or make posting a condition of the gift.
+  - Ask every creator who posts to say they got the product free, the way their platform requires.
+measure:
+  - { metric: Post rate, how: Creators who posted divided by creators who accepted. }
+  - { metric: Paying customers per creator, how: Paying customers from each creator's link and code. }
+prompt: |
+  Seed {{brand}}'s product to {{how_many}} creators. Offer {{offer}}, with
+  no obligation to post. Pick creators who fit from the Partnerships
+  board and our own records, give everyone who accepts their own link
+  and code, and follow up when they post. Nothing is sent until I
+  approve it.
+example: |
+  Northpeak offered shoes to 20 creators. Fourteen accepted, nine posted
+  within two weeks, and three of them brought more than 10 paying
+  customers each. Those three were offered a paid video.

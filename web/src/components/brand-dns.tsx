@@ -100,6 +100,11 @@ export function BrandDNS({ ws, brand, website, canManage, page, onChange }: {
   const [connecting, setConnecting] = useState(false);
   const [busy, setBusy] = useState(false);
   const [progress, setProgress] = useState<string>("");
+  // The last time the person asked Outflare to look now, and for a short
+  // while after it, while sending domains are checked with their provider.
+  const [checking, setChecking] = useState(false);
+  const [checkedAt, setCheckedAt] = useState<Date | null>(null);
+  const [rechecks, setRechecks] = useState(0);
   const path = { params: { path: { ws, brand } } };
 
   const load = useCallback(async () => {
@@ -186,6 +191,19 @@ export function BrandDNS({ ws, brand, website, canManage, page, onChange }: {
     return () => clearInterval(t);
   }, [queued, load]);
 
+  // Sending domains are checked with their provider a few seconds after
+  // Check now, so look again a few times.
+  useEffect(() => {
+    if (rechecks <= 0) return;
+    const t = setTimeout(() => {
+      void load().then((d) => {
+        if (d && d.missing === 0) onChange?.();
+        setRechecks(d && d.groups.some((g) => g.subject === "email_domain" && g.missing > 0) ? rechecks - 1 : 0);
+      });
+    }, 4000);
+    return () => clearTimeout(t);
+  }, [rechecks]); // eslint-disable-line react-hooks/exhaustive-deps
+
   if (error) return <p className="text-[13px] text-destructive">{error}</p>;
   if (!dns) return <Loading />;
   if (dns.groups.length === 0) {
@@ -218,6 +236,27 @@ export function BrandDNS({ ws, brand, website, canManage, page, onChange }: {
     onChange?.();
   }
 
+  async function checkNow() {
+    setChecking(true);
+    const before = dns?.missing ?? 0;
+    const { data, error } = await api.POST("/v1/workspaces/{ws}/brands/{brand}/dns/check", path);
+    setChecking(false);
+    if (error) return toast(errorMessage(error), "error");
+    if (heldByMission(data)) return toast("Waiting for approval in a mission.");
+    if (!data) return;
+    setDNS(data);
+    setCheckedAt(new Date());
+    if (data.missing === 0) {
+      toast("Every record is in place.");
+      onChange?.();
+      return;
+    }
+    if (before > data.missing) onChange?.();
+    const email = data.groups.some((g) => g.subject === "email_domain" && g.missing > 0);
+    if (email) setRechecks(5);
+    toast(`${before > data.missing ? `Found ${plural(before - data.missing, "record")}. ` : ""}Still looking for ${plural(data.missing, "record")}. New records can take a few minutes to show; Outflare keeps checking on its own.`);
+  }
+
   const signIn = (def: Connector) => {
     track("ui.dns_one_click_used", { where: "brand_dns", how: "sign_in" });
     void startConnectorOAuth(ws, def, page);
@@ -238,12 +277,13 @@ export function BrandDNS({ ws, brand, website, canManage, page, onChange }: {
             <ul className="divide-y text-[12px]">
               {g.records.map((r, i) => (
                 <li key={i} className="grid items-center gap-x-3 gap-y-0.5 px-3 py-2 sm:grid-cols-[1.25rem_3.5rem_minmax(0,14rem)_1fr]">
-                  {r.status === "in_place" ? <Icon name="check" className="size-3.5 text-green-600 dark:text-green-400" /> : <span aria-hidden="true" className="size-3 rounded-full border" />}
+                  {r.status === "in_place" ? <Icon name="check" className="size-3.5 text-green-600 dark:text-green-400" aria-label="Found" /> : <span aria-label="Not found yet" className="size-3 rounded-full border" />}
                   <span className="font-mono font-medium">{r.type}</span>
                   <code className="font-mono break-all">{r.name}</code>
                   <span className="flex items-center gap-1">
                     <code className="font-mono break-all text-muted-foreground">{r.priority != null ? `${r.priority} ` : ""}{r.value}</code>
                     {r.status !== "in_place" && <CopyText text={r.value} icon onCopy={() => used("copied")} />}
+                    {checkedAt && <span className={cn("ml-auto shrink-0 text-[11px]", r.status === "in_place" ? "text-green-700 dark:text-green-400" : "text-muted-foreground")}>{r.status === "in_place" ? "Found" : "Not found yet"}</span>}
                   </span>
                 </li>
               ))}
@@ -321,6 +361,18 @@ export function BrandDNS({ ws, brand, website, canManage, page, onChange }: {
               <CopyText text={dns.ai_prompt.split("\n\nRules:")[0]} label="Copy all records" onCopy={() => used("copied_all")} />
             </Panel>
           )}
+
+          <div className="flex flex-wrap items-center gap-3 rounded-lg border border-dashed px-3 py-2.5">
+            <div className="min-w-0 flex-1">
+              <p className="text-[13px] font-medium">Added them already?</p>
+              <p className="text-[12px] text-muted-foreground">
+                {checkedAt
+                  ? `Checked at ${checkedAt.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}: ${plural(dns.missing, "record")} not found yet. New records can take a few minutes to show. Outflare also keeps checking on its own.`
+                  : "Outflare looks for each record and ticks it off when it's found. It also keeps checking on its own."}
+              </p>
+            </div>
+            <Button variant="ghost" disabled={checking} onClick={checkNow}><Icon name="refresh" className="size-3.5" /> {checking ? "Checking…" : checkedAt ? "Check again" : "I've added them, check now"}</Button>
+          </div>
         </>
       )}
     </div>

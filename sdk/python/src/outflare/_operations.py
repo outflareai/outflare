@@ -1300,6 +1300,33 @@ class Operations(_Mixin):
             idempotency_key=idempotency_key,
         )
 
+    def check_brand_dns(
+        self,
+        brand: str,
+        *,
+        ws: str | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Look for a brand's missing DNS records now.
+
+        Scope: workspace.manage. For a person who has just added the records
+        by hand: looks for every missing record from GET
+        .../brands/{brand}/dns now and returns the list again, each record
+        `in_place` or still `missing`. The site's proof and tracking
+        domains are checked straight away; sending domains are checked with
+        their email provider in a few seconds, so read the list again
+        shortly to see them. Outflare keeps checking on its own afterwards.
+
+        Needs: the workspace.manage scope.
+        POST /v1/workspaces/{ws}/brands/{brand}/dns/check
+        """
+        return self._call(
+            "POST",
+            "/v1/workspaces/{ws}/brands/{brand}/dns/check",
+            path={"brand": brand, "ws": ws},
+            idempotency_key=idempotency_key,
+        )
+
     def check_brand_setup(
         self,
         brand: str,

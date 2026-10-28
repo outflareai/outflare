@@ -267,3 +267,44 @@ func TestPreviewStopsInTime(t *testing.T) {
 		t.Fatalf("notes %+v, tasks %+v", p.Notes, p.Tasks)
 	}
 }
+
+// A workspace whose record queries hang: counting gives up on them when its
+// time is up, instead of holding the preview for the request timeout.
+func TestPreviewGivesUpOnSlowCounts(t *testing.T) {
+	defer func(d time.Duration) { previewTime = d }(previewTime)
+	previewTime = 200 * time.Millisecond
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var out any
+		switch r.Method + " " + r.URL.Path {
+		case "GET /v2/self":
+			out = map[string]any{"active": true, "workspace_name": "Acme"}
+		case "GET /v2/objects":
+			out = map[string]any{"data": []any{map[string]any{"id": map[string]string{"object_id": "o-people"}, "api_slug": "people"}}}
+		case "GET /v2/lists", "GET /v2/workspace_members", "GET /v2/objects/people/attributes":
+			out = map[string]any{"data": []any{}}
+		default:
+			select {
+			case <-r.Context().Done():
+			case <-time.After(2 * time.Second):
+			}
+			return
+		}
+		json.NewEncoder(w).Encode(out)
+	}))
+	defer srv.Close()
+	cl := &c.Client{BaseURLs: map[string]string{"attio": srv.URL}}
+	start := time.Now()
+	p, err := Attio{}.CRMPreview(context.Background(), cl, c.Creds{"api_key": "at-key"}, 5000)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if d := time.Since(start); d > 3*time.Second {
+		t.Fatalf("preview took %s", d)
+	}
+	if n := p.Objects[0].Records; n.Count != 0 || !n.Capped {
+		t.Fatalf("people count: %+v", n)
+	}
+	if !p.Notes.Capped || !p.Tasks.Capped {
+		t.Fatalf("notes %+v, tasks %+v", p.Notes, p.Tasks)
+	}
+}

@@ -1,0 +1,80 @@
+id: recruit-partners-from-signups
+version: 1
+title: Recruit affiliates and creators from your own sign-ups
+summary: Find the people who signed up and run a blog, channel, newsletter or comparison site in your space, and invite them to partner with you.
+description: |
+  Some of your best partners already use your product. A sign-up from a
+  company whose website is a review site, a developer blog or a YouTube
+  channel about your category can send you customers who trust them.
+  This playbook reads recent sign-ups, looks at the website behind each
+  one, picks those with a real audience in your topic, puts them on the
+  Partnerships board, and drafts a personal invite for each one you
+  approve: a commission on every sale, free product, or a paid post.
+tier: clever
+goals: [partners, customers]
+publisher: outflare
+author: { github: outflareai }
+kit: creators-partnerships
+needs:
+  data:
+    - { check: records, label: "People who signed up, with their company or website" }
+    - { check: customer_events, label: Sign-up events sent to Outflare }
+  connections:
+    - capability: email.send
+      label: An email provider for invites to your own users
+      recommended: [resend, postmark, amazon_ses]
+    - capability: crawl.fetch
+      label: A way to read their websites, unless your AI app can
+      optional: true
+      recommended: [geonode]
+    - capability: plan
+      label: An AI model, unless you run this from your own AI app
+      optional: true
+      recommended: [claude, openai]
+inputs:
+  - name: brand
+    label: Brand
+    example: Northpeak
+  - name: topics
+    label: Your space
+    help: What a partner's audience should care about.
+    example: trail running, outdoor gear
+  - name: since
+    label: Sign-ups since
+    example: the last 90 days
+  - name: offer
+    label: What you offer partners
+    help: Leave it empty and the agent suggests a commission, free product or a paid post for each one.
+    example: 20% of every sale for 12 months
+    optional: true
+steps:
+  - say: Read the brand's context, and check its setup kit is applied so the Partnerships board is there.
+    tools: [getBrandContext, listRecordTypes]
+  - say: List people who signed up in the period, with their companies and websites, and skip anyone already on the board or who opted out of marketing email.
+    tools: [listCustomerEvents, listRecords, getRecord]
+  - say: Look at the website behind each one and note what it is (review or comparison site, blog, newsletter, channel, agency, or a normal business), its topics and any sign of an audience.
+    tools: []
+  - say: For each one with an audience in the space, save their creator fields and add a partnership at Found with a suggested deal type, and a one-line reason.
+    tools: [updateRecord, createRecord]
+  - say: Draft a short, personal invite for each, from a real person at the brand, that says why them and what they'd get. Hold every send until a person approves it.
+    tools: [previewEmailTemplate, sendEmail]
+  - say: Move partnerships to Pitched when the invite goes out, and to Negotiating or Declined as replies come in.
+    tools: [listInbox, updateRecord]
+guardrails:
+  - Never send an invite or agree terms without a person's approval.
+  - Only write to people who allow marketing email from the brand; the opt-out list always wins.
+  - Never mention what you know about their account or usage beyond the fact that they signed up.
+measure:
+  - { metric: Partners found, how: Sign-ups added to the board divided by sign-ups reviewed. }
+  - { metric: Partners agreed, how: Partnerships from this playbook that reach Agreed within 30 days. }
+prompt: |
+  Find partners among {{brand}}'s own sign-ups from {{since}}. Look at the
+  website behind each one and pick the people who run a blog, channel,
+  newsletter or comparison site about {{topics}}. Put them on the
+  Partnerships board and draft a personal invite for each, offering
+  {{offer}}. Nothing is sent until I approve it.
+example: |
+  Northpeak reviewed 1,240 sign-ups from the last 90 days. 31 came from
+  websites with an audience: 12 running blogs, 9 YouTube channels, 6
+  newsletters and 4 gear comparison sites. Northpeak approved 18 invites;
+  7 joined on commission and 2 asked for a paid post.

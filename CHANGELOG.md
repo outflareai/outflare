@@ -6,6 +6,22 @@ Each pull request that changes what Outflare does adds a change note in [changes
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-10-28
+
+### Added
+
+- The Connectors page shows who built a connector that Outflare doesn't look after: a **Verified** badge for a verified publisher, **Community** for everyone else, with the publisher's name when you connect it ([integrations/README.md](integrations/README.md#trust)).
+- Email finder: under CRM → Email finder, propose a likely work email for someone at a company and check whether an address is good to send to. It learns the shape each company uses from your own contacts, so finding is free; checking an address uses your own connected verifier only when it has to. Also available over the API and to agents (`email_pattern`, `find_emails`, `verify_addresses`).
+- Five more partner playbooks on the Creator partnerships board: find creators who already cover your competitors, sponsor newsletters and podcasts that pay back, seed your product to creators, renew the creator deals that pay back, and recruit affiliates and creators from your own sign-ups.
+
+### Changed
+
+- Added your DNS records by hand? Press "I've added them, check now" in brand setup or Get started, and Outflare looks for every record straight away and shows which are in place and which are still missing.
+
+### Fixed
+
+- Importing from Attio now shows its first screen within about half a minute on large workspaces, or a clear error if Attio doesn't answer, instead of loading forever.
+
 ## [0.8.0] - 2026-10-28
 
 ### Added

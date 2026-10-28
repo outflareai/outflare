@@ -1,0 +1,78 @@
+id: find-creators-covering-competitors
+version: 1
+title: Find creators who already cover your competitors
+summary: Videos, newsletters and podcasts that reviewed or sponsored a competitor, vetted and pitched, all tracked on your Partnerships board.
+description: |
+  A creator who reviewed a competitor has shown three things: their
+  audience cares about your category, they take sponsorships, and they
+  can explain a product like yours. This playbook finds who covered your
+  competitors in the last year, drops the ones that are off-topic or too
+  small, and drafts a personal pitch for each one you approve, with a
+  partnership on the board for every creator so nothing gets lost.
+tier: clever
+goals: [customers, partners]
+publisher: outflare
+author: { github: outflareai }
+kit: creators-partnerships
+needs:
+  data:
+    - { check: mailboxes, label: A mailbox to send pitches from }
+  connections:
+    - capability: web.search
+      label: Web search, unless your AI app searches the web itself
+      optional: true
+      recommended: [geonode]
+    - capability: social.search
+      label: Social search, to find posts that mention your competitors
+      optional: true
+      recommended: [reddit]
+    - capability: plan
+      label: An AI model, unless you run this from your own AI app
+      optional: true
+      recommended: [claude, openai]
+inputs:
+  - name: brand
+    label: Brand
+    example: Northpeak
+  - name: competitors
+    label: Competitors
+    help: Two to five names, the way people write them.
+    example: Acme Trail, Summit Gear
+  - name: platforms
+    label: Where to look
+    help: Leave it empty to look everywhere your buyers might be.
+    example: YouTube, newsletters, podcasts
+    optional: true
+steps:
+  - say: Read the brand's context, and check its setup kit is applied so the Partnerships board and creator fields are there.
+    tools: [getBrandContext, listRecordTypes]
+  - say: Look at partnerships already on the board, so nobody is pitched twice.
+    tools: [listRecords]
+  - say: Find reviews, comparisons and sponsored posts about each competitor from the last twelve months, with the brand's social watches and web search.
+    tools: [createSocialWatch, checkSocialWatch, listSocialItems]
+  - say: For each creator behind them, find or add a person with their platforms, audience size, topics and past sponsors, and a partnership at Found.
+    tools: [lookupRecords, createRecord, updateRecord]
+  - say: Vet each one (topic fit, recent views, how the review read) and move them to Vetted or Declined with a one-line reason.
+    tools: [updateRecord]
+  - say: Draft a short pitch for each vetted creator that names what they said about the competitor and why your product is worth a look, as a sequence held until a person approves the sends.
+    tools: [createSequence, replaceSequenceSteps, previewSequence]
+  - say: Move partnerships to Pitched when the sequence runs, and to Negotiating or Declined as replies come in.
+    tools: [listInbox, updateRecord]
+guardrails:
+  - Never send a pitch, accept terms or promise money without a person's approval.
+  - Never criticise a competitor in a pitch; say what your product does better.
+  - Only use contact details a creator publishes for business, and never contact anyone who opted out.
+measure:
+  - { metric: Reply rate, how: Replies from pitched creators divided by creators pitched. }
+  - { metric: Partnerships agreed, how: Partnerships that reach Agreed within 30 days. }
+prompt: |
+  Find creators who already cover {{brand}}'s competitors: {{competitors}}.
+  Look at {{platforms}} for reviews, comparisons and sponsored posts from
+  the last year. Vet them, put each one on the Partnerships board, and
+  draft a personal pitch for the best ten. Nothing is sent until I
+  approve it.
+example: |
+  Northpeak named two competitors. The agent found 64 videos and 18
+  newsletters that reviewed them, kept 22 that were on-topic with at
+  least 2,000 views, and drafted 12 pitches. Four replied and two agreed:
+  a newsletter slot for 400 USD and a video for 900 USD.

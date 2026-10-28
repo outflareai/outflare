@@ -370,6 +370,21 @@ export function Connectors({ ws, canManage, canVerify, canImport, open, setOpen,
   );
 }
 
+// Connectors Outflare looks after carry no badge; the rest say who built
+// them and whether that publisher is verified.
+function TrustBadge({ def }: { def: Connector }) {
+  if (def.trust === "verified") return <Badge tone="green" title={trustHelp(def)}>Verified</Badge>;
+  if (def.trust === "community") return <Badge title={trustHelp(def)}>Community</Badge>;
+  return null;
+}
+
+function trustHelp(def: Connector) {
+  const by = def.publisher?.name ?? "another company";
+  return def.trust === "verified"
+    ? `Built by ${by}, a verified publisher. Outflare reviewed it before listing it.`
+    : `Built by ${by}. Outflare reviewed it before listing it, but hasn't verified the publisher yet.`;
+}
+
 export function ConnectorCard({ def, also, canManage, onConnect }: { def: Connector; also?: string; canManage: boolean; onConnect: () => void }) {
   const planned = def.status === "planned";
   const blocked = !def.configured && !planned;
@@ -394,6 +409,7 @@ export function ConnectorCard({ def, also, canManage, onConnect }: { def: Connec
             {def.name}
             {def.connected > 0 && <Badge tone="green">{def.connected > 1 ? `${def.connected} connected` : "Connected"}</Badge>}
             {(def.tags ?? []).map((t) => <Badge key={t.label} tone={t.label === "Router" ? "grey" : "blue"} title={t.help}>{t.label}</Badge>)}
+            <TrustBadge def={def} />
           </div>
           <div className="mt-0.5 text-[12px] text-muted-foreground">{howToConnect(def)}{def.pricing ? ` · ${def.pricing}` : ""}</div>
         </div>
@@ -465,6 +481,7 @@ export function ConnectDialog({ ws, def, replace, brand, why, onSignIn, onClose,
             <DialogTitle className="flex items-center gap-2.5 text-[15px]"><ConnectorLogo id={def.id} />{replace ? (replace.auth_method === "oauth2" ? `Use an API key for "${replace.name}"` : `Replace the key for "${replace.name}"`) : `Connect ${def.name}`}</DialogTitle>
             <DialogDescription className="text-[13px]">{why ?? (def.description || def.summary)}</DialogDescription>
             {(def.tags ?? []).filter((t) => t.label !== "Router").map((t) => <p key={t.label} className="text-[12px] text-muted-foreground"><Badge tone="blue">{t.label}</Badge> {t.help}</p>)}
+            {def.trust !== "outflare" && <p className="text-[12px] text-muted-foreground"><TrustBadge def={def} /> {trustHelp(def)}</p>}
           </DialogHeader>
           {brand && !replace && (
             <fieldset className="space-y-1.5">

@@ -29,6 +29,7 @@ import (
 func (s *Server) routesBrandDNS(mux *http.ServeMux) {
 	mux.HandleFunc("GET /v1/workspaces/{ws}/brands/{brand}/dns", s.inBrand(auth.ScopeWorkspaceRead, s.getBrandDNS))
 	mux.HandleFunc("POST /v1/workspaces/{ws}/brands/{brand}/dns", s.inBrand(auth.ScopeWorkspaceManage, s.addBrandDNS))
+	mux.HandleFunc("POST /v1/workspaces/{ws}/brands/{brand}/dns/check", s.inBrand(auth.ScopeWorkspaceManage, s.checkBrandDNS))
 }
 
 // brandDNSRecord is one record, and whether DNS shows it yet.
@@ -291,4 +292,75 @@ func (s *Server) addBrandDNS(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusAccepted, map[string]any{"queued": true, "groups": queued, "records": v.Missing})
+}
+
+// checkBrandDNS looks for every missing record now, for a person who has
+// just added them by hand: the site's proof and tracking CNAMEs straight
+// away, sending domains through their provider in a job (a few seconds).
+// Outflare keeps looking on its own afterwards either way.
+func (s *Server) checkBrandDNS(w http.ResponseWriter, r *http.Request) {
+	a, b, ok := s.setupBrandWrite(w, r)
+	if !ok {
+		return
+	}
+	ctx := r.Context()
+	v, err := s.loadBrandDNS(ctx, a.WorkspaceID, b)
+	if err != nil {
+		s.internal(w, r, err)
+		return
+	}
+	before, checked, email := v.Missing, 0, 0
+	for _, g := range v.Groups {
+		if g.Missing == 0 {
+			continue
+		}
+		checked++
+		switch g.Subject {
+		case "seo_site":
+			site, err := s.setupSiteFor(ctx, s.pool, a.WorkspaceID, b.ID, websiteHost(b.Website))
+			if err != nil {
+				s.internal(w, r, err)
+				return
+			}
+			if site == nil || site.verified {
+				continue
+			}
+			if _, err := s.verifySetupSite(ctx, a.WorkspaceID, site, a.Test, &a.principal); err != nil {
+				s.internal(w, r, err)
+				return
+			}
+			if _, err := s.pool.Exec(ctx, `UPDATE seo_sites SET verify_watch_until = greatest(coalesce(verify_watch_until, now()), now() + $2::interval) WHERE id = $1 AND verified_at IS NULL`,
+				site.id, strconv.Itoa(int(verifyWatch.Seconds()))+" seconds"); err != nil {
+				s.internal(w, r, err)
+				return
+			}
+		case "tracking_domain":
+			if _, err := s.checkTracking(ctx, a.WorkspaceID, g.ID); err != nil && !errors.Is(err, pgx.ErrNoRows) {
+				s.internal(w, r, err)
+				return
+			}
+		case "email_domain":
+			email++
+		}
+	}
+	if v, err = s.loadBrandDNS(ctx, a.WorkspaceID, b); err != nil {
+		s.internal(w, r, err)
+		return
+	}
+	err = pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
+		for _, g := range v.Groups {
+			if g.Subject == "email_domain" && g.Missing > 0 {
+				if err := s.emails.CheckDomain(ctx, tx, a.WorkspaceID, g.ID); err != nil {
+					return err
+				}
+			}
+		}
+		return record(ctx, tx, &a.principal, a.WorkspaceID, "brand.dns_checked", "brand", b.ID, map[string]any{
+			"brand_id": b.ID, "groups": checked, "records": before, "found": before - v.Missing, "missing": v.Missing, "email_groups": email})
+	})
+	if err != nil {
+		s.internal(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, v)
 }

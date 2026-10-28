@@ -75,7 +75,7 @@ Three endpoints, all scoped to one workspace:
 
 Each result carries the caller's own `ref` echoed back, so match by that rather
 than by position. Through MCP the same three are `email_pattern`, `find_emails`
-and `verify_emails`.
+and `verify_addresses`.
 
 ## What it never does
 

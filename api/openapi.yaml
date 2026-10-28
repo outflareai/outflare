@@ -16523,6 +16523,34 @@ paths:
         "404": { $ref: "#/components/responses/Error" }
         "409": { $ref: "#/components/responses/Error" }
         default: { $ref: "#/components/responses/Error" }
+  /v1/workspaces/{ws}/brands/{brand}/dns/check:
+    parameters:
+      - { $ref: "#/components/parameters/Workspace" }
+      - { $ref: "#/components/parameters/BrandRef" }
+    post:
+      operationId: checkBrandDNS
+      x-outflare-access: { scope: workspace.manage, brand_limited: true }
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      summary: Look for a brand's missing DNS records now
+      description: |
+        Scope: workspace.manage. For a person who has just added the records
+        by hand: looks for every missing record from GET
+        .../brands/{brand}/dns now and returns the list again, each record
+        `in_place` or still `missing`. The site's proof and tracking
+        domains are checked straight away; sending domains are checked with
+        their email provider in a few seconds, so read the list again
+        shortly to see them. Outflare keeps checking on its own afterwards.
+      tags: [brands]
+      responses:
+        "200":
+          description: The brand's DNS records, after the check.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/BrandDNS" }
+        "202": { $ref: "#/components/responses/MissionHeld" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        default: { $ref: "#/components/responses/Error" }
   /v1/workspaces/{ws}/brands/{brand}/setup:
     parameters:
       - { $ref: "#/components/parameters/Workspace" }

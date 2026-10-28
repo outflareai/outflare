@@ -16,12 +16,12 @@ export function CRMImportDialog({ ws, integration, onClose }: { ws: string; inte
   const tool = integration.connector_name;
 
   useEffect(() => {
-    api.GET("/v1/workspaces/{ws}/integrations/{id}/crm-import-preview", { params: { path: { ws, id: integration.id } } }).then(({ data, error }) => {
+    api.GET("/v1/workspaces/{ws}/integrations/{id}/crm-import-preview", { params: { path: { ws, id: integration.id } }, signal: AbortSignal.timeout(90_000) }).then(({ data, error }) => {
       if (error || !data) return setError(errorMessage(error));
       setPreview(data);
-      setPicked(new Set(data.objects.filter((o) => o.records.count > 0).map((o) => o.slug)));
-    }, (e) => setError(errorMessage(e)));
-  }, [ws, integration.id]);
+      setPicked(new Set(data.objects.filter((o) => o.records.count > 0 || o.records.capped).map((o) => o.slug)));
+    }, (e) => setError(e instanceof DOMException && e.name === "TimeoutError" ? errorMessage({ error: { code: "timeout", message: `${tool} didn't answer in time. Close this and try again in a few minutes.` } }) : errorMessage(e)));
+  }, [ws, integration.id, tool]);
 
   // Follow the import until it finishes.
   useEffect(() => {
@@ -45,7 +45,7 @@ export function CRMImportDialog({ ws, integration, onClose }: { ws: string; inte
   }
 
   const toggle = (slug: string) => setPicked((p) => { const n = new Set(p); if (n.has(slug)) n.delete(slug); else n.add(slug); return n; });
-  const count = (c: { count: number; capped: boolean }) => `${c.count.toLocaleString()}${c.capped ? "+" : ""}`;
+  const count = (c: { count: number; capped: boolean }) => (c.capped && c.count === 0 ? "many" : `${c.count.toLocaleString()}${c.capped ? "+" : ""}`);
   const later = preview && preview.lists.length + preview.notes.count + preview.tasks.count > 0;
   const sum = run?.summary;
 

@@ -1,9 +1,11 @@
 package api
 
 import (
+	"context"
 	"errors"
 	"net/http"
 	"slices"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 
@@ -14,6 +16,10 @@ import (
 // crmPreviewLimit is how far each count goes before it stops and says so,
 // so the preview answers in seconds even for a large CRM.
 const crmPreviewLimit = 5000
+
+// crmPreviewTimeout bounds the whole preview, so someone waiting on it gets
+// an answer or an error, never a page that keeps loading.
+const crmPreviewTimeout = time.Minute
 
 // Moving from another CRM: see what a connected CRM holds, then import it
 // once into customer records (crm_import_run.go).
@@ -57,7 +63,12 @@ func (s *Server) crmImportPreview(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	p, err := imp.CRMPreview(r.Context(), o.Client, o.Creds, crmPreviewLimit)
+	ctx, cancel := context.WithTimeout(r.Context(), crmPreviewTimeout)
+	defer cancel()
+	p, err := imp.CRMPreview(ctx, o.Client, o.Creds, crmPreviewLimit)
+	if err != nil && ctx.Err() == context.DeadlineExceeded {
+		err = connectors.Errf(connectors.ErrUnavailable, "%s took over a minute to answer. Try again in a few minutes", o.Connector.Definition().Name)
+	}
 	if err != nil {
 		connectorError(w, r, err)
 		return

@@ -26,14 +26,18 @@ import (
 const api = "https://api.attio.com"
 
 // Page sizes Attio allows: 500 for records, entries and tasks, 50 for notes.
+// The preview counts in pages of countPageSize: a page of 500 records with
+// all their values can take Attio many seconds to build.
 const (
-	pageSize     = 500
-	notePageSize = 50
+	pageSize      = 500
+	notePageSize  = 50
+	countPageSize = 100
 )
 
 // The preview reads a whole Attio workspace while someone waits for it, so
 // it makes up to previewWorkers calls at once (Attio allows 100 reads a
-// second) and stops counting after previewTime, marking those counts capped.
+// second) and stops counting after previewTime, cancelling the calls still
+// running and marking those counts capped.
 const previewWorkers = 8
 
 var previewTime = 15 * time.Second
@@ -168,25 +172,30 @@ func fields(ctx context.Context, cl *c.Client, creds c.Creds, base string, objec
 	return out, nil
 }
 
-// count pages through query results up to limit, or until stop, counting how often each
-// field is filled. key is "values" for records and "entry_values" for
-// list entries.
-func count(ctx context.Context, cl *c.Client, creds c.Creds, path, key string, limit int, stop time.Time, fs []c.CRMField) (c.CRMCount, error) {
+// count pages through query results up to limit, counting how often each
+// field is filled. key is "values" for records and "entry_values" for list
+// entries. When counting runs out of time (counting is done), it stops
+// there and says it is capped.
+func count(ctx, counting context.Context, cl *c.Client, creds c.Creds, path, key string, limit int, fs []c.CRMField) (c.CRMCount, error) {
 	idx := map[string]int{}
 	for i, f := range fs {
 		idx[f.Slug] = i
 	}
 	var n c.CRMCount
-	for offset := 0; ; offset += pageSize {
-		if offset >= limit || offset > 0 && time.Now().After(stop) {
+	for offset := 0; ; offset += countPageSize {
+		if offset >= limit || counting.Err() != nil {
 			n.Capped = true
 			return n, nil
 		}
-		size := min(pageSize, limit-offset)
+		size := min(countPageSize, limit-offset)
 		var resp struct {
 			Data []map[string]json.RawMessage `json:"data"`
 		}
-		if err := get(ctx, cl, creds, http.MethodPost, path, map[string]int{"limit": size, "offset": offset}, &resp); err != nil {
+		if err := get(counting, cl, creds, http.MethodPost, path, map[string]int{"limit": size, "offset": offset}, &resp); err != nil {
+			if ctx.Err() == nil && counting.Err() != nil {
+				n.Capped = true
+				return n, nil
+			}
 			return n, err
 		}
 		for _, row := range resp.Data {
@@ -205,11 +214,11 @@ func count(ctx context.Context, cl *c.Client, creds c.Creds, path, key string, l
 	}
 }
 
-// countPages counts a plain list endpoint (notes, tasks) up to limit.
-func countPages(ctx context.Context, cl *c.Client, creds c.Creds, path string, size, limit int, stop time.Time) (c.CRMCount, error) {
+// countPages counts a plain list endpoint (notes, tasks) the same way.
+func countPages(ctx, counting context.Context, cl *c.Client, creds c.Creds, path string, size, limit int) (c.CRMCount, error) {
 	var n c.CRMCount
 	for offset := 0; ; offset += size {
-		if offset >= limit || offset > 0 && time.Now().After(stop) {
+		if offset >= limit || counting.Err() != nil {
 			n.Capped = true
 			return n, nil
 		}
@@ -217,7 +226,11 @@ func countPages(ctx context.Context, cl *c.Client, creds c.Creds, path string, s
 		var resp struct {
 			Data []json.RawMessage `json:"data"`
 		}
-		if err := get(ctx, cl, creds, http.MethodGet, fmt.Sprintf("%s?limit=%d&offset=%d", path, want, offset), nil, &resp); err != nil {
+		if err := get(counting, cl, creds, http.MethodGet, fmt.Sprintf("%s?limit=%d&offset=%d", path, want, offset), nil, &resp); err != nil {
+			if ctx.Err() == nil && counting.Err() != nil {
+				n.Capped = true
+				return n, nil
+			}
 			return n, err
 		}
 		n.Count += len(resp.Data)
@@ -228,7 +241,7 @@ func countPages(ctx context.Context, cl *c.Client, creds c.Creds, path string, s
 }
 
 // CRMPreview reads the workspace's objects, lists, members, notes and
-// tasks. Each count stops at limit, or once the preview has run for
+// tasks. Each count stops at limit, or once counting has run for
 // previewTime, and then says it is capped.
 func (a Attio) CRMPreview(ctx context.Context, cl *c.Client, creds c.Creds, limit int) (c.CRMPreview, error) {
 	acct, err := a.Test(ctx, cl, creds)
@@ -272,8 +285,9 @@ func (a Attio) CRMPreview(ctx context.Context, cl *c.Client, creds c.Creds, limi
 	for _, o := range objects.Data {
 		slugs[o.ID.ObjectID] = o.Slug
 	}
-	stop := time.Now().Add(previewTime)
 	g := newGroup(ctx, previewWorkers)
+	counting, stop := context.WithTimeout(g.ctx, previewTime)
+	defer stop()
 	out.Objects = make([]c.CRMObject, len(objects.Data))
 	for i, o := range objects.Data {
 		g.Go(func(ctx context.Context) error {
@@ -282,7 +296,7 @@ func (a Attio) CRMPreview(ctx context.Context, cl *c.Client, creds c.Creds, limi
 			if err != nil {
 				return err
 			}
-			n, err := count(ctx, cl, creds, base+"/records/query", "values", limit, stop, fs)
+			n, err := count(ctx, counting, cl, creds, base+"/records/query", "values", limit, fs)
 			out.Objects[i] = c.CRMObject{Slug: o.Slug, Name: o.Singular, Plural: o.Plural, Records: n, Fields: fs}
 			return err
 		})
@@ -295,7 +309,7 @@ func (a Attio) CRMPreview(ctx context.Context, cl *c.Client, creds c.Creds, limi
 			if err != nil {
 				return err
 			}
-			n, err := count(ctx, cl, creds, base+"/entries/query", "entry_values", limit, stop, fs)
+			n, err := count(ctx, counting, cl, creds, base+"/entries/query", "entry_values", limit, fs)
 			out.Lists[i] = c.CRMList{Slug: l.Slug, Name: l.Name, Entries: n, Fields: fs}
 			if len(l.Parent) > 0 {
 				out.Lists[i].Object = l.Parent[0]
@@ -304,11 +318,11 @@ func (a Attio) CRMPreview(ctx context.Context, cl *c.Client, creds c.Creds, limi
 		})
 	}
 	g.Go(func(ctx context.Context) (err error) {
-		out.Notes, err = countPages(ctx, cl, creds, "/v2/notes", notePageSize, limit, stop)
+		out.Notes, err = countPages(ctx, counting, cl, creds, "/v2/notes", notePageSize, limit)
 		return err
 	})
 	g.Go(func(ctx context.Context) (err error) {
-		out.Tasks, err = countPages(ctx, cl, creds, "/v2/tasks", pageSize, limit, stop)
+		out.Tasks, err = countPages(ctx, counting, cl, creds, "/v2/tasks", countPageSize, limit)
 		return err
 	})
 	return out, g.Wait()

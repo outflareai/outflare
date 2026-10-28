@@ -101,6 +101,19 @@ export function registerSetupTools(server: McpServer, gtm: MissionClient, worksp
   );
 
   server.registerTool(
+    "check_brand_dns",
+    {
+      title: "Look for a brand's missing DNS records now",
+      description:
+        "After the person (or you) added records by hand: looks for every missing record from get_brand_dns now and returns the list again, each in_place or still missing. " +
+        "Sending domains are checked with their email provider a few seconds later, so read get_brand_dns again shortly. Outflare keeps checking on its own afterwards. Needs workspace.manage.",
+      inputSchema: { brand: brandRef },
+      annotations: { ...write, idempotentHint: true, openWorldHint: true },
+    },
+    ({ brand }) => call(() => gtm.POST("/v1/workspaces/{ws}/brands/{brand}/dns/check", { params: { path: path(brand) } })),
+  );
+
+  server.registerTool(
     "update_brand_setup",
     {
       title: "Skip or close brand setup steps",

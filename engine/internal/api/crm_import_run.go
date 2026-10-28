@@ -43,9 +43,10 @@ const (
 )
 
 // Page and batch sizes, and how long one step may run. Tests make them
-// small.
+// small. A page of 500 records with all their values is slow for Attio to
+// build and can pass the 8 MB a connector reads, so pages are 100.
 var (
-	crmImportPage  = 500
+	crmImportPage  = 100
 	crmImportBatch = 100
 	crmImportStep  = 90 * time.Second
 )

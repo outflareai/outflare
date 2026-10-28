@@ -1,0 +1,57 @@
+id: renew-what-works
+version: 1
+title: Renew the creator deals that pay back
+summary: Each month, rank every creator deal by what it brought in for what it cost, draft renewals for the winners and a polite pass for the rest.
+description: |
+  Once a few creator deals have run, the question is which to do again.
+  This playbook lines up every partnership's spend against the visits,
+  sign-ups and paying customers from its link and code, ranks them, and
+  drafts a renewal for each one that paid back and a kind note to the
+  ones that didn't, so the next month's budget goes where it works.
+tier: clever
+goals: [revenue, partners]
+publisher: outflare
+author: { github: outflareai }
+kit: creators-partnerships
+needs:
+  data:
+    - { check: records, label: Partnerships on the board with their results }
+  connections:
+    - capability: plan
+      label: An AI model, unless you run this from your own AI app
+      optional: true
+      recommended: [claude, openai]
+inputs:
+  - name: brand
+    label: Brand
+    example: Northpeak
+  - name: target
+    label: Most you'll pay for a customer
+    help: Deals that cost less per paying customer than this are renewed.
+    example: 80 USD
+steps:
+  - say: Read the brand's context, and list partnerships at Live or Measured.
+    tools: [getBrandContext, listRecords]
+  - say: For each one, add up its recorded spend and its visits, sign-ups and paying customers from its link and code.
+    tools: [listSpend, getAnalyticsReport, outcomesReport]
+  - say: Rank them by cost per paying customer, mark each as renew, renegotiate or stop against the target, and move them to Measured.
+    tools: [updateRecord]
+  - say: Draft a renewal for each one to renew, a new rate for each to renegotiate, and a short thank-you for the rest, held until a person approves them.
+    tools: [createSequence, replaceSequenceSteps, previewSequence]
+  - say: Once the person decides, move each partnership to Renewed or Declined.
+    tools: [updateRecord]
+guardrails:
+  - Never agree a renewal, a new rate or a payment without a person's approval.
+  - Keep the numbers you share with a creator to their own deal.
+measure:
+  - { metric: Cost per paying customer, how: "Across creator deals, this month against last." }
+  - { metric: Share of spend on winners, how: Spend on renewed deals divided by all creator spend. }
+prompt: |
+  Review {{brand}}'s creator partnerships. Rank every deal at Live or
+  Measured by cost per paying customer, renew the ones under
+  {{target}}, suggest a new rate for the close ones and a polite pass for
+  the rest. Draft each message for me to approve.
+example: |
+  Northpeak had six live deals. Two newsletters cost 38 and 44 USD per
+  paying customer and were renewed, one video at 95 USD got a lower rate
+  offer, and three were thanked and dropped.

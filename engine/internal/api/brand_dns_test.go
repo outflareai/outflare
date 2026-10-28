@@ -126,3 +126,56 @@ func TestBrandDNSInOneGo(t *testing.T) {
 		}
 	}
 }
+
+// Records added by hand are looked for as soon as the person says so.
+func TestBrandDNSCheckNow(t *testing.T) {
+	got := track.Capture(t)
+	e := freshEnv(t)
+	owner, ws := setupOwner(t, e.h)
+	base := "/v1/workspaces/" + ws
+	owner.must(201, "POST", base+"/brands", map[string]any{"name": "Northpeak", "website": "northpeak.example"})
+	owner.must(200, "POST", base+"/brands/northpeak/setup/prepare", map[string]any{"step": "verify_site"})
+	owner.must(201, "POST", base+"/tracking-domains", map[string]string{"domain": "links.northpeak.example"})
+	check := base + "/brands/northpeak/dns/check"
+
+	missing := func(d map[string]any) map[string]float64 {
+		out := map[string]float64{}
+		for _, g := range d["groups"].([]any) {
+			g := g.(map[string]any)
+			out[g["subject"].(string)] = g["missing"].(float64)
+		}
+		return out
+	}
+	d := owner.must(200, "POST", check, nil)
+	if m := missing(d); d["missing"] != 2.0 || m["seo_site"] != 1 || m["tracking_domain"] != 1 {
+		t.Fatalf("nothing added yet: %v", d)
+	}
+
+	// The person adds both by hand, then checks: both are found at once.
+	var proof string
+	for _, g := range d["groups"].([]any) {
+		if g := g.(map[string]any); g["subject"] == "seo_site" {
+			proof = g["records"].([]any)[0].(map[string]any)["value"].(string)
+		}
+	}
+	e.dns.txt["northpeak.example"] = []string{proof}
+	e.dns.cname = map[string]string{"links.northpeak.example": "localhost"}
+	d = owner.must(200, "POST", check, nil)
+	if m := missing(d); d["missing"] != 0.0 || m["seo_site"] != 0 || m["tracking_domain"] != 0 {
+		t.Fatalf("added by hand: %v", d)
+	}
+	for _, g := range d["groups"].([]any) {
+		for _, r := range g.(map[string]any)["records"].([]any) {
+			if r.(map[string]any)["status"] != "in_place" {
+				t.Fatalf("record not in place: %v", r)
+			}
+		}
+	}
+	checked := named(got(), "brand.dns_checked")
+	if len(checked) != 2 {
+		t.Fatalf("brand.dns_checked events: %d", len(checked))
+	}
+	if len(named(got(), "seo_site.verified")) != 1 {
+		t.Errorf("no seo_site.verified event")
+	}
+}

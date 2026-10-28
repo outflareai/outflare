@@ -70,6 +70,7 @@ export const tabNames: Record<Tab, string> = {
   leads: "Leads",
   lists: "Lists",
   "lead-finder": "Lead finder",
+  "email-finder": "Email finder",
   suppression: "Do not contact",
   infrastructure: "Infrastructure",
   mailboxes: "Mailboxes",
@@ -119,6 +120,7 @@ export const tabBlurbs: Record<Tab, string> = {
   leads: "Everyone you can contact, where they came from, and what has been sent to them.",
   lists: "Saved searches that build lead lists from your data providers and keep them fresh.",
   "lead-finder": "AI that searches the web for companies that fit your ideal customer, reads their websites and says which fit and why.",
+  "email-finder": "Propose a likely work email for someone at a company, and check an address. Learns from your own contacts; finding is free.",
   suppression: "People and domains Outflare will never email, such as unsubscribes and bounces.",
   infrastructure: "Plan the domains and mailboxes a motion needs, and follow each through warm-up, rest and retirement.",
   mailboxes: "Connected mailboxes, their health, daily limits and sign-in state.",
@@ -250,7 +252,7 @@ export const everyday: Tab[] = ["overview", "inbox", "missions", "projects"];
 
 export type Module = { id: string; label: string; icon: IconName; tabs: Tab[] };
 export const modules: Module[] = [
-  { id: "crm", label: "CRM", icon: "leads", tabs: ["leads", "lists", "lead-finder", "suppression"] },
+  { id: "crm", label: "CRM", icon: "leads", tabs: ["leads", "lists", "lead-finder", "email-finder", "suppression"] },
   { id: "visitors", label: "Visitors", icon: "visitors", tabs: ["visitors"] },
   { id: "outreach", label: "Outreach", icon: "sequences", tabs: ["sequences", "allocation", "reports"] },
   { id: "deliverability", label: "Deliverability", icon: "mailboxes", tabs: ["infrastructure", "mailboxes", "domains", "warmup", "servers", "senders"] },
@@ -933,6 +935,8 @@ function callFor(tab: Tab, ws: string, item?: string): Call {
         : { title: "Lead lists", path: "/v1/workspaces/{ws}/lead-lists", params: base, mcp: "list_lead_lists", ask: "Build a list of 200 heads of growth at 50-200 person SaaS companies.", scope: "leads.read" };
     case "lead-finder":
       return { title: "Lead finder runs", path: "/v1/workspaces/{ws}/cloud/lead-finder/runs", params: base, ask: "Find 25 companies that fit our ideal customer profile.", scope: "leads.read" };
+    case "email-finder":
+      return { title: "Find a work email", path: "/v1/workspaces/{ws}/email-finder/find", params: base, mcp: "find_emails", ask: "Find the work email for Alice Nguyen at acme.example.", scope: "leads.read" };
     case "suppression":
       return { title: "Suppression list", path: "/v1/workspaces/{ws}/suppressions", params: base, mcp: "list_suppressions", ask: "Is anyone at acme-com.example suppressed?", scope: "leads.read" };
     case "mailboxes":

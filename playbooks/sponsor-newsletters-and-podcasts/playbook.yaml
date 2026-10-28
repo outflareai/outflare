@@ -1,0 +1,71 @@
+id: sponsor-newsletters-and-podcasts
+version: 1
+title: Sponsor newsletters and podcasts that pay back
+summary: Shortlist newsletters and podcasts your buyers read, ask for rates, book small test slots, and scale the ones that bring paying customers.
+description: |
+  Newsletter and podcast sponsorships are easy to buy and hard to judge.
+  This playbook shortlists the ones that reach your buyers, compares them
+  by price per 1,000 readers or listeners, books one small test slot at a
+  time, and gives each slot its own tracked link and promo code, so the
+  next decision is based on paying customers, not opens.
+tier: clever
+goals: [customers]
+publisher: outflare
+author: { github: outflareai }
+kit: creators-partnerships
+needs:
+  data:
+    - { check: mailboxes, label: A mailbox to ask for rates from }
+  connections:
+    - capability: web.search
+      label: Web search, unless your AI app searches the web itself
+      optional: true
+      recommended: [geonode]
+    - capability: plan
+      label: An AI model, unless you run this from your own AI app
+      optional: true
+      recommended: [claude, openai]
+inputs:
+  - name: brand
+    label: Brand
+    example: Northpeak
+  - name: topics
+    label: What your buyers read and listen to
+    example: trail running, outdoor gear
+  - name: test_budget
+    label: Budget for the first test slots
+    example: 1,500 USD
+steps:
+  - say: Read the brand's context, and check its setup kit is applied so the Partnerships board is there.
+    tools: [getBrandContext, listRecordTypes]
+  - say: Look at partnerships already on the board, so nobody is asked twice.
+    tools: [listRecords]
+  - say: Shortlist newsletters and podcasts on the topics, with their audience size and published prices, and work out the price per 1,000 readers or listeners where they share it.
+    tools: []
+  - say: Add each one as a company with its host or editor as a person, and a partnership at Found with the platform, deal type flat fee and the published price as the fee.
+    tools: [lookupRecords, createRecord, updateRecord]
+  - say: Draft a short rate card request to the best shortlisted ones that don't publish prices, as a sequence held until a person approves it.
+    tools: [createSequence, replaceSequenceSteps, previewSequence]
+  - say: Suggest which test slots to book within the budget, cheapest per reader first. For each slot a person books, make its tracked link, save it and the promo code on the partnership, and record the fee as spend.
+    tools: [updateRecord, createTrackingLink, recordSpend]
+  - say: Thirty days after each slot runs, report visits, sign-ups, paying customers and cost per paying customer, and say which to book again.
+    tools: [getAnalyticsReport, outcomesReport, updateRecord]
+guardrails:
+  - Never book a slot, agree a price or pay anyone; a person does that from their own account.
+  - Stay within the test budget.
+  - Ask every newsletter and podcast to label the slot as sponsored.
+measure:
+  - { metric: Cost per paying customer, how: Each slot's recorded fee divided by paying customers from its link and code. }
+  - { metric: Slots booked again, how: Partnerships that reach Renewed. }
+prompt: |
+  Find newsletters and podcasts about {{topics}} that {{brand}}'s buyers
+  read and listen to. Shortlist them by price per 1,000 readers, ask the
+  best ones for rates, and suggest test slots within {{test_budget}}.
+  Track each slot on the Partnerships board with its own link and code,
+  and tell me after 30 days which ones to book again. Nothing is booked
+  or sent until I approve it.
+example: |
+  Northpeak shortlisted 18 newsletters and 6 podcasts. Two test slots
+  were booked for 1,300 USD in all. After 30 days the newsletter brought
+  9 paying customers at 44 USD each and the podcast 1 at 900 USD, so the
+  newsletter was booked again and the podcast was dropped.

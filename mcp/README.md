@@ -218,6 +218,7 @@ Write (left out when `OUTFLARE_MCP_READ_ONLY=1`):
 | `update_brand_setup`, `prepare_brand_setup`, `check_brand_setup` | Skip or close setup steps, make the website script or DNS record, check a site's DNS record now |
 | `install_brand_setup` | Add the website script through the workspace's own Tag Manager, or the verification record on its own Cloudflare, in one click |
 | `add_brand_dns` | Add every DNS record a brand still needs (site proof, sending domains, tracking domain) in one go through its own Cloudflare |
+| `check_brand_dns` | Look for a brand's missing DNS records now, after they were added by hand, and see which are in place |
 | `get_brand_rules`, `set_brand_rules` | The cross-brand contact rule: no first email from a second brand within N days of another brand's email |
 | `add_to_brand`, `remove_from_brand` | Move projects, domains, mailboxes, lead lists, sequences or missions into a brand, or make them shared by every brand again |
 | `search_workspace` | Find records by name, attribute text, email, phone or id, and emails sent and received, meetings, deals and lifecycle email by their words, ranked, with whose each one is. With `mode: meaning`, find records, replies, meetings and deals by what they mean |

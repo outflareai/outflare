@@ -1,6 +1,7 @@
 package api_test
 
 import (
+	"slices"
 	"strings"
 	"testing"
 
@@ -28,7 +29,7 @@ func TestKits(t *testing.T) {
 		t.Fatal("no kits")
 	}
 	k := anon.must(200, "GET", "/v1/kits/creators-partnerships", nil)
-	if pb := k["playbooks"].([]any); len(pb) == 0 || pb[0] != "creator-partnerships" {
+	if pb := k["playbooks"].([]any); !slices.Contains(pb, any("creator-partnerships")) {
 		t.Fatalf("kit playbooks: %v", k["playbooks"])
 	}
 	anon.must(404, "GET", "/v1/kits/nope", nil)
