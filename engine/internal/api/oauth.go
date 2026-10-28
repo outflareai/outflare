@@ -337,7 +337,7 @@ func (s *Server) oauthCallback(w http.ResponseWriter, r *http.Request) {
 
 	// The person finishing must be the person who started, and still allowed
 	// to manage mailboxes there.
-	p, err := s.authenticate(r)
+	p, err := s.authenticateSession(r)
 	if err != nil {
 		s.internal(w, r, err)
 		return

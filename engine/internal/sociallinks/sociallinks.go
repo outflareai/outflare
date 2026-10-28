@@ -12,6 +12,8 @@ import (
 	"strings"
 
 	"golang.org/x/net/html"
+
+	"github.com/outflareai/outflare/engine/internal/reviews"
 )
 
 // Link is one place the brand lives, with the kind brands use.
@@ -35,7 +37,12 @@ var KindHosts = map[string]string{
 }
 
 // KindOf names a link's kind by its host, or "" when it is no known place.
+// Review pages (Trustpilot, G2, Capterra, a Google Maps place) are kinds of
+// their own.
 func KindOf(u *url.URL) string {
+	if k := reviews.KindOf(u); k != "" {
+		return k
+	}
 	h := strings.TrimPrefix(strings.ToLower(u.Hostname()), "www.")
 	if k, ok := KindHosts[h]; ok {
 		return k
@@ -89,6 +96,13 @@ func Clean(raw string, base *url.URL) (Link, bool) {
 	kind := KindOf(u)
 	if kind == "" {
 		return Link{}, false
+	}
+	if reviews.IsPlatform(kind) {
+		p, ok := reviews.ParsePage(u.String())
+		if !ok {
+			return Link{}, false
+		}
+		return Link{Kind: kind, URL: p.URL}, true
 	}
 	path := strings.Trim(u.EscapedPath(), "/")
 	parts := strings.Split(path, "/")

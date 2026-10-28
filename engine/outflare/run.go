@@ -55,6 +55,7 @@ import (
 	"github.com/outflareai/outflare/engine/internal/imports"
 	"github.com/outflareai/outflare/engine/internal/inbound"
 	"github.com/outflareai/outflare/engine/internal/inbox"
+	"github.com/outflareai/outflare/engine/internal/indexability"
 	"github.com/outflareai/outflare/engine/internal/infra"
 	"github.com/outflareai/outflare/engine/internal/jobs"
 	"github.com/outflareai/outflare/engine/internal/journeys"
@@ -259,7 +260,7 @@ func Run(ctx context.Context, log *slog.Logger, cmd string, exts ...Extension) e
 	plat.Register(queue)
 	importer := &imports.Service{Pool: pool, Store: integrations, Log: log}
 	importer.Register(queue)
-	results := &outcomes.Syncer{Pool: pool, Store: integrations, Log: log}
+	results := &outcomes.Syncer{Pool: pool, Store: integrations, Log: log, PublicURL: cfg.PublicURL}
 	results.Register(queue)
 	analyticsSync := &analyticsync.Syncer{Pool: pool, Store: integrations, Log: log}
 	analyticsSync.Register(queue)
@@ -285,7 +286,8 @@ func Run(ctx context.Context, log *slog.Logger, cmd string, exts ...Extension) e
 	hooks := &webhooks.Service{Pool: pool, Box: box, Log: log, AllowPrivate: cfg.WebhooksAllowPrivate}
 	hooks.Register(queue)
 	crawler := &crawl.Service{Pool: pool, Log: log, Resolver: net.DefaultResolver, AllowPrivate: cfg.CrawlAllowPrivate,
-		Fallback: &crawl.ConnectorFallback{Store: integrations, Pool: pool, Ledger: pool}, AfterAudit: seointel.AfterAudit}
+		Fallback: &crawl.ConnectorFallback{Store: integrations, Pool: pool, Ledger: pool}, AfterAudit: seointel.AfterAudit,
+		AfterCrawl: indexability.AfterCrawl}
 	crawler.Register(queue)
 	// Production deploys of the websites a workspace watches on GitHub or
 	// Vercel, which fix re-checks and experiments start from.
@@ -353,9 +355,10 @@ func Run(ctx context.Context, log *slog.Logger, cmd string, exts ...Extension) e
 	apiServer := api.NewServer(pool, log, api.Options{
 		WebDir: cfg.WebDir, PublicURL: cfg.PublicURL, Mailboxes: mail, Sending: send, Inbox: syncer, OAuth: tokens, Allocation: alloc,
 		Box: box, Integrations: integrations, Verify: verifier, EmailFinder: emailFinder, Imports: importer, Platforms: plat, Lists: lister, Outcomes: results, AnalyticsSync: analyticsSync, SEOSync: seoSync, AdSync: adSync, Crawl: crawler, Vendors: vendors, Inbound: liveUpdates, Telemetry: tel, Mailer: mailer, Webhooks: hooks, Emails: lifecycle, Research: researcher, RateLimit: cfg.RateLimit, Passkeys: cfg.PasskeysOn(), ClientIPHeader: cfg.ClientIPHeader,
+		TrackingTarget: cfg.TrackingTarget, TrackingCerts: host.trackingCerts, EdgeSecret: cfg.EdgeSecret,
 		PostHogKey: cfg.PostHogKey, PostHogHost: cfg.PostHogHost, MCP: mcpUpstream, PrivacyURL: cfg.PrivacyURL, TermsURL: cfg.TermsURL, CommunityLinks: cfg.CommunityLinks, CommunityXURL: cfg.CommunityXURL, SignedInCookieDomain: cfg.SignedInCookieDomain,
 		SiteInbox: true, QueryConnections: queryConnections(cfg.QueryConnections),
-		Routes: host.registerRoutes, Middleware: host.middleware, Capabilities: host.capabilities, WorkspaceRoutes: host.workspaceRoutes, MenuLinks: host.menuLinks,
+		Routes: host.registerRoutes, Middleware: host.middleware, Capabilities: host.capabilities, WorkspaceRoutes: host.workspaceRoutes, MenuLinks: host.menuLinks, AITools: host.aiTools,
 	})
 	host.server = apiServer
 	researcher.Models = apiServer.AIModels()
@@ -364,6 +367,11 @@ func Run(ctx context.Context, log *slog.Logger, cmd string, exts ...Extension) e
 	// The API server's own background work, such as CRM imports into
 	// customer records.
 	apiServer.RegisterJobs(queue)
+	// Certificates for tracking domains verified before the server had a
+	// provider (an extension's SetTrackingCerts).
+	if err := apiServer.StartTrackingHTTPS(ctx); err != nil {
+		track.Fail(ctx, log, track.Event{Name: "tracking_domain.https_failed", ActorType: "system", Surface: "system"}, "internal", err)
+	}
 	// Product events (every action and error) go to the operator's own
 	// PostHog with the web app's, only when OUTFLARE_POSTHOG_KEY is set, and
 	// into the operator's own workspace when OUTFLARE_EVENTS_WORKSPACE is.

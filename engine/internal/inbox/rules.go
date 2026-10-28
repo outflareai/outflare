@@ -38,6 +38,35 @@ type Rule struct {
 	Days int `json:"days,omitempty"`
 	// SequenceID is where an added referral is enrolled.
 	SequenceID string `json:"sequence_id,omitempty"`
+	// Deal moves the reply's deal in Outflare's own CRM, for any label a
+	// person writes.
+	Deal *DealRule `json:"deal,omitempty"`
+}
+
+// DealRule moves a deal to a stage: the newest open deal that points at
+// the reply's person or their company, or a new one. It only moves a deal
+// forward through the stages, never out of a closed one, and never over a
+// stage a person set.
+type DealRule struct {
+	// Type is the record type of deals, such as deal.
+	Type string `json:"type"`
+	// Field is its status field that holds the stage, such as deal_stage.
+	Field string `json:"field"`
+	// Stage is the option key to move to.
+	Stage string `json:"stage"`
+	// Closed are the final stages (won, lost): a deal in one is never
+	// moved, and a new reply opens a new deal instead.
+	Closed []string `json:"closed,omitempty"`
+}
+
+// JobDeal moves the deal for one labelled reply (handled with the CRM's
+// records, in the api package).
+const JobDeal = "inbox.deal"
+
+// DealLabel reports whether a label can move a deal: any a person writes,
+// not automatic mail.
+func DealLabel(label string) bool {
+	return slices.Contains(Categories, label) && GroupOf(label) != "automatic"
 }
 
 // RuleSet holds a rule per label.
@@ -103,8 +132,29 @@ func CheckRules(ctx context.Context, q jobs.Querier, ws string, rs RuleSet) erro
 	for _, label := range labels {
 		r := rs[label]
 		actions, ok := RuleActions[label]
-		if !ok {
-			return ErrInvalidRule(fmt.Sprintf("no rules for %q; rules exist for %s", label, strings.Join(RuleLabels(), ", ")))
+		if !ok && DealLabel(label) {
+			// Other labels only move deals.
+			actions = []string{"nothing"}
+			if r.Action == "" {
+				r.Action = "nothing"
+			}
+			if r.Deal == nil {
+				return ErrInvalidRule(label + " only takes a deal move: send " + label + ".deal")
+			}
+		} else if !ok {
+			return ErrInvalidRule(fmt.Sprintf("no rules for %q; rules exist for %s, and deal moves for any label but automatic mail", label, strings.Join(RuleLabels(), ", ")))
+		}
+		if r.Deal != nil {
+			d := r.Deal
+			if !DealLabel(label) {
+				return ErrInvalidRule(label + " is automatic mail, so it can't move a deal")
+			}
+			if d.Type == "" || d.Field == "" || d.Stage == "" {
+				return ErrInvalidRule(label + ".deal needs type, field and stage")
+			}
+			if slices.Contains(d.Closed, d.Stage) {
+				return ErrInvalidRule(label + ".deal.stage can't be one of its closed stages")
+			}
 		}
 		if !slices.Contains(actions, r.Action) {
 			return ErrInvalidRule(fmt.Sprintf("%s.action must be one of %s", label, strings.Join(actions, ", ")))
@@ -167,7 +217,7 @@ func EffectiveRules(ctx context.Context, q RuleQuerier, ws string, sequenceID *s
 			return nil, err
 		}
 		for label, r := range rs {
-			if _, ok := RuleActions[label]; ok {
+			if _, ok := RuleActions[label]; ok || DealLabel(label) {
 				out[label] = r
 			}
 		}
@@ -180,7 +230,15 @@ func EffectiveRules(ctx context.Context, q RuleQuerier, ws string, sequenceID *s
 // reply, so relabelling back and forth doesn't repeat an action.
 func QueueRules(ctx context.Context, q jobs.Querier, ws, inboundID, category string) error {
 	if _, ok := RuleActions[category]; !ok {
-		return nil
+		// Other labels only have deal moves, which few workspaces set up.
+		var moves bool
+		if !DealLabel(category) {
+			return nil
+		}
+		if err := q.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM reply_rules WHERE workspace_id = $1 AND rules -> $2 ? 'deal')`,
+			ws, category).Scan(&moves); err != nil || !moves {
+			return err
+		}
 	}
 	_, err := jobs.Enqueue(ctx, q, jobs.NewJob{Kind: JobRules, WorkspaceID: &ws,
 		Payload:        map[string]string{"inbound_id": inboundID, "category": category},
@@ -314,6 +372,13 @@ func (r *Rules) Apply(ctx context.Context, ws, inboundID, category string) error
 			}
 			done = true
 			data["referral_lead_id"], data["enrolled"] = ref.LeadID, ref.Enrolled
+		}
+		if rule.Deal != nil {
+			if _, err := jobs.Enqueue(ctx, tx, jobs.NewJob{Kind: JobDeal, WorkspaceID: &ws,
+				Payload:        map[string]string{"inbound_id": inboundID, "category": category},
+				IdempotencyKey: "deal:" + inboundID + ":" + category, MaxAttempts: 5}); err != nil {
+				return err
+			}
 		}
 		if !done {
 			return nil

@@ -112,8 +112,15 @@ func (s *Server) search(w http.ResponseWriter, r *http.Request) {
 	// What the caller may find: a kind it asked for (or all), with its scope.
 	may := map[string]bool{}
 	var missing []string
+	hidden := false
 	for _, k := range searchKinds {
 		if len(want) > 0 && !want[k.kind] {
+			continue
+		}
+		// A support view never finds email content: sent messages are
+		// left out here, received ones by their scope (viewScopes).
+		if a.ViewID != "" && k.kind == "message" {
+			hidden = true
 			continue
 		}
 		if a.has(k.scope) {
@@ -121,6 +128,10 @@ func (s *Server) search(w http.ResponseWriter, r *http.Request) {
 		} else {
 			missing = append(missing, k.scope)
 		}
+	}
+	if len(may) == 0 && len(missing) == 0 && hidden {
+		writeError(w, r, http.StatusForbidden, "support_view_hidden", "email content is hidden while staff view this account")
+		return
 	}
 	if len(may) == 0 {
 		writeError(w, r, http.StatusForbidden, "forbidden", s.missingScope(a, missing[0]))

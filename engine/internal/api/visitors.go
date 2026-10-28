@@ -15,6 +15,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
+	"github.com/outflareai/outflare/engine/internal/alerts"
 	"github.com/outflareai/outflare/engine/internal/audit"
 	"github.com/outflareai/outflare/engine/internal/auth"
 	"github.com/outflareai/outflare/engine/internal/connectors"
@@ -41,6 +42,7 @@ func (s *Server) routesVisitors(mux *http.ServeMux) {
 	mux.HandleFunc("GET /v1/workspaces/{ws}/visitors/settings", s.inWorkspace(read, s.getVisitorSettings))
 	mux.HandleFunc("PUT /v1/workspaces/{ws}/visitors/settings", s.inWorkspace(manage, s.updateVisitorSettings))
 	mux.HandleFunc("POST /v1/workspaces/{ws}/visitors/companies", s.inWorkspace(manage, s.addVisitorCompany))
+	mux.HandleFunc("POST /v1/visitor-hooks/{id}/{token}", s.visitorHook)
 }
 
 // withVisitToken is where a click on a tracked email link goes: the link's
@@ -231,6 +233,16 @@ func (s *Server) alertSubjects(ctx context.Context, tx pgx.Tx, ws string, set vi
 			TargetType: "record", TargetID: sub.id, RequestID: RequestID(ctx),
 			Data:  map[string]any{"record_id": sub.id, "kind": sub.kind, "score": score, "hot_score": set.HotScore, "pageviews": act.Pageviews, "key_pageviews": act.KeyPageviews, "sessions": act.Sessions, "people": act.People},
 			Props: map[string]any{"kind": sub.kind, "score": score}}); err != nil {
+			return err
+		}
+		id := sub.id
+		var brand *string
+		if err := tx.QueryRow(ctx, `SELECT brand_id::text FROM records WHERE id = $1`, id).Scan(&brand); err != nil {
+			return err
+		}
+		if _, err := alerts.Raise(ctx, tx, alerts.Alert{WorkspaceID: ws, BrandID: brand, Kind: visitors.AlertHot,
+			DedupeKey: id + ":" + now.UTC().Format(time.RFC3339), TargetType: "record", TargetID: id, RecordID: &id, RequestID: RequestID(ctx),
+			Data: map[string]any{"kind": sub.kind, "score": score}}); err != nil {
 			return err
 		}
 	}
@@ -533,12 +545,23 @@ type visitorSettingsView struct {
 	// were made today (UTC).
 	RevealConnections []map[string]string `json:"reveal_connections"`
 	RevealsToday      int                 `json:"reveals_today"`
+	// The connected tools that name people, each with the webhook address
+	// to paste into the tool, and how many people wait for review.
+	PeopleConnections []map[string]string `json:"people_connections"`
+	PeopleToReview    int                 `json:"people_to_review"`
 }
 
 func (s *Server) visitorSettingsView(ctx context.Context, ws string, set visitors.Settings) (visitorSettingsView, error) {
 	v := visitorSettingsView{Settings: set}
 	var err error
 	if v.RevealConnections, err = s.revealConnections(ctx, ws); err != nil {
+		return v, err
+	}
+	if v.PeopleConnections, err = s.peopleConnections(ctx, ws); err != nil {
+		return v, err
+	}
+	if err = s.pool.QueryRow(ctx, `SELECT count(*) FROM records WHERE workspace_id = $1 AND needs_review AND merged_into IS NULL AND archived_at IS NULL`, ws).
+		Scan(&v.PeopleToReview); err != nil {
 		return v, err
 	}
 	err = s.pool.QueryRow(ctx, `SELECT count(*) FROM visitor_ip_lookups WHERE workspace_id = $1 AND checked_at >= date_trunc('day', now() AT TIME ZONE 'UTC') AT TIME ZONE 'UTC'`, ws).
@@ -559,6 +582,8 @@ func (s *Server) updateVisitorSettings(w http.ResponseWriter, r *http.Request) {
 		RevealIntegrationID optional[string] `json:"reveal_integration_id"`
 		RevealDailyLimit    *int             `json:"reveal_daily_limit"`
 		NotCompanies        *[]string        `json:"not_companies"`
+		RevealPeople        *bool            `json:"reveal_people"`
+		AcceptPeopleNotice  bool             `json:"accept_people_notice"`
 	}
 	if !decode(w, r, &in) {
 		return
@@ -646,6 +671,18 @@ func (s *Server) updateVisitorSettings(w http.ResponseWriter, r *http.Request) {
 			set.RevealDailyLimit = *in.RevealDailyLimit
 			changed = append(changed, "reveal_daily_limit")
 		}
+		if in.AcceptPeopleNotice && set.PeopleNoticeAcceptedAt == nil {
+			now := time.Now().UTC()
+			set.PeopleNoticeAcceptedAt, set.PeopleNoticeAcceptedBy = &now, &a.principal.ActorID
+			changed = append(changed, "people_notice")
+		}
+		if in.RevealPeople != nil {
+			if *in.RevealPeople && set.PeopleNoticeAcceptedAt == nil {
+				return errInvalid("turning reveal_people on needs accept_people_notice: true, after reading the notice on the Visitors page")
+			}
+			set.RevealPeople = *in.RevealPeople
+			changed = append(changed, "reveal_people")
+		}
 		var marked []string
 		if in.NotCompanies != nil {
 			if len(*in.NotCompanies) > 1000 {
@@ -679,7 +716,8 @@ func (s *Server) updateVisitorSettings(w http.ResponseWriter, r *http.Request) {
 		return record(ctx, tx, &a.principal, a.WorkspaceID, "visitor_settings.updated", "workspace", a.WorkspaceID,
 			map[string]any{"changed": changed, "hot_score": set.HotScore, "email_clicks": set.EmailClicks, "key_pages": len(set.KeyPages),
 				"exclude_domains": len(set.ExcludeDomains), "exclude_customers": set.ExcludeCustomers,
-				"reveal_companies": set.RevealCompanies, "reveal_daily_limit": set.RevealDailyLimit, "not_companies": len(set.NotCompanies), "marked_not_companies": len(marked)})
+				"reveal_companies": set.RevealCompanies, "reveal_daily_limit": set.RevealDailyLimit, "not_companies": len(set.NotCompanies), "marked_not_companies": len(marked),
+				"reveal_people": set.RevealPeople})
 	})
 	if err != nil {
 		var bad errInvalid

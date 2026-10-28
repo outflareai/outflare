@@ -65,6 +65,10 @@ func withContactability(ctx context.Context, q pgx.Tx, list []recordView) error 
 			return err
 		}
 		c := contactFor(origin, via, rule, marketing, suppressed)
+		if list[at[id]].NeedsReview {
+			c.Allowed = contactAllowed{}
+			c.Why = "Held for review: no email of any kind until someone approves them."
+		}
 		list[at[id]].Contactability = &c
 	}
 	return rows.Err()

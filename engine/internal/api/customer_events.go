@@ -1283,6 +1283,15 @@ func (s *Server) recordTimeline(w http.ResponseWriter, r *http.Request) {
 	if s.recordError(w, r, err) {
 		return
 	}
+	if a.ViewID != "" {
+		// A support view sees that an email was sent or received, not
+		// its subject.
+		for i := range list {
+			if list[i].Kind == "message" {
+				list[i].Title = ""
+			}
+		}
+	}
 	var next *string
 	if len(list) == limit {
 		last := list[len(list)-1]

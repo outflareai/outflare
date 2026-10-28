@@ -25,6 +25,7 @@ import (
 	"github.com/outflareai/outflare/engine/internal/connectors/payments"
 	"github.com/outflareai/outflare/engine/internal/connectors/reddit"
 	"github.com/outflareai/outflare/engine/internal/connectors/seo"
+	"github.com/outflareai/outflare/engine/internal/connectors/slack"
 	"github.com/outflareai/outflare/engine/internal/connectors/smartlead"
 	"github.com/outflareai/outflare/engine/internal/connectors/tagmanager"
 	"github.com/outflareai/outflare/engine/internal/connectors/verifiers"
@@ -54,6 +55,7 @@ func Available() []c.Connector {
 	out = append(out, linkedin.All()...)
 	out = append(out, dnshosts.All()...)
 	out = append(out, tagmanager.All()...)
+	out = append(out, slack.All()...)
 	out = append(out, manifest.All(integrations.FS)...)
 	return out
 }

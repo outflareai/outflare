@@ -6,7 +6,7 @@
 // Links from before slugs, /w/{workspace id}/{tab}, still open and are
 // rewritten to the slug.
 
-export const appTabs = ["overview", "get-started", "setup", "ai", "ai-usage", "tools", "reports", "analytics", "tracking", "links", "seo", "seo-overview", "audits", "fixes", "experiments", "keywords", "ai-visibility", "backlinks", "competitors", "reddit", "social", "ads", "visitors", "inbox", "missions", "playbooks", "outcomes", "projects", "sequences", "infrastructure", "mailboxes", "domains", "warmup", "servers", "allocation", "lifecycle", "emails", "broadcasts", "journeys", "templates", "topics", "providers", "leads", "lists", "suppression", "company", "brands", "ideal-customers", "workspace", "members", "digests", "senders", "connectors", "webhooks", "tokens", "logs", "audit", "agency", "instance", "account"] as const;
+export const appTabs = ["overview", "get-started", "setup", "ai", "ai-usage", "tools", "reports", "analytics", "tracking", "flags", "links", "seo", "seo-overview", "audits", "fixes", "experiments", "keywords", "ai-visibility", "backlinks", "competitors", "reddit", "social", "reviews", "ads", "visitors", "inbox", "missions", "playbooks", "outcomes", "projects", "sequences", "infrastructure", "mailboxes", "domains", "warmup", "servers", "allocation", "lifecycle", "emails", "broadcasts", "journeys", "templates", "topics", "providers", "leads", "lists", "lead-finder", "suppression", "company", "brands", "ideal-customers", "workspace", "members", "alerts", "digests", "senders", "connectors", "webhooks", "tokens", "logs", "audit", "agency", "instance", "account"] as const;
 export type Tab = (typeof appTabs)[number];
 
 const isTab = (t?: string): t is Tab => !!t && (appTabs as readonly string[]).includes(t);

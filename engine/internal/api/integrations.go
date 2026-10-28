@@ -511,7 +511,11 @@ func (s *Server) updateIntegration(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if req.Config != nil {
-		if msg := checkWarmupTags(req.Config); msg != "" {
+		msg := checkWarmupTags(req.Config)
+		if msg == "" {
+			msg = checkPushReplies(req.Config)
+		}
+		if msg != "" {
 			writeError(w, r, http.StatusBadRequest, "invalid_request", msg)
 			return
 		}
@@ -921,6 +925,24 @@ func isUnique(err error) bool {
 
 // checkWarmupTags checks config.warmup_tags, the tags a sequencer puts in
 // its warm-up mail, which the inbox skips. It returns what is wrong, or "".
+// checkPushReplies checks config.push_replies: reply labels or groups.
+func checkPushReplies(config json.RawMessage) string {
+	var c struct {
+		Labels json.RawMessage `json:"push_replies"`
+	}
+	if json.Unmarshal(config, &c) != nil || c.Labels == nil {
+		return ""
+	}
+	var labels []string
+	if err := json.Unmarshal(c.Labels, &labels); err != nil || len(labels) > 20 {
+		return "config.push_replies must be a list of reply labels or groups, such as [\"hot\"]"
+	}
+	if _, bad := inbox.Expand(labels); bad != "" {
+		return "config.push_replies: " + bad + " is not a reply label or group"
+	}
+	return ""
+}
+
 func checkWarmupTags(config json.RawMessage) string {
 	var c struct {
 		Tags json.RawMessage `json:"warmup_tags"`

@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"strings"
@@ -167,6 +168,9 @@ type playbookRunInput struct {
 	ProjectID     optional[string]  `json:"project_id"`
 	TokenID       optional[string]  `json:"token_id"`
 	MaxSpendCents optional[int64]   `json:"max_spend_cents"`
+	// ApplyKit sets up the playbook's kit in the same step (catalog.manage,
+	// and emails.manage when it adds email drafts).
+	ApplyKit bool `json:"apply_kit"`
 }
 
 // startPlaybook creates a mission draft from a playbook. Required
@@ -205,6 +209,18 @@ func (s *Server) startPlaybook(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	var kit playbooks.Kit
+	if in.ApplyKit {
+		var ok bool
+		if kit, ok = playbooks.GetKit(p.Kit); !ok {
+			writeError(w, r, http.StatusBadRequest, "invalid_request", "this playbook has no setup kit, so apply_kit is not for it")
+			return
+		}
+		if !a.has(auth.ScopeCatalogManage) {
+			writeError(w, r, http.StatusForbidden, "forbidden", "applying the setup kit needs the catalog.manage scope; start without apply_kit, or ask someone who can")
+			return
+		}
+	}
 	ready, err := s.playbookReadiness(ctx, a.WorkspaceID, []playbooks.Playbook{p})
 	if err != nil {
 		s.internal(w, r, err)
@@ -229,13 +245,21 @@ func (s *Server) startPlaybook(w http.ResponseWriter, r *http.Request) {
 	var id string
 	err = pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
 		var err error
+		if in.ApplyKit {
+			if _, err = applyKit(ctx, tx, a, kit); err != nil {
+				return err
+			}
+		}
 		if id, err = s.insertMission(ctx, tx, a, &mi); err != nil {
 			return err
 		}
-		props := map[string]any{"playbook_id": p.ID, "playbook_version": p.Version, "mode": modeOr(in.Mode), "publisher": p.Publisher}
+		props := map[string]any{"playbook_id": p.ID, "playbook_version": p.Version, "mode": modeOr(in.Mode), "publisher": p.Publisher, "kit_applied": in.ApplyKit}
 		return recordWithProps(ctx, tx, &a.principal, a.WorkspaceID, "playbook.started", "mission", id,
 			map[string]any{"playbook_id": p.ID, "playbook_version": p.Version, "mission_id": id, "mode": modeOr(in.Mode)}, props)
 	})
+	if errors.As(err, new(errKitConflict)) && s.kitError(w, r, err) {
+		return
+	}
 	if s.missionError(w, r, err) {
 		return
 	}
@@ -259,6 +283,9 @@ func playbookBrief(p playbooks.Playbook, inputs map[string]string) (instructions
 	var b strings.Builder
 	b.WriteString(p.Render(inputs))
 	fmt.Fprintf(&b, "\n\nThis mission runs the playbook %q, version %d (GET /v1/playbooks/%s).", p.ID, p.Version, p.ID)
+	if p.Kit != "" {
+		fmt.Fprintf(&b, " It works on what its setup kit %q adds (GET /v1/kits/%s): check GET /v1/workspaces/{ws}/kits/%s/preview, and if anything is still to add, ask a person to apply it rather than building it yourself.", p.Kit, p.Kit, p.Kit)
+	}
 	if len(p.Guardrails) > 0 {
 		b.WriteString("\n\nGuardrails:")
 		for _, g := range p.Guardrails {

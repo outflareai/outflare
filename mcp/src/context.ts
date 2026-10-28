@@ -102,7 +102,7 @@ export function registerContextTools(
     {
       title: "Getting-started steps",
       description:
-        "The steps a new workspace is walked through: add its website (brand), pick what to do first (goal), connect an AI, connect the tools that goal needs, start a first mission; then invite the team. " +
+        "The steps a new workspace is walked through, setting up one brand first (brand, the workspace's first one): add the brand and its website, add an AI key (ai), pick what to do first (goal), put the script on the website and add its DNS records (website: get_brand_setup and get_brand_dns), connect the tools that goal needs, star and follow Outflare (community, a person's own clicks), start a first mission; then invite the team. " +
         "Each is done once the workspace has it (however it was added) or skipped by a person; none is required. step.tool is the tool that does it " +
         "(empty: a person must, at step.page). When steps are left and not skipped, offer once to help with next_step; if the person declines, skip it with update_onboarding.",
       annotations: read,
@@ -111,7 +111,7 @@ export function registerContextTools(
   );
 
   if (!readOnly) {
-    const steps = ["brand", "goal", "ai", "connect", "mission", "team"] as const;
+    const steps = ["brand", "ai", "goal", "website", "connect", "community", "mission", "team"] as const;
     server.registerTool(
       "update_onboarding",
       {

@@ -29,6 +29,9 @@ const (
 	// OtherBrand: another brand emailed the person within the workspace's
 	// cross-brand window. The reason reads other_brand:<handle>.
 	OtherBrand = "other_brand"
+	// NeedsReview: the only person with this address is waiting for
+	// someone to approve them (a visitor identification tool named them).
+	NeedsReview = "needs_review"
 )
 
 // Decision is the verdict for one recipient.
@@ -88,6 +91,24 @@ func CheckRecipients(ctx context.Context, q Querier, workspaceID string, emails 
 	}
 	for _, r := range rows {
 		hits[r[0]] = append(hits[r[0]], MarketingWithdrawn)
+	}
+	// People held for review get no email of any kind until someone
+	// approves them, unless another record that isn't held has the
+	// address too.
+	rows, err = queryRows(ctx, q, `
+		SELECT e, '', ''
+		FROM unnest($2::text[]) AS e
+		WHERE EXISTS (SELECT 1 FROM record_identities i JOIN records r ON r.id = i.record_id
+			WHERE i.workspace_id = $1 AND i.namespace = 'email' AND i.value = e AND i.valid_to IS NULL
+			  AND r.needs_review AND r.merged_into IS NULL AND r.archived_at IS NULL)
+		  AND NOT EXISTS (SELECT 1 FROM record_identities i JOIN records r ON r.id = i.record_id
+			WHERE i.workspace_id = $1 AND i.namespace = 'email' AND i.value = e AND i.valid_to IS NULL
+			  AND NOT r.needs_review AND r.merged_into IS NULL AND r.archived_at IS NULL)`, workspaceID, check)
+	if err != nil {
+		return nil, err
+	}
+	for _, r := range rows {
+		hits[r[0]] = append(hits[r[0]], NeedsReview)
 	}
 	for i := range out {
 		if h, ok := hits[strings.ToLower(out[i].Email)]; ok && out[i].Allowed {

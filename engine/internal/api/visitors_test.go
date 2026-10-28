@@ -175,6 +175,11 @@ func TestVisitorsFromEmailClicks(t *testing.T) {
 	if err := e.pool.QueryRow(t.Context(), `SELECT count(*) FROM audit_events WHERE action = 'visitor.became_hot'`).Scan(&alerts); err != nil || alerts != 2 {
 		t.Fatalf("alerts (person and company): %d %v", alerts, err)
 	}
+	// Each is an alert too, with the name read from the record.
+	shown := owner.must(200, "GET", base+"/alerts?kind=visitor.hot", nil)["data"].([]any)
+	if len(shown) != 2 || !strings.HasSuffix(shown[0].(map[string]any)["title"].(string), "is hot on your website") {
+		t.Fatalf("visitor alerts: %v", shown)
+	}
 	hot := owner.must(200, "GET", base+"/visitors?view=people&hot=true", nil)
 	if len(hot["data"].([]any)) != 1 || hot["data"].([]any)[0].(map[string]any)["hot"] != true {
 		t.Fatalf("hot: %v", hot)

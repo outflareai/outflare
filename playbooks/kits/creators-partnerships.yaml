@@ -1,0 +1,130 @@
+id: creators-partnerships
+version: 1
+title: Creator partnerships
+summary: A Partnerships pipeline for creator, newsletter and podcast deals, creator fields on people, and email drafts for briefs, go-live reminders and thank-yous.
+
+option_sets:
+  - key: partnership_stage
+    name: Partnership stage
+    options:
+      - { key: found, label: Found }
+      - { key: vetted, label: Vetted }
+      - { key: pitched, label: Pitched }
+      - { key: negotiating, label: Negotiating }
+      - { key: agreed, label: Agreed }
+      - { key: live, label: Live }
+      - { key: measured, label: Measured }
+      - { key: renewed, label: Renewed }
+      - { key: declined, label: Declined }
+  - key: partnership_deal_type
+    name: Partnership deal type
+    options:
+      - { key: affiliate, label: Commission per sale }
+      - { key: flat_fee, label: Flat fee }
+      - { key: hybrid, label: Fee plus commission }
+      - { key: seeding, label: Free product }
+      - { key: retainer, label: Monthly retainer }
+      - { key: content_rights, label: Content run as ads }
+      - { key: community, label: Community or open source }
+  - key: creator_platform
+    name: Creator platform
+    options:
+      - { key: youtube, label: YouTube }
+      - { key: tiktok, label: TikTok }
+      - { key: instagram, label: Instagram }
+      - { key: x, label: X }
+      - { key: linkedin, label: LinkedIn }
+      - { key: twitch, label: Twitch }
+      - { key: newsletter, label: Newsletter }
+      - { key: podcast, label: Podcast }
+      - { key: blog, label: Blog }
+      - { key: other, label: Other }
+
+record_types:
+  - key: partnership
+    name: Partnership
+    plural: Partnerships
+    description: |
+      A deal with a creator, newsletter or podcast: from finding them to
+      their post going live, how it did, and whether to renew.
+    stage: stage
+    fields:
+      - { key: stage, label: Stage, value_type: status, option_set: partnership_stage, filterable: true }
+      - { key: creator, label: Creator, value_type: record_reference, target_type: person, filterable: true }
+      - { key: channel, label: Channel or company, value_type: record_reference, target_type: account, description: "The creator's business, newsletter or show, when it has one." }
+      - { key: deal_type, label: Deal type, value_type: select, option_set: partnership_deal_type, filterable: true }
+      - { key: fee, label: Fee, value_type: currency }
+      - { key: deliverables, label: Deliverables, value_type: text, description: "What they make, such as one video and two stories." }
+      - { key: platform, label: Platform, value_type: select, option_set: creator_platform, filterable: true }
+      - { key: go_live_on, label: Go-live date, value_type: date, filterable: true }
+      - { key: post_url, label: Post, value_type: url }
+      - { key: rights_until, label: Content rights until, value_type: date, description: "Until when you may run their content as ads." }
+      - { key: campaign_link, label: Tracked link, value_type: url, description: "The campaign link made for this partnership, so visits and sign-ups count towards it." }
+      - { key: promo_code, label: Promo code, value_type: text }
+
+fields:
+  person:
+    - { key: creator_platforms, label: Creator platforms, value_type: select, option_set: creator_platform, multiple: true, filterable: true }
+    - { key: audience_size, label: Audience size, value_type: number, filterable: true, description: "Followers or subscribers on their main platform." }
+    - { key: creator_topics, label: Creator topics, value_type: text, multiple: true }
+    - { key: rate_card, label: Rate card, value_type: currency, description: "Their usual fee for one post." }
+    - { key: past_sponsors, label: Past sponsors, value_type: text, multiple: true }
+
+email_templates:
+  - handle: creator-brief
+    name: Creator brief and kit
+    purpose: lifecycle
+    subject: "Your {{brand}} brief"
+    text: |
+      Hi {{first_name|there}},
+
+      Thanks again for partnering with {{brand}}. Here's everything for your post.
+
+      What we agreed: {{deliverables}}
+      Go-live date: {{go_live_on}}
+      Your link: {{campaign_link}}
+      {{#if promo_code}}Your code: {{promo_code}}
+      {{/if}}
+      Please use your link (and code) in the post so we can show you how it did. Send us a draft if you'd like a second pair of eyes; we never ask you to change your voice.
+
+      Thanks,
+      The {{brand}} team
+  - handle: creator-go-live-reminder
+    name: Creator go-live reminder
+    purpose: lifecycle
+    subject: "Going live on {{go_live_on}}"
+    text: |
+      Hi {{first_name|there}},
+
+      A quick reminder that your {{brand}} post is due on {{go_live_on}}. Your link is {{campaign_link}}.
+
+      Reply here if anything has changed or you need anything from us.
+
+      Thanks,
+      The {{brand}} team
+  - handle: creator-thanks-results
+    name: Creator thanks and first results
+    purpose: lifecycle
+    subject: "Thank you, and how your post is doing"
+    text: |
+      Hi {{first_name|there}},
+
+      Thank you for the post. Here's how it's doing so far: {{results}}
+
+      We'd love to work together again. Reply if you're open to it and we'll send a few ideas.
+
+      Thanks,
+      The {{brand}} team
+  - handle: creator-customer-invite
+    name: Creator invite for customers
+    purpose: lifecycle
+    subject: "Want to make something with {{brand}}?"
+    text: |
+      Hi {{first_name|there}},
+
+      We noticed you create for an audience that might like {{brand}} as much as you do. We run a small creator programme for people who already use the product: early features, a commission on every sale through your link, and paid posts when they fit.
+
+      Reply if you'd like to hear more. No pressure either way.
+
+      Thanks,
+      The {{brand}} team

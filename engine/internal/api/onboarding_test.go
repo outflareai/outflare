@@ -24,7 +24,7 @@ func TestOnboardingStepsSkipsAndDismissal(t *testing.T) {
 
 	// A new workspace has every step to do, and the app opens the walk-through.
 	o := owner.must(200, "GET", base+"/onboarding", nil)
-	if o["done"] != 0.0 || o["total"] != 6.0 || o["next_step"] != "brand" || o["complete"] != false || o["show"] != true || o["dismissed"] != false || o["goal"] != nil {
+	if o["done"] != 0.0 || o["total"] != 7.0 || o["next_step"] != "brand" || o["complete"] != false || o["show"] != true || o["dismissed"] != false || o["goal"] != nil {
 		t.Fatalf("new workspace: %v", o)
 	}
 	if st := stepsOf(o)["brand"]; !strings.HasSuffix(st["page"].(string), "/brands") || st["tool"] != "create_brand" || st["walkthrough"] != true {
@@ -39,7 +39,7 @@ func TestOnboardingStepsSkipsAndDismissal(t *testing.T) {
 	owner.must(400, "PATCH", base+"/onboarding", map[string]any{"skip": []string{"billing"}})
 	owner.must(400, "PATCH", base+"/onboarding", map[string]any{"goal": "world_domination"})
 	o = owner.must(200, "PATCH", base+"/onboarding", map[string]any{"skip": []string{"brand", "brand"}})
-	if o["next_step"] != "goal" || stepsOf(o)["brand"]["skipped"] != true || o["show"] != false {
+	if o["next_step"] != "ai" || stepsOf(o)["brand"]["skipped"] != true || o["show"] != false || o["brand"] != nil {
 		t.Fatalf("after skipping brand: %v", o)
 	}
 
@@ -62,9 +62,24 @@ func TestOnboardingStepsSkipsAndDismissal(t *testing.T) {
 	if o["done"] != 4.0 || o["next_step"] != "ai" {
 		t.Fatalf("progress: %v", o)
 	}
+	if b, _ := o["brand"].(map[string]any); b == nil || b["handle"] != "acme" || b["website"] != "acme-com.example" {
+		t.Fatalf("the walk-through's brand: %v", o["brand"])
+	}
 	owner.must(201, "POST", base+"/integrations", map[string]any{"connector": "claude", "credentials": map[string]any{"api_key": "sk-ant-good"}})
-	if o = owner.must(200, "GET", base+"/onboarding", nil); stepsOf(o)["ai"]["done"] != true || o["next_step"] != "mission" {
+	if o = owner.must(200, "GET", base+"/onboarding", nil); stepsOf(o)["ai"]["done"] != true || o["next_step"] != "website" {
 		t.Fatalf("an AI model connects the AI: %v", o)
+	}
+
+	// The website step is done once the script is waiting for its first
+	// visit and Outflare is looking for the DNS record.
+	owner.must(200, "POST", base+"/brands/acme/setup/prepare", map[string]any{"step": "site_script"})
+	if o = owner.must(200, "GET", base+"/onboarding", nil); stepsOf(o)["website"]["done"] != false {
+		t.Fatalf("only the script: %v", o)
+	}
+	owner.must(200, "POST", base+"/brands/acme/setup/prepare", map[string]any{"step": "verify_site"})
+	owner.must(200, "POST", base+"/brands/acme/setup/check", map[string]any{"step": "verify_site"})
+	if o = owner.must(200, "GET", base+"/onboarding", nil); stepsOf(o)["website"]["done"] != true || o["next_step"] != "mission" {
+		t.Fatalf("script and DNS under way: %v", o)
 	}
 	owner.must(201, "POST", base+"/missions", map[string]any{"name": "First", "goal": "Find the pages losing traffic"})
 	if o = owner.must(200, "GET", base+"/onboarding", nil); stepsOf(o)["mission"]["done"] != true || o["complete"] != true || o["next_step"] != nil {

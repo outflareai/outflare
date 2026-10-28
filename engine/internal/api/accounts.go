@@ -54,7 +54,7 @@ func (a *Accounts) SendVerification(ctx context.Context, userID string) error {
 // SessionUser is the signed-in person behind r's session, as a user id and
 // email. Both are empty for an anonymous request or an API token.
 func (a *Accounts) SessionUser(r *http.Request) (userID, email string, err error) {
-	p, err := (&Server{pool: a.Pool}).authenticate(r)
+	p, err := (&Server{pool: a.Pool}).authenticateSession(r)
 	if err != nil || p == nil || p.UserID == "" {
 		return "", "", err
 	}

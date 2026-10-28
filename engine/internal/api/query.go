@@ -88,6 +88,8 @@ var queryTables = []queryTable{
 	{"broadcasts", auth.ScopeEmailsRead, "Email broadcasts and how many they reached."},
 	{"visits", auth.ScopeAnalyticsRead, "Website visits from the Outflare site snippet, with UTM tags."},
 	{"social_posts", auth.ScopeSocialRead, "Posts on the workspace's own social accounts, with their numbers."},
+	{"reviews", auth.ScopeSocialRead, "Reviews on the brands' review pages (Trustpilot, G2, Capterra, Google); rating is 1 to 5."},
+	{"review_page_days", auth.ScopeSocialRead, "Each review page's numbers by day: the platform's score and count, new reviews, stars and Outflare's review score."},
 }
 
 type queryColumn struct {
@@ -106,6 +108,10 @@ type queryTableView struct {
 // queryReadable reports whether the caller may read a table.
 func queryReadable(a *access, t queryTable) bool {
 	if !a.has(t.Scope) {
+		return false
+	}
+	// A support view never reads email content, sent or received.
+	if a.ViewID != "" && t.Name == "messages" {
 		return false
 	}
 	// Leads have no brand, so a caller kept to some brands sees none.

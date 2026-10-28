@@ -1,5 +1,5 @@
 // Brand setup: the ordered checklist that gets one brand's website and
-// tools working (website script, verifying the site, then analytics,
+// tools working (website script, every DNS record in one go, then analytics,
 // Search Console, email, payments, ads, social and a CRM), the one-click
 // installs through the workspace's own Tag Manager or Cloudflare, and
 // install health: what is out of date or broken.
@@ -25,7 +25,7 @@ export function registerSetupTools(server: McpServer, gtm: MissionClient, worksp
     {
       title: "Brand setup checklist",
       description:
-        "One brand's setup steps, most needed first: say what the brand does (business_model, set with update_brand from list_business_models), add the website script, verify the website, then connect analytics, Search Console, email, payments, ads, social and a CRM. " +
+        "One brand's setup steps, most needed first: say what the brand does (business_model, set with update_brand from list_business_models), add the website script, add every DNS record the brand needs (get_brand_dns), then connect analytics, Search Console, email, payments, ads, social and a CRM. " +
         "Each step is todo, waiting (Outflare is waiting for a first visit or for DNS), done (however it was done) or skipped. " +
         "The two install steps carry install: the snippet or DNS record, ai_prompt (a prompt for an AI coding tool: if you can edit the site's code, follow it yourself), " +
         "developer (a message the person can send), and whether a one-click install is ready (connections to Google Tag Manager or Cloudflare). " +
@@ -72,7 +72,33 @@ export function registerSetupTools(server: McpServer, gtm: MissionClient, worksp
     ({ brand }) => call(() => gtm.GET("/v1/workspaces/{ws}/install-health", { params: { path: { ws: workspace() }, query: brand ? { brand } : {} } })),
   );
 
+  server.registerTool(
+    "get_brand_dns",
+    {
+      title: "Every DNS record a brand needs",
+      description:
+        "Every record Outflare asks for on the brand's domains, in one list grouped by what it is for: the website's proof of ownership (seo_site), each sending domain's records (email_domain) and each tracking domain's CNAME (tracking_domain). " +
+        "Each record is in_place or missing. Add every missing one at once with add_brand_dns, or give the person developer (a message to send) or follow ai_prompt yourself if you can edit their DNS.",
+      inputSchema: { brand: brandRef },
+      annotations: read,
+    },
+    ({ brand }) => call(() => gtm.GET("/v1/workspaces/{ws}/brands/{brand}/dns", { params: { path: path(brand) } })),
+  );
+
   if (readOnly) return;
+
+  server.registerTool(
+    "add_brand_dns",
+    {
+      title: "Add every missing DNS record for a brand",
+      description:
+        "Adds every missing record from get_brand_dns in one go through the brand's Cloudflare connection (connections in get_brand_dns), then Outflare checks for them on its own. " +
+        "It only adds records, never changes or deletes one. Changes the person's DNS, so confirm first. Needs workspace.manage.",
+      inputSchema: { brand: brandRef, integration_id: z.string().uuid().describe("A Cloudflare connection, from get_brand_dns connections.") },
+      annotations: { ...write, openWorldHint: true },
+    },
+    ({ brand, integration_id }) => call(() => gtm.POST("/v1/workspaces/{ws}/brands/{brand}/dns", { params: { path: path(brand) }, body: { integration_id } })),
+  );
 
   server.registerTool(
     "update_brand_setup",

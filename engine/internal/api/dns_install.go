@@ -15,7 +15,6 @@ import (
 	"github.com/outflareai/outflare/engine/internal/crawl"
 	"github.com/outflareai/outflare/engine/internal/jobs"
 	"github.com/outflareai/outflare/engine/internal/track"
-	"github.com/outflareai/outflare/engine/internal/tracking"
 )
 
 // One click for the other records Outflare asks a workspace to put in its
@@ -56,6 +55,12 @@ type dnsAddJob struct {
 // that can add DNS records for it. One whose sign-in broke is left out, so
 // the page offers to connect again instead of retrying it.
 func (s *Server) dnsConnections(ctx context.Context, ws string) (func(brand string) []string, error) {
+	return s.connectionsWith(ctx, ws, connectors.CapDNSWrite)
+}
+
+// connectionsWith returns, for a brand, the workspace's connections with a
+// capability that serve it.
+func (s *Server) connectionsWith(ctx context.Context, ws, capability string) (func(brand string) []string, error) {
 	var conns []connectors.Integration
 	if s.integrations != nil {
 		var err error
@@ -66,7 +71,7 @@ func (s *Server) dnsConnections(ctx context.Context, ws string) (func(brand stri
 	return func(brand string) []string {
 		out := []string{}
 		for _, c := range conns {
-			if d, ok := s.integrations.Registry.Definition(c.Connector); ok && d.Has(connectors.CapDNSWrite) && c.Status == connectors.StatusConnected && c.Serves(brand, conns) {
+			if d, ok := s.integrations.Registry.Definition(c.Connector); ok && d.Has(capability) && c.Status == connectors.StatusConnected && c.Serves(brand, conns) {
 				out = append(out, c.ID)
 			}
 		}
@@ -167,7 +172,7 @@ func (s *Server) addSubjectRecords(ctx context.Context, ws string, p dnsAddJob) 
 		if err := s.pool.QueryRow(ctx, `SELECT domain FROM tracking_domains WHERE workspace_id = $1 AND id = $2`, ws, p.ID).Scan(&domain); err != nil {
 			return connectors.DNSResult{}, err
 		}
-		want = []connectors.DNSRecord{{Type: "CNAME", Name: domain, Content: tracking.Target(s.publicURL)}}
+		want = []connectors.DNSRecord{{Type: "CNAME", Name: domain, Content: s.trackingHost()}}
 	case "sending_domain":
 		d := p.ID
 		list, err := s.queryDomains(ctx, ws, &d)

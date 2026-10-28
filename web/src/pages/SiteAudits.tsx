@@ -11,6 +11,7 @@ import { track } from "@/lib/analytics";
 import { dnsHelp, DNSWays, heldByMission, takeDNSFocus } from "@/components/dns-one-click";
 import { takeConnectOutcome } from "./Connectors";
 import type { Tab } from "../App";
+import { Indexability } from "./Indexability";
 
 // Site audits: the websites OutflareBot crawls, each with its ownership
 // proof and its latest audit (health score, issues by URL template). The
@@ -349,6 +350,7 @@ function Site({ ws, canManage, open, onOpen, go }: Props) {
       />
 
       {last && <LatestCrawl ws={ws} site={open} crawl={last} siteVerified={site.verified} go={go} />}
+      {last && <Indexability ws={ws} site={open} go={go} />}
       {!last && <Empty title="Not crawled yet">{canManage ? "Crawl now to get its first audit." : "Its first crawl will show here."}</Empty>}
 
       {!site.verified && (
@@ -416,38 +418,188 @@ function Site({ ws, canManage, open, onOpen, go }: Props) {
         </Card>
       )}
 
-      {canManage && (
-        <Card title="Settings">
-          <div className="flex flex-wrap items-end gap-4 text-[13px]">
-            <label className="min-w-64 flex-1 space-y-1">
-              <span className="font-medium">Start address</span>
+      {canManage && <CrawlSettings site={site} patch={patch} remove={remove} go={go} />}
+    </div>
+  );
+}
+
+const days = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+const delays = [250, 500, 1000, 2000, 5000, 10000];
+
+function zones(current: string): string[] {
+  let all: string[] = [];
+  try {
+    all = (Intl as unknown as { supportedValuesOf?: (k: string) => string[] }).supportedValuesOf?.("timeZone") ?? [];
+  } catch {
+    all = [];
+  }
+  return Array.from(new Set(["UTC", current, ...all]));
+}
+
+function lines(v: string) {
+  return v.split("\n").map((l) => l.trim()).filter(Boolean);
+}
+
+// settingsLine says how a crawl ran, in a few words.
+function settingsLine(c: Crawl) {
+  const s = c.settings;
+  const parts = [`up to ${c.max_pages.toLocaleString()} pages`];
+  if (s.max_depth > 0) parts.push(`${plural(s.max_depth, "click")} deep`);
+  parts.push(s.use_sitemaps ? "links and sitemaps" : "links only");
+  if (s.render_js === "always") parts.push("scripts run on every page");
+  else if (s.render_js === "off") parts.push("scripts never run");
+  if ((s.include_patterns ?? []).length || (s.exclude_patterns ?? []).length) parts.push("own scope rules");
+  if (s.ignore_params) parts.push("parameters ignored");
+  if (!c.obey_robots) parts.push("robots.txt ignored");
+  return parts.join(" · ");
+}
+
+function CrawlSettings({ site, patch, remove, go }: { site: SEOSite; patch: (body: Record<string, unknown>) => Promise<void>; remove: () => void; go: (tab: Tab, item?: string) => void }) {
+  const tz = site.schedule_tz;
+  const label = "font-medium";
+  const hint = "block text-[12px] text-muted-foreground";
+  const toggle = (key: "use_sitemaps" | "follow_nofollow" | "ignore_params", text: string, sub: string) => (
+    <label className="flex items-start gap-2">
+      <input type="checkbox" className="mt-0.5" checked={site[key]} onChange={(e) => patch({ [key]: e.target.checked })} />
+      <span><span className={label}>{text}</span><span className={hint}>{sub}</span></span>
+    </label>
+  );
+  const patterns = (key: "include_patterns" | "exclude_patterns", text: string, sub: string, example: string) => (
+    <label className="flex min-w-64 flex-1 flex-col gap-1">
+      <span className={label}>{text}</span>
+      <textarea
+        key={site[key].join("\n")}
+        rows={3}
+        className={`${field} w-full font-mono text-[12px]`}
+        placeholder={example}
+        defaultValue={site[key].join("\n")}
+        onBlur={(e) => lines(e.target.value).join("\n") !== site[key].join("\n") && patch({ [key]: lines(e.target.value) })}
+      />
+      <span className={hint}>{sub}</span>
+    </label>
+  );
+  const renderReady = site.verified && site.render_connections.length > 0;
+  return (
+    <Card title="Crawl settings" description="Smart defaults read your site the way a search engine does. Changes apply from the next crawl.">
+      <div className="space-y-6 text-[13px]">
+        <section className="space-y-3">
+          <h3 className="text-[13px] font-semibold">What to crawl</h3>
+          <div className="flex flex-wrap items-start gap-4">
+            <label className="flex min-w-64 flex-1 flex-col gap-1">
+              <span className={label}>Start address</span>
               <input key={site.start_url} className={`${field} w-full`} defaultValue={site.start_url} onBlur={(e) => e.target.value.trim() && e.target.value.trim() !== site.start_url && patch({ url: e.target.value.trim() })} />
-              <span className="block text-[12px] text-muted-foreground">Where crawls start, on {site.host}</span>
+              <span className={hint}>Where crawls start, on {site.host}</span>
             </label>
-            <label className="space-y-1">
-              <span className="font-medium">Crawl</span>
+            <label className="flex flex-col gap-1">
+              <span className={label}>Pages per crawl</span>
+              <input key={site.max_pages} className={`${field} w-28`} type="number" min={1} max={site.limits.max_pages} defaultValue={site.max_pages} onBlur={(e) => Number(e.target.value) !== site.max_pages && patch({ max_pages: Number(e.target.value) })} />
+              <span className={hint}>At most {site.limits.max_pages.toLocaleString()}{!site.verified && ", or 10,000 once proved"}</span>
+            </label>
+            <label className="flex flex-col gap-1">
+              <span className={label}>How deep</span>
+              <select className={`${field} w-full`} value={site.max_depth} onChange={(e) => patch({ max_depth: Number(e.target.value) })}>
+                <option value={0}>Every page it finds</option>
+                {[1, 2, 3, 5, 10, 16].map((d) => <option key={d} value={d}>{plural(d, "click")} from the start</option>)}
+              </select>
+            </label>
+          </div>
+          <div className="grid gap-3 sm:grid-cols-3">
+            {toggle("use_sitemaps", "Find pages in sitemaps", "The ones robots.txt lists, or /sitemap.xml.")}
+            {toggle("follow_nofollow", "Follow nofollow links", "Off by default, like search engines.")}
+            {toggle("ignore_params", "Ignore URL parameters", "Crawl /shoes?color=red as /shoes.")}
+          </div>
+          <div className="flex flex-wrap gap-4">
+            {patterns("include_patterns", "Only crawl pages matching", "One pattern per line, on the path. Empty crawls everything. The start page is always crawled.", "^/blog/")}
+            {patterns("exclude_patterns", "Never crawl pages matching", "One pattern per line. Wins over the line above.", "^/tag/\n[?&]sort=")}
+          </div>
+        </section>
+
+        <section className="space-y-2">
+          <h3 className="text-[13px] font-semibold">JavaScript</h3>
+          <select className={`${field} w-full max-w-md`} value={site.render_js} onChange={(e) => patch({ render_js: e.target.value })}>
+            <option value="auto">Run scripts only on pages that need them (recommended)</option>
+            <option value="always">Run scripts on every page</option>
+            <option value="off">Never run scripts</option>
+          </select>
+          <p className={hint}>
+            {site.render_js === "off"
+              ? "Pages are read exactly as served. Pages built by scripts look empty."
+              : renderReady
+                ? `Scripts run through your own Geonode connection, which uses your Geonode credits${site.render_js === "always" ? " for every page" : " only for pages that are empty until scripts run"}.`
+                : !site.verified
+                  ? "Scripts run only on a site you've proved is yours, through your own Geonode account."
+                  : "Scripts run through your own Geonode account, which isn't connected yet. Until then pages are read as served."}
+          </p>
+          {site.render_js !== "off" && site.verified && site.render_connections.length === 0 && (
+            <ConnectFor connector="geonode" name="Geonode" back="audits" item={site.id} why={geonodeWhy.audits} go={go} variant="ghost" />
+          )}
+        </section>
+
+        <section className="space-y-3">
+          <h3 className="text-[13px] font-semibold">Speed and robots.txt</h3>
+          <div className="flex flex-wrap items-start gap-4">
+            <label className="flex max-w-md flex-col gap-1">
+              <span className={label}>Pause between pages</span>
+              <select className={`${field} w-48`} value={site.crawl_delay_ms} onChange={(e) => patch({ crawl_delay_ms: Number(e.target.value) })}>
+                {Array.from(new Set([...delays, site.crawl_delay_ms])).filter((d) => d >= site.limits.min_crawl_delay_ms).sort((a, b) => a - b).map((d) => (
+                  <option key={d} value={d}>{d < 1000 ? `${d} ms` : `${d / 1000} second${d === 1000 ? "" : "s"}`}</option>
+                ))}
+              </select>
+              <span className={hint}>{site.verified ? "Slower is gentler on your server." : "At least 2 seconds until the site is proved yours."} The crawl slows down by itself when the site struggles.</span>
+            </label>
+            {site.limits.may_ignore_robots && (
+              <label className="flex items-start gap-2 pt-6">
+                <input type="checkbox" className="mt-0.5" checked={!site.obey_robots} onChange={(e) => patch({ obey_robots: !e.target.checked })} />
+                <span><span className={label}>Audit pages my robots.txt hides</span><span className={hint}>Only for your own site.</span></span>
+              </label>
+            )}
+          </div>
+        </section>
+
+        <section className="space-y-3">
+          <h3 className="text-[13px] font-semibold">Schedule</h3>
+          <div className="flex flex-wrap items-start gap-4">
+            <label className="flex flex-col gap-1">
+              <span className={label}>Crawl</span>
               <select className={`${field} w-full`} value={site.schedule} onChange={(e) => patch({ schedule: e.target.value })}>
                 <option value="weekly">Every week</option>
                 <option value="daily">Every day</option>
                 <option value="off">Only by hand</option>
               </select>
             </label>
-            <label className="space-y-1">
-              <span className="font-medium">Pages per crawl</span>
-              <input className={`${field} w-28`} type="number" min={1} max={site.limits.max_pages} defaultValue={site.max_pages} onBlur={(e) => Number(e.target.value) !== site.max_pages && patch({ max_pages: Number(e.target.value) })} />
-              <span className="block text-[12px] text-muted-foreground">At most {site.limits.max_pages.toLocaleString()}</span>
-            </label>
-            {site.limits.may_ignore_robots && (
-              <label className="flex items-center gap-2 pb-1">
-                <input type="checkbox" checked={!site.obey_robots} onChange={(e) => patch({ obey_robots: !e.target.checked })} />
-                <span>Audit pages my robots.txt hides</span>
+            {site.schedule === "weekly" && (
+              <label className="flex flex-col gap-1">
+                <span className={label}>Day</span>
+                <select className={`${field} w-full`} value={site.schedule_day ?? ""} onChange={(e) => patch({ schedule_day: e.target.value === "" ? null : Number(e.target.value), ...(site.schedule_hour === null && e.target.value !== "" ? { schedule_hour: 3 } : {}) })}>
+                  <option value="">Any day</option>
+                  {days.map((d, i) => <option key={d} value={i}>{d}</option>)}
+                </select>
               </label>
             )}
-            <div className="ml-auto"><Button variant="ghost" onClick={remove}>Remove site</Button></div>
+            {site.schedule !== "off" && (
+              <>
+                <label className="flex flex-col gap-1">
+                  <span className={label}>Time</span>
+                  <select className={`${field} w-full`} value={site.schedule_hour ?? ""} onChange={(e) => patch({ schedule_hour: e.target.value === "" ? null : Number(e.target.value) })}>
+                    <option value="">Any time</option>
+                    {Array.from({ length: 24 }, (_, h) => <option key={h} value={h}>{`${String(h).padStart(2, "0")}:00`}</option>)}
+                  </select>
+                </label>
+                <label className="flex flex-col gap-1">
+                  <span className={label}>Time zone</span>
+                  <select className={`${field} w-full`} value={tz} onChange={(e) => patch({ schedule_tz: e.target.value })}>
+                    {zones(tz).map((z) => <option key={z} value={z}>{z.replaceAll("_", " ")}</option>)}
+                  </select>
+                  <span className={hint}>Pick a quiet hour for your site.</span>
+                </label>
+              </>
+            )}
           </div>
-        </Card>
-      )}
-    </div>
+        </section>
+
+        <div className="flex justify-end border-t pt-4"><Button variant="ghost" onClick={remove}>Remove site</Button></div>
+      </div>
+    </Card>
   );
 }
 
@@ -482,7 +634,12 @@ function LatestCrawl({ ws, site, crawl, siteVerified, go }: { ws: string; site: 
         <Stat label="Blocked by robots.txt" value={crawl.pages_blocked.toLocaleString()} />
       </Stats>
       {!done && <p className="text-[13px] text-muted-foreground">{crawlLine(crawl)}. The audit runs when it ends.</p>}
-      {done && crawl.reason && crawl.reason !== "done" && <p className="text-[13px] text-muted-foreground">{reasons[crawl.reason] ?? crawl.reason}</p>}
+      <p className="text-[12px] text-muted-foreground">
+        {done && crawl.reason && <>{reasons[crawl.reason] ?? crawl.reason} </>}
+        {done ? "Crawled" : "Crawling"} {settingsLine(crawl)}.
+        {crawl.pages_excluded > 0 && <> {plural(crawl.pages_excluded, "link")} left out by your scope settings.</>}
+        {crawl.pages_rendered > 0 && <> {plural(crawl.pages_rendered, "page")} read with scripts run, through your Geonode.</>}
+      </p>
       {crawl.pages_firewalled > 0 && (
         <div role="status" className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-[13px] text-amber-900 dark:text-amber-200">
           A firewall or bot protection blocked {plural(crawl.pages_firewalled, "page")}

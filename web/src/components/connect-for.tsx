@@ -75,5 +75,6 @@ export function ConnectFor({ connector, name, back, item, why, go, variant, labe
 export const geonodeWhy = {
   social: "We use the Geonode Scraper or Web Data API for this: it reads each brand's public social profiles (X, LinkedIn, YouTube, Instagram, TikTok and more) once a day for their followers, a token or so each, on your own Geonode account.",
   brands: "We use the Geonode Scraper or Web Data API for this: it reads each brand's website to find its social profiles and app store listings, a token or two per brand, on your own Geonode account.",
+  reviews: "We use the Geonode Scraper or Web Data API for this: it searches the web for each brand's Trustpilot, G2 and Capterra pages, then reads every review page once a day, a token or so each, on your own Geonode account.",
   audits: "We use the Geonode Scraper or Web Data API for this: it reads the pages a firewall blocks OutflareBot from, on sites you've proved you own, for a token per page on your own Geonode account.",
 } as const;

@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"strconv"
 	"testing"
+	"time"
 
 	c "github.com/outflareai/outflare/engine/internal/connectors"
 )
@@ -221,5 +222,48 @@ func TestRecordsAndMembersConvertAttioValues(t *testing.T) {
 		if fmt.Sprint(v[k]) != fmt.Sprint(w) {
 			t.Fatalf("%s: %#v, want %#v", k, v[k], w)
 		}
+	}
+}
+
+// A workspace too big to count while someone waits: every page is full, so
+// only the time limit stops the preview, and each count says it is capped.
+func TestPreviewStopsInTime(t *testing.T) {
+	defer func(d time.Duration) { previewTime = d }(previewTime)
+	previewTime = 200 * time.Millisecond
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body struct{ Limit int }
+		if r.Method == http.MethodPost {
+			json.NewDecoder(r.Body).Decode(&body)
+		} else {
+			body.Limit, _ = strconv.Atoi(r.URL.Query().Get("limit"))
+		}
+		var out any
+		switch r.Method + " " + r.URL.Path {
+		case "GET /v2/self":
+			out = map[string]any{"active": true, "workspace_name": "Acme"}
+		case "GET /v2/objects":
+			out = map[string]any{"data": []any{map[string]any{"id": map[string]string{"object_id": "o-people"}, "api_slug": "people"}}}
+		case "GET /v2/lists", "GET /v2/workspace_members", "GET /v2/objects/people/attributes":
+			out = map[string]any{"data": []any{}}
+		default:
+			out = map[string]any{"data": make([]map[string]any, body.Limit)}
+		}
+		json.NewEncoder(w).Encode(out)
+	}))
+	defer srv.Close()
+	cl := &c.Client{BaseURLs: map[string]string{"attio": srv.URL}}
+	start := time.Now()
+	p, err := Attio{}.CRMPreview(context.Background(), cl, c.Creds{"api_key": "at-key"}, 1_000_000_000)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if d := time.Since(start); d > 5*time.Second {
+		t.Fatalf("preview took %s", d)
+	}
+	if n := p.Objects[0].Records; n.Count == 0 || !n.Capped {
+		t.Fatalf("people count: %+v", n)
+	}
+	if !p.Notes.Capped || !p.Tasks.Capped {
+		t.Fatalf("notes %+v, tasks %+v", p.Notes, p.Tasks)
 	}
 }

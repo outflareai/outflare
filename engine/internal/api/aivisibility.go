@@ -94,7 +94,8 @@ func (m aivisModels) Open(ctx context.Context, ws string, t aivis.Target, cents 
 			Message: "Enter what " + t.Model + " costs under SEO → AI visibility → Settings, so Outflare can keep to your spend limits."}
 	}
 	c := aiChoice{Provider: p, IntegrationID: conns[i].ID, Price: price, MonthlyLimit: row.MonthlyLimit,
-		Task: taskVisibilitySampling, TaskLimit: row.taskLimit(taskVisibilitySampling)}
+		Task: taskVisibilitySampling, TaskLimit: row.taskLimit(taskVisibilitySampling),
+		LimitWarnOnly: row.LimitWarnOnly, TaskWarnOnly: row.taskWarnOnly(taskVisibilitySampling)}
 	if err := m.s.checkAIBudget(ctx, ws, c, cents); err != nil {
 		return aivis.Choice{}, refused(err)
 	}

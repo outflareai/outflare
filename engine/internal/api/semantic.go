@@ -175,7 +175,8 @@ func (s *Server) embedder(ctx context.Context, ws string) (aiChoice, llm.Config,
 		return aiChoice{}, llm.Config{}, err
 	}
 	c := aiChoice{Provider: p, IntegrationID: conn.ID, Task: taskSemanticSearch, Price: p.EmbedPrice(), PriceSource: "list",
-		MonthlyLimit: row.MonthlyLimit, TaskLimit: row.taskLimit(taskSemanticSearch)}
+		MonthlyLimit: row.MonthlyLimit, TaskLimit: row.taskLimit(taskSemanticSearch),
+		LimitWarnOnly: row.LimitWarnOnly, TaskWarnOnly: row.taskWarnOnly(taskSemanticSearch)}
 	return c, models.Config(p, o.Client, o.Creds["api_key"], ""), nil
 }
 

@@ -1150,6 +1150,12 @@ type messageView struct {
 
 func (s *Server) listMessages(w http.ResponseWriter, r *http.Request) {
 	a := accessFrom(r.Context())
+	if a.ViewID != "" {
+		// Sent emails, with their bodies, are email content: a support
+		// view never shows it.
+		writeError(w, r, http.StatusForbidden, "support_view_hidden", "sent emails are hidden while staff view this account")
+		return
+	}
 	q := r.URL.Query()
 	limit := 50
 	if v := q.Get("limit"); v != "" {

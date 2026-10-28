@@ -3,6 +3,8 @@ package api_test
 import (
 	"context"
 	"os"
+	"path/filepath"
+	"regexp"
 	"slices"
 	"strings"
 	"testing"
@@ -173,7 +175,28 @@ func TestQueryTablesMatchSchema(t *testing.T) {
 		}
 	}
 	slices.Sort(names)
+	// The database can be newer than this code: the previous version runs on
+	// the next version's schema during a deploy and after a rollback. Compare
+	// with the views this version's own migrations create, so a view from a
+	// later migration isn't counted against it.
+	views = slices.DeleteFunc(views, func(v string) bool { return !ownViews[v] })
 	if !slices.Equal(names, views) {
 		t.Fatalf("listed %v, schema has %v", names, views)
 	}
 }
+
+var ownViews = func() map[string]bool {
+	files, _ := filepath.Glob("../db/migrations/*.sql")
+	re := regexp.MustCompile(`(?i)CREATE\s+(?:OR\s+REPLACE\s+)?VIEW\s+query\.(\w+)`)
+	views := map[string]bool{}
+	for _, f := range files {
+		b, err := os.ReadFile(f)
+		if err != nil {
+			panic(err)
+		}
+		for _, m := range re.FindAllStringSubmatch(string(b), -1) {
+			views[m[1]] = true
+		}
+	}
+	return views
+}()

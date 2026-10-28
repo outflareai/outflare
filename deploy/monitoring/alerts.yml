@@ -51,6 +51,20 @@ groups:
         annotations:
           summary: "Website event batches failed 5 times and were set aside (site_events.store_failed in the logs)."
 
+      - alert: OutflareFlagsFailing
+        expr: sum(rate(outflare_flags_requests_total{outcome="error"}[5m])) / clamp_min(sum(rate(outflare_flags_requests_total[5m])), 1e-9) > 0.02
+        for: 10m
+        labels: { severity: warning }
+        annotations:
+          summary: "Over 2% of requests for visitors' feature flags fail: sites show their default instead of their variants. Look for errors on POST /v1/site/flags and .../flags/evaluate in the logs (usually the database)."
+
+      - alert: OutflareFlagsSlow
+        expr: histogram_quantile(0.95, sum by (le) (rate(outflare_flags_request_seconds_bucket[5m]))) > 0.25
+        for: 15m
+        labels: { severity: warning }
+        annotations:
+          summary: "Deciding feature flags takes over 250 ms at the 95th percentile, so pages wait longer to show their variant. Check the database pool and the Feature flags row."
+
       - alert: OutflareSmartListsBehind
         expr: max(outflare_smart_lists_oldest_refresh_seconds) > 3600
         for: 15m
@@ -272,3 +286,19 @@ groups:
         labels: { severity: warning }
         annotations:
           summary: "A conversion has waited over 30 minutes to go to its ad platform; check the jobs queue for ads.conversions_send and the engine log for ad_conversions."
+
+      - alert: OutflareReviewPagesNotRead
+        # Pages are read once a day; two days without a read means the
+        # hourly scheduler or the reviews.read jobs are stuck.
+        expr: max by (platform) (outflare_reviews_oldest_read_seconds) > 48 * 3600
+        for: 1h
+        labels: { severity: warning }
+        annotations:
+          summary: "A review page ({{ $labels.platform }}) hasn't been read for over two days; check the reviews.read jobs and the engine log for reviews.scheduler_failed."
+
+      - alert: OutflareReviewPageReadsFailing
+        expr: sum(rate(outflare_reviews_page_reads_total{outcome!="success"}[6h])) / sum(rate(outflare_reviews_page_reads_total[6h])) > 0.5 and sum(increase(outflare_reviews_page_reads_total[6h])) > 20
+        for: 1h
+        labels: { severity: warning }
+        annotations:
+          summary: "Over half of review page reads fail: a review site may have changed its page or started blocking reads; check the review_page.read_failed events by platform and error code."

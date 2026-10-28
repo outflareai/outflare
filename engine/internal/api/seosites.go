@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"net/http"
 	"net/url"
 	"slices"
@@ -64,20 +65,29 @@ type siteLimits struct {
 }
 
 type seoSite struct {
-	ID              string       `json:"id"`
-	BrandID         *string      `json:"brand_id"`
-	Host            string       `json:"host"`
-	StartURL        string       `json:"start_url"`
-	Status          string       `json:"status"`
-	Schedule        string       `json:"schedule"`
-	MaxPages        int          `json:"max_pages"`
-	CrawlDelayMS    int          `json:"crawl_delay_ms"`
-	ObeyRobots      bool         `json:"obey_robots"`
-	Verified        bool         `json:"verified"`
-	VerifiedAt      *time.Time   `json:"verified_at"`
-	VerifyMethod    *string      `json:"verify_method"`
-	VerifyCheckedAt *time.Time   `json:"verify_checked_at"`
-	Verification    crawl.Proofs `json:"verification"`
+	ID           string  `json:"id"`
+	BrandID      *string `json:"brand_id"`
+	Host         string  `json:"host"`
+	StartURL     string  `json:"start_url"`
+	Status       string  `json:"status"`
+	Schedule     string  `json:"schedule"`
+	MaxPages     int     `json:"max_pages"`
+	CrawlDelayMS int     `json:"crawl_delay_ms"`
+	ObeyRobots   bool    `json:"obey_robots"`
+	// How it is crawled beyond its limits, and when a scheduled crawl
+	// starts.
+	crawl.Settings
+	ScheduleHour *int   `json:"schedule_hour"`
+	ScheduleDay  *int   `json:"schedule_day"`
+	ScheduleTZ   string `json:"schedule_tz"`
+	// The connections that can run pages' scripts (render_js), for this
+	// site's brand.
+	RenderConnections []string     `json:"render_connections"`
+	Verified          bool         `json:"verified"`
+	VerifiedAt        *time.Time   `json:"verified_at"`
+	VerifyMethod      *string      `json:"verify_method"`
+	VerifyCheckedAt   *time.Time   `json:"verify_checked_at"`
+	Verification      crawl.Proofs `json:"verification"`
 	// One click for the DNS proof: the connections that can add it and
 	// the last run.
 	DNSInstall     *connectors.DNSInstall `json:"dns_install"`
@@ -112,6 +122,10 @@ type crawlRunView struct {
 	PagesFallback   int     `json:"pages_fallback"`
 	PagesFirewalled int     `json:"pages_firewalled"`
 	FallbackHint    string  `json:"fallback_hint"`
+	PagesExcluded   int     `json:"pages_excluded"`
+	PagesRendered   int     `json:"pages_rendered"`
+	// The settings the crawl ran with.
+	Settings crawl.Settings `json:"settings"`
 	// The audit, once the crawl has finished.
 	HealthScore *int        `json:"health_score"`
 	Issues      issueCounts `json:"issues"`
@@ -122,12 +136,12 @@ type crawlRunView struct {
 }
 
 const crawlRunCols = `r.id, r.site_id, r.host, r.status, r.trigger, NULLIF(r.reason, ''), NULLIF(r.error_code, ''), r.max_pages,
-	r.delay_ms, r.obey_robots, r.pages_fetched, r.pages_blocked, r.pages_failed, r.pages_found, r.pages_fallback, r.pages_firewalled, r.fallback_hint, r.health_score, r.issues_errors, r.issues_warnings, r.issues_notices,
+	r.delay_ms, r.obey_robots, r.pages_fetched, r.pages_blocked, r.pages_failed, r.pages_found, r.pages_fallback, r.pages_firewalled, r.fallback_hint, r.pages_excluded, r.pages_rendered, r.settings, r.health_score, r.issues_errors, r.issues_warnings, r.issues_notices,
 	r.bytes, r.created_at, r.started_at, r.finished_at`
 
 func scanCrawlRun(row pgx.Row, v *crawlRunView, extra ...any) error {
 	return row.Scan(append([]any{&v.ID, &v.SiteID, &v.Host, &v.Status, &v.Trigger, &v.Reason, &v.ErrorCode, &v.MaxPages,
-		&v.DelayMS, &v.ObeyRobots, &v.PagesFetched, &v.PagesBlocked, &v.PagesFailed, &v.PagesFound, &v.PagesFallback, &v.PagesFirewalled, &v.FallbackHint, &v.HealthScore, &v.Issues.Errors, &v.Issues.Warnings, &v.Issues.Notices,
+		&v.DelayMS, &v.ObeyRobots, &v.PagesFetched, &v.PagesBlocked, &v.PagesFailed, &v.PagesFound, &v.PagesFallback, &v.PagesFirewalled, &v.FallbackHint, &v.PagesExcluded, &v.PagesRendered, &v.Settings, &v.HealthScore, &v.Issues.Errors, &v.Issues.Warnings, &v.Issues.Notices,
 		&v.Bytes, &v.CreatedAt, &v.StartedAt, &v.FinishedAt}, extra...)...)
 }
 
@@ -139,6 +153,8 @@ func (s *Server) loadSEOSites(ctx context.Context, ws string, id *string, sel br
 		SELECT s.id, s.brand_id::text, s.host, s.start_url, s.status, s.schedule, s.max_pages, s.crawl_delay_ms,
 		       s.obey_robots, s.verify_token, s.verified_at, NULLIF(s.verify_method, ''), s.verify_checked_at,
 		       s.created_at, s.updated_at, s.dns_install,
+		       s.render_js, s.use_sitemaps, s.follow_nofollow, s.ignore_params, s.max_depth, s.include_patterns, s.exclude_patterns,
+		       s.schedule_hour, s.schedule_day, s.schedule_tz,
 		       (SELECT r.id FROM crawl_runs r WHERE r.site_id = s.id ORDER BY r.created_at DESC LIMIT 1)
 		FROM seo_sites s
 		WHERE s.workspace_id = $1 AND ($2::uuid IS NULL OR s.id = $2)`+sel.sql("s.brand_id", &args)+`
@@ -154,7 +170,9 @@ func (s *Server) loadSEOSites(ctx context.Context, ws string, id *string, sel br
 		var v withRun
 		var token string
 		err := row.Scan(&v.ID, &v.BrandID, &v.Host, &v.StartURL, &v.Status, &v.Schedule, &v.MaxPages, &v.CrawlDelayMS,
-			&v.ObeyRobots, &token, &v.VerifiedAt, &v.VerifyMethod, &v.VerifyCheckedAt, &v.CreatedAt, &v.UpdatedAt, &v.DNSInstall, &v.run)
+			&v.ObeyRobots, &token, &v.VerifiedAt, &v.VerifyMethod, &v.VerifyCheckedAt, &v.CreatedAt, &v.UpdatedAt, &v.DNSInstall,
+			&v.RenderJS, &v.UseSitemaps, &v.FollowNofollow, &v.IgnoreParams, &v.MaxDepth, &v.Include, &v.Exclude,
+			&v.ScheduleHour, &v.ScheduleDay, &v.ScheduleTZ, &v.run)
 		v.Verified = v.VerifiedAt != nil
 		v.Verification = crawl.ProofsFor(v.StartURL, v.Host, token)
 		l := crawl.LimitsFor(v.Verified)
@@ -164,13 +182,17 @@ func (s *Server) loadSEOSites(ctx context.Context, ws string, id *string, sel br
 	if err != nil {
 		return nil, err
 	}
-	dns, err := s.dnsConnections(ctx, ws)
+	dns, err := s.connectionsWith(ctx, ws, connectors.CapDNSWrite)
+	if err != nil {
+		return nil, err
+	}
+	render, err := s.connectionsWith(ctx, ws, connectors.CapCrawlFetch)
 	if err != nil {
 		return nil, err
 	}
 	out := make([]seoSite, 0, len(list))
 	for _, v := range list {
-		v.DNSConnections = dns(deref(v.BrandID))
+		v.DNSConnections, v.RenderConnections = dns(deref(v.BrandID)), render(deref(v.BrandID))
 		if v.run != nil {
 			var run crawlRunView
 			if err := scanCrawlRun(s.pool.QueryRow(ctx, `SELECT `+crawlRunCols+` FROM crawl_runs r WHERE r.id = $1`, *v.run), &run); err != nil {
@@ -251,6 +273,17 @@ type seoSiteInput struct {
 	ObeyRobots   *bool            `json:"obey_robots"`
 	Schedule     *string          `json:"schedule"`
 	Status       *string          `json:"status"`
+
+	RenderJS        *string       `json:"render_js"`
+	UseSitemaps     *bool         `json:"use_sitemaps"`
+	FollowNofollow  *bool         `json:"follow_nofollow"`
+	IgnoreParams    *bool         `json:"ignore_params"`
+	MaxDepth        *int          `json:"max_depth"`
+	IncludePatterns *[]string     `json:"include_patterns"`
+	ExcludePatterns *[]string     `json:"exclude_patterns"`
+	ScheduleHour    optional[int] `json:"schedule_hour"`
+	ScheduleDay     optional[int] `json:"schedule_day"`
+	ScheduleTZ      *string       `json:"schedule_tz"`
 }
 
 // check validates the settings against a site's limits.
@@ -276,7 +309,69 @@ func (in *seoSiteInput) check(verified bool) error {
 	if in.Status != nil && !slices.Contains(siteStatuses, *in.Status) {
 		return errInvalid("status is active or paused")
 	}
+	if in.RenderJS != nil && !slices.Contains(crawl.RenderModes, *in.RenderJS) {
+		return errInvalid("render_js is off, auto or always")
+	}
+	if in.MaxDepth != nil && (*in.MaxDepth < 0 || *in.MaxDepth > 100) {
+		return errInvalid("max_depth is 0 (no limit) to 100")
+	}
+	for name, list := range map[string]*[]string{"include_patterns": in.IncludePatterns, "exclude_patterns": in.ExcludePatterns} {
+		if list == nil {
+			continue
+		}
+		if *list == nil {
+			*list = []string{}
+		}
+		if err := crawl.CheckPatterns(name, *list); err != nil {
+			return errInvalid(err.Error())
+		}
+	}
+	if v := in.ScheduleHour.Value; v != nil && (*v < 0 || *v > 23) {
+		return errInvalid("schedule_hour is 0 to 23, or null for any time")
+	}
+	if v := in.ScheduleDay.Value; v != nil && (*v < 0 || *v > 6) {
+		return errInvalid("schedule_day is 0 (Sunday) to 6, or null for any day")
+	}
+	if in.ScheduleTZ != nil {
+		if _, err := time.LoadLocation(*in.ScheduleTZ); err != nil || *in.ScheduleTZ == "" || *in.ScheduleTZ == "Local" {
+			return errInvalid("schedule_tz is a time zone name such as Australia/Sydney or UTC")
+		}
+	}
 	return nil
+}
+
+// settingsSQL is the SET clause for the crawl settings in seoSiteInput,
+// with its arguments numbered from n.
+func (in *seoSiteInput) settingsSQL(n int) (string, []any) {
+	return fmt.Sprintf(`render_js = COALESCE($%d, render_js), use_sitemaps = COALESCE($%d, use_sitemaps),
+		follow_nofollow = COALESCE($%d, follow_nofollow), ignore_params = COALESCE($%d, ignore_params),
+		max_depth = COALESCE($%d, max_depth), include_patterns = COALESCE($%d, include_patterns),
+		exclude_patterns = COALESCE($%d, exclude_patterns),
+		schedule_hour = CASE WHEN $%d THEN $%d ELSE schedule_hour END,
+		schedule_day = CASE WHEN $%d THEN $%d ELSE schedule_day END, schedule_tz = COALESCE($%d, schedule_tz)`,
+			n, n+1, n+2, n+3, n+4, n+5, n+6, n+7, n+8, n+9, n+10, n+11),
+		[]any{in.RenderJS, in.UseSitemaps, in.FollowNofollow, in.IgnoreParams, in.MaxDepth, in.IncludePatterns, in.ExcludePatterns,
+			in.ScheduleHour.Set, in.ScheduleHour.Value, in.ScheduleDay.Set, in.ScheduleDay.Value, in.ScheduleTZ}
+}
+
+// checkTZ makes sure Postgres knows a time zone the schedule names too.
+func checkTZ(ctx context.Context, tx pgx.Tx, tz *string) error {
+	if tz == nil {
+		return nil
+	}
+	if _, err := tx.Exec(ctx, `SELECT now() AT TIME ZONE $1`, *tz); err != nil {
+		return errInvalid("schedule_tz is a time zone name such as Australia/Sydney or UTC")
+	}
+	return nil
+}
+
+// settingsFields names the crawl settings an input sets, for the audit
+// log.
+func (in *seoSiteInput) settingsFields() map[string]bool {
+	return map[string]bool{"render_js": in.RenderJS != nil, "use_sitemaps": in.UseSitemaps != nil,
+		"follow_nofollow": in.FollowNofollow != nil, "ignore_params": in.IgnoreParams != nil, "max_depth": in.MaxDepth != nil,
+		"include_patterns": in.IncludePatterns != nil, "exclude_patterns": in.ExcludePatterns != nil,
+		"schedule_hour": in.ScheduleHour.Set, "schedule_day": in.ScheduleDay.Set, "schedule_tz": in.ScheduleTZ != nil}
 }
 
 func (s *Server) createSEOSite(w http.ResponseWriter, r *http.Request) {
@@ -346,6 +441,13 @@ func (s *Server) createSEOSite(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			return err
 		}
+		if err := checkTZ(ctx, tx, req.ScheduleTZ); err != nil {
+			return err
+		}
+		set, args := req.settingsSQL(2)
+		if _, err := tx.Exec(ctx, `UPDATE seo_sites SET `+set+` WHERE id = $1`, append([]any{id}, args...)...); err != nil {
+			return err
+		}
 		return record(ctx, tx, &a.principal, a.WorkspaceID, "seo_site.created", "seo_site", id, map[string]any{
 			"brand_id": brand, "max_pages": maxPages, "schedule": schedule,
 		})
@@ -413,12 +515,17 @@ func (s *Server) updateSEOSite(w http.ResponseWriter, r *http.Request) {
 			}
 			brand = b
 		}
+		if err := checkTZ(ctx, tx, req.ScheduleTZ); err != nil {
+			return err
+		}
+		settings, settingsArgs := req.settingsSQL(10)
 		_, err := tx.Exec(ctx, `
 			UPDATE seo_sites SET brand_id = $3::uuid, max_pages = COALESCE($4, max_pages), crawl_delay_ms = COALESCE($5, crawl_delay_ms),
 				obey_robots = COALESCE($6, obey_robots), schedule = COALESCE($7, schedule), status = COALESCE($8, status),
-				start_url = COALESCE($9, start_url), updated_at = now()
+				start_url = COALESCE($9, start_url), `+settings+`, updated_at = now()
 			WHERE id = $1 AND workspace_id = $2`,
-			site.ID, a.WorkspaceID, brand, req.MaxPages, req.CrawlDelayMS, req.ObeyRobots, req.Schedule, req.Status, startURL)
+			append([]any{site.ID, a.WorkspaceID, brand, req.MaxPages, req.CrawlDelayMS, req.ObeyRobots, req.Schedule, req.Status, startURL},
+				settingsArgs...)...)
 		if err != nil {
 			return err
 		}
@@ -435,9 +542,11 @@ func (s *Server) updateSEOSite(w http.ResponseWriter, r *http.Request) {
 		}
 		data := map[string]any{}
 		var fields []string
-		for name, set := range map[string]bool{"brand_id": req.BrandID.Set, "max_pages": req.MaxPages != nil,
+		changed := req.settingsFields()
+		maps.Copy(changed, map[string]bool{"brand_id": req.BrandID.Set, "max_pages": req.MaxPages != nil,
 			"crawl_delay_ms": req.CrawlDelayMS != nil, "obey_robots": req.ObeyRobots != nil, "schedule": req.Schedule != nil,
-			"status": req.Status != nil, "url": req.URL != nil} {
+			"status": req.Status != nil, "url": req.URL != nil})
+		for name, set := range changed {
 			if set {
 				fields = append(fields, name)
 			}
@@ -453,6 +562,9 @@ func (s *Server) updateSEOSite(w http.ResponseWriter, r *http.Request) {
 		}
 		if req.Schedule != nil {
 			data["schedule"] = *req.Schedule
+		}
+		if req.RenderJS != nil {
+			data["render_js"] = *req.RenderJS
 		}
 		return record(ctx, tx, &a.principal, a.WorkspaceID, "seo_site.updated", "seo_site", site.ID, data)
 	})
@@ -480,6 +592,9 @@ func (s *Server) deleteSEOSite(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	err := pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
 		if _, err := tx.Exec(ctx, `DELETE FROM seo_sites WHERE id = $1 AND workspace_id = $2`, site.ID, a.WorkspaceID); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(ctx, `DELETE FROM fix_guidelines WHERE workspace_id = $1 AND subject_id = $2`, a.WorkspaceID, site.ID); err != nil {
 			return err
 		}
 		if _, err := tx.Exec(ctx, `DELETE FROM fixes WHERE workspace_id = $1 AND subject_type = 'seo_site' AND subject_id = $2`, a.WorkspaceID, site.ID); err != nil {

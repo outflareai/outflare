@@ -264,6 +264,9 @@ const (
 	// One-time links in account emails.
 	PrefixVerifyEmail   = "ofv_"
 	PrefixResetPassword = "ofr_"
+	// A support view lets a staff member see one account read-only, beside
+	// their own session (outflare_view cookie).
+	PrefixSupportView = "ofsv_"
 )
 
 // NewToken returns a random secret with the given prefix and its hash for

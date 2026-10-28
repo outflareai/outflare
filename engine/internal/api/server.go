@@ -58,42 +58,48 @@ import (
 var Version = "dev"
 
 type Server struct {
-	pool            *pgxpool.Pool
-	log             *slog.Logger
-	webDir          string
-	publicURL       string
-	secureCookies   bool
-	limiter         loginLimiter
-	emailLimiter    loginLimiter // account emails per address and per network
-	mailer          sysmail.Sender
-	webauthn        *webauthn.WebAuthn // nil while passkeys are off
-	mail            *mailbox.Service
-	send            *sending.Engine
-	inbox           *inbox.Syncer
-	oauth           *oauth.Tokens
-	box             *secrets.Box
-	query           queryState    // Query's own connections
-	semantic        semanticState // whether pgvector is there, and query vectors
-	integrations    *connectors.Store
-	lists           *lists.Service
-	verifier        *verify.Service
-	emailFinder     *emailfind.Service
-	classifier      *classify.Classifier
-	research        *research.Service
-	vendors         *vendorsync.Service
-	inbound         *inbound.Service
-	outcomes        *outcomes.Syncer
-	analyticsSync   *analyticsync.Syncer
-	seoSyncer       *seosync.Syncer
-	adSync          *adsync.Syncer
-	crawler         *crawl.Service
-	imports         *imports.Service
-	cname           tracking.CNAMEResolver
+	pool          *pgxpool.Pool
+	log           *slog.Logger
+	webDir        string
+	publicURL     string
+	secureCookies bool
+	limiter       loginLimiter
+	emailLimiter  loginLimiter // account emails per address and per network
+	mailer        sysmail.Sender
+	webauthn      *webauthn.WebAuthn // nil while passkeys are off
+	mail          *mailbox.Service
+	send          *sending.Engine
+	inbox         *inbox.Syncer
+	oauth         *oauth.Tokens
+	box           *secrets.Box
+	query         queryState    // Query's own connections
+	semantic      semanticState // whether pgvector is there, and query vectors
+	integrations  *connectors.Store
+	lists         *lists.Service
+	verifier      *verify.Service
+	emailFinder   *emailfind.Service
+	classifier    *classify.Classifier
+	research      *research.Service
+	vendors       *vendorsync.Service
+	inbound       *inbound.Service
+	outcomes      *outcomes.Syncer
+	analyticsSync *analyticsync.Syncer
+	seoSyncer     *seosync.Syncer
+	adSync        *adsync.Syncer
+	crawler       *crawl.Service
+	imports       *imports.Service
+	cname         tracking.CNAMEResolver
+	// What tracking domains point at, who gets their certificates, and
+	// the secret the edge in front of them signs its headers with.
+	trackingTarget  string
+	trackingCerts   TrackingCerts
+	edgeSecret      string
 	dc              *domainconnect.Client
 	dcMu            sync.Mutex
 	routes          func(*http.ServeMux)
 	workspaceRoutes []WorkspaceRoute
 	menuLinks       []MenuLinks
+	aiTools         []AITool
 	middleware      []func(http.Handler) http.Handler
 	capabilities    []string
 	posthog         *posthogProxy
@@ -111,6 +117,9 @@ type Server struct {
 	siteInbox        bool
 	inboxWake        chan struct{}
 	siteVisitorLimit *rateLimiter
+	// siteFlagLimit caps the website script's flag requests per key.
+	siteFlagLimit *rateLimiter
+	flagCache     flagCache
 	// Which hosts are tracking domains, for trackingHostsOnly.
 	trackingHosts trackingHostCache
 	mcp           *MCPUpstream
@@ -231,6 +240,17 @@ type Options struct {
 	Capabilities    []string                          // added to /v1/meta
 	// MenuLinks add per-person sidebar items, in /v1/me.
 	MenuLinks []MenuLinks
+	// AITools name extensions' own AI calls on the usage page.
+	AITools []AITool
+	// TrackingTarget is the host tracking domains' CNAME records point at;
+	// empty for PUBLIC_URL's host.
+	TrackingTarget string
+	// TrackingCerts gets HTTPS certificates for tracking domains; nil when
+	// the operator's own proxy serves them.
+	TrackingCerts TrackingCerts
+	// EdgeSecret lets an edge in front of tracking domains pass on the
+	// domain and visitor address it saw (edge.go); empty turns that off.
+	EdgeSecret string
 	// QueryConnections is how many queries run at once, each on its own
 	// database connection; zero means the default (3), below zero turns
 	// Query off.
@@ -281,19 +301,23 @@ func NewServer(pool *pgxpool.Pool, log *slog.Logger, opts Options) *Server {
 		mailer = sysmail.Log{Logger: log}
 	}
 	s := &Server{
-		emails:    mail,
-		mailer:    mailer,
-		webauthn:  newWebAuthn(publicURL, opts.Passkeys && opts.Box != nil),
-		cname:     cname,
-		dc:        dc,
-		telemetry: tel,
-		webhooks:  hooks,
-		rateLimit: &rateLimiter{name: "api", limit: opts.RateLimit, window: time.Minute},
+		emails:         mail,
+		mailer:         mailer,
+		webauthn:       newWebAuthn(publicURL, opts.Passkeys && opts.Box != nil),
+		cname:          cname,
+		trackingTarget: opts.TrackingTarget,
+		trackingCerts:  opts.TrackingCerts,
+		edgeSecret:     opts.EdgeSecret,
+		dc:             dc,
+		telemetry:      tel,
+		webhooks:       hooks,
+		rateLimit:      &rateLimiter{name: "api", limit: opts.RateLimit, window: time.Minute},
 		// Apps register themselves once per install; this stops a flood.
 		registerLimit:    &rateLimiter{name: "register", limit: 30, window: time.Hour},
 		siteIPLimit:      &rateLimiter{name: "site_ip", limit: 300, window: time.Minute},
 		siteKeyLimit:     &rateLimiter{name: "site_key", limit: 6000, window: time.Minute},
 		siteVisitorLimit: &rateLimiter{name: "site_visitor", limit: 600, window: time.Minute},
+		siteFlagLimit:    &rateLimiter{name: "site_flags", limit: 6000, window: time.Minute},
 		siteInbox:        opts.SiteInbox,
 		inboxWake:        make(chan struct{}, 1),
 		mcp:              opts.MCP,
@@ -325,6 +349,7 @@ func NewServer(pool *pgxpool.Pool, log *slog.Logger, opts Options) *Server {
 		routes:           opts.Routes,
 		workspaceRoutes:  opts.WorkspaceRoutes,
 		menuLinks:        opts.MenuLinks,
+		aiTools:          opts.AITools,
 		middleware:       opts.Middleware,
 		capabilities:     append([]string{"mailboxes", "domains", "leads", "suppression", "sequences", "inbox", "oauth", "warmup", "infrastructure", "allocation", "platforms", "connectors", "verification", "classification", "mailbox_suppliers", "mailbox_health", "imports", "reports", "outcomes", "projects", "agencies", "tracking", "missions", "lists", "webhooks", "emails"}, opts.Capabilities...),
 		alloc:            alloc,
@@ -394,7 +419,9 @@ func (s *Server) buildHandler() http.Handler {
 	s.routesContext(mux)
 	s.routesOnboarding(mux)
 	s.routesCommunity(mux)
+	s.routesSupportAccess(mux)
 	s.routesSetup(mux)
+	s.routesBrandDNS(mux)
 	s.routesStatus(mux)
 	s.routesTeams(mux)
 	s.routesAllocation(mux)
@@ -407,6 +434,7 @@ func (s *Server) buildHandler() http.Handler {
 	s.routesInbox(mux)
 	s.routesInboxTags(mux)
 	s.routesReplyRules(mux)
+	s.routesAlerts(mux)
 	s.routesOAuth(mux)
 	s.routesStats(mux)
 	s.routesDomains(mux)
@@ -437,8 +465,11 @@ func (s *Server) buildHandler() http.Handler {
 	s.routesSocial(mux)
 	s.routesSocialAccounts(mux)
 	s.routesBrandLinks(mux)
+	s.routesReviews(mux)
 	s.routesAIFacts(mux)
 	s.routesFixAutonomy(mux)
+	s.routesFixTickets(mux)
+	s.routesIndexability(mux)
 	s.routesConnectRequests(mux)
 	s.routesVendorMailboxes(mux)
 	s.routesEmailBisonCompat(mux)
@@ -447,6 +478,7 @@ func (s *Server) buildHandler() http.Handler {
 	s.routesPayments(mux)
 	s.routesConnectionHooks(mux)
 	s.routesSiteKeys(mux)
+	s.routesFlags(mux)
 	s.routesVisitors(mux)
 	s.routesHealth(mux)
 	s.routesReports(mux)
@@ -458,6 +490,7 @@ func (s *Server) buildHandler() http.Handler {
 	s.routesClassify(mux)
 	s.routesMissions(mux)
 	s.routesPlaybooks(mux)
+	s.routesKits(mux)
 	s.routesTelemetry(mux)
 	s.routesAgentOAuth(mux)
 	s.routesMCP(mux)
@@ -489,7 +522,7 @@ func (s *Server) buildHandler() http.Handler {
 		_, p := mux.Handler(r)
 		return p
 	}
-	return requestID(s.securityHeaders(s.logRequests(pattern, s.recoverer(s.trackingHostsOnly(withCursorParam(withFields(h)))))))
+	return requestID(s.fromEdge(s.securityHeaders(s.logRequests(pattern, s.recoverer(s.trackingHostsOnly(withCursorParam(withFields(h))))))))
 }
 
 // testWrap, set only by this package's tests, wraps every handler the

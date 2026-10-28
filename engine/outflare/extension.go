@@ -53,6 +53,8 @@ type Host struct {
 
 	workspaceRoutes []api.WorkspaceRoute
 	menuLinks       []api.MenuLinks
+	aiTools         []api.AITool
+	trackingCerts   api.TrackingCerts
 	store           *connectors.Store
 	server          *api.Server
 	emailFinder     *emailfind.Service
@@ -114,6 +116,31 @@ func (h *Host) AddMenuLinks(fn func(ctx context.Context, userID string) ([]MenuL
 	h.menuLinks = append(h.menuLinks, fn)
 }
 
+// AITool names an extension's own AI calls: ID is what it passes as the
+// task to AI().Chat, Name and Description are what Settings → AI usage
+// shows, and ModelTask is the model task whose model the calls use (such
+// as classify_domain), so a workspace sees and limits them on their own
+// without choosing another model.
+type AITool = api.AITool
+
+// AddAITool lists t on every workspace's AI usage page, so its calls are
+// shown, and can be limited, apart from the engine's tools. A bad or
+// clashing tool panics at start-up.
+func (h *Host) AddAITool(t AITool) {
+	if err := api.CheckAITool(t); err != nil {
+		panic(err)
+	}
+	h.aiTools = append(h.aiTools, t)
+}
+
+// SetTrackingCerts gets HTTPS certificates for workspaces' tracking
+// domains through certs, for a server whose own proxy can't (Cloud asks
+// Cloudflare). Once set, a tracking domain's links use it only after its
+// certificate is active.
+func (h *Host) SetTrackingCerts(certs TrackingCerts) {
+	h.trackingCerts = certs
+}
+
 // DisableTelemetry stops the daily anonymous usage report and update check
 // that self-hosted servers send (docs/telemetry.md). The hosted Cloud calls
 // it: its usage is measured on its own side, not reported to itself.
@@ -145,10 +172,15 @@ type (
 	Accounts   = api.Accounts
 	NewAccount = api.NewAccount
 	MenuLink   = api.MenuLink
-	InputError = api.InputError
+	// TrackingCerts and CertState are what SetTrackingCerts takes.
+	TrackingCerts = api.TrackingCerts
+	CertState     = api.CertState
+	InputError    = api.InputError
 	// UserDeletion is what Accounts.DeleteUser did, or would do.
 	UserDeletion      = api.UserDeletion
 	DeletionWorkspace = api.DeletionWorkspace
+	// SupportView is a read-only view Accounts.StartSupportView began.
+	SupportView = api.SupportView
 )
 
 var (
@@ -157,6 +189,8 @@ var (
 	// person must choose a password; or the link is unknown, used or expired.
 	ErrChoosePassword = api.ErrChoosePassword
 	ErrBadSignupLink  = api.ErrBadSignupLink
+	// Accounts.StartSupportView: the person turned support access off.
+	ErrSupportAccessOff = api.ErrSupportAccessOff
 )
 
 // SignupConfirmPath is the page a sign-up confirmation link opens, with

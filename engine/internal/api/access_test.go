@@ -31,6 +31,7 @@ import (
 	"github.com/outflareai/outflare/engine/internal/emailfind"
 	"github.com/outflareai/outflare/engine/internal/imports"
 	"github.com/outflareai/outflare/engine/internal/inbox"
+	"github.com/outflareai/outflare/engine/internal/indexability"
 	"github.com/outflareai/outflare/engine/internal/jobs"
 	"github.com/outflareai/outflare/engine/internal/mailbox"
 	"github.com/outflareai/outflare/engine/internal/oauth"
@@ -136,7 +137,8 @@ func freshEnvWith(t *testing.T, change func(*api.Options)) *env {
 	ads := &adsync.Syncer{Pool: pool, Store: integrations, Log: log}
 	// Crawls reach httptest sites on 127.0.0.1 without pausing between requests.
 	crawler := &crawl.Service{Pool: pool, Log: log, Resolver: dns, AllowPrivate: true, StepFor: 5 * time.Second,
-		Wait: func(context.Context, time.Duration) error { return nil }, Fallback: &crawl.ConnectorFallback{Store: integrations, Pool: pool}, AfterAudit: seointel.AfterAudit}
+		Wait: func(context.Context, time.Duration) error { return nil }, Fallback: &crawl.ConnectorFallback{Store: integrations, Pool: pool}, AfterAudit: seointel.AfterAudit,
+		AfterCrawl: indexability.AfterCrawl}
 	opts := api.Options{Mailboxes: mail, Sending: send, Inbox: syncer, OAuth: tokens,
 		Box: box, Integrations: integrations, Verify: verifier, EmailFinder: finder, Classifier: &classify.Classifier{Resolver: dns}, Research: &research.Service{Pool: pool, Log: log}, Imports: importer, Platforms: plat, CNAME: dns, Mailer: ob, AnalyticsSync: async, SEOSync: seo, AdSync: ads, Crawl: crawler,
 		DomainConnect: &domainconnect.Client{HTTP: http.DefaultClient, Resolver: dns}}
@@ -165,6 +167,9 @@ func (c *client) raw(method, path, contentType, body string) (int, map[string]an
 	if c.cookie != nil {
 		req.AddCookie(c.cookie)
 	}
+	for _, ck := range c.extra {
+		req.AddCookie(ck)
+	}
 	if c.bearer != "" {
 		req.Header.Set("Authorization", "Bearer "+c.bearer)
 	}
@@ -182,6 +187,7 @@ type client struct {
 	cookie *http.Cookie
 	bearer string
 	header map[string]string // sent with every request, such as Outflare-Client
+	extra  []*http.Cookie    // more cookies, such as a support view's
 }
 
 func (c *client) do(method, path string, body any) (int, map[string]any) {
@@ -197,6 +203,9 @@ func (c *client) do(method, path string, body any) (int, map[string]any) {
 	}
 	if c.cookie != nil {
 		req.AddCookie(c.cookie)
+	}
+	for _, ck := range c.extra {
+		req.AddCookie(ck)
 	}
 	if c.bearer != "" {
 		req.Header.Set("Authorization", "Bearer "+c.bearer)

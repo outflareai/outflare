@@ -151,13 +151,30 @@ func Emit(ctx context.Context, e Event) {
 	if e.At.IsZero() {
 		e.At = time.Now().UTC()
 	}
-	if h, ok := ctx.Value(holdKey{}).(*hold); ok && (e.Outcome == "" || e.Outcome == Success) {
+	if h, ok := ctx.Value(holdKey{}).(*hold); ok {
 		h.mu.Lock()
-		h.events = append(h.events, e)
+		e = h.credit(e)
+		held := e.Outcome == "" || e.Outcome == Success
+		if held {
+			h.events = append(h.events, e)
+		}
 		h.mu.Unlock()
-		return
+		if held {
+			return
+		}
 	}
 	send(e)
+}
+
+// Credit says the request held in ctx is a support view by viewerID, a
+// staff member reading someone's account: its events count as the
+// viewer's, not the person's, and say so with support_view.
+func Credit(ctx context.Context, viewerID string) {
+	if h, ok := ctx.Value(holdKey{}).(*hold); ok {
+		h.mu.Lock()
+		h.viewer = viewerID
+		h.mu.Unlock()
+	}
 }
 
 // Fail logs err and records e as a failure with code: the one call for an
@@ -182,6 +199,20 @@ type holdKey struct{}
 type hold struct {
 	mu     sync.Mutex
 	events []Event
+	viewer string // Credit
+}
+
+func (h *hold) credit(e Event) Event {
+	if h.viewer == "" {
+		return e
+	}
+	props := make(map[string]any, len(e.Props)+1)
+	for k, v := range e.Props {
+		props[k] = v
+	}
+	props["support_view"] = true
+	e.UserID, e.Props = h.viewer, props
+	return e
 }
 
 // Hold keeps the events emitted with the returned context until release:

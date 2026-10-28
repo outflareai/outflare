@@ -9,7 +9,7 @@ import { AICostNotice } from "./AIUsage";
 type Settings = components["schemas"]["AISettings"];
 type Model = { id: string; name: string; price: components["schemas"]["AIPrice"] | null };
 type Price = components["schemas"]["AIPrice"];
-type Task = "plan" | "turn" | "check_in" | "reply_labelling" | "classify_domain" | "social_replies" | "email_verification";
+type Task = "plan" | "turn" | "check_in" | "reply_labelling" | "classify_domain" | "social_replies" | "review_replies" | "email_verification";
 type TaskChoice = { model: string; inPrice: string; outPrice: string };
 const tasks: { id: Task; name: string; help: string }[] = [
   { id: "plan", name: "Planning", help: "Drafting a mission from your goal" },
@@ -18,6 +18,7 @@ const tasks: { id: Task; name: string; help: string }[] = [
   { id: "reply_labelling", name: "Reply labelling", help: "Labelling replies to your outreach: interested, not now, out of office" },
   { id: "classify_domain", name: "Domain research", help: "Reading an unknown email domain's homepage to tell what kind of company it is" },
   { id: "social_replies", name: "Social replies", help: "Drafting replies to posts your social watches found, for a person to approve" },
+  { id: "review_replies", name: "Review answers", help: "Drafting public answers to reviews of your brands, for a person to edit and post" },
   { id: "email_verification", name: "Email verification", help: "Checking email addresses the free checks could not settle" },
 ];
 const noChoice: TaskChoice = { model: "", inPrice: "", outPrice: "" };
@@ -93,7 +94,7 @@ export function AIModelCard({ ws, canManage }: { ws: string; canManage: boolean 
   // short jobs, when they cost less (as the engine decides).
   const taskDefault = (t: Task) => {
     const p = chosen?.provider;
-    const tier = t === "check_in" || t === "social_replies" ? p?.light_model : t === "reply_labelling" || t === "classify_domain" || t === "email_verification" ? (p?.cheap_model ?? p?.light_model) : null;
+    const tier = t === "check_in" || t === "social_replies" || t === "review_replies" ? p?.light_model : t === "reply_labelling" || t === "classify_domain" || t === "email_verification" ? (p?.cheap_model ?? p?.light_model) : null;
     return tier && tier !== model && cost(priceOf(tier)) < cost(known) ? tier : model;
   };
   const taskNeedsPrice = (t: Task) => !!taskChoice[t].model && !priceOf(taskChoice[t].model);

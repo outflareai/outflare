@@ -193,8 +193,16 @@ func TestEmailFinders(t *testing.T) {
 func TestEveryConnectorIsWellFormed(t *testing.T) {
 	for _, conn := range All() {
 		d := conn.Definition()
-		if d.ID == "" || d.Name == "" || d.Category != c.CategoryData || len(d.Fields) == 0 || d.DocsURL == "" {
+		// Visitor identification tools push to a webhook, so they ask
+		// for nothing.
+		if pushes := d.Has(c.CapRevealPerson); d.ID == "" || d.Name == "" || d.DocsURL == "" ||
+			(!pushes && (d.Category != c.CategoryData || len(d.Fields) == 0)) || (pushes && d.Category != c.CategorySignals) {
 			t.Errorf("%s: incomplete definition", d.ID)
+		}
+		if d.Has(c.CapRevealPerson) {
+			if _, ok := conn.(c.PersonRevealer); !ok {
+				t.Errorf("%s claims person reveal but does not implement it", d.ID)
+			}
 		}
 		if d.Has(c.CapSearchPeople) {
 			if _, ok := conn.(c.PeopleSearcher); !ok {
@@ -290,5 +298,35 @@ func TestApolloSignInUsesBearer(t *testing.T) {
 	}
 	if _, err := (Apollo{}).Test(context.Background(), cl, key); err != nil || auth != "" || apiKey != "k" {
 		t.Fatalf("key: %v %q %q", err, auth, apiKey)
+	}
+}
+
+func TestParsePeople(t *testing.T) {
+	// RB2B's field names, one person per call.
+	got, err := (RB2B{}).ParsePeople([]byte(`{"LinkedIn URL":"https://www.linkedin.com/in/ana-example","First Name":"Ana","Last Name":"Lee",
+		"Title":"Head of Growth","Company Name":"Northpeak","Business Email":"Ana@Northpeak.example","Website":"https://www.northpeak.example",
+		"Industry":"Software","Employee Count":"51-200","City":"Austin","State":"TX","Seen At":"2026-10-27T09:00:00Z",
+		"Captured URL":"https://acme.example/pricing","Tags":"Hot Pages"}`))
+	if err != nil || len(got) != 1 {
+		t.Fatalf("rb2b: %+v %v", got, err)
+	}
+	p := got[0]
+	if p.Email != "ana@northpeak.example" || p.Name != "Ana Lee" || p.Title != "Head of Growth" || p.Company.Domain != "northpeak.example" ||
+		p.Company.Name != "Northpeak" || p.Company.Location != "Austin, TX" || p.Page != "https://acme.example/pricing" || p.SeenAt.IsZero() {
+		t.Fatalf("rb2b person: %+v", p)
+	}
+	// Vector and Warmly nest the contact and company, sometimes in a list.
+	got, err = (Vector{}).ParsePeople([]byte(`{"event":"contact.visited","data":{"contact":{"first_name":"Bo","last_name":"Chan","email":"bo@acme.example",
+		"linkedin_url":"linkedin.com/in/bo-example"},"company":{"name":"Acme","domain":"acme.example"},"page_url":"https://acme.example/"}}`))
+	if err != nil || len(got) != 1 || got[0].Email != "bo@acme.example" || got[0].Company.Name != "Acme" || got[0].Company.Domain != "acme.example" ||
+		got[0].LinkedInURL != "https://linkedin.com/in/bo-example" {
+		t.Fatalf("vector: %+v %v", got, err)
+	}
+	got, err = (Warmly{}).ParsePeople([]byte(`[{"workEmail":"cy@acme.example","fullName":"Cy Diaz"},{"name":"Nobody"}]`))
+	if err != nil || len(got) != 1 || got[0].Email != "cy@acme.example" || got[0].Name != "Cy Diaz" {
+		t.Fatalf("warmly: %+v %v", got, err)
+	}
+	if _, err := (Warmly{}).ParsePeople([]byte(`not json`)); c.KindOf(err) != c.ErrInvalid {
+		t.Fatalf("not json: %v", err)
 	}
 }

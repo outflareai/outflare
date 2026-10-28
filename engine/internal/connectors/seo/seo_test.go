@@ -198,7 +198,9 @@ func TestLinksReports(t *testing.T) {
 		"POST /v3/backlinks/backlinks/live": dfs(0.021, map[string]any{"total_count": 2, "items": []any{
 			map[string]any{"url_from": "https://blog.example.org/post", "url_to": "https://example.com/", "anchor": "Example", "domain_from": "Blog.Example.org",
 				"dofollow": true, "domain_from_rank": 55, "backlink_spam_score": 3, "first_seen": "2026-09-01 10:00:00 +00:00", "last_seen": "2026-10-20 10:00:00 +00:00",
-				"is_lost": false, "page_from_external_links": 12, "page_from_title": "A post"},
+				"is_lost": false, "page_from_external_links": 12, "page_from_title": "A post", "page_from_rank": 33, "item_type": "image",
+				"semantic_location": "article", "page_from_language": "en", "domain_from_platform_type": []any{"blogs", "unknown"},
+				"url_to_redirect_target": "https://example.com/home", "url_to_status_code": 301},
 			map[string]any{"url_from": "https://spam.example.net/x", "url_to": "https://example.com/pricing", "anchor": "cheap", "domain_from": "spam.example.net",
 				"dofollow": false, "attributes": []any{"nofollow", "sponsored"}, "domain_from_rank": 2, "backlink_spam_score": 80, "first_seen": "2026-08-01 00:00:00 +00:00",
 				"last_seen": "2026-10-10 00:00:00 +00:00", "is_lost": true},
@@ -206,7 +208,10 @@ func TestLinksReports(t *testing.T) {
 		"GET /site-explorer/all-backlinks": map[string]any{"backlinks": []any{
 			map[string]any{"url_from": "https://news.example.org/a", "url_to": "https://example.com/", "anchor": "here", "name_source": "news.example.org",
 				"is_nofollow": false, "is_lost": true, "lost_reason": "removedfromhtml", "first_seen_link": "2026-05-01T00:00:00Z", "last_seen": "2026-10-02T00:00:00Z",
-				"domain_rating_source": 71, "is_spam": false, "links_external": 4, "title": "News"},
+				"domain_rating_source": 71, "is_spam": false, "links_external": 4, "title": "News", "url_rating_source": 12.5, "positions": 40,
+				"linked_domains_source_page": 9, "link_type": "text", "is_content": true, "page_type_source": "/Article/Listicle, /Listing",
+				"page_category_source": "/Computers/Security", "languages": []any{"en"}, "powered_by": []any{"WordPress"}, "source_page_author": "Ana",
+				"url_redirect": []any{"https://example.com/b"}, "redirect_kind": []any{301}, "traffic": 120, "traffic_domain": 5000, "refdomains_source": 7},
 		}},
 	})
 	lq := q(c.SEOLinks)
@@ -231,7 +236,30 @@ func TestLinksReports(t *testing.T) {
 	if !l.Lost || l.LostReason != "removedfromhtml" || l.FirstSeen != "2026-05-01" || l.LastSeen != "2026-10-02" || val(l.Spam) != 0 || val(l.SourceRating) != 71 {
 		t.Fatalf("ahrefs row: %+v", l)
 	}
-	if last := (*calls)[len(*calls)-1]; !strings.Contains(last, "history=since%3A2026-08-01") {
+	if last := (*calls)[len(*calls)-1]; !strings.Contains(last, "history=since%3A2026-08-01") || strings.Contains(last, "traffic") {
 		t.Fatalf("ahrefs request: %s", last)
+	}
+	if val(l.URLRating) != 12.5 || val(l.PageKeywords) != 40 || val(l.LinkedDomains) != 9 || l.LinkType != "text" || !l.InContent ||
+		len(l.PageTypes) != 2 || l.PageTypes[1] != "/Listing" || l.PageCategories[0] != "/Computers/Security" || l.Platforms[0] != "WordPress" ||
+		l.Author != "Ana" || len(l.Hops) != 1 || l.Hops[0] != (c.SEOHop{Kind: "301", URL: "https://example.com/b"}) || l.PageTraffic != nil || l.DomainTraffic != nil {
+		t.Fatalf("ahrefs details: %+v", l)
+	}
+	// Traffic is read only when asked for, and costs 26 units a link.
+	lq.Traffic = true
+	rep, err = Ahrefs{}.SEOReport(ctx, cl, c.Creds{"api_key": "k"}, lq)
+	if err != nil || val(rep.Rows[0].Link.PageTraffic) != 120 || val(rep.Rows[0].Link.DomainTraffic) != 5000 || val(rep.Rows[0].Link.PageRefDomains) != 7 {
+		t.Fatalf("ahrefs traffic: %v %+v", err, rep.Rows)
+	}
+	if last := (*calls)[len(*calls)-1]; !strings.Contains(last, "traffic_domain") {
+		t.Fatalf("ahrefs traffic request: %s", last)
+	}
+	if est := (Ahrefs{}).Estimate(c.SEOQuery{Report: c.SEOLinks, Limit: 200, Traffic: true}); est.Units != 5200 {
+		t.Fatalf("traffic estimate: %+v", est)
+	}
+	d := DataForSEO{}
+	rep, _ = d.SEOReport(ctx, cl, c.Creds{"login": "jo", "password": "pw"}, lq)
+	if a := rep.Rows[0].Link; val(a.URLRating) != 33 || a.LinkType != "image" || !a.InContent || a.Languages[0] != "en" || len(a.Platforms) != 1 ||
+		a.LastChecked != "2026-10-20" || len(a.Hops) != 1 || a.Hops[0].Kind != "301" {
+		t.Fatalf("dfs details: %+v", a)
 	}
 }

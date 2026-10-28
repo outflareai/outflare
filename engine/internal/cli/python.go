@@ -101,6 +101,12 @@ func writePythonMethod(b *bytes.Buffer, op *operation) {
 		b.WriteString("        *,\n")
 	}
 	for _, k := range kw {
+		// Past 120 columns ruff format breaks an optional hint before
+		// its "| None".
+		if line := "        " + k + ","; len(line) > 120 && strings.HasSuffix(k, " | None = None") {
+			b.WriteString("        " + strings.TrimSuffix(k, " | None = None") + "\n        | None = None,\n")
+			continue
+		}
 		b.WriteString("        " + k + ",\n")
 	}
 	b.WriteString("    ) -> Any:\n")

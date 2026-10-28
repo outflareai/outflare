@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
-import type { PlaybookConnectionNeed, WorkspacePlaybook } from "@outflare/sdk";
+import type { KitPlan, PlaybookConnectionNeed, WorkspacePlaybook } from "@outflare/sdk";
 import { track } from "@/lib/analytics";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { api, errorMessage } from "../api";
@@ -23,6 +23,14 @@ type View = keyof typeof views;
 const contributeURL = "https://github.com/outflareai/outflare/tree/main/playbooks#readme";
 
 const needKey = (n: PlaybookConnectionNeed) => n.capability ?? n.category ?? n.label;
+
+const kitAction: Record<KitPlan["items"][number]["action"], { label: string; tone: keyof typeof tones }> = {
+  add: { label: "Adds", tone: "blue" },
+  extend: { label: "Extends", tone: "blue" },
+  reuse: { label: "Have", tone: "green" },
+  conflict: { label: "Conflict", tone: "amber" },
+};
+const kitKind: Record<KitPlan["items"][number]["kind"], string> = { option_set: "List", record_type: "Pipeline", field: "Field", email_template: "Email draft" };
 
 export function Playbooks({ ws, canManage, go }: Props) {
   const [list, setList] = useState<WorkspacePlaybook[] | null>(null);
@@ -99,15 +107,26 @@ function PlaybookSheet({ ws, playbook: p, names, canManage, go, onClose }: { ws:
   const [values, setValues] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [kit, setKit] = useState<KitPlan | null>(null);
+  const [applyKit, setApplyKit] = useState(false);
   const missing = new Set(p.readiness.missing_connections.map(needKey));
   const missingOptional = new Set(p.readiness.missing_optional.map(needKey));
   const missingData = new Set(p.readiness.missing_data.map((d) => d.check));
   const prompt = p.prompt.replace(/\{\{\s*([a-z0-9_]+)\s*\}\}/g, (m, name: string) => values[name]?.trim() || m);
 
+  useEffect(() => {
+    if (!p.kit) return;
+    api.GET("/v1/workspaces/{ws}/kits/{id}/preview", { params: { path: { ws, id: p.kit } } }).then(({ data }) => {
+      if (!data) return;
+      setKit(data);
+      setApplyKit(data.changes > 0 && data.conflicts === 0);
+    });
+  }, [ws, p.kit]);
+
   async function start(e: FormEvent) {
     e.preventDefault();
     setBusy(true);
-    const { data, error } = await api.POST("/v1/workspaces/{ws}/playbooks/{id}/runs", { params: { path: { ws, id: p.id } }, body: { inputs: values } });
+    const { data, error } = await api.POST("/v1/workspaces/{ws}/playbooks/{id}/runs", { params: { path: { ws, id: p.id } }, body: { inputs: values, apply_kit: applyKit } });
     setBusy(false);
     if (error || !data || !("id" in data)) return setError(errorMessage(error));
     toast(`Started ${p.title} as a mission draft. Approve it to let it run.`);
@@ -154,6 +173,27 @@ function PlaybookSheet({ ws, playbook: p, names, canManage, go, onClose }: { ws:
             <p className="text-[12px] text-muted-foreground">Everything runs on your own accounts and keys. Outflare never lends its own.</p>
           </section>
 
+          {kit && (
+            <section className="space-y-2">
+              <h3 className="font-medium">What it sets up</h3>
+              <p className="text-muted-foreground">
+                {kit.changes === 0 && kit.conflicts === 0 ? "Everything it needs is already set up." : "The setup kit adds what's missing to your CRM and email drafts. It only adds: nothing you have changes, and drafts wait for you to publish them."}
+              </p>
+              <ul className="space-y-1.5">
+                {kit.items.filter((it) => it.kind !== "field" || it.action !== "reuse").map((it) => (
+                  <li key={it.kind + it.key} className="flex items-start gap-2">
+                    <Badge tone={kitAction[it.action].tone}>{kitAction[it.action].label}</Badge>
+                    <span className="min-w-0">
+                      {kitKind[it.kind]}: {it.label}
+                      {it.detail && <span className="text-muted-foreground"> · {it.detail}</span>}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+              {kit.conflicts > 0 && <p className="text-[12px] text-muted-foreground">A conflict is something you already have under the same name but set up differently. Change it first, or start without the setup and build it your way.</p>}
+            </section>
+          )}
+
           <section className="space-y-2">
             <h3 className="font-medium">Steps</h3>
             <ol className="list-decimal space-y-1.5 pl-5">
@@ -192,6 +232,12 @@ function PlaybookSheet({ ws, playbook: p, names, canManage, go, onClose }: { ws:
             <p className="text-[12px] text-muted-foreground">
               Paste the prompt into Claude, ChatGPT or Cursor with Outflare connected (<button type="button" className="underline underline-offset-4" onClick={() => go("ai")}>AI apps</button>), or start it here as a mission draft.
             </p>
+            {kit && kit.changes > 0 && kit.conflicts === 0 && canManage && (
+              <label className="flex items-center gap-2">
+                <input type="checkbox" className="size-4" checked={applyKit} onChange={(e) => setApplyKit(e.target.checked)} />
+                Set up what it needs when I start ({plural(kit.changes, "change")})
+              </label>
+            )}
             <ErrorText>{error}</ErrorText>
             {canManage && (
               <Button type="submit" disabled={busy || p.readiness.missing_connections.length > 0}>

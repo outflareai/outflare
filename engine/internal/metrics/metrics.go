@@ -87,6 +87,21 @@ var (
 		Help: "Time to store one inbox row (a browser's batch of events).", Buckets: requestBuckets,
 	})
 
+	// Feature flags decided for websites (the tracking script) and servers
+	// (the API).
+	flagRequests = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Namespace: namespace, Subsystem: "flags", Name: "requests_total",
+		Help: "Requests to decide a visitor's feature flags, by surface (site, api) and outcome (ok, refused, error).",
+	}, []string{"surface", "outcome"})
+	flagDuration = prometheus.NewHistogramVec(prometheus.HistogramOpts{
+		Namespace: namespace, Subsystem: "flags", Name: "request_seconds",
+		Help: "Time to decide a visitor's feature flags, by surface.", Buckets: requestBuckets,
+	}, []string{"surface"})
+	flagCache = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Namespace: namespace, Subsystem: "flags", Name: "cache_total",
+		Help: "Lookups of a workspace's flags, by result (hit: from memory, miss: read from Postgres).",
+	}, []string{"result"})
+
 	// AI calls made with workspaces' own keys. Labels are the provider and
 	// the tool (a fixed task id), never a workspace or a model a person
 	// typed.
@@ -187,6 +202,17 @@ var (
 		Help: "How long the oldest conversion waiting to be sent has waited, as of this process's last round.",
 	})
 
+	// Reviews: reading brands' review pages through the workspace's own
+	// page reader.
+	reviewReads = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Namespace: namespace, Subsystem: "reviews", Name: "page_reads_total",
+		Help: "Review page reads, by platform and outcome (success, not_a_review_page, connector_error).",
+	}, []string{"platform", "outcome"})
+	reviewsFound = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Namespace: namespace, Subsystem: "reviews", Name: "new_total",
+		Help: "Reviews kept for the first time, by platform (a page's first read included).",
+	}, []string{"platform"})
+
 	buildInfo = prometheus.NewGaugeVec(prometheus.GaugeOpts{
 		Namespace: namespace, Name: "build_info",
 		Help: "Always 1; the labels are the running engine version and its role (OUTFLARE_ROLE).",
@@ -199,6 +225,7 @@ var own = []prometheus.Collector{
 	httpRequests, httpDuration, httpInFlight, httpRateLimited,
 	jobsDone, jobDuration, jobWait, jobsActive, jobsReaped, workers,
 	siteEvents, inboxEvents, inboxBatch,
+	flagRequests, flagDuration, flagCache,
 	pipelineItems, pipelineCodes, pipelineBatch, pipelineBatchSize, pipelineWait, pipelineLimitWaits, pipelineLimitReports,
 	aiCalls, aiTokens, aiCost, aiBudgetAlerts,
 	connectionLimitAlerts, connectionLimitStops,
@@ -207,6 +234,7 @@ var own = []prometheus.Collector{
 	queryRuns, queryDuration, queryRows,
 	semanticRuns, semanticItems, semanticDuration, semanticAvailable, semanticWorkspaces,
 	adConversions, adConversionsOldest,
+	reviewReads, reviewsFound,
 	buildInfo,
 }
 
@@ -295,6 +323,23 @@ func InboxStored(stored, rejected, failed int, d time.Duration) {
 	inboxBatch.Observe(d.Seconds())
 }
 
+// FlagsDecided records one request to decide a visitor's flags: its
+// surface (site, api), outcome (ok, refused, error) and time.
+func FlagsDecided(surface, outcome string, d time.Duration) {
+	flagRequests.WithLabelValues(surface, outcome).Inc()
+	flagDuration.WithLabelValues(surface).Observe(d.Seconds())
+}
+
+// FlagCache counts a lookup of a workspace's flags: hit when they were in
+// memory.
+func FlagCache(hit bool) {
+	if hit {
+		flagCache.WithLabelValues("hit").Inc()
+	} else {
+		flagCache.WithLabelValues("miss").Inc()
+	}
+}
+
 // QueryRan records one query: its outcome, time and rows returned.
 func QueryRan(outcome string, d time.Duration, rows int) {
 	queryRuns.WithLabelValues(outcome).Inc()
@@ -366,6 +411,15 @@ func HookEvent(connector, result string, lag time.Duration) {
 	hookEvents.WithLabelValues(connector, result).Inc()
 	if result != "retry" {
 		hookLag.WithLabelValues(connector).Observe(lag.Seconds())
+	}
+}
+
+// ReviewPageRead records one read of a review page: its outcome and how
+// many reviews it kept for the first time.
+func ReviewPageRead(platform, outcome string, added int) {
+	reviewReads.WithLabelValues(platform, outcome).Inc()
+	if added > 0 {
+		reviewsFound.WithLabelValues(platform).Add(float64(added))
 	}
 }
 

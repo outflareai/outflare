@@ -20,7 +20,7 @@ export function CRMImportDialog({ ws, integration, onClose }: { ws: string; inte
       if (error || !data) return setError(errorMessage(error));
       setPreview(data);
       setPicked(new Set(data.objects.filter((o) => o.records.count > 0).map((o) => o.slug)));
-    });
+    }, (e) => setError(errorMessage(e)));
   }, [ws, integration.id]);
 
   // Follow the import until it finishes.
@@ -59,7 +59,12 @@ export function CRMImportDialog({ ws, integration, onClose }: { ws: string; inte
           </DialogDescription>
         </DialogHeader>
 
-        {!preview && !error && <Loading />}
+        {!preview && !error && (
+          <div className="space-y-3">
+            <p className="text-[13px] text-muted-foreground" aria-live="polite">Reading your {tool} workspace: its objects, fields and how many records each holds. This takes up to half a minute.</p>
+            <Loading />
+          </div>
+        )}
 
         {preview && !run && (
           <div className="space-y-4">

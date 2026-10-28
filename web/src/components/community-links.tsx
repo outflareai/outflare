@@ -6,12 +6,27 @@ import { cn } from "@/lib/utils";
 
 type Community = components["schemas"]["CommunityLinks"];
 type Link = Community["links"][number];
+type HeardFrom = components["schemas"]["HeardFrom"];
+
+// The answers to "How did you hear about Outflare?", in the order shown.
+const heardFrom: [HeardFrom, string][] = [
+  ["search", "Search"],
+  ["ai_assistant", "An AI assistant"],
+  ["x", "X"],
+  ["linkedin", "LinkedIn"],
+  ["github", "GitHub"],
+  ["youtube", "YouTube"],
+  ["friend", "A friend or colleague"],
+  ["newsletter_podcast", "A newsletter or podcast"],
+  ["other", "Somewhere else"],
+];
 
 // "Star us on GitHub" and "Follow us on X": optional, one click each. Nobody
 // can check a star or a follow, so opening the link ticks the item. Each
 // person has their own, and the server's operator can turn them off.
 // step: the Get started step, which shows the links even once they're all
-// done and calls onClicked after each one is saved.
+// done, asks how the person heard about Outflare (optional, one tap), and
+// calls onClicked after each link is saved.
 export function CommunityLinks({ className, step = false, onClicked }: { className?: string; step?: boolean; onClicked?: () => void }) {
   const [c, setC] = useState<Community | null>(null);
   useEffect(() => {
@@ -19,7 +34,7 @@ export function CommunityLinks({ className, step = false, onClicked }: { classNa
   }, []);
   if (!c || (step ? c.links.length === 0 : !c.show)) return null;
 
-  async function patch(body: { clicked?: string; hidden?: boolean }) {
+  async function patch(body: { clicked?: string; hidden?: boolean; heard_from?: HeardFrom }) {
     const { data } = await api.PATCH("/v1/me/community", { body });
     if (data) setC(body.hidden ? { ...data, show: false } : data);
     if (data && body.clicked) onClicked?.();
@@ -57,6 +72,33 @@ export function CommunityLinks({ className, step = false, onClicked }: { classNa
           </li>
         ))}
       </ul>
+      {step && (
+        <div role="group" aria-labelledby="heard-from" className="border-t px-4 py-3.5">
+          <p id="heard-from" className="text-[13px] text-muted-foreground">
+            How did you hear about Outflare? <span className="text-muted-foreground/70">Optional</span>
+          </p>
+          <div className="mt-2.5 flex flex-wrap gap-1.5">
+            {heardFrom.map(([id, label]) => (
+              <button
+                key={id}
+                type="button"
+                aria-pressed={c.heard_from === id}
+                onClick={() => {
+                  setC((cur) => cur && { ...cur, heard_from: id });
+                  patch({ heard_from: id });
+                }}
+                className={cn(
+                  "rounded-full border px-3 py-1 text-[13px] hover:bg-accent",
+                  c.heard_from === id ? "border-primary bg-primary/10 text-foreground" : "text-muted-foreground hover:text-foreground",
+                )}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+          {c.heard_from && <p className="mt-2 text-[12px] text-muted-foreground">Thanks, that helps us know where to show up.</p>}
+        </div>
+      )}
     </section>
   );
 }

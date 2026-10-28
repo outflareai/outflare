@@ -12,7 +12,10 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
+	"github.com/outflareai/outflare/engine/internal/alerts"
 	"github.com/outflareai/outflare/engine/internal/connectors"
+	"github.com/outflareai/outflare/engine/internal/inbox"
+	"github.com/outflareai/outflare/engine/internal/indexability"
 	"github.com/outflareai/outflare/engine/internal/jobs"
 	"github.com/outflareai/outflare/engine/internal/usagelimits"
 )
@@ -247,9 +250,15 @@ func (s *Server) RegisterJobs(q *jobs.Queue) {
 	q.Handle(jobSetupInstall, s.setupInstallJob)
 	q.Handle(jobDNSAdd, s.dnsAddJob)
 	q.Handle(jobTrackingCheck, s.trackingCheckJob)
+	q.Handle(jobTrackingHTTPS, s.trackingHTTPSJob)
+	q.Handle(jobTrackingHTTPSRemove, s.trackingHTTPSRemoveJob)
 	q.Handle(jobVisitorReveal, s.visitorRevealJob)
 	q.Handle(jobAIBudgetAlert, s.aiBudgetAlertJob)
 	q.Handle(usagelimits.JobAlert, s.connectionLimitAlertJob)
+	q.Handle(inbox.JobDeal, s.replyDealJob)
+	(&alerts.Service{Pool: s.pool, Log: s.log, Send: s.sendAccountEmail, PublicURL: s.publicURL, Store: s.integrations}).Register(q)
+	q.Handle(jobFixTicketWrite, s.fixTicketWriteJob)
+	q.Handle(indexability.JobSnapshot, indexability.Handler(s.pool))
 	s.registerSocialJobs(q)
 	s.registerSemanticJobs(q)
 }

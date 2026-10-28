@@ -13,6 +13,12 @@ on:
   pull_request_target: # zizmor: ignore[dangerous-triggers]
     types: [opened, synchronize, closed]
 
+# A newer push to a pull request replaces the older check, so superseded
+# runs don't hold one of the organisation's few Actions runners.
+concurrency:
+  group: cla-${{ github.event.pull_request.number || github.event.issue.number }}-${{ github.event_name }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request_target' }}
+
 permissions:
   actions: write
   contents: write
@@ -21,7 +27,12 @@ permissions:
 
 jobs:
   cla:
-    if: github.event_name == 'pull_request_target' || github.event.issue.pull_request
+    # Only the two CLA comments start a job; any other comment on a pull
+    # request (reviews, bots) doesn't take a runner.
+    if: >-
+      github.event_name == 'pull_request_target' ||
+      (github.event.issue.pull_request &&
+       (github.event.comment.body == 'recheck' || github.event.comment.body == 'I have read the CLA Document and I hereby sign the CLA'))
     runs-on: ubuntu-latest
     steps:
       - uses: contributor-assistant/github-action@ca4a40a7d1004f18d9960b404b97e5f30a505a08 # v2.6.1 # zizmor: ignore[archived-uses]

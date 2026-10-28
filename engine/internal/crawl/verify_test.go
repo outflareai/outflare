@@ -35,3 +35,35 @@ func TestHasTrackingTag(t *testing.T) {
 		t.Fatal("the key alone, without the tag, proves nothing")
 	}
 }
+
+func TestScope(t *testing.T) {
+	set := DefaultSettings()
+	set.Include, set.Exclude, set.MaxDepth, set.IgnoreParams = []string{"^/blog/"}, []string{"/draft"}, 3, true
+	sc, err := set.Scope()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range []struct {
+		in    string
+		depth int
+		start bool
+		want  string
+	}{
+		{"https://example.com/?ref=x", 0, true, "https://example.com/"},
+		{"https://example.com/blog/a?utm=1", 1, false, "https://example.com/blog/a"},
+		{"https://example.com/blog/draft-1", 1, false, ""},
+		{"https://example.com/about", 1, false, ""},
+		{"https://example.com/blog/deep", 4, false, ""},
+	} {
+		got, ok := sc.URL(c.in, c.depth, c.start)
+		if got != c.want || ok != (c.want != "") {
+			t.Errorf("%s: %q %v", c.in, got, ok)
+		}
+	}
+	if CheckPatterns("x", []string{"(["}) == nil || CheckPatterns("x", make([]string, MaxPatterns+1)) == nil {
+		t.Fatal("bad patterns accepted")
+	}
+	if s, err := SettingsFrom([]byte(`{}`)); err != nil || !s.UseSitemaps || s.RenderJS != "auto" {
+		t.Fatalf("old run: %v %v", s, err)
+	}
+}

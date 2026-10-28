@@ -263,6 +263,24 @@ const trackingStatus: Record<TrackingDomain["status"], { label: string; tone: To
   failed: { label: "Not pointing here", tone: "red" },
 };
 
+// A verified domain waits for its HTTPS certificate on servers that get
+// one for it (Outflare Cloud); links use it only once that is active.
+function trackingBadge(t: TrackingDomain): { label: string; tone: Tone } {
+  if (t.status === "verified" && t.https_status === "pending") return { label: "Setting up HTTPS", tone: "grey" };
+  if (t.status === "verified" && t.https_status === "failed") return { label: "HTTPS failed", tone: "red" };
+  return trackingStatus[t.status];
+}
+
+function trackingReady(t: TrackingDomain) {
+  return t.status === "verified" && (t.https_status === null || t.https_status === "active");
+}
+
+function trackingToast(t: TrackingDomain) {
+  if (trackingReady(t)) return `${t.domain} is ready. New emails use it.`;
+  if (t.status === "verified") return `${t.domain} points here. Setting up HTTPS: new emails use it once that's done, usually in a few minutes.`;
+  return "";
+}
+
 function TrackingDomains({ ws, canManage }: { ws: string; canManage: boolean }) {
   const [list, setList] = useState<TrackingDomain[]>();
   const [target, setTarget] = useState("");
@@ -282,7 +300,7 @@ function TrackingDomains({ ws, canManage }: { ws: string; canManage: boolean }) 
     load();
   }, [load]);
   // While a CNAME is being added in Cloudflare, or looked for after.
-  const watching = list?.some((t) => t.dns_install?.status === "queued" || (t.status !== "verified" && t.dns_install && Date.now() - Date.parse(t.dns_install.at) < 15 * 60_000));
+  const watching = list?.some((t) => t.dns_install?.status === "queued" || (t.status !== "verified" && t.dns_install && Date.now() - Date.parse(t.dns_install.at) < 15 * 60_000) || (t.status === "verified" && t.https_status === "pending"));
   useEffect(() => {
     if (!watching) return;
     const t = setInterval(load, 4000);
@@ -297,7 +315,7 @@ function TrackingDomains({ ws, canManage }: { ws: string; canManage: boolean }) 
     if (error) return setError(errorMessage(error));
     setDomain("");
     setError("");
-    toast(data.status === "verified" ? `${data.domain} is ready. New emails use it.` : `Added ${data.domain}. Add the CNAME record below, then check it.`);
+    toast(trackingToast(data) || `Added ${data.domain}. Add the CNAME record below, then check it.`);
     load();
   }
 
@@ -306,7 +324,7 @@ function TrackingDomains({ ws, canManage }: { ws: string; canManage: boolean }) 
     const { data, error } = await api.POST("/v1/workspaces/{ws}/tracking-domains/{id}/check", { params: { path: { ws, id: t.id } } });
     setBusy("");
     if (error) return toast(errorMessage(error), "error");
-    toast(data.status === "verified" ? `${data.domain} is ready. New emails use it.` : `Not yet: ${data.error}`, data.status === "verified" ? "ok" : "error");
+    toast(trackingToast(data) || `Not yet: ${data.error}`, data.status === "verified" ? "ok" : "error");
     load();
   }
 
@@ -327,7 +345,7 @@ function TrackingDomains({ ws, canManage }: { ws: string; canManage: boolean }) 
             <div key={t.id} className="space-y-2 rounded-md border p-3">
               <div className="flex flex-wrap items-center gap-2">
                 <span className="font-mono text-[13px] font-medium">{t.domain}</span>
-                <Badge tone={trackingStatus[t.status].tone}>{trackingStatus[t.status].label}</Badge>
+                <Badge tone={trackingBadge(t).tone}>{trackingBadge(t).label}</Badge>
                 {t.last_checked_at && <span className="text-xs text-muted-foreground">checked {ago(t.last_checked_at)}</span>}
                 {canManage && (
                   <span className="ml-auto flex gap-2">
@@ -336,6 +354,12 @@ function TrackingDomains({ ws, canManage }: { ws: string; canManage: boolean }) 
                   </span>
                 )}
               </div>
+              {t.status === "verified" && t.https_status === "pending" && (
+                <p className="text-xs text-muted-foreground">It points here. Its HTTPS certificate is on the way, usually within a few minutes; until then links use {target}.</p>
+              )}
+              {t.status === "verified" && t.https_status === "failed" && (
+                <p className="text-xs text-muted-foreground">{t.https_error || "Its HTTPS certificate couldn't be issued."} Links use {target} until it is; press Check now to try again.</p>
+              )}
               {t.status !== "verified" && (
                 <>
                   {t.error && <p className="text-xs text-muted-foreground">{t.error}</p>}

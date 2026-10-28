@@ -30,14 +30,15 @@ Credentials are sealed with the instance key (`OUTFLARE_SECRET_KEY`, AES-256-GCM
 | `data` | Apollo, People Data Labs, MoltSets, Prospeo, LeadMagic, Findymail, Hunter (email finder). Planned: Clay, ZoomInfo, Lusha and more. See [lists.md](lists.md) |
 | `signals` | Planned: Crunchbase, TheirStack, PredictLeads, UserGems, RB2B, Common Room, Trigify |
 | `analytics` | Google Analytics 4, Google Search Console, Bing Webmaster Tools, PostHog, Plausible, Fathom, Matomo, Umami, Mixpanel, Amplitude, Cloudflare Web Analytics, Simple Analytics, Microsoft Clarity, Vercel Web Analytics. See [analytics.md](analytics.md) |
-| `seo` | DataForSEO, Ahrefs. Paid per call, with a monthly budget. See [seo.md](seo.md). Geonode reads pages through its own network: an unknown email domain's homepage for [classification.md](classification.md), and your own site's pages when its firewall blocks OutflareBot or they need JavaScript; see [crawler.md](crawler.md). It also runs web searches (`web.search`) on your Geonode account, for finding companies to research, finds brands' social links on their websites, and reads public X follower counts ([social.md](social.md)) |
+| `seo` | DataForSEO, Ahrefs. Paid per call, with a monthly budget. See [seo.md](seo.md). Geonode reads pages through its own network: an unknown email domain's homepage for [classification.md](classification.md), and your own site's pages when its firewall blocks OutflareBot or they need JavaScript; see [crawler.md](crawler.md). It also runs web searches (`web.search`) on your Geonode account, for finding companies to research, finds brands' social links on their websites, reads public X follower counts ([social.md](social.md)), and finds and reads brands' review pages ([reviews.md](reviews.md)) |
 | `code` | GitHub, Vercel: production deploys of your websites, read only. See [deploys.md](deploys.md) |
 | `social` | Reddit, with the workspace's own app: search, and replies a person approves from the brand's own account. X, with the workspace's own developer app, and LinkedIn, signed in to your own account: followers and your own posts' numbers, read every day. See [social.md](social.md) |
 | `crm` | HubSpot, Salesforce, Pipedrive, Attio |
 | `payments` | Stripe. Who pays you, read into customer records. See [Payments](#payments) |
 | `calendar` | Google Calendar, Outlook, Calendly, Cal.com |
 | `dns`, `registrar` | Cloudflare, Namecheap, GoDaddy, Route 53 |
-| `warehouse`, `notification` | Exports and alerts |
+| `notification` | Slack: [alerts](alerts.md) posted to a channel the workspace picks |
+| `warehouse` | Exports |
 | `model` | Claude, OpenAI, Gemini, Mistral, xAI, or a router (OpenRouter, Vercel AI Gateway, Requesty: one key for many vendors' models), with your own API key. OpenAI and xAI are tagged for subscription sign-in (ChatGPT plans, SuperGrok), which is coming; use a key for now. They plan missions from a goal, run Outflare's built-in agent and ask the questions [AI visibility](ai-visibility.md) samples. Pick one under Workspace settings → AI model |
 | `custom` | A generic HTTP API or MCP server registered by the workspace |
 
@@ -61,6 +62,7 @@ Every catalog entry says how it connects: `auth_methods` lists the ways, recomme
 | Outlook Calendar | Microsoft, through the server's Microsoft client | |
 | HubSpot | HubSpot app | Private app token |
 | Attio | Attio app | Access token |
+| Slack | Slack app | Bot token from the workspace's own Slack app |
 | PostHog | PostHog Cloud, no app to register | Personal API key (also self-hosted) |
 | Calendly | Calendly app | Personal access token |
 | Apollo | Apollo app | Master API key |
@@ -103,6 +105,7 @@ Signing in needs an app registered at the provider. Set `CONNECTOR_<ID>_CLIENT_I
 | --- | --- | --- |
 | HubSpot | developers.hubspot.com, Apps, Create app (scopes: `crm.objects.contacts.read`, `crm.objects.contacts.write`, `crm.objects.deals.read`, `crm.schemas.deals.read`, `oauth`) | `CONNECTOR_HUBSPOT_CLIENT_ID`, `_CLIENT_SECRET` |
 | LinkedIn | linkedin.com/developers, create an app with the Community Management API product (scopes: `r_basicprofile`, `w_member_social`, `r_organization_social`, `w_organization_social`, `rw_organization_admin`) | `CONNECTOR_LINKEDIN_CLIENT_ID`, `_CLIENT_SECRET` |
+| Slack | api.slack.com/apps, Create app, OAuth & Permissions (bot scopes: `chat:write`, `chat:write.public`, `channels:read`, `groups:read`) | `CONNECTOR_SLACK_CLIENT_ID`, `_CLIENT_SECRET` |
 | Attio | build.attio.com, create an app with read access to records, object configuration, lists, list entries, list configuration, notes, tasks and workspace members (scopes are set on the app, not the consent screen) | `CONNECTOR_ATTIO_CLIENT_ID`, `_CLIENT_SECRET` |
 | Calendly | developer.calendly.com, Create a new app (scopes `users:read`, `scheduled_events:read`) | `CONNECTOR_CALENDLY_CLIENT_ID`, `_CLIENT_SECRET` |
 | Apollo | Apollo, Settings, Integrations, API, OAuth registration (people search, person enrichment, email accounts) | `CONNECTOR_APOLLO_CLIENT_ID`, `_CLIENT_SECRET` |
@@ -171,7 +174,7 @@ Connectors with the `payments.read` capability (Stripe) implement `connectors.Pa
 
 Connectors with the `import.crm` capability (Attio) implement `connectors.CRMImporter`. It only reads; nothing changes in the CRM, and there is no ongoing sync.
 
-- **Preview.** `GET /v1/workspaces/{ws}/integrations/{id}/crm-import-preview` (scope `integrations.read`, MCP `preview_crm_import`) reads the CRM live and changes nothing: every object (People, Companies, Deals and custom ones) with its fields, select options and pipeline stages, every list with its own fields, and how many records, entries, notes, tasks and members it holds. Each count stops at 5,000 and says so with `capped`; `filled` is how many of the counted records use each field.
+- **Preview.** `GET /v1/workspaces/{ws}/integrations/{id}/crm-import-preview` (scope `integrations.read`, MCP `preview_crm_import`) reads the CRM live and changes nothing: every object (People, Companies, Deals and custom ones) with its fields, select options and pipeline stages, every list with its own fields, and how many records, entries, notes, tasks and members it holds. Each count stops at 5,000, or after about 15 seconds of counting so the preview stays quick on a large CRM, and says so with `capped`; `filled` is how many of the counted records use each field.
 - **Import.** In the app, **Import** on the connection under Connectors (owners and admins) shows the preview, lets you pick objects and follows the import. Through the API, `POST /v1/workspaces/{ws}/integrations/{id}/crm-imports` (scopes `catalog.manage` and `customers.manage`, MCP `start_crm_import`) copies the CRM into [customer records](customers.md) in the background, optionally only some `objects`. Follow it with `GET .../crm-imports/{import}` (MCP `get_crm_import`). One import runs per connection at a time.
 
 What the import does:
@@ -313,13 +316,15 @@ Calendar and CRM connectors feed the Outcomes page and `GET /v1/workspaces/{ws}/
 | `outlook_calendar` | OAuth, `Calendars.Read` | Meetings (Microsoft Graph delta) | Nothing |
 | `calendly` | OAuth, or a personal access token | Scheduled events and invitees | Nothing |
 | `cal_com` | OAuth, or an API key (with an optional `base_url` for self-hosted Cal.com) | Accepted bookings | Nothing |
-| `hubspot` | OAuth, or a private app token | Meetings with their outcome, deals with stage and amount | Booked meetings, when `push_meetings` is on |
+| `hubspot` | OAuth, or a private app token | Meetings with their outcome, deals with stage and amount | Booked meetings, when `push_meetings` is on; replies with a note and a follow-up task, for the labels in `push_replies` |
 
 Settings on each connection, sent as `config` with `PATCH /v1/workspaces/{ws}/integrations/{id}`:
 
 - `own_domains`: your own email domains, so colleagues on an invite are never mistaken for prospects.
 - `calendar_id` (Google, Outlook): which calendar to read. The primary calendar by default.
 - `push_meetings` (HubSpot): write meetings booked from outreach into HubSpot, upserting the contact by email. Off by default.
+- `push_replies` (HubSpot): reply labels to write into HubSpot, such as `["interested", "meeting_request"]` or `["hot"]` for every hot label. Each matching reply upserts the contact and adds a note with the reply and a link to it in Outflare. A reply is written once, when it is labelled. Empty by default.
+- `reply_tasks` (HubSpot): with `push_replies`, also add a high-priority task to follow up within a day. It goes to the HubSpot user with the same email as the reply's owner in Outflare (who it is assigned to, else who made the sequence), when the connection can read owners (`crm.objects.owners.read`); otherwise it is left unassigned.
 - `paused`: stop syncing without disconnecting.
 
 Google Calendar and Outlook use the server's Google and Microsoft clients unless `CONNECTOR_GOOGLE_CALENDAR_CLIENT_ID` or `CONNECTOR_OUTLOOK_CALENDAR_CLIENT_ID` (with `_CLIENT_SECRET`) override them. HubSpot, Calendly and Cal.com sign-in need their own app (table above); their keys need none.

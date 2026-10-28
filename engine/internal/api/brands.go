@@ -16,6 +16,7 @@ import (
 
 	"github.com/outflareai/outflare/engine/internal/allocation"
 	"github.com/outflareai/outflare/engine/internal/auth"
+	"github.com/outflareai/outflare/engine/internal/reviews"
 	"github.com/outflareai/outflare/engine/internal/sociallinks"
 )
 
@@ -46,7 +47,8 @@ var (
 	handleShape    = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,38}[a-z0-9]$`)
 	brandLinkKinds = []string{"app_store", "google_play", "tv_app", "chrome_web_store", "microsoft_store", "steam", "docs", "help", "blog", "status",
 		"x", "linkedin", "youtube", "instagram", "tiktok", "facebook", "discord", "reddit", "github",
-		"bluesky", "threads", "mastodon", "dev_to", "docker_hub", "other"}
+		"bluesky", "threads", "mastodon", "dev_to", "docker_hub",
+		reviews.Trustpilot, reviews.G2, reviews.Capterra, reviews.Google, "other"}
 )
 
 // brandLink is one place the brand lives besides its website: an app

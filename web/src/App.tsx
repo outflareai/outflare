@@ -13,9 +13,11 @@ import { Setup } from "./pages/Setup";
 import { Login } from "./pages/Login";
 import { AcceptInvite } from "./pages/AcceptInvite";
 import { ConfirmEmailBanner, ConfirmEmailFirst, ResetPassword, VerifyEmail } from "./pages/AccountEmail";
+import { SupportViewBanner } from "./components/support-view-banner";
 import { Members } from "./pages/Members";
 import { Tokens } from "./pages/Tokens";
 import { Webhooks } from "./pages/Webhooks";
+import { Alerts } from "./pages/Alerts";
 import { Digests } from "./pages/Digests";
 import { AIUsage } from "./pages/AIUsage";
 import { Experiments } from "./pages/Experiments";
@@ -46,9 +48,13 @@ import { Connect, pendingConnectToken } from "./pages/Connect";
 import { Reports } from "./pages/Reports";
 import { Analytics } from "./pages/Analytics";
 import { WebsiteTracking } from "./pages/WebsiteTracking";
+import { Flags } from "./pages/Flags";
 import { CampaignLinks } from "./pages/CampaignLinks";
 import { IdealCustomers } from "./pages/IdealCustomers";
 import { Agency } from "./pages/Agency";
+import { LeadFinder } from "./pages/LeadFinder";
+import { CloudPage } from "./pages/CloudLocked";
+import { cloudFeature } from "./lib/cloud";
 import { Missions } from "./pages/Missions";
 import { Playbooks } from "./pages/Playbooks";
 import { Infrastructure } from "./pages/Infrastructure";
@@ -65,6 +71,7 @@ import { Fixes } from "./pages/Fixes";
 import { Keywords } from "./pages/Keywords";
 import { Reddit } from "./pages/Reddit";
 import { Social } from "./pages/Social";
+import { Reviews } from "./pages/Reviews";
 import { Ads } from "./pages/Ads";
 import { Visitors } from "./pages/Visitors";
 import { SEOOverview } from "./pages/SEOOverview";
@@ -75,7 +82,7 @@ import { Warmup } from "./pages/Warmup";
 import { ConnectAI } from "./pages/ConnectAI";
 import { Authorize } from "./pages/Authorize";
 
-type Me = { user: { id?: string; name?: string; email?: string; email_verified?: boolean; has_password?: boolean; email_resend_after?: number }; workspaces: Workspace[]; agencies: AgencyT[]; menu_links?: MenuLink[] };
+type Me = { user: { id?: string; name?: string; email?: string; email_verified?: boolean; has_password?: boolean; email_resend_after?: number }; workspaces: Workspace[]; agencies: AgencyT[]; menu_links?: MenuLink[]; support_view?: { expires_at: string } | null };
 type State =
   | { kind: "loading" }
   | { kind: "setup" }
@@ -464,7 +471,8 @@ function Shell({ me, onSignOut, onReload }: { me: Me; onSignOut: () => void; onR
         {/* Every page uses the whole width beside the sidebar: tables and
             charts stretch, and forms and text cap themselves at a reading width. */}
         <div className="w-full px-4 py-6 sm:px-6 lg:px-8">
-        {me.user.email_verified === false && me.user.email && <ConfirmEmailBanner email={me.user.email} resendAfter={me.user.email_resend_after ?? 0} />}
+        {me.support_view && <SupportViewBanner name={me.user.name || me.user.email || "this person"} />}
+        {!me.support_view && me.user.email_verified === false && me.user.email && <ConfirmEmailBanner email={me.user.email} resendAfter={me.user.email_resend_after ?? 0} />}
         {ws?.test && (
           <div role="status" className="mb-6 rounded-lg border border-sky-600/30 bg-sky-500/10 px-3 py-2 text-[13px] text-sky-900 dark:border-sky-400/20 dark:text-sky-200">
             <strong className="font-medium">Test workspace.</strong> Nothing here reaches anyone: mailboxes are simulated and nothing is delivered or bought.
@@ -486,6 +494,7 @@ function Shell({ me, onSignOut, onReload }: { me: Me; onSignOut: () => void; onR
         {ready && ws && tab === "overview" && <Overview key={ws.id} ws={ws.id} name={ws.name} isAdmin={isAdmin} go={(t) => { if (t === "get-started") setOpenedFrom("overview"); setTab(t); }} limited={(ws.brand_ids?.length ?? 0) > 0} />}
         {ready && ws && tab === "setup" && <BrandSetup key={ws.id} ws={ws.id} canManage={isAdmin} go={setTab} />}
         {ready && ws && tab === "get-started" && !isAdmin && <p className="text-sm text-muted-foreground">An owner or admin of {ws.name} sets this up.</p>}
+        {ready && ws && tab === "flags" && <Flags key={ws.id} ws={ws.id} canManage={can("analytics.manage")} go={setTab} />}
         {ready && ws && tab === "links" && <CampaignLinks key={ws.id} ws={ws.id} canManage={writer} />}
         {ready && ws && tab === "tracking" && <WebsiteTracking key={ws.id} ws={ws.id} canManage={isAdmin} go={setTab} />}
         {ready && ws && tab === "ideal-customers" && <IdealCustomers key={ws.id} ws={ws.id} canManage={writer} />}
@@ -498,6 +507,7 @@ function Shell({ me, onSignOut, onReload }: { me: Me; onSignOut: () => void; onR
         {ready && ws && tab === "backlinks" && <Backlinks key={ws.id} ws={ws.id} go={setTab} />}
         {ready && ws && tab === "competitors" && <Competitors key={ws.id} ws={ws.id} go={setTab} />}
         {ready && ws && tab === "social" && <Social key={ws.id} ws={ws.id} canManage={writer} go={setTab} />}
+        {ready && ws && tab === "reviews" && <Reviews key={ws.id} ws={ws.id} canManage={writer} go={setTab} />}
         {ready && ws && tab === "ads" && <Ads key={ws.id} ws={ws.id} canManage={writer} go={setTab} />}
         {ready && ws && tab === "visitors" && <Visitors key={ws.id} ws={ws.id} canManage={writer} go={setTab} />}
         {ready && ws && tab === "reddit" && <Reddit key={ws.id} ws={ws.id} canManage={writer} go={setTab} />}
@@ -526,6 +536,11 @@ function Shell({ me, onSignOut, onReload }: { me: Me; onSignOut: () => void; onR
         {ready && ws && tab === "servers" && <Servers key={ws.id} ws={ws.id} canManage={writer} open={item ?? ""} onOpen={(id) => setItem(id || undefined)} go={setTab} />}
         {ready && ws && tab === "leads" && <Leads key={ws.id} ws={ws.id} canManage={writer} go={setTab} />}
         {ready && ws && tab === "lists" && <Lists key={ws.id} ws={ws.id} canManage={writer} open={item} setOpen={setItem} go={setTab} />}
+        {ready && ws && tab === "lead-finder" && (
+          <CloudPage feature={cloudFeature("lead-finder")!}>
+            <LeadFinder key={ws.id} ws={ws.id} canManage={writer} onConnectors={() => setTab("connectors")} onProfiles={() => setTab("ideal-customers")} />
+          </CloudPage>
+        )}
         {ready && ws && tab === "suppression" && <Suppression key={ws.id} ws={ws.id} canAdd={writer} canRemove={isAdmin} />}
         {ready && ws && tab === "connectors" && <Connectors key={ws.id} ws={ws.id} canManage={isAdmin} canVerify={writer} canImport={writer} open={item} setOpen={setItem} go={setTab} />}
         {ready && ws && tab === "company" && <Company key={ws.id} ws={ws.id} canManage={writer} />}
@@ -534,6 +549,7 @@ function Shell({ me, onSignOut, onReload }: { me: Me; onSignOut: () => void; onR
           <SettingsFrame groups={settings} tab={tab} onTab={go}>
             {ready && ws && tab === "workspace" && <WorkspaceSettings key={ws.id} ws={ws} canManage={isAdmin} onSaved={onReload} />}
             {ready && ws && tab === "members" && <Members key={ws.id} ws={ws.id} myId={me.user.id ?? ""} myScopes={scopes} myRole={ws.role} />}
+            {ready && ws && tab === "alerts" && <Alerts key={ws.id} ws={ws.id} canManage={isAdmin} />}
             {ready && ws && tab === "digests" && <Digests key={ws.id} ws={ws.id} canManage={isAdmin} go={setTab} />}
             {ready && ws && tab === "ai-usage" && <AIUsage key={ws.id} ws={ws.id} canManage={isAdmin} go={setTab} />}
             {ready && ws && tab === "webhooks" && <Webhooks key={ws.id} ws={ws.id} canManage={isAdmin} open={item ?? ""} onOpen={(id) => setItem(id || undefined)} />}

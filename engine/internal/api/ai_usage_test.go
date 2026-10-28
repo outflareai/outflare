@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/outflareai/outflare/engine/internal/api"
 	"github.com/outflareai/outflare/engine/internal/track"
 )
 
@@ -27,7 +28,7 @@ func TestAIUsage(t *testing.T) {
 
 	// Before any call every tool is listed, with nothing spent.
 	u := owner.must(200, "GET", base+"/ai-usage", nil)
-	if u["month"] != time.Now().UTC().Format("2006-01") || u["total"].(map[string]any)["calls"].(float64) != 0 || len(u["tools"].([]any)) != 10 {
+	if u["month"] != time.Now().UTC().Format("2006-01") || u["total"].(map[string]any)["calls"].(float64) != 0 || len(u["tools"].([]any)) != 12 {
 		t.Fatalf("empty usage = %v", u)
 	}
 	owner.must(400, "GET", base+"/ai-usage?month=2026-13", nil)
@@ -145,6 +146,35 @@ func TestAIUsage(t *testing.T) {
 		t.Errorf("purged %d", n)
 	}
 
+	// A limit can warn only: calls go on past it. The workspace's limit
+	// (201 of 200 spent) stops plans until it is set to warn only.
+	if u["hard_stop"] != true {
+		t.Errorf("hard_stop by default = %v", u["hard_stop"])
+	}
+	owner.must(400, "PUT", base+"/ai-usage/limits", map[string]any{"limits": map[string]any{}, "hard_stops": map[string]any{"Bad Tool": false}})
+	u = owner.must(200, "PUT", base+"/ai-usage/limits", map[string]any{"limits": map[string]any{"plan": 5}, "hard_stop": false, "hard_stops": map[string]any{"plan": false}})
+	stops := map[string]any{}
+	for _, x := range u["tools"].([]any) {
+		stops[x.(map[string]any)["task"].(string)] = x.(map[string]any)["hard_stop"]
+	}
+	if u["hard_stop"] != false || stops["plan"] != false || stops["check_in"] != true {
+		t.Errorf("after warn only: hard_stop %v, tools %v", u["hard_stop"], stops)
+	}
+	owner.must(201, "POST", base+"/missions/plan", map[string]any{"goal": "Past both limits"})
+	// Leaving the switches out keeps them; setting them back stops calls.
+	if u = owner.must(200, "PUT", base+"/ai-usage/limits", map[string]any{"limits": map[string]any{"plan": 5}}); u["hard_stop"] != false {
+		t.Errorf("hard_stop after a PUT without it = %v", u["hard_stop"])
+	}
+	owner.must(200, "PUT", base+"/ai-usage/limits", map[string]any{"limits": map[string]any{"plan": 5}, "hard_stop": true, "hard_stops": map[string]any{}})
+	if code, _ := owner.do("POST", base+"/missions/plan", map[string]any{"goal": "Stopped again"}); code != 409 {
+		t.Errorf("plan after hard stop is back = %d", code)
+	}
+	var ws2Limits int
+	e.pool.QueryRow(ctx, `SELECT count(*) FROM workspace_ai_settings WHERE workspace_id = $1 AND (limit_warn_only OR warn_only_tasks <> '{}')`, ws2).Scan(&ws2Limits)
+	if ws2Limits != 0 {
+		t.Errorf("another workspace's limits changed")
+	}
+
 	names := map[string]bool{}
 	for _, ev := range events() {
 		names[ev.Name] = true
@@ -153,5 +183,29 @@ func TestAIUsage(t *testing.T) {
 		if !names[want] {
 			t.Errorf("no %s event", want)
 		}
+	}
+}
+
+// An extension's AI tool is listed with its own name and description, and
+// takes a limit of its own.
+func TestAIUsageExtensionTool(t *testing.T) {
+	e := freshEnvWith(t, func(o *api.Options) {
+		o.AITools = []api.AITool{{ID: "lead_finder", Name: "Lead finder", Description: "Finding and checking companies for lead lists.", ModelTask: "classify_domain"}}
+	})
+	owner, ws := setupOwner(t, e.h)
+	base := "/v1/workspaces/" + ws
+	u := owner.must(200, "PUT", base+"/ai-usage/limits", map[string]any{"limits": map[string]any{"lead_finder": 300}})
+	tools := u["tools"].([]any)
+	if len(tools) != 13 {
+		t.Fatalf("tools = %v", tools)
+	}
+	var found bool
+	for _, x := range tools {
+		if x := x.(map[string]any); x["task"] == "lead_finder" {
+			found = x["name"] == "Lead finder" && x["description"] == "Finding and checking companies for lead lists." && x["monthly_limit_cents"] == float64(300)
+		}
+	}
+	if !found {
+		t.Errorf("tools = %v", tools)
 	}
 }

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"net/http"
 	"slices"
 	"strconv"
@@ -58,18 +59,50 @@ type backlinkView struct {
 	Review      string          `json:"review"`
 	ReviewNote  string          `json:"review_note"`
 	ReviewedAt  *time.Time      `json:"reviewed_at"`
+	// The linking page: its strength (UR), traffic, keywords, how many
+	// domains link to it and it links to, what kind of page it is.
+	URLRating            *float64 `json:"url_rating"`
+	DomainTraffic        *float64 `json:"domain_traffic"`
+	PageTraffic          *float64 `json:"page_traffic"`
+	PageKeywords         *float64 `json:"page_keywords"`
+	PageReferringDomains *float64 `json:"page_referring_domains"`
+	LinkedDomains        *float64 `json:"linked_domains"`
+	ExternalLinks        *float64 `json:"external_links"`
+	Title                string   `json:"title"`
+	Author               string   `json:"author"`
+	PageTypes            []string `json:"page_types"`
+	PageCategories       []string `json:"page_categories"`
+	Languages            []string `json:"languages"`
+	Platforms            []string `json:"platforms"`
+	// The link: its kind, whether it sits in the main content, and where
+	// the linked URL leads (redirects).
+	LinkType   string          `json:"link_type"`
+	InContent  bool            `json:"in_content"`
+	Hops       json.RawMessage `json:"hops"`
+	LastSeenAt *time.Time      `json:"last_seen_at"`
+	// GroupLinks is how many links the row stands for when the list is
+	// grouped (one link per domain or page); 1 otherwise.
+	GroupLinks int `json:"group_links"`
 }
 
 const backlinkCols = `b.id::text, b.site_id::text, b.brand_id::text, b.source_url, b.target_url, b.source_domain, b.anchor, b.nofollow,
 	b.sponsored, b.ugc, b.status, b.source_rating, b.first_seen_at, b.lost_at, b.regained_at, b.checked_at, b.providers,
-	b.spam_score, b.spam_factors, b.review, b.review_note, b.reviewed_at`
+	b.spam_score, b.spam_factors, b.review, b.review_note, b.reviewed_at, b.url_rating, b.domain_traffic, b.page_traffic, b.page_keywords,
+	b.page_referring_domains, b.linked_domains, b.external_links, b.title, b.author, b.page_types, b.page_categories, b.languages,
+	b.platforms, b.link_type, b.in_content, b.hops, b.last_seen_at`
 
-func scanBacklink(row pgx.Row) (backlinkView, error) {
+func scanBacklink(row pgx.Row) (backlinkView, error) { return scanBacklinkWith(row) }
+
+// scanBacklinkWith scans backlinkCols, then extra columns after them.
+func scanBacklinkWith(row pgx.Row, extra ...any) (backlinkView, error) {
 	var v backlinkView
 	var raw []byte
-	err := row.Scan(&v.ID, &v.SiteID, &v.BrandID, &v.SourceURL, &v.TargetURL, &v.SourceDomain, &v.Anchor, &v.Nofollow,
+	err := row.Scan(append([]any{&v.ID, &v.SiteID, &v.BrandID, &v.SourceURL, &v.TargetURL, &v.SourceDomain, &v.Anchor, &v.Nofollow,
 		&v.Sponsored, &v.UGC, &v.Status, &v.SourceRating, &v.FirstSeenAt, &v.LostAt, &v.RegainedAt, &v.CheckedAt, &raw,
-		&v.SpamScore, &v.SpamFactors, &v.Review, &v.ReviewNote, &v.ReviewedAt)
+		&v.SpamScore, &v.SpamFactors, &v.Review, &v.ReviewNote, &v.ReviewedAt, &v.URLRating, &v.DomainTraffic, &v.PageTraffic, &v.PageKeywords,
+		&v.PageReferringDomains, &v.LinkedDomains, &v.ExternalLinks, &v.Title, &v.Author, &v.PageTypes, &v.PageCategories, &v.Languages,
+		&v.Platforms, &v.LinkType, &v.InContent, &v.Hops, &v.LastSeenAt}, extra...)...)
+	v.GroupLinks = 1
 	v.Providers = map[string]json.RawMessage{}
 	_ = json.Unmarshal(raw, &v.Providers)
 	if v.SpamScore != nil {
@@ -80,11 +113,24 @@ func scanBacklink(row pgx.Row) (backlinkView, error) {
 }
 
 var backlinkOrders = map[string]string{
-	"rating": "b.source_rating DESC NULLS LAST, b.id",
-	"newest": "b.first_seen_at DESC NULLS LAST, b.id",
-	"lost":   "b.lost_at DESC NULLS LAST, b.id",
-	"spam":   "b.spam_score DESC NULLS LAST, b.source_rating DESC NULLS LAST, b.id",
+	"rating":         "b.source_rating DESC NULLS LAST, b.id",
+	"url_rating":     "b.url_rating DESC NULLS LAST, b.source_rating DESC NULLS LAST, b.id",
+	"domain_traffic": "b.domain_traffic DESC NULLS LAST, b.source_rating DESC NULLS LAST, b.id",
+	"page_traffic":   "b.page_traffic DESC NULLS LAST, b.source_rating DESC NULLS LAST, b.id",
+	"keywords":       "b.page_keywords DESC NULLS LAST, b.source_rating DESC NULLS LAST, b.id",
+	"newest":         "b.first_seen_at DESC NULLS LAST, b.id",
+	"oldest":         "b.first_seen_at ASC NULLS LAST, b.id",
+	"last_seen":      "b.last_seen_at DESC NULLS LAST, b.id",
+	"lost":           "b.lost_at DESC NULLS LAST, b.id",
+	"spam":           "b.spam_score DESC NULLS LAST, b.source_rating DESC NULLS LAST, b.id",
 }
+
+// groupBest picks the link that stands for its group (a domain or a page):
+// a live one first, then followed, in the main content, from the strongest
+// page.
+const groupBest = `(b.status = 'live') DESC, (NOT b.nofollow) DESC, b.in_content DESC, b.url_rating DESC NULLS LAST, b.first_seen_at, b.id`
+
+var backlinkLinkTypes = []string{"text", "image", "redirect", "canonical", "alternate", "frame", "form", "rss"}
 
 // spamRanges are the spam filter's score ranges.
 var spamRanges = map[string][2]int{
@@ -128,23 +174,169 @@ func (s *Server) listBacklinks(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	bad := func(msg string) { writeError(w, r, http.StatusBadRequest, "invalid_request", msg) }
+	args := []any{a.WorkspaceID}
+	arg := func(v any) string {
+		args = append(args, v)
+		return "$" + strconv.Itoa(len(args))
+	}
+	where := `b.workspace_id = $1`
+	if site != "" {
+		where += ` AND b.site_id = ` + arg(site) + `::uuid`
+	}
+
 	status := q.Get("status")
 	if status != "" && status != "live" && status != "lost" {
-		writeError(w, r, http.StatusBadRequest, "invalid_request", "status is live or lost")
+		bad("status is live or lost")
 		return
 	}
+	// History: since (a date) adds the links lost since then to the live
+	// ones; change=new lists links first seen since then, change=lost
+	// links lost since then.
+	var since *time.Time
+	if v := q.Get("since"); v != "" {
+		t, err := time.Parse(time.DateOnly, v)
+		if err != nil {
+			bad("since is a date, like 2026-01-31")
+			return
+		}
+		since = &t
+	}
+	change := q.Get("change")
+	switch change {
+	case "":
+	case "new", "lost":
+		if since == nil {
+			t := time.Now().UTC().AddDate(0, 0, -30).Truncate(24 * time.Hour)
+			since = &t
+		}
+	default:
+		bad("change is new or lost")
+		return
+	}
+	switch {
+	case change == "new":
+		where += ` AND b.first_seen_at >= ` + arg(*since)
+	case change == "lost":
+		where += ` AND b.status = 'lost' AND b.lost_at >= ` + arg(*since)
+	case status == "" && since != nil:
+		where += ` AND (b.status = 'live' OR b.lost_at >= ` + arg(*since) + `)`
+	}
+	if status != "" {
+		where += ` AND b.status = ` + arg(status)
+	}
+
+	switch follow := q.Get("nofollow"); follow {
+	case "":
+	case "true", "false":
+		where += ` AND b.nofollow = ` + arg(follow == "true")
+	default:
+		bad("nofollow is true or false")
+		return
+	}
+	switch q.Get("follow") {
+	case "":
+	case "dofollow":
+		where += ` AND NOT b.nofollow`
+	case "nofollow":
+		where += ` AND b.nofollow`
+	case "ugc":
+		where += ` AND b.ugc`
+	case "sponsored":
+		where += ` AND b.sponsored`
+	default:
+		bad("follow is dofollow, nofollow, ugc or sponsored")
+		return
+	}
+	if t := q.Get("link_type"); t != "" {
+		if t == "content" {
+			where += ` AND b.in_content`
+		} else if !slices.Contains(backlinkLinkTypes, t) {
+			bad("link_type is content, " + strings.Join(backlinkLinkTypes, ", "))
+			return
+		} else {
+			where += ` AND b.link_type = ` + arg(t)
+		}
+	}
+	for _, rg := range []struct{ param, col string }{
+		{"dr", "b.source_rating"}, {"ur", "b.url_rating"}, {"domain_traffic", "b.domain_traffic"}, {"page_traffic", "b.page_traffic"},
+	} {
+		for _, side := range []string{"min", "max"} {
+			v := q.Get(rg.param + "_" + side)
+			if v == "" {
+				continue
+			}
+			n, err := strconv.ParseFloat(v, 64)
+			if err != nil || n < 0 {
+				bad(rg.param + "_" + side + " is a number of 0 or more")
+				return
+			}
+			op := ">="
+			if side == "max" {
+				op = "<="
+			}
+			where += ` AND ` + rg.col + ` ` + op + ` ` + arg(n)
+		}
+	}
+	if t := strings.TrimSpace(q.Get("page_type")); t != "" {
+		if len(t) > 100 || strings.ContainsAny(t, "/,") {
+			bad("page_type is a top-level page type, like Article")
+			return
+		}
+		where += ` AND EXISTS (SELECT 1 FROM unnest(b.page_types) p WHERE split_part(p, '/', 2) = ` + arg(t) + `)`
+	}
+	if d := strings.ToLower(strings.TrimSpace(q.Get("source_domain"))); d != "" {
+		where += ` AND b.source_domain = ` + arg(strings.TrimPrefix(d, "www."))
+	}
+	if search := strings.ToLower(strings.TrimSpace(q.Get("q"))); search != "" {
+		p := arg(search)
+		in := map[string]string{
+			"":           `(strpos(b.source_domain, ` + p + `) > 0 OR strpos(lower(b.source_url), ` + p + `) > 0 OR strpos(lower(b.anchor), ` + p + `) > 0 OR strpos(lower(b.title), ` + p + `) > 0 OR strpos(lower(b.target_url), ` + p + `) > 0)`,
+			"source_url": `strpos(lower(b.source_url), ` + p + `) > 0`,
+			"target_url": `strpos(lower(b.target_url), ` + p + `) > 0`,
+			"anchor":     `strpos(lower(b.anchor), ` + p + `) > 0`,
+			"title":      `strpos(lower(b.title), ` + p + `) > 0`,
+		}
+		cond, known := in[q.Get("q_in")]
+		if !known {
+			bad("q_in is source_url, target_url, anchor or title")
+			return
+		}
+		where += ` AND ` + cond
+	}
+	if spam := q.Get("spam"); spam != "" {
+		rng, known := spamRanges[spam]
+		if !known {
+			bad("spam is clean, suspect or toxic")
+			return
+		}
+		where += ` AND b.spam_score BETWEEN ` + arg(rng[0]) + ` AND ` + arg(rng[1])
+	}
+	switch review := q.Get("review"); review {
+	case "":
+	case "none":
+		where += ` AND b.review = ''`
+	case "ok", "disavow":
+		where += ` AND b.review = ` + arg(review)
+	default:
+		bad("review is none, ok or disavow")
+		return
+	}
+	where += sel.sql("b.brand_id", &args)
+
 	order := q.Get("order")
 	if order == "" {
 		order = "rating"
 	}
 	orderBy, known := backlinkOrders[order]
 	if !known {
-		writeError(w, r, http.StatusBadRequest, "invalid_request", "order is rating, newest, lost or spam")
+		bad("order is " + strings.Join(slices.Sorted(maps.Keys(backlinkOrders)), ", "))
 		return
 	}
-	follow := q.Get("nofollow")
-	if follow != "" && follow != "true" && follow != "false" {
-		writeError(w, r, http.StatusBadRequest, "invalid_request", "nofollow is true or false")
+	group := q.Get("group")
+	partition := map[string]string{"": "", "all": "", "domain": "b.source_domain", "page": "b.source_url"}[group]
+	if _, known := map[string]bool{"": true, "all": true, "domain": true, "page": true}[group]; !known {
+		bad("group is all, domain or page")
 		return
 	}
 	limit, err := limitParam(r, 100, 500)
@@ -155,40 +347,36 @@ func (s *Server) listBacklinks(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	search := strings.ToLower(strings.TrimSpace(q.Get("q")))
-	spam := q.Get("spam")
-	rng, known := spamRanges[spam]
-	if spam != "" && !known {
-		writeError(w, r, http.StatusBadRequest, "invalid_request", "spam is clean, suspect or toxic")
-		return
+
+	countSQL := `SELECT count(*) FROM backlinks b WHERE ` + where
+	from := `backlinks b WHERE ` + where
+	if partition != "" {
+		countSQL = `SELECT count(DISTINCT ` + partition + `) FROM backlinks b WHERE ` + where
+		from = `(SELECT b.*, count(*) OVER (PARTITION BY ` + partition + `) AS group_links,
+			row_number() OVER (PARTITION BY ` + partition + ` ORDER BY ` + groupBest + `) AS group_rank
+			FROM backlinks b WHERE ` + where + `) b WHERE b.group_rank = 1`
 	}
-	review := q.Get("review")
-	if review != "" && review != "none" && review != "ok" && review != "disavow" {
-		writeError(w, r, http.StatusBadRequest, "invalid_request", "review is none, ok or disavow")
-		return
-	}
-	if review == "none" {
-		review = "-"
-	}
-	args := []any{a.WorkspaceID, site, status, follow, search, spam, rng[0], rng[1], review}
-	where := `b.workspace_id = $1 AND ($2 = '' OR b.site_id = NULLIF($2, '')::uuid) AND ($3 = '' OR b.status = $3)
-		AND ($4 = '' OR b.nofollow = ($4 = 'true'))
-		AND ($5 = '' OR strpos(b.source_domain, $5) > 0 OR strpos(lower(b.source_url), $5) > 0 OR strpos(lower(b.anchor), $5) > 0)
-		AND ($6 = '' OR b.spam_score BETWEEN $7 AND $8)
-		AND ($9 = '' OR b.review = CASE $9 WHEN '-' THEN '' ELSE $9 END)` + sel.sql("b.brand_id", &args)
 	var total int
-	if err := s.pool.QueryRow(r.Context(), `SELECT count(*) FROM backlinks b WHERE `+where, args...).Scan(&total); err != nil {
+	if err := s.pool.QueryRow(r.Context(), countSQL, args...).Scan(&total); err != nil {
 		s.internal(w, r, err)
 		return
 	}
-	args = append(args, limit, offset)
-	rows, err := s.pool.Query(r.Context(), `SELECT `+backlinkCols+` FROM backlinks b WHERE `+where+`
-		ORDER BY `+orderBy+` LIMIT $`+strconv.Itoa(len(args)-1)+` OFFSET $`+strconv.Itoa(len(args)), args...)
+	groupCol := `1`
+	if partition != "" {
+		groupCol = `b.group_links`
+	}
+	page := `SELECT ` + backlinkCols + `, ` + groupCol + ` FROM ` + from + ` ORDER BY ` + orderBy + ` LIMIT ` + arg(limit) + ` OFFSET ` + arg(offset)
+	rows, err := s.pool.Query(r.Context(), page, args...)
 	if err != nil {
 		s.internal(w, r, err)
 		return
 	}
-	list, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (backlinkView, error) { return scanBacklink(row) })
+	list, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (backlinkView, error) {
+		var n int
+		v, err := scanBacklinkWith(row, &n)
+		v.GroupLinks = n
+		return v, err
+	})
 	if err != nil {
 		s.internal(w, r, err)
 		return
@@ -338,6 +526,18 @@ type backlinkSiteSummary struct {
 	Last30Days       backlinkCounts     `json:"last_30_days"`
 	Weeks            []backlinkWeek     `json:"weeks"`
 	Providers        []backlinkProvider `json:"providers"`
+	// PageTypes and LinkTypes count the live links by the linking page's
+	// top-level type (Article, Listing, ...) and by link type, for filters.
+	PageTypes []backlinkFacet `json:"page_types"`
+	LinkTypes []backlinkFacet `json:"link_types"`
+	// Traffic: some links carry the linking page's traffic, so traffic
+	// columns and filters mean something.
+	Traffic bool `json:"traffic"`
+}
+
+type backlinkFacet struct {
+	Value string `json:"value"`
+	Links int    `json:"links"`
 }
 
 // summaryWeeks is how many weeks of gains and losses the summary charts.
@@ -427,6 +627,39 @@ func (s *Server) backlinksSummary(w http.ResponseWriter, r *http.Request) {
 		}
 		if v.Providers == nil {
 			v.Providers = []backlinkProvider{}
+		}
+		facet := func(sql string) ([]backlinkFacet, error) {
+			rows, err := s.pool.Query(ctx, sql, a.WorkspaceID, v.Site.ID)
+			if err != nil {
+				return nil, err
+			}
+			list, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (backlinkFacet, error) {
+				var x backlinkFacet
+				err := row.Scan(&x.Value, &x.Links)
+				return x, err
+			})
+			if list == nil {
+				list = []backlinkFacet{}
+			}
+			return list, err
+		}
+		if v.PageTypes, err = facet(`
+			SELECT t, count(DISTINCT b.id) FROM backlinks b, unnest(b.page_types) p, split_part(p, '/', 2) t
+			WHERE b.workspace_id = $1 AND b.site_id = $2 AND b.status = 'live' AND t <> ''
+			GROUP BY t ORDER BY 2 DESC, 1 LIMIT 30`); err != nil {
+			s.internal(w, r, err)
+			return
+		}
+		if v.LinkTypes, err = facet(`
+			SELECT link_type, count(*) FROM backlinks WHERE workspace_id = $1 AND site_id = $2 AND status = 'live' AND link_type <> ''
+			GROUP BY link_type ORDER BY 2 DESC, 1`); err != nil {
+			s.internal(w, r, err)
+			return
+		}
+		if err := s.pool.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM backlinks WHERE workspace_id = $1 AND site_id = $2 AND domain_traffic IS NOT NULL)`,
+			a.WorkspaceID, v.Site.ID).Scan(&v.Traffic); err != nil {
+			s.internal(w, r, err)
+			return
 		}
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"data": list})

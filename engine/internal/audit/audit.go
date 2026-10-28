@@ -57,6 +57,8 @@ var brandOf = map[string]string{
 		LEFT JOIN sequences s ON s.id = x.sequence_id LEFT JOIN projects p ON p.id = x.project_id
 		WHERE x.id = $1::uuid AND x.workspace_id = $2`,
 	"mission_action": `SELECT m.brand_id FROM mission_actions a JOIN missions m ON m.id = a.mission_id WHERE a.id = $1::uuid AND m.workspace_id = $2`,
+	"review_page":    `SELECT brand_id FROM review_pages WHERE id = $1::uuid AND workspace_id = $2`,
+	"review":         `SELECT brand_id FROM reviews WHERE id = $1::uuid AND workspace_id = $2`,
 	// A domain's id is its name.
 	"domain": `SELECT brand_id FROM sending_domains WHERE domain = lower($1) AND workspace_id = $2`,
 }

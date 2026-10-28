@@ -75,10 +75,14 @@ func (s *Server) pageReaders(ctx context.Context, q connectors.Querier, ws strin
 }
 
 // enqueueLinkDiscovery queues reading a brand's website for links, when
-// the workspace has a page reader. It reports whether it queued one.
+// the workspace has a page reader, and searching for its review pages. It
+// reports whether it queued one.
 func (s *Server) enqueueLinkDiscovery(ctx context.Context, tx pgx.Tx, ws, brandID, key string) (bool, error) {
 	readers, err := s.pageReaders(ctx, tx, ws)
 	if err != nil || len(readers) == 0 {
+		return false, err
+	}
+	if _, err := s.enqueueReviewDiscovery(ctx, tx, ws, brandID, key); err != nil {
 		return false, err
 	}
 	_, err = jobs.Enqueue(ctx, tx, jobs.NewJob{Kind: jobBrandDiscoverLinks, WorkspaceID: &ws, Payload: map[string]string{"brand_id": brandID},
@@ -88,6 +92,7 @@ func (s *Server) enqueueLinkDiscovery(ctx context.Context, tx pgx.Tx, ws, brandI
 
 // enqueuePublicSocialSync reads the X profiles in brand links now, through
 // each page reader, after links change.
+// Review pages in the links are read too.
 func (s *Server) enqueuePublicSocialSync(ctx context.Context, tx pgx.Tx, ws, key string) error {
 	readers, err := s.pageReaders(ctx, tx, ws)
 	if err != nil {
@@ -98,7 +103,7 @@ func (s *Server) enqueuePublicSocialSync(ctx context.Context, tx pgx.Tx, ws, key
 			return err
 		}
 	}
-	return nil
+	return s.enqueueReviewRead(ctx, tx, ws, key)
 }
 
 // watchPageReaders reads every brand's website for links when a page
@@ -124,6 +129,9 @@ func (s *Server) watchPageReaders() {
 		for _, id := range ids {
 			if _, err := jobs.Enqueue(ctx, tx, jobs.NewJob{Kind: jobBrandDiscoverLinks, WorkspaceID: &i.WorkspaceID, Payload: map[string]string{"brand_id": id},
 				IdempotencyKey: "brand.discover_links:" + id + ":connected:" + i.ID, MaxAttempts: 3}); err != nil {
+				return err
+			}
+			if _, err := s.enqueueReviewDiscovery(ctx, tx, i.WorkspaceID, id, "connected:"+i.ID); err != nil {
 				return err
 			}
 		}

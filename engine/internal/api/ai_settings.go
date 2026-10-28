@@ -53,6 +53,8 @@ const (
 	taskAIVisibility = aivis.Task
 	// Drafting a reply to a post a social watch found.
 	taskSocialReplies = socialReplyTask
+	// Drafting a public answer to a review on the brand's review pages.
+	taskReviewReplies = reviewReplyTask
 	// Checking an email address the free checks could not settle.
 	taskEmailVerification = "email_verification"
 	// Asking the models chosen under AI visibility about a brand. It uses
@@ -73,13 +75,15 @@ var aiTasks = []aiTask{
 	{taskDomainResearch, "Domain research", "Reading an unknown email domain's homepage to tell what kind of company it is."},
 	{taskAIVisibility, "AI visibility", "Reading what AI models answer about your brands, such as checking the answers against your brand's facts."},
 	{taskSocialReplies, "Social replies", "Drafting replies to posts your social watches found, such as Reddit threads, for a person to approve."},
+	{taskReviewReplies, "Review answers", "Drafting public answers to reviews of your brands, for a person to edit and post."},
 	{taskEmailVerification, "Email verification", "Checking email addresses the free checks could not settle."},
+	{taskFixTickets, "Fix tickets", "Writing fix tickets from site audits and other findings, for your team or your coding agent to act on."},
 }
 
 // taskTier says which of the provider's cheaper models a task defaults to.
 func taskTier(task string, p llm.Provider) string {
 	switch task {
-	case taskCheckIn, taskAIVisibility, taskSocialReplies:
+	case taskCheckIn, taskAIVisibility, taskSocialReplies, taskReviewReplies, taskFixTickets:
 		return p.LightModel
 	case taskReplyLabelling, taskDomainResearch, taskEmailVerification:
 		if p.CheapModel != "" {
@@ -117,6 +121,10 @@ type aiSettingsRow struct {
 	// TaskLimits caps a tool's AI spend each calendar month, in cents, on
 	// top of MonthlyLimit. A tool left out has no limit of its own.
 	TaskLimits map[string]int64
+	// LimitWarnOnly makes MonthlyLimit warn without stopping calls, and
+	// WarnOnlyTasks does the same for those tools' own limits.
+	LimitWarnOnly bool
+	WarnOnlyTasks []string
 	// Research reads an unknown email domain's homepage with the
 	// workspace's own page reader and its own model; off until asked for.
 	Research      bool
@@ -137,10 +145,10 @@ func loadAISettings(ctx context.Context, q rowQuerier, ws string) (aiSettingsRow
 	row := aiSettingsRow{MonthlyLimit: ptr(int64(defaultAILimitCents))}
 	var tasks, limits []byte
 	err := q.QueryRow(ctx, `SELECT integration_id::text, model, input_cents_per_m::float8, output_cents_per_m::float8, monthly_limit_cents,
-			domain_research, domain_research_limit_cents, task_models, task_limits, updated_at
+			domain_research, domain_research_limit_cents, task_models, task_limits, limit_warn_only, warn_only_tasks, updated_at
 		FROM workspace_ai_settings WHERE workspace_id = $1`, ws).
 		Scan(&row.IntegrationID, &row.Model, &row.InputCents, &row.OutputCents, &row.MonthlyLimit,
-			&row.Research, &row.ResearchLimit, &tasks, &limits, &row.UpdatedAt)
+			&row.Research, &row.ResearchLimit, &tasks, &limits, &row.LimitWarnOnly, &row.WarnOnlyTasks, &row.UpdatedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return aiSettingsRow{MonthlyLimit: ptr(int64(defaultAILimitCents))}, nil
 	}
@@ -159,6 +167,11 @@ func (row aiSettingsRow) taskLimit(task string) *int64 {
 		return &v
 	}
 	return nil
+}
+
+// taskWarnOnly says the tool's own limit warns without stopping calls.
+func (row aiSettingsRow) taskWarnOnly(task string) bool {
+	return slices.Contains(row.WarnOnlyTasks, task)
 }
 
 func ptr[T any](v T) *T { return &v }
@@ -186,6 +199,10 @@ type aiChoice struct {
 	PriceSource   string // list (Outflare knows it) or workspace
 	MonthlyLimit  *int64
 	TaskLimit     *int64 // the tool's own monthly limit, on top of MonthlyLimit
+	// LimitWarnOnly and TaskWarnOnly: the limit only warns, and calls go on
+	// past it. Left false, a limit stops calls.
+	LimitWarnOnly bool
+	TaskWarnOnly  bool
 }
 
 // aiConnections lists the workspace's connected AI model integrations, in
@@ -279,7 +296,7 @@ func (s *Server) aiModel(ctx context.Context, ws, task string) (aiChoice, error)
 	if err != nil {
 		return aiChoice{}, err
 	}
-	model, price, source, _ = forTask(row, p, model, price, source, task)
+	model, price, source, _ = forTask(row, p, model, price, source, s.modelTask(task))
 	o, err := s.integrations.Open(ctx, s.pool, ws, conn.ID)
 	if err != nil {
 		return aiChoice{}, err
@@ -289,7 +306,7 @@ func (s *Server) aiModel(ctx context.Context, ws, task string) (aiChoice, error)
 		return aiChoice{}, err
 	}
 	return aiChoice{Provider: p, IntegrationID: conn.ID, Task: task, Model: m, Price: price, PriceSource: source,
-		MonthlyLimit: row.MonthlyLimit, TaskLimit: row.taskLimit(task)}, nil
+		MonthlyLimit: row.MonthlyLimit, TaskLimit: row.taskLimit(task), LimitWarnOnly: row.LimitWarnOnly, TaskWarnOnly: row.taskWarnOnly(task)}, nil
 }
 
 // aiMonthSpend is what AI calls cost the workspace this calendar month (UTC).
@@ -306,9 +323,10 @@ func aiMonthSpend(ctx context.Context, q rowQuerier, ws string) (int64, error) {
 }
 
 // checkAIBudget refuses a call that would take the month's AI spend past
-// the workspace limit, counting estimate cents for the call itself.
+// the workspace limit, counting estimate cents for the call itself. A limit
+// set to warn only never refuses: warnAIBudget emails about it instead.
 func (s *Server) checkAIBudget(ctx context.Context, ws string, c aiChoice, estimate int64) error {
-	if c.TaskLimit != nil {
+	if c.TaskLimit != nil && !c.TaskWarnOnly {
 		spent, err := aiTaskMonthSpend(ctx, s.pool, ws, c.Task)
 		if err != nil {
 			return err
@@ -316,10 +334,10 @@ func (s *Server) checkAIBudget(ctx context.Context, ws string, c aiChoice, estim
 		if spent+estimate > *c.TaskLimit {
 			return errAI{http.StatusConflict, "ai_budget_reached", fmt.Sprintf(
 				"AI calls for %s reached their monthly limit of $%.2f (spent $%.2f). An admin can raise it under Settings → AI usage.",
-				aiToolName(c.Task), float64(*c.TaskLimit)/100, float64(spent)/100)}
+				s.aiToolName(c.Task), float64(*c.TaskLimit)/100, float64(spent)/100)}
 		}
 	}
-	if c.MonthlyLimit == nil {
+	if c.MonthlyLimit == nil || c.LimitWarnOnly {
 		return nil
 	}
 	spent, err := s.aiMonthSpend(ctx, s.pool, ws)

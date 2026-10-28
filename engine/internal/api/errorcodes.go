@@ -47,6 +47,8 @@ var errorCodes = []errorCode{
 	{"passkey_rejected", []int{400, 401}, "The passkey was not accepted.", false},
 	{"too_many_passkeys", []int{409}, "The account already has the most passkeys allowed.", false},
 	{"project_has_tokens", []int{409}, "The project still has API tokens. Revoke them first.", false},
+	{"support_view_read_only", []int{403}, "You are viewing this account as staff (support access), which is read-only. End the view with DELETE /v1/me/support-view to make changes as yourself.", false},
+	{"support_view_hidden", []int{403}, "Hidden while staff view this account (support access): inbox and email content never show in a view.", false},
 	{"managed", []int{409}, "Usage stats are set by the server (an environment variable or the build), not here.", false},
 
 	// Signing AI apps in with OAuth (/oauth/register, /oauth/token,
@@ -114,6 +116,7 @@ var errorCodes = []errorCode{
 	{"no_email_provider", []int{409}, "No email provider is connected. Connect Amazon SES, Postmark or Resend under Lifecycle, Email providers.", false},
 	{"email_provider_purpose", []int{409}, "The email provider is not set to send this purpose (transactional or lifecycle). Choose another provider or change its purposes.", false},
 	{"domain_not_ready", []int{409}, "The provider hasn't sent the sending domain's DNS records yet. Try again in a few seconds.", true},
+	{"nothing_to_add", []int{409}, "Every DNS record the brand needs is already in place, so there is nothing to add.", false},
 	{"email_domain_not_verified", []int{409}, "The from address's domain is not a verified sending domain for the provider. Add it under Lifecycle, Sending domains, and add its DNS records.", false},
 	{"template_not_published", []int{409}, "The template has no published version. Publish it, or send with draft: true to test it.", false},
 	{"template_variables_missing", []int{422}, "data is missing variables the template requires. The message names them.", false},
@@ -127,6 +130,7 @@ var errorCodes = []errorCode{
 	// AI models.
 	{"ai_model_needed", []int{409}, "The workspace's AI model needs a choice first: a model, or its price. The message says which, under Settings, AI model.", false},
 	{"ai_budget_reached", []int{409}, "AI calls reached the workspace's monthly limit. An admin can raise it under Settings, AI model.", false},
+	{"ai_failed", []int{502}, "The workspace's AI model did not answer, or not usably. Retry; the message says more.", true},
 
 	// Customer records.
 	{"identity_taken", []int{409}, "Another record already holds this verified identity, such as a verified email. The message names it when you can see it: change that record, or add the identity unverified.", false},

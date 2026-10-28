@@ -122,6 +122,45 @@ type SEOLink struct {
 	ExternalLinks *float64 `json:"external_links,omitempty"`
 	// Title is the linking page's title.
 	Title string `json:"title,omitempty"`
+	// URLRating is the linking page's strength, 0 to 100 (Ahrefs UR, or
+	// DataForSEO's page rank on the same scale).
+	URLRating *float64 `json:"url_rating,omitempty"`
+	// DomainTraffic and PageTraffic are the linking domain's and page's
+	// estimated monthly organic visits; PageKeywords is how many keywords
+	// the page ranks for in the top 100. Traffic is read only when the
+	// query asks for it, because it costs more.
+	DomainTraffic *float64 `json:"domain_traffic,omitempty"`
+	PageTraffic   *float64 `json:"page_traffic,omitempty"`
+	PageKeywords  *float64 `json:"page_keywords,omitempty"`
+	// PageRefDomains is how many domains link to the linking page, and
+	// LinkedDomains how many domains it links to.
+	PageRefDomains *float64 `json:"page_referring_domains,omitempty"`
+	LinkedDomains  *float64 `json:"linked_domains,omitempty"`
+	// LinkType is text, image, redirect, canonical, alternate, frame, form
+	// or rss; InContent: the link sits in the page's main content.
+	LinkType  string `json:"link_type,omitempty"`
+	InContent bool   `json:"in_content,omitempty"`
+	// PageTypes and PageCategories are the linking page's kind and topics
+	// as paths (/Article/Listicle, /Computers/Security); Languages and
+	// Platforms what it is written in and built with.
+	PageTypes      []string `json:"page_types,omitempty"`
+	PageCategories []string `json:"page_categories,omitempty"`
+	Languages      []string `json:"languages,omitempty"`
+	Platforms      []string `json:"platforms,omitempty"`
+	Author         string   `json:"author,omitempty"`
+	// LastChecked is when the provider last found the link live
+	// (YYYY-MM-DD).
+	LastChecked string `json:"last_checked,omitempty"`
+	// Hops is where the linked URL leads: each redirect or canonical step
+	// after To, in order.
+	Hops []SEOHop `json:"hops,omitempty"`
+}
+
+// SEOHop is one step from a linked URL to where it ends up: a redirect
+// (Kind "301", "302", ...) or a canonical (Kind "canonical").
+type SEOHop struct {
+	Kind string `json:"kind"`
+	URL  string `json:"url"`
 }
 
 // SEOCost is what a call cost: money for pay-as-you-go providers
@@ -150,6 +189,9 @@ type SEOQuery struct {
 	// Since (YYYY-MM-DD) adds links lost on or after it to the links
 	// report; empty is live links only.
 	Since string `json:"since,omitempty"`
+	// Traffic adds the linking pages' and domains' traffic and referring
+	// domains to the links report, which costs more on Ahrefs.
+	Traffic bool `json:"traffic,omitempty"`
 }
 
 // SEOReport is a provider's answer, in provider-neutral terms.

@@ -46,6 +46,7 @@ export const tabNames: Record<Tab, string> = {
   analytics: "Website analytics",
   links: "Campaign links",
   tracking: "Website tracking",
+  flags: "Feature flags",
   seo: "Rankings & backlinks",
   "seo-overview": "SEO overview",
   audits: "Site audits",
@@ -57,6 +58,7 @@ export const tabNames: Record<Tab, string> = {
   competitors: "Competitors",
   reddit: "Reddit",
   social: "Accounts",
+  reviews: "Reviews",
   ads: "Paid ads",
   visitors: "Visitors",
   inbox: "Inbox",
@@ -67,6 +69,7 @@ export const tabNames: Record<Tab, string> = {
   sequences: "Sequences",
   leads: "Leads",
   lists: "Lists",
+  "lead-finder": "Lead finder",
   suppression: "Do not contact",
   infrastructure: "Infrastructure",
   mailboxes: "Mailboxes",
@@ -87,6 +90,7 @@ export const tabNames: Record<Tab, string> = {
   "ideal-customers": "Ideal customers",
   workspace: "General",
   members: "Members",
+  alerts: "Alerts",
   digests: "Digests",
   connectors: "Connectors",
   webhooks: "Webhooks",
@@ -114,6 +118,7 @@ export const tabBlurbs: Record<Tab, string> = {
   sequences: "The emails and follow-ups each lead gets, the schedule they send on, and who is in them.",
   leads: "Everyone you can contact, where they came from, and what has been sent to them.",
   lists: "Saved searches that build lead lists from your data providers and keep them fresh.",
+  "lead-finder": "AI that searches the web for companies that fit your ideal customer, reads their websites and says which fit and why.",
   suppression: "People and domains Outflare will never email, such as unsubscribes and bounces.",
   infrastructure: "Plan the domains and mailboxes a motion needs, and follow each through warm-up, rest and retirement.",
   mailboxes: "Connected mailboxes, their health, daily limits and sign-in state.",
@@ -133,11 +138,12 @@ export const tabBlurbs: Record<Tab, string> = {
   reports: "Sends, bounces, replies and opt-outs by day, sequence, step, mailbox or domain.",
   analytics: "Visitors, top pages, traffic sources and conversions from the analytics tools on your website.",
   tracking: "Outflare's own snippet for your websites: the script tag to paste, and whether each site is sending visits.",
+  flags: "Turn things on for some visitors, or split them between versions to see which works better.",
   links: "Tag every link with one channel, source and campaign, so each visit, lead and sale is credited to the right place.",
   "seo-overview": "Is each brand growing in search: branded search, visitors, domain rating and links, with their trends.",
   experiments: "Did a change help? Hold back a matched group of pages and measure the difference from Search Console.",
   audits: "OutflareBot crawls your websites, scores their health and finds what to fix, page by page.",
-  fixes: "One list of everything worth fixing, for people and agents, starting with site audits.",
+  fixes: "Everything worth fixing, one ticket per problem, written up by your AI model and reviewed by you.",
   keywords: "What Google shows each page for, the keyword each page targets, where it ranks, pages that compete for one search, and how Google indexed them, from your Search Console.",
   backlinks: "Who links to your sites, what you gained and lost, and which links are worth getting back.",
   "ai-visibility": "How often AI assistants name each brand against its competitors, whether they get its facts right, and which AI crawlers read its sites.",
@@ -145,6 +151,7 @@ export const tabBlurbs: Record<Tab, string> = {
   visitors: "The companies and people on your website, scored for buying intent, from your site snippet and clicks on your emails.",
   ads: "Spend, clicks and platform-reported conversions from your own Google, Meta, Microsoft, Reddit, X and LinkedIn ad accounts, by brand.",
   social: "Confirm your brands' X and LinkedIn accounts, then follow their followers, posts and engagement every day.",
+  reviews: "Every review of your brands on Trustpilot, G2, Capterra and Google, your review score and its direction, and answers drafted for you to post.",
   reddit: "Find threads where your brand can help, reply with a disclosure from its own account, and count the sign-ups.",
   seo: "Domain rating, backlinks and the keywords your sites rank for, from DataForSEO or Ahrefs.",
   connectors: "The services Outflare can use, connected once for the whole workspace.",
@@ -153,6 +160,7 @@ export const tabBlurbs: Record<Tab, string> = {
   "ideal-customers": "Who you sell to, described once for projects, lead lists and the lead finder.",
   workspace: "The workspace's name and its address in the app.",
   members: "Who is in this workspace, and what each person can do.",
+  alerts: "What needs someone now, such as hot replies and hot website visitors, and who hears about it by email.",
   digests: "A daily or weekly summary of the whole workspace, kept here and emailed through your own provider.",
   tokens: "Tokens for scripts and agents, with scopes and send budgets.",
   webhooks: "Events Outflare sends to your own systems as they happen.",
@@ -200,6 +208,7 @@ export const tabDocs: Partial<Record<Tab, string>> = {
   experiments: "/docs/guides/seo-experiments/",
   links: "/docs/guides/campaign-links/",
   tracking: "/docs/guides/website-tracking/",
+  flags: "/docs/guides/feature-flags/",
   seo: "/docs/integrations/seo/",
   "seo-overview": "/docs/integrations/seo/",
   audits: "/docs/guides/site-audits/",
@@ -210,12 +219,14 @@ export const tabDocs: Partial<Record<Tab, string>> = {
   reddit: "/docs/guides/reddit/",
   "ai-visibility": "/docs/guides/ai-visibility/",
   social: "/docs/guides/social/",
+  reviews: "/docs/guides/reviews/",
   ads: "/docs/integrations/paid-media/",
   visitors: "/docs/guides/website-visitors/",
   connectors: "/docs/integrations/connectors/",
   company: "/docs/agents/memory/",
   workspace: "/docs/guides/workspaces-and-access/",
   members: "/docs/guides/workspaces-and-access/",
+  alerts: "/docs/guides/alerts/",
   digests: "/docs/guides/digests/",
   tokens: "/docs/api/authentication/",
   webhooks: "/docs/api/webhooks/",
@@ -233,22 +244,23 @@ export type NavGroup = { label?: string; tabs: Tab[] };
 // The sidebar: the everyday pages, then one item per module, then the
 // company hub. A module's pages show beneath it while you are in it. A new
 // tool joins its module; a new module is one more entry here, in this
-// order: CRM, Visitors, Outreach, Deliverability, Lifecycle, SEO, Social, Paid ads,
+// order: CRM, Visitors, Outreach, Deliverability, Lifecycle, SEO, Social, Reviews, Paid ads,
 // Partners, Analytics, Playbooks. A module with no pages yet is left out.
 export const everyday: Tab[] = ["overview", "inbox", "missions", "projects"];
 
 export type Module = { id: string; label: string; icon: IconName; tabs: Tab[] };
 export const modules: Module[] = [
-  { id: "crm", label: "CRM", icon: "leads", tabs: ["leads", "lists", "suppression"] },
+  { id: "crm", label: "CRM", icon: "leads", tabs: ["leads", "lists", "lead-finder", "suppression"] },
   { id: "visitors", label: "Visitors", icon: "visitors", tabs: ["visitors"] },
   { id: "outreach", label: "Outreach", icon: "sequences", tabs: ["sequences", "allocation", "reports"] },
   { id: "deliverability", label: "Deliverability", icon: "mailboxes", tabs: ["infrastructure", "mailboxes", "domains", "warmup", "servers", "senders"] },
   { id: "lifecycle", label: "Lifecycle", icon: "lifecycle", tabs: ["lifecycle", "broadcasts", "journeys", "templates", "topics", "emails", "providers"] },
   { id: "seo", label: "SEO", icon: "seo", tabs: ["seo-overview", "audits", "fixes", "experiments", "keywords", "seo", "backlinks", "ai-visibility", "competitors"] },
   { id: "social", label: "Social", icon: "social", tabs: ["social", "reddit"] },
+  { id: "reviews", label: "Reviews", icon: "reviews", tabs: ["reviews"] },
   { id: "ads", label: "Paid ads", icon: "ads", tabs: ["ads"] },
   // Partners goes here when its pages land.
-  { id: "analytics", label: "Analytics", icon: "reports", tabs: ["outcomes", "analytics", "tracking", "links"] },
+  { id: "analytics", label: "Analytics", icon: "reports", tabs: ["outcomes", "analytics", "tracking", "flags", "links"] },
   // Playbooks: recipes that use every module above, from playbooks/ in the repository.
   { id: "playbooks", label: "Playbooks", icon: "playbooks", tabs: ["playbooks"] },
   // The company hub: what Outflare knows about the business, for every module.
@@ -259,7 +271,7 @@ const allModules = modules;
 
 // Pages that work for someone kept to some brands. The others need every
 // brand (the API answers 403), so they are hidden from them.
-const brandTabs: readonly Tab[] = ["overview", "seo-overview", "audits", "fixes", "experiments", "keywords", "ai-visibility", "backlinks", "competitors", "reddit", "social", "ads", "visitors", "tracking", "inbox", "projects", "sequences", "leads", "lists", "suppression", "mailboxes", "domains", "company", "brands", "setup", "ideal-customers", "members", "account", "instance"];
+const brandTabs: readonly Tab[] = ["overview", "seo-overview", "audits", "fixes", "experiments", "keywords", "ai-visibility", "backlinks", "competitors", "reddit", "social", "reviews", "ads", "visitors", "tracking", "flags", "inbox", "projects", "sequences", "leads", "lists", "lead-finder", "suppression", "mailboxes", "domains", "company", "brands", "setup", "ideal-customers", "members", "account", "instance"];
 export const canOpen = (ws: Workspace | undefined, t: Tab) => !ws?.brand_ids?.length || brandTabs.includes(t);
 
 // The sidebar keeps two things. Pins are kept in this browser for the
@@ -372,7 +384,7 @@ export function settingsGroups(isAdmin: boolean, agency = false, ws?: Workspace)
   const groups: NavGroup[] = [
     { label: "Workspace", tabs: ["workspace", "members"] },
     { label: "AI", tabs: ["ai", "ai-usage"] },
-    { label: "Notifications", tabs: ["digests"] },
+    { label: "Notifications", tabs: ["alerts", "digests"] },
     { label: "Developers", tabs: isAdmin ? ["tokens", "webhooks", "logs", "audit", "tools"] : ["webhooks", "tools"] },
     ...(agency ? [{ label: "Agency", tabs: ["agency"] as Tab[] }] : []),
     { label: "You", tabs: ["account"] },
@@ -381,7 +393,7 @@ export function settingsGroups(isAdmin: boolean, agency = false, ws?: Workspace)
   return groups.map((g) => ({ ...g, tabs: g.tabs.filter((t) => canOpen(ws, t)) })).filter((g) => g.tabs.length > 0);
 }
 
-export const settingsTabs: readonly Tab[] = ["workspace", "members", "ai", "ai-usage", "digests", "tokens", "webhooks", "logs", "audit", "tools", "agency", "account", "instance"];
+export const settingsTabs: readonly Tab[] = ["workspace", "members", "ai", "ai-usage", "alerts", "digests", "tokens", "webhooks", "logs", "audit", "tools", "agency", "account", "instance"];
 export const isSettings = (t: Tab) => settingsTabs.includes(t);
 
 // ---- Theme ----
@@ -864,7 +876,7 @@ function callFor(tab: Tab, ws: string, item?: string): Call {
     case "ai-visibility":
       return { title: "AI visibility for each cohort", path: "/v1/workspaces/{ws}/ai-visibility", params: base, mcp: "get_ai_visibility", ask: "How often do AI answers name us against our competitors, and what do they get wrong about us?", scope: "seo.read" };
     case "fixes":
-      return { title: "The fixes list", path: "/v1/workspaces/{ws}/fixes", params: base, query: { status: "open" }, mcp: "list_fixes", ask: "Take the three worst open fixes, tell me how to fix each, and mark them in progress.", scope: "seo.read" };
+      return { title: "Fix tickets", path: "/v1/workspaces/{ws}/fix-tickets", params: base, query: { status: "todo" }, mcp: "list_fix_tickets", ask: "Take the three worst fix tickets, read each with get_fix_ticket, and tell me which to approve and why.", scope: "seo.read" };
     case "competitors":
       return { title: "Sites you compete with", path: "/v1/workspaces/{ws}/seo-competitors", params: base, query: { status: "tracked" }, mcp: "list_seo_competitors", ask: "What did my tracked competitors publish this month, and whose domain rating is rising?", scope: "seo.read" };
     case "backlinks":
@@ -873,6 +885,8 @@ function callFor(tab: Tab, ws: string, item?: string): Call {
       return { title: "Reddit drafts waiting for approval", path: "/v1/workspaces/{ws}/social/actions", params: base, query: { channel: "reddit", status: "draft" }, mcp: "list_social_replies", ask: "Find Reddit threads this week where we can genuinely help, and draft replies that disclose we work here.", scope: "social.read" };
     case "social":
       return { title: "Social growth by channel", path: "/v1/workspaces/{ws}/social/growth", params: base, mcp: "get_social_growth", ask: "How did our followers and engagement on X and LinkedIn move this month, and which posts did best?", scope: "social.read" };
+    case "reviews":
+      return { title: "Your review score and its direction", path: "/v1/workspaces/{ws}/reviews/summary", params: base, mcp: "get_reviews_summary", ask: "How are our reviews trending this month, and which unhappy reviews still need an answer?", scope: "social.read" };
     case "visitors":
       return { title: "Companies on your website", path: "/v1/workspaces/{ws}/visitors", params: base, query: { view: "companies" }, mcp: "list_website_visitors", ask: "Which companies looked at our pricing this week, and who there should we follow up with?", scope: "customers.read" };
     case "ads":
@@ -885,6 +899,8 @@ function callFor(tab: Tab, ws: string, item?: string): Call {
       return { title: "Traffic from every analytics tool", path: "/v1/workspaces/{ws}/analytics/summary", params: base, mcp: "get_analytics_summary", ask: "How did the website do over the last 28 days, and which pages and searches bring people in?", scope: "analytics.read" };
     case "tracking":
       return { title: "Website tracking keys and their snippets", path: "/v1/workspaces/{ws}/site-keys", params: base, mcp: "list_site_keys", ask: "Is our website snippet installed and sending visits on every site?", scope: "customers.read" };
+    case "flags":
+      return { title: "Feature flags", path: "/v1/workspaces/{ws}/flags", params: base, mcp: "list_flags", ask: "Set up a test of a new pricing headline on half of our visitors, shown only on the pricing page.", scope: "analytics.read" };
     case "links":
       return { title: "Campaign links", path: "/v1/workspaces/{ws}/tracking-campaigns", params: base, query: { status: "active" }, mcp: "list_tracking_campaigns", ask: "Make a tagged link for our spring launch on LinkedIn ads, pointing at the pricing page.", scope: "analytics.read" };
     case "inbox":
@@ -915,6 +931,8 @@ function callFor(tab: Tab, ws: string, item?: string): Call {
       return item
         ? { title: "One lead list", path: "/v1/workspaces/{ws}/lead-lists/{id}", params: { ...base, id: item }, mcp: "get_lead_list", ask: "How many leads did the last refresh add, and what did it skip?", scope: "leads.read" }
         : { title: "Lead lists", path: "/v1/workspaces/{ws}/lead-lists", params: base, mcp: "list_lead_lists", ask: "Build a list of 200 heads of growth at 50-200 person SaaS companies.", scope: "leads.read" };
+    case "lead-finder":
+      return { title: "Lead finder runs", path: "/v1/workspaces/{ws}/cloud/lead-finder/runs", params: base, ask: "Find 25 companies that fit our ideal customer profile.", scope: "leads.read" };
     case "suppression":
       return { title: "Suppression list", path: "/v1/workspaces/{ws}/suppressions", params: base, mcp: "list_suppressions", ask: "Is anyone at acme-com.example suppressed?", scope: "leads.read" };
     case "mailboxes":
@@ -967,6 +985,8 @@ function callFor(tab: Tab, ws: string, item?: string): Call {
       return { title: "The workspace", path: "/v1/workspaces/{ws}", params: base, scope: "workspace.read" };
     case "members":
       return { title: "Members", path: "/v1/workspaces/{ws}/members", params: base, scope: "members.read" };
+    case "alerts":
+      return { title: "Alerts", path: "/v1/workspaces/{ws}/alerts", params: base, mcp: "list_alerts", ask: "What needs me right now?", scope: "workspace.read" };
     case "digests":
       return { title: "Digests", path: "/v1/workspaces/{ws}/digests", params: base, mcp: "preview_digest", ask: "Summarise how the whole workspace did this week, and what needs me first.", scope: "workspace.read" };
     case "connectors":

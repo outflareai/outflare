@@ -11,6 +11,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/outflareai/outflare/engine/internal/connectors"
+	"github.com/outflareai/outflare/engine/internal/indexability"
 	"github.com/outflareai/outflare/engine/internal/seointel"
 	"github.com/outflareai/outflare/engine/internal/track"
 )
@@ -168,6 +169,13 @@ func (s *Syncer) syncSearch(ctx context.Context, o *connectors.Opened, r connect
 	}
 	ev := track.Event{Name: "search_console.synced", WorkspaceID: ws, ActorType: "system", Surface: "job",
 		Props: map[string]any{"integration_id": id, "days": out.Days, "rows": out.Rows, "inspected": out.Inspected, "sitemaps": out.Sitemaps, "backfilled": backfilled}}
+	// The indexability report of the property's SEO sites takes today's
+	// numbers once a day.
+	if out.Days > 0 || out.Inspected > 0 {
+		if err := s.queueIndexability(ctx, ws, host, today); err != nil {
+			return out, dbError{err}
+		}
+	}
 	// New days can change which pages compete for a search: check the
 	// property's SEO sites again. A failure here leaves the sync done.
 	if out.Days > 0 {
@@ -346,6 +354,27 @@ func parseTime(s string) *time.Time {
 	for _, layout := range []string{time.RFC3339Nano, time.RFC3339, time.DateOnly} {
 		if t, err := time.Parse(layout, s); err == nil {
 			return &t
+		}
+	}
+	return nil
+}
+
+// queueIndexability queues today's indexability snapshot of each SEO site
+// the property covers: the host and, for a domain property, its subdomains.
+func (s *Syncer) queueIndexability(ctx context.Context, ws, host string, today time.Time) error {
+	rows, err := s.Pool.Query(ctx, `
+		SELECT id::text FROM (SELECT id, regexp_replace(split_part(lower(host), ':', 1), '^www\.', '') AS bare FROM seo_sites WHERE workspace_id = $1) x
+		WHERE bare = $2 OR bare LIKE '%.' || $2`, ws, host)
+	if err != nil {
+		return err
+	}
+	ids, err := pgx.CollectRows(rows, pgx.RowTo[string])
+	if err != nil {
+		return err
+	}
+	for _, id := range ids {
+		if err := indexability.Enqueue(ctx, s.Pool, ws, id, "search:"+day(today)); err != nil {
+			return err
 		}
 	}
 	return nil

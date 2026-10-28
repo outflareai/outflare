@@ -40,6 +40,12 @@ type SourceConfig struct {
 	PushMeetings bool `json:"push_meetings,omitempty"`
 	// Pause syncing without disconnecting.
 	Paused bool `json:"paused,omitempty"`
+	// Reply labels and groups (such as "hot") whose replies are written
+	// into the CRM: the contact, a note and, with ReplyTasks, a task to
+	// follow up. Empty writes none.
+	PushReplies []string `json:"push_replies,omitempty"`
+	// ReplyTasks adds a follow-up task with each reply written.
+	ReplyTasks bool `json:"reply_tasks,omitempty"`
 }
 
 // MeetingPage is one run's worth of meetings from a source.
@@ -92,6 +98,8 @@ type Syncer struct {
 	Pool  *pgxpool.Pool
 	Store *connectors.Store
 	Log   *slog.Logger
+	// PublicURL is where links written into the CRM point.
+	PublicURL string
 }
 
 type syncPayload struct {
@@ -99,7 +107,10 @@ type syncPayload struct {
 }
 
 // Register adds the sync job handler.
-func (s *Syncer) Register(q *jobs.Queue) { q.Handle(JobSync, s.syncJob) }
+func (s *Syncer) Register(q *jobs.Queue) {
+	q.Handle(JobSync, s.syncJob)
+	q.Handle(JobPushReply, s.HandlePushReply)
+}
 
 // Run enqueues a sync for every outcome integration every interval.
 func (s *Syncer) Run(ctx context.Context) {

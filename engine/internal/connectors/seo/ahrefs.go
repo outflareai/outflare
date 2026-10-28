@@ -55,7 +55,50 @@ func (Ahrefs) Estimate(q c.SEOQuery) c.SEOCost {
 	case c.SEOAudit:
 		return c.SEOCost{Units: 100, Estimated: true}
 	}
+	if q.Report == c.SEOLinks {
+		return c.SEOCost{Units: math.Max(50, float64(q.Limit)*linkUnits(q)), Estimated: true}
+	}
 	return c.SEOCost{Units: math.Max(50, float64(q.Limit)*rowUnits[q.Report]), Estimated: true}
+}
+
+// linkUnits is what one link row costs: 1, plus 25 with traffic (page and
+// domain traffic at 10 each, the page's referring domains at 5).
+func linkUnits(q c.SEOQuery) float64 {
+	if q.Traffic {
+		return 26
+	}
+	return rowUnits[c.SEOLinks]
+}
+
+// paths splits Ahrefs' comma-separated page type or category paths.
+func paths(s *string) []string {
+	if s == nil {
+		return nil
+	}
+	var out []string
+	for _, p := range strings.Split(*s, ",") {
+		if p = strings.TrimSpace(p); p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
+// ahrefsHops turns Ahrefs' redirect chain (the URLs after the linked one
+// and the status code of each step) into hops.
+func ahrefsHops(to string, chain []string, codes []int) []c.SEOHop {
+	var out []c.SEOHop
+	for i, u := range chain {
+		if u == "" || (i == 0 && u == to) {
+			continue
+		}
+		kind := "redirect"
+		if i < len(codes) && codes[i] > 0 {
+			kind = itoa(codes[i])
+		}
+		out = append(out, c.SEOHop{Kind: kind, URL: u})
+	}
+	return out
 }
 
 func (Ahrefs) get(ctx context.Context, cl *c.Client, creds c.Creds, path string, q url.Values, out any) error {
@@ -186,29 +229,51 @@ func (a Ahrefs) SEOReport(ctx context.Context, cl *c.Client, creds c.Creds, q c.
 		}
 		rep.Cost.Units = math.Max(50, float64(len(resp.Refdomains))*rowUnits[q.Report])
 	case c.SEOLinks:
+		fields := "url_from,url_to,anchor,name_source,is_nofollow,is_sponsored,is_ugc,is_lost,lost_reason,first_seen_link,last_seen,last_visited," +
+			"domain_rating_source,url_rating_source,is_spam,links_external,linked_domains_source_page,positions,title,link_type,is_content," +
+			"page_type_source,page_category_source,languages,powered_by,source_page_author,url_redirect,redirect_kind,is_canonical"
+		if q.Traffic {
+			fields += ",traffic,traffic_domain,refdomains_source"
+		}
 		v := url.Values{"target": {q.Target}, "mode": {"subdomains"}, "output": {"json"}, "aggregation": {"similar_links"},
-			"select":   {"url_from,url_to,anchor,name_source,is_nofollow,is_sponsored,is_ugc,is_lost,lost_reason,first_seen_link,last_seen,domain_rating_source,is_spam,links_external,title"},
-			"order_by": {"domain_rating_source:desc"}, "limit": {itoa(q.Limit)}, "history": {"live"}}
+			"select": {fields}, "order_by": {"domain_rating_source:desc"}, "limit": {itoa(q.Limit)}, "history": {"live"}}
 		if q.Since != "" {
 			v.Set("history", "since:"+q.Since)
 		}
 		var resp struct {
 			Backlinks []struct {
-				From       string   `json:"url_from"`
-				To         string   `json:"url_to"`
-				Anchor     string   `json:"anchor"`
-				Source     string   `json:"name_source"`
-				Nofollow   bool     `json:"is_nofollow"`
-				Sponsored  bool     `json:"is_sponsored"`
-				UGC        bool     `json:"is_ugc"`
-				Lost       bool     `json:"is_lost"`
-				LostReason *string  `json:"lost_reason"`
-				FirstSeen  *string  `json:"first_seen_link"`
-				LastSeen   *string  `json:"last_seen"`
-				DR         *float64 `json:"domain_rating_source"`
-				Spam       bool     `json:"is_spam"`
-				External   *float64 `json:"links_external"`
-				Title      string   `json:"title"`
+				From         string   `json:"url_from"`
+				To           string   `json:"url_to"`
+				Anchor       string   `json:"anchor"`
+				Source       string   `json:"name_source"`
+				Nofollow     bool     `json:"is_nofollow"`
+				Sponsored    bool     `json:"is_sponsored"`
+				UGC          bool     `json:"is_ugc"`
+				Lost         bool     `json:"is_lost"`
+				LostReason   *string  `json:"lost_reason"`
+				FirstSeen    *string  `json:"first_seen_link"`
+				LastSeen     *string  `json:"last_seen"`
+				LastVisited  *string  `json:"last_visited"`
+				DR           *float64 `json:"domain_rating_source"`
+				UR           *float64 `json:"url_rating_source"`
+				Spam         bool     `json:"is_spam"`
+				External     *float64 `json:"links_external"`
+				Linked       *float64 `json:"linked_domains_source_page"`
+				Keywords     *float64 `json:"positions"`
+				Title        string   `json:"title"`
+				LinkType     string   `json:"link_type"`
+				Content      bool     `json:"is_content"`
+				PageType     *string  `json:"page_type_source"`
+				Category     *string  `json:"page_category_source"`
+				Languages    []string `json:"languages"`
+				PoweredBy    []string `json:"powered_by"`
+				Author       *string  `json:"source_page_author"`
+				Redirect     []string `json:"url_redirect"`
+				RedirectKind []int    `json:"redirect_kind"`
+				Canonical    bool     `json:"is_canonical"`
+				Traffic      *float64 `json:"traffic"`
+				TrafficDom   *float64 `json:"traffic_domain"`
+				RefDomains   *float64 `json:"refdomains_source"`
 			} `json:"backlinks"`
 		}
 		if err := a.get(ctx, cl, creds, "/site-explorer/all-backlinks", v, &resp); err != nil {
@@ -217,7 +282,19 @@ func (a Ahrefs) SEOReport(ctx context.Context, cl *c.Client, creds c.Creds, q c.
 		for _, b := range resp.Backlinks {
 			l := &c.SEOLink{From: b.From, To: b.To, Anchor: b.Anchor, SourceDomain: strings.ToLower(b.Source), Nofollow: b.Nofollow,
 				Sponsored: b.Sponsored, UGC: b.UGC, Lost: b.Lost, FirstSeen: day(b.FirstSeen), SourceRating: n(b.DR),
-				ExternalLinks: n(b.External), Title: b.Title, Spam: c.Num(0)}
+				ExternalLinks: n(b.External), Title: b.Title, Spam: c.Num(0), URLRating: n(b.UR), PageKeywords: n(b.Keywords),
+				LinkedDomains: n(b.Linked), LinkType: b.LinkType, InContent: b.Content, PageTypes: paths(b.PageType),
+				PageCategories: paths(b.Category), Languages: b.Languages, Platforms: b.PoweredBy, LastChecked: day(b.LastVisited),
+				Hops: ahrefsHops(b.To, b.Redirect, b.RedirectKind)}
+			if b.Author != nil {
+				l.Author = *b.Author
+			}
+			if q.Traffic {
+				l.PageTraffic, l.DomainTraffic, l.PageRefDomains = n(b.Traffic), n(b.TrafficDom), n(b.RefDomains)
+			}
+			if b.Canonical && l.LinkType == "" {
+				l.LinkType = "canonical"
+			}
 			if b.Spam {
 				l.Spam = c.Num(100)
 			}
@@ -229,7 +306,7 @@ func (a Ahrefs) SEOReport(ctx context.Context, cl *c.Client, creds c.Creds, q c.
 			}
 			rep.Rows = append(rep.Rows, c.SEORow{Key: b.From, URL: b.To, Link: l, SEOMetrics: c.SEOMetrics{DomainRating: n(b.DR)}})
 		}
-		rep.Cost.Units = math.Max(50, float64(len(resp.Backlinks))*rowUnits[q.Report])
+		rep.Cost.Units = math.Max(50, float64(len(resp.Backlinks))*linkUnits(q))
 	case c.SEOCompetitors:
 		v := cloneValues(base)
 		v.Set("country", country)

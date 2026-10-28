@@ -102,6 +102,9 @@ func (s *Server) setReplyRules(w http.ResponseWriter, r *http.Request) {
 			}
 			return err
 		}
+		if err := checkDealRules(ctx, tx, a.WorkspaceID, req.Rules); err != nil {
+			return err
+		}
 		labels := make([]string, 0, len(req.Rules))
 		for l := range req.Rules {
 			labels = append(labels, l)

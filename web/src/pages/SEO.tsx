@@ -195,7 +195,11 @@ function Settings({ ws, source, onSaved }: { ws: string; source: SEOSource; onSa
   const [country, setCountry] = useState(source.country);
   const [budget, setBudget] = useState(source.budget.default || source.budget.unlimited ? "" : String(source.budget.limit));
   const [sync, setSync] = useState(source.sync);
+  const [linkRows, setLinkRows] = useState(String(source.link_rows));
+  const [linkTraffic, setLinkTraffic] = useState(source.link_traffic);
   const [saving, setSaving] = useState(false);
+  const readsLinks = source.link_rows > 0;
+  const ahrefs = source.connector === "ahrefs";
   const unit = source.budget.unit;
 
   async function save(e: React.FormEvent) {
@@ -204,7 +208,14 @@ function Settings({ ws, source, onSaved }: { ws: string; source: SEOSource; onSa
     const list = domains.split(/[\s,]+/).map((d) => d.trim()).filter(Boolean);
     const { error } = await api.PUT("/v1/workspaces/{ws}/seo/{id}/settings", {
       params: { path: { ws, id: source.id } },
-      body: { domains: list.length ? list : null, country, monthly_budget: budget.trim() === "" ? null : Number(budget), sync: sync as "weekly" | "off" },
+      body: {
+        domains: list.length ? list : null,
+        country,
+        monthly_budget: budget.trim() === "" ? null : Number(budget),
+        sync: sync as "weekly" | "off",
+        ...(readsLinks ? { link_rows: Number(linkRows) || null } : {}),
+        ...(readsLinks && ahrefs ? { link_traffic: linkTraffic } : {}),
+      },
     });
     setSaving(false);
     if (error) return toast(errorMessage(error), "error");
@@ -234,6 +245,24 @@ function Settings({ ws, source, onSaved }: { ws: string; source: SEOSource; onSa
           <option value="off">Off</option>
         </select>
       </label>
+      {readsLinks && (
+        <label className="space-y-1">
+          <span className="font-medium">Backlinks read a week, per site</span>
+          <input className={`${field} w-full`} type="number" min={1} max={1000} step={50} value={linkRows} onChange={(e) => setLinkRows(e.target.value)} />
+          <span className="block text-[12px] text-muted-foreground">Strongest linking domains first. {ahrefs ? "About 1 Ahrefs unit a link." : "About $0.00003 a link."}</span>
+        </label>
+      )}
+      {readsLinks && ahrefs && (
+        <label className="flex items-start gap-2 sm:col-span-2">
+          <input type="checkbox" className="mt-0.5" checked={linkTraffic} onChange={(e) => setLinkTraffic(e.target.checked)} />
+          <span>
+            <span className="font-medium">Read traffic for each backlink</span>
+            <span className="block text-[12px] text-muted-foreground">
+              Fills domain traffic, page traffic and referring domains on Backlinks. Ahrefs charges about 25 more units a link: {(25 * (Number(linkRows) || 200)).toLocaleString()} units a site each week.
+            </span>
+          </span>
+        </label>
+      )}
       <div className="flex items-end justify-end sm:col-span-1">
         <Button type="submit" disabled={saving}>{saving ? "Saving…" : "Save"}</Button>
       </div>

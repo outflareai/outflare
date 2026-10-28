@@ -26,9 +26,11 @@ People can also copy the prompt into Claude, ChatGPT or Cursor with the Outflare
 ```
 playbooks/<id>/
   playbook.yaml
+playbooks/kits/
+  <kit-id>.yaml                  # optional setup kits, shared by any playbooks that name them
 ```
 
-The folder name is the playbook's id: lowercase words joined by hyphens, at most 60 characters.
+The folder name is the playbook's id: lowercase words joined by hyphens, at most 60 characters (and not `kits`).
 
 ## playbook.yaml
 
@@ -83,6 +85,8 @@ prompt: |                        # at most 4,000 characters
 
 example: |                       # optional: a worked run, with fictional data only
   Northpeak's events showed that...
+
+kit: creators-partnerships       # optional: the setup kit it offers to apply first (below)
 ```
 
 ### What each part can refer to
@@ -105,6 +109,55 @@ Run them:
 ```sh
 go test ./engine/internal/playbooks/
 ```
+
+## Setup kits
+
+Some playbooks need things set up before their first run: a pipeline in the CRM to track deals, fields on people, email drafts. A setup kit says what, so nobody builds it by hand. It lives in `kits/<id>.yaml` and any playbook can name it with `kit: <id>`; several playbooks can share one (all the creator playbooks use `creators-partnerships`).
+
+When someone starts the playbook, the Playbooks page shows what the kit would add, and with their OK it is applied in the same step (`apply_kit` on `POST .../playbooks/{id}/runs`). It can also be previewed and applied on its own: `GET /v1/workspaces/{ws}/kits/{id}/preview` and `POST .../kits/{id}/apply`, or the MCP tools `preview_kit` and `apply_kit`. Applying a kit only adds:
+
+- a part that is already there and matches is reused;
+- an option list the workspace made itself only gains the options it is missing;
+- an email template with the same handle stays as it is, and new drafts are added unpublished, so a person reads and publishes them first;
+- anything there but different (a field of another type under the same key, an archived type) is a conflict, and the kit changes nothing until it is sorted out.
+
+```yaml
+id: creators-partnerships        # the file name, without .yaml
+version: 1                       # raise it whenever the kit changes
+title: Creator partnerships
+summary: A Partnerships pipeline for creator deals, creator fields on people, and email drafts.   # at most 200
+
+option_sets:                     # option lists, such as a pipeline's stages
+  - key: partnership_stage
+    name: Partnership stage
+    options:
+      - { key: found, label: Found }
+      - { key: live, label: Live }
+
+record_types:                    # a pipeline is a record type with a status field for its stages
+  - key: partnership
+    name: Partnership
+    plural: Partnerships
+    stage: stage                 # the status field that holds the stages
+    fields:
+      - { key: stage, label: Stage, value_type: status, option_set: partnership_stage, filterable: true }
+      - { key: creator, label: Creator, value_type: record_reference, target_type: person }
+      - { key: fee, label: Fee, value_type: currency }
+
+fields:                          # fields on people (person) and companies (account)
+  person:
+    - { key: audience_size, label: Audience size, value_type: number }
+
+email_templates:                 # drafts, in the email template syntax
+  - handle: creator-brief
+    name: Creator brief and kit
+    purpose: lifecycle           # or transactional
+    subject: "Your {{brand}} brief"
+    text: |
+      Hi {{first_name|there}}, ...
+```
+
+Fields use the catalog's value types: `text`, `number`, `currency`, `date`, `timestamp`, `checkbox`, `select`, `status`, `rating`, `email`, `phone`, `url`, `location`, `record_reference` and `actor_reference`. `select` and `status` fields name an `option_set` (the kit's own, or a built-in one such as `country` or `industry`); `record_reference` fields name a `target_type`; `multiple: true` is for text, select, email, phone, url and reference fields. The same `go test ./engine/internal/playbooks/` checks kits, and the engine's tests apply every shipped kit to an empty workspace.
 
 ## Writing a good playbook
 

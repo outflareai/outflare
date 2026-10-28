@@ -54,7 +54,7 @@ type fixView struct {
 }
 
 // fixSources are the sources the fixes list holds.
-var fixSources = []string{crawl.FixSource, seointel.FixSource, aivis.FixSource, socialFixSource, seosync.LinkFixSource}
+var fixSources = []string{crawl.FixSource, seointel.FixSource, aivis.FixSource, socialFixSource, seosync.LinkFixSource, reviewFixSource}
 
 // fixRules looks up a source's rule: why it matters and how to fix it.
 var fixRules = map[string]func(string) (crawl.Rule, bool){
@@ -66,6 +66,17 @@ var fixRules = map[string]func(string) (crawl.Rule, bool){
 		r, ok := socialFixRules[rule]
 		return r, ok
 	},
+	reviewFixSource: func(rule string) (crawl.Rule, bool) {
+		r, ok := reviewFixRules[rule]
+		return r, ok
+	},
+}
+
+// reviewFixRules are the review pages' rules (source reviews).
+var reviewFixRules = map[string]crawl.Rule{
+	"reviews_to_answer": {ID: "reviews_to_answer", Severity: "warning", Category: "reviews", Title: "Reviews waiting for an answer",
+		Why: "Unhappy reviews with no answer from the business put off the next customer who reads them. An answer within a day or two shows you listen.",
+		Fix: "Open Reviews, draft an answer for each one, edit it, post it on the review site, then mark it answered."},
 }
 
 // socialFixRules are the social watches' rules (source social).

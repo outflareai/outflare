@@ -73,6 +73,9 @@ type Playbook struct {
 	Measure     []Measure `yaml:"measure" json:"measure"`
 	Prompt      string    `yaml:"prompt" json:"prompt"`
 	Example     string    `yaml:"example" json:"example"`
+	// Kit names the setup kit (kits/<id>.yaml) the playbook offers to
+	// apply before its first run, if any.
+	Kit string `yaml:"kit" json:"kit,omitempty"`
 }
 
 // Author is who wrote the playbook, by GitHub handle.
@@ -217,8 +220,8 @@ type ConnectorInfo struct {
 func (p Playbook) Validate(c *Catalog) error {
 	var errs []error
 	bad := func(format string, args ...any) { errs = append(errs, fmt.Errorf(format, args...)) }
-	if !idPattern.MatchString(p.ID) || len(p.ID) > 60 {
-		bad("id must be lowercase words joined by hyphens, at most 60 characters")
+	if !idPattern.MatchString(p.ID) || len(p.ID) > 60 || p.ID == "kits" {
+		bad("id must be lowercase words joined by hyphens, at most 60 characters, and not kits")
 	}
 	if p.Version < 1 {
 		bad("version must be 1 or more; raise it whenever the steps or prompt change")
@@ -366,6 +369,10 @@ func Load(fsys fs.FS, c *Catalog) ([]Playbook, error) {
 	if err != nil {
 		return nil, err
 	}
+	kits, err := LoadKits(fsys)
+	if err != nil {
+		return nil, err
+	}
 	var out []Playbook
 	var errs []error
 	for _, f := range files {
@@ -379,6 +386,9 @@ func Load(fsys fs.FS, c *Catalog) ([]Playbook, error) {
 		}
 		if dir := path.Dir(f); err == nil && dir != p.ID {
 			err = fmt.Errorf("the folder is %q but the id is %q; they must match", dir, p.ID)
+		}
+		if err == nil && p.Kit != "" && !slices.ContainsFunc(kits, func(k Kit) bool { return k.ID == p.Kit }) {
+			err = fmt.Errorf("kit %q is not in playbooks/kits", p.Kit)
 		}
 		if err != nil {
 			errs = append(errs, fmt.Errorf("playbooks/%s: %w", f, err))

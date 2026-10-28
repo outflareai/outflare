@@ -28,6 +28,9 @@ const (
 	sessionCookie   = "outflare_session"
 	signedInCookie  = "outflare_signed_in"
 	sessionLifetime = 30 * 24 * time.Hour
+	// viewCookie holds a support view's secret beside the staff member's
+	// own session cookie; a version without support views ignores it.
+	viewCookie = "outflare_view"
 )
 
 // principal is who is making a request.
@@ -55,6 +58,11 @@ type principal struct {
 	TokenGrantID string
 	// The token makes changes only inside a mission (Outflare-Mission).
 	TokenRequiresMission bool
+
+	// A support view: a staff member (ViewerID, signed in with SessionID)
+	// sees UserID's account read-only, without inbox or email content.
+	ViewID   string
+	ViewerID string
 }
 
 // access is a principal's resolved rights in one workspace.
@@ -136,8 +144,23 @@ func principalFrom(ctx context.Context) *principal {
 }
 
 // authenticate resolves the request's credentials. A nil principal with a nil
-// error means the request is anonymous.
+// error means the request is anonymous. A support view in progress makes the
+// staff member's session the viewed person's, read-only.
 func (s *Server) authenticate(r *http.Request) (*principal, error) {
+	p, err := s.authenticateSession(r)
+	if err != nil || p == nil || p.SessionID == "" {
+		return p, err
+	}
+	c, err := r.Cookie(viewCookie)
+	if err != nil || !strings.HasPrefix(c.Value, auth.PrefixSupportView) {
+		return p, nil
+	}
+	return s.supportViewFor(r.Context(), p, c.Value)
+}
+
+// authenticateSession is authenticate without support views: always the
+// person who signed in.
+func (s *Server) authenticateSession(r *http.Request) (*principal, error) {
 	var secret string
 	fromCookie := false
 	if h := r.Header.Get("Authorization"); strings.HasPrefix(h, "Bearer ") {
@@ -321,6 +344,13 @@ func (s *Server) workspaceRoute(scope string, projectAware, brandAware bool, nex
 			writeError(w, r, http.StatusForbidden, "forbidden", brandLimitedMessage)
 			return
 		}
+		if p.ViewID != "" {
+			a.Scopes = viewScopes(a.Scopes)
+			if scope != "" && !a.has(scope) {
+				writeError(w, r, http.StatusForbidden, "support_view_hidden", "this is hidden while staff view this account")
+				return
+			}
+		}
 		// No scope: the handler checks what the caller may read itself.
 		if scope != "" && !a.has(scope) {
 			writeError(w, r, http.StatusForbidden, "forbidden", s.missingScope(a, scope))
@@ -398,6 +428,13 @@ func (s *Server) authenticated(w http.ResponseWriter, r *http.Request) (*princip
 		return nil, false
 	}
 	notePrincipal(r, p)
+	if p.ViewerID != "" {
+		track.Credit(r.Context(), p.ViewerID)
+	}
+	if p.ViewID != "" && !viewAllows(r) {
+		writeError(w, r, http.StatusForbidden, "support_view_read_only", "you are viewing this account as staff, which is read-only; end the view to make changes")
+		return nil, false
+	}
 	if p.TokenID != "" && !s.rateLimit.allow(w, r, p.TokenID) {
 		return nil, false
 	}

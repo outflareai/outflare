@@ -18,6 +18,8 @@ Each person record carries `contactability` (on `GET .../records/{record}` and e
 
 `acquired_via` names the tool the record came from, such as `csv`, `apollo`, `attio` or `emailbison_import`. It is set as records are made and can be set with `POST`/`PATCH .../records` (`acquired_via`). `allowed` says yes or no for `transactional`, `cold_outreach` and `marketing`, and `why` says it in a sentence.
 
+A person held for review (`needs_review`, such as someone a visitor identification tool named) gets no email of any kind, and `allowed` is all no, until someone approves them ([website visitors](website-visitors.md)).
+
 Receipts and account email (`purpose: transactional`) reach anyone who is not blocked outright. Cold email goes through sequences, never through broadcasts.
 
 ### The rule for people who never said yes or no

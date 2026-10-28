@@ -354,8 +354,14 @@ func (s *Server) addVisitorCompany(w http.ResponseWriter, r *http.Request) {
 			if name == "" {
 				name = domain
 			}
-			if err := tx.QueryRow(ctx, `INSERT INTO records (workspace_id, record_type, brand_id, name, origin, created_by) VALUES ($1, 'account', $2, $3, 'prospect', $4) RETURNING id::text`,
-				a.WorkspaceID, brand, name, nullIfEmpty(a.ActorID)).Scan(&id); err != nil {
+			// The tool whose lookup named it, as its source.
+			via := "visitor_reveal"
+			if err := tx.QueryRow(ctx, `SELECT i.connector FROM visitor_ip_lookups l JOIN integrations i ON i.id = l.integration_id
+				WHERE l.workspace_id = $1 AND l.domain = $2 ORDER BY l.checked_at DESC LIMIT 1`, a.WorkspaceID, domain).Scan(&via); err != nil && !errors.Is(err, pgx.ErrNoRows) {
+				return err
+			}
+			if err := tx.QueryRow(ctx, `INSERT INTO records (workspace_id, record_type, brand_id, name, origin, acquired_via, created_by) VALUES ($1, 'account', $2, $3, 'prospect', $4, $5) RETURNING id::text`,
+				a.WorkspaceID, brand, name, via, nullIfEmpty(a.ActorID)).Scan(&id); err != nil {
 				return err
 			}
 			if _, err := tx.Exec(ctx, `INSERT INTO record_identities (workspace_id, record_id, namespace, value, verified, source, created_by)

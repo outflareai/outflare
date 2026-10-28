@@ -14,9 +14,10 @@ import (
 )
 
 // Onboarding: the steps a new workspace is walked through, each one
-// skippable. It aims at a first real result, not a full settings page: the
-// brand, what to do first, an AI, the tools that goal needs, then a first
-// mission. Inviting the team comes after, on Home. Whether a step is done
+// skippable. It aims at a first real result, not a full settings page, and
+// sets up one brand: the brand, an AI key (with why it is needed), what to
+// do first, the brand's website script and DNS in one go, the tools that
+// goal needs, a star and a follow, then a first mission. Inviting the team comes after, on Home. Whether a step is done
 // is read from the workspace itself (a brand exists, an AI is connected, a
 // mission was drafted), so doing the same thing anywhere else in the app,
 // or through the API or MCP, ticks it off too. Only the goal, skips and
@@ -38,11 +39,12 @@ type onboardingStepDef struct {
 // onboardingSteps are the steps in the order they are shown. tool is the
 // MCP tool an agent calls to do the step, empty when a person must.
 var onboardingSteps = []onboardingStepDef{
-	{"brand", "Add your website", "Your site and a line on what you do, so agents know what they are marketing.", "brands", "create_brand", true},
+	{"brand", "Add your brand", "Start with one brand: its website and a line on what it does. Every module uses it, so you never type it twice. Add more brands later.", "brands", "create_brand", true},
+	{"ai", "Add your AI key", "Outflare has no AI of its own and never pays for yours. Your key lets its agent plan missions, write emails and research companies, billed by your AI provider.", "ai", "request_connection", true},
 	{"goal", "Pick what to do first", "Outflare suggests the tools and the first mission for it.", "get-started", "update_onboarding", true},
-	{"ai", "Connect your AI", "Your own AI key lets Outflare's agent work; or run Outflare from Claude or ChatGPT.", "ai", "request_connection", true},
+	{"website", "Connect your website", "One script on your pages and one set of DNS records, so this brand's visits, sign-ups and search show up from today.", "setup", "get_brand_dns", true},
 	{"connect", "Connect your tools", "Only what your first goal needs, such as analytics, Search Console or your CRM.", "connectors", "request_connection", true},
-	{"community", "Star and follow Outflare", "Two clicks that help a young open-source project: a star on GitHub and a follow on X.", "get-started", "", true},
+	{"community", "Star and follow Outflare", "Outflare is free and open source. A star helps other teams find it, and on X you hear about new features first.", "get-started", "", true},
 	{"mission", "Start your first mission", "Say what you want in plain words; your AI drafts the plan for you to approve.", "missions", "plan_mission", true},
 	{"team", "Invite your team", "Teammates share the same connections, context and inbox.", "members", "", false},
 }
@@ -96,6 +98,16 @@ type onboardingView struct {
 	// Whether the app should open the walk-through by itself: nothing done
 	// or skipped yet, and nobody closed it.
 	Show bool `json:"show"`
+	// The brand the walk-through sets up: the workspace's first active
+	// brand, null until there is one. More brands come later, on Brands.
+	Brand *onboardingBrand `json:"brand"`
+}
+
+type onboardingBrand struct {
+	ID      string `json:"id"`
+	Handle  string `json:"handle"`
+	Name    string `json:"name"`
+	Website string `json:"website"`
 }
 
 // connectorsIn lists the connector ids in the given categories, or, with
@@ -143,6 +155,28 @@ func (s *Server) loadOnboarding(ctx context.Context, ws string) (onboardingView,
 	}
 	done["brand"], done["team"], done["ai"], done["connect"], done["mission"] = brand, team, ai, connected, mission
 
+	// The website step is the first brand's script and DNS: done once each
+	// is in place or Outflare is waiting to see it (a first visit, the
+	// record showing in DNS), since the person has done their part.
+	if brand {
+		first, err := s.firstBrand(ctx, ws)
+		if err != nil {
+			return v, err
+		}
+		if first != nil {
+			v.Brand = &onboardingBrand{ID: first.ID, Handle: first.Handle, Name: first.Name, Website: first.Website}
+			setup, err := s.loadBrandSetup(ctx, ws, first)
+			if err != nil {
+				return v, err
+			}
+			started := map[string]bool{}
+			for _, st := range setup.Steps {
+				started[st.ID] = st.Status == "done" || st.Status == "waiting"
+			}
+			done["website"] = started[stepSiteScript] && started[stepVerifySite]
+		}
+	}
+
 	// Starring and following is each person's own, so the step is done for
 	// whoever opened every community link.
 	user := ""
@@ -184,6 +218,24 @@ func (s *Server) loadOnboarding(ctx context.Context, ws string) (onboardingView,
 	v.Dismissed = v.DismissedAt != nil
 	v.Show = !v.Dismissed && v.Done == 0 && skips == 0
 	return v, nil
+}
+
+// firstBrand is the workspace's oldest active brand, the one Get started
+// sets up, or nil.
+func (s *Server) firstBrand(ctx context.Context, ws string) (*brandRecord, error) {
+	var id string
+	err := s.pool.QueryRow(ctx, `SELECT id FROM brands WHERE workspace_id = $1 AND status = 'active' ORDER BY created_at, id LIMIT 1`, ws).Scan(&id)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	list, err := s.loadBrands(ctx, ws, &id, "all")
+	if err != nil || len(list) == 0 {
+		return nil, err
+	}
+	return &list[0], nil
 }
 
 func (s *Server) getOnboarding(w http.ResponseWriter, r *http.Request) {

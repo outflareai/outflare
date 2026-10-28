@@ -12,8 +12,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/outflareai/outflare/engine/internal/alerts"
 	"github.com/outflareai/outflare/engine/internal/jobs"
 	"github.com/outflareai/outflare/engine/internal/mailbox/mailtest"
+	"github.com/outflareai/outflare/engine/internal/outcomes"
 )
 
 type fakeDNS struct {
@@ -72,6 +74,8 @@ func (e *env) runJobs(t *testing.T) {
 	e.mail.Register(q)
 	e.send.Register(q)
 	e.sync.Register(q)
+	q.Handle(outcomes.JobPushReply, (&outcomes.Syncer{Pool: e.pool, Store: e.integrations, Log: slog.New(slog.NewTextHandler(io.Discard, nil)), PublicURL: "http://localhost:8080"}).HandlePushReply)
+	(&alerts.Service{Pool: e.pool, Log: slog.New(slog.NewTextHandler(io.Discard, nil)), Send: e.outbox.Send, PublicURL: "http://localhost:8080", Store: e.integrations}).Register(q)
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
 	go func() { q.Run(ctx, 4); close(done) }() //nolint:errcheck

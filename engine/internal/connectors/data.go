@@ -3,6 +3,7 @@ package connectors
 import (
 	"context"
 	"strings"
+	"time"
 )
 
 // Lead data: connectors that find people and fill in what is known about
@@ -21,6 +22,7 @@ const (
 	CapEnrichPerson  = "data.enrich_person"  // implements PersonEnricher
 	CapFindEmail     = "data.find_email"     // a PersonEnricher that finds work emails from a name and company
 	CapRevealCompany = "data.reveal_company" // implements CompanyRevealer
+	CapRevealPerson  = "data.reveal_person"  // implements PersonRevealer
 )
 
 // Filter names a PeopleSearcher may support. They match the project's ICP
@@ -266,6 +268,29 @@ type Revealed struct {
 // the lookup only and never kept.
 type CompanyRevealer interface {
 	RevealCompany(ctx context.Context, cl *Client, cr Creds, ip string) (Revealed, error)
+}
+
+// RevealedPerson is someone a visitor identification tool named, as its
+// webhook sent them. Any field may be empty.
+type RevealedPerson struct {
+	Email       string
+	FirstName   string
+	LastName    string
+	Name        string
+	Title       string
+	LinkedInURL string
+	Company     Company
+	// Where they were seen: the page and when.
+	Page   string
+	SeenAt time.Time
+}
+
+// PersonRevealer reads the people a visitor identification tool (RB2B,
+// Vector, Warmly) pushes to a workspace's webhook, from the workspace's own
+// account with that tool. Outflare never asks the tool who someone is: the
+// tool decides and sends.
+type PersonRevealer interface {
+	ParsePeople(body []byte) ([]RevealedPerson, error)
 }
 
 // ErrRetryLater is returned by a CompanyRevealer when the provider is still

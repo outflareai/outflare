@@ -246,6 +246,14 @@ func (s *Server) logout(w http.ResponseWriter, r *http.Request) {
 			emitUser(r.Context(), "user.signed_out", userID, nil)
 		}
 	}
+	if c, err := r.Cookie(viewCookie); err == nil {
+		// Signing out ends a support view in progress too.
+		if _, err := s.pool.Exec(r.Context(), `UPDATE support_views SET ended_at = now() WHERE token_hash = $1 AND ended_at IS NULL`, auth.HashToken(c.Value)); err != nil {
+			s.internal(w, r, err)
+			return
+		}
+		s.setViewCookie(w, "", 0)
+	}
 	http.SetCookie(w, &http.Cookie{Name: sessionCookie, Value: "", Path: "/", MaxAge: -1, HttpOnly: true, Secure: s.secureCookies, SameSite: http.SameSiteLaxMode})
 	s.setSignedInHint(w, false)
 	w.WriteHeader(http.StatusNoContent)
@@ -407,6 +415,9 @@ func (s *Server) me(w http.ResponseWriter, r *http.Request) {
 			s.internal(w, r, err)
 			return
 		}
+		if p.ViewID != "" {
+			v.Scopes = viewScopes(v.Scopes)
+		}
 		wss = append(wss, v)
 	}
 	if err := rows.Err(); err != nil {
@@ -426,7 +437,16 @@ func (s *Server) me(w http.ResponseWriter, r *http.Request) {
 		s.internal(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"user": user, "workspaces": wss, "agencies": ags, "menu_links": s.menuLinksFor(ctx, p.UserID)})
+	view, err := s.supportViewOf(ctx, p)
+	if err != nil {
+		s.internal(w, r, err)
+		return
+	}
+	links := s.menuLinksFor(ctx, p.UserID)
+	if view != nil {
+		links = []MenuLink{}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"user": user, "workspaces": wss, "agencies": ags, "menu_links": links, "support_view": view})
 }
 
 func (s *Server) createWorkspace(w http.ResponseWriter, r *http.Request) {
@@ -1063,7 +1083,7 @@ func (s *Server) acceptInvite(w http.ResponseWriter, r *http.Request) {
 	}
 	signedIn := false
 	if !newUser && id == nil {
-		if p, err := s.authenticate(r); err == nil && p != nil && p.UserID == userID {
+		if p, err := s.authenticateSession(r); err == nil && p != nil && p.UserID == userID {
 			signedIn = true
 		}
 	}

@@ -267,6 +267,31 @@ func (d DataForSEO) SEOReport(ctx context.Context, cl *c.Client, creds c.Creds, 
 			}
 			if l.Lost {
 				l.LastSeen = dfsDay(it["last_seen"])
+			} else {
+				l.LastChecked = dfsDay(it["last_seen"])
+			}
+			l.URLRating = num(it["page_from_rank"])
+			l.LinkType = dfsLinkType(str(it["item_type"]))
+			// DataForSEO marks where on the page the link sits; article and
+			// main are the page's own content.
+			switch str(it["semantic_location"]) {
+			case "article", "main", "section":
+				l.InContent = true
+			}
+			if lang := str(it["page_from_language"]); lang != "" {
+				l.Languages = []string{lang}
+			}
+			for _, p := range anyStrings(it["domain_from_platform_type"]) {
+				if p != "unknown" {
+					l.Platforms = append(l.Platforms, p)
+				}
+			}
+			if to := str(it["url_to_redirect_target"]); to != "" && to != l.To {
+				kind := "redirect"
+				if code := num(it["url_to_status_code"]); code != nil && *code >= 300 && *code < 400 {
+					kind = itoa(int(*code))
+				}
+				l.Hops = []c.SEOHop{{Kind: kind, URL: to}}
 			}
 			rep.Rows = append(rep.Rows, c.SEORow{Key: l.From, URL: l.To, Link: l, SEOMetrics: c.SEOMetrics{DomainRating: l.SourceRating}})
 		}
@@ -345,4 +370,28 @@ func (d DataForSEO) SERP(ctx context.Context, cl *c.Client, creds c.Creds, engin
 		out.Items = append(out.Items, c.SERPItem{Position: int(*pos), URL: str(it["url"]), Domain: str(it["domain"]), Title: str(it["title"])})
 	}
 	return out, nil
+}
+
+// dfsLinkType maps DataForSEO's item_type onto the link types Ahrefs uses.
+func dfsLinkType(t string) string {
+	switch t {
+	case "anchor":
+		return "text"
+	case "image", "redirect", "canonical", "alternate", "frame", "form", "rss":
+		return t
+	case "meta":
+		return "redirect"
+	}
+	return t
+}
+
+func anyStrings(v any) []string {
+	list, _ := v.([]any)
+	var out []string
+	for _, x := range list {
+		if s, ok := x.(string); ok && s != "" {
+			out = append(out, s)
+		}
+	}
+	return out
 }

@@ -7,6 +7,11 @@ on:
   pull_request:
     types: [opened, synchronize, reopened, labeled, unlabeled]
 
+# A newer push or label change replaces the older check.
+concurrency:
+  group: changes-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
 permissions:
   contents: read
 

@@ -39,6 +39,7 @@ func (s *Server) routesRecords(mux *http.ServeMux) {
 	mux.HandleFunc("GET "+base+"/lookup", s.inBrand(read, s.lookupRecords))
 	mux.HandleFunc("GET "+base+"/{record}", s.inBrand(read, s.getRecord))
 	mux.HandleFunc("PATCH "+base+"/{record}", s.inBrand(manage, s.updateRecord))
+	mux.HandleFunc("POST "+base+"/{record}/review", s.inBrand(manage, s.reviewRecord))
 	mux.HandleFunc("GET "+base+"/{record}/history", s.inBrand(read, s.recordHistory))
 	mux.HandleFunc("GET "+base+"/{record}/identities", s.inBrand(read, s.listIdentities))
 	mux.HandleFunc("POST "+base+"/{record}/identities", s.inBrand(manage, s.addIdentity))
@@ -87,11 +88,14 @@ type recordView struct {
 	Identities       []identityView    `json:"identities"`
 	// People only: what may go out to them, and why.
 	Contactability *contactability `json:"contactability,omitempty"`
-	Version        int             `json:"version"`
-	MergedInto     *string         `json:"merged_into"`
-	Archived       bool            `json:"archived"`
-	CreatedAt      time.Time       `json:"created_at"`
-	UpdatedAt      time.Time       `json:"updated_at"`
+	// Held for someone to approve: hidden from the list and never emailed
+	// until then.
+	NeedsReview bool      `json:"needs_review"`
+	Version     int       `json:"version"`
+	MergedInto  *string   `json:"merged_into"`
+	Archived    bool      `json:"archived"`
+	CreatedAt   time.Time `json:"created_at"`
+	UpdatedAt   time.Time `json:"updated_at"`
 	// Set on a write: fields left as they were because a higher-precedence
 	// source set them.
 	Skipped []skippedField `json:"skipped,omitempty"`
@@ -115,12 +119,12 @@ func (s *Server) recordError(w http.ResponseWriter, r *http.Request, err error) 
 // ---- Loading ----
 
 const recordColumns = `r.id::text, r.record_type, r.name, r.brand_id::text, r.origin, r.attributes, r.attribute_sources, r.version,
-	r.merged_into::text, r.archived_at IS NOT NULL, r.created_at, r.updated_at`
+	r.merged_into::text, r.archived_at IS NOT NULL, r.created_at, r.updated_at, r.needs_review`
 
 func scanRecord(row pgx.Row) (recordView, error) {
 	var v recordView
 	err := row.Scan(&v.ID, &v.Type, &v.Name, &v.BrandID, &v.Origin, &v.Attributes, &v.AttributeSources, &v.Version,
-		&v.MergedInto, &v.Archived, &v.CreatedAt, &v.UpdatedAt)
+		&v.MergedInto, &v.Archived, &v.CreatedAt, &v.UpdatedAt, &v.NeedsReview)
 	return v, err
 }
 
@@ -1100,6 +1104,21 @@ func (s *Server) listRecords(w http.ResponseWriter, r *http.Request) {
 		writeError(w, r, http.StatusBadRequest, "invalid_request", "archived is false, true or all")
 		return
 	}
+	// People held for review stay out of the list unless asked for.
+	switch q.Get("review") {
+	case "", "approved":
+		where += ` AND NOT r.needs_review`
+	case "needs_review":
+		where += ` AND r.needs_review`
+	case "all":
+	default:
+		writeError(w, r, http.StatusBadRequest, "invalid_request", "review is approved, needs_review or all")
+		return
+	}
+	if v := q.Get("acquired_via"); v != "" {
+		args = append(args, strings.Split(v, ","))
+		where += fmt.Sprintf(` AND r.acquired_via = ANY($%d)`, len(args))
+	}
 	if text := strings.ToLower(strings.TrimSpace(q.Get("q"))); text != "" {
 		args = append(args, escapeLike(text))
 		n := len(args)
@@ -1167,7 +1186,7 @@ func (s *Server) lookupRecords(w http.ResponseWriter, r *http.Request) {
 			var v recordView
 			var verified bool
 			err := row.Scan(&v.ID, &v.Type, &v.Name, &v.BrandID, &v.Origin, &v.Attributes, &v.AttributeSources, &v.Version,
-				&v.MergedInto, &v.Archived, &v.CreatedAt, &v.UpdatedAt, &verified)
+				&v.MergedInto, &v.Archived, &v.CreatedAt, &v.UpdatedAt, &v.NeedsReview, &verified)
 			if verified {
 				owner = &v.ID
 			}

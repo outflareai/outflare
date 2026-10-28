@@ -1,0 +1,76 @@
+id: creator-partnerships
+version: 1
+title: Run creator partnerships from first find to results
+summary: Find creators your buyers already follow, pitch them personally, track every deal on a Partnerships board, and see which ones paid off.
+description: |
+  Creators, newsletters and podcasts reach the people you want, but the
+  work around them is messy: a spreadsheet of names, pitches lost in
+  inboxes, fees nobody adds up, and no idea which post brought sign-ups.
+  This playbook sets up a Partnerships pipeline in the CRM, finds
+  creators who already cover your space, drafts a personal pitch for each
+  one you approve, gives every deal its own tracked link, and reports
+  sign-ups and cost per deal, so you renew what works and drop what
+  doesn't.
+tier: clever
+goals: [customers, partners]
+publisher: outflare
+author: { github: outflareai }
+kit: creators-partnerships
+needs:
+  data:
+    - { check: mailboxes, label: A mailbox to send pitches from }
+  connections:
+    - capability: plan
+      label: An AI model, unless you run this from your own AI app
+      optional: true
+      recommended: [claude, openai]
+inputs:
+  - name: brand
+    label: Brand
+    example: Northpeak
+  - name: topics
+    label: What your buyers watch and read about
+    help: A few topics, so the agent looks for creators in the right places.
+    example: trail running, ultralight hiking gear
+  - name: budget
+    label: Budget per partnership
+    help: Leave it empty to start with free product and commission deals only.
+    example: 500 USD
+    optional: true
+steps:
+  - say: Read the brand's context, and check its setup kit is applied so the Partnerships board and creator fields are there.
+    tools: [getBrandContext, listRecordTypes]
+  - say: Look at partnerships already on the board, so nobody is pitched twice.
+    tools: [listRecords]
+  - say: Find creators who already cover the topics, starting with people in your own records who create, then the web through your AI app. Add each one as a person with their platforms, audience size and topics, and a partnership at Found.
+    tools: [searchWorkspace, lookupRecords, createRecord, updateRecord]
+  - say: Vet each one (recent posts, audience fit, past sponsors) and move them to Vetted or Declined with a one-line reason.
+    tools: [updateRecord]
+  - say: Draft a short, personal pitch for each vetted creator as a sequence, held until a person approves the sends.
+    tools: [createSequence, replaceSequenceSteps, previewSequence]
+  - say: Watch for replies and move partnerships to Negotiating or Declined. For each agreed deal, make its own tracked link and promo code, save them on the partnership, and record the fee as spend.
+    tools: [listInbox, updateRecord, createTrackingLink, recordSpend]
+  - say: When a post goes live, save its link and move it to Live; after two weeks, report visits, sign-ups and cost per sign-up for each, and move it to Measured.
+    tools: [updateRecord, getAnalyticsReport, outcomesReport]
+guardrails:
+  - Never send a pitch, accept terms or promise money without a person's approval.
+  - Only use contact details a creator publishes for business, and never contact anyone who opted out.
+  - Ask every creator to label the post as sponsored the way their platform requires.
+  - Stay within the budget per partnership, if one was given.
+measure:
+  - { metric: Partnerships live, how: Partnerships at Live or later on the board. }
+  - { metric: Sign-ups per partnership, how: Sign-ups from each partnership's tracked link. }
+  - { metric: Cost per sign-up, how: Each partnership's recorded spend divided by its sign-ups. }
+prompt: |
+  Run creator partnerships for {{brand}}. Their buyers follow creators,
+  newsletters and podcasts about {{topics}}. Find ten creators who already
+  cover this, vet them, and draft a personal pitch for the best five.
+  Track every one on the Partnerships board, give each agreed deal its
+  own tracked link, and keep each deal within {{budget}}. Nothing is sent
+  or agreed until I approve it.
+example: |
+  Northpeak sells trail running gear. The agent found twelve creators,
+  three of them already Northpeak customers, vetted eight, and drafted
+  five pitches. Two agreed: a newsletter for a flat fee and a YouTube
+  channel for free product plus commission. After two weeks the
+  newsletter brought 41 sign-ups at 12 USD each and was renewed.

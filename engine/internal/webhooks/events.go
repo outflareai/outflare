@@ -185,6 +185,13 @@ var Catalog = []Event{
 	{"social_action.rejected", "social", "A person rejected a drafted social reply."},
 	{"social_action.done", "social", "An approved social reply was posted from the brand's own account. data has channel and type; GET it for its link."},
 	{"social_action.failed", "social", "An approved social reply could not be posted. GET it for status_reason."},
+	// Reviews
+	{"review.posted", "reviews", "A new review appeared on one of the brands' review pages. data has page_id, platform, rating (1 to 5), sentiment and verified; GET /reviews/{id} for its text."},
+	{"review.replied", "reviews", "A review got the business's reply, seen on the platform (via platform) or marked in Outflare (via outflare)."},
+	{"review.reply_drafted", "reviews", "The workspace's AI drafted an answer to a review, waiting for a person to edit and post it."},
+	{"review_momentum.changed", "reviews", "A review page's momentum changed, such as from steady to slipping. data has from, to, score and score_change."},
+	// Alerts
+	{"alert.raised", "alerts", "Something needs a person now: a hot reply (reply.hot), a hot website visitor (visitor.hot) or another kind a module raises, at most once per thing. data has alert_id, kind, target_type, target_id, record_id, owner_id (the user it is for, or null), brand_id and the kind's own ids; GET .../alerts has what it says."},
 	// Website visitors
 	{"visitor.became_hot", "visitors", "A known person, or their company, reached the workspace's hot score on its website (at most once a week each). data has record_id, kind (person or company), score, hot_score, pageviews, key_pageviews, sessions and people."},
 	// Workspace

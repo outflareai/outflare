@@ -37,15 +37,15 @@ type trackingDomainView struct {
 
 func (s *Server) trackingDomains(ctx context.Context, ws string, id *string) ([]trackingDomainView, error) {
 	rows, err := s.pool.Query(ctx, `
-		SELECT id, domain, status, error, last_checked_at, verified_at, created_at, dns_install FROM tracking_domains
+		SELECT id, domain, status, error, last_checked_at, verified_at, created_at, dns_install, https_status, https_error FROM tracking_domains
 		WHERE workspace_id = $1 AND ($2::uuid IS NULL OR id = $2) ORDER BY created_at`, ws, id)
 	if err != nil {
 		return nil, err
 	}
-	target := tracking.Target(s.publicURL)
+	target := s.trackingHost()
 	list, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (trackingDomainView, error) {
 		v := trackingDomainView{Domain: tracking.Domain{Target: target}}
-		err := row.Scan(&v.ID, &v.Domain.Domain, &v.Status, &v.Error, &v.LastCheckedAt, &v.VerifiedAt, &v.CreatedAt, &v.DNSInstall)
+		err := row.Scan(&v.ID, &v.Domain.Domain, &v.Status, &v.Error, &v.LastCheckedAt, &v.VerifiedAt, &v.CreatedAt, &v.DNSInstall, &v.HTTPSStatus, &v.HTTPSError)
 		return v, err
 	})
 	if err != nil || len(list) == 0 {
@@ -79,7 +79,7 @@ func (s *Server) listTrackingDomains(w http.ResponseWriter, r *http.Request) {
 		s.internal(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"data": list, "target": tracking.Target(s.publicURL)})
+	writeJSON(w, http.StatusOK, map[string]any{"data": list, "target": s.trackingHost()})
 }
 
 // addTrackingDomainDNS adds the domain's CNAME with the workspace's own
@@ -114,7 +114,7 @@ func (s *Server) addTrackingDomain(w http.ResponseWriter, r *http.Request) {
 		writeError(w, r, http.StatusBadRequest, "invalid_request", "domain must be a host name such as links.acme-com.example")
 		return
 	}
-	if domain == tracking.Target(s.publicURL) {
+	if domain == s.trackingHost() {
 		writeError(w, r, http.StatusBadRequest, "invalid_request", "use a domain of your own, not this server's address")
 		return
 	}
@@ -180,10 +180,21 @@ func (s *Server) checkTracking(ctx context.Context, ws, id string) (trackingDoma
 			state = "pending" // not set up yet, rather than broken
 		}
 	}
-	if _, err := s.pool.Exec(ctx, `
-		UPDATE tracking_domains SET status = $2, error = $3, last_checked_at = now(),
-			verified_at = CASE WHEN $2 = 'verified' THEN COALESCE(verified_at, now()) ELSE NULL END
-		WHERE id = $1`, id, state, reason); err != nil {
+	err = pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
+		if _, err := tx.Exec(ctx, `
+			UPDATE tracking_domains SET status = $2, error = $3, last_checked_at = now(),
+				verified_at = CASE WHEN $2 = 'verified' THEN COALESCE(verified_at, now()) ELSE NULL END
+			WHERE id = $1`, id, state, reason); err != nil {
+			return err
+		}
+		// Only a domain that points here gets a certificate, so nobody
+		// can ask for them for domains they don't control.
+		if state == "verified" && (d.HTTPSStatus == nil || *d.HTTPSStatus == "failed") {
+			return s.queueTrackingHTTPS(ctx, tx, ws, id)
+		}
+		return nil
+	})
+	if err != nil {
 		return d, err
 	}
 	return s.trackingDomain(ctx, ws, id)
@@ -201,6 +212,9 @@ func (s *Server) removeTrackingDomain(w http.ResponseWriter, r *http.Request) {
 		var domain string
 		err := tx.QueryRow(ctx, `DELETE FROM tracking_domains WHERE id = $1 AND workspace_id = $2 RETURNING domain`, id, a.WorkspaceID).Scan(&domain)
 		if err != nil {
+			return err
+		}
+		if err := s.queueTrackingHTTPSRemove(ctx, tx, a.WorkspaceID, domain); err != nil {
 			return err
 		}
 		return record(ctx, tx, &a.principal, a.WorkspaceID, "tracking_domain.removed", "tracking_domain", id, map[string]any{"domain": domain})

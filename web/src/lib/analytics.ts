@@ -84,7 +84,7 @@ export function page(name: string) {
 export type UiEvent =
   | "ui.error_shown" // an error message was shown to the person (error_code)
   | "ui.crashed" // a script error or a page that failed to render
-  | "ui.dns_one_click_used" // a way to add DNS records outside Lifecycle (where: seo_site, tracking_domain, sending_domain, brand_setup; way: cloudflare, ai, developer, manual; how: sign_in, connected, added, approval, approved, approval_cancelled, copied, claude, chatgpt, email)
+  | "ui.dns_one_click_used" // a way to add DNS records outside Lifecycle (where: seo_site, tracking_domain, sending_domain, brand_setup, brand_dns; way: cloudflare, ai, developer, manual; how: sign_in, connected, added, approval, approved, approval_cancelled, copied, claude, chatgpt, email; groups for brand_dns)
   | "ui.request_failed" // a call never got an answer (offline, blocked)
   | "ui.command_run" // a command palette command
   | "ui.copied" // a copy button
@@ -106,6 +106,7 @@ export type UiEvent =
   | "ui.site_key_duplicates_shown" // Website tracking listed spare scripts for a brand (extra: how many)
   | "ui.site_key_second_asked" // Add a site when the brand already has a script, and what they chose (choice: edit, second, cancel)
   | "ui.setup_method_used" // a way to do an install step picked (step, method: gtm, dns, developer, ai, manual; how: copied, email, claude, chatgpt)
+  | "ui.indexability_filtered" // a site's indexability report filtered by verdict or issue (filter, value: the verdict or issue id, or all)
   | "ui.logs_filtered" // a filter on the Logs page changed (filter: which one)
   | "ui.logs_live_toggled" // Live on the Logs page turned on or off (on)
   | "ui.logs_exported" // logs downloaded (format: csv or ndjson)
@@ -122,7 +123,9 @@ export type UiEvent =
   | "ui.analytics_sites_skipped" // that step closed with Later, nothing saved (from, connector)
   | "ui.ai_cost_notice_accepted" // connecting an AI model: the person accepted that their provider bills them (connector, via)
   | "ui.connect_for_opened" // a page's Connect button for a service it needs, such as Geonode on Social (connector, from)
-  | "ui.connect_for_returned"; // back on that page after Connectors (connector, from, connected)
+  | "ui.connect_for_returned" // back on that page after Connectors (connector, from, connected)
+  | "ui.cloud_feature_shown" // an Outflare Cloud feature's page on a server that doesn't run it (capability)
+  | "ui.cloud_feature_clicked"; // its link to Outflare Cloud (capability)
 
 type Props = Record<string, string | number | boolean | undefined>;
 

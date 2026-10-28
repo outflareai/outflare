@@ -52,6 +52,9 @@ type seoSource struct {
 	// LinkRows is how many links a weekly read asks for per SEO site;
 	// zero for a connection that does not read links.
 	LinkRows int `json:"link_rows"`
+	// LinkTraffic: links reads also take the linking pages' and domains'
+	// traffic (Ahrefs only, about 25 more API units a link).
+	LinkTraffic bool `json:"link_traffic"`
 	// GapRows is how many keywords and linking domains a weekly read takes
 	// of each tracked competitor; 0 is off.
 	GapRows int `json:"gap_rows"`
@@ -83,6 +86,7 @@ func (s *Server) seoSources(ctx context.Context, ws string) ([]seoSource, error)
 		src.GapRows = set.GapRowsOrDefault()
 		if connectors.SupportsSEO(r, connectors.SEOLinks) {
 			src.LinkRows = set.LinkRowsOrDefault()
+			src.LinkTraffic = set.LinkTraffic && i.Connector == "ahrefs"
 		}
 		var hosts []string
 		if hosts, src.DomainsSet, err = seosync.Domains(ctx, s.pool, i); err != nil {
@@ -251,6 +255,7 @@ func (s *Server) setSEOSettings(w http.ResponseWriter, r *http.Request) {
 		MonthlyBudget optional[float64]  `json:"monthly_budget"`
 		Sync          *string            `json:"sync"`
 		LinkRows      optional[int]      `json:"link_rows"`
+		LinkTraffic   *bool              `json:"link_traffic"`
 		GapRows       optional[int]      `json:"gap_rows"`
 	}
 	if !decode(w, r, &req) {
@@ -309,6 +314,13 @@ func (s *Server) setSEOSettings(w http.ResponseWriter, r *http.Request) {
 		}
 		set.LinkRows = req.LinkRows.Value
 	}
+	if req.LinkTraffic != nil {
+		if *req.LinkTraffic && o.Connector.Definition().ID != "ahrefs" {
+			writeError(w, r, http.StatusBadRequest, "invalid_request", "only Ahrefs reads the traffic of linking pages")
+			return
+		}
+		set.LinkTraffic = *req.LinkTraffic
+	}
 	if req.GapRows.Set {
 		if n := req.GapRows.Value; n != nil && (*n < 0 || *n > 500) {
 			writeError(w, r, http.StatusBadRequest, "invalid_request", "gap_rows is 0 to 500, or null for the default")
@@ -320,7 +332,7 @@ func (s *Server) setSEOSettings(w http.ResponseWriter, r *http.Request) {
 	err := pgx.BeginFunc(r.Context(), s.pool, func(tx pgx.Tx) error {
 		// Settings keys are replaced whole; unset ones are removed so the
 		// defaults apply.
-		if _, err := tx.Exec(r.Context(), `UPDATE integrations SET config = (config - 'domains' - 'country' - 'monthly_budget' - 'sync' - 'link_rows' - 'gap_rows') || $3::jsonb, updated_at = now()
+		if _, err := tx.Exec(r.Context(), `UPDATE integrations SET config = (config - 'domains' - 'country' - 'monthly_budget' - 'sync' - 'link_rows' - 'link_traffic' - 'gap_rows') || $3::jsonb, updated_at = now()
 			WHERE workspace_id = $1 AND id = $2`, a.WorkspaceID, o.ID, patch); err != nil {
 			return err
 		}
@@ -335,7 +347,7 @@ func (s *Server) setSEOSettings(w http.ResponseWriter, r *http.Request) {
 		if _, err := seosync.EnqueueRetry(r.Context(), tx, a.WorkspaceID, o.ID); err != nil {
 			return err
 		}
-		return record(r.Context(), tx, &a.principal, a.WorkspaceID, "seo.settings_set", "integration", o.ID, map[string]any{"domains": set.Domains, "country": set.Country, "monthly_budget": set.MonthlyBudget, "sync": set.Sync, "link_rows": set.LinkRows, "gap_rows": set.GapRows})
+		return record(r.Context(), tx, &a.principal, a.WorkspaceID, "seo.settings_set", "integration", o.ID, map[string]any{"domains": set.Domains, "country": set.Country, "monthly_budget": set.MonthlyBudget, "sync": set.Sync, "link_rows": set.LinkRows, "link_traffic": set.LinkTraffic, "gap_rows": set.GapRows})
 	})
 	if err != nil {
 		s.internal(w, r, err)

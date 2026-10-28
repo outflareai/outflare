@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/outflareai/outflare/engine/internal/crawl"
 	"github.com/outflareai/outflare/engine/internal/jobs"
 	"github.com/outflareai/outflare/engine/internal/track"
 )
@@ -21,6 +22,9 @@ import (
 func (e *env) runCrawls(t *testing.T) {
 	q := jobs.New(e.pool, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	q.PollInterval = 20 * time.Millisecond
+	// Only crawl jobs, so another queue's jobs (the server's) aren't taken
+	// and failed here for want of a handler.
+	q.Only = []string{crawl.JobRun, crawl.JobGlance}
 	e.crawl.Register(q)
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
@@ -412,8 +416,23 @@ func TestSEOSiteFallbackForBlockedPages(t *testing.T) {
 	if p := pages["/secret/y"]; p["status"] != "blocked" || p["fetched_via"] != nil {
 		t.Fatalf("secret: %v", p)
 	}
-	if run["pages_fallback"] != 2.0 || run["pages_firewalled"] != 2.0 || run["fallback_hint"] != "" {
+	if run["pages_fallback"] != 2.0 || run["pages_firewalled"] != 2.0 || run["fallback_hint"] != "" || run["pages_rendered"] != 1.0 {
 		t.Fatalf("run: %v", run)
+	}
+	if s := owner.must(200, "GET", base+"/seo-sites/"+id, nil); len(s["render_connections"].([]any)) != 1 {
+		t.Fatalf("render connections: %v", s["render_connections"])
+	}
+
+	// render_js off reads every page as served; always runs every page's scripts.
+	owner.must(200, "PATCH", base+"/seo-sites/"+id, map[string]any{"render_js": "off"})
+	run, pages = crawl()
+	if p := pages["/app"]; p["title"] != "Loading" || run["pages_rendered"] != 0.0 {
+		t.Fatalf("render off: %v %v", run, p)
+	}
+	owner.must(200, "PATCH", base+"/seo-sites/"+id, map[string]any{"render_js": "always"})
+	run, pages = crawl()
+	if pages["/"]["fetched_via"] != "geonode" || pages["/app"]["title"] != "Built by JS" || run["pages_rendered"].(float64) < 3 {
+		t.Fatalf("render always: %v %v", run, pages["/"])
 	}
 
 	seen := map[string]bool{}
@@ -544,5 +563,103 @@ func TestSEOSiteProvedByTrackingTag(t *testing.T) {
 	// The first proof moves the unproved limits to the proved defaults.
 	if s["max_pages"] != 10000.0 || s["crawl_delay_ms"] != 1000.0 {
 		t.Fatalf("proved defaults: %v %v", s["max_pages"], s["crawl_delay_ms"])
+	}
+}
+
+func TestSEOSiteCrawlSettings(t *testing.T) {
+	e := freshEnv(t)
+	owner, ws := setupOwner(t, e.h)
+	base := "/v1/workspaces/" + ws
+
+	site := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		html := func(body string) {
+			w.Header().Set("Content-Type", "text/html")
+			io.WriteString(w, "<html><body>"+body+"</body></html>")
+		}
+		switch r.URL.Path {
+		case "/robots.txt":
+			io.WriteString(w, "User-agent: *\nSitemap: http://"+r.Host+"/sitemap.xml\n")
+		case "/sitemap.xml":
+			w.Header().Set("Content-Type", "application/xml")
+			io.WriteString(w, `<urlset><url><loc>http://`+r.Host+`/only-in-sitemap</loc></url></urlset>`)
+		case "/":
+			html(`<a href="/a?x=1">a1</a> <a href="/a?x=2">a2</a> <a href="/tag/y">tag</a> <a href="/deep">deep</a> <a href="/b" rel="nofollow">b</a>`)
+		case "/deep":
+			html(`<a href="/deep2">deeper</a>`)
+		case "/deep2":
+			html(`<a href="/deep3">deepest</a>`)
+		default:
+			html("page")
+		}
+	}))
+	defer site.Close()
+
+	s := owner.must(201, "POST", base+"/seo-sites", map[string]any{"url": site.URL})
+	id := s["id"].(string)
+	if s["render_js"] != "auto" || s["use_sitemaps"] != true || s["max_depth"] != 0.0 || s["schedule_tz"] != "UTC" ||
+		len(s["include_patterns"].([]any)) != 0 || len(s["render_connections"].([]any)) != 0 {
+		t.Fatalf("defaults: %v", s)
+	}
+	for _, bad := range []map[string]any{
+		{"render_js": "sometimes"}, {"max_depth": -1}, {"exclude_patterns": []string{"(["}},
+		{"schedule_hour": 24}, {"schedule_day": 7}, {"schedule_tz": "Mars/Base"},
+	} {
+		owner.must(400, "PATCH", base+"/seo-sites/"+id, bad)
+	}
+	s = owner.must(200, "PATCH", base+"/seo-sites/"+id, map[string]any{
+		"use_sitemaps": false, "ignore_params": true, "exclude_patterns": []string{"^/tag/"}, "max_depth": 2,
+		"follow_nofollow": true, "render_js": "off", "schedule_hour": 9, "schedule_day": 1, "schedule_tz": "Australia/Sydney",
+	})
+	if s["render_js"] != "off" || s["schedule_hour"] != 9.0 || s["schedule_tz"] != "Australia/Sydney" || s["exclude_patterns"].([]any)[0] != "^/tag/" {
+		t.Fatalf("saved: %v", s)
+	}
+	// Null clears the hour; other settings stay.
+	if s = owner.must(200, "PATCH", base+"/seo-sites/"+id, map[string]any{"schedule_hour": nil}); s["schedule_hour"] != nil || s["max_depth"] != 2.0 {
+		t.Fatalf("cleared hour: %v", s)
+	}
+
+	rid := owner.must(202, "POST", base+"/seo-sites/"+id+"/crawls", nil)["id"].(string)
+	e.runCrawls(t)
+	run := waitFor(t, owner, base+"/crawls/"+rid, func(m map[string]any) bool { return m["status"] != "queued" && m["status"] != "running" })
+	if run["status"] != "done" {
+		t.Fatalf("finished: %v", run)
+	}
+	set := run["settings"].(map[string]any)
+	if set["max_depth"] != 2.0 || set["use_sitemaps"] != false || set["render_js"] != "off" {
+		t.Fatalf("run settings: %v", set)
+	}
+	pages := pagesByPath(owner, base+"/crawls/"+rid+"/pages")
+	for _, want := range []string{"/", "/a", "/deep", "/deep2", "/b"} {
+		if pages[want] == nil {
+			t.Errorf("not crawled: %s", want)
+		}
+	}
+	for _, not := range []string{"/tag/y", "/deep3", "/only-in-sitemap"} {
+		if pages[not] != nil {
+			t.Errorf("crawled %s", not)
+		}
+	}
+	all := owner.must(200, "GET", base+"/crawls/"+rid+"/pages", nil)["data"].([]any)
+	if len(all) != 5 || run["pages_excluded"] != 2.0 {
+		t.Fatalf("pages %v, excluded %v", all, run["pages_excluded"])
+	}
+
+	// A scheduled crawl starts at the hour asked for, in the site's time zone.
+	loc, _ := time.LoadLocation("Australia/Sydney")
+	now := time.Now().In(loc).Hour()
+	other := owner.must(201, "POST", base+"/seo-sites", map[string]any{"url": strings.Replace(site.URL, "127.0.0.1", "localhost", 1),
+		"schedule": "daily", "schedule_tz": "Australia/Sydney", "schedule_hour": (now + 12) % 24})["id"].(string)
+	scheduled := func() int {
+		if err := e.crawl.Schedule(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+		return len(owner.must(200, "GET", base+"/crawls?site="+other, nil)["data"].([]any))
+	}
+	if n := scheduled(); n != 0 {
+		t.Fatalf("started off the hour: %d", n)
+	}
+	owner.must(200, "PATCH", base+"/seo-sites/"+other, map[string]any{"schedule_hour": now})
+	if n := scheduled(); n != 1 {
+		t.Fatalf("not started at the hour: %d", n)
 	}
 }

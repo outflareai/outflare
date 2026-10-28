@@ -159,6 +159,9 @@ func (s *Server) logRequests(pattern func(*http.Request) string, next http.Handl
 		}
 		if p := info.p; p != nil {
 			e.ActorID, e.ActorType, e.UserID = p.ActorID, p.ActorType, p.personID()
+			if p.ViewerID != "" {
+				e.UserID = p.ViewerID
+			}
 		}
 		release(rec.status < 400, e)
 
@@ -211,6 +214,9 @@ func (s *Server) logRequests(pattern func(*http.Request) string, next http.Handl
 		if p := info.p; p != nil && p.TokenProjectID != nil {
 			e.Props["project_token"] = true
 		}
+		if p := info.p; p != nil && p.ViewerID != "" {
+			e.Props["support_view"] = true
+		}
 		track.Emit(r.Context(), e)
 	})
 }
@@ -241,13 +247,13 @@ func tracked(r *http.Request, status int, route string) bool {
 	case "GET /healthz", "GET /readyz", "GET /v1/meta", "GET /.well-known/outflare.json":
 		return false
 	}
-	// Websites send a request per page view: one in a hundred that went
+	// Websites send a request per page view (and one for flags): one in a hundred that went
 	// fine is enough to see the endpoint is used; every failure counts.
 	if status < 400 {
 		switch route {
-		case "OPTIONS /v1/site/events":
+		case "OPTIONS /v1/site/events", "OPTIONS /v1/site/flags":
 			return false
-		case "POST /v1/site/events":
+		case "POST /v1/site/events", "POST /v1/site/flags":
 			return rand.IntN(100) == 0
 		}
 	}

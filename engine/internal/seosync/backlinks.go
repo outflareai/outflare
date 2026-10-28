@@ -96,7 +96,8 @@ func SyncSiteLinks(ctx context.Context, pool *pgxpool.Pool, o *connectors.Opened
 		return run, err
 	}
 	q, err := connectors.CheckSEOQuery(connectors.SEOQuery{Report: connectors.SEOLinks, Target: LinkTarget(site.Host),
-		Country: set.Country, Limit: set.LinkRowsOrDefault(), Since: now.Add(-lostLookback).UTC().Format(time.DateOnly)})
+		Country: set.Country, Limit: set.LinkRowsOrDefault(), Since: now.Add(-lostLookback).UTC().Format(time.DateOnly),
+		Traffic: set.LinkTraffic && connector == "ahrefs"})
 	if err != nil {
 		return fail(err)
 	}
@@ -303,6 +304,13 @@ func applyLink(ctx context.Context, tx pgx.Tx, ws string, site LinkSite, connect
 			return ch, err
 		}
 	}
+	// Ahrefs' details win, being the fuller; another provider's fill in
+	// only links Ahrefs has not seen.
+	if _, ahrefs := views["ahrefs"]; connector == "ahrefs" || !ahrefs {
+		if err := storeDetails(ctx, tx, id, l, now); err != nil {
+			return ch, err
+		}
+	}
 	if ch.event == "" {
 		return ch, nil
 	}
@@ -316,6 +324,45 @@ func applyLink(ctx context.Context, tx pgx.Tx, ws string, site LinkSite, connect
 	_, err = tx.Exec(ctx, `INSERT INTO backlink_events (workspace_id, site_id, backlink_id, kind, at, connector, run_id, source_rating, reason)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`, ws, site.ID, id, ch.event, at, connector, runID, rating, view.LostReason)
 	return ch, err
+}
+
+// storeDetails keeps a provider's details of a link: what the linking page
+// is and how strong, and where the linked URL leads. Traffic stays from an
+// earlier read when this one did not ask for it.
+func storeDetails(ctx context.Context, tx pgx.Tx, id string, l connectors.SEOLink, now time.Time) error {
+	hops := []connectors.SEOHop{}
+	for _, h := range l.Hops {
+		if u := NormalLinkURL(h.URL); u != "" && len(hops) < 10 {
+			hops = append(hops, connectors.SEOHop{Kind: trunc(h.Kind, 20), URL: u})
+		}
+	}
+	hopsJSON, _ := json.Marshal(hops)
+	var lastSeen *time.Time
+	if l.LastChecked != "" {
+		t := dateOr(l.LastChecked, now)
+		lastSeen = &t
+	}
+	_, err := tx.Exec(ctx, `
+		UPDATE backlinks SET url_rating = $2, domain_traffic = COALESCE($3, domain_traffic), page_traffic = COALESCE($4, page_traffic),
+			page_keywords = $5, page_referring_domains = COALESCE($6, page_referring_domains), linked_domains = $7, external_links = $8,
+			link_type = $9, in_content = $10, page_types = $11, page_categories = $12, languages = $13, platforms = $14,
+			title = $15, author = $16, hops = $17, last_seen_at = COALESCE($18, last_seen_at)
+		WHERE id = $1`,
+		id, l.URLRating, l.DomainTraffic, l.PageTraffic, l.PageKeywords, l.PageRefDomains, l.LinkedDomains, l.ExternalLinks,
+		trunc(l.LinkType, 20), l.InContent, short(l.PageTypes, 10, 200), short(l.PageCategories, 10, 200), short(l.Languages, 10, 20),
+		short(l.Platforms, 10, 100), trunc(l.Title, 500), trunc(l.Author, 200), hopsJSON, lastSeen)
+	return err
+}
+
+// short caps a list and each of its values.
+func short(list []string, n, each int) []string {
+	out := []string{}
+	for _, v := range list {
+		if v = strings.TrimSpace(v); v != "" && len(out) < n {
+			out = append(out, trunc(v, each))
+		}
+	}
+	return out
 }
 
 // NormalLinkURL tidies a link's URL so both providers' copies match: the

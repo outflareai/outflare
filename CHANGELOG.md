@@ -6,6 +6,51 @@ Each pull request that changes what Outflare does adds a change note in [changes
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-10-28
+
+### Added
+
+- Every DNS record a brand needs, in one list: the site's proof, its email domain's records and its tracking domain. Add every missing one with one button through your own Cloudflare, or approve them at your DNS provider one group after another.
+- Get started's star and follow step asks, optionally, how you heard about Outflare: one tap from a short list.
+
+### Changed
+
+- Get started now sets up one brand from start to finish: the brand, your AI key (with why Outflare needs it), the website script and every DNS record in one step, the tools for your goal, star and follow, then a first mission. Home shows one set-up checklist at a time.
+
+### Upgrading
+
+- migration 0214 adds two columns to users.
+
+## [0.7.0] - 2026-10-27
+
+### Added
+
+- Support access: a new switch in Account settings says whether your server's staff, such as Outflare Cloud's support team, may view your account to help you. A view is read-only, never shows your inbox or email content, ends after an hour, and is listed under the switch. It's on by default; turning it off ends a view straight away.
+- People by name on the Visitors page: connect your own RB2B, Vector or Warmly, turn it on and accept the notice, then paste the webhook address into the tool. New people are added to your CRM tagged with the tool and held for review: hidden from the people list and never emailed until someone approves them.
+- CRM → Lead finder: on Outflare Cloud, AI searches the web for companies that fit your ideal customer, reads their websites and tells you which fit and why, for you to review before they're added. It runs on your own Geonode account and AI key. Self-hosted servers show what it does and where to get it.
+- Replies move deals: a reply rule can open or move a deal in Outflare's own CRM when a reply gets a label, such as "interested" to Qualified and "meeting booked" to Meeting. Deals only move forward, never out of won or lost, and never over a stage a person set.
+- Indexability report: every page from the crawl, its sitemaps, Search Console and your SEO tool in one list, with whether it can be indexed and whether Google indexed it. Where the sources disagree it says which to trust, flags pages Google skipped, sitemap mistakes and orphans with how to fix each, and tracks it day by day.
+- Playbooks can now set up what they need before their first run: a pipeline in the CRM, fields on people and email drafts, shown first and added only with your OK. The first one, Run creator partnerships, adds a Partnerships board for creator, newsletter and podcast deals.
+- Feature flags: turn something on for the visitors you pick, or split them between versions of a page to see which works better. Each visitor keeps their version, your website and servers agree on it, and pages don't flicker. Find them under Analytics → Feature flags.
+
+### Changed
+
+- Tracking domains can get their HTTPS certificate automatically on servers that support it, and each tracking domain now shows whether HTTPS is set up (`https_status`). Links only switch to a tracking domain once its certificate is ready.
+- Extensions can list their own AI calls as a tool on Settings → AI usage, with a name, a description and a monthly limit of their own, while using the model chosen for a built-in task.
+- AI spend limits can now warn without stopping. Under Settings → AI usage, untick Stop for the workspace's monthly AI limit or any tool's limit: owners and admins still get the 80% and 100% emails, but AI calls carry on. Every limit still stops calls by default.
+- **Follow us on X** now shows next to **Star us on GitHub** on Home and in Get started, opening Outflare's profile (@outflareai).
+
+### Fixed
+
+- Importing from Attio no longer gets stuck on the first screen for large workspaces. The preview reads your objects in parallel and stops counting after about 15 seconds, showing counts like "5,000+" when there are more.
+
+### Upgrading
+
+- migration 0227 adds two columns to tracking domains. `OUTFLARE_TRACKING_TARGET` optionally sets the host customers point their CNAME at, and `OUTFLARE_EDGE_SECRET` lets an edge proxy in front of tracking domains pass on the domain and visitor address.
+- runs migration 0191. A self-hosted server has no staff of its own, so nobody can start a view unless an extension adds them.
+- the item is on by default. Set `OUTFLARE_FOLLOW_URL=off` to hide it, or `OUTFLARE_COMMUNITY_LINKS=off` to hide both items.
+- runs migration 0221.
+
 ## [0.6.0] - 2026-10-27
 
 ### Added
@@ -69,6 +114,8 @@ Each pull request that changes what Outflare does adds a change note in [changes
 - Every workspace brings its own keys for every third-party API, connectors and AI alike, with no exceptions. At start-up the server now removes vendor keys such as `ANTHROPIC_API_KEY`, `OPENAI_API_KEY` or `GOOGLE_APPLICATION_CREDENTIALS` from its own environment and logs that it ignored them, so nothing can run a workspace's work on the operator's account. Workspaces connect their own keys on the Connectors page.
 
 ### Added
+
+- The Backlinks page works like Ahrefs' backlinks report: one link per domain (or per page, or every link), All, New or Lost over a history range, filters for dofollow, nofollow, UGC and sponsored, backlink type, DR, domain traffic, page type and a word or phrase, and columns for DR, UR, traffic, keywords, referring and linked domains, the anchor, and first seen, last seen and lost dates. The referring page and target URLs are shown in full and open on click, with any redirects the target goes through. Filtering reads the stored links, so it costs nothing. Ahrefs connections can also read each link's traffic (`link_traffic` in the SEO settings, about 25 more Ahrefs units a link). The new details fill in on each connection's next weekly read, or straight away with "Snapshot now".
 - Get started has a skippable **Star and follow Outflare** step before the first mission, and Home shows the same two optional one-click items, **Star us on GitHub** and **Follow us on X**, to anyone who hasn't opened them. Opening the link ticks the item, since a star or a follow can't be checked; each person has their own and can hide them on Home (`GET`/`PATCH /v1/me/community`); the step is done for whoever opened both. Self-hosted servers turn them off (step included) with `OUTFLARE_COMMUNITY_LINKS=off`; **Follow us on X** shows only when `OUTFLARE_FOLLOW_URL` is set to the profile to open. Upgrading runs migration 0196.
 - Live updates: a connection can now get its own webhook address, so a tool tells Outflare when something happens instead of being asked. Geonode is first: turning on live updates adds the address in your Geonode account for you (extract, batch and crawl finished), and every delivery's signature is checked. Repeats are ignored, each event is handled by a worker with retries, and the last 90 days are listed under Logs → Incoming webhooks, where a failed event can be run again. Needs the server reachable at a public https `PUBLIC_URL`. `GET`/`POST`/`DELETE .../integrations/{id}/hook`, `.../hook/rotate`, `.../hook/signing-secret`, `GET .../hook-events`, `POST .../hook-events/{event}/replay`; MCP `get_connection_hook`, `set_up_connection_hook`, `rotate_connection_hook`, `remove_connection_hook`, `list_hook_events`, `replay_hook_event` ([docs/connectors.md](docs/connectors.md#live-updates-webhooks)). New metrics (`outflare_hooks_*`), a Grafana row and three alerts. Upgrading runs migration 0197.
 - Cal.com, Stripe and OpenRouter connect with a sign-in as well as a key. OpenRouter needs nothing on the server: signing in makes a key on your own OpenRouter account. Cal.com needs `CONNECTOR_CAL_COM_CLIENT_ID` and `_CLIENT_SECRET`; Stripe needs a Stripe App (`CONNECTOR_STRIPE_CLIENT_ID`, `_CLIENT_SECRET` and the app's install link in `CONNECTOR_STRIPE_AUTH_URL`). See docs/connectors.md.

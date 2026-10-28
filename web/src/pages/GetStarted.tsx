@@ -11,6 +11,8 @@ import { ConnectDialog, ConnectorCard, startConnectorOAuth, takeConnectOutcome, 
 import { useSiteSetupAfterConnect } from "@/components/analytics-sites";
 import { setupPrompt } from "./ConnectAI";
 import { CommunityLinks } from "@/components/community-links";
+import { BrandDNS } from "@/components/brand-dns";
+import { InstallStep } from "./BrandSetup";
 
 type Onboarding = components["schemas"]["Onboarding"];
 type StepId = components["schemas"]["OnboardingStepId"];
@@ -23,9 +25,12 @@ export function openGetStartedAt(step: StepId) {
 }
 
 // The Get started page: a full-page walk-through, without the app around
-// it, that ends with Outflare doing something: the website, what to do
-// first, an AI, the tools that goal needs, then a first mission. Inviting
-// the team waits for Home. Whether a step is done comes from the workspace
+// it, that sets up one brand and ends with Outflare doing something: the
+// brand, an AI key (and why it's needed), what to do first, the brand's
+// website script and every DNS record in one go, the tools that goal
+// needs, a star and a follow, then a first mission. More brands, and the
+// rest of this one's checklist, come after. Inviting the team waits for
+// Home. Whether a step is done comes from the workspace
 // itself, so adding a brand on the Brands page or connecting a tool over
 // MCP ticks it off here too. Every step, and the whole thing, can be
 // skipped.
@@ -129,12 +134,13 @@ export function GetStarted({ ws, wsName, from, go }: { ws: string; wsName: strin
                   <>
                     <div className="space-y-1.5">
                       <p className="text-[12px] text-muted-foreground">Step {index + 1} of {steps.length}</p>
-                      <h1 className="text-2xl font-semibold tracking-tight">{headings[step.id] ?? step.title}</h1>
+                      <h1 className="text-2xl font-semibold tracking-tight">{step.id === "website" && o.brand?.website ? `Connect ${o.brand.website.replace(/^https?:\/\//, "").replace(/\/$/, "")}` : headings[step.id] ?? step.title}</h1>
                       <p className="text-[15px] text-muted-foreground">{step.detail}</p>
                     </div>
                     {step.id === "brand" && <BrandStep ws={ws} wsName={wsName} done={step.done} onDone={next} go={go} />}
                     {step.id === "goal" && <GoalStep current={o.goal} onPick={pickGoal} />}
                     {step.id === "ai" && <AIStep ws={ws} onChange={load} />}
+                    {step.id === "website" && <WebsiteStep ws={ws} brand={o.brand ?? null} onChange={load} onBack={() => setAt("brand")} />}
                     {step.id === "connect" && <ToolsStep ws={ws} goal={o.goal} onChange={load} go={go} />}
                     {step.id === "community" && <CommunityLinks step onClicked={load} />}
                     {step.id === "mission" && <MissionStep ws={ws} goal={o.goal} aiDone={!!o.steps.find((s) => s.id === "ai")?.done} onBack={() => setAt("ai")} onChange={load} go={finish} />}
@@ -160,9 +166,10 @@ export function GetStarted({ ws, wsName, from, go }: { ws: string; wsName: strin
 
 // What each step asks, as the page's heading.
 const headings: Partial<Record<StepId, string>> = {
-  brand: "What's your website?",
+  brand: "Start with one brand",
   goal: "What should Outflare do first?",
-  ai: "Connect your AI",
+  ai: "Add your AI key",
+  website: "Connect your website",
   connect: "Connect what it needs",
   community: "Star and follow Outflare",
   mission: "Give it a goal",
@@ -213,7 +220,16 @@ function AIStep({ ws, onChange }: { ws: string; onChange: () => void }) {
   const app = apps?.[0];
   return (
     <div className="space-y-6">
-      <Option title="Add your AI key" detail="Outflare's own agent plans and runs missions with it. Your key, billed to your account; tested before it's saved and never shown again.">
+      <div className="space-y-2 rounded-lg border bg-card p-4 text-[13px]">
+        <p className="font-medium">Why Outflare needs your key</p>
+        <ul className="space-y-1.5 text-muted-foreground">
+          <li className="flex gap-2"><Icon name="check" className="mt-0.5 size-3.5 shrink-0 text-green-600 dark:text-green-400" />It's what lets Outflare's agent work: plan missions from a goal, write emails, research companies and check how AI answers talk about you.</li>
+          <li className="flex gap-2"><Icon name="check" className="mt-0.5 size-3.5 shrink-0 text-green-600 dark:text-green-400" />You pay your AI provider directly, at their prices. Outflare never adds a margin, and never lends or shares a key of its own.</li>
+          <li className="flex gap-2"><Icon name="check" className="mt-0.5 size-3.5 shrink-0 text-green-600 dark:text-green-400" />It's tested before it's saved, stored encrypted and never shown again. Set a monthly limit on AI usage in Settings.</li>
+        </ul>
+        <p className="text-muted-foreground">Without one, reports, tracking and connections still work; anything that needs AI waits until you add it.</p>
+      </div>
+      <Option title="Add your AI key" detail="Claude is a good first choice. Each card links to where you get a key.">
         <ConnectStep ws={ws} pick={(c) => c.category === "model"} first={["claude"]} limit={4} onChange={onChange} />
       </Option>
       {url && (
@@ -254,6 +270,61 @@ function Option({ title, detail, children }: { title: string; detail: string; ch
   );
 }
 
+// The brand's website, in one step: the script on its pages, then every
+// DNS record the brand needs, added in one go. Either part ticks off on its
+// own once Outflare sees it (a first visit, the records in DNS).
+function WebsiteStep({ ws, brand, onChange, onBack }: { ws: string; brand: Onboarding["brand"]; onChange: () => void; onBack: () => void }) {
+  const [setup, setSetup] = useState<components["schemas"]["BrandSetup"] | null>(null);
+  const [catalog, setCatalog] = useState<Connector[]>([]);
+  const handle = brand?.handle;
+  const load = useCallback(async () => {
+    if (!handle) return;
+    const { data } = await api.GET("/v1/workspaces/{ws}/brands/{brand}/setup", { params: { path: { ws, brand: handle } } });
+    if (data) setSetup(data);
+  }, [ws, handle]);
+  useEffect(() => {
+    void load();
+    api.GET("/v1/workspaces/{ws}/connectors", { params: { path: { ws } } }).then(({ data }) => setCatalog(data?.data ?? []));
+  }, [load, ws]);
+  // While waiting for a first visit, look again so the step ticks off.
+  const script = setup?.steps.find((s) => s.id === "site_script");
+  useEffect(() => {
+    if (script?.status !== "waiting") return;
+    const t = setInterval(() => {
+      void load();
+      onChange();
+    }, 8000);
+    return () => clearInterval(t);
+  }, [script?.status, load]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  if (!brand || !brand.website) {
+    return <p className="text-[14px] text-muted-foreground">This step needs your brand's website. <button className="underline underline-offset-2" onClick={onBack}>Add it</button> first.</p>;
+  }
+  if (!setup || !script?.install) return <Loading />;
+  const part = (n: number, title: string, why: string, done: boolean, waiting: string | undefined) => (
+    <div className="flex items-start gap-3">
+      <span className={cn("mt-0.5 flex size-6 shrink-0 items-center justify-center rounded-full border font-mono text-[11px]", done && "border-transparent bg-brand text-brand-foreground")}>{done ? <Icon name="check" className="size-3.5" /> : n}</span>
+      <div className="min-w-0">
+        <h2 className="text-[14px] font-medium">{title}</h2>
+        <p className="text-[13px] text-muted-foreground">{why}</p>
+        {waiting && !done && <p className="mt-1 text-[12px] text-blue-600 dark:text-blue-400">{waiting}</p>}
+      </div>
+    </div>
+  );
+  return (
+    <div className="space-y-8">
+      <section className="space-y-3">
+        {part(1, "Add the script to your pages", "One line on every page counts visits and sign-ups and where they came from.", script.done, script.waiting)}
+        {!script.done && <div className="sm:pl-9"><InstallStep ws={ws} brand={brand.handle} step={script} install={script.install} canManage catalog={catalog} back="get-started" onChange={(d) => (d ? setSetup(d) : void load())} /></div>}
+      </section>
+      <section className="space-y-3">
+        {part(2, "Add your DNS records, all at once", "Proves the site is yours so Outflare can audit it. Records for sending email and tracking links join this list when you set those up.", !!setup.steps.find((s) => s.id === "verify_site")?.done, setup.steps.find((s) => s.id === "verify_site")?.waiting)}
+        <div className="sm:pl-9"><BrandDNS ws={ws} brand={brand.handle} website={brand.website} canManage page="get-started" onChange={() => { void load(); onChange(); }} /></div>
+      </section>
+    </div>
+  );
+}
+
 // The tools the chosen goal needs, a few at most; every other one is a
 // click away.
 function ToolsStep({ ws, goal, onChange, go }: { ws: string; goal: Goal | null; onChange: () => void; go: (t: Tab) => void }) {
@@ -283,7 +354,8 @@ function MissionStep({ ws, goal, aiDone, onBack, onChange, go }: { ws: string; g
   const [text, setText] = useState(goals.find((x) => x.id === goal)?.mission ?? goals[0].mission);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
-  const [needsKey, setNeedsKey] = useState(false);
+  // Without an AI key it says so before anything is typed or pressed.
+  const [needsKey, setNeedsKey] = useState(!aiDone);
   const [planned, setPlanned] = useState(false);
   const apps = useAgentApps(ws);
   const app = apps?.[0];
@@ -354,6 +426,7 @@ function CopyGoal({ text }: { text: string }) {
 }
 
 function Summary({ o, onOpen, onFinish }: { o: Onboarding; onOpen: (s: StepId) => void; onFinish: (to?: Tab) => void }) {
+  const brand = o.brand?.name;
   const left = o.steps.filter((s) => s.walkthrough && !s.done);
   const team = o.steps.find((s) => s.id === "team");
   return (
@@ -374,8 +447,15 @@ function Summary({ o, onOpen, onFinish }: { o: Onboarding; onOpen: (s: StepId) =
           ))}
         </ul>
       )}
+      {brand && (
+        <div className="space-y-2 rounded-lg border bg-card p-4">
+          <p className="font-medium">Next: the rest of {brand}</p>
+          <p className="text-[13px] text-muted-foreground">Analytics, Search Console, email, payments, ads, social and your CRM, one at a time and each skippable. Home keeps your place.</p>
+          <Button onClick={() => onFinish("setup")}>Continue with {brand}</Button>
+        </div>
+      )}
       <div className="flex flex-wrap items-center gap-4">
-        <Button onClick={() => onFinish()}>Go to Home</Button>
+        <Button variant={brand ? "ghost" : undefined} onClick={() => onFinish()}>Go to Home</Button>
         {team && !team.done && <button onClick={() => onFinish("members")} className="text-[13px] text-muted-foreground underline-offset-2 hover:text-foreground hover:underline">Invite your team</button>}
       </div>
     </div>
@@ -444,6 +524,7 @@ function BrandStep({ ws, wsName, done, onDone, go }: { ws: string; wsName: strin
       </label>
       <ErrorText>{error}</ErrorText>
       <Button className="w-full sm:w-auto" disabled={busy || !name.trim() || !website.trim()}>{busy ? "Saving…" : "Continue"}</Button>
+      <p className="text-[12px] text-muted-foreground">Market more than one product or site? Set this one up first; add the others under Brands later.</p>
     </form>
   );
 }

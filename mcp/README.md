@@ -91,9 +91,10 @@ Agents forget everything between chats, and different clients share nothing. Out
 | `remember` | Save one lasting fact, preference or decision in a sentence. Never transcripts |
 | `list_memories` | Search memories before asking something the person may have said before |
 | `update_memory`, `forget` | Correct or delete a memory |
-| `get_onboarding` | The getting-started steps (website, goal, AI, tools, first mission, then team): each `done` or `skipped`, `next_step`, and the tool or page that does it |
+| `get_onboarding` | The getting-started steps for the first brand (brand, AI key, goal, website script and DNS, tools, star and follow, first mission, then team): each `done` or `skipped`, `next_step`, and the tool or page that does it |
 | `update_onboarding` | Pick what to do first, skip getting-started steps, bring them back, or close the walk-through in the app |
-| `get_brand_setup` | One brand's setup steps in order (website script, verify the website, analytics, Search Console, email, payments, ads, social, CRM), with the snippet, DNS record, AI prompt and developer message for the install steps |
+| `get_brand_setup` | One brand's setup steps in order (website script, DNS records, analytics, Search Console, email, payments, ads, social, CRM), with the snippet, DNS record, AI prompt and developer message for the install steps |
+| `get_brand_dns` | Every DNS record a brand needs on its domains in one list (site proof, sending domains, tracking domain), each in place or missing |
 | `get_install_health` | What is out of date or broken: a silent or old website script, an unverified site, a connection to sign in again, an outdated SDK, CLI or MCP server, deprecated API calls |
 | `list_business_models` | What a brand can say it does (grouped) and how its customers pay; set them with `update_brand` |
 | `list_tag_containers` | The Google Tag Manager containers a connection sees, the brand's own site first |
@@ -137,6 +138,7 @@ Read (always available):
 | `list_lead_lists`, `get_lead_list` | Lead lists with sizes, search settings and the latest build |
 | `list_lead_list_members` | A list's leads with their ICP fit score and reasons, best first |
 | `list_smart_lists`, `get_smart_list`, `list_smart_list_members`, `preview_smart_list` | Smart lists: people on customer records who match rules now (a field, an event in the last N days, being in a lead list), who is in each, and how many a set of rules would pick |
+| `list_flags`, `get_flag`, `evaluate_flags` | Feature flags: switches and splits (A/B tests) the website script and servers read, and which version a given visitor gets and why |
 | `list_data_providers` | Connected data providers that search, find emails or enrich, and the filters each understands |
 | `list_list_runs`, `get_list_run` | Builds, refreshes and enrichments: found, added, skipped by reason, credits spent |
 | `get_lead_sources` | Which data provider a lead came from |
@@ -163,7 +165,7 @@ Read (always available):
 | `get_connection_hook`, `set_up_connection_hook`, `rotate_connection_hook`, `remove_connection_hook` | A connection's live updates: its own webhook address, which Outflare registers at the tool when it can (Geonode), whether events arrive, a new address, and turning them off |
 | `list_hook_events`, `replay_hook_event` | The events connectors sent by webhook, with what happened to each, and handling one again |
 | `list_site_keys`, `create_site_key`, `update_site_key`, `rotate_site_key`, `revoke_site_key`, `create_site_proxy_secret` | Website tracking keys (ofk_) and their snippet: anonymous page views with the landing page's campaign tags, click ids and referral code; a proxy secret (ofp_) for sites that forward tracking through their own domain |
-| `list_website_visitors`, `get_visitor_settings`, `update_visitor_settings`, `add_visitor_company` | The companies and people on the website, scored for buying intent (key pages, return visits), known from the product, from clicks on tracked links in Outflare email, or (when turned on) from the company behind their address with the workspace's own People Data Labs or Snitcher key; key pages, hot score, lookups and who is left out; add a looked-up company to the CRM |
+| `list_website_visitors`, `get_visitor_settings`, `update_visitor_settings`, `add_visitor_company` | The companies and people on the website, scored for buying intent (key pages, return visits), known from the product, from clicks on tracked links in Outflare email, or (when turned on) from the company behind their address with the workspace's own People Data Labs or Snitcher key, or by name from the workspace's own RB2B, Vector or Warmly; key pages, hot score, lookups, people reveal and who is left out; add a looked-up company to the CRM |
 | `get_ai_settings`, `list_ai_models` | Which AI model (Claude, OpenAI, Gemini, Mistral, xAI, OpenRouter, Vercel AI Gateway, Requesty) plans missions and runs Outflare's agent, its price, the monthly AI limit and spend; the models a connection can use |
 | `get_ai_usage` | Where the workspace's AI spend goes in a month: by tool, provider, model and day, each tool's own limit, and the latest calls with tokens and cost |
 | `list_connection_usage` | What each paid connection (SEO data, lead data, email verification, page reads) used today and this month, with its daily and monthly limits |
@@ -178,6 +180,7 @@ Read (always available):
 | `list_senders`, `list_teams` | Who mailboxes send as, and the teams that own sequences and senders |
 | `use_mission` | Act inside a mission from now on, or stop (null) |
 | `list_playbooks`, `get_playbook`, `start_playbook` | Ready-made playbooks with whether the workspace is ready for each (connections and data still missing); start one as a mission draft with its prompt filled in. Needs `missions.read`, and `missions.run` to start |
+| `preview_kit`, `apply_kit` | What a playbook's setup kit (a pipeline, fields on people and companies, option lists, email drafts) would add, and setting it up once the person agrees. It only adds and stops at a conflict. Needs `customers.read` to preview; `catalog.manage`, and `emails.manage` for email drafts, to apply |
 | `list_missions`, `get_mission` | Missions; check in on one: the project brief, what writes do now, limits, progress, open connect requests, notes from people |
 | `list_mission_actions`, `get_mission_action` | Writes held or dry-run in a mission, and their decisions and results |
 | `list_mission_calls` | Every call made in a mission |
@@ -214,13 +217,14 @@ Write (left out when `OUTFLARE_MCP_READ_ONLY=1`):
 | `find_brand_links`, `add_brand_link`, `dismiss_brand_link` | Read a brand's website through Geonode for its social profiles and app listings, then add (corrected if need be) or dismiss each one |
 | `update_brand_setup`, `prepare_brand_setup`, `check_brand_setup` | Skip or close setup steps, make the website script or DNS record, check a site's DNS record now |
 | `install_brand_setup` | Add the website script through the workspace's own Tag Manager, or the verification record on its own Cloudflare, in one click |
+| `add_brand_dns` | Add every DNS record a brand still needs (site proof, sending domains, tracking domain) in one go through its own Cloudflare |
 | `get_brand_rules`, `set_brand_rules` | The cross-brand contact rule: no first email from a second brand within N days of another brand's email |
 | `add_to_brand`, `remove_from_brand` | Move projects, domains, mailboxes, lead lists, sequences or missions into a brand, or make them shared by every brand again |
 | `search_workspace` | Find records by name, attribute text, email, phone or id, and emails sent and received, meetings, deals and lifecycle email by their words, ranked, with whose each one is. With `mode: meaning`, find records, replies, meetings and deals by what they mean |
 | `get_semantic_search`, `set_semantic_search` | Read whether meaning-based search is on and how far along it is, or turn it off and on |
 | `list_query_tables`, `run_query` | Read-only SQL over the workspace's own data (people, companies, product events, deals, outreach, replies, emails, visits): counts, sums, rates and joins in one call. It sees only what the connection may read, and never changes anything |
 | `get_catalog` | Everything customer records can hold: record types (person, account and the workspace's own), their fields, the shared option lists and product events. Read it before writing records |
-| `list_records`, `get_record`, `lookup_record` | Find people, companies and other records by type, name or identity; `lookup_record` says which record holds an email or id verified |
+| `list_records`, `get_record`, `lookup_record`, `review_record` | Find people, companies and other records by type, name or identity; `lookup_record` says which record holds an email or id verified; approve or reject records held for review |
 | `get_record_history`, `list_record_identities`, `list_record_links` | A record's changes (who, when, which source), its emails, phones and ids (closed ones too) and its links |
 | `get_record_timeline`, `list_record_consents`, `list_customer_events` | One timeline per person or company across every module (product events, changes, identities, consent, cold email and replies, meetings, deals, visits, opt-outs, journeys; a company with its people), a person's current consents, and product events (unmatched anonymous ones too) |
 | `list_record_duplicates` | Pairs of records that may be the same human (a shared email or phone), with both records |
@@ -249,6 +253,7 @@ Write (left out when `OUTFLARE_MCP_READ_ONLY=1`):
 | `create_lead_list`, `update_lead_list` | A manual list, or one built from a data provider search with an email waterfall, ICP scoring, dedupe and credit caps |
 | `run_lead_list` | Build, refresh or enrich a list (spends provider credits, within the caps) |
 | `create_smart_list`, `update_smart_list`, `refresh_smart_list`, `delete_smart_list` | Make a list that keeps itself up to date from rules, change its rules, bring it up to date now, or delete it (its people stay) |
+| `create_flag`, `update_flag`, `archive_flag` | Add a switch or a split between versions, turn it on or off, change who gets it, or archive it |
 | `cancel_list_run` | Stop a run; leads already added stay |
 | `create_sequence` | Create a draft sequence with steps (it sends nothing yet) |
 | `update_sequence` | Change settings (including optional click tracking and the unsubscribe header), or set status `active`, `paused` or `archived` |
@@ -259,8 +264,11 @@ Write (left out when `OUTFLARE_MCP_READ_ONLY=1`):
 | `triage_inbox_message` | Label a reply, assign it, snooze it, mark it done, tag it or flag it for review |
 | `create_inbox_tag`, `update_inbox_tag`, `delete_inbox_tag` | Add, rename, recolour or delete a reply tag (renaming changes it on every reply) |
 | `create_inbox_view`, `update_inbox_view`, `delete_inbox_view` | Save, change or delete a named set of inbox filters |
-| `get_reply_rules`, `set_reply_rules` | What happens when a reply gets a label (snooze or restart a not now, move past an out-of-office, add a referral), for the workspace, a project or a sequence |
+| `get_reply_rules`, `set_reply_rules` | What happens when a reply gets a label (snooze or restart a not now, move past an out-of-office, add a referral, open or move a deal in the CRM), for the workspace, a project or a sequence |
 | `add_reply_referral` | Add the person a reply refers you to as a lead, and optionally enrol them |
+| `list_alerts` | What needs someone now: hot replies, hot website visitors and other alerts, with the page that has each |
+| `get_alert_settings`, `set_alert_settings`, `mute_alerts` | Who gets each kind of alert by email and which Slack channel it posts to, for the workspace or a brand, and muting a kind for yourself |
+| `list_alert_channels` | The Slack channels the workspace's own Slack can post alerts to |
 | `list_members` | Workspace members and their user ids, for assigning replies |
 | `list_roles` | The workspace's roles and what each one allows |
 | `reply_to_inbox_message` | Reply now, from the same mailbox and in the same thread |
@@ -272,8 +280,8 @@ Write (left out when `OUTFLARE_MCP_READ_ONLY=1`):
 | `test_integration`, `update_integration`, `disconnect_integration` | Re-test, rename, replace the key or choose which brands use it, or disconnect an account |
 | `update_mailbox_health_settings` | Turn automatic pausing on bounce spikes on or off, or change its threshold |
 | `start_import` | Bring campaigns (as drafts), leads and sending accounts over from Instantly or Smartlead |
-| `update_ai_settings` | Choose the AI model, its price, a model per task (plan, turn, check_in, reply_labelling, classify_domain, ai_visibility, social_replies, email_verification) and the monthly AI limit |
-| `update_ai_tool_limits` | Set a monthly AI limit for each tool, on top of the workspace's |
+| `update_ai_settings` | Choose the AI model, its price, a model per task (plan, turn, check_in, reply_labelling, classify_domain, ai_visibility, social_replies, review_replies, email_verification) and the monthly AI limit |
+| `update_ai_tool_limits` | Set a monthly AI limit for each tool, on top of the workspace's, and whether reaching a limit stops calls or only warns |
 | `update_connection_limits` | Set a paid connection's daily and monthly usage limits, and whether reaching one stops calls |
 | `update_verification_settings` | Pick the verification service and what to block |
 | `verify_emails` | Verify addresses, a lead list, or every unverified lead |
@@ -342,20 +350,24 @@ Write (left out when `OUTFLARE_MCP_READ_ONLY=1`):
 | `get_crawl_ai_access` | What AI crawlers may read of a crawled site: per crawler (OAI-SearchBot, ClaudeBot, PerplexityBot and others) whether robots.txt lets it in and how many pages it is kept from, and whether the site has an llms.txt |
 | `get_ai_bot_hits` | How often AI crawlers requested each site, per crawler and day, from the request logs of the workspace's own Cloudflare connection |
 | `list_crawl_issues`, `get_crawl_issue` | What a finished crawl's audit found: each rule broken, by URL template, why it matters and how to fix it, the pages behind it, and the health score |
-| `list_backlinks`, `list_backlink_events`, `get_backlinks_summary` | Links to the SEO sites merged from Ahrefs and DataForSEO, the feed of links gained, lost and regained, and each site's totals and weekly trend |
+| `list_backlinks`, `list_backlink_events`, `get_backlinks_summary` | Links to the SEO sites merged from Ahrefs and DataForSEO (filter by follow, link type, DR, traffic, page type, new or lost since a date; one link per domain), the feed of links gained, lost and regained, and each site's totals and weekly trend |
 | `review_backlink`, `get_disavow_file` | Mark a link ok or to disavow (one link or its whole domain), and get the site's disavow file of what people marked |
 | `list_seo_competitors`, `add_seo_competitor`, `update_seo_competitor`, `remove_seo_competitor`, `check_seo_competitor`, `list_competitor_events` | The sites each SEO site competes with (suggested by the SEO connection, tracked or dismissed), their numbers and OutflareBot's light look, and the feed of what changed at them |
 | `get_seo_competitor_gaps` | Keywords tracked competitors rank for that the site doesn't (or ranks well below), and domains that link to them but not to the site, from stored snapshots |
 | `get_site_search`, `get_site_search_history`, `get_site_indexing`, `get_site_sitemaps` | A site's Google Search Console data stored by Outflare: clicks, impressions, CTR and position by page and query for 16 months, day by day history, how Google indexed each page (URL Inspection) and the sitemaps it read |
+| `get_site_indexability`, `list_indexability_pages` | A site's indexability report: every page from the crawl, its sitemaps, Search Console and an SEO tool, whether it can be indexed and whether Google indexed it, the issues where they disagree, and daily history |
 | `list_page_targets`, `set_page_target`, `accept_page_targets`, `update_page_target`, `delete_page_target` | The keyword each page of an SEO site targets: checked against the latest crawl (title, H1, description) with its Search Console numbers, suggestions from the query that brings each page the most clicks; a missing keyword becomes a fix (source `seo_keywords`) |
 | `get_site_cannibalisation` | Searches several pages of an SEO site compete for in Search Console, with each page's share of impressions and the page to keep; the top 50 are fixes (`keyword_cannibalised`) |
 | `get_site_internal_links` | For each page with a target keyword, other pages about the keyword that don't link to it yet, from the latest crawl; each is a fix (`internal_link_opportunity`) |
 | `get_site_conversions` | Visits and conversions by landing page, overall and from search, beside Search Console clicks and the target keyword, from the workspace's own PostHog |
 | `get_site_regressions` | What got worse for an SEO site: search clicks, tracked rankings, indexing, conversions and health; open ones are fixes |
 | `list_rankings`, `track_keywords`, `check_rankings`, `get_rank_history`, `update_tracked_keyword`, `delete_tracked_keyword` | Rank tracking: where an SEO site ranks on Google for the keywords it follows, checked daily or weekly through the workspace's own DataForSEO connection within its monthly budget, with the top 10 results each day |
-| `list_fixes`, `update_fix` | The workspace's shared fixes list (site audits', search intelligence's, AI visibility's and social watches' fixes, and link opportunities): take a fix, mark it done (its source checks again), ignore it, or leave a note |
+| `list_fixes`, `update_fix` | The workspace's shared fixes list (site audits', search intelligence's, AI visibility's, social watches' and review pages' fixes, and link opportunities): take a fix, mark it done (its source checks again), ignore it, or leave a note |
 | `list_deploy_options`, `list_deploy_targets`, `add_deploy_target`, `update_deploy_target`, `remove_deploy_target`, `check_deploys`, `list_deploys` | Watch a GitHub repository or Vercel project for production deploys, tied to the SEO site it serves, and see when each website went live |
 | `get_fix_prompt`, `verify_fix` | Hand a fix to a coding agent as a prompt, then report it fixed so a fresh crawl confirms it or opens it again |
+| `list_fix_tickets`, `get_fix_ticket`, `get_fix_ticket_prompt` | Fixes grouped into tickets, one per issue and site with every page behind it: the AI brief (summary, why, the change, done-when), search impact, related tickets and the team's guidelines, and the ticket as a Markdown issue for a coding agent |
+| `write_fix_ticket`, `review_fix_ticket` | Have the workspace's AI model write or rewrite a ticket's brief (with feedback), then approve, reject or reopen it, saving the reason as a guideline |
+| `list_fix_guidelines`, `create_fix_guideline`, `delete_fix_guideline` | The team's rules for fix tickets, per workspace, brand or site, which every brief follows |
 | `start_fix`, `get_fix_autonomy`, `update_fix_autonomy` | Take a fix before changing the site, held for a person unless fix autonomy lets it through, and read or change that setting |
 | `get_digest_settings`, `update_digest_settings`, `list_digests`, `preview_digest`, `send_digest` | The daily or weekly digest of the whole workspace: when it is made, who gets it by email through your own provider, and what it says |
 | `get_ai_visibility` | How often AI answers name each brand, its share of voice against competitors, its position, the pages they cite, by model and week |
@@ -372,9 +384,14 @@ Write (left out when `OUTFLARE_MCP_READ_ONLY=1`):
 | `list_social_replies`, `get_social_reply` | Replies with their link, score, removal, and the visitors and sign-ups each brought |
 | `get_social_sign_in_link` | A link for the user to sign in to the brand's Reddit account through the workspace's own app |
 | `list_social_accounts`, `update_social_account`, `sync_social_accounts` | The brand's own X accounts, LinkedIn company pages and LinkedIn profiles, with followers and the change over 7 and 28 days; put one on a brand, pause it, or read them now |
+| `get_reviews_summary` | Outflare's review score (stars weighted by count and recency), momentum (growing, improving, steady, stagnating, slipping), each review site's score and count, weekly series, sentiment and reply rate |
+| `list_reviews`, `get_review` | Reviews from the brand's Trustpilot, G2, Capterra and Google pages, with stars, sentiment, link and answer; filter for the ones waiting for an answer |
+| `draft_review_answer`, `mark_review_answered` | Draft a public answer with the workspace's own AI from the brand's reply guide; the user posts it on the review site, then marks it answered |
+| `list_review_pages`, `update_review_page`, `read_review_pages`, `get_review_page_days`, `find_review_pages` | The brand's review pages (from its links) and their numbers day by day; pause one, read them now, or search the web for the brand's pages |
+| `get_review_guide`, `update_review_guide` | How the brand answers reviews: tone, sign-off, support contact, what never to say, known issues |
 | `get_social_account_days`, `list_own_social_posts`, `get_social_growth` | Followers day by day, the brand's own posts with impressions, engagements and clicks, and growth per channel over a period |
 
-Tools carry MCP annotations: read tools are marked read-only, tools that delete or end something (`delete_lead`, `delete_smart_list`, `delete_webhook`, `delete_inbox_tag`, `delete_inbox_view`, `delete_email_domain`, `delete_email_template`, `delete_spend_entry`, `disconnect_integration`, `stop_enrollment`, `stop_mission`, `complete_mission`, `cancel_infra_plan`, `move_mailboxes`, `delete_seo_site`, `stop_crawl`, `delete_ai_cohort`, `delete_ai_prompt`, `stop_ai_run`, `delete_social_watch`, `delete_ai_fact`) are marked destructive, and the tools that cause email to go out (`update_sequence`, `enroll_leads`, `reply_to_inbox_message`, `set_warmup`, `resolve_orphaned_follow_ups`, `approve_infra_plan`, `test_webhook`, `redeliver_webhook`, `send_email`) are marked as reaching the outside world, so clients can ask before running them. So are the tools that spend data provider credits (`preview_lead_search`, `create_lead_list`, `run_lead_list`) and SEO calls (`get_seo_report`, `sync_seo`), and the tool that asks AI models on the workspace's own key (`run_ai_prompts`). Crawls and ownership checks (`start_crawl`, `verify_seo_site`) visit the site too.
+Tools carry MCP annotations: read tools are marked read-only, tools that delete or end something (`delete_lead`, `delete_smart_list`, `archive_flag`, `delete_webhook`, `delete_inbox_tag`, `delete_inbox_view`, `delete_email_domain`, `delete_email_template`, `delete_spend_entry`, `disconnect_integration`, `stop_enrollment`, `stop_mission`, `complete_mission`, `cancel_infra_plan`, `move_mailboxes`, `delete_seo_site`, `stop_crawl`, `delete_ai_cohort`, `delete_ai_prompt`, `stop_ai_run`, `delete_social_watch`, `delete_ai_fact`) are marked destructive, and the tools that cause email to go out (`update_sequence`, `enroll_leads`, `reply_to_inbox_message`, `set_warmup`, `resolve_orphaned_follow_ups`, `approve_infra_plan`, `test_webhook`, `redeliver_webhook`, `send_email`) are marked as reaching the outside world, so clients can ask before running them. So are the tools that spend data provider credits (`preview_lead_search`, `create_lead_list`, `run_lead_list`) and SEO calls (`get_seo_report`, `sync_seo`), and the tool that asks AI models on the workspace's own key (`run_ai_prompts`). Crawls and ownership checks (`start_crawl`, `verify_seo_site`) visit the site too.
 
 ### Analytics prompts and resources
 

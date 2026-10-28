@@ -32,6 +32,13 @@ type Config struct {
 	// server (Fly.io: Fly-Client-IP, Cloudflare: CF-Connecting-IP) puts the
 	// visitor's address in. Leave it empty unless such a proxy is there.
 	ClientIPHeader string
+	// TrackingTarget is OUTFLARE_TRACKING_TARGET: the host workspaces point
+	// their tracking domains' CNAME records at, when it isn't PUBLIC_URL's.
+	TrackingTarget string
+	// EdgeSecret is OUTFLARE_EDGE_SECRET: shared with an edge in front of
+	// tracking domains, which signs the domain and visitor address it
+	// passes on with it. Empty turns that off.
+	EdgeSecret string
 	// WebhooksAllowPrivate is WEBHOOKS_ALLOW_PRIVATE=true: lets webhooks
 	// go to private, loopback and plain-http addresses, for self-hosted
 	// servers whose receivers are on the same network. Off, webhooks only
@@ -125,8 +132,8 @@ type Config struct {
 	// CommunityLinks is OUTFLARE_COMMUNITY_LINKS: off hides the optional
 	// "Star us on GitHub" and "Follow us on X" items on Home and Get
 	// started. On by default. CommunityXURL is OUTFLARE_FOLLOW_URL: the X
-	// profile "Follow us on X" opens, an https address; empty leaves that
-	// item out.
+	// profile "Follow us on X" opens, an https address, by default
+	// Outflare's own (https://x.com/outflareai); off leaves that item out.
 	CommunityLinks bool
 	CommunityXURL  string
 
@@ -156,6 +163,8 @@ func Load() (Config, error) {
 		Passkeys:          getenv("PASSKEYS", "auto"),
 
 		ClientIPHeader:         os.Getenv("CLIENT_IP_HEADER"),
+		TrackingTarget:         strings.ToLower(strings.TrimSpace(os.Getenv("OUTFLARE_TRACKING_TARGET"))),
+		EdgeSecret:             os.Getenv("OUTFLARE_EDGE_SECRET"),
 		WebhooksAllowPrivate:   os.Getenv("WEBHOOKS_ALLOW_PRIVATE") == "true",
 		CrawlAllowPrivate:      os.Getenv("OUTFLARE_CRAWL_ALLOW_PRIVATE") == "true",
 		ConnectorsAllowPrivate: os.Getenv("OUTFLARE_CONNECTORS_ALLOW_PRIVATE") == "true",
@@ -184,7 +193,7 @@ func Load() (Config, error) {
 		PrivacyURL: os.Getenv("OUTFLARE_PRIVACY_URL"),
 		TermsURL:   os.Getenv("OUTFLARE_TERMS_URL"),
 
-		CommunityXURL: strings.TrimSpace(os.Getenv("OUTFLARE_FOLLOW_URL")),
+		CommunityXURL: strings.TrimSpace(getenv("OUTFLARE_FOLLOW_URL", "https://x.com/outflareai")),
 
 		SignedInCookieDomain: strings.ToLower(strings.Trim(strings.TrimSpace(os.Getenv("OUTFLARE_SIGNED_IN_COOKIE_DOMAIN")), ".")),
 	}
@@ -211,6 +220,10 @@ func Load() (Config, error) {
 	case "off", "false", "0":
 	default:
 		return c, fmt.Errorf("OUTFLARE_COMMUNITY_LINKS must be on or off, got %q", v)
+	}
+	switch strings.ToLower(c.CommunityXURL) {
+	case "off", "false", "0":
+		c.CommunityXURL = ""
 	}
 	if c.CommunityXURL != "" && !strings.HasPrefix(c.CommunityXURL, "https://") {
 		return c, fmt.Errorf("OUTFLARE_FOLLOW_URL must be an https address, got %q", c.CommunityXURL)

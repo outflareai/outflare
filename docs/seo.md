@@ -155,11 +155,42 @@ links from the site's own subdomains do not.
   its reason) and `regained` when a lost link is found again. A site's first
   read is a baseline: only links first found or lost in the 30 days before it
   become events, so old links don't show up as news.
+- **What each link carries.** Like Ahrefs' backlinks report: the linking
+  domain's DR (`source_rating`) and the page's UR (`url_rating`), how many
+  keywords the page ranks for, how many domains it links to and links it
+  has to other sites, its title, author, language, platform, page type and
+  topics (Ahrefs' page types such as `/Article/Listicle`), the link's type
+  (`text`, `image`, `redirect`, `canonical`, ...), whether it sits in the
+  page's main content, and `hops`: where the linked URL redirects to. Ahrefs
+  gives all of these; DataForSEO gives the page's rank, link type, language,
+  platform and redirects.
+- **Traffic is a choice.** Set `link_traffic: true` on an Ahrefs
+  connection (`PUT /seo/{id}/settings`, or the checkbox in its settings on
+  Rankings & backlinks) to also read each linking domain's and page's
+  monthly organic traffic and the page's referring domains. Ahrefs charges
+  about 25 more API units a link for these, so it is off by default: at 200
+  links that is 5,200 more units a site a week. DataForSEO has no traffic
+  for links.
+- **Filters cost nothing.** `GET /backlinks` filters and sorts what is
+  stored: `follow` (`dofollow`, `nofollow`, `ugc`, `sponsored`), `link_type`
+  (or `content` for links in the main content), `dr_min`/`dr_max`,
+  `ur_min`/`ur_max`, `domain_traffic_min`/`max`, `page_traffic_min`/`max`,
+  `page_type`, `source_domain`, and `q` for words or a phrase, narrowed with
+  `q_in` (`source_url`, `title`, `anchor`, `target_url`). `group=domain`
+  shows one link per linking domain (the best one: live, followed, in the
+  content, from the strongest page) with `group_links` saying how many it
+  stands for; `group=page` does the same per linking page. History works
+  like Ahrefs': `since=YYYY-MM-DD` adds the links lost since then to the live
+  ones, and `change=new` or `change=lost` lists only the links first seen or
+  lost since then.
 - **Summary.** `GET /backlinks/summary` (MCP `get_backlinks_summary`) gives
   each site's live and lost links, referring domains, followed links, links
   gained, lost and regained in the last 30 days and in each of the last 12
-  weeks, and each tool's latest read. The **Backlinks** page in the SEO
-  module shows the same.
+  weeks, each tool's latest read, and the live links by page type and link
+  type (for filters). The **Backlinks** page in the SEO module shows the
+  same, with the links table: one link per domain by default, All, New or
+  Lost over a history range, every filter above, and the full referring and
+  target URLs to click.
 - **Cost.** A read is one call per site: about $0.03 on DataForSEO, and 50
   to 200 API units on Ahrefs at the default 200 rows (estimated at one unit
   a row). It counts against the connection's budget like any other call; a

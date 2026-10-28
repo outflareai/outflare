@@ -20,6 +20,14 @@ Opening one shows what it needs, its steps and the API operations each step uses
 
 Missions started from a playbook carry `playbook_id` and `playbook_version`, so results can be compared per playbook and version.
 
+## Setup kits
+
+Some playbooks need things set up before their first run, such as a pipeline in the CRM, fields on people and email drafts. Such a playbook names a setup kit (`playbooks/kits/<id>.yaml`). When you open it, **What it sets up** lists each part: **Adds**, **Extends** (an option list of your own gains missing options), **Have** (already there) or **Conflict** (there under the same key but set up differently). Tick **Set up what it needs when I start** and the kit is applied in the same step as the mission draft.
+
+A kit only adds. Nothing you already have changes, email drafts are added unpublished so you read and publish them first, and while anything conflicts it changes nothing. Applying it again changes nothing. Applying needs `catalog.manage`, and `emails.manage` when it adds email drafts.
+
+The first kit, **Creator partnerships**, adds a Partnerships record type with a stage field (Found, Vetted, Pitched, Negotiating, Agreed, Live, Measured, Renewed, Declined), the creator, deal type, fee, deliverables, platform, go-live date, post, content rights, tracked link and promo code; creator fields on people (platforms, audience size, topics, rate card, past sponsors); and four email drafts (brief, go-live reminder, thanks and results, an invite for customers who create). The playbook **Run creator partnerships from first find to results** uses it.
+
 ## API
 
 | Call | What it does |
@@ -28,8 +36,11 @@ Missions started from a playbook carry `playbook_id` and `playbook_version`, so 
 | `GET /v1/playbooks/{id}` | One playbook |
 | `GET /v1/workspaces/{ws}/playbooks` | Playbooks with `readiness` and `runs` for the workspace (`missions.read`) |
 | `GET /v1/workspaces/{ws}/playbooks/{id}` | One, with its readiness (`missions.read`) |
-| `POST /v1/workspaces/{ws}/playbooks/{id}/runs` | Start one as a mission draft (`missions.run`) |
+| `POST /v1/workspaces/{ws}/playbooks/{id}/runs` | Start one as a mission draft (`missions.run`); `apply_kit: true` also sets up its kit |
+| `GET /v1/kits`, `GET /v1/kits/{id}` | Setup kits, public, with the playbooks that use each |
+| `GET /v1/workspaces/{ws}/kits/{id}/preview` | What the kit would add, extend, reuse or conflict with (`customers.read`) |
+| `POST /v1/workspaces/{ws}/kits/{id}/apply` | Set it up (`catalog.manage`, and `emails.manage` for email drafts); 409 `conflict` names what's in the way |
 
 ## Events
 
-Starting a playbook records `playbook.started` (with `playbook_id`, `playbook_version`, `mode` and `publisher`) beside `mission.created`. The web app records `ui.playbook_opened` and `ui.playbook_prompt_copied`.
+Starting a playbook records `playbook.started` (with `playbook_id`, `playbook_version`, `mode`, `publisher` and `kit_applied`) beside `mission.created`. Applying a kit records `kit.applied` (with `kit_id`, `kit_version` and how many parts were added, extended and reused), and each part records its own action with `kit_id`. The web app records `ui.playbook_opened` and `ui.playbook_prompt_copied`.

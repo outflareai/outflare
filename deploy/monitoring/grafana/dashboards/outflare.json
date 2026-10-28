@@ -4015,6 +4015,385 @@
           "sort": "desc"
         }
       }
+    },
+    {
+      "type": "row",
+      "title": "Feature flags",
+      "id": 83,
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 274
+      },
+      "panels": []
+    },
+    {
+      "type": "timeseries",
+      "title": "Flag requests, by surface and outcome",
+      "description": "Requests per minute to decide a visitor's flags: site is the website script (one per page view on sites that use flags), api is servers. Mostly ok is normal; refused is a bad key, origin or body, error is a failure to read flags.",
+      "id": 84,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 0,
+        "y": 275
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (surface, outcome) (rate(outflare_flags_requests_total{job=\"$job\"}[5m])) * 60",
+          "legendFormat": "{{surface}} {{outcome}}",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "fillOpacity": 10,
+            "stacking": {
+              "mode": "normal"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "mean",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Flag request time (p95)",
+      "description": "95th percentile time to decide a visitor's flags. Normal is a few milliseconds, since flags are kept in memory; it adds to the time before a page shows its variant.",
+      "id": 85,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 8,
+        "y": 275
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "histogram_quantile(0.95, sum by (le, surface) (rate(outflare_flags_request_seconds_bucket{job=\"$job\"}[5m])))",
+          "legendFormat": "{{surface}}",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "custom": {
+            "fillOpacity": 10
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "mean",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Flags read from memory",
+      "description": "Share of flag lookups answered from memory rather than Postgres. Each workspace's flags are read at most every 10 seconds per process, so on a busy site this is close to 100%.",
+      "id": 86,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 275
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum(rate(outflare_flags_cache_total{job=\"$job\",result=\"hit\"}[5m])) / clamp_min(sum(rate(outflare_flags_cache_total{job=\"$job\"}[5m])), 1e-9)",
+          "legendFormat": "from memory",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "custom": {
+            "fillOpacity": 10
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "mean",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "type": "row",
+      "title": "Reviews (review pages read daily)",
+      "id": 87,
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 283
+      },
+      "panels": []
+    },
+    {
+      "type": "timeseries",
+      "title": "Review page reads by outcome",
+      "description": "Reads of brands' review pages through each workspace's own page reader, by platform and outcome. Normal: mostly success; not_a_review_page means the site showed a challenge or a wrong address, connector_error that the page reader failed.",
+      "id": 88,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 284
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (platform, outcome) (rate(outflare_reviews_page_reads_total{job=\"$job\"}[1h]))",
+          "legendFormat": "{{platform}} {{outcome}}",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps",
+          "custom": {
+            "fillOpacity": 10
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "mean",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "New reviews kept",
+      "description": "Reviews kept for the first time, by platform. A page's first read brings its history, so spikes after a page is added are normal.",
+      "id": 89,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 284
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (platform) (increase(outflare_reviews_new_total{job=\"$job\"}[1h]))",
+          "legendFormat": "{{platform}}",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "fillOpacity": 10
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "mean",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Review pages being read",
+      "description": "Active review pages by platform, and how many failed their last read. Normal: few failing.",
+      "id": 90,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 292
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (platform, state) (outflare_reviews_pages{job=\"$job\"})",
+          "legendFormat": "{{platform}} {{state}}",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "fillOpacity": 10
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "mean",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Longest since a review page was read",
+      "description": "Time since the least recently read active page was read, by platform. Pages are read once a day, so normal is under 25 hours.",
+      "id": 91,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 292
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "max by (platform) (outflare_reviews_oldest_read_seconds{job=\"$job\"})",
+          "legendFormat": "{{platform}}",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "custom": {
+            "fillOpacity": 10
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "mean",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
     }
   ]
 }

@@ -22,7 +22,7 @@ import (
 
 // All returns every available data connector.
 func All() []c.Connector {
-	return []c.Connector{Apollo{}, PDL{}, MoltSets{}, Prospeo{}, LeadMagic{}, Findymail{}, Snitcher{}}
+	return []c.Connector{Apollo{}, PDL{}, MoltSets{}, Prospeo{}, LeadMagic{}, Findymail{}, Snitcher{}, RB2B{}, Vector{}, Warmly{}}
 }
 
 // Planned lists data and signal providers we intend to add. Listing them
@@ -48,7 +48,6 @@ func Planned() []c.Definition {
 		p("theirstack", "TheirStack", signals, "https://theirstack.com", "Companies hiring for roles that signal a need, and the tech they use."),
 		p("predictleads", "PredictLeads", signals, "https://predictleads.com", "Hiring, news and technology changes at target companies."),
 		p("usergems", "UserGems", signals, "https://www.usergems.com", "Past customers and champions who changed jobs."),
-		p("rb2b", "RB2B", signals, "https://www.rb2b.com", "People visiting your website, by name."),
 		p("commonroom", "Common Room", signals, "https://www.commonroom.io", "Community, product and website signals in one place."),
 		p("trigify", "Trigify", signals, "https://trigify.io", "LinkedIn engagement and job-change signals."),
 	}

@@ -12,6 +12,7 @@ import { BusinessModelPicker } from "@/components/business-model-picker";
 import { ConnectDialog, ConnectorCard, authOption, startConnectorOAuth, takeConnectOutcome } from "./Connectors";
 import { DNSOneClick, heldByMission, takeDNSFocus } from "@/components/dns-one-click";
 import { AIPromptPanel, Code, CopyText, DeveloperPanel, Panel, Snippet } from "@/components/install-methods";
+import { BrandDNS } from "@/components/brand-dns";
 
 type Setup = components["schemas"]["BrandSetup"];
 type Step = components["schemas"]["BrandSetupStep"];
@@ -22,8 +23,9 @@ type Check = components["schemas"]["InstallCheck"];
 type Method = Install["methods"][number];
 type Container = { id: string; name: string; public_id: string; account: string; domains: string[]; matches_website: boolean };
 
-// A brand's setup checklist: the website script, verifying the site, then
-// the tools most brands connect, in that order. Each install step offers
+// A brand's setup checklist: the website script, every DNS record the
+// brand needs (added in one go), then the tools most brands connect, in
+// that order. Each install step offers
 // every way to do it, quickest first: one click through the workspace's own
 // Tag Manager or Cloudflare, a message for a developer, a prompt for an AI
 // coding tool, or the snippet itself. Whether a step is done comes from the
@@ -165,6 +167,8 @@ export function BrandSetup({ ws, canManage, go }: { ws: string; canManage: boole
                 {step.waiting && <p className="text-[13px]"><Status tone="blue">{step.waiting}</Status></p>}
                 {step.id === "business_model" ? (
                   <BusinessModelPicker ws={ws} brand={handle!} model={setup.business_model} revenue={setup.revenue_models} canManage={canManage} onSaved={load} />
+                ) : step.id === "verify_site" ? (
+                  <BrandDNS ws={ws} brand={handle!} website={setup.website} canManage={canManage} page="setup" onChange={load} />
                 ) : step.install ? (
                   <InstallStep ws={ws} brand={handle!} step={step} install={step.install} canManage={canManage} catalog={catalog} onChange={(d) => (d ? setSetup(d) : void load())} />
                 ) : (
@@ -218,7 +222,7 @@ const methodIcons: Record<Method, Parameters<typeof Icon>[0]["name"]> = { gtm: "
 
 // An install step: make what it installs first, then every way to put it
 // on the site, quickest first.
-export function InstallStep({ ws, brand, step, install, canManage, catalog, onChange, back = "setup" }: { ws: string; brand: string; step: Step; install: Install; canManage: boolean; catalog: Connector[]; onChange: (s?: Setup) => void; back?: "setup" | "tracking" }) {
+export function InstallStep({ ws, brand, step, install, canManage, catalog, onChange, back = "setup" }: { ws: string; brand: string; step: Step; install: Install; canManage: boolean; catalog: Connector[]; onChange: (s?: Setup) => void; back?: "setup" | "tracking" | "get-started" }) {
   const [method, setMethod] = useState<Method>(install.methods[0] ?? "manual");
   const [busy, setBusy] = useState(false);
   const path = { params: { path: { ws, brand } } };
@@ -316,7 +320,7 @@ export function InstallStep({ ws, brand, step, install, canManage, catalog, onCh
 
 // The one-click path: connect the workspace's own Tag Manager or
 // Cloudflare (once), then one button does the install.
-function OneClick({ ws, brand, step, method, install, canManage, catalog, back, onQueued }: { ws: string; brand: string; step: "site_script" | "verify_site"; method: "gtm" | "dns"; install: Install; canManage: boolean; catalog: Connector[]; back: "setup" | "tracking"; onQueued: () => void }) {
+function OneClick({ ws, brand, step, method, install, canManage, catalog, back, onQueued }: { ws: string; brand: string; step: "site_script" | "verify_site"; method: "gtm" | "dns"; install: Install; canManage: boolean; catalog: Connector[]; back: "setup" | "tracking" | "get-started"; onQueued: () => void }) {
   const def = catalog.find((c) => c.id === install.connector);
   const [connecting, setConnecting] = useState(false);
   const [containers, setContainers] = useState<Container[] | null>(null);

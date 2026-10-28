@@ -35,12 +35,17 @@ export function AIUsage({ ws, canManage, go }: { ws: string; canManage: boolean;
   const [month, setMonth] = useState(months[0]);
   const [u, setU] = useState<Usage | null>(null);
   const [limits, setLimits] = useState<Record<string, string>>({});
+  // Whether reaching each limit stops calls (true) or only warns.
+  const [stops, setStops] = useState<Record<string, boolean>>({});
+  const [wsStop, setWsStop] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
 
   function show(data: Usage) {
     setU(data);
     setLimits(Object.fromEntries(data.tools.map((t) => [t.task, t.monthly_limit_cents == null ? "" : String(t.monthly_limit_cents / 100)])));
+    setStops(Object.fromEntries(data.tools.map((t) => [t.task, t.hard_stop])));
+    setWsStop(data.hard_stop);
   }
 
   async function load() {
@@ -57,7 +62,11 @@ export function AIUsage({ ws, canManage, go }: { ws: string; canManage: boolean;
 
   async function saveLimits() {
     setBusy(true);
-    const body = { limits: Object.fromEntries(Object.entries(limits).map(([k, v]) => [k, v.trim() === "" ? null : Math.round(parseFloat(v) * 100)])) };
+    const body = {
+      limits: Object.fromEntries(Object.entries(limits).map(([k, v]) => [k, v.trim() === "" ? null : Math.round(parseFloat(v) * 100)])),
+      hard_stop: wsStop,
+      hard_stops: Object.fromEntries(Object.entries(stops).filter(([, stop]) => !stop)),
+    };
     const { error } = await api.PUT("/v1/workspaces/{ws}/ai-usage/limits", { params: { path: { ws } }, body });
     setBusy(false);
     if (error) return setError(errorMessage(error));
@@ -81,7 +90,7 @@ export function AIUsage({ ws, canManage, go }: { ws: string; canManage: boolean;
   const cur = month === months[0];
   const peak = Math.max(1, ...u.days.map((d) => d.cost_cents));
   const used = u.tools.filter((t) => t.calls > 0);
-  const limitChanged = u.tools.some((t) => (limits[t.task] ?? "") !== (t.monthly_limit_cents == null ? "" : String(t.monthly_limit_cents / 100)));
+  const limitChanged = wsStop !== u.hard_stop || u.tools.some((t) => (limits[t.task] ?? "") !== (t.monthly_limit_cents == null ? "" : String(t.monthly_limit_cents / 100)) || (stops[t.task] ?? true) !== t.hard_stop);
   const badLimit = Object.values(limits).some((v) => v.trim() !== "" && !(parseFloat(v) >= 0));
 
   return (
@@ -113,11 +122,11 @@ export function AIUsage({ ws, canManage, go }: { ws: string; canManage: boolean;
         </Card>
       )}
 
-      <Card title="By tool" description="A limit per tool stops that tool's AI calls for the rest of the month, on top of the workspace's limit. Owners and admins are emailed at 80% and when a limit is reached.">
+      <Card title="By tool" description="A limit per tool stops that tool's AI calls for the rest of the month, on top of the workspace's limit. Owners and admins are emailed at 80% and when a limit is reached. Untick Stop to make a limit warn only: the emails still go out, but the calls carry on and your provider keeps billing you.">
         <div className="overflow-x-auto">
           <table className="w-full text-[13px]">
             <thead className="text-left text-[11px] text-muted-foreground uppercase">
-              <tr><th className="py-1 font-medium">Tool</th><th className="font-medium">Calls</th><th className="font-medium">Tokens in / out</th><th className="font-medium">Cost</th><th className="font-medium">Monthly limit</th></tr>
+              <tr><th className="py-1 font-medium">Tool</th><th className="font-medium">Calls</th><th className="font-medium">Tokens in / out</th><th className="font-medium">Cost</th><th className="font-medium">Monthly limit</th><th className="font-medium">Stop</th></tr>
             </thead>
             <tbody className="divide-y">
               {u.tools.map((t) => (
@@ -143,11 +152,20 @@ export function AIUsage({ ws, canManage, go }: { ws: string; canManage: boolean;
                         value={limits[t.task] ?? ""} disabled={!canManage} onChange={(e) => setLimits({ ...limits, [t.task]: e.target.value.replace(/[^0-9.]/g, "") })} />
                     </span>
                   </td>
+                  <td>
+                    <input type="checkbox" aria-label={`Stop ${t.name} at its limit`} checked={stops[t.task] ?? true} disabled={!canManage}
+                      onChange={(e) => setStops({ ...stops, [t.task]: e.target.checked })} />
+                  </td>
                 </tr>
               ))}
             </tbody>
           </table>
         </div>
+        <label className="mt-3 flex items-center gap-2 text-[13px]">
+          <input type="checkbox" checked={wsStop} disabled={!canManage} onChange={(e) => setWsStop(e.target.checked)} />
+          <span>Stop all AI calls at the workspace's monthly limit{u.monthly_limit_cents != null && ` (${dollars(u.monthly_limit_cents)})`}</span>
+        </label>
+        {!wsStop && <p className="mt-1 text-[13px] text-muted-foreground">The workspace limit only warns: AI calls carry on past it.</p>}
         {canManage ? (
           <Button className="mt-3" disabled={busy || !limitChanged || badLimit} onClick={saveLimits}>{busy ? "Saving…" : "Save limits"}</Button>
         ) : (

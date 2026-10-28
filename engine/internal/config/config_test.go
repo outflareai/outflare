@@ -80,3 +80,19 @@ func TestRole(t *testing.T) {
 		t.Fatal("an unknown role was taken")
 	}
 }
+
+func TestFollowURL(t *testing.T) {
+	t.Setenv("DATABASE_URL", "postgres://example")
+	t.Setenv("OUTFLARE_FOLLOW_URL", "")
+	if c, err := Load(); err != nil || c.CommunityXURL != "https://x.com/outflareai" {
+		t.Fatalf("default %q %v", c.CommunityXURL, err)
+	}
+	t.Setenv("OUTFLARE_FOLLOW_URL", "off")
+	if c, err := Load(); err != nil || c.CommunityXURL != "" {
+		t.Fatalf("off %q %v", c.CommunityXURL, err)
+	}
+	t.Setenv("OUTFLARE_FOLLOW_URL", "x.com/outflareai")
+	if _, err := Load(); err == nil {
+		t.Fatal("an address without https was taken")
+	}
+}

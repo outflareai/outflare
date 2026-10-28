@@ -508,7 +508,7 @@ func (s *Server) updateInbound(w http.ResponseWriter, r *http.Request) {
 		if !req.Category.Set || equalPtr(req.Category.Value, v.Category) {
 			// Confirming a label that waited for review runs its rules.
 			if v.NeedsReview && req.NeedsReview != nil && !*req.NeedsReview && v.Category != nil {
-				return inbox.QueueRules(ctx, tx, a.WorkspaceID, v.ID, *v.Category)
+				return inbox.Settled(ctx, tx, a.WorkspaceID, v.ID, *v.Category, a.ActorID, RequestID(ctx))
 			}
 			return nil
 		}

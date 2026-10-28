@@ -37,6 +37,7 @@ Agents use the MCP tools `list_query_tables` and `run_query`.
 | `emails`, `email_events`, `broadcasts` | `emails.read` | Lifecycle email, without bodies or addresses |
 | `visits` | `analytics.read` | Website visits from the Outflare site snippet |
 | `social_posts` | `social.read` | Posts on the workspace's own social accounts |
+| `reviews`, `review_page_days` | `social.read` | [Reviews](reviews.md) of the brands on Trustpilot, G2, Capterra and Google, and each review page's numbers day by day |
 
 jsonb columns such as `attributes` are read with `->>`: `select attributes->>'plan' as plan, count(*) from people group by 1`.
 

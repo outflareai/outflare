@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http/httptest"
 	"os/exec"
+	"strings"
 	"testing"
 	"time"
 
@@ -158,5 +159,62 @@ func TestSiteClientIP(t *testing.T) {
 		if got := siteClientIP(r, tc.k); got != tc.want {
 			t.Errorf("%s: %q, want %q", tc.name, got, tc.want)
 		}
+	}
+}
+
+// With data-flags, the snippet asks for the visitor's flags once, tells
+// onFlags, marks <html> with each variant, lifts of-wait, keeps the answer
+// for the next page and lets ?of_flag preview a variant.
+func TestSiteFlagsClient(t *testing.T) {
+	node, err := exec.LookPath("node")
+	if err != nil {
+		t.Skip("node not installed")
+	}
+	run := func(opts map[string]any) (got struct {
+		Anon, Href string
+		FlagAsks   int
+		Got        struct {
+			Flags   map[string]any
+			Payload map[string]any
+		}
+		Classes []string
+		Stored  map[string]string
+	}) {
+		t.Helper()
+		b, _ := json.Marshal(opts)
+		out, err := exec.Command(node, "testdata/run_site.mjs", "site.js", string(b)).CombinedOutput()
+		if err != nil {
+			t.Fatalf("%v: %s", err, out)
+		}
+		if err := json.Unmarshal(out, &got); err != nil {
+			t.Fatalf("%v: %s", err, out)
+		}
+		return got
+	}
+	answer := map[string]any{"flags": map[string]any{"hero": "faster", "chat-widget": false}, "payloads": map[string]any{"hero": map[string]any{"headline": "Ship faster"}}}
+	got := run(map[string]any{"href": "https://northpeak.example/pricing", "flags": answer, "htmlClass": "of-wait"})
+	if got.FlagAsks != 1 || got.Got.Flags["hero"] != "faster" || got.Got.Flags["chat-widget"] != false || got.Got.Payload["headline"] != "Ship faster" {
+		t.Fatalf("flags: %+v", got)
+	}
+	if strings.Join(got.Classes, " ") != "of-flag-hero-faster" {
+		t.Fatalf("classes on <html>: %v", got.Classes)
+	}
+	if !strings.Contains(got.Stored["of_flags"], `"faster"`) {
+		t.Fatalf("not kept for the next page: %v", got.Stored)
+	}
+
+	// A preview link shows another variant to this visitor, and leaves the
+	// address.
+	got = run(map[string]any{"href": "https://northpeak.example/pricing?plan=pro&of_flag=hero:control,chat-widget:on", "flags": answer})
+	if got.Got.Flags["hero"] != "control" || got.Got.Flags["chat-widget"] != "on" || got.Href != "https://northpeak.example/pricing?plan=pro" {
+		t.Fatalf("preview: %+v", got)
+	}
+	if !strings.Contains(got.Stored["of_flag_preview"], `"hero":"control"`) {
+		t.Fatalf("preview not kept for the visit: %v", got.Stored)
+	}
+
+	// Without data-flags, nothing is asked.
+	if got := run(map[string]any{"href": "https://northpeak.example/"}); got.FlagAsks != 0 {
+		t.Fatalf("asked for flags without data-flags: %+v", got)
 	}
 }

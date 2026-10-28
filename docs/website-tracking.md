@@ -16,6 +16,10 @@ The quickest way is **Analytics → Website tracking** (the same step as **Compa
    Self-hosted installs serve `/site.js` from their own address. To keep ad blockers from dropping events and to keep the visitor's cookie for its full year, serve it from your own domain instead (see [Serve it from your own domain](#serve-it-from-your-own-domain)).
 3. When someone signs up or signs in, have your product's server send `identify` with their `userId` and the visitor's `anonymousId` to `POST .../customer-events`. In the browser, `outflare.anonymousId()` returns it, and it is also in the first-party `of_aid` cookie. Their earlier visits then join their record.
 
+## Feature flags
+
+With `data-flags` on the tag, the script also asks for the visitor's [feature flags](feature-flags.md): `outflare.onFlags(fn)`, `outflare.flag("key")` and a class on `<html>` per version, for switches and A/B tests.
+
 ## Keeping it current
 
 `site.js` sends its version with every batch, and each site key keeps the last one it saw (`script_version`). Install health (`GET .../install-health`, MCP `get_install_health`) flags a key that never sent a visit a day after it was made, one that went quiet for two days, and one whose pages run a copy older than the one this server serves. Each shows on the brand's setup page and on Home until it's fixed.

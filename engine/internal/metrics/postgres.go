@@ -71,9 +71,11 @@ var (
 	smartLists      = desc("smart_lists", "lists", "Smart lists in every workspace.")
 	smartOldest     = desc("smart_lists", "oldest_refresh_seconds", "How long since the least recently refreshed smart list was brought up to date (since it was made, if never). Lists refresh every 15 minutes.")
 	smartFailing    = desc("smart_lists", "failing", "Smart lists whose last refresh failed.")
+	reviewPages     = desc("reviews", "pages", "Review pages being read, by platform and state (ok, failing: the last read failed).", "platform", "state")
+	reviewOldest    = desc("reviews", "oldest_read_seconds", "How long since the least recently read active review page was read (or added, if never read), by platform.", "platform")
 	scrapeErrors    = desc("metrics", "scrape_errors", "Queries that failed in the last database scrape.")
 	scrapeDuration  = desc("metrics", "scrape_duration_seconds", "Time the last database scrape took.")
-	allDescs        = []*prometheus.Desc{poolAcquired, poolIdle, poolTotal, poolMax, poolAcquires, poolWaits, poolWaitSeconds, poolAcquireSecs, poolCanceled, queued, scheduled, oldestDue, running, dbBackends, dbMaxConns, dbLongestXact, dbLockWaits, dbSize, dbCommits, dbRollbacks, dbBlocksHit, dbBlocksRead, dbDeadlocks, dbTempBytes, tableBytes, tableDeadRows, tableSeqScans, pipeItems, pipeOldest, pipeRuns, pipeBreakers, inboxPending, inboxOldest, inboxFailed, smartLists, smartOldest, smartFailing, scrapeErrors, scrapeDuration}
+	allDescs        = []*prometheus.Desc{poolAcquired, poolIdle, poolTotal, poolMax, poolAcquires, poolWaits, poolWaitSeconds, poolAcquireSecs, poolCanceled, queued, scheduled, oldestDue, running, dbBackends, dbMaxConns, dbLongestXact, dbLockWaits, dbSize, dbCommits, dbRollbacks, dbBlocksHit, dbBlocksRead, dbDeadlocks, dbTempBytes, tableBytes, tableDeadRows, tableSeqScans, pipeItems, pipeOldest, pipeRuns, pipeBreakers, inboxPending, inboxOldest, inboxFailed, smartLists, smartOldest, smartFailing, reviewPages, reviewOldest, scrapeErrors, scrapeDuration}
 	gauge, counter  = prometheus.GaugeValue, prometheus.CounterValue
 )
 
@@ -247,6 +249,26 @@ func (p *Postgres) query() []prometheus.Metric {
 				return err
 			}
 			add(pipeBreakers, gauge, float64(n), account, state)
+		}
+		return nil
+	})
+	run("review_pages", `
+		SELECT platform, CASE WHEN last_error IS NULL THEN 'ok' ELSE 'failing' END, count(*),
+			coalesce(max(extract(epoch FROM now() - coalesce(last_read_at, created_at))), 0)::float8
+		FROM review_pages WHERE status = 'active' GROUP BY 1, 2`, func(r rowser) error {
+		oldest := map[string]float64{}
+		for r.Next() {
+			var platform, state string
+			var n int64
+			var age float64
+			if err := r.Scan(&platform, &state, &n, &age); err != nil {
+				return err
+			}
+			add(reviewPages, gauge, float64(n), platform, state)
+			oldest[platform] = max(oldest[platform], age)
+		}
+		for platform, age := range oldest {
+			add(reviewOldest, gauge, age, platform)
 		}
 		return nil
 	})

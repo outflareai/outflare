@@ -35,6 +35,11 @@ type Domain struct {
 	LastCheckedAt *time.Time `json:"last_checked_at"`
 	VerifiedAt    *time.Time `json:"verified_at"`
 	CreatedAt     time.Time  `json:"created_at"`
+	// HTTPSStatus is the certificate the server's provider is getting for
+	// the domain (pending, active, failed), or nil when the server has no
+	// provider and the operator's own proxy serves HTTPS.
+	HTTPSStatus *string `json:"https_status"`
+	HTTPSError  string  `json:"https_error"`
 }
 
 var hostname = regexp.MustCompile(`^([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$`)
@@ -84,10 +89,13 @@ func Verify(ctx context.Context, r CNAMEResolver, domain, target string) error {
 }
 
 // BaseURL is where a workspace's unsubscribe and click links point: its
-// verified tracking domain, or the instance's public URL.
+// verified tracking domain, or the instance's public URL. When the server
+// gets certificates for tracking domains, a domain is used only once its
+// certificate is active, so no link goes out that a browser would refuse.
 func BaseURL(ctx context.Context, q Querier, ws, publicURL string) (string, error) {
 	var domain string
-	err := q.QueryRow(ctx, `SELECT domain FROM tracking_domains WHERE workspace_id = $1 AND status = 'verified' ORDER BY verified_at LIMIT 1`, ws).Scan(&domain)
+	err := q.QueryRow(ctx, `SELECT domain FROM tracking_domains WHERE workspace_id = $1 AND status = 'verified'
+		AND (https_status IS NULL OR https_status = 'active') ORDER BY verified_at LIMIT 1`, ws).Scan(&domain)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return strings.TrimRight(publicURL, "/"), nil
 	}

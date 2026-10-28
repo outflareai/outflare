@@ -587,12 +587,18 @@ const ruleLabels: Record<string, string> = {
   wrong_person: "Wrong person, names someone else",
 };
 
-type ReplyRule = { action: string; days?: number; sequence_id?: string };
+type DealRule = { type: string; field: string; stage: string; closed?: string[] };
+type ReplyRule = { action?: string; days?: number; sequence_id?: string; deal?: DealRule };
+// Where deals live in the CRM: a record type with a stage (status) field
+// and a reference to a person or company, so a reply can find its deal.
+type DealSetup = { type: string; typeName: string; field: string; stages: { key: string; label: string }[] };
 
 function RulesDialog({ ws, onClose }: { ws: string; onClose: () => void }) {
   const [rules, setRules] = useState<Record<string, ReplyRule> | null>(null);
   const [overrides, setOverrides] = useState(0);
   const [sequences, setSequences] = useState<{ id: string; name: string }[]>([]);
+  const [deals, setDeals] = useState<DealSetup | null>(null);
+  const [closed, setClosed] = useState<string[]>([]);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
 
@@ -600,14 +606,39 @@ function RulesDialog({ ws, onClose }: { ws: string; onClose: () => void }) {
     Promise.all([
       api.GET("/v1/workspaces/{ws}/reply-rules", { params: { path: { ws } } }),
       api.GET("/v1/workspaces/{ws}/sequences", { params: { path: { ws } } }),
-    ]).then(([r, q]) => {
+      api.GET("/v1/workspaces/{ws}/catalog", { params: { path: { ws } } }),
+    ]).then(([r, q, c]) => {
       if (r.error) return setError(errorMessage(r.error));
       const own = r.data.data.find((s) => !s.project_id && !s.sequence_id);
-      setRules({ ...(r.data.defaults as Record<string, ReplyRule>), ...((own?.rules ?? {}) as Record<string, ReplyRule>) });
+      const set = { ...(r.data.defaults as Record<string, ReplyRule>), ...((own?.rules ?? {}) as Record<string, ReplyRule>) };
+      setRules(set);
       setOverrides(r.data.data.length - (own ? 1 : 0));
       if (q.data) setSequences(q.data.data.filter((s) => s.status !== "archived").map((s) => ({ id: s.id, name: s.name })));
+      // The deal type the rules already use, else the first that fits.
+      const used = Object.values(set).find((x) => x.deal)?.deal;
+      const setups: DealSetup[] = [];
+      for (const t of c.data?.types ?? []) {
+        if (t.archived || t.key === "person" || t.key === "account") continue;
+        const linked = t.fields.some((f) => !f.archived && f.value_type === "record_reference" && (f.target_type === "person" || f.target_type === "account"));
+        for (const f of t.fields) {
+          const options = c.data?.option_sets.find((o) => o.key === f.option_set)?.options.filter((o) => !o.archived);
+          if (linked && !f.archived && f.value_type === "status" && options?.length) setups.push({ type: t.key, typeName: t.name, field: f.key, stages: options });
+        }
+      }
+      const setup = setups.find((d) => used && d.type === used.type && d.field === used.field) ?? setups[0] ?? null;
+      setDeals(setup);
+      setClosed(used?.closed ?? setup?.stages.filter((o) => o.key === "won" || o.key === "lost").map((o) => o.key) ?? []);
     });
   }, [ws]);
+
+  function moveTo(label: string, stage: string) {
+    setRules((rs) => {
+      const next = { ...rs!, [label]: { ...rs![label] } };
+      if (stage && deals) next[label].deal = { type: deals.type, field: deals.field, stage };
+      else delete next[label].deal;
+      return next;
+    });
+  }
 
   function change(label: string, r: Partial<ReplyRule>) {
     setRules((rs) => {
@@ -620,7 +651,16 @@ function RulesDialog({ ws, onClose }: { ws: string; onClose: () => void }) {
   async function save(e: FormEvent) {
     e.preventDefault();
     setBusy(true);
-    const body = Object.fromEntries(Object.entries(rules!).map(([l, r]) => [l, l === "not_now" ? r : { action: r.action, ...(r.sequence_id ? { sequence_id: r.sequence_id } : {}) }]));
+    const body = Object.fromEntries(
+      Object.entries(rules!)
+        .filter(([l, r]) => ruleLabels[l] || r.deal)
+        .map(([l, r]) => {
+          const deal = r.deal && deals ? { deal: { ...r.deal, closed: closed.filter((c) => c !== r.deal!.stage) } } : {};
+          if (!ruleLabels[l]) return [l, deal];
+          const base = l === "not_now" ? { action: r.action, days: r.days } : { action: r.action, ...(r.sequence_id ? { sequence_id: r.sequence_id } : {}) };
+          return [l, { ...base, ...deal }];
+        }),
+    );
     const { error } = await api.PUT("/v1/workspaces/{ws}/reply-rules", { params: { path: { ws } }, body: { rules: body } });
     setBusy(false);
     if (error) return setError(errorMessage(error));
@@ -663,6 +703,38 @@ function RulesDialog({ ws, onClose }: { ws: string; onClose: () => void }) {
                 </div>
               </div>
             ))}
+            <div className="space-y-2 border-t pt-4">
+              <p className="font-medium">Deals</p>
+              {!deals ? (
+                <p className="text-muted-foreground">
+                  To move deals from replies, your CRM needs a deal type with a stage field and a link to the person or company. Ask your agent, or set it up through the API (catalog).
+                </p>
+              ) : (
+                <>
+                  <p className="text-muted-foreground">
+                    Open or move the reply's {deals.typeName.toLowerCase()}: the newest open one for the person or their company, or a new one. Deals only move forward, and never over a stage someone set.
+                  </p>
+                  {categories.filter((c) => c.group !== "automatic").map((c) => (
+                    <div key={c.id} className="flex items-center gap-2">
+                      <label className="w-36 shrink-0" htmlFor={`deal-${c.id}`}>{c.label}</label>
+                      <select id={`deal-${c.id}`} className={`${field} min-w-0 flex-1`} value={rules[c.id]?.deal?.stage ?? ""} onChange={(e) => moveTo(c.id, e.target.value)}>
+                        <option value="">Don't move</option>
+                        {deals.stages.filter((o) => !closed.includes(o.key)).map((o) => <option key={o.key} value={o.key}>{o.label}</option>)}
+                      </select>
+                    </div>
+                  ))}
+                  <fieldset className="flex flex-wrap items-center gap-3">
+                    <legend className="mb-1 text-muted-foreground">Closed stages, never moved out of:</legend>
+                    {deals.stages.map((o) => (
+                      <label key={o.key} className="flex items-center gap-1.5">
+                        <input type="checkbox" checked={closed.includes(o.key)} onChange={(e) => setClosed(e.target.checked ? [...closed, o.key] : closed.filter((k) => k !== o.key))} />
+                        {o.label}
+                      </label>
+                    ))}
+                  </fieldset>
+                </>
+              )}
+            </div>
             {overrides > 0 && <p className="text-[12px] text-muted-foreground">{overrides === 1 ? "A project or sequence has" : `${overrides} projects or sequences have`} its own rules too, set through the API or MCP, and those win for their replies.</p>}
             <ErrorText>{error}</ErrorText>
             <div className="flex justify-end gap-2">

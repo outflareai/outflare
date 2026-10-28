@@ -455,7 +455,7 @@ export interface paths {
          * The "Star us on GitHub" and "Follow us on X" items
          * @description Two optional one-click items the app shows on Home and at the end of Get started. Nobody can check a star or a
          *     follow, so opening a link ticks its item. Each person has their own. `links` is empty when the server's operator
-         *     turned them off (`OUTFLARE_COMMUNITY_LINKS=off`); "Follow us on X" is listed only when `OUTFLARE_FOLLOW_URL` is set.
+         *     turned them off (`OUTFLARE_COMMUNITY_LINKS=off`); "Follow us on X" is left out when `OUTFLARE_FOLLOW_URL=off`.
          */
         get: operations["getCommunityLinks"];
         put?: never;
@@ -463,7 +463,7 @@ export interface paths {
         delete?: never;
         options?: never;
         head?: never;
-        /** Tick a community item, or hide them */
+        /** Tick a community item, hide them, or say how you heard about Outflare */
         patch: operations["updateCommunityLinks"];
         trace?: never;
     };
@@ -590,6 +590,52 @@ export interface paths {
         put?: never;
         post?: never;
         delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/me/support-access": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Whether staff may view your account, and when they did
+         * @description Support access lets staff of the server's operator, such as Outflare Cloud's, view your account as you see it to
+         *     help you. A view is read-only and never shows inbox or email content, lasts an hour at most, and is listed here.
+         *     It is on until you turn it off. A server without staff (most self-hosted ones) never starts a view.
+         */
+        get: operations["getSupportAccess"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Turn support access on or off
+         * @description Turning it off ends a view in progress straight away and stops new ones.
+         */
+        patch: operations["updateSupportAccess"];
+        trace?: never;
+    };
+    "/v1/me/support-view": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * End the support view in progress in this browser
+         * @description For staff viewing an account. Afterwards requests are their own again. 404 when no view is in progress.
+         */
+        delete: operations["endSupportView"];
         options?: never;
         head?: never;
         patch?: never;
@@ -3550,6 +3596,124 @@ export interface paths {
         patch: operations["updateInboxView"];
         trace?: never;
     };
+    "/v1/workspaces/{ws}/alerts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+            };
+            cookie?: never;
+        };
+        /**
+         * List alerts
+         * @description Scope workspace.read, plus the scope of the module each kind comes
+         *     from (inbox.read for hot replies, customers.read for hot website
+         *     visitors); kinds the caller can't read are left out. Newest first.
+         *     Each alert says what happened, read fresh from what it is about, and
+         *     the app page that has it. Brand-limited callers see their brands'
+         *     alerts and the shared ones.
+         */
+        get: operations["listAlerts"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/workspaces/{ws}/alerts/settings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+            };
+            cookie?: never;
+        };
+        /**
+         * Show who gets alerts by email
+         * @description Scope workspace.read. The kinds of alert, who gets each by email
+         *     for the workspace and for each brand that chose differently, and
+         *     the kinds the caller muted for themselves. A kind no setting names
+         *     goes to the person it is for (owner), else the owners and admins.
+         *     Alert emails are Outflare's account email, at most
+         *     daily_email_limit a day for each person; the rest wait in the app.
+         */
+        get: operations["getAlertSettings"];
+        /**
+         * Choose where a kind of alert goes
+         * @description Scope workspace.manage. For the workspace or, with brand_id, one
+         *     brand. email is who gets the kind by email: owner (the person it is
+         *     for, else the owners and admins), admins (every owner and admin),
+         *     off, or null to follow the workspace (for a brand) or the default.
+         *     slack_integration_id and slack_channel (from GET .../alerts/channels)
+         *     post it to a channel in one of the workspace's own Slack
+         *     connections; both null stops posting. Fields left out stay as they
+         *     are. When nothing is chosen any more the setting is removed and the
+         *     answer is {"cleared": true}. Alerts still show in the app and go to
+         *     webhooks whatever this says.
+         */
+        put: operations["setAlertSettings"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/workspaces/{ws}/alerts/channels": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+            };
+            cookie?: never;
+        };
+        /**
+         * List the Slack channels alerts can post to
+         * @description Scope workspace.manage. The channels one of the workspace's own Slack
+         *     connections can see, by name, through that connection.
+         */
+        get: operations["listAlertChannels"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/workspaces/{ws}/alerts/mutes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Mute or unmute a kind of alert for yourself
+         * @description Scope workspace.read. Stops (muted true) or restarts alert emails of
+         *     one kind to the caller in this workspace: the signed-in person, or
+         *     who made the token. Muted alerts still show in the app.
+         */
+        put: operations["setAlertMute"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/workspaces/{ws}/reply-rules": {
         parameters: {
             query?: never;
@@ -5587,6 +5751,66 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/workspaces/{ws}/seo-sites/{site}/indexability": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                site: string;
+            };
+            cookie?: never;
+        };
+        /**
+         * Read a site's indexability report
+         * @description Scope: seo.read. Every page any source knows (the latest crawl, the
+         *     sitemaps it read, Search Console's impressions over 28 days and its
+         *     URL inspections, and the pages an SEO tool sees ranking), whether it
+         *     can be indexed and whether Google indexed it. Each page gets one
+         *     verdict from the strongest evidence: indexed (impressions, or the
+         *     inspection says it is on Google), likely_indexed (an SEO tool sees it
+         *     ranking and Search Console says nothing against it), not_indexed (the
+         *     inspection says so and nothing shows it in results) or unknown.
+         *     Where sources disagree, impressions win over an old inspection.
+         *     `history` is one snapshot a day for 90 days, taken after each crawl
+         *     and Search Console sync. `gaps` names the sources the report lacks
+         *     and the connection that fills each. Reads only stored data, so it
+         *     costs nothing.
+         */
+        get: operations["getSiteIndexability"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/workspaces/{ws}/seo-sites/{site}/indexability/pages": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                site: string;
+            };
+            cookie?: never;
+        };
+        /**
+         * List a site's pages with their indexability
+         * @description Scope: seo.read. The indexability report's pages, with what each source says about them: pages with issues first, then most impressions. Filter by verdict, issue, whether the page can be indexed, or part of the URL.
+         */
+        get: operations["listIndexabilityPages"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/workspaces/{ws}/seo-sites/{site}/sitemaps": {
         parameters: {
             query?: never;
@@ -5627,7 +5851,15 @@ export interface paths {
          *     sites, merged from every SEO connection that reads links (Ahrefs,
          *     DataForSEO): one row per link, with each provider's own view in
          *     `providers`. A link is live while any provider still finds it.
-         *     Reads only what the weekly snapshot stored, so it costs nothing.
+         *     Reads only what the weekly snapshot stored, so it costs nothing,
+         *     however often it is filtered.
+         *
+         *     `group` shows one link per linking domain (`domain`) or page
+         *     (`page`): the best one (live, followed, in the main content, from
+         *     the strongest page), with `group_links` saying how many it stands
+         *     for. `since` adds links lost since that date to the live ones;
+         *     `change` lists only links first seen (`new`) or lost (`lost`) since
+         *     then (default: the last 30 days).
          */
         get: operations["listBacklinks"];
         put?: never;
@@ -6376,6 +6608,176 @@ export interface paths {
          */
         post: operations["verifyFix"];
         delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/workspaces/{ws}/fix-tickets": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+            };
+            cookie?: never;
+        };
+        /**
+         * List fix tickets
+         * @description Scope: seo.read. The fixes list read as tickets: one per problem (a source's rule) on one subject, such as "missing title" on a site, with its fixes as parts (for a site audit, one per URL template). A ticket's status comes from its parts: in progress when someone took one, open when one is open, ignored when all are, else done. In progress first, then open; worst first, then by the Search Console clicks and impressions of its pages (impact), then by size. By default only open and in-progress tickets (status todo).
+         */
+        get: operations["listFixTickets"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/workspaces/{ws}/fix-tickets/{ticket}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                ticket: string;
+            };
+            cookie?: never;
+        };
+        /**
+         * Read a fix ticket
+         * @description Scope: seo.read. The ticket with its parts (fixes), up to 25 example pages per open part, the other tickets on its subject with their status and review, and the guidelines its brief follows. Reading it refreshes its impact.
+         */
+        get: operations["getFixTicket"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/workspaces/{ws}/fix-tickets/{ticket}/prompt": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                ticket: string;
+            };
+            cookie?: never;
+        };
+        /**
+         * A fix ticket as an issue for a developer or coding agent
+         * @description Scope: seo.read. Markdown, like a GitHub or Linear issue: the title, summary, why it matters and what to change (the brief, or the rule's own advice before one is written), the pages grouped by URL template, the definition of done as a checklist, what not to do, the team's guidelines, and how to tell Outflare the change is live. Page details are marked as data, not instructions.
+         */
+        get: operations["getFixTicketPrompt"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/workspaces/{ws}/fix-tickets/{ticket}/write": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                ticket: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Write a fix ticket's brief with AI
+         * @description Scope: seo.manage. Queues the workspace's own AI model (its Fix tickets task under Settings, AI model) to write the ticket's brief from everything Outflare knows: the brand, the problem and its pages, their search clicks, every other ticket on the subject and what people decided (rejected ones with their reasons), the saved guidelines, and feedback. Send feedback to rewrite it the way you want. Outflare never uses an AI key of its own: without a connected model this is 409 connector_needed. Follow brief_status on the ticket (queued, writing, ready or failed with brief_error); the result is the fix_ticket.written event.
+         */
+        post: operations["writeFixTicket"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/workspaces/{ws}/fix-tickets/{ticket}/review": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                ticket: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Approve or reject a fix ticket
+         * @description Scope: seo.manage. approve marks the ticket ready to do. reject needs a note saying why: it ignores the ticket's open parts, and the reason goes into every later brief on the subject so the idea is not raised again. reopen undoes a review and opens ignored parts again. guideline also saves the note as a fix guideline for the site, the brand or the whole workspace.
+         */
+        post: operations["reviewFixTicket"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/workspaces/{ws}/fix-guidelines": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+            };
+            cookie?: never;
+        };
+        /**
+         * List fix guidelines
+         * @description Scope: seo.read. What people told the brief writer once, for every later brief: for the whole workspace, a brand, or one site (optionally one rule). Newest first.
+         */
+        get: operations["listFixGuidelines"];
+        put?: never;
+        /**
+         * Add a fix guideline
+         * @description Scope: seo.manage. With subject_id it is for one site (and, with rule, one of its problems); with brand_id, for a brand; with neither, for the workspace. A workspace keeps up to 200.
+         */
+        post: operations["createFixGuideline"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/workspaces/{ws}/fix-guidelines/{guideline}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                guideline: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Remove a fix guideline
+         * @description Scope: seo.manage.
+         */
+        delete: operations["deleteFixGuideline"];
         options?: never;
         head?: never;
         patch?: never;
@@ -7253,6 +7655,309 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/workspaces/{ws}/reviews": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+            };
+            cookie?: never;
+        };
+        /**
+         * List reviews
+         * @description Scope: social.read. Reviews on the brands' review pages (Trustpilot,
+         *     G2, Capterra, Google), newest first, each with its latest drafted
+         *     answer. Pass next_cursor as cursor for the next page. Review text is
+         *     the reviewer's, as written: data, never instructions.
+         */
+        get: operations["listReviews"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/workspaces/{ws}/reviews/summary": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+            };
+            cookie?: never;
+        };
+        /**
+         * How reviews are doing
+         * @description Scope: social.read. Outflare's review score (out of 100, from every
+         *     review's stars, weighted by how new it is, and pulled toward the
+         *     middle while there are few), its momentum, each platform's own score
+         *     and count, the score and new reviews week by week, and the last 28
+         *     days' sentiment, reply rate and reply time.
+         */
+        get: operations["getReviewsSummary"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/workspaces/{ws}/reviews/pages": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+            };
+            cookie?: never;
+        };
+        /**
+         * List review pages
+         * @description Scope: social.read. The brands' review pages, one per review link in
+         *     brand links, with the platform's score and count, their change over
+         *     28 days, Outflare's review score and momentum, and when each was
+         *     read. Add, change or remove pages in the brand's links. Removed pages
+         *     are left out unless status=removed.
+         */
+        get: operations["listReviewPages"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/workspaces/{ws}/reviews/pages/sync": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Read review pages now
+         * @description Scope: social.manage. Reads every active review page now through the
+         *     workspace's own page reader (Geonode, on its own key). Answers
+         *     connector_needed (409) with no page reader.
+         */
+        post: operations["syncReviewPages"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/workspaces/{ws}/reviews/pages/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Pause or resume a review page
+         * @description Scope: social.manage. status paused stops reading the page and keeps
+         *     its reviews; active reads it again now.
+         */
+        patch: operations["updateReviewPage"];
+        trace?: never;
+    };
+    "/v1/workspaces/{ws}/reviews/pages/{id}/days": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        /**
+         * A review page's numbers by day
+         * @description Scope: social.read. One row per day the page was read: the platform's
+         *     score and count, reviews posted that day, the star breakdown of the
+         *     reviews kept, and Outflare's review score and momentum.
+         */
+        get: operations["listReviewPageDays"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/workspaces/{ws}/reviews/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        /**
+         * Get a review
+         * @description Scope: social.read. The review with its latest drafted answer.
+         */
+        get: operations["getReview"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/workspaces/{ws}/reviews/{id}/draft": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Draft an answer to a review
+         * @description Scope: social.manage. Queues a public answer drafted by the
+         *     workspace's own AI model (the review_replies task), on its own AI
+         *     bill, from the review, the reviewer's earlier reviews, the brand's
+         *     context and reply guide, and the brand's past replies. The answer is
+         *     the review with draft.status drafting; it becomes draft (to edit and
+         *     post on the platform yourself), skipped (with the reason, such as a
+         *     review to report instead) or failed. hint asks for another version
+         *     ("shorter"). Drafts are never posted from Outflare. Answers
+         *     connector_needed (409) without an AI model.
+         */
+        post: operations["draftReviewReply"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/workspaces/{ws}/reviews/{id}/replied": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Mark a review answered
+         * @description Scope: social.manage. Records that the business answered the review
+         *     on the platform, with the answer it posted when given. It comes off
+         *     the fixes list straight away; the next read keeps the platform's own
+         *     copy of the answer.
+         */
+        post: operations["markReviewReplied"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/workspaces/{ws}/brands/{brand}/reviews/discover": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                /** @description The brand's id or handle. */
+                brand: components["parameters"]["BrandRef"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Find a brand's review pages
+         * @description Scope: social.manage. Queues a few web searches through the
+         *     workspace's own web search connection (Geonode, on its own key) for
+         *     the brand's pages on Trustpilot (by its website), G2 and Capterra (by
+         *     its name). Matches become link suggestions (GET .../link-suggestions)
+         *     to confirm or dismiss; nothing is added on its own. This also happens
+         *     when a brand is created or its website changes, and when Geonode is
+         *     first connected. Google places are added by pasting their Maps link.
+         *     Answers connector_needed (409) without one.
+         */
+        post: operations["discoverReviewPages"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/workspaces/{ws}/brands/{brand}/review-guide": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                /** @description The brand's id or handle. */
+                brand: components["parameters"]["BrandRef"];
+            };
+            cookie?: never;
+        };
+        /**
+         * Get a brand's reply guide
+         * @description Scope: social.read. How the brand answers reviews, for drafting. Until
+         *     someone saves it, it is prefilled from the brand's context (its voice
+         *     and rules) and prefilled is true.
+         */
+        get: operations["getReviewGuide"];
+        /**
+         * Save a brand's reply guide
+         * @description Scope: social.manage. notes is for what's true now, such as known
+         *     issues and fixes ("Sync bug fixed in 3.3"), so drafts can say so.
+         */
+        put: operations["putReviewGuide"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/workspaces/{ws}/social/accounts": {
         parameters: {
             query?: never;
@@ -7877,7 +8582,11 @@ export interface paths {
          *     stops at whichever limit comes first, with `ai_budget_reached`.
          *     Owners and admins are emailed once a month when AI spend reaches
          *     80% of a limit and again when it reaches it (the `ai_budget.warned`
-         *     and `ai_budget.reached` webhooks).
+         *     and `ai_budget.reached` webhooks). Every limit stops calls unless it
+         *     is set to warn only: `hard_stop` false for the workspace's limit,
+         *     or a tool set to false in `hard_stops`. A limit that warns only
+         *     still sends both emails, but calls go on past it and the provider
+         *     keeps billing the workspace.
          */
         put: operations["updateAIToolLimits"];
         post?: never;
@@ -8023,10 +8732,10 @@ export interface paths {
          *     outreach), `classify_domain` (domain research, below) and
          *     `ai_visibility` (reading AI answers about your brands; the sampling
          *     itself asks the models chosen under AI visibility), `social_replies`
-         *     (drafting replies to posts social watches found) and
-         *     `email_verification` (checking addresses the free checks could not
+         *     (drafting replies to posts social watches found), `review_replies`
+         *     (drafting answers to reviews) and `email_verification` (checking addresses the free checks could not
          *     settle). A task left out uses the main model, except that
-         *     `check_in`, `ai_visibility` and `social_replies` use the provider's
+         *     `check_in`, `ai_visibility`, `social_replies` and `review_replies` use the provider's
          *     lighter model (Claude Sonnet 5.5) and `reply_labelling`,
          *     `classify_domain` and `email_verification` its cheapest (Claude
          *     Haiku 5.5), when they cost less than the main model. Each tool's
@@ -8775,9 +9484,122 @@ export interface paths {
          *     whether writes are dry runs, wait for approval or run within the
          *     limits. Fails with 409 `connector_needed` while a required
          *     connection is missing: playbooks run only on the workspace's own
-         *     accounts. Missing data doesn't stop it.
+         *     accounts. Missing data doesn't stop it. With `apply_kit`, the
+         *     playbook's setup kit is applied in the same step (see
+         *     `POST /v1/workspaces/{ws}/kits/{id}/apply` for the scopes it
+         *     needs, and its 409 `conflict`).
          */
         post: operations["startPlaybook"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/kits": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Every setup kit this server ships
+         * @description Public, no key needed. A setup kit is what a playbook needs set up
+         *     before its first run, from the repository's `playbooks/kits`
+         *     folder: option lists (such as a pipeline's stages), record types
+         *     with their fields (such as a Partnerships pipeline), fields on
+         *     people and companies, and email drafts. `playbooks` lists the
+         *     playbooks that use it. Preview it in a workspace with
+         *     `GET /v1/workspaces/{ws}/kits/{id}/preview`.
+         */
+        get: operations["listKitCatalog"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/kits/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get a setup kit
+         * @description Public, no key needed.
+         */
+        get: operations["getKitCatalog"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/workspaces/{ws}/kits/{id}/preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                /** @example creators-partnerships */
+                id: string;
+            };
+            cookie?: never;
+        };
+        /**
+         * Preview what a setup kit would add to this workspace
+         * @description Scope: customers.read. Compares the kit with the workspace's
+         *     catalog and email templates, part by part: `add` (new), `extend`
+         *     (an option list of the workspace's own gains the kit's missing
+         *     options), `reuse` (already there and matching) or `conflict`
+         *     (there but different, such as a field of another type under the
+         *     same key, or archived). Changes nothing.
+         */
+        get: operations["previewKit"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/workspaces/{ws}/kits/{id}/apply": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                /** @example creators-partnerships */
+                id: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Set up a kit in this workspace
+         * @description Scope: catalog.manage, and emails.manage when the kit adds email
+         *     drafts (403 otherwise). Adds what the preview says, in one step,
+         *     with the same audit events as adding each part by hand, then
+         *     `kit.applied`. It only adds: matching parts are reused, option
+         *     lists of the workspace's own only gain options, and existing
+         *     email templates stay as they are. Email drafts are added
+         *     unpublished, so a person reads and publishes them before anything
+         *     sends them. Fails with 409 `conflict`, changing nothing, while any
+         *     part conflicts; the message names each one. Applying it again
+         *     changes nothing.
+         */
+        post: operations["applyKit"];
         delete?: never;
         options?: never;
         head?: never;
@@ -9413,7 +10235,7 @@ export interface paths {
         };
         /**
          * See what an import from another CRM would bring over
-         * @description Scope: integrations.read. Reads the connected CRM (Attio) live: its objects (People, Companies, Deals and custom ones) with their fields, select options and pipeline stages, its lists with their own fields, and how many records, list entries, notes, tasks and members it holds. Each count stops at limit and says so with capped; filled is how many of the counted records have a value in that field. Changes nothing, in Outflare or in the CRM.
+         * @description Scope: integrations.read. Reads the connected CRM (Attio) live: its objects (People, Companies, Deals and custom ones) with their fields, select options and pipeline stages, its lists with their own fields, and how many records, list entries, notes, tasks and members it holds. Each count stops at limit, or when the preview has spent about 15 seconds counting, and says so with capped; filled is how many of the counted records have a value in that field. Changes nothing, in Outflare or in the CRM.
          */
         get: operations["crmImportPreview"];
         put?: never;
@@ -10692,6 +11514,32 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/workspaces/{ws}/records/{record}/review": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                record: components["parameters"]["RecordID"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Approve or reject a record held for review
+         * @description Scope: customers.manage. For a record with needs_review true, such as a person a visitor identification tool named.
+         *     approve lists it like any other and lets the policy check send to it (it stays a third-party prospect: cold email
+         *     only, never marketing without their consent). reject archives it. A record not held is refused with not_held (409).
+         */
+        post: operations["reviewRecord"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/workspaces/{ws}/records/{record}/identities": {
         parameters: {
             query?: never;
@@ -11204,6 +12052,36 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/visitor-hooks/{id}/{token}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The connection's id. */
+                id: string;
+                /** @description The connection's signature. */
+                token: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Receive people from a visitor identification tool
+         * @description Public: the address is the authority, so keep it secret (GET .../visitors/settings gives it, in people_connections).
+         *     Where RB2B, Vector or Warmly send the people they name on your website, from your own account with the tool. One
+         *     person or up to 100 per call, as an object, an array, or under data; field names as the tool sends them (Business
+         *     Email, business_email, workEmail). People with an email address the CRM doesn't have become person records tagged
+         *     with the tool and held for review; people it has are left as they were. Each one is a visitor.person_revealed
+         *     audit event. With reveal_people off, the call is answered with ignored: off and nothing is kept.
+         */
+        post: operations["sendVisitorPeople"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/site/events": {
         parameters: {
             query?: never;
@@ -11244,6 +12122,124 @@ export interface paths {
         options: operations["sendSiteEventsPreflight"];
         head?: never;
         patch?: never;
+        trace?: never;
+    };
+    "/v1/site/flags": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Decide flags for a website visitor
+         * @description Public: the site key (ofk_) in the body is the authority. What the tracking script asks on each page: the
+         *     visitor's variant of every flag that is on and served to the site (on_site), shared or for the key's brand.
+         *     Flags that are off are left out, unless previewed. Send the JSON as text/plain to skip the CORS preflight. 6,000 requests a
+         *     minute per key. Nothing is stored.
+         */
+        post: operations["getSiteFlags"];
+        delete?: never;
+        /**
+         * CORS preflight for website flags
+         * @description Public. Any origin may ask; the key, not the page, is checked.
+         */
+        options: operations["getSiteFlagsPreflight"];
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/workspaces/{ws}/flags": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+            };
+            cookie?: never;
+        };
+        /**
+         * List feature flags
+         * @description Scope: analytics.read. The workspace's flags, oldest first; archived ones only with status=archived or all. A brand's flags include the shared ones, which reach its site too.
+         */
+        get: operations["listFlags"];
+        put?: never;
+        /**
+         * Add a feature flag
+         * @description Scope: analytics.manage. A switch (one variant, "on") or a split (several variants with weights) that the
+         *     website script and your servers read to decide what a visitor sees. It starts off unless status is on. Each
+         *     visitor who passes every rule and falls inside the rollout gets one variant, from a hash of the flag and the
+         *     visitor's id: the same on every page and server. At most 200 live flags per workspace.
+         */
+        post: operations["createFlag"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/workspaces/{ws}/flags/evaluate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Decide flags for a visitor
+         * @description Scope: analytics.read. The variant a visitor or user gets of every flag that is on (or of keys), for your own
+         *     server, with why. Send anonymous_id from the page (outflare.anonymousId()) so the server and the site agree;
+         *     user_id is used when there is no anonymous_id, and makes signed_in true. Rules on the page read url,
+         *     referrer, user_agent and language; property.<name> rules read properties. Nothing is stored.
+         */
+        post: operations["evaluateFlags"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/workspaces/{ws}/flags/{flag}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                /** @description The flag's id or key. */
+                flag: string;
+            };
+            cookie?: never;
+        };
+        /**
+         * Get a feature flag
+         * @description Scope: analytics.read. By id, or by key for a live flag.
+         */
+        get: operations["getFlag"];
+        put?: never;
+        post?: never;
+        /**
+         * Archive a feature flag
+         * @description Scope: analytics.manage. Turns it off for good and frees its key. It stays listed with status=archived.
+         */
+        delete: operations["archiveFlag"];
+        options?: never;
+        head?: never;
+        /**
+         * Change a feature flag
+         * @description Scope: analytics.manage. Turn it on or off, or change its variants, rollout, rules, brand or name. The key
+         *     can't change. Visitors keep their variant unless the weights move them: changing a split moves only those
+         *     near the boundaries it shifts, and growing a rollout only adds visitors. Reaches visitors within 10 seconds.
+         */
+        patch: operations["updateFlag"];
         trace?: never;
     };
     "/v1/workspaces/{ws}/customer-events": {
@@ -11495,6 +12491,49 @@ export interface paths {
          *     company's rules; the other fields win over the company's where set.
          */
         patch: operations["updateBrandContext"];
+        trace?: never;
+    };
+    "/v1/workspaces/{ws}/brands/{brand}/dns": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                /** @description The brand's id or handle. */
+                brand: components["parameters"]["BrandRef"];
+            };
+            cookie?: never;
+        };
+        /**
+         * Read every DNS record a brand needs
+         * @description Scope: workspace.read. Every record Outflare asks for on the brand's
+         *     domains, in one list grouped by what it is for: the website's proof
+         *     of ownership (`seo_site`), each sending domain's records
+         *     (`email_domain`) and each tracking domain's CNAME
+         *     (`tracking_domain`). Each record says whether DNS shows it yet, and
+         *     `missing` counts the rest. Add them all at once with POST, or
+         *     approve each group at the DNS provider with its own
+         *     `.../dns/approval`. `developer` and `ai_prompt` list every missing
+         *     record for a developer or an AI coding tool.
+         */
+        get: operations["getBrandDNS"];
+        put?: never;
+        /**
+         * Add every missing DNS record for a brand
+         * @description Scope: workspace.manage. Adds every missing record from GET
+         *     .../brands/{brand}/dns through the brand's DNS host connection
+         *     (`integration_id`, a Cloudflare connection), one job per group, all
+         *     queued together. When the brand has a website but no site to verify
+         *     yet, it is added first so its proof goes in too. Outflare only adds
+         *     records, never changes or deletes one, and then checks for them on
+         *     its own. 409 `nothing_to_add` when every record is in place.
+         */
+        post: operations["addBrandDNS"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
         trace?: never;
     };
     "/v1/workspaces/{ws}/brands/{brand}/setup": {
@@ -16074,6 +17113,91 @@ export interface webhooks {
         patch?: never;
         trace?: never;
     };
+    "review.posted": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** A new review appeared on one of the brands' review pages. data has page_id, platform, rating (1 to 5), sentiment and verified; GET /reviews/{id} for its text. */
+        post: operations["webhook_review_posted"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "review.replied": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** A review got the business's reply, seen on the platform (via platform) or marked in Outflare (via outflare). */
+        post: operations["webhook_review_replied"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "review.reply_drafted": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** The workspace's AI drafted an answer to a review, waiting for a person to edit and post it. */
+        post: operations["webhook_review_reply_drafted"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "review_momentum.changed": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** A review page's momentum changed, such as from steady to slipping. data has from, to, score and score_change. */
+        post: operations["webhook_review_momentum_changed"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "alert.raised": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Something needs a person now: a hot reply (reply.hot), a hot website visitor (visitor.hot) or another kind a module raises, at most once per thing. data has alert_id, kind, target_type, target_id, record_id, owner_id (the user it is for, or null), brand_id and the kind's own ids; GET .../alerts has what it says. */
+        post: operations["webhook_alert_raised"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "visitor.became_hot": {
         parameters: {
             query?: never;
@@ -16364,7 +17488,7 @@ export interface components {
              */
             id: string;
             /** @enum {string} */
-            type: "lead.replied" | "lead.unsubscribed" | "inbox.replied" | "inbox.updated" | "inbox.classified" | "lead.bounced" | "mailbox.auto_paused" | "lead.created" | "lead.updated" | "lead.deleted" | "leads.imported" | "suppressions.added" | "suppression.removed" | "lead_list.created" | "lead_list.leads_added" | "lead_list.run_started" | "lead_list.build_done" | "lead_list.build_failed" | "lead_list.refresh_done" | "lead_list.refresh_failed" | "lead_list.enrich_done" | "lead_list.enrich_failed" | "import.done" | "import.failed" | "sequence.created" | "sequence.updated" | "sequence.activated" | "sequence.paused" | "sequence.archived" | "sequence.deleted" | "sequence.steps_updated" | "sequence.leads_enrolled" | "enrollment.stopped" | "mailbox.imported" | "mailbox.updated" | "mailbox.paused" | "mailbox.resumed" | "mailbox.stage_changed" | "mailbox.deleted" | "domain.added" | "domain.paused" | "domain.resumed" | "domain.removed" | "email.queued" | "email.sent" | "email.delivered" | "email.bounced" | "email.complained" | "email.failed" | "email.suppressed" | "email.cancelled" | "email.unsubscribed" | "email.opened" | "email.clicked" | "email.preferences_changed" | "email_domain.verified" | "email_domain.verification_failed" | "email_provider.events_failed" | "email_template.published" | "meeting.created" | "meeting.updated" | "meeting.deleted" | "deal.created" | "deal.updated" | "deal.deleted" | "spend.recorded" | "integration.connected" | "integration.updated" | "integration.disconnected" | "connect_request.created" | "deploy.detected" | "deploy.failed" | "digest.ready" | "ai_budget.warned" | "ai_budget.reached" | "connection_limit.warned" | "connection_limit.reached" | "experiment.started" | "experiment.concluded" | "project.created" | "project.updated" | "project.deleted" | "mission.created" | "mission.updated" | "mission.submitted" | "mission.approved" | "mission.paused" | "mission.resumed" | "mission.stopped" | "mission.completed" | "mission.action_held" | "mission.action_approved" | "mission.action_rejected" | "infra.plan_created" | "infra.plan_approved" | "infra.ordered" | "infra.order_failed" | "infra.domains_bought" | "infra.mailbox_joined" | "infra.plan_warming" | "infra.plan_ready" | "infra.plan_cancelled" | "fix.found" | "fix.updated" | "fix.started" | "fix.verify_requested" | "fix.confirmed" | "fix.reopened" | "record.created" | "record.bulk_created" | "record.updated" | "record.merged" | "identity.verified" | "identity.closed" | "relationship.added" | "relationship.ended" | "consent.granted" | "consent.withdrawn" | "consent.bulk_withdrawn" | "brand.created" | "brand.updated" | "email_broadcast.created" | "email_broadcast.started" | "email_broadcast.sent" | "email_broadcast.failed" | "email_broadcast.cancelled" | "journey.created" | "journey.updated" | "journey_run.entered" | "journey_run.exited" | "brand_setup.installed" | "brand_setup.install_failed" | "install.issue_opened" | "install.issue_resolved" | "seo_site.created" | "seo_site.verified" | "seo_site.unverified" | "seo_site.deleted" | "crawl.started" | "crawl.stopped" | "crawl.done" | "social_action.drafted" | "social_action.approved" | "social_action.rejected" | "social_action.done" | "social_action.failed" | "visitor.became_hot" | "workspace.updated" | "webhook.test";
+            type: "lead.replied" | "lead.unsubscribed" | "inbox.replied" | "inbox.updated" | "inbox.classified" | "lead.bounced" | "mailbox.auto_paused" | "lead.created" | "lead.updated" | "lead.deleted" | "leads.imported" | "suppressions.added" | "suppression.removed" | "lead_list.created" | "lead_list.leads_added" | "lead_list.run_started" | "lead_list.build_done" | "lead_list.build_failed" | "lead_list.refresh_done" | "lead_list.refresh_failed" | "lead_list.enrich_done" | "lead_list.enrich_failed" | "import.done" | "import.failed" | "sequence.created" | "sequence.updated" | "sequence.activated" | "sequence.paused" | "sequence.archived" | "sequence.deleted" | "sequence.steps_updated" | "sequence.leads_enrolled" | "enrollment.stopped" | "mailbox.imported" | "mailbox.updated" | "mailbox.paused" | "mailbox.resumed" | "mailbox.stage_changed" | "mailbox.deleted" | "domain.added" | "domain.paused" | "domain.resumed" | "domain.removed" | "email.queued" | "email.sent" | "email.delivered" | "email.bounced" | "email.complained" | "email.failed" | "email.suppressed" | "email.cancelled" | "email.unsubscribed" | "email.opened" | "email.clicked" | "email.preferences_changed" | "email_domain.verified" | "email_domain.verification_failed" | "email_provider.events_failed" | "email_template.published" | "meeting.created" | "meeting.updated" | "meeting.deleted" | "deal.created" | "deal.updated" | "deal.deleted" | "spend.recorded" | "integration.connected" | "integration.updated" | "integration.disconnected" | "connect_request.created" | "deploy.detected" | "deploy.failed" | "digest.ready" | "ai_budget.warned" | "ai_budget.reached" | "connection_limit.warned" | "connection_limit.reached" | "experiment.started" | "experiment.concluded" | "project.created" | "project.updated" | "project.deleted" | "mission.created" | "mission.updated" | "mission.submitted" | "mission.approved" | "mission.paused" | "mission.resumed" | "mission.stopped" | "mission.completed" | "mission.action_held" | "mission.action_approved" | "mission.action_rejected" | "infra.plan_created" | "infra.plan_approved" | "infra.ordered" | "infra.order_failed" | "infra.domains_bought" | "infra.mailbox_joined" | "infra.plan_warming" | "infra.plan_ready" | "infra.plan_cancelled" | "fix.found" | "fix.updated" | "fix.started" | "fix.verify_requested" | "fix.confirmed" | "fix.reopened" | "record.created" | "record.bulk_created" | "record.updated" | "record.merged" | "identity.verified" | "identity.closed" | "relationship.added" | "relationship.ended" | "consent.granted" | "consent.withdrawn" | "consent.bulk_withdrawn" | "brand.created" | "brand.updated" | "email_broadcast.created" | "email_broadcast.started" | "email_broadcast.sent" | "email_broadcast.failed" | "email_broadcast.cancelled" | "journey.created" | "journey.updated" | "journey_run.entered" | "journey_run.exited" | "brand_setup.installed" | "brand_setup.install_failed" | "install.issue_opened" | "install.issue_resolved" | "seo_site.created" | "seo_site.verified" | "seo_site.unverified" | "seo_site.deleted" | "crawl.started" | "crawl.stopped" | "crawl.done" | "social_action.drafted" | "social_action.approved" | "social_action.rejected" | "social_action.done" | "social_action.failed" | "review.posted" | "review.replied" | "review.reply_drafted" | "review_momentum.changed" | "alert.raised" | "visitor.became_hot" | "workspace.updated" | "webhook.test";
             /** Format: date-time */
             created_at: string;
             /** Format: uuid */
@@ -16662,6 +17786,11 @@ export interface components {
             /** @description A worked example with fictional data. */
             example: string;
             /**
+             * @description The setup kit it offers to apply before its first run (GET /v1/kits/{id}), if any.
+             * @example creators-partnerships
+             */
+            kit?: string;
+            /**
              * Format: uri
              * @description The playbook's file on GitHub.
              */
@@ -16713,6 +17842,88 @@ export interface components {
             token_id?: string | null;
             /** Format: int64 */
             max_spend_cents?: number | null;
+            /** @description Apply the playbook's setup kit in the same step. Needs catalog.manage, and emails.manage when the kit adds email drafts. */
+            apply_kit?: boolean;
+        };
+        /** @description A setup kit from the repository's playbooks/kits folder (playbooks/README.md has the format). */
+        Kit: {
+            /** @example creators-partnerships */
+            id: string;
+            /** @description Raised whenever the kit changes. */
+            version: number;
+            title: string;
+            summary: string;
+            option_sets: {
+                key: string;
+                name: string;
+                options: {
+                    key: string;
+                    label: string;
+                }[];
+            }[];
+            record_types: {
+                /** @example partnership */
+                key: string;
+                name: string;
+                plural: string;
+                description: string;
+                /** @description The status field that holds its stages, so it shows as a pipeline. */
+                stage?: string;
+                fields: components["schemas"]["KitField"][];
+            }[];
+            /** @description Fields to add to existing record types, by type key (person, account). */
+            fields: {
+                [key: string]: components["schemas"]["KitField"][];
+            };
+            email_templates: {
+                handle: string;
+                name: string;
+                /** @enum {string} */
+                purpose: "transactional" | "lifecycle";
+                subject: string;
+                text: string;
+            }[];
+            /**
+             * Format: uri
+             * @description The kit's file on GitHub.
+             */
+            source_url: string;
+            /** @description The playbooks that use it. */
+            playbooks: string[];
+        };
+        KitField: {
+            key: string;
+            label: string;
+            description?: string;
+            /** @description A value type from the catalog (GET .../catalog). */
+            value_type: string;
+            option_set?: string;
+            multiple: boolean;
+            target_type?: string;
+            filterable: boolean;
+        };
+        /** @description What applying a kit does, or did, in a workspace. */
+        KitPlan: {
+            kit_id: string;
+            version: number;
+            title: string;
+            items: {
+                /** @enum {string} */
+                kind: "option_set" | "record_type" | "field" | "email_template";
+                /** @description A field's key is type.field. */
+                key: string;
+                label: string;
+                /** @enum {string} */
+                action: "add" | "extend" | "reuse" | "conflict";
+                /** @description What it adds */
+                detail: string;
+            }[];
+            /** @description Parts it adds or extends. */
+            changes: number;
+            /** @description Parts that stop it; applying fails with 409 until there are none. */
+            conflicts: number;
+            /** @description True once applied. */
+            applied: boolean;
         };
         /** @description The built-in agent's turns. All empty for an external runner. */
         MissionTurns: {
@@ -18060,6 +19271,26 @@ export interface components {
             }[];
             /** @description Addresses looked up today (UTC). */
             reveals_today: number;
+            /** @description Take in the people a connected visitor identification tool (RB2B, Vector, Warmly) names on the workspace's own account with it. Each new one becomes a person record tagged with the tool (acquired_via) as a third-party prospect and held for review: left out of the people list and never emailed until approved. The tools name people in the United States only. Off until the workspace turns it on and accepts the notice (default false). */
+            reveal_people: boolean;
+            /**
+             * Format: date-time
+             * @description When the workspace accepted the notice: the tools name people in the United States only, and the workspace tells its visitors in its own privacy policy and honours their opt-outs.
+             */
+            people_notice_accepted_at: string | null;
+            /** @description The workspace's connections that name people, each with the address to paste into the tool's webhook settings. */
+            people_connections: {
+                /** Format: uuid */
+                id: string;
+                name: string;
+                /** @example rb2b */
+                connector: string;
+                status: string;
+                /** @description Secret: anyone with it can send people to the review list. Removing the connection turns it off. */
+                webhook_url: string;
+            }[];
+            /** @description People records waiting for review (GET .../records?review=needs_review). */
+            people_to_review: number;
             /** Format: date-time */
             updated_at: string | null;
         };
@@ -18074,6 +19305,25 @@ export interface components {
             reveal_integration_id?: string | null;
             reveal_daily_limit?: number;
             not_companies?: string[];
+            /** @description Turning it on needs the notice accepted, now or before. */
+            reveal_people?: boolean;
+            /** @description Accept the notice shown on the Visitors page, once. */
+            accept_people_notice?: boolean;
+        };
+        VisitorHookResult: {
+            /** @description People in the call. */
+            received: number;
+            /** @description New people records */
+            added: number;
+            /** @description People the CRM already had: left as they were. */
+            known: number;
+            /** @description People without an email address, or at a domain the workspace leaves out. */
+            skipped: number;
+            /**
+             * @description Set when nothing was taken in because the workspace hasn't turned it on.
+             * @enum {string}
+             */
+            ignored?: "off";
         };
         SiteKey: {
             /** Format: uuid */
@@ -18116,6 +19366,88 @@ export interface components {
             proxy_secret_at: string | null;
             /** @description The script tag to paste into the site's <head>. Lists the origins' domains in data-domains when there is more than one, so a visit can cross them. */
             snippet: string;
+        };
+        Flag: {
+            /** Format: uuid */
+            id: string;
+            /**
+             * @description What code asks for: outflare.flag("new-pricing").
+             * @example new-pricing
+             */
+            key: string;
+            name: string;
+            description: string;
+            /**
+             * Format: uuid
+             * @description The brand whose site reads it; null is shared by every brand.
+             */
+            brand_id: string | null;
+            /** @enum {string} */
+            status: "on" | "off" | "archived";
+            variants: components["schemas"]["FlagVariant"][];
+            /** @description Percent of visitors who pass the rules that get a variant at all. */
+            rollout: number;
+            /** @description Every rule must hold. */
+            rules: components["schemas"]["FlagRule"][];
+            /** @description Whether the website script gets it. Off keeps a flag only your servers read out of the page. */
+            on_site: boolean;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            updated_at: string;
+            /** Format: date-time */
+            archived_at: string | null;
+        };
+        FlagVariant: {
+            /** @example control */
+            key: string;
+            /** @description Its share is its weight over the total of all weights. */
+            weight: number;
+            /** @description Any JSON the page or server reads with the variant, such as a headline; null for none. At most 4 KB. */
+            payload?: unknown;
+        };
+        FlagRule: {
+            /** @description host, path, url, referrer, device (desktop, mobile, tablet), language, signed_in (true, false), query.<name> (a parameter of the page's address) or property.<name> (sent to evaluate). */
+            attribute: string;
+            /** @enum {string} */
+            op: "is" | "is_not" | "contains" | "not_contains" | "starts_with" | "ends_with" | "exists" | "not_exists";
+            /** @description Any of these (case does not matter). None for exists and not_exists. */
+            values?: string[];
+        };
+        FlagInput: {
+            /** @description Required when adding; can't change. */
+            key?: string;
+            name?: string;
+            description?: string;
+            /** Format: uuid */
+            brand_id?: string | null;
+            /** @enum {string} */
+            status?: "on" | "off";
+            /** @description Default: one variant, "on", at 100. */
+            variants?: components["schemas"]["FlagVariant"][];
+            rollout?: number;
+            rules?: components["schemas"]["FlagRule"][];
+            on_site?: boolean;
+        };
+        FlagDecisions: {
+            /**
+             * @description Each flag that is on, by key: the visitor's variant, or false when the rules or rollout leave them out.
+             * @example {
+             *       "new-pricing": "treatment",
+             *       "chat-widget": false
+             *     }
+             */
+            flags: {
+                [key: string]: string | boolean;
+            };
+            /** @description The payload of each variant given that has one, by flag key. */
+            payloads: {
+                [key: string]: unknown;
+            };
+            /** @description Why, by flag key (evaluate only). */
+            reasons?: {
+                [key: string]: "match" | "rules" | "rollout" | "off" | "no_subject";
+            };
         };
         SiteKeyInput: {
             name?: string;
@@ -18243,7 +19575,7 @@ export interface components {
         };
         CRMCount: {
             count: number;
-            /** @description True when counting stopped at the limit, so there are more. */
+            /** @description True when counting stopped early, at the limit or out of time, so there may be more. */
             capped: boolean;
         };
         CRMObject: {
@@ -19033,6 +20365,96 @@ export interface components {
             ctr: number;
             position: number;
         };
+        IndexabilitySummary: {
+            /** @description Every page any source knows. */
+            pages: number;
+            crawled: number;
+            /** @description Pages the crawl read that answer 200, aren't noindex and don't point their canonical elsewhere. */
+            indexable: number;
+            in_sitemap: number;
+            indexed: number;
+            likely_indexed: number;
+            not_indexed: number;
+            unknown: number;
+            /** @description Pages per issue id. */
+            issues: {
+                [key: string]: number;
+            };
+        };
+        IndexabilityIssue: {
+            /** @enum {string} */
+            id: "indexable_not_indexed" | "sitemap_not_indexable" | "indexed_not_indexable" | "google_canonical_differs" | "not_found_by_crawl" | "sources_disagree" | "missing_from_sitemap";
+            title: string;
+            why: string;
+            fix: string;
+            /** @enum {string} */
+            severity: "error" | "warning" | "notice";
+        };
+        IndexabilitySources: {
+            crawl: {
+                /** Format: uuid */
+                run_id: string | null;
+                /** Format: date-time */
+                finished_at: string | null;
+                /** @description The crawl read every page it found, so a page it didn't find isn't linked. */
+                complete: boolean;
+                /** @description The crawl read the site's sitemaps. */
+                sitemaps: boolean;
+                pages: number;
+                in_sitemap: number;
+            };
+            search_console: {
+                connected: boolean;
+                /** Format: date */
+                newest_day: string | null;
+                inspected: number;
+                /** Format: date-time */
+                inspected_at: string | null;
+            };
+            seo_tool: {
+                /** @description The SEO connection whose rankings the report used, such as ahrefs. */
+                connector: string | null;
+                /** Format: date */
+                day: string | null;
+                pages: number;
+            };
+        };
+        IndexabilityPage: {
+            url: string;
+            /** @description False for pages only Google or the SEO tool know. */
+            crawled: boolean;
+            crawl_status: string;
+            http_status: number | null;
+            in_sitemap: boolean;
+            depth: number | null;
+            links_in: number;
+            /** @description Null when the crawl didn't read the page. */
+            indexable: boolean | null;
+            /** @enum {string} */
+            not_indexable_reason: "" | "noindex" | "canonical" | "redirect" | "error" | "blocked" | "failed";
+            /** @description Search Console clicks over 28 days. */
+            clicks: number;
+            /** @description Search Console impressions over 28 days. */
+            impressions: number;
+            inspection: {
+                verdict: string;
+                coverage: string;
+                google_canonical: string;
+                user_canonical: string;
+                /** Format: date-time */
+                last_crawl: string | null;
+                /** Format: date-time */
+                inspected_at: string;
+            } | null;
+            /** @description Keywords the SEO tool sees it ranking for. */
+            seo_keywords: number;
+            /** @description The SEO tool's estimate of its monthly organic visits. */
+            seo_traffic: number;
+            /** @enum {string} */
+            verdict: "indexed" | "likely_indexed" | "not_indexed" | "unknown";
+            evidence: ("search_console" | "url_inspection" | "seo_tool")[];
+            issues: string[];
+        };
         URLInspection: {
             url: string;
             /** @description Google's verdict is PASS. */
@@ -19263,6 +20685,24 @@ export interface components {
             crawl_delay_ms: number;
             /** @description false audits pages the site's robots.txt hides; only for a verified site. */
             obey_robots: boolean;
+            /**
+             * @description Whether pages' scripts run before they are read: off, auto (only empty app shells) or always. It needs a proved site and a connection in render_connections.
+             * @enum {string}
+             */
+            render_js: "off" | "auto" | "always";
+            use_sitemaps: boolean;
+            follow_nofollow: boolean;
+            ignore_params: boolean;
+            /** @description 0 is no limit. */
+            max_depth: number;
+            include_patterns: string[];
+            exclude_patterns: string[];
+            schedule_hour: number | null;
+            schedule_day: number | null;
+            /** @example UTC */
+            schedule_tz: string;
+            /** @description The workspace's connections that can run pages' scripts for the site's brand, such as Geonode. Empty means render_js does nothing yet. */
+            render_connections: string[];
             /** @description Whether this workspace has proved it owns the site. */
             verified: boolean;
             /** Format: date-time */
@@ -19349,6 +20789,21 @@ export interface components {
              * @enum {string}
              */
             fallback_hint: "" | "verify_site" | "connect_geonode";
+            /** @description Links the crawl's settings left out: include and exclude patterns, and max_depth. */
+            pages_excluded: number;
+            /** @description Pages read after running their scripts (render_js). */
+            pages_rendered: number;
+            /** @description The settings the crawl ran with, copied from the site when it started. */
+            settings: {
+                /** @enum {string} */
+                render_js: "off" | "auto" | "always";
+                use_sitemaps: boolean;
+                follow_nofollow: boolean;
+                ignore_params: boolean;
+                max_depth: number;
+                include_patterns: string[] | null;
+                exclude_patterns: string[] | null;
+            };
             /** @description The share of the crawl's pages (HTML or broken) with no error-level issue. null until the crawl has finished. */
             health_score: number | null;
             /** @description How many issues the audit found, by severity; GET .../issues lists them. */
@@ -19519,7 +20974,7 @@ export interface components {
             /** @enum {string} */
             severity: "error" | "warning" | "notice";
             /** @enum {string} */
-            category: "indexability" | "links" | "content" | "metadata" | "performance" | "security" | "social" | "ai_visibility" | "keywords" | "regressions";
+            category: "indexability" | "links" | "content" | "metadata" | "performance" | "security" | "social" | "ai_visibility" | "keywords" | "regressions" | "reviews";
             /** @example Missing title */
             title: string;
             /** @description Why it matters, in plain words. */
@@ -20143,6 +21598,199 @@ export interface components {
          * @enum {string}
          */
         SocialAccountChannel: "x" | "linkedin" | "youtube" | "instagram" | "tiktok" | "facebook" | "reddit" | "github" | "discord" | "bluesky" | "threads" | "mastodon" | "dev_to" | "docker_hub";
+        /**
+         * @description A review platform, as its brand link kind: google_reviews is a Google Maps place.
+         * @enum {string}
+         */
+        ReviewPlatform: "trustpilot" | "g2" | "capterra" | "google_reviews";
+        /**
+         * @description Where reviews are heading: the score now against 28 days ago, and new reviews in the last 28 days against the 28
+         *     before. growing (score held or rose, pace up 15% or more), improving (score up 2 or more), steady, stagnating (pace
+         *     down 30% or more, or under 8 reviews in 8 weeks), slipping (score down 2 or more), or too_few (under 5 reviews).
+         */
+        ReviewMomentum: {
+            /** @enum {string} */
+            state: "growing" | "improving" | "steady" | "stagnating" | "slipping" | "too_few";
+            /** @description Outflare's review score now */
+            score: number;
+            /** @description Its change over 28 days */
+            score_change: number;
+            /** @description Reviews posted in the last 28 days. */
+            new_reviews: number;
+            /** @description Reviews posted in the 28 days before. */
+            new_reviews_before: number;
+            /** @description The change in pace as a share: -0.31 is 31% slower. Null with none before. */
+            pace_change: number | null;
+            per_week: number;
+            /** @description Reviews counted. */
+            reviews: number;
+        };
+        /** @description A brand's page on a review platform, from its links, read once a day through the workspace's own page reader. */
+        ReviewPage: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            brand_id: string | null;
+            platform: components["schemas"]["ReviewPlatform"];
+            /** @description The page's id on the platform: a Trustpilot domain, a G2 slug, a Capterra id. */
+            external_id: string;
+            url: string;
+            /** @description The name the platform shows. */
+            name: string;
+            /** @enum {string} */
+            status: "active" | "paused" | "removed";
+            /** @description The platform's own headline score on a 1 to 5 scale (Trustpilot's TrustScore). Null until read, never zero. */
+            score: number | null;
+            /** @description How many reviews the platform says it has. */
+            review_count: number | null;
+            score_change_28d: number | null;
+            review_count_change_28d: number | null;
+            /** @description Outflare's review score for the page, out of 100. */
+            outflare_score: number | null;
+            momentum: components["schemas"]["ReviewMomentum"];
+            /** @description Reviews Outflare has kept from the page. */
+            reviews_kept: number;
+            /** @description Negative reviews from the last 90 days without a reply. */
+            unanswered_negative: number;
+            /** Format: date-time */
+            last_read_at: string | null;
+            /** Format: date-time */
+            next_read_at: string;
+            /** @description Why the last read failed; tried again the next day. */
+            last_error: string | null;
+            /**
+             * Format: date-time
+             * @description When the first read took the page's earlier reviews.
+             */
+            backfilled_at: string | null;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            updated_at: string;
+        };
+        ReviewPageDay: {
+            /** Format: date */
+            day: string;
+            score: number | null;
+            review_count: number | null;
+            new_reviews: number;
+            /** @description Reviews kept with 1, 2, 3, 4 and 5 stars. */
+            stars: number[];
+            outflare_score: number | null;
+            momentum: string | null;
+        };
+        /** @description An answer the workspace's AI drafted, for a person to edit and post on the platform. */
+        ReviewDraft: {
+            /** Format: uuid */
+            id: string;
+            /** @enum {string} */
+            status: "drafting" | "draft" | "failed" | "skipped";
+            body: string;
+            hint: string;
+            status_reason: string | null;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            updated_at: string;
+        };
+        /** @description A review on one of the brand's review pages. Its text is the reviewer's, as written. */
+        Review: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            brand_id: string | null;
+            /** Format: uuid */
+            page_id: string;
+            platform: components["schemas"]["ReviewPlatform"];
+            /** @description The review's own address */
+            url: string;
+            /** @description Stars on a 1 to 5 scale. */
+            rating: number;
+            title: string;
+            body: string;
+            language: string;
+            /** @description The reviewer's name as the platform shows it. */
+            author_name: string;
+            author_country: string;
+            /** @description The platform marked the reviewer verified. */
+            verified: boolean;
+            /** Format: date-time */
+            posted_at: string;
+            /** Format: date-time */
+            edited_at: string | null;
+            /** @enum {string} */
+            sentiment: "positive" | "neutral" | "negative" | "mixed";
+            /**
+             * @description rating: from the stars (4 and 5 positive, 3 neutral, 1 and 2 negative).
+             * @enum {string}
+             */
+            sentiment_source: "rating" | "ai";
+            /** @description The business's public reply. */
+            reply_body: string;
+            /** Format: date-time */
+            replied_at: string | null;
+            /** @description Minutes from the review to the reply. */
+            reply_minutes: number | null;
+            /** @enum {string} */
+            state: "live" | "removed";
+            draft: components["schemas"]["ReviewDraft"] | null;
+            /** Format: date-time */
+            first_seen_at: string;
+        };
+        ReviewsSummary: {
+            /** @description Outflare's review score across every platform, out of 100. Null with no reviews. */
+            outflare_score: number | null;
+            /** @description The weighted average of stars the score comes from. */
+            average: number | null;
+            reviews: number;
+            momentum: components["schemas"]["ReviewMomentum"];
+            platforms: {
+                platform: components["schemas"]["ReviewPlatform"];
+                pages: number;
+                score: number | null;
+                review_count: number | null;
+                outflare_score: number | null;
+                momentum: components["schemas"]["ReviewMomentum"];
+            }[];
+            weeks: {
+                /**
+                 * Format: date
+                 * @description The week's first day.
+                 */
+                week: string;
+                /** @description The score at the week's end. */
+                outflare_score: number | null;
+                new_reviews: number;
+            }[];
+            last_28_days: {
+                reviews: number;
+                positive: number | null;
+                neutral: number | null;
+                negative: number | null;
+                reply_rate: number | null;
+                median_reply_hours: number | null;
+            };
+            /** @description How long until a review counts half as much. */
+            half_life_days: number;
+            /** @description The workspace has a page reader (Geonode) connected. */
+            can_read: boolean;
+            /** @description The workspace has its own AI model connected. */
+            can_draft: boolean;
+        };
+        ReviewGuide: {
+            /** Format: uuid */
+            brand_id: string;
+            tone: string;
+            signed_by: string;
+            /** @description Where to send people for help. */
+            support_contact: string;
+            never_say: string;
+            /** @description What's true now, such as known issues and fixes. */
+            notes: string;
+            prefilled: boolean;
+            /** Format: date-time */
+            updated_at: string | null;
+        };
         /** @description A page or profile of the brand's own, reached through the workspace's own connection. */
         SocialAccount: {
             /** Format: uuid */
@@ -20475,14 +22123,14 @@ export interface components {
             /** Format: uuid */
             id: string;
             /**
-             * @description What found it: seo_audit is a site audit's crawl issues; seo_keywords is search intelligence (a page's keyword target, internal links worth adding, pages competing for one search, pages sharing a target keyword, and regressions such as a drop in clicks, rank or conversions); ai_visibility is AI answers that leave the brand out; social is social watches' posts and drafts; seo_links is link opportunities from backlinks, their spam scores and competitors' links.
+             * @description What found it: seo_audit is a site audit's crawl issues; seo_keywords is search intelligence (a page's keyword target, internal links worth adding, pages competing for one search, pages sharing a target keyword, and regressions such as a drop in clicks, rank or conversions); ai_visibility is AI answers that leave the brand out; social is social watches' posts and drafts; seo_links is link opportunities from backlinks, their spam scores and competitors' links; reviews is review pages with unhappy reviews waiting for an answer.
              * @enum {string}
              */
-            source: "seo_audit" | "seo_keywords" | "ai_visibility" | "social" | "seo_links";
+            source: "seo_audit" | "seo_keywords" | "ai_visibility" | "social" | "seo_links" | "reviews";
             /** @description What it is about. */
             subject: {
                 /** @enum {string} */
-                type: "seo_site" | "ai_prompt" | "social_watch" | "ai_fact";
+                type: "seo_site" | "ai_prompt" | "social_watch" | "ai_fact" | "review_page";
                 /** Format: uuid */
                 id: string;
             };
@@ -20529,6 +22177,135 @@ export interface components {
             created_at: string;
             /** Format: date-time */
             updated_at: string;
+        };
+        FixTicket: {
+            /** Format: uuid */
+            id: string;
+            /** @enum {string} */
+            source: "seo_audit" | "seo_keywords" | "ai_visibility" | "social" | "seo_links";
+            subject: {
+                /** @enum {string} */
+                type: "seo_site" | "ai_prompt" | "social_watch" | "ai_fact";
+                /** Format: uuid */
+                id: string;
+            };
+            /** Format: uuid */
+            brand_id: string | null;
+            rule: components["schemas"]["SEORule"];
+            /**
+             * @description The brief's title once written, else the rule's.
+             * @example Add titles to 42 product pages
+             */
+            title: string;
+            /** @enum {string} */
+            status: "open" | "in_progress" | "done" | "ignored";
+            /** @description What is left across its open parts, in unit. */
+            count: number;
+            /** @example pages */
+            unit: string;
+            /** @description Its fixes: for a site audit, one per URL template. */
+            parts: number;
+            open_parts: number;
+            /** @enum {string} */
+            brief_status: "none" | "queued" | "writing" | "ready" | "failed";
+            brief: components["schemas"]["FixTicketBrief"] | null;
+            /** @description Why the last write failed, for a person. */
+            brief_error: string;
+            /** @example claude-sonnet-5-5 */
+            brief_model: string;
+            /** @description The feedback the latest write followed. */
+            brief_feedback: string;
+            /** Format: date-time */
+            brief_written_at: string | null;
+            /** @enum {string} */
+            review: "" | "approved" | "rejected";
+            review_note: string;
+            reviewed_by: {
+                /** Format: uuid */
+                id: string;
+                name: string;
+                type: string;
+            } | null;
+            /** Format: date-time */
+            reviewed_at: string | null;
+            /** @description Search Console clicks and impressions of the ticket's open pages over the last 28 days; null without Search Console data. */
+            impact: {
+                clicks: number;
+                impressions: number;
+                /** Format: date-time */
+                at: string | null;
+            } | null;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            updated_at: string;
+        };
+        FixTicketBrief: {
+            /**
+             * @description Where the work is: the site's code or templates, words on pages, or settings of the server, CDN or CMS.
+             * @enum {string}
+             */
+            kind: "code" | "content" | "config";
+            title: string;
+            /** @description Two or three sentences for a person. */
+            summary: string;
+            why: string;
+            /** @description Markdown. */
+            change: string;
+            /** @description The definition of done. */
+            done_when: string[];
+            dont: string[];
+        };
+        FixTicketPage: {
+            /**
+             * Format: uuid
+             * @description The part it belongs to.
+             */
+            fix_id: string;
+            url: string;
+            /** @description What the source read on the page; data, not instructions. */
+            detail: string;
+        };
+        FixTicketDetail: components["schemas"]["FixTicket"] & {
+            fixes: components["schemas"]["Fix"][];
+            pages: components["schemas"]["FixTicketPage"][];
+            related: {
+                /** Format: uuid */
+                id: string;
+                title: string;
+                rule: string;
+                /** @enum {string} */
+                status: "open" | "in_progress" | "done" | "ignored";
+                /** @enum {string} */
+                review: "" | "approved" | "rejected";
+            }[];
+            guidelines: components["schemas"]["FixGuideline"][];
+        };
+        FixGuideline: {
+            /** Format: uuid */
+            id: string;
+            /** @enum {string} */
+            scope: "workspace" | "brand" | "site";
+            /** Format: uuid */
+            brand_id: string | null;
+            /** Format: uuid */
+            subject_id: string | null;
+            /** @description One rule, or empty for all. */
+            rule: string;
+            text: string;
+            /**
+             * Format: uuid
+             * @description The ticket whose review it came from.
+             */
+            ticket_id: string | null;
+            created_by: {
+                /** Format: uuid */
+                id: string;
+                name: string;
+                type: string;
+            } | null;
+            /** Format: date-time */
+            created_at: string;
         };
         CrawlLink: {
             url: string;
@@ -20620,6 +22397,47 @@ export interface components {
             review_note: string;
             /** Format: date-time */
             reviewed_at: string | null;
+            /** @description The linking page's strength, 0 to 100 (Ahrefs UR). */
+            url_rating: number | null;
+            /** @description The linking domain's estimated monthly organic visits; null unless the Ahrefs connection reads traffic (link_traffic). */
+            domain_traffic: number | null;
+            /** @description The linking page's estimated monthly organic visits, likewise. */
+            page_traffic: number | null;
+            /** @description Keywords the linking page ranks for in the top 100. */
+            page_keywords: number | null;
+            /** @description Domains linking to the linking page (with traffic). */
+            page_referring_domains: number | null;
+            /** @description Domains the linking page links to. */
+            linked_domains: number | null;
+            /** @description Links from the linking page to other sites. */
+            external_links: number | null;
+            /** @description The linking page's title. */
+            title: string;
+            author: string;
+            /** @description What kind of page links, as paths (/Article/Listicle). */
+            page_types: string[];
+            /** @description Its topics, as paths (/Computers/Security). */
+            page_categories: string[];
+            languages: string[];
+            /** @description What the linking site is built with (WordPress, ...). */
+            platforms: string[];
+            /** @description text, image, redirect, canonical, alternate, frame, form or rss; empty when unknown. */
+            link_type: string;
+            /** @description The link sits in the page's main content. */
+            in_content: boolean;
+            /** @description Where the linked URL leads: each redirect after target_url, in order. */
+            hops: {
+                /** @description The HTTP status (301, 302, ...), redirect, or canonical. */
+                kind: string;
+                url: string;
+            }[];
+            /**
+             * Format: date-time
+             * @description When a provider last found it live.
+             */
+            last_seen_at: string | null;
+            /** @description How many links this row stands for when the list is grouped; 1 otherwise. */
+            group_links: number;
         };
         BacklinkEvent: {
             id: string;
@@ -20702,6 +22520,16 @@ export interface components {
                 /** Format: date-time */
                 finished_at: string | null;
             }[];
+            /** @description Live links by the linking page's top-level type. */
+            page_types: components["schemas"]["BacklinkFacet"][];
+            /** @description Live links by link type. */
+            link_types: components["schemas"]["BacklinkFacet"][];
+            /** @description Some links carry traffic, so traffic columns and filters mean something. */
+            traffic: boolean;
+        };
+        BacklinkFacet: {
+            value: string;
+            links: number;
         };
         SEOCompetitor: {
             /** Format: uuid */
@@ -20808,6 +22636,8 @@ export interface components {
             sync: "weekly" | "off";
             /** @description Links the weekly read asks for per SEO site (default 200); 0 for a connection that does not read links. */
             link_rows: number;
+            /** @description The weekly links read also takes the linking pages' and domains' traffic (Ahrefs only, about 25 more API units a link). */
+            link_traffic: boolean;
             /** @description Keywords and linking domains the weekly read takes of each of up to 5 tracked competitors a site (default 50); 0 is off. */
             gap_rows: number;
             /** @description false: the domains follow the analytics tools. */
@@ -21001,7 +22831,7 @@ export interface components {
             /** @description Each task the AI model does and the model it uses now. */
             tasks: {
                 /** @enum {string} */
-                task: "plan" | "turn" | "check_in" | "reply_labelling" | "classify_domain" | "ai_visibility" | "social_replies" | "email_verification";
+                task: "plan" | "turn" | "check_in" | "reply_labelling" | "classify_domain" | "ai_visibility" | "social_replies" | "email_verification" | "fix_tickets" | "review_replies";
                 name: string;
                 description: string;
                 /** @description Null when no model can run yet. */
@@ -21139,6 +22969,8 @@ export interface components {
             spent_cents: number;
             /** @description The workspace's monthly AI limit; null is none. */
             monthly_limit_cents: number | null;
+            /** @description Reaching the workspace's monthly AI limit stops calls; false when it only warns. */
+            hard_stop: boolean;
             total: components["schemas"]["AIUsageTotals"];
             /** @description Each tool, most spent first. The engine's tools are always listed; others when they made calls or have a limit. */
             tools: (components["schemas"]["AIUsageTotals"] & {
@@ -21149,6 +22981,8 @@ export interface components {
                 description: string;
                 /** @description The tool's own monthly limit; null is none. */
                 monthly_limit_cents: number | null;
+                /** @description Reaching the tool's own limit stops its calls; false when it only warns. */
+                hard_stop: boolean;
             })[];
             /** @description Each provider and model, most spent first. */
             models: (components["schemas"]["AIUsageTotals"] & {
@@ -23270,10 +25104,10 @@ export interface components {
             ask_for_missing: boolean;
         };
         /**
-         * @description The steps in order. `community` (star the repository on GitHub and follow on X) is listed only when the server shows community links (`GET /v1/me/community`), and is done for the person asking once they opened every link.
+         * @description The steps in order. `website` is the first brand's script and DNS records, done once both are in place or Outflare is waiting to see them. `community` (star the repository on GitHub and follow on X) is listed only when the server shows community links (`GET /v1/me/community`), and is done for the person asking once they opened every link.
          * @enum {string}
          */
-        OnboardingStepId: "brand" | "goal" | "ai" | "connect" | "community" | "mission" | "team";
+        OnboardingStepId: "brand" | "ai" | "goal" | "website" | "connect" | "community" | "mission" | "team";
         /**
          * @description What a workspace wants to do first: find and email new customers (outreach), grow search traffic (search), report on what works (reports) or nurture existing customers (nurture).
          * @enum {string}
@@ -23356,6 +25190,56 @@ export interface components {
             connectors: string[];
             install: components["schemas"]["BrandSetupInstall"] | null;
         };
+        BrandDNSRecord: {
+            /** @description TXT, CNAME or MX. */
+            type: string;
+            /** @description The full name the record goes on. */
+            name: string;
+            value: string;
+            /** @description MX only. */
+            priority: number | null;
+            /**
+             * @description in_place once DNS shows it.
+             * @enum {string}
+             */
+            status: "in_place" | "missing";
+        };
+        BrandDNSGroup: {
+            /**
+             * @description What the records are for.
+             * @enum {string}
+             */
+            subject: "seo_site" | "email_domain" | "tracking_domain";
+            /**
+             * Format: uuid
+             * @description That thing's id, for its own .../dns/approval.
+             */
+            id: string;
+            title: string;
+            /** @description Why the records are needed */
+            why: string;
+            domain: string;
+            records: components["schemas"]["BrandDNSRecord"][];
+            missing: number;
+            /** @description The last one-click run or approval for this group. */
+            last: components["schemas"]["EmailDomainDNSInstall"] | null;
+        };
+        BrandDNS: {
+            /** Format: uuid */
+            brand_id: string;
+            /** @description The brand's website domain, without www; empty when it has none. */
+            domain: string;
+            groups: components["schemas"]["BrandDNSGroup"][];
+            /** @description Records still missing across every group. */
+            missing: number;
+            /** @description The brand's connections that can add DNS records. */
+            connections: string[];
+            developer: {
+                subject: string;
+                body: string;
+            };
+            ai_prompt: string;
+        };
         BrandSetup: {
             /** Format: uuid */
             brand_id: string;
@@ -23410,6 +25294,24 @@ export interface components {
             /** Format: date-time */
             checked_at: string;
         };
+        SupportAccess: {
+            /** @description Staff of the server's operator may view this account read-only to help. On by default. */
+            enabled: boolean;
+            /** @description Views of this account so far, newest first (at most 50). */
+            views: {
+                /** Format: uuid */
+                id: string;
+                /** Format: date-time */
+                started_at: string;
+                /** Format: date-time */
+                expires_at: string;
+                /**
+                 * Format: date-time
+                 * @description When the staff member or you ended it early; null if it ran until expires_at, or is running.
+                 */
+                ended_at: string | null;
+            }[];
+        };
         CommunityLinks: {
             links: {
                 /** @enum {string} */
@@ -23427,7 +25329,15 @@ export interface components {
             hidden_at: string | null;
             /** @description Whether the app shows the items: there are links, the person didn't hide them, and one isn't done yet. */
             show: boolean;
+            /** @description How the person heard about Outflare; null until they answer. */
+            heard_from: components["schemas"]["HeardFrom"] | null;
         };
+        /**
+         * @description The answer to "How did you hear about Outflare?", asked once in Get started's Star and follow step. Optional, one
+         *     fixed choice, never free text. A new answer replaces the last one.
+         * @enum {string}
+         */
+        HeardFrom: "search" | "ai_assistant" | "x" | "linkedin" | "github" | "youtube" | "friend" | "newsletter_podcast" | "other";
         Onboarding: {
             steps: components["schemas"]["OnboardingStep"][];
             done: number;
@@ -23444,6 +25354,14 @@ export interface components {
             dismissed_at: string | null;
             /** @description Whether the app opens the walk-through by itself: nothing done or skipped yet and nobody closed it. */
             show: boolean;
+            /** @description The brand the walk-through sets up: the workspace's first active brand, null until there is one. */
+            brand?: {
+                /** Format: uuid */
+                id: string;
+                handle: string;
+                name: string;
+                website: string;
+            } | null;
         };
         OnboardingInput: {
             /** @description Steps to leave for later. */
@@ -23849,6 +25767,8 @@ export interface components {
             /** @description Active identities. */
             identities: components["schemas"]["RecordIdentity"][];
             contactability?: components["schemas"]["Contactability"];
+            /** @description Held for someone to approve, such as a person a visitor identification tool named: left out of the list unless asked for, and blocked by the policy check (needs_review) until approved with POST .../records/{record}/review. */
+            needs_review: boolean;
             /** @description Goes up on every change. */
             version: number;
             /** Format: uuid */
@@ -24293,7 +26213,7 @@ export interface components {
              * @description What it is. Guessed from the address when left out (apps.apple.com is app_store); other when unknown.
              * @enum {string}
              */
-            kind?: "app_store" | "google_play" | "tv_app" | "chrome_web_store" | "microsoft_store" | "steam" | "docs" | "help" | "blog" | "status" | "x" | "linkedin" | "youtube" | "instagram" | "tiktok" | "facebook" | "discord" | "reddit" | "github" | "bluesky" | "threads" | "mastodon" | "dev_to" | "docker_hub" | "other";
+            kind?: "app_store" | "google_play" | "tv_app" | "chrome_web_store" | "microsoft_store" | "steam" | "docs" | "help" | "blog" | "status" | "x" | "linkedin" | "youtube" | "instagram" | "tiktok" | "facebook" | "discord" | "reddit" | "github" | "bluesky" | "threads" | "mastodon" | "dev_to" | "docker_hub" | "trustpilot" | "g2" | "capterra" | "google_reviews" | "other";
             /**
              * Format: uri
              * @example https://apps.apple.com/app/repocket/id1234567890
@@ -24855,6 +26775,13 @@ export interface components {
             dns_install: components["schemas"]["EmailDomainDNSInstall"] | null;
             /** @description The workspace's connections that can add the CNAME, such as Cloudflare. */
             dns_connections: string[];
+            /**
+             * @description The HTTPS certificate the server is getting for the domain once its CNAME checks out: pending, active or failed. Links use the domain only once it is active. null when the server has no certificate provider and its own proxy serves HTTPS (self-hosted).
+             * @enum {string|null}
+             */
+            https_status: "pending" | "active" | "failed" | null;
+            /** @description What to fix when https_status is failed, or why it is still pending. */
+            https_error: string;
         };
         /**
          * @description replied means the lead answered and the sequence stops on reply. unsubscribed also covers a reply asking to be removed.
@@ -25011,12 +26938,70 @@ export interface components {
             /** Format: date-time */
             created_at: string;
         };
+        Alert: {
+            /** Format: uuid */
+            id: string;
+            /** @example reply.hot */
+            kind: string;
+            /** Format: uuid */
+            brand_id: string | null;
+            /** @example inbound_message */
+            target_type: string;
+            /** Format: uuid */
+            target_id: string;
+            /** Format: uuid */
+            record_id: string | null;
+            /**
+             * Format: uuid
+             * @description The user it is for
+             */
+            owner_id: string | null;
+            /** @description Ids, enums and counts, as in the alert.raised webhook. */
+            data: {
+                [key: string]: unknown;
+            };
+            /** Format: date-time */
+            created_at: string;
+            /** @example Kim Lee at Northpeak is interested */
+            title: string;
+            text: string;
+            /**
+             * @description The app page that has it, under the workspace: /{workspace}/{path}.
+             * @example inbox/5f0c1e2a-0000-4000-8000-000000000000
+             */
+            path: string;
+        };
+        AlertKind: {
+            /** @example reply.hot */
+            id: string;
+            title: string;
+            description: string;
+        };
+        AlertSetting: {
+            /**
+             * Format: uuid
+             * @description Null for the workspace.
+             */
+            brand_id: string | null;
+            kind: string;
+            /**
+             * @description Null follows the workspace or the default.
+             * @enum {string|null}
+             */
+            email: "owner" | "admins" | "off" | null;
+            /** Format: uuid */
+            slack_integration_id: string | null;
+            slack_channel: string | null;
+            slack_channel_name: string | null;
+            /** Format: date-time */
+            updated_at: string;
+        };
         ReplyRule: {
             /**
-             * @description One of the label's actions (see actions in GET .../reply-rules).
+             * @description One of the label's actions (see actions in GET .../reply-rules). Required for not_now, out_of_office, referral and wrong_person; other labels only take nothing, the default.
              * @example snooze
              */
-            action: string;
+            action?: string;
             /** @description not_now only: how long to wait when the reply gives no date. Default 90. */
             days?: number;
             /**
@@ -25024,6 +27009,41 @@ export interface components {
              * @description add_and_enroll only: the sequence to enrol the person in.
              */
             sequence_id?: string;
+            deal?: components["schemas"]["ReplyDealRule"];
+        };
+        /**
+         * @description Moves a deal in Outflare's own CRM when a reply gets the label. The
+         *     reply's deal is the newest one of this type, not in a closed stage,
+         *     that points at the reply's person or one of their companies; with
+         *     none, a new deal opens at the stage, named after the company. A deal
+         *     only moves forward through the stages, and never over a stage a
+         *     person set. The type needs a reference field to a person or a
+         *     company.
+         */
+        ReplyDealRule: {
+            /**
+             * @description The record type of deals.
+             * @example deal
+             */
+            type: string;
+            /**
+             * @description Its status field that holds the stage.
+             * @example stage
+             */
+            field: string;
+            /**
+             * @description The option key to move to.
+             * @example qualified
+             */
+            stage: string;
+            /**
+             * @description Final stages, such as won and lost: a deal in one is never moved, and a new reply opens a new deal.
+             * @example [
+             *       "won",
+             *       "lost"
+             *     ]
+             */
+            closed?: string[];
         };
         /**
          * @description A rule per label. not_now: snooze (default; the reply comes back to
@@ -25032,13 +27052,21 @@ export interface components {
          *     reschedule (default; the lead's next email waits until the day
          *     after the return date the AI read) or nothing. referral and
          *     wrong_person: suggest (default; the inbox offers to add the person),
-         *     add (a lead on the referrer's lists) or add_and_enroll.
+         *     add (a lead on the referrer's lists) or add_and_enroll. Any label a
+         *     person writes (not out_of_office or auto_reply) can also move a deal.
          */
         ReplyRules: {
             not_now?: components["schemas"]["ReplyRule"];
             out_of_office?: components["schemas"]["ReplyRule"];
             referral?: components["schemas"]["ReplyRule"];
             wrong_person?: components["schemas"]["ReplyRule"];
+            interested?: components["schemas"]["ReplyRule"];
+            meeting_booked?: components["schemas"]["ReplyRule"];
+            question?: components["schemas"]["ReplyRule"];
+            objection?: components["schemas"]["ReplyRule"];
+            not_interested?: components["schemas"]["ReplyRule"];
+            unsubscribe?: components["schemas"]["ReplyRule"];
+            complaint?: components["schemas"]["ReplyRule"];
         };
         ReplyRuleSet: {
             /** Format: uuid */
@@ -26399,6 +28427,7 @@ export interface operations {
                     clicked?: string;
                     /** @description True hides the items for this person; false shows them again. */
                     hidden?: boolean;
+                    heard_from?: components["schemas"]["HeardFrom"];
                 };
             };
         };
@@ -26605,6 +28634,91 @@ export interface operations {
                             /** @description One of the web app's icon names, such as "shield". */
                             icon: string;
                         }[];
+                        /**
+                         * @description Set while a staff member of the server's operator views this account (support access): `user` and
+                         *     `workspaces` are the viewed person's, every workspace's `scopes` are read scopes only, and inbox and
+                         *     email content stay hidden. The app shows a banner with a way out (`DELETE /v1/me/support-view`).
+                         *     Null otherwise.
+                         */
+                        support_view: null | {
+                            /**
+                             * Format: date-time
+                             * @description When the view ends by itself.
+                             */
+                            expires_at: string;
+                        };
+                    };
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    getSupportAccess: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The setting and the views so far. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SupportAccess"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    updateSupportAccess: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    enabled: boolean;
+                };
+            };
+        };
+        responses: {
+            /** @description The setting after the change. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SupportAccess"];
+                };
+            };
+            400: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    endSupportView: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The view ended. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        ended: boolean;
                     };
                 };
             };
@@ -32755,6 +34869,209 @@ export interface operations {
             default: components["responses"]["Error"];
         };
     };
+    listAlerts: {
+        parameters: {
+            query?: {
+                /** @description One kind */
+                kind?: string;
+                /** @description next_before from the previous page. */
+                before?: string;
+                limit?: number;
+                /**
+                 * @description next_cursor from the previous page, unchanged. Every paged list takes it, so one loop pages them all:
+                 *     call, then call again with cursor=next_cursor until next_cursor is null. Cursors are opaque; don't build them.
+                 */
+                cursor?: components["parameters"]["Cursor"];
+                /**
+                 * @description Only these fields of each item, comma separated (fields=id,email,status); id always comes back.
+                 *     Paging fields stay. A field the items don't have answers 400 naming the ones they do. Any GET takes it.
+                 */
+                fields?: components["parameters"]["Fields"];
+            };
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Alerts. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["Alert"][];
+                        /** Format: date-time */
+                        next_before: string | null;
+                        next_cursor: components["schemas"]["NextCursor"];
+                    };
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    getAlertSettings: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Settings. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        kinds: components["schemas"]["AlertKind"][];
+                        /** @enum {string} */
+                        default_email: "owner" | "admins" | "off";
+                        daily_email_limit: number;
+                        settings: components["schemas"]["AlertSetting"][];
+                        /** @description Kinds the caller muted for themselves. */
+                        muted: string[];
+                    };
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    setAlertSettings: {
+        parameters: {
+            query?: never;
+            header?: {
+                /**
+                 * @description Makes the write safe to retry. A repeat with the same key from the same caller within 24 hours gets the first
+                 *     answer back (with `Idempotent-Replayed: true`) instead of running again. The same key for a different request
+                 *     is refused with 422 `idempotency_key_reused`; while the first is still running, 409 `idempotency_in_progress`.
+                 *     Use a new random key, such as a UUID, for each distinct write.
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** Format: uuid */
+                    brand_id?: string | null;
+                    /** @example reply.hot */
+                    kind: string;
+                    /** @enum {string|null} */
+                    email?: "owner" | "admins" | "off" | null;
+                    /** Format: uuid */
+                    slack_integration_id?: string | null;
+                    /** @example C0123456789 */
+                    slack_channel?: string | null;
+                };
+            };
+        };
+        responses: {
+            /** @description The saved setting, or cleared true. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AlertSetting"] | {
+                        cleared: boolean;
+                    };
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            default: components["responses"]["Error"];
+        };
+    };
+    listAlertChannels: {
+        parameters: {
+            query: {
+                integration_id: string;
+            };
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Channels. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: {
+                            id: string;
+                            name: string;
+                            private: boolean;
+                        }[];
+                    };
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    setAlertMute: {
+        parameters: {
+            query?: never;
+            header?: {
+                /**
+                 * @description Makes the write safe to retry. A repeat with the same key from the same caller within 24 hours gets the first
+                 *     answer back (with `Idempotent-Replayed: true`) instead of running again. The same key for a different request
+                 *     is refused with 422 `idempotency_key_reused`; while the first is still running, 409 `idempotency_in_progress`.
+                 *     Use a new random key, such as a UUID, for each distinct write.
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @example visitor.hot */
+                    kind: string;
+                    muted: boolean;
+                };
+            };
+        };
+        responses: {
+            /** @description The mute as it now is. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        kind: string;
+                        muted: boolean;
+                    };
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            default: components["responses"]["Error"];
+        };
+    };
     getReplyRules: {
         parameters: {
             query?: never;
@@ -35218,6 +37535,8 @@ export interface operations {
                     sync?: "weekly" | "off";
                     /** @description Links each weekly read asks for per SEO site, strongest linking domains first; null is the default, 200. */
                     link_rows?: number | null;
+                    /** @description Ahrefs only: also read the linking pages' and domains' traffic and referring domains, about 25 more API units a link (5,200 a site a week at the default 200 links). */
+                    link_traffic?: boolean;
                     /** @description Keywords and linking domains each weekly read takes of up to 5 tracked competitors a site, for the gaps; 0 turns that off, null is the default, 50. */
                     gap_rows?: number | null;
                 };
@@ -35424,6 +37743,43 @@ export interface operations {
                      * @enum {string}
                      */
                     schedule?: "off" | "daily" | "weekly";
+                    /**
+                     * @description Run pages' scripts before reading them, through the workspace's own scraping connection (Geonode, which bills you for it) and only on a proved site. auto (the default) does it only for pages that are an empty app shell; always does it for every page.
+                     * @enum {string}
+                     */
+                    render_js?: "off" | "auto" | "always";
+                    /** @description Read the sitemaps robots.txt lists (or /sitemap.xml) to find pages. Default true. */
+                    use_sitemaps?: boolean;
+                    /** @description Follow links marked rel=nofollow too. Default false. */
+                    follow_nofollow?: boolean;
+                    /** @description Crawl /page?a=1 and /page?a=2 as /page. Default false. */
+                    ignore_params?: boolean;
+                    /** @description Clicks from the start page; 0 (the default) is no limit. */
+                    max_depth?: number;
+                    /**
+                     * @description Regular expressions over a page's path and query. When set, only matching pages are crawled; the start page always is.
+                     * @example [
+                     *       "^/blog/"
+                     *     ]
+                     */
+                    include_patterns?: string[];
+                    /**
+                     * @description Pages matching any of these are not crawled. They win over include_patterns.
+                     * @example [
+                     *       "^/tag/",
+                     *       "[?&]sort="
+                     *     ]
+                     */
+                    exclude_patterns?: string[];
+                    /** @description The hour a scheduled crawl starts, in schedule_tz; null starts it any time. */
+                    schedule_hour?: number | null;
+                    /** @description For a weekly schedule with an hour: the day, 0 is Sunday; null is any day. */
+                    schedule_day?: number | null;
+                    /**
+                     * @description The time zone of schedule_hour. Default UTC.
+                     * @example Australia/Sydney
+                     */
+                    schedule_tz?: string;
                 };
             };
         };
@@ -35528,10 +37884,49 @@ export interface operations {
                     max_pages?: number;
                     crawl_delay_ms?: number;
                     obey_robots?: boolean;
+                    /** @description Where crawls start, on the site's own host. */
+                    url?: string;
                     /** @enum {string} */
                     schedule?: "off" | "daily" | "weekly";
                     /** @enum {string} */
                     status?: "active" | "paused";
+                    /**
+                     * @description Run pages' scripts before reading them, through the workspace's own scraping connection (Geonode, which bills you for it) and only on a proved site. auto (the default) does it only for pages that are an empty app shell; always does it for every page.
+                     * @enum {string}
+                     */
+                    render_js?: "off" | "auto" | "always";
+                    /** @description Read the sitemaps robots.txt lists (or /sitemap.xml) to find pages. Default true. */
+                    use_sitemaps?: boolean;
+                    /** @description Follow links marked rel=nofollow too. Default false. */
+                    follow_nofollow?: boolean;
+                    /** @description Crawl /page?a=1 and /page?a=2 as /page. Default false. */
+                    ignore_params?: boolean;
+                    /** @description Clicks from the start page; 0 (the default) is no limit. */
+                    max_depth?: number;
+                    /**
+                     * @description Regular expressions over a page's path and query. When set, only matching pages are crawled; the start page always is.
+                     * @example [
+                     *       "^/blog/"
+                     *     ]
+                     */
+                    include_patterns?: string[];
+                    /**
+                     * @description Pages matching any of these are not crawled. They win over include_patterns.
+                     * @example [
+                     *       "^/tag/",
+                     *       "[?&]sort="
+                     *     ]
+                     */
+                    exclude_patterns?: string[];
+                    /** @description The hour a scheduled crawl starts, in schedule_tz; null starts it any time. */
+                    schedule_hour?: number | null;
+                    /** @description For a weekly schedule with an hour: the day, 0 is Sunday; null is any day. */
+                    schedule_day?: number | null;
+                    /**
+                     * @description The time zone of schedule_hour. Default UTC.
+                     * @example Australia/Sydney
+                     */
+                    schedule_tz?: string;
                 };
             };
         };
@@ -36178,6 +38573,106 @@ export interface operations {
             default: components["responses"]["Error"];
         };
     };
+    getSiteIndexability: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                site: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The report. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** Format: uuid */
+                        site_id: string;
+                        summary: components["schemas"]["IndexabilitySummary"];
+                        sources: components["schemas"]["IndexabilitySources"];
+                        /** @description Every issue the report checks, worst first, with how many pages have it. */
+                        issues: (components["schemas"]["IndexabilityIssue"] & {
+                            pages: number;
+                        })[];
+                        /** @description Oldest first. */
+                        history: (components["schemas"]["IndexabilitySummary"] & {
+                            /** Format: date */
+                            day: string;
+                        })[];
+                        gaps: {
+                            /** @enum {string} */
+                            source: "crawl" | "search_console" | "seo_tool";
+                            /** @description The connection to add, when one fills the gap. */
+                            connector?: string;
+                            message: string;
+                        }[];
+                    };
+                };
+            };
+            400: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    listIndexabilityPages: {
+        parameters: {
+            query?: {
+                verdict?: "indexed" | "likely_indexed" | "not_indexed" | "unknown";
+                /** @description An issue id from GET .../indexability. */
+                issue?: "indexable_not_indexed" | "sitemap_not_indexable" | "indexed_not_indexable" | "google_canonical_differs" | "not_found_by_crawl" | "sources_disagree" | "missing_from_sitemap";
+                /** @description Only pages the crawl read that can (true) or can't (false) be indexed. */
+                indexable?: boolean;
+                /** @description Part of the URL. */
+                q?: string;
+                limit?: number;
+                offset?: number;
+                /**
+                 * @description Only these fields of each item, comma separated (fields=id,email,status); id always comes back.
+                 *     Paging fields stay. A field the items don't have answers 400 naming the ones they do. Any GET takes it.
+                 */
+                fields?: components["parameters"]["Fields"];
+                /**
+                 * @description next_cursor from the previous page, unchanged. Every paged list takes it, so one loop pages them all:
+                 *     call, then call again with cursor=next_cursor until next_cursor is null. Cursors are opaque; don't build them.
+                 */
+                cursor?: components["parameters"]["Cursor"];
+            };
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                site: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Pages. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["IndexabilityPage"][];
+                        total: number;
+                        next_offset: number | null;
+                        next_cursor: components["schemas"]["NextCursor"];
+                    };
+                };
+            };
+            400: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
     getSiteSitemaps: {
         parameters: {
             query?: never;
@@ -36214,10 +38709,32 @@ export interface operations {
                 brand?: components["parameters"]["Brand"];
                 site_id?: string;
                 status?: "live" | "lost";
+                /** @description History: also list links lost on or after this date. */
+                since?: string;
+                /** @description Only links first seen, or lost, since `since`. */
+                change?: "new" | "lost";
+                group?: "all" | "domain" | "page";
                 nofollow?: boolean;
-                /** @description Part of the linking domain, URL or anchor. */
+                follow?: "dofollow" | "nofollow" | "ugc" | "sponsored";
+                /** @description content: links in the page's main content. */
+                link_type?: "content" | "text" | "image" | "redirect" | "canonical" | "alternate" | "frame" | "form" | "rss";
+                dr_min?: number;
+                dr_max?: number;
+                ur_min?: number;
+                ur_max?: number;
+                domain_traffic_min?: number;
+                domain_traffic_max?: number;
+                page_traffic_min?: number;
+                page_traffic_max?: number;
+                /** @description A top-level page type of the linking page, like Article or Listing (see the summary's page_types). */
+                page_type?: string;
+                /** @description Only links from this domain. */
+                source_domain?: string;
+                /** @description Words or a phrase to find. */
                 q?: string;
-                order?: "rating" | "newest" | "lost" | "spam";
+                /** @description Where to look for q; unset is the linking domain, page URL, title, anchor and target URL. */
+                q_in?: "source_url" | "target_url" | "anchor" | "title";
+                order?: "rating" | "url_rating" | "domain_traffic" | "page_traffic" | "keywords" | "newest" | "oldest" | "last_seen" | "lost" | "spam";
                 spam?: "clean" | "suspect" | "toxic";
                 /** @description none for links nobody reviewed. */
                 review?: "none" | "ok" | "disavow";
@@ -37415,7 +39932,7 @@ export interface operations {
     listFixes: {
         parameters: {
             query?: {
-                source?: "seo_audit" | "seo_keywords" | "ai_visibility" | "social" | "seo_links";
+                source?: "seo_audit" | "seo_keywords" | "ai_visibility" | "social" | "seo_links" | "reviews";
                 /** @description One subject's fixes, such as an SEO site's id. */
                 subject_id?: string;
                 status?: "open" | "in_progress" | "done" | "ignored";
@@ -37760,6 +40277,305 @@ export interface operations {
             403: components["responses"]["Error"];
             404: components["responses"]["Error"];
             409: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    listFixTickets: {
+        parameters: {
+            query?: {
+                status?: "todo" | "open" | "in_progress" | "done" | "ignored" | "all";
+                source?: "seo_audit" | "seo_keywords" | "ai_visibility" | "social" | "seo_links";
+                /** @description One subject's tickets, such as an SEO site's id. */
+                subject_id?: string;
+                /** @description Only records of this brand: its id or handle, none for records shared by every brand, or all (the default). */
+                brand?: components["parameters"]["Brand"];
+            };
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Tickets (up to 500). */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["FixTicket"][];
+                    };
+                };
+            };
+            400: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    getFixTicket: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                ticket: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The ticket. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FixTicketDetail"];
+                };
+            };
+            404: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    getFixTicketPrompt: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                ticket: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The prompt. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        prompt: string;
+                        pages: components["schemas"]["FixTicketPage"][];
+                    };
+                };
+            };
+            404: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    writeFixTicket: {
+        parameters: {
+            query?: never;
+            header?: {
+                /**
+                 * @description Makes the write safe to retry. A repeat with the same key from the same caller within 24 hours gets the first
+                 *     answer back (with `Idempotent-Replayed: true`) instead of running again. The same key for a different request
+                 *     is refused with 422 `idempotency_key_reused`; while the first is still running, 409 `idempotency_in_progress`.
+                 *     Use a new random key, such as a UUID, for each distinct write.
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                ticket: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": {
+                    /** @example Our product pages come from Shopify; fix it in the theme. */
+                    feedback?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description Queued, or held for a person's approval in a mission. */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        queued: boolean;
+                    } | components["schemas"]["MissionHeld"];
+                };
+            };
+            400: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    reviewFixTicket: {
+        parameters: {
+            query?: never;
+            header?: {
+                /**
+                 * @description Makes the write safe to retry. A repeat with the same key from the same caller within 24 hours gets the first
+                 *     answer back (with `Idempotent-Replayed: true`) instead of running again. The same key for a different request
+                 *     is refused with 422 `idempotency_key_reused`; while the first is still running, 409 `idempotency_in_progress`.
+                 *     Use a new random key, such as a UUID, for each distinct write.
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                ticket: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @enum {string} */
+                    decision: "approve" | "reject" | "reopen";
+                    note?: string;
+                    /** @enum {string} */
+                    guideline?: "workspace" | "brand" | "site" | "";
+                };
+            };
+        };
+        responses: {
+            /** @description The ticket. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FixTicket"];
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            400: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    listFixGuidelines: {
+        parameters: {
+            query?: {
+                /** @description Only records of this brand: its id or handle, none for records shared by every brand, or all (the default). */
+                brand?: components["parameters"]["Brand"];
+            };
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Guidelines. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["FixGuideline"][];
+                    };
+                };
+            };
+            400: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    createFixGuideline: {
+        parameters: {
+            query?: never;
+            header?: {
+                /**
+                 * @description Makes the write safe to retry. A repeat with the same key from the same caller within 24 hours gets the first
+                 *     answer back (with `Idempotent-Replayed: true`) instead of running again. The same key for a different request
+                 *     is refused with 422 `idempotency_key_reused`; while the first is still running, 409 `idempotency_in_progress`.
+                 *     Use a new random key, such as a UUID, for each distinct write.
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @example Titles are in sentence case and end with | Northpeak. */
+                    text: string;
+                    /** @description A brand's id or handle. */
+                    brand_id?: string | null;
+                    /**
+                     * Format: uuid
+                     * @description An SEO site's id.
+                     */
+                    subject_id?: string;
+                    /** @example title_missing */
+                    rule?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The guideline. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FixGuideline"];
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            400: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    deleteFixGuideline: {
+        parameters: {
+            query?: never;
+            header?: {
+                /**
+                 * @description Makes the write safe to retry. A repeat with the same key from the same caller within 24 hours gets the first
+                 *     answer back (with `Idempotent-Replayed: true`) instead of running again. The same key for a different request
+                 *     is refused with 422 `idempotency_key_reused`; while the first is still running, 409 `idempotency_in_progress`.
+                 *     Use a new random key, such as a UUID, for each distinct write.
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                guideline: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            202: components["responses"]["MissionHeld"];
+            /** @description Removed. */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
             default: components["responses"]["Error"];
         };
     };
@@ -39408,6 +42224,435 @@ export interface operations {
             default: components["responses"]["Error"];
         };
     };
+    listReviews: {
+        parameters: {
+            query?: {
+                /** @description Only records of this brand: its id or handle, none for records shared by every brand, or all (the default). */
+                brand?: components["parameters"]["Brand"];
+                platform?: components["schemas"]["ReviewPlatform"];
+                page_id?: string;
+                sentiment?: "positive" | "neutral" | "negative" | "mixed";
+                /** @description false: reviews with no answer yet; true: answered ones. */
+                replied?: boolean;
+                stars?: number;
+                /** @description Only reviews from the last this many days. */
+                days?: number;
+                /** @description Only reviews posted before this time (next_before of the last page). */
+                before?: string;
+                limit?: number;
+                /**
+                 * @description next_cursor from the previous page, unchanged. Every paged list takes it, so one loop pages them all:
+                 *     call, then call again with cursor=next_cursor until next_cursor is null. Cursors are opaque; don't build them.
+                 */
+                cursor?: components["parameters"]["Cursor"];
+                /**
+                 * @description Only these fields of each item, comma separated (fields=id,email,status); id always comes back.
+                 *     Paging fields stay. A field the items don't have answers 400 naming the ones they do. Any GET takes it.
+                 */
+                fields?: components["parameters"]["Fields"];
+            };
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Reviews. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["Review"][];
+                        /** Format: date-time */
+                        next_before: string | null;
+                        next_cursor?: components["schemas"]["NextCursor"];
+                    };
+                };
+            };
+            400: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    getReviewsSummary: {
+        parameters: {
+            query?: {
+                /** @description Only records of this brand: its id or handle, none for records shared by every brand, or all (the default). */
+                brand?: components["parameters"]["Brand"];
+                weeks?: number;
+            };
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The summary. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReviewsSummary"];
+                };
+            };
+            400: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    listReviewPages: {
+        parameters: {
+            query?: {
+                /** @description Only records of this brand: its id or handle, none for records shared by every brand, or all (the default). */
+                brand?: components["parameters"]["Brand"];
+                platform?: components["schemas"]["ReviewPlatform"];
+                status?: "active" | "paused" | "removed";
+            };
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Review pages. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["ReviewPage"][];
+                    };
+                };
+            };
+            400: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    syncReviewPages: {
+        parameters: {
+            query?: never;
+            header?: {
+                /**
+                 * @description Makes the write safe to retry. A repeat with the same key from the same caller within 24 hours gets the first
+                 *     answer back (with `Idempotent-Replayed: true`) instead of running again. The same key for a different request
+                 *     is refused with 422 `idempotency_key_reused`; while the first is still running, 409 `idempotency_in_progress`.
+                 *     Use a new random key, such as a UUID, for each distinct write.
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Queued, or held in a mission. */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @constant */
+                        queued: true;
+                    } | components["schemas"]["MissionHeld"];
+                };
+            };
+            409: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    updateReviewPage: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @enum {string} */
+                    status: "active" | "paused";
+                };
+            };
+        };
+        responses: {
+            /** @description The page. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReviewPage"];
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            400: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    listReviewPageDays: {
+        parameters: {
+            query?: {
+                days?: number;
+            };
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Days, oldest first. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["ReviewPageDay"][];
+                    };
+                };
+            };
+            400: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    getReview: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The review. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Review"];
+                };
+            };
+            404: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    draftReviewReply: {
+        parameters: {
+            query?: never;
+            header?: {
+                /**
+                 * @description Makes the write safe to retry. A repeat with the same key from the same caller within 24 hours gets the first
+                 *     answer back (with `Idempotent-Replayed: true`) instead of running again. The same key for a different request
+                 *     is refused with 422 `idempotency_key_reused`; while the first is still running, 409 `idempotency_in_progress`.
+                 *     Use a new random key, such as a UUID, for each distinct write.
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": {
+                    hint?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The review, its answer being drafted, or held in a mission. */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Review"] | components["schemas"]["MissionHeld"];
+                };
+            };
+            400: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    markReviewReplied: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": {
+                    body?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The review. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Review"];
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            400: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    discoverReviewPages: {
+        parameters: {
+            query?: never;
+            header?: {
+                /**
+                 * @description Makes the write safe to retry. A repeat with the same key from the same caller within 24 hours gets the first
+                 *     answer back (with `Idempotent-Replayed: true`) instead of running again. The same key for a different request
+                 *     is refused with 422 `idempotency_key_reused`; while the first is still running, 409 `idempotency_in_progress`.
+                 *     Use a new random key, such as a UUID, for each distinct write.
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                /** @description The brand's id or handle. */
+                brand: components["parameters"]["BrandRef"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Queued, or held in a mission. */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @constant */
+                        queued: true;
+                    } | components["schemas"]["MissionHeld"];
+                };
+            };
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    getReviewGuide: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                /** @description The brand's id or handle. */
+                brand: components["parameters"]["BrandRef"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The guide. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReviewGuide"];
+                };
+            };
+            404: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    putReviewGuide: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                /** @description The brand's id or handle. */
+                brand: components["parameters"]["BrandRef"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    tone?: string;
+                    signed_by?: string;
+                    support_contact?: string;
+                    never_say?: string;
+                    notes?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The guide. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReviewGuide"];
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            400: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
     listSocialAccounts: {
         parameters: {
             query?: {
@@ -39467,7 +42712,7 @@ export interface operations {
                 };
                 content: {
                     "application/json": {
-                        /** @constant */
+                        /** @enum {boolean} */
                         queued: true;
                         /** @description Connections queued. */
                         connections: number;
@@ -40541,6 +43786,17 @@ export interface operations {
                     limits: {
                         [key: string]: number | null;
                     };
+                    /** @description Whether reaching the workspace's monthly AI limit stops calls (true) or only warns (false). Left out, it stays as it is; true for a workspace that never set it. */
+                    hard_stop?: boolean;
+                    /**
+                     * @description Replaces which tools' own limits only warn. A tool set to false only warns; a tool set to true or left out stops calls. Leave the whole field out to keep what is set.
+                     * @example {
+                     *       "reply_labelling": false
+                     *     }
+                     */
+                    hard_stops?: {
+                        [key: string]: boolean;
+                    };
                 };
             };
         };
@@ -40754,6 +44010,7 @@ export interface operations {
                         reply_labelling?: components["schemas"]["AITaskModelInput"];
                         classify_domain?: components["schemas"]["AITaskModelInput"];
                         social_replies?: components["schemas"]["AITaskModelInput"];
+                        review_replies?: components["schemas"]["AITaskModelInput"];
                         ai_visibility?: components["schemas"]["AITaskModelInput"];
                         email_verification?: components["schemas"]["AITaskModelInput"];
                     };
@@ -42167,6 +45424,112 @@ export interface operations {
             };
             202: components["responses"]["MissionHeld"];
             400: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    listKitCatalog: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Kits, by title. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["Kit"][];
+                    };
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    getKitCatalog: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @example creators-partnerships */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The kit. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Kit"];
+                };
+            };
+            404: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    previewKit: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                /** @example creators-partnerships */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description What applying it would do. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["KitPlan"];
+                };
+            };
+            404: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    applyKit: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                /** @example creators-partnerships */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description What it did. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["KitPlan"];
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            403: components["responses"]["Error"];
             404: components["responses"]["Error"];
             409: components["responses"]["Error"];
             default: components["responses"]["Error"];
@@ -45042,6 +48405,10 @@ export interface operations {
                 origin?: components["schemas"]["RecordOrigin"];
                 /** @description Default false. */
                 archived?: "false" | "true" | "all";
+                /** @description Default approved: records held for review are left out. needs_review lists only those. */
+                review?: "approved" | "needs_review" | "all";
+                /** @description Only records from these tools, comma-separated, such as rb2b,vector. */
+                acquired_via?: string;
                 /** @description Only records of this brand: its id or handle, none for records shared by every brand, or all (the default). */
                 brand?: components["parameters"]["Brand"];
                 limit?: number;
@@ -45371,6 +48738,39 @@ export interface operations {
                     };
                 };
             };
+            default: components["responses"]["Error"];
+        };
+    };
+    reviewRecord: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                record: components["parameters"]["RecordID"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @enum {string} */
+                    decision: "approve" | "reject";
+                };
+            };
+        };
+        responses: {
+            /** @description The record now. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Record"];
+                };
+            };
+            202: components["responses"]["MissionHeld"];
             default: components["responses"]["Error"];
         };
     };
@@ -46261,6 +49661,36 @@ export interface operations {
             default: components["responses"]["Error"];
         };
     };
+    sendVisitorPeople: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The connection's id. */
+                id: string;
+                /** @description The connection's signature. */
+                token: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": unknown;
+            };
+        };
+        responses: {
+            /** @description Taken in. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["VisitorHookResult"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
     sendSiteEvents: {
         parameters: {
             query?: never;
@@ -46320,6 +49750,248 @@ export interface operations {
                 };
                 content?: never;
             };
+            default: components["responses"]["Error"];
+        };
+    };
+    getSiteFlags: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "text/plain": string;
+                "application/json": {
+                    /** @example ofk_test_not_a_real_key */
+                    key: string;
+                    anonymousId: string;
+                    url?: string;
+                    referrer?: string;
+                    language?: string;
+                    /** @description Versions a person chose to see (?of_flag=key:version), by flag key: each comes back with its content, even for a flag that is still off. */
+                    preview?: {
+                        [key: string]: string;
+                    };
+                };
+            };
+        };
+        responses: {
+            /** @description Each flag that is on, with the variant or false. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FlagDecisions"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    getSiteFlagsPreflight: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Allowed. */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    listFlags: {
+        parameters: {
+            query?: {
+                /** @description Only records of this brand: its id or handle, none for records shared by every brand, or all (the default). */
+                brand?: components["parameters"]["Brand"];
+                /** @description Without it, every flag but the archived ones. */
+                status?: "on" | "off" | "archived" | "all";
+            };
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Flags. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["Flag"][];
+                    };
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    createFlag: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["FlagInput"];
+            };
+        };
+        responses: {
+            /** @description The flag. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Flag"];
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            default: components["responses"]["Error"];
+        };
+    };
+    evaluateFlags: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    anonymous_id?: string;
+                    user_id?: string;
+                    /** @description The page's address, for host, path, url and query.<name> rules. */
+                    url?: string;
+                    referrer?: string;
+                    /** @description For device rules. */
+                    user_agent?: string;
+                    /** @example en-GB */
+                    language?: string;
+                    /** @description For property.<name> rules; values are compared as text. */
+                    properties?: {
+                        [key: string]: unknown;
+                    };
+                    /** @description Only these flags; all when absent. */
+                    keys?: string[];
+                };
+            };
+        };
+        responses: {
+            /** @description Each flag that is on, with the variant or false. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FlagDecisions"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    getFlag: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                /** @description The flag's id or key. */
+                flag: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The flag. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Flag"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    archiveFlag: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                /** @description The flag's id or key. */
+                flag: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            202: components["responses"]["MissionHeld"];
+            /** @description Archived. */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    updateFlag: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                /** @description The flag's id or key. */
+                flag: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["FlagInput"];
+            };
+        };
+        responses: {
+            /** @description The flag. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Flag"];
+                };
+            };
+            202: components["responses"]["MissionHeld"];
             default: components["responses"]["Error"];
         };
     };
@@ -46566,7 +50238,7 @@ export interface operations {
                 };
                 content: {
                     "application/json": {
-                        /** @constant */
+                        /** @enum {boolean} */
                         queued: true;
                     } | components["schemas"]["MissionHeld"];
                 };
@@ -46769,6 +50441,88 @@ export interface operations {
             };
             202: components["responses"]["MissionHeld"];
             400: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    getBrandDNS: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                /** @description The brand's id or handle. */
+                brand: components["parameters"]["BrandRef"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The brand's DNS records. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BrandDNS"];
+                };
+            };
+            404: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    addBrandDNS: {
+        parameters: {
+            query?: never;
+            header?: {
+                /**
+                 * @description Makes the write safe to retry. A repeat with the same key from the same caller within 24 hours gets the first
+                 *     answer back (with `Idempotent-Replayed: true`) instead of running again. The same key for a different request
+                 *     is refused with 422 `idempotency_key_reused`; while the first is still running, 409 `idempotency_in_progress`.
+                 *     Use a new random key, such as a UUID, for each distinct write.
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                /** @description The brand's id or handle. */
+                brand: components["parameters"]["BrandRef"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /**
+                     * Format: uuid
+                     * @description A connection that can add DNS records (Cloudflare).
+                     */
+                    integration_id: string;
+                };
+            };
+        };
+        responses: {
+            /** @description Queued, or held for approval in a mission. */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @enum {boolean} */
+                        queued: true;
+                        /** @description Groups with records to add. */
+                        groups: number;
+                        /** @description Records that were missing. */
+                        records: number;
+                    } | components["schemas"]["MissionHeld"];
+                };
+            };
+            400: components["responses"]["Error"];
+            403: components["responses"]["Error"];
             404: components["responses"]["Error"];
             409: components["responses"]["Error"];
             default: components["responses"]["Error"];
@@ -53740,6 +57494,104 @@ export interface operations {
         };
     };
     webhook_social_action_failed: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["WebhookEvent"];
+            };
+        };
+        responses: {
+            /** @description Any 2xx answer means received; anything else is retried. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    webhook_review_posted: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["WebhookEvent"];
+            };
+        };
+        responses: {
+            /** @description Any 2xx answer means received; anything else is retried. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    webhook_review_replied: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["WebhookEvent"];
+            };
+        };
+        responses: {
+            /** @description Any 2xx answer means received; anything else is retried. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    webhook_review_reply_drafted: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["WebhookEvent"];
+            };
+        };
+        responses: {
+            /** @description Any 2xx answer means received; anything else is retried. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    webhook_review_momentum_changed: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: never;
+    };
+    webhook_alert_raised: {
         parameters: {
             query?: never;
             header?: never;

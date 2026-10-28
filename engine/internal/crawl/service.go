@@ -120,6 +120,10 @@ type Service struct {
 	// AfterAudit runs in the transaction that stores a crawl's audit, so
 	// other checks of the site's pages (keyword targets) see the crawl.
 	AfterAudit func(ctx context.Context, tx pgx.Tx, ws, siteID, runID string) error
+	// AfterCrawl runs in the transaction that finishes a crawl that read
+	// pages, before the audit, so what follows the pages (the indexability
+	// report's history) doesn't wait on the audit.
+	AfterCrawl func(ctx context.Context, tx pgx.Tx, ws, siteID, runID string) error
 	// Owns checks a proof through the workspace's own connections (a
 	// Search Console property it owns); nil skips it.
 	Owns func(ctx context.Context, ws, host string) (bool, error)
@@ -224,11 +228,14 @@ func StartRun(ctx context.Context, tx pgx.Tx, ws, siteID, trigger string, actorI
 		maxPages, delay int
 		obey            bool
 		verifiedAt      *time.Time
+		set             Settings
 	)
 	err := tx.QueryRow(ctx, `
-		SELECT host, status, max_pages, crawl_delay_ms, obey_robots, verified_at
+		SELECT host, status, max_pages, crawl_delay_ms, obey_robots, verified_at,
+		       render_js, use_sitemaps, follow_nofollow, ignore_params, max_depth, include_patterns, exclude_patterns
 		FROM seo_sites WHERE id = $1 AND workspace_id = $2 FOR UPDATE`, siteID, ws).
-		Scan(&host, &status, &maxPages, &delay, &obey, &verifiedAt)
+		Scan(&host, &status, &maxPages, &delay, &obey, &verifiedAt,
+			&set.RenderJS, &set.UseSitemaps, &set.FollowNofollow, &set.IgnoreParams, &set.MaxDepth, &set.Include, &set.Exclude)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return "", ErrNoSite
 	}
@@ -248,9 +255,9 @@ func StartRun(ctx context.Context, tx pgx.Tx, ws, siteID, trigger string, actorI
 	obey = obey || !lim.MayIgnoreRobots
 	var id string
 	err = tx.QueryRow(ctx, `
-		INSERT INTO crawl_runs (workspace_id, site_id, host, trigger, max_pages, delay_ms, obey_robots, created_by)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id`,
-		ws, siteID, host, trigger, maxPages, delay, obey, actorID).Scan(&id)
+		INSERT INTO crawl_runs (workspace_id, site_id, host, trigger, max_pages, delay_ms, obey_robots, settings, created_by)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING id`,
+		ws, siteID, host, trigger, maxPages, delay, obey, set, actorID).Scan(&id)
 	var pgErr *pgconn.PgError
 	if errors.As(err, &pgErr) && pgErr.Code == "23505" {
 		return "", ErrRunning
@@ -279,6 +286,9 @@ type run struct {
 	fb       *FallbackFetcher
 	fbLoaded bool
 	fbFails  int
+	// How the run crawls, copied from the site when it started.
+	set   Settings
+	scope *Scope
 }
 
 func (s *Service) step(ctx context.Context, job jobs.Job) error {
@@ -287,19 +297,26 @@ func (s *Service) step(ctx context.Context, job jobs.Job) error {
 		return fmt.Errorf("%w: %v", jobs.ErrPermanent, err)
 	}
 	r := &run{id: p.RunID, robots: map[string]*Robots{}}
+	var settings []byte
 	err := s.Pool.QueryRow(ctx, `
 		SELECT r.workspace_id, r.site_id, r.host, r.status, r.step, r.max_pages, r.delay_ms, r.obey_robots,
 		       r.consecutive_errors, r.pages_fetched, r.pages_found, s.start_url, s.verify_token, s.verified_at,
-		       s.verify_checked_at, w.test
+		       s.verify_checked_at, w.test, r.settings
 		FROM crawl_runs r JOIN seo_sites s ON s.id = r.site_id JOIN workspaces w ON w.id = r.workspace_id
 		WHERE r.id = $1`, p.RunID).
 		Scan(&r.ws, &r.siteID, &r.host, &r.status, &r.step, &r.maxPages, &r.delayMS, &r.obey, &r.errors,
-			&r.fetched, &r.found, &r.startURL, &r.token, &r.verifiedAt, &r.checkedAt, &r.test)
+			&r.fetched, &r.found, &r.startURL, &r.token, &r.verifiedAt, &r.checkedAt, &r.test, &settings)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil // the site was deleted
 	}
 	if err != nil {
 		return err
+	}
+	if r.set, err = SettingsFrom(settings); err == nil {
+		r.scope, err = r.set.Scope()
+	}
+	if err != nil {
+		return fmt.Errorf("%w: crawl %s settings: %v", jobs.ErrPermanent, r.id, err)
 	}
 	if (r.status != "queued" && r.status != "running") || r.step != p.Step {
 		return nil // stopped, finished, or a stale copy of a step
@@ -462,6 +479,9 @@ func (s *Service) begin(ctx context.Context, r *run) (bool, error) {
 	}
 	// Sitemaps: those robots.txt lists, else the usual place.
 	maps := []string{}
+	if !r.set.UseSitemaps {
+		return false, nil
+	}
 	for _, m := range robots.Sitemaps {
 		if u, ok := Normalize(start, m); ok && SameSite(hostOfURL(u), r.host) {
 			maps = append(maps, u)
@@ -648,17 +668,39 @@ func (s *Service) queue(ctx context.Context, r *run, urls []string, depth int, s
 	if room <= 0 || len(urls) == 0 {
 		return 0, nil
 	}
+	// The settings' scope: patterns, depth and parameters.
+	kept, excluded := make([]string, 0, len(urls)), 0
+	for _, u := range urls {
+		if u, ok := r.scope.URL(u, depth, source == "start"); ok {
+			kept = append(kept, u)
+		} else {
+			excluded++
+		}
+	}
+	if excluded > 0 {
+		if _, err := s.Pool.Exec(ctx, `UPDATE crawl_runs SET pages_excluded = pages_excluded + $2 WHERE id = $1`, r.id, excluded); err != nil {
+			return 0, err
+		}
+	}
+	urls = kept
 	if len(urls) > room {
 		urls = urls[:room]
 	}
 	tag, err := s.Pool.Exec(ctx, `
-		INSERT INTO crawl_pages (workspace_id, run_id, url, depth, source, found_on)
-		SELECT $1, $2, u, $4, $5, $6 FROM unnest($3::text[]) u
+		INSERT INTO crawl_pages (workspace_id, run_id, url, depth, source, found_on, in_sitemap)
+		SELECT $1, $2, u, $4, $5, $6, $5 = 'sitemap' FROM unnest($3::text[]) u
 		ON CONFLICT (run_id, url) DO NOTHING`, r.ws, r.id, urls, depth, source, foundOn)
 	if err != nil {
 		return 0, err
 	}
 	n := int(tag.RowsAffected())
+	if source == "sitemap" && n < len(urls) {
+		// Pages found before (the start page) are in the sitemap too.
+		if _, err := s.Pool.Exec(ctx, `UPDATE crawl_pages SET in_sitemap = true WHERE run_id = $1 AND url = ANY($2) AND NOT in_sitemap`,
+			r.id, urls); err != nil {
+			return 0, err
+		}
+	}
 	r.found += n
 	_, err = s.Pool.Exec(ctx, `UPDATE crawl_runs SET pages_found = pages_found + $2 WHERE id = $1`, r.id, n)
 	return n, err
@@ -781,7 +823,8 @@ func (s *Service) page(ctx context.Context, r *run, id int64, raw string, depth 
 		// A page that its scripts build is read through the workspace's
 		// own scraping connector, which runs them, when the site is proved.
 		// Links in the served HTML stay links.
-		if jsShell && via == "" && r.verifiedAt != nil && !r.test && s.Fallback != nil {
+		render := (jsShell && r.set.RenderJS == "auto") || r.set.RenderJS == "always"
+		if render && via == "" && r.verifiedAt != nil && !r.test && s.Fallback != nil {
 			if fr := s.viaFallback(ctx, r, raw, true); fr != nil && fr.Status >= 200 && fr.Status < 300 && strings.Contains(fr.ContentType(), "html") {
 				built := ParsePage(base, fr.Body)
 				have := map[string]bool{}
@@ -811,7 +854,7 @@ func (s *Service) page(ctx context.Context, r *run, id int64, raw string, depth 
 		if !nofollow {
 			var own []string
 			for _, l := range pg.Links {
-				if SameSite(hostOfURL(l.URL), r.host) && !l.Nofollow {
+				if SameSite(hostOfURL(l.URL), r.host) && (!l.Nofollow || r.set.FollowNofollow) {
 					own = append(own, l.URL)
 				}
 			}
@@ -877,7 +920,8 @@ func (s *Service) viaFallback(ctx context.Context, r *run, raw string, js bool) 
 	r.fbFails = 0
 	ev.Props["http_status"], ev.Props["duration_ms"] = resp.Status, resp.Duration.Milliseconds()
 	track.Emit(ctx, ev)
-	if _, err := s.Pool.Exec(ctx, `UPDATE crawl_runs SET pages_fallback = pages_fallback + 1 WHERE id = $1`, r.id); err != nil {
+	if _, err := s.Pool.Exec(ctx, `UPDATE crawl_runs SET pages_fallback = pages_fallback + 1,
+		pages_rendered = pages_rendered + CASE WHEN $2 THEN 1 ELSE 0 END WHERE id = $1`, r.id, js); err != nil {
 		s.Log.Error("count fallback page", "run_id", r.id, "err", err)
 	}
 	return resp
@@ -996,6 +1040,11 @@ func (s *Service) finish(ctx context.Context, r *run, ev track.Event, status, re
 		if err != nil || fetched == 0 {
 			return err
 		}
+		if s.AfterCrawl != nil {
+			if err := s.AfterCrawl(ctx, tx, r.ws, r.siteID, r.id); err != nil {
+				return err
+			}
+		}
 		// The audit. A failure leaves the crawl finished without issues,
 		// rather than not finished.
 		sp, err := tx.Begin(ctx)
@@ -1039,6 +1088,8 @@ func (s *Service) finish(ctx context.Context, r *run, ev track.Event, status, re
 	ev.Props["bytes"] = bytes
 	ev.Props["obey_robots"] = r.obey
 	ev.Props["verified"] = r.verifiedAt != nil
+	ev.Props["render_js"], ev.Props["max_depth"] = r.set.RenderJS, r.set.MaxDepth
+	ev.Props["include_patterns"], ev.Props["exclude_patterns"] = len(r.set.Include), len(r.set.Exclude)
 	if started != nil {
 		ev.Props["duration_ms"] = time.Since(*started).Milliseconds()
 	}
@@ -1080,9 +1131,15 @@ func (s *Service) Schedule(ctx context.Context) error {
 	rows, err := s.Pool.Query(ctx, `
 		SELECT s.id, s.workspace_id FROM seo_sites s
 		WHERE s.schedule <> 'off' AND s.status = 'active'
+		  -- At the hour (and weekly, the day) the site asked for, when it did.
+		  AND (s.schedule_hour IS NULL OR (extract(hour FROM now() AT TIME ZONE s.schedule_tz) = s.schedule_hour
+		       AND (s.schedule <> 'weekly' OR s.schedule_day IS NULL OR extract(dow FROM now() AT TIME ZONE s.schedule_tz) = s.schedule_day)))
 		  AND NOT EXISTS (SELECT 1 FROM crawl_runs r WHERE r.site_id = s.id
 		      AND (r.status IN ('queued', 'running')
-		           OR r.created_at > now() - CASE s.schedule WHEN 'daily' THEN interval '23 hours' ELSE interval '167 hours' END))
+		           OR r.created_at > now() - CASE
+		               WHEN s.schedule_hour IS NOT NULL AND s.schedule = 'daily' THEN interval '20 hours'
+		               WHEN s.schedule_hour IS NOT NULL THEN interval '6 days'
+		               WHEN s.schedule = 'daily' THEN interval '23 hours' ELSE interval '167 hours' END))
 		ORDER BY s.created_at LIMIT 100`)
 	if err != nil {
 		return err

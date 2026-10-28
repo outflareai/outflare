@@ -48,8 +48,22 @@ func TestCommunityLinks(t *testing.T) {
 		t.Fatalf("shown again: %v", c)
 	}
 
+	// How they heard about Outflare: one choice from the list, changeable.
+	if c["heard_from"] != nil {
+		t.Fatalf("heard_from before answering: %v", c["heard_from"])
+	}
+	owner.must(400, "PATCH", "/v1/me/community", map[string]any{"heard_from": "a friend at Acme"})
+	owner.must(200, "PATCH", "/v1/me/community", map[string]any{"heard_from": "x"})
+	owner.must(200, "PATCH", "/v1/me/community", map[string]any{"heard_from": "x"})
+	if c = owner.must(200, "PATCH", "/v1/me/community", map[string]any{"heard_from": "ai_assistant"}); c["heard_from"] != "ai_assistant" {
+		t.Fatalf("heard_from: %v", c)
+	}
+
 	// Each click and each hide is an event, and repeats are not.
 	ev := got()
+	if hf := named(ev, "community.heard_from_answered"); len(hf) != 2 || hf[1].Props["source"] != "ai_assistant" {
+		t.Fatalf("heard_from events: %+v", hf)
+	}
 	if cl := named(ev, "community.link_clicked"); len(cl) != 2 || cl[0].Props["target_id"] != "github" || cl[1].Props["target_id"] != "x" {
 		t.Fatalf("click events: %+v", cl)
 	}
@@ -91,14 +105,14 @@ func TestCommunityOnboardingStep(t *testing.T) {
 
 	// The walk-through asks to star and follow, before the first mission.
 	o := owner.must(200, "GET", base, nil)
-	if st := step(o); st == nil || st["walkthrough"] != true || st["done"] != false || o["total"] != 7.0 {
+	if st := step(o); st == nil || st["walkthrough"] != true || st["done"] != false || o["total"] != 8.0 {
 		t.Fatalf("community step: %v", o)
 	}
 	ids := []string{}
 	for _, s := range o["steps"].([]any) {
 		ids = append(ids, s.(map[string]any)["id"].(string))
 	}
-	if strings.Join(ids, ",") != "brand,goal,ai,connect,community,mission,team" {
+	if strings.Join(ids, ",") != "brand,ai,goal,website,connect,community,mission,team" {
 		t.Fatalf("order: %v", ids)
 	}
 

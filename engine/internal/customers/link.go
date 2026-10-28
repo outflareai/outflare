@@ -305,6 +305,7 @@ var Owned = []Ref{
 	{"record_merge_candidates", "record_a"}, {"record_merge_candidates", "record_b"},
 	// An alert was about the record it was sent for.
 	{"visitor_alerts", "record_id"},
+	{"alerts", "record_id"},
 	// The next refresh drops the merged record and adds the one kept, if
 	// it matches.
 	{"smart_list_members", "record_id"},

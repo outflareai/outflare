@@ -97,8 +97,15 @@ type Settings struct {
 	RevealDailyLimit int `json:"reveal_daily_limit"`
 	// NotCompanies are domains marked as not a company, such as an ISP
 	// whose customers' traffic a provider took for the ISP's own.
-	NotCompanies []string   `json:"not_companies"`
-	UpdatedAt    *time.Time `json:"updated_at"`
+	NotCompanies []string `json:"not_companies"`
+	// RevealPeople takes in the people a connected visitor identification
+	// tool (RB2B, Vector, Warmly) names. Off until the workspace turns it on
+	// and accepts the notice.
+	RevealPeople bool `json:"reveal_people"`
+	// When and by whom the notice was accepted.
+	PeopleNoticeAcceptedAt *time.Time `json:"people_notice_accepted_at"`
+	PeopleNoticeAcceptedBy *string    `json:"-"`
+	UpdatedAt              *time.Time `json:"updated_at"`
 }
 
 // DefaultKeyPages are the pages most sites mean by buying intent.
@@ -114,9 +121,11 @@ func Load(ctx context.Context, q Querier, ws string) (Settings, error) {
 	s := Defaults()
 	var at time.Time
 	err := q.QueryRow(ctx, `SELECT key_pages, hot_score, email_clicks, exclude_domains, exclude_customers,
-			reveal_companies, reveal_integration_id::text, reveal_daily_limit, not_companies, updated_at
+			reveal_companies, reveal_integration_id::text, reveal_daily_limit, not_companies,
+			reveal_people, people_notice_accepted_at, people_notice_accepted_by::text, updated_at
 		FROM visitor_settings WHERE workspace_id = $1`, ws).Scan(&s.KeyPages, &s.HotScore, &s.EmailClicks, &s.ExcludeDomains, &s.ExcludeCustomers,
-		&s.RevealCompanies, &s.RevealIntegrationID, &s.RevealDailyLimit, &s.NotCompanies, &at)
+		&s.RevealCompanies, &s.RevealIntegrationID, &s.RevealDailyLimit, &s.NotCompanies,
+		&s.RevealPeople, &s.PeopleNoticeAcceptedAt, &s.PeopleNoticeAcceptedBy, &at)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return s, nil
 	}
@@ -130,14 +139,18 @@ func Load(ctx context.Context, q Querier, ws string) (Settings, error) {
 // Save stores a workspace's settings.
 func Save(ctx context.Context, q Querier, ws string, s Settings) error {
 	_, err := q.Exec(ctx, `INSERT INTO visitor_settings (workspace_id, key_pages, hot_score, email_clicks, exclude_domains, exclude_customers,
-			reveal_companies, reveal_integration_id, reveal_daily_limit, not_companies)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+			reveal_companies, reveal_integration_id, reveal_daily_limit, not_companies,
+			reveal_people, people_notice_accepted_at, people_notice_accepted_by)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
 		ON CONFLICT (workspace_id) DO UPDATE SET key_pages = EXCLUDED.key_pages, hot_score = EXCLUDED.hot_score,
 			email_clicks = EXCLUDED.email_clicks, exclude_domains = EXCLUDED.exclude_domains,
 			exclude_customers = EXCLUDED.exclude_customers, reveal_companies = EXCLUDED.reveal_companies,
 			reveal_integration_id = EXCLUDED.reveal_integration_id, reveal_daily_limit = EXCLUDED.reveal_daily_limit,
-			not_companies = EXCLUDED.not_companies, updated_at = now()`,
-		ws, s.KeyPages, s.HotScore, s.EmailClicks, s.ExcludeDomains, s.ExcludeCustomers, s.RevealCompanies, s.RevealIntegrationID, s.RevealDailyLimit, s.NotCompanies)
+			not_companies = EXCLUDED.not_companies, reveal_people = EXCLUDED.reveal_people,
+			people_notice_accepted_at = EXCLUDED.people_notice_accepted_at, people_notice_accepted_by = EXCLUDED.people_notice_accepted_by,
+			updated_at = now()`,
+		ws, s.KeyPages, s.HotScore, s.EmailClicks, s.ExcludeDomains, s.ExcludeCustomers, s.RevealCompanies, s.RevealIntegrationID, s.RevealDailyLimit, s.NotCompanies,
+		s.RevealPeople, s.PeopleNoticeAcceptedAt, s.PeopleNoticeAcceptedBy)
 	return err
 }
 

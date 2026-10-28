@@ -2,10 +2,12 @@ import { useCallback, useEffect, useState } from "react";
 import type { components } from "@outflare/sdk";
 import { api, errorMessage } from "../api";
 import { Badge, Button, Card, ErrorText, Loading, PageHeader, ask, confirmAction, toast } from "../ui";
-import { ago } from "../format";
+import { ago, when } from "../format";
+import { Switch } from "@/components/ui/switch";
 import { createPasskey, deviceName, passkeyError, passkeysSupported } from "../lib/passkeys";
 
 type Passkey = components["schemas"]["Passkey"];
+type SupportAccess = components["schemas"]["SupportAccess"];
 type User = { id?: string; name?: string; email?: string; email_verified?: boolean; has_password?: boolean };
 
 // Your own sign-in: email, password and passkeys. Not part of any
@@ -37,6 +39,7 @@ export function Account({ onChanged }: { onChanged: () => void }) {
         <EmailCard user={user} onChanged={() => (load(), onChanged())} />
         <PasswordCard user={user} delivery={delivery} />
         <PasskeysCard on={methods.includes("passkey")} />
+        <SupportAccessCard />
       </div>
     </>
   );
@@ -186,6 +189,60 @@ function PasskeysCard({ on }: { on: boolean }) {
             </li>
           ))}
         </ul>
+      )}
+    </Card>
+  );
+}
+
+// Support access: staff of the server's operator may view this account
+// read-only to help. On until the person turns it off; every view is listed.
+function SupportAccessCard() {
+  const [sa, setSA] = useState<SupportAccess>();
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    api.GET("/v1/me/support-access").then(({ data, error }) => (data ? setSA(data) : setError(errorMessage(error))));
+  }, []);
+
+  async function change(enabled: boolean) {
+    setBusy(true);
+    const { data, error } = await api.PATCH("/v1/me/support-access", { body: { enabled } });
+    setBusy(false);
+    if (error) return toast(errorMessage(error), "error");
+    setSA(data);
+    toast(enabled ? "Support access is on." : "Support access is off. Staff can't view your account.");
+  }
+
+  return (
+    <Card
+      title="Support access"
+      description="Let our staff view your account as you see it, so they can help you quickly."
+      action={sa && <Switch aria-label="Support access" disabled={busy} checked={sa.enabled} onCheckedChange={change} />}
+    >
+      <ErrorText>{error}</ErrorText>
+      {!sa ? (
+        !error && <Loading />
+      ) : (
+        <>
+          <p className="text-[13px] text-muted-foreground">
+            A view is read-only: staff can't change, send, connect or delete anything, and never see your inbox or the content of your emails.
+            It ends after an hour at most. Turning this off ends a view straight away.
+          </p>
+          {sa.views.length > 0 && (
+            <ul className="mt-3 divide-y border-t text-[13px]">
+              {sa.views.map((v) => (
+                <li key={v.id} className="flex flex-wrap justify-between gap-2 py-2 last:pb-0">
+                  <span>Staff viewed your account</span>
+                  <span className="text-muted-foreground" title={when(v.started_at)}>
+                    {ago(v.started_at)}
+                    {!v.ended_at && new Date(v.expires_at) > new Date() && <span className="ml-2"><Badge tone="amber">now</Badge></span>}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </>
       )}
     </Card>
   );

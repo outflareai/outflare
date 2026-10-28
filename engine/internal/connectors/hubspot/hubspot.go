@@ -12,8 +12,10 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"html"
 	"io"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -44,7 +46,8 @@ func (HubSpot) Definition() c.Definition {
 		ID: "hubspot", Name: "HubSpot", Category: c.CategoryCRM,
 		Summary: "Count meetings and deals from outreach, and log booked meetings on the contact.",
 		Description: "Reads deals (stage, amount, close date) and meetings, and ties each to the lead and campaign that started it. " +
-			"Optionally writes meetings booked from outreach onto the HubSpot contact (off by default, since HubSpot may already log them from its own calendar sync). Deals are never changed.",
+			"Optionally writes meetings booked from outreach onto the HubSpot contact (off by default, since HubSpot may already log them from its own calendar sync), " +
+			"and replies with the labels you pick as a note on the contact, with a task to follow up. Deals are never changed.",
 		Website: "https://www.hubspot.com", DocsURL: "https://developers.hubspot.com/docs/api/crm/deals",
 		KeyURL: "https://knowledge.hubspot.com/integrations/how-do-i-get-my-hubspot-api-key",
 		Auth:   c.AuthOAuth2, AuthMethods: c.Both,
@@ -53,8 +56,8 @@ func (HubSpot) Definition() c.Definition {
 			Scopes: scopes,
 		},
 		Fields: []c.Field{{Name: "api_key", Label: "Private app access token", Secret: true, Placeholder: "pat-…",
-			Help: "In HubSpot: Settings, Integrations, Private apps, Create a private app. Give it the scopes " + strings.Join(scopes[1:], ", ") + "."}},
-		Capabilities: []string{outcomes.CapDeals, outcomes.CapMeetings, outcomes.CapPushCRM},
+			Help: "In HubSpot: Settings, Integrations, Private apps, Create a private app. Give it the scopes " + strings.Join(scopes[1:], ", ") + ", and crm.objects.owners.read if reply tasks should go to the lead's owner."}},
+		Capabilities: []string{outcomes.CapDeals, outcomes.CapMeetings, outcomes.CapPushCRM, outcomes.CapPushReplies},
 		Pricing:      "Works on every HubSpot plan, including free",
 		Replaces:     []string{"hubspot_private_app"},
 	}
@@ -358,28 +361,9 @@ func (h conn) PushMeeting(ctx context.Context, cl *c.Client, creds c.Creds, m ou
 	if email == "" {
 		return "", c.Errf(c.ErrInvalid, "meeting %s has no attendee email to find the HubSpot contact by", m.ID)
 	}
-	props := map[string]string{"email": email}
-	if m.LeadFirstName != "" {
-		props["firstname"] = m.LeadFirstName
-	}
-	if m.LeadLastName != "" {
-		props["lastname"] = m.LeadLastName
-	}
-	if m.LeadCompany != "" {
-		props["company"] = m.LeadCompany
-	}
-	var up struct {
-		Results []struct {
-			ID string `json:"id"`
-		} `json:"results"`
-	}
-	if err := h.call(ctx, cl, creds, http.MethodPost, "/crm/v3/objects/contacts/batch/upsert", map[string]any{
-		"inputs": []any{map[string]any{"id": email, "idProperty": "email", "properties": props}},
-	}, &up); err != nil {
+	contact, err := h.upsertContact(ctx, cl, creds, email, m.LeadFirstName, m.LeadLastName, m.LeadCompany)
+	if err != nil {
 		return "", err
-	}
-	if len(up.Results) == 0 {
-		return "", c.Errf(c.ErrUnavailable, "HubSpot did not return the contact for %s", email)
 	}
 	title := m.Title
 	if title == "" {
@@ -389,7 +373,7 @@ func (h conn) PushMeeting(ctx context.Context, cl *c.Client, creds c.Creds, m ou
 	if m.SequenceName != nil {
 		body = "Booked from the Outflare sequence \"" + *m.SequenceName + "\"."
 	}
-	props = map[string]string{
+	props := map[string]string{
 		"hs_timestamp":          m.StartsAt.UTC().Format(time.RFC3339),
 		"hs_meeting_title":      title,
 		"hs_meeting_body":       body,
@@ -406,12 +390,8 @@ func (h conn) PushMeeting(ctx context.Context, cl *c.Client, creds c.Creds, m ou
 		ID string `json:"id"`
 	}
 	// 200 is HubSpot's own meeting-to-contact association.
-	err := h.call(ctx, cl, creds, http.MethodPost, "/crm/v3/objects/meetings", map[string]any{
-		"properties": props,
-		"associations": []any{map[string]any{
-			"to":    map[string]string{"id": up.Results[0].ID},
-			"types": []any{map[string]any{"associationCategory": "HUBSPOT_DEFINED", "associationTypeId": 200}},
-		}},
+	err = h.call(ctx, cl, creds, http.MethodPost, "/crm/v3/objects/meetings", map[string]any{
+		"properties": props, "associations": associate(contact, 200),
 	}, &created)
 	return created.ID, err
 }
@@ -431,4 +411,122 @@ func parse(s string) *time.Time {
 		return &t
 	}
 	return nil
+}
+
+// upsertContact finds or makes the contact by email and returns its id.
+func (h conn) upsertContact(ctx context.Context, cl *c.Client, creds c.Creds, email, first, last, company string) (string, error) {
+	props := map[string]string{"email": email}
+	if first != "" {
+		props["firstname"] = first
+	}
+	if last != "" {
+		props["lastname"] = last
+	}
+	if company != "" {
+		props["company"] = company
+	}
+	var up struct {
+		Results []struct {
+			ID string `json:"id"`
+		} `json:"results"`
+	}
+	if err := h.call(ctx, cl, creds, http.MethodPost, "/crm/v3/objects/contacts/batch/upsert", map[string]any{
+		"inputs": []any{map[string]any{"id": email, "idProperty": "email", "properties": props}},
+	}, &up); err != nil {
+		return "", err
+	}
+	if len(up.Results) == 0 {
+		return "", c.Errf(c.ErrUnavailable, "HubSpot did not return the contact for %s", email)
+	}
+	return up.Results[0].ID, nil
+}
+
+// associate is one HubSpot-defined association to a contact, for a new
+// note (202) or task (204).
+func associate(contact string, typeID int) []any {
+	return []any{map[string]any{
+		"to":    map[string]string{"id": contact},
+		"types": []any{map[string]any{"associationCategory": "HUBSPOT_DEFINED", "associationTypeId": typeID}},
+	}}
+}
+
+// owner finds the HubSpot user with an email address, or "" when there is
+// none or the app may not read users.
+func (h conn) owner(ctx context.Context, cl *c.Client, creds c.Creds, email string) string {
+	if email == "" {
+		return ""
+	}
+	var out struct {
+		Results []struct {
+			ID string `json:"id"`
+		} `json:"results"`
+	}
+	if err := h.call(ctx, cl, creds, http.MethodGet, "/crm/v3/owners?limit=1&email="+url.QueryEscape(email), nil, &out); err != nil || len(out.Results) == 0 {
+		return ""
+	}
+	return out.Results[0].ID
+}
+
+// PushReply upserts the lead as a contact, adds a note with the reply and,
+// when asked, a task to follow up, for the lead's owner when HubSpot has a
+// user with their address.
+func (h conn) PushReply(ctx context.Context, cl *c.Client, creds c.Creds, r outcomes.PushReply) (outcomes.PushedReply, error) {
+	var out outcomes.PushedReply
+	if r.Email == "" {
+		return out, c.Errf(c.ErrInvalid, "the reply has no email address to find the HubSpot contact by")
+	}
+	id, err := h.upsertContact(ctx, cl, creds, r.Email, r.FirstName, r.LastName, r.Company)
+	if err != nil {
+		return out, err
+	}
+	out.ContactID = id
+	head := "Replied: " + r.LabelText
+	if r.Sequence != "" {
+		head += ", to the Outflare sequence \"" + r.Sequence + "\""
+	}
+	body := r.Body
+	if len(body) > 10000 {
+		body = body[:10000] + "…"
+	}
+	note := "<p><strong>" + html.EscapeString(head) + "</strong></p><p>" +
+		strings.ReplaceAll(html.EscapeString(strings.TrimSpace(body)), "\n", "<br>") + "</p>"
+	if r.URL != "" {
+		note += `<p><a href="` + html.EscapeString(r.URL) + `">Open in Outflare</a></p>`
+	}
+	var created struct {
+		ID string `json:"id"`
+	}
+	if err := h.call(ctx, cl, creds, http.MethodPost, "/crm/v3/objects/notes", map[string]any{
+		"properties":   map[string]string{"hs_timestamp": r.ReceivedAt.UTC().Format(time.RFC3339), "hs_note_body": note},
+		"associations": associate(id, 202),
+	}, &created); err != nil {
+		return out, err
+	}
+	out.NoteID = created.ID
+	if !r.Task {
+		return out, nil
+	}
+	who := strings.TrimSpace(r.FirstName + " " + r.LastName)
+	if who == "" {
+		who = r.Email
+	}
+	props := map[string]string{
+		"hs_timestamp":     r.ReceivedAt.Add(24 * time.Hour).UTC().Format(time.RFC3339),
+		"hs_task_subject":  "Follow up with " + who + " (" + strings.ToLower(r.LabelText) + ")",
+		"hs_task_body":     head + ". " + r.URL,
+		"hs_task_status":   "NOT_STARTED",
+		"hs_task_priority": "HIGH",
+		"hs_task_type":     "EMAIL",
+	}
+	if o := h.owner(ctx, cl, creds, r.OwnerEmail); o != "" {
+		props["hubspot_owner_id"] = o
+	}
+	created.ID = ""
+	if err := h.call(ctx, cl, creds, http.MethodPost, "/crm/v3/objects/tasks", map[string]any{
+		"properties": props, "associations": associate(id, 204),
+	}, &created); err != nil {
+		return out, err
+	}
+	out.TaskID = created.ID
+	return out, nil
 }

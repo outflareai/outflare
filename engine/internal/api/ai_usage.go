@@ -52,19 +52,59 @@ func aiCallTask(task string) string {
 	return "other"
 }
 
-// aiTools are the tools the usage page always lists, in order, even in a
-// month they made no calls: the model tasks, AI visibility's sampling and
-// meaning-based search's embeddings.
-func aiTools() []aiTask {
-	out := slices.Clone(aiTasks)
-	return append(out, aiTask{taskVisibilitySampling, "AI visibility sampling", "Asking the AI models chosen under AI visibility what they answer about your brands."},
-		aiTask{taskSemanticSearch, "Meaning-based search", "Turning your records, replies, meetings and deals into vectors, so search finds them by what they mean."})
+// AITool is an extension's own AI tool: a name for its calls on the usage
+// page, so a workspace sees what they cost and can give them a limit. Its
+// calls use the model the workspace chose for ModelTask, a model task such
+// as classify_domain, so they need no model setting of their own.
+type AITool struct {
+	ID, Name, Description, ModelTask string
 }
 
-// aiToolName is the name a person sees for a tool: lead_finder becomes
-// "Lead finder" when no tool of the engine's has the id.
-func aiToolName(task string) string {
-	for _, t := range aiTools() {
+// CheckAITool says what is wrong with an extension's tool, or nil: its id
+// must be a tool id the engine has no tool of its own under, and its model
+// task one a workspace can choose a model for.
+func CheckAITool(t AITool) error {
+	switch {
+	case !aiTaskID.MatchString(t.ID) || t.ID == "other":
+		return fmt.Errorf("AI tool id %q must be lowercase letters, digits and underscores", t.ID)
+	case slices.ContainsFunc((&Server{}).usageTools(), func(x aiTask) bool { return x.ID == t.ID }):
+		return fmt.Errorf("AI tool id %q is the engine's own", t.ID)
+	case t.Name == "":
+		return fmt.Errorf("AI tool %q has no name", t.ID)
+	case !validTask(t.ModelTask):
+		return fmt.Errorf("AI tool %q borrows model task %q, which is not one", t.ID, t.ModelTask)
+	}
+	return nil
+}
+
+// usageTools are the tools the usage page always lists, in order, even in a
+// month they made no calls: the model tasks, AI visibility's sampling,
+// meaning-based search's embeddings and the extensions' tools.
+func (s *Server) usageTools() []aiTask {
+	out := slices.Clone(aiTasks)
+	out = append(out, aiTask{taskVisibilitySampling, "AI visibility sampling", "Asking the AI models chosen under AI visibility what they answer about your brands."},
+		aiTask{taskSemanticSearch, "Meaning-based search", "Turning your records, replies, meetings and deals into vectors, so search finds them by what they mean."})
+	for _, t := range s.aiTools {
+		out = append(out, aiTask{t.ID, t.Name, t.Description})
+	}
+	return out
+}
+
+// modelTask is the model task whose model a tool's calls use: an
+// extension's tool borrows one, every other tool is its own.
+func (s *Server) modelTask(task string) string {
+	for _, t := range s.aiTools {
+		if t.ID == task {
+			return t.ModelTask
+		}
+	}
+	return task
+}
+
+// aiToolName is the name a person sees for a tool: an unknown lead_finder
+// becomes "Lead finder".
+func (s *Server) aiToolName(task string) string {
+	for _, t := range s.usageTools() {
 		if t.ID == task {
 			return t.Name
 		}
@@ -139,13 +179,14 @@ func warnAIBudget(ctx context.Context, q jobs.Querier, ws, task string) error {
 		return err
 	}
 	type check struct {
-		task  string // "" for the workspace's own limit
-		limit *int64
-		spent func() (int64, error)
+		task     string // "" for the workspace's own limit
+		limit    *int64
+		warnOnly bool
+		spent    func() (int64, error)
 	}
 	checks := []check{
-		{"", row.MonthlyLimit, func() (int64, error) { return aiMonthSpend(ctx, q, ws) }},
-		{task, row.taskLimit(task), func() (int64, error) { return aiTaskMonthSpend(ctx, q, ws, task) }},
+		{"", row.MonthlyLimit, row.LimitWarnOnly, func() (int64, error) { return aiMonthSpend(ctx, q, ws) }},
+		{task, row.taskLimit(task), row.taskWarnOnly(task), func() (int64, error) { return aiTaskMonthSpend(ctx, q, ws, task) }},
 	}
 	month := monthStart(time.Now())
 	for _, c := range checks {
@@ -190,13 +231,14 @@ func warnAIBudget(ctx context.Context, q jobs.Querier, ws, task string) error {
 		if c.task != "" {
 			scope = "tool"
 		}
-		data := map[string]any{"task": c.task, "level": level, "limit_cents": *c.limit, "spent_cents": spent, "month": month.Format("2006-01")}
+		data := map[string]any{"task": c.task, "level": level, "limit_cents": *c.limit, "spent_cents": spent, "month": month.Format("2006-01"),
+			"hard_stop": !c.warnOnly}
 		if err := audit.Record(ctx, q, audit.Event{WorkspaceID: ws, ActorType: "system", Action: action,
-			TargetType: "workspace", TargetID: ws, Data: data, Props: map[string]any{"task": c.task, "level": level, "scope": scope}}); err != nil {
+			TargetType: "workspace", TargetID: ws, Data: data, Props: map[string]any{"task": c.task, "level": level, "scope": scope, "hard_stop": !c.warnOnly}}); err != nil {
 			return err
 		}
 		metrics.AIBudgetAlert(level, c.task != "")
-		if err := enqueueAIBudgetEmails(ctx, q, ws, c.task, level, month); err != nil {
+		if err := enqueueAIBudgetEmails(ctx, q, ws, c.task, level, month, !c.warnOnly); err != nil {
 			return err
 		}
 	}
@@ -204,8 +246,8 @@ func warnAIBudget(ctx context.Context, q jobs.Querier, ws, task string) error {
 }
 
 // enqueueAIBudgetEmails queues a warning email to each owner and admin
-// with a confirmed address.
-func enqueueAIBudgetEmails(ctx context.Context, q jobs.Querier, ws, task string, level int, month time.Time) error {
+// with a confirmed address. hardStop says whether the limit stops calls.
+func enqueueAIBudgetEmails(ctx context.Context, q jobs.Querier, ws, task string, level int, month time.Time, hardStop bool) error {
 	var users []string
 	if err := q.QueryRow(ctx, `
 		SELECT COALESCE(array_agg(u.id::text ORDER BY u.id), '{}') FROM memberships m JOIN users u ON u.id = m.user_id
@@ -215,7 +257,7 @@ func enqueueAIBudgetEmails(ctx context.Context, q jobs.Querier, ws, task string,
 	for _, u := range users {
 		key := fmt.Sprintf("%s:%s:%s:%d:%s", ws, month.Format("2006-01"), task, level, u)
 		if _, err := jobs.Enqueue(ctx, q, jobs.NewJob{Kind: jobAIBudgetAlert, WorkspaceID: &ws, IdempotencyKey: key, MaxAttempts: 5,
-			Payload: map[string]any{"user_id": u, "task": task, "level": level, "month": month.Format("2006-01")}}); err != nil {
+			Payload: map[string]any{"user_id": u, "task": task, "level": level, "month": month.Format("2006-01"), "hard_stop": hardStop}}); err != nil {
 			return err
 		}
 	}
@@ -232,6 +274,9 @@ func (s *Server) aiBudgetAlertJob(ctx context.Context, job jobs.Job) error {
 		Task   string `json:"task"`
 		Level  int    `json:"level"`
 		Month  string `json:"month"`
+		// HardStop is missing from jobs queued before limits could warn
+		// only, which all stopped calls.
+		HardStop *bool `json:"hard_stop"`
 	}
 	if err := json.Unmarshal(job.Payload, &p); err != nil || job.WorkspaceID == nil || !validUUID(p.UserID) {
 		return fmt.Errorf("%w: bad payload", jobs.ErrPermanent)
@@ -257,9 +302,14 @@ func (s *Server) aiBudgetAlertJob(ctx context.Context, job jobs.Job) error {
 	if err != nil {
 		return err
 	}
+	hardStop := p.HardStop == nil || *p.HardStop
 	ev := track.Event{Name: "ai_budget.emailed", WorkspaceID: ws, UserID: p.UserID, ActorType: "system", Surface: "job",
-		Props: map[string]any{"level": p.Level, "task": p.Task}}
-	if err := s.sendAccountEmail(ctx, aiBudgetMessage(s.publicURL+"/"+s.workspaceSlug(ctx, ws)+"/ai-usage", email, workspace, p.Task, p.Level, limit, spent)); err != nil {
+		Props: map[string]any{"level": p.Level, "task": p.Task, "hard_stop": hardStop}}
+	tool := "" // the workspace's own limit
+	if p.Task != "" {
+		tool = s.aiToolName(p.Task)
+	}
+	if err := s.sendAccountEmail(ctx, aiBudgetMessage(s.publicURL+"/"+s.workspaceSlug(ctx, ws)+"/ai-usage", email, workspace, tool, p.Level, limit, spent, hardStop)); err != nil {
 		track.Fail(ctx, s.log, ev, "email_failed", err)
 		return err
 	}
@@ -267,24 +317,38 @@ func (s *Server) aiBudgetAlertJob(ctx context.Context, job jobs.Job) error {
 	return nil
 }
 
-func aiBudgetMessage(url, email, workspace, task string, level int, limit, spent int64) sysmail.Message {
+// aiBudgetMessage is the warning email; tool is the name of the tool whose
+// limit it is, or empty for the workspace's own limit. hardStop says
+// whether the limit stops calls or only warns.
+func aiBudgetMessage(url, email, workspace, tool string, level int, limit, spent int64, hardStop bool) sysmail.Message {
 	what, limitName := "AI calls in "+workspace, "the workspace's monthly AI limit"
-	if task != "" {
-		what, limitName = aiToolName(task)+" in "+workspace, "the monthly limit for "+aiToolName(task)
+	if tool != "" {
+		what, limitName = tool+" in "+workspace, "the monthly limit for "+tool
 	}
 	m := sysmail.Email{To: email, Button: "See AI usage", URL: url,
 		Note: "These calls run on your own AI provider account, with your own key, and your provider bills you for them. Outflare doesn't pay for them or take responsibility for them, so set a hard spend limit at your provider too."}
 	body := fmt.Sprintf("%s have cost $%.2f this month, of %s of $%.2f.", what, float64(spent)/100, limitName, float64(limit)/100)
-	if level >= 100 {
+	switch {
+	case level >= 100 && hardStop:
 		m.Subject = "Outflare paused AI calls: monthly limit reached"
 		m.Heading = "AI spend reached its limit"
 		m.Preview = what + " reached their monthly limit."
 		m.Body = []string{body, "Outflare makes no more of these AI calls until next month, or until an owner or admin raises the limit under Settings → AI usage."}
-	} else {
+	case level >= 100:
+		m.Subject = "Your Outflare AI spend reached its limit"
+		m.Heading = "AI spend reached its limit"
+		m.Preview = what + " reached their monthly limit and are still running."
+		m.Body = []string{body, "This limit is set to warn only, so Outflare keeps making these AI calls and your provider keeps billing you. An owner or admin can make it stop calls, or change it, under Settings → AI usage."}
+	case hardStop:
 		m.Subject = "Your Outflare AI spend is at 80% of its limit"
 		m.Heading = "AI spend is at 80% of its limit"
 		m.Preview = what + " are close to their monthly limit."
 		m.Body = []string{body, "When it reaches the limit, Outflare stops these AI calls until next month. An owner or admin can change the limit under Settings → AI usage."}
+	default:
+		m.Subject = "Your Outflare AI spend is at 80% of its limit"
+		m.Heading = "AI spend is at 80% of its limit"
+		m.Preview = what + " are close to their monthly limit."
+		m.Body = []string{body, "This limit is set to warn only: Outflare emails you again when it is reached, but doesn't stop these AI calls. An owner or admin can change it under Settings → AI usage."}
 	}
 	return m.Message()
 }
@@ -351,6 +415,9 @@ type aiUsageTool struct {
 	Description string `json:"description"`
 	aiUsageTotals
 	MonthlyLimit *int64 `json:"monthly_limit_cents"`
+	// HardStop: reaching MonthlyLimit stops the tool's calls; false only
+	// warns.
+	HardStop bool `json:"hard_stop"`
 }
 
 type aiUsageModel struct {
@@ -442,8 +509,9 @@ func (s *Server) aiUsage(ctx context.Context, ws string, row aiSettingsRow, from
 	}
 	tools := []aiUsageTool{}
 	listed := map[string]bool{}
-	for _, t := range aiTools() {
-		tools = append(tools, aiUsageTool{Task: t.ID, Name: t.Name, Description: t.Description, aiUsageTotals: seen[t.ID], MonthlyLimit: row.taskLimit(t.ID)})
+	for _, t := range s.usageTools() {
+		tools = append(tools, aiUsageTool{Task: t.ID, Name: t.Name, Description: t.Description, aiUsageTotals: seen[t.ID],
+			MonthlyLimit: row.taskLimit(t.ID), HardStop: !row.taskWarnOnly(t.ID)})
 		listed[t.ID] = true
 	}
 	extra := []string{}
@@ -459,7 +527,7 @@ func (s *Server) aiUsage(ctx context.Context, ws string, row aiSettingsRow, from
 	}
 	slices.Sort(extra)
 	for _, id := range slices.Compact(extra) {
-		tools = append(tools, aiUsageTool{Task: id, Name: aiToolName(id), aiUsageTotals: seen[id], MonthlyLimit: row.taskLimit(id)})
+		tools = append(tools, aiUsageTool{Task: id, Name: s.aiToolName(id), aiUsageTotals: seen[id], MonthlyLimit: row.taskLimit(id), HardStop: !row.taskWarnOnly(id)})
 	}
 	// Most spent first; tools with no calls keep their order at the end.
 	slices.SortStableFunc(tools, func(x, y aiUsageTool) int {
@@ -507,7 +575,7 @@ func (s *Server) aiUsage(ctx context.Context, ws string, row aiSettingsRow, from
 	recent, err := pgx.CollectRows(rows, func(r pgx.CollectableRow) (aiUsageCall, error) {
 		var c aiUsageCall
 		err := r.Scan(append([]any{&c.ID, &c.OccurredAt, &c.Task, &c.Provider, &c.Model, &c.MissionID}, append(scanTotals(&c.aiUsageTotals), &c.CostReported)...)...)
-		c.ToolName = aiToolName(c.Task)
+		c.ToolName = s.aiToolName(c.Task)
 		return c, err
 	})
 	if err != nil {
@@ -526,6 +594,7 @@ func (s *Server) aiUsage(ctx context.Context, ws string, row aiSettingsRow, from
 		"month":               from.Format("2006-01"),
 		"spent_cents":         ledger,
 		"monthly_limit_cents": row.MonthlyLimit,
+		"hard_stop":           !row.LimitWarnOnly,
 		"total":               total,
 		"tools":               tools,
 		"models":              byModel,
@@ -535,11 +604,16 @@ func (s *Server) aiUsage(ctx context.Context, ws string, row aiSettingsRow, from
 	}, nil
 }
 
-// putAIUsageLimits replaces the per-tool monthly limits.
+// putAIUsageLimits replaces the per-tool monthly limits, and says which
+// limits stop calls and which only warn.
 func (s *Server) putAIUsageLimits(w http.ResponseWriter, r *http.Request) {
 	a := accessFrom(r.Context())
 	var req struct {
 		Limits map[string]*int64 `json:"limits"`
+		// HardStop is for the workspace's own limit, HardStops for each
+		// tool's; either left out keeps what is set.
+		HardStop  *bool           `json:"hard_stop"`
+		HardStops map[string]bool `json:"hard_stops"`
 	}
 	if !decode(w, r, &req) {
 		return
@@ -563,6 +637,24 @@ func (s *Server) putAIUsageLimits(w http.ResponseWriter, r *http.Request) {
 		}
 		out[id] = *v
 	}
+	if len(req.HardStops) > 50 {
+		bad("hard_stops has at most 50 tools")
+		return
+	}
+	var warnOnly []string
+	for id, stop := range req.HardStops {
+		if !aiTaskID.MatchString(id) {
+			bad("hard_stops keys are tool ids as GET /ai-usage lists them, such as reply_labelling")
+			return
+		}
+		if !stop {
+			warnOnly = append(warnOnly, id)
+		}
+	}
+	slices.Sort(warnOnly)
+	if req.HardStops != nil && warnOnly == nil {
+		warnOnly = []string{}
+	}
 	limits, err := json.Marshal(out)
 	if err != nil {
 		s.internal(w, r, err)
@@ -574,14 +666,21 @@ func (s *Server) putAIUsageLimits(w http.ResponseWriter, r *http.Request) {
 	}
 	slices.Sort(tools)
 	err = pgx.BeginFunc(r.Context(), s.pool, func(tx pgx.Tx) error {
-		if _, err := tx.Exec(r.Context(), `
-			INSERT INTO workspace_ai_settings (workspace_id, task_limits, updated_at, updated_by) VALUES ($1, $2, now(), $3)
-			ON CONFLICT (workspace_id) DO UPDATE SET task_limits = $2, updated_at = now(), updated_by = $3`,
-			a.WorkspaceID, limits, a.ActorID); err != nil {
+		var hardStop bool
+		var stillWarnOnly []string
+		if err := tx.QueryRow(r.Context(), `
+			INSERT INTO workspace_ai_settings (workspace_id, task_limits, limit_warn_only, warn_only_tasks, updated_at, updated_by)
+			VALUES ($1, $2, NOT COALESCE($4, true), COALESCE($5, '{}'::text[]), now(), $3)
+			ON CONFLICT (workspace_id) DO UPDATE SET task_limits = $2,
+				limit_warn_only = COALESCE(NOT $4, workspace_ai_settings.limit_warn_only),
+				warn_only_tasks = COALESCE($5, workspace_ai_settings.warn_only_tasks),
+				updated_at = now(), updated_by = $3
+			RETURNING NOT limit_warn_only, warn_only_tasks`,
+			a.WorkspaceID, limits, a.ActorID, req.HardStop, warnOnly).Scan(&hardStop, &stillWarnOnly); err != nil {
 			return err
 		}
 		return record(r.Context(), tx, &a.principal, a.WorkspaceID, "ai_limits.updated", "workspace", a.WorkspaceID,
-			map[string]any{"tools": tools, "limits_cents": out})
+			map[string]any{"tools": tools, "limits_cents": out, "hard_stop": hardStop, "warn_only_tools": stillWarnOnly})
 	})
 	if err != nil {
 		s.internal(w, r, err)

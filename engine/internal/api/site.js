@@ -21,6 +21,18 @@
 // Control on), no cookie is set and the id lasts only for the page until
 // you call outflare.consent(true). data-consent="required" asks it of everyone;
 // "granted" if your own banner already asked before loading this.
+//
+// Feature flags and A/B tests: with data-flags on the tag (or the first
+// call to outflare.flag), the script asks for the visitor's variants.
+// outflare.onFlags(fn) runs fn once they are known; outflare.flag("key")
+// then gives the variant or false, and outflare.flagPayload("key") its
+// payload. <html> gets a class per variant (of-flag-pricing-headline-faster)
+// for tests done in CSS alone. To keep visitors from seeing the original
+// flash before a variant, give <html> the class of-wait from an inline
+// script in <head>, with a style that hides the page while it is there:
+// the script takes it off as soon as the flags arrive, and your inline
+// script after a second or two at most. ?of_flag=key:variant on any page
+// shows that variant to you alone for the rest of the visit, to preview it.
 (function () {
   "use strict";
   var w = window, d = document;
@@ -107,6 +119,22 @@
   } catch (e) {}
   if (consented) writeCookie(anon);
 
+  // Variants to preview, from ?of_flag=key:variant, kept for the visit.
+  var preview = {};
+  try { preview = JSON.parse(sessionStorage.getItem("of_flag_preview") || "{}") || {}; } catch (e) {}
+  try {
+    var asked = new URL(location.href), pv = asked.searchParams.getAll("of_flag");
+    if (pv.length) {
+      pv.join(",").split(",").forEach(function (p) {
+        var kv = p.split(":");
+        if (/^[a-z0-9][a-z0-9_-]{0,63}$/.test(kv[0])) preview[kv[0]] = kv[1] && kv[1] !== "off" ? kv[1] : false;
+      });
+      try { sessionStorage.setItem("of_flag_preview", JSON.stringify(preview)); } catch (e) {}
+      asked.searchParams.delete("of_flag");
+      history.replaceState(history.state, "", asked.pathname + asked.search + asked.hash);
+    }
+  } catch (e) {}
+
   function campaign(q) {
     var c = {}, any = false;
     ["source", "medium", "campaign", "term", "content", "id"].forEach(function (k) {
@@ -162,6 +190,7 @@
     var q = new URLSearchParams(location.search), props = landing(q);
     for (var k in properties || {}) props[k] = properties[k];
     if (visitToken) { props.ofvisit = visitToken; visitToken = ""; }
+    if (flagsWanted && lastURL && lastURL !== location.href) loadFlags();
     var e = { type: "page", anonymousId: anon, messageId: uuid(), properties: props, context: context(q) };
     if (name) e.name = String(name);
     send([e]);
@@ -176,6 +205,57 @@
     send([{ type: "track", event: String(event), anonymousId: anon, messageId: id, properties: properties || {}, context: context(q) }]);
     return id;
   }
+
+  // Flags: asked for once per page (and again on in-app navigation, since
+  // rules can depend on the page), and kept for the visit so the next page
+  // starts with the last answer.
+  var FLAGS = "of_flags", flagsWanted = script.getAttribute("data-flags") !== null, flagState = null, flagWaiters = [], flagClasses = [];
+  try {
+    var kept = JSON.parse(sessionStorage.getItem(FLAGS) || "null");
+    if (kept && kept.anon === anon) flagState = kept;
+  } catch (e) {}
+  function applyFlags(state) {
+    flagState = state;
+    var root = d.documentElement, cls = [];
+    for (var k in state.flags) if (variant(k)) cls.push("of-flag-" + k + "-" + variant(k));
+    flagClasses.forEach(function (c) { root.classList.remove(c); });
+    cls.forEach(function (c) { root.classList.add(c); });
+    flagClasses = cls;
+    root.classList.remove("of-wait");
+    var waiting = flagWaiters;
+    flagWaiters = [];
+    waiting.forEach(function (fn) { try { fn(flagMap()); } catch (e) {} });
+  }
+  function variant(k) {
+    if (Object.prototype.hasOwnProperty.call(preview, k)) return preview[k];
+    return flagState && flagState.flags[k] ? flagState.flags[k] : false;
+  }
+  // The versions being previewed, for the server to send their content.
+  function previewed() {
+    var out = {};
+    for (var k in preview) if (preview[k]) out[k] = preview[k];
+    return out;
+  }
+  function flagMap() {
+    var out = {}, k;
+    for (k in (flagState && flagState.flags) || {}) out[k] = variant(k);
+    for (k in preview) out[k] = preview[k];
+    return out;
+  }
+  function loadFlags() {
+    flagsWanted = true;
+    if (!w.fetch) return applyFlags({ anon: anon, flags: {}, payloads: {} });
+    var body = JSON.stringify({ key: key, anonymousId: anon, url: location.href, referrer: lastURL || d.referrer, language: navigator.language || "", preview: previewed() });
+    fetch(api + "/v1/site/flags", { method: "POST", body: body, headers: { "Content-Type": "text/plain" } })
+      .then(function (res) { return res.ok ? res.json() : null; })
+      .then(function (out) {
+        var state = { anon: anon, flags: (out && out.flags) || (flagState && flagState.flags) || {}, payloads: (out && out.payloads) || (flagState && flagState.payloads) || {} };
+        if (out) try { sessionStorage.setItem(FLAGS, JSON.stringify(state)); } catch (e) {}
+        applyFlags(state);
+      }, function () { applyFlags(flagState || { anon: anon, flags: {}, payloads: {} }); });
+  }
+  // The last answer shows at once; a fresh one follows.
+  if (flagState) applyFlags(flagState);
 
   // Links to the site's other domains carry the visitor's id.
   function registrable(host) {
@@ -227,8 +307,31 @@
     // is removed).
     consent: function (yes) { consented = !!yes; writeCookie(anon); },
     // Forget the visitor, such as on sign-out on a shared computer.
-    reset: function () { anon = uuid(); if (consented) writeCookie(anon); }
+    reset: function () {
+      anon = uuid();
+      if (consented) writeCookie(anon);
+      try { sessionStorage.removeItem(FLAGS); } catch (e) {}
+      if (flagsWanted) loadFlags();
+    },
+    // The visitor's variant of a flag, or false: false too until the
+    // flags arrive, so wait with onFlags when it matters.
+    flag: function (k) {
+      if (!flagsWanted) loadFlags();
+      return variant(String(k));
+    },
+    flagPayload: function (k) {
+      var v = variant(String(k));
+      return v && flagState && flagState.payloads ? flagState.payloads[k] : undefined;
+    },
+    // Runs fn(flags) once the visitor's flags are known (at once when
+    // they already are), with every flag that is on: its variant or false.
+    onFlags: function (fn) {
+      if (typeof fn !== "function") return;
+      if (!flagsWanted) loadFlags();
+      if (flagState) { try { fn(flagMap()); } catch (e) {} } else flagWaiters.push(fn);
+    }
   };
+  if (flagsWanted) loadFlags();
   page();
   queued.forEach(function (c) {
     if (c && w.outflare[c[0]]) w.outflare[c[0]].apply(null, c.slice(1));

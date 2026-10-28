@@ -17,6 +17,8 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"sync"
+	"time"
 
 	c "github.com/outflareai/outflare/engine/internal/connectors"
 )
@@ -28,6 +30,13 @@ const (
 	pageSize     = 500
 	notePageSize = 50
 )
+
+// The preview reads a whole Attio workspace while someone waits for it, so
+// it makes up to previewWorkers calls at once (Attio allows 100 reads a
+// second) and stops counting after previewTime, marking those counts capped.
+const previewWorkers = 8
+
+var previewTime = 15 * time.Second
 
 // All returns Attio.
 func All() []c.Connector { return []c.Connector{Attio{}} }
@@ -159,17 +168,17 @@ func fields(ctx context.Context, cl *c.Client, creds c.Creds, base string, objec
 	return out, nil
 }
 
-// count pages through query results up to limit, counting how often each
+// count pages through query results up to limit, or until stop, counting how often each
 // field is filled. key is "values" for records and "entry_values" for
 // list entries.
-func count(ctx context.Context, cl *c.Client, creds c.Creds, path, key string, limit int, fs []c.CRMField) (c.CRMCount, error) {
+func count(ctx context.Context, cl *c.Client, creds c.Creds, path, key string, limit int, stop time.Time, fs []c.CRMField) (c.CRMCount, error) {
 	idx := map[string]int{}
 	for i, f := range fs {
 		idx[f.Slug] = i
 	}
 	var n c.CRMCount
 	for offset := 0; ; offset += pageSize {
-		if offset >= limit {
+		if offset >= limit || offset > 0 && time.Now().After(stop) {
 			n.Capped = true
 			return n, nil
 		}
@@ -197,10 +206,10 @@ func count(ctx context.Context, cl *c.Client, creds c.Creds, path, key string, l
 }
 
 // countPages counts a plain list endpoint (notes, tasks) up to limit.
-func countPages(ctx context.Context, cl *c.Client, creds c.Creds, path string, size, limit int) (c.CRMCount, error) {
+func countPages(ctx context.Context, cl *c.Client, creds c.Creds, path string, size, limit int, stop time.Time) (c.CRMCount, error) {
 	var n c.CRMCount
 	for offset := 0; ; offset += size {
-		if offset >= limit {
+		if offset >= limit || offset > 0 && time.Now().After(stop) {
 			n.Capped = true
 			return n, nil
 		}
@@ -219,7 +228,8 @@ func countPages(ctx context.Context, cl *c.Client, creds c.Creds, path string, s
 }
 
 // CRMPreview reads the workspace's objects, lists, members, notes and
-// tasks. Each count stops at limit.
+// tasks. Each count stops at limit, or once the preview has run for
+// previewTime, and then says it is capped.
 func (a Attio) CRMPreview(ctx context.Context, cl *c.Client, creds c.Creds, limit int) (c.CRMPreview, error) {
 	acct, err := a.Test(ctx, cl, creds)
 	if err != nil {
@@ -240,23 +250,6 @@ func (a Attio) CRMPreview(ctx context.Context, cl *c.Client, creds c.Creds, limi
 	if err := get(ctx, cl, creds, http.MethodGet, "/v2/objects", nil, &objects); err != nil {
 		return out, err
 	}
-	slugs := map[string]string{}
-	for _, o := range objects.Data {
-		slugs[o.ID.ObjectID] = o.Slug
-	}
-	for _, o := range objects.Data {
-		base := "/v2/objects/" + url.PathEscape(o.Slug)
-		fs, err := fields(ctx, cl, creds, base, slugs)
-		if err != nil {
-			return out, err
-		}
-		n, err := count(ctx, cl, creds, base+"/records/query", "values", limit, fs)
-		if err != nil {
-			return out, err
-		}
-		out.Objects = append(out.Objects, c.CRMObject{Slug: o.Slug, Name: o.Singular, Plural: o.Plural, Records: n, Fields: fs})
-	}
-
 	var lists struct {
 		Data []struct {
 			Slug   string   `json:"api_slug"`
@@ -267,23 +260,6 @@ func (a Attio) CRMPreview(ctx context.Context, cl *c.Client, creds c.Creds, limi
 	if err := get(ctx, cl, creds, http.MethodGet, "/v2/lists", nil, &lists); err != nil {
 		return out, err
 	}
-	for _, l := range lists.Data {
-		base := "/v2/lists/" + url.PathEscape(l.Slug)
-		fs, err := fields(ctx, cl, creds, base, slugs)
-		if err != nil {
-			return out, err
-		}
-		n, err := count(ctx, cl, creds, base+"/entries/query", "entry_values", limit, fs)
-		if err != nil {
-			return out, err
-		}
-		list := c.CRMList{Slug: l.Slug, Name: l.Name, Entries: n, Fields: fs}
-		if len(l.Parent) > 0 {
-			list.Object = l.Parent[0]
-		}
-		out.Lists = append(out.Lists, list)
-	}
-
 	var members struct {
 		Data []json.RawMessage `json:"data"`
 	}
@@ -291,14 +267,91 @@ func (a Attio) CRMPreview(ctx context.Context, cl *c.Client, creds c.Creds, limi
 		return out, err
 	}
 	out.Members = len(members.Data)
-	if out.Notes, err = countPages(ctx, cl, creds, "/v2/notes", notePageSize, limit); err != nil {
-		return out, err
+
+	slugs := map[string]string{}
+	for _, o := range objects.Data {
+		slugs[o.ID.ObjectID] = o.Slug
 	}
-	out.Tasks, err = countPages(ctx, cl, creds, "/v2/tasks", pageSize, limit)
-	return out, err
+	stop := time.Now().Add(previewTime)
+	g := newGroup(ctx, previewWorkers)
+	out.Objects = make([]c.CRMObject, len(objects.Data))
+	for i, o := range objects.Data {
+		g.Go(func(ctx context.Context) error {
+			base := "/v2/objects/" + url.PathEscape(o.Slug)
+			fs, err := fields(ctx, cl, creds, base, slugs)
+			if err != nil {
+				return err
+			}
+			n, err := count(ctx, cl, creds, base+"/records/query", "values", limit, stop, fs)
+			out.Objects[i] = c.CRMObject{Slug: o.Slug, Name: o.Singular, Plural: o.Plural, Records: n, Fields: fs}
+			return err
+		})
+	}
+	out.Lists = make([]c.CRMList, len(lists.Data))
+	for i, l := range lists.Data {
+		g.Go(func(ctx context.Context) error {
+			base := "/v2/lists/" + url.PathEscape(l.Slug)
+			fs, err := fields(ctx, cl, creds, base, slugs)
+			if err != nil {
+				return err
+			}
+			n, err := count(ctx, cl, creds, base+"/entries/query", "entry_values", limit, stop, fs)
+			out.Lists[i] = c.CRMList{Slug: l.Slug, Name: l.Name, Entries: n, Fields: fs}
+			if len(l.Parent) > 0 {
+				out.Lists[i].Object = l.Parent[0]
+			}
+			return err
+		})
+	}
+	g.Go(func(ctx context.Context) (err error) {
+		out.Notes, err = countPages(ctx, cl, creds, "/v2/notes", notePageSize, limit, stop)
+		return err
+	})
+	g.Go(func(ctx context.Context) (err error) {
+		out.Tasks, err = countPages(ctx, cl, creds, "/v2/tasks", pageSize, limit, stop)
+		return err
+	})
+	return out, g.Wait()
 }
 
-// CRMMembers lists the people in the Attio workspace.
+// group runs functions with at most n at once. The first error cancels the
+// rest and is what Wait returns.
+type group struct {
+	ctx    context.Context
+	cancel context.CancelFunc
+	sem    chan struct{}
+	wg     sync.WaitGroup
+	once   sync.Once
+	err    error
+}
+
+func newGroup(ctx context.Context, n int) *group {
+	ctx, cancel := context.WithCancel(ctx)
+	return &group{ctx: ctx, cancel: cancel, sem: make(chan struct{}, n)}
+}
+
+func (g *group) Go(f func(context.Context) error) {
+	g.wg.Add(1)
+	go func() {
+		defer g.wg.Done()
+		select {
+		case g.sem <- struct{}{}:
+		case <-g.ctx.Done():
+			return
+		}
+		defer func() { <-g.sem }()
+		if err := f(g.ctx); err != nil {
+			g.once.Do(func() { g.err = err; g.cancel() })
+		}
+	}()
+}
+
+func (g *group) Wait() error {
+	g.wg.Wait()
+	g.cancel()
+	return g.err
+}
+
 func (Attio) CRMMembers(ctx context.Context, cl *c.Client, creds c.Creds) ([]c.CRMMember, error) {
 	var resp struct {
 		Data []struct {

@@ -53,6 +53,25 @@ The check runs while you wait, and answers `409 verification_failed` with the pr
 
 One crawl per site runs at a time (`409 crawl_running`). Follow it with `GET .../crawls/{crawl}`, and stop it with `POST .../crawls/{crawl}/stop`. A site with `schedule: daily` or `weekly` is crawled that often by itself.
 
+### Crawl settings
+
+Every setting has a default that reads the site the way a search engine does, so most sites need none of them. Change them with `PATCH .../seo-sites/{site}` (or the site's Crawl settings in the app); a crawl keeps the settings it started with (`settings` on the crawl).
+
+| Setting | Default | What it does |
+| --- | --- | --- |
+| `max_pages` | 100, or 10,000 once proved | Pages read per crawl. |
+| `max_depth` | 0 (no limit) | Clicks from the start page. |
+| `use_sitemaps` | on | Find pages in the sitemaps robots.txt lists, or `/sitemap.xml`. |
+| `follow_nofollow` | off | Follow links marked `rel="nofollow"` too. |
+| `ignore_params` | off | Crawl `/shoes?color=red` as `/shoes`. |
+| `include_patterns` | none | Regular expressions on a page's path and query; when set, only matching pages are crawled. The start page always is. |
+| `exclude_patterns` | none | Pages matching any of these are left out; they win over `include_patterns`. |
+| `render_js` | `auto` | Run pages' scripts: `auto` only for pages that are empty app shells, `always` for every page, `off` never. See below. |
+| `crawl_delay_ms` | 2 seconds, or 1 second once proved | The pause between requests. |
+| `schedule`, `schedule_hour`, `schedule_day`, `schedule_tz` | off (by hand), any time, UTC | When a scheduled crawl starts: every day or week, at an hour (and, weekly, a day) in a time zone. |
+
+A crawl's `pages_excluded` counts the links its patterns and depth left out, and `pages_rendered` the pages read with their scripts run.
+
 Each crawl runs as a chain of jobs that each work for about 90 seconds, so a large site never holds a worker for long and a restart picks the crawl up where it was.
 
 `GET .../crawls/{crawl}/pages` lists every URL the crawl found, in the order found:
@@ -178,18 +197,65 @@ How far agents in a mission may go on their own (taking a fix with `POST .../fix
 
 Every step is a webhook event in the `fixes` category, so an agent can run the whole loop without polling: `fix.found` (a new fix), `fix.updated` (someone took, finished or ignored it), `fix.started` (taken before changing the site), `fix.verify_requested` (with the checking crawl's `run_id`), `fix.confirmed` and `fix.reopened`. Each has the fix's `source`, `rule`, `subject_type` and `subject_id`.
 
+### Fix tickets
+
+The fixes list is fine for machines, but a person (or a coding agent) wants one piece of work per problem. So fixes are grouped into **tickets**: one per issue and site, such as "pages have no title", with every page behind it however many URL templates they come from. Tickets are a view over the same fixes, kept in step by the database: a new fix joins its ticket, a ticket's status comes from its fixes (in progress if any is, open if any is, then done, then ignored), and a ticket goes when its last fix does. Other sources group the same way, one ticket per rule and subject.
+
+`GET .../fix-tickets` lists them (`?status=todo`, the default, is open and in progress; `open`, `in_progress`, `done`, `ignored` or `all`; `?source=`, `?subject_id=`, `?brand=`). `GET .../fix-tickets/{ticket}` adds:
+
+- its fixes and pages (each with the template it came from),
+- the search clicks and impressions of those pages over the last 28 days, when the site has Search Console,
+- the other tickets on the same site with their status and review, so nobody fixes the same thing twice or undoes another fix,
+- the guidelines that apply to it (below).
+
+**The brief.** `POST .../fix-tickets/{ticket}/write` has the workspace's own AI model (the **Fix tickets** tool under Settings → AI model, a light model by default) write the ticket like a GitHub or Linear issue: a `title`, a two-line `summary` for a person, `why` it matters for search traffic, AI citations or users, the `change` in enough detail for a coding agent, a `done_when` checklist anyone can check, and what not to do (`dont`). It writes from the issue, the pages, the brand and its website, the other tickets and their reviews, the team's guidelines and any `feedback` you send, and says `kind`: `code`, `content` or `config`. It answers `202` and runs as a job; the ticket's `brief_status` goes `queued`, `writing`, then `ready` or `failed` with `brief_error`. Without an AI connection it answers `409 connector_needed`; nothing is written with a key of Outflare's own. Writing again with `feedback` ("keep titles under 55 characters") rewrites it.
+
+**Review.** A person decides with `POST .../fix-tickets/{ticket}/review` and `decision`:
+
+- `approve` marks the ticket approved.
+- `reject` needs a `note` saying why, and ignores its fixes, so crawls stop raising them.
+- `reopen` clears the review and opens the fixes again.
+
+With `"guideline": "site"`, `"brand"` or `"workspace"`, the note is saved as a guideline as well.
+
+**Guidelines** are how a team tunes what Outflare recommends. Each is a sentence every later brief follows, for the whole workspace, one brand, or one site (and one issue): "titles end with | Northpeak", "never change /legal/*". `GET`, `POST .../fix-guidelines` (`text`, and `brand_id` or `subject_id` with an optional `rule`) and `DELETE .../fix-guidelines/{guideline}` manage them; a workspace keeps at most 200. Rejected tickets' notes on the same site are given to the AI as well.
+
+**Hand it on.** `GET .../fix-tickets/{ticket}/prompt` answers the ticket as one Markdown issue (with the guidelines, every page and how to report back), ready for a coding agent or an issue tracker. It works before a brief is written, too, from the rule alone. Then report each fix live with `verify_fix` as above.
+
+Reading tickets needs `seo.read`; writing, reviewing and guidelines need `seo.manage`. The MCP tools are `list_fix_tickets`, `get_fix_ticket`, `get_fix_ticket_prompt`, `write_fix_ticket`, `review_fix_ticket`, `list_fix_guidelines`, `create_fix_guideline` and `delete_fix_guideline`. Asking for a brief is `fix_ticket.write_requested`, a written one `fix_ticket.written` (a failed one the product event `fix_ticket.write_failed`), reviews are `fix_ticket.approved`, `fix_ticket.rejected` and `fix_ticket.reopened`, and guidelines `fix_guideline.created` and `fix_guideline.deleted`.
+
 ## Pages your firewall blocks, and pages built by JavaScript
 
 Two kinds of page can't be read as served. A firewall or bot protection (Cloudflare, Akamai, DataDome, Imperva and the like) can answer OutflareBot with a `403` or a challenge page instead of your page. And some sites send an almost empty page and build it in the browser with JavaScript (React, Vue, Angular and the like), so read as served it has no title, words or links. For a site you have proved you own, a crawl can read both through **Geonode's Scraper API** with your own Geonode key: connect Geonode (`POST /v1/workspaces/$WS/integrations` with `{"connector": "geonode", "credentials": {"api_key": "..."}}`, or Connectors in the app), and the next crawl uses it. Outflare never uses a key of its own for this.
 
 - Only for a proved site. A blocked page is one whose answer was a `403`, a challenge page or a `Cf-Mitigated: challenge` header. A rate limit (`429`) is waited out, not got around.
-- A JavaScript page is one that looks like an empty app shell: fewer than 150 words and a framework's mount point (`id="root"`, `id="__next"` and the like). Geonode loads it in a browser and the crawl audits what it built, keeping any link from the served HTML too. A page marked `noindex` is kept as served.
+- A JavaScript page is one that looks like an empty app shell: fewer than 150 words and a framework's mount point (`id="root"`, `id="__next"` and the like). Geonode loads it in a browser and the crawl audits what it built, keeping any link from the served HTML too. A page marked `noindex` is kept as served. That is `render_js: auto`, the default; `always` runs every HTML page's scripts (each one costs Geonode tokens), and `off` never does. The site's `render_connections` lists the connections that can do it for its brand.
 - Never for a page robots.txt disallows: those are not requested at all. A fallback gets past a technical block, never the site's rules.
 - The page is then marked `fetched_via: "geonode"`, and keeps Geonode's answer. When Geonode cannot read it either, it keeps your site's own answer. After three failed reads in a row (out of tokens, say), a crawl stops asking for a while. A crawl's `pages_fallback` counts these pages.
 - Outflare never reads them with an account or key of its own, on Cloud or self-hosted: only the workspace's own Geonode connection. Without one the page stays blocked. A crawl's `pages_firewalled` counts the blocked pages, and its `fallback_hint` says what would let the next crawl read them: `verify_site` (prove you own it) or `connect_geonode`.
 - Each page costs Geonode tokens on your plan; a page loaded in a browser costs more.
 
 Without a Geonode connection, pages are read as served. Better still for blocked pages, let OutflareBot through your firewall: its user agent and, once published, its addresses are on [outflare.ai/bot](https://outflare.ai/bot/).
+
+## Indexability
+
+A site's indexability report says which of its pages Google has indexed, and why some aren't. No single source is right on its own: the crawl knows what the site asks for (status, `noindex`, canonical, the sitemap), Search Console's URL Inspection says what Google decided but only for the pages it inspected and can be weeks old, Search Console's impressions prove a page is on Google, and an SEO tool (Ahrefs or DataForSEO, on your own account) sees pages ranking where Search Console has nothing. The report puts every page any of them knows in one list and gives each a verdict from the strongest evidence:
+
+- **Indexed**: Search Console showed it in results in the last 28 days, or URL Inspection says it is on Google.
+- **Likely indexed**: your SEO tool sees it ranking, and Search Console says nothing against it.
+- **Not indexed**: URL Inspection says Google hasn't indexed it, and nothing shows it in results.
+- **Unknown**: no source has looked at it yet.
+
+Where they disagree, results beat an old inspection. The report also finds these issues, worst first: a page that can be indexed but isn't (error), a page in the sitemap that can't be indexed (error), an indexed page that can no longer be (warning), Google choosing another canonical (warning), a page Google knows that the crawl didn't find, an orphan or old address (warning, only after a complete crawl), sources disagreeing (notice), and an indexable page missing from the sitemap (notice). Each issue says why it matters and how to fix it.
+
+It reads only what the crawls and syncs stored, so it costs nothing. A snapshot of its counts is kept once a day, after every crawl that read pages and every Search Console sync that brought new days or inspections, so the report shows 90 days of history. Without a crawl or a Search Console connection the report says which to add; an SEO tool is optional.
+
+```sh
+curl -H "Authorization: Bearer $TOKEN" "$URL/v1/workspaces/$WS/seo-sites/$SITE/indexability"
+curl -H "Authorization: Bearer $TOKEN" "$URL/v1/workspaces/$WS/seo-sites/$SITE/indexability/pages?issue=indexable_not_indexed"
+```
+
+The MCP tools are `get_site_indexability` and `list_indexability_pages`.
 
 ## API and scopes
 

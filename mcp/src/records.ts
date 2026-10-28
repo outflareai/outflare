@@ -61,12 +61,16 @@ export function registerRecordTools(server: McpServer, gtm: MissionClient, works
     "list_records",
     {
       title: "List customer records",
-      description: "People, companies or another record type, newest first. q matches the name or any identity, such as part of an email.",
+      description:
+        "People, companies or another record type, newest first. q matches the name or any identity, such as part of an email. " +
+        "Records held for review (people a visitor identification tool named) are left out unless review is needs_review or all.",
       inputSchema: {
         type: typeKey.optional(),
         q: z.string().optional(),
         origin: origins.optional(),
         archived: z.enum(["false", "true", "all"]).optional(),
+        review: z.enum(["approved", "needs_review", "all"]).optional(),
+        acquired_via: z.string().optional().describe("Only records from these tools, comma-separated, such as rb2b,vector."),
         brand: z.string().optional().describe("A brand's handle or id, none for shared records, or all."),
         limit: z.number().int().min(1).max(200).optional(),
         cursor: z.string().optional().describe("next_cursor from the previous page."),
@@ -217,6 +221,20 @@ export function registerRecordTools(server: McpServer, gtm: MissionClient, works
   );
 
   if (readOnly) return;
+
+  server.registerTool(
+    "review_record",
+    {
+      title: "Approve or reject a record held for review",
+      description:
+        "For a record with needs_review true, such as a person RB2B, Vector or Warmly named on the website. approve lists it and lets cold " +
+        "email reach it (never marketing without their consent); reject archives it. Ask the user before deciding for them.",
+      inputSchema: { record_id: id, decision: z.enum(["approve", "reject"]) },
+      annotations: write,
+    },
+    ({ record_id, decision }) =>
+      call(() => gtm.POST("/v1/workspaces/{ws}/records/{record}/review", { params: { path: recordPath(record_id) }, body: { decision } })),
+  );
 
   server.registerTool(
     "create_record",

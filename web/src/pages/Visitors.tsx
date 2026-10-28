@@ -5,7 +5,7 @@ import { DataTable } from "@/components/data-table";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Switch } from "@/components/ui/switch";
 import { api, errorMessage } from "../api";
-import { Badge, Button, Card, ErrorText, Input, Loading, PageHeader, Stat, Stats, toast } from "../ui";
+import { Badge, Button, Card, CopyButton, ErrorText, Input, Loading, PageHeader, Stat, Stats, toast } from "../ui";
 import { ago, plural } from "../format";
 import { SiteKeysCard } from "./SiteKeys";
 import type { Tab } from "../App";
@@ -15,12 +15,17 @@ import type { Tab } from "../App";
 // a click on a tracked link in an email Outflare sent them; their company is
 // their first company, else the one with their email's domain. When the
 // workspace turns lookups on, unknown visitors' companies come from its own
-// data provider, and stay off the CRM until someone adds them.
+// data provider, and stay off the CRM until someone adds them. People a
+// visitor identification tool (RB2B, Vector, Warmly) names wait in a review
+// list, never emailed, until someone approves them.
 
 type Visitor = components["schemas"]["Visitor"];
 type Totals = components["schemas"]["VisitorTotals"];
 type Settings = components["schemas"]["VisitorSettings"];
 type TimelineItem = components["schemas"]["TimelineItem"];
+type RecordView = components["schemas"]["Record"];
+
+const tools: Record<string, string> = { rb2b: "RB2B", vector: "Vector", warmly: "Warmly" };
 
 type Props = { ws: string; canManage: boolean; go: (tab: Tab, item?: string) => void };
 
@@ -100,6 +105,7 @@ export function Visitors({ ws, canManage, go }: Props) {
       {header}
       {error && <ErrorText>{error}</ErrorText>}
       {showSettings && canManage && <SettingsCard ws={ws} onSaved={load} go={go} />}
+      {canManage && <ReviewCard ws={ws} />}
 
       {!hasKeys && (
         <>
@@ -311,6 +317,7 @@ function SettingsCard({ ws, onSaved, go }: { ws: string; onSaved: () => void; go
   const [notCompanies, setNotCompanies] = useState("");
   const [hot, setHot] = useState("60");
   const [limit, setLimit] = useState("500");
+  const [acceptNotice, setAcceptNotice] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
 
@@ -336,6 +343,7 @@ function SettingsCard({ ws, onSaved, go }: { ws: string; onSaved: () => void; go
       body: {
         key_pages: split(keyPages), exclude_domains: split(exclude), hot_score: Number(hot), email_clicks: s.email_clicks, exclude_customers: s.exclude_customers,
         reveal_companies: s.reveal_companies, reveal_integration_id: s.reveal_integration_id, reveal_daily_limit: Number(limit), not_companies: split(notCompanies),
+        reveal_people: s.reveal_people, ...(acceptNotice ? { accept_people_notice: true } : {}),
       },
     });
     setBusy(false);
@@ -400,9 +408,98 @@ function SettingsCard({ ws, onSaved, go }: { ws: string; onSaved: () => void; go
             </>
           )}
         </div>
+        <div className="space-y-3 border-t pt-4">
+          <div className="text-[13px] font-medium">People by name</div>
+          {s.people_connections.length === 0 ? (
+            <p className="text-[13px] text-muted-foreground">
+              Have your own RB2B, Vector or Warmly name the people on your site.{" "}
+              <button type="button" className="underline" onClick={() => go("connectors")}>Connect one</button> first. Outflare never identifies anyone on its own.
+            </p>
+          ) : (
+            <>
+              <label className="flex items-start gap-3 text-[13px]">
+                <Switch checked={s.reveal_people} onCheckedChange={(v) => setS({ ...s, reveal_people: v })} className="mt-0.5" />
+                <span><span className="font-medium">Take in the people your tool names.</span> <span className="text-muted-foreground">New people become CRM records tagged with the tool, held for review: they stay off your people list and get no email until you approve them. Approved people can get cold email, never marketing without their consent.</span></span>
+              </label>
+              {s.reveal_people && !s.people_notice_accepted_at && (
+                <div className="space-y-2 rounded-md border bg-muted/40 p-3 text-[13px]">
+                  <p className="font-medium">Before you turn this on</p>
+                  <p className="text-muted-foreground">These tools name people in the United States only. You're responsible for saying so in your site's privacy policy, honouring opt-outs (Global Privacy Control included) and checking the rules where you sell. Never use it for visitors in the EU, UK, Canada or Australia.</p>
+                  <label className="flex items-center gap-2">
+                    <input type="checkbox" checked={acceptNotice} onChange={(e) => setAcceptNotice(e.target.checked)} />
+                    I've read this and accept it for this workspace.
+                  </label>
+                </div>
+              )}
+              {s.people_connections.map((c) => (
+                <div key={c.id} className="space-y-1 text-[13px]">
+                  <div className="font-medium">{c.name}: webhook address</div>
+                  <div className="flex items-center gap-2">
+                    <code className="min-w-0 flex-1 truncate rounded bg-muted px-2 py-1 text-[12px]">{c.webhook_url}</code>
+                    <CopyButton text={c.webhook_url} />
+                  </div>
+                  <div className="text-muted-foreground">Paste it into {tools[c.connector] ?? c.name}'s webhook settings. Keep it private: anyone with it can add people to your review list.</div>
+                </div>
+              ))}
+            </>
+          )}
+        </div>
         {error && <ErrorText>{error}</ErrorText>}
-        <Button type="submit" disabled={busy}>Save</Button>
+        <Button type="submit" disabled={busy || (s.reveal_people && !s.people_notice_accepted_at && !acceptNotice)}>Save</Button>
       </form>
+    </Card>
+  );
+}
+
+// ReviewCard lists the people a visitor identification tool named, for
+// someone to approve (they join the people list and may get cold email) or
+// reject (archived).
+function ReviewCard({ ws }: { ws: string }) {
+  const [held, setHeld] = useState<RecordView[] | null>(null);
+  const [busy, setBusy] = useState("");
+  const [error, setError] = useState("");
+
+  const load = useCallback(async () => {
+    const { data, error } = await api.GET("/v1/workspaces/{ws}/records", { params: { path: { ws }, query: { type: "person", review: "needs_review", limit: 50 } } });
+    if (error || !data) return setError(errorMessage(error));
+    setHeld(data.data);
+  }, [ws]);
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  async function decide(r: RecordView, decision: "approve" | "reject") {
+    setBusy(r.id);
+    const { error } = await api.POST("/v1/workspaces/{ws}/records/{record}/review", { params: { path: { ws, record: r.id } }, body: { decision } });
+    setBusy("");
+    if (error) return setError(errorMessage(error));
+    toast(decision === "approve" ? `${r.name || "Person"} approved.` : `${r.name || "Person"} rejected and archived.`);
+    load();
+  }
+
+  if (!held || held.length === 0) return error ? <ErrorText>{error}</ErrorText> : null;
+  return (
+    <Card title={`People to review (${held.length}${held.length === 50 ? "+" : ""})`} description="Named by your visitor identification tool. Such tools are often wrong: check each one. Nobody here is emailed until you approve them.">
+      <div className="divide-y">
+        {held.map((r) => {
+          const email = r.identities.find((i) => i.namespace === "email")?.value;
+          const via = r.contactability?.acquired_via ?? "";
+          const title = typeof r.attributes.job_title === "string" ? r.attributes.job_title : "";
+          return (
+            <div key={r.id} className="flex flex-wrap items-center justify-between gap-2 py-2 text-[13px]">
+              <div className="min-w-0">
+                <div className="font-medium">{r.name || email || "Unnamed"}</div>
+                <div className="truncate text-muted-foreground">{[title, email, tools[via] ?? via, ago(r.created_at)].filter(Boolean).join(" · ")}</div>
+              </div>
+              <div className="flex gap-2">
+                <Button variant="ghost" disabled={busy === r.id} onClick={() => decide(r, "reject")}>Reject</Button>
+                <Button disabled={busy === r.id} onClick={() => decide(r, "approve")}>Approve</Button>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+      {error && <ErrorText>{error}</ErrorText>}
     </Card>
   );
 }

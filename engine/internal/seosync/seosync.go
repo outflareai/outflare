@@ -18,6 +18,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -63,6 +64,10 @@ type Settings struct {
 	// LinkRows is how many links each weekly read asks for per SEO site.
 	// Unset is DefaultLinkRows.
 	LinkRows *int `json:"link_rows,omitempty"`
+	// LinkTraffic adds the linking pages' and domains' traffic to each
+	// weekly links read. Ahrefs charges about 25 more API units a link for
+	// it; DataForSEO has no traffic for links.
+	LinkTraffic bool `json:"link_traffic,omitempty"`
 	// GapRows is how many keywords and linking domains each weekly read
 	// takes of a tracked competitor, for the gaps. Unset is
 	// DefaultGapRows; 0 turns gaps off.
@@ -234,6 +239,9 @@ func Fetch(ctx context.Context, pool *pgxpool.Pool, o *connectors.Opened, r conn
 	}
 	out.Budget = b
 	key := "seo|" + strings.Join([]string{q.Report, q.Target, q.Country, strconv.Itoa(q.Limit)}, "|")
+	if q.Traffic {
+		key += "|traffic"
+	}
 	if !opt.Fresh {
 		var raw []byte
 		var at time.Time
@@ -748,6 +756,10 @@ func (s *Syncer) finish(ctx context.Context, ws, id, host string, cost float64, 
 func trunc(s string, n int) string {
 	if len(s) <= n {
 		return s
+	}
+	// Cut on a character boundary, so the text stays valid UTF-8.
+	for n > 0 && !utf8.RuneStart(s[n]) {
+		n--
 	}
 	return s[:n]
 }

@@ -107,7 +107,8 @@ function legacy(from, to) {
 				const kind = { Added: 'launch', Changed: 'improvement', Removed: 'improvement', Fixed: 'fix', Security: 'security' }[heading] ?? 'improvement';
 				let text = t.slice(2).replace(/\[([^\]]+)\]\([^)]+\)/g, '$1').replace(/`/g, '');
 				// The first sentence: changelog lines were written for self-hosters and run long.
-				text = text.match(/^.{10,380}?[.!?](?=\s|$)/)?.[0] ?? text.slice(0, 380);
+				// A first sentence too long to fit ends at the last whole word, never mid-word.
+				text = text.match(/^.{10,380}?[.!?](?=\s|$)/)?.[0] ?? `${text.slice(0, 378).replace(/[\s,;:(]+\S*$/, '')}…`;
 				out.push({ kind, area: 'general', text: kind === 'security' ? 'Security improvements.' : text, pr: prOfMerge(commit) ?? prFor(commit, to), legacy: true });
 			}
 		}

@@ -95,7 +95,9 @@ export function Overview({ ws, name, isAdmin, go, limited = false }: { ws: strin
 
   // While Get started has steps left, it is the set-up row on Home: it
   // covers connecting an AI, so the other set-up steps wait.
-  const checklist = onboarding && onboarding.done < onboarding.total && !onboarding.dismissed ? onboarding : null;
+  // Once every Get started step is done or skipped, the brand's own
+  // checklist takes over.
+  const checklist = onboarding && !onboarding.dismissed && onboarding.steps.some((x) => x.walkthrough && !x.done && !x.skipped) ? onboarding : null;
 
   // Everything that needs a person, in one list: the blockers agents read
   // from GET /status (the set-up row covers the empty-workspace ones and
@@ -123,15 +125,16 @@ export function Overview({ ws, name, isAdmin, go, limited = false }: { ws: strin
       key: "onboarding", title: `Finish setting up ${name}`, detail: next ? `Next: ${next.title}` : undefined, tone: "blue", tab: "get-started",
       cta: "Continue", progress: [steps.filter((x) => x.done).length, steps.length], onOpen: next ? () => open(next) : undefined,
     });
-  } else if (nextStep) {
-    todos.push({ key: "setup", title: nextStep.title, detail: nextStep.detail, tone: "blue", tab: nextStep.tab, cta: nextStep.cta, progress: [setup.filter((x) => x.done).length, setup.length] });
-  }
-  if (brandSetup && !brandSetup.complete && !brandSetup.dismissed) {
+  } else if (brandSetup && !brandSetup.complete && !brandSetup.dismissed) {
+    // One set-up row at a time: Get started first, then the brand's own
+    // checklist, then what outreach needs.
     const next = brandSetup.steps.find((x) => x.id === brandSetup.next_step);
     todos.push({
       key: "brand_setup", title: `Continue setting up ${brandSetup.brand}`, detail: next ? `Next: ${next.title}` : undefined, tone: "blue", tab: "setup",
       cta: "Continue", progress: [brandSetup.done, brandSetup.total],
     });
+  } else if (nextStep) {
+    todos.push({ key: "setup", title: nextStep.title, detail: nextStep.detail, tone: "blue", tab: nextStep.tab, cta: nextStep.cta, progress: [setup.filter((x) => x.done).length, setup.length] });
   }
   todos.sort((a, b) => toneRank[a.tone] - toneRank[b.tone]);
 
