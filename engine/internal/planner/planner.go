@@ -20,7 +20,7 @@ import (
 )
 
 // Metrics a mission's goal can be measured in.
-var Metrics = []string{"meetings", "replies", "sends", "leads"}
+var Metrics = []string{"meetings", "replies", "sends", "leads", "revenue_attributed", "revenue_deals"}
 
 // Snapshot is what the planner knows about the workspace. Callers fill it
 // from the database; nothing secret goes in it.
@@ -240,7 +240,7 @@ func Schema() map[string]any {
 	return obj(map[string]any{
 		"name":            str,
 		"goal":            str,
-		"goal_metric":     map[string]any{"type": "string", "enum": []any{"meetings", "replies", "sends", "leads"}},
+		"goal_metric":     map[string]any{"type": "string", "enum": []any{"meetings", "replies", "sends", "leads", "revenue_attributed", "revenue_deals"}},
 		"goal_target":     map[string]any{"type": "integer"},
 		"ends_on":         str,
 		"steps":           map[string]any{"type": "array", "items": obj(map[string]any{"title": str, "detail": str})},
@@ -260,7 +260,7 @@ A person has typed a goal. Turn it into a mission draft that a person will revie
 How to draft:
 - name: short, like "Fintech CFOs, Australia".
 - goal: one sentence restating what success is, in the person's terms.
-- goal_metric and goal_target: the number the goal is measured in. Meetings booked is the usual one for "book meetings"; use replies, sends or leads only when the goal is about those.
+- goal_metric and goal_target: the number the goal is measured in. Meetings booked is the usual one for "book meetings"; use replies, sends or leads only when the goal is about those. For a revenue goal in US dollars use revenue_attributed (payments credited to the mission's sequences) or revenue_deals (won deals tagged with the mission), with goal_target in whole dollars.
 - ends_on: the deadline as YYYY-MM-DD if the goal gives or implies one, otherwise "".
 - steps: 4 to 8 concrete steps in order, each one an action an agent can take through the Outflare API (find and import leads, verify emails, check suppression, write and create the sequence, assign mailboxes, start in a dry run, watch replies, hand interested replies to a person). Say which connector a step uses.
 - instructions: what the agent must keep to while running: who to target and exclude, tone, claims it must not make, when to stop and ask.

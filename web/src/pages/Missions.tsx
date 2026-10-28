@@ -41,7 +41,7 @@ const writesText: Record<Mission["writes"], string> = {
   refused: "Changes are refused. Reads still work while paused.",
 };
 
-const metricLabel = { meetings: "meetings", replies: "replies", sends: "emails sent", leads: "leads contacted" } as const;
+const metricLabel = { meetings: "meetings", replies: "replies", sends: "emails sent", leads: "leads contacted", revenue_attributed: "USD revenue from its sequences", revenue_deals: "USD in won deals" } as const;
 const money = (cents: number) => (cents / 100).toLocaleString(undefined, { style: "currency", currency: "USD", maximumFractionDigits: cents % 100 ? 2 : 0 });
 // The end date in the viewer's time zone, with the zone named.
 const endsAt = (iso: string) => new Date(iso).toLocaleString(undefined, { weekday: "short", day: "numeric", month: "short", year: "numeric", hour: "numeric", minute: "2-digit", timeZoneName: "short" });
@@ -380,7 +380,7 @@ function MissionForm({ ws, mission, canApprove = true, onClose, onSaved }: { ws:
           <Labeled label="Goal" hint="What success looks like, in words the agent will read.">
             <textarea className={`${field} w-full`} rows={2} value={goal} onChange={(e) => setGoal(e.target.value)} placeholder="Book 10 meetings with CFOs at Australian fintechs with 50 to 500 staff." />
           </Labeled>
-          <Labeled label="Track a number" hint="Optional. Progress shows on this page and to the agent.">
+          <Labeled label="Track a number" hint="Optional. Progress shows on this page and to the agent. Revenue counts in whole US dollars: from its sequences counts payments credited to the campaign links in its emails; won deals counts deals tagged with the mission.">
             <div className="flex gap-2">
               <input className={`${field} w-24`} inputMode="numeric" aria-label="Target" placeholder="10" value={target} onChange={(e) => setTarget(e.target.value.replace(/\D/g, ""))} />
               <select className={field} aria-label="Metric" value={metric} onChange={(e) => setMetric(e.target.value)}>

@@ -292,6 +292,66 @@ func TestMissionSpendAndMeetings(t *testing.T) {
 	}
 }
 
+// Revenue goals count in whole US dollars: payments credited to the
+// campaigns of the mission's sequences under the default model, or won
+// deals tagged with the mission.
+func TestMissionRevenueGoals(t *testing.T) {
+	e := freshEnv(t)
+	owner, ws := setupOwner(t, e.h)
+	base := "/v1/workspaces/" + ws
+	ctx := t.Context()
+	owner.must(400, "POST", base+"/missions", map[string]any{"name": "x", "goal_metric": "revenue", "goal_target": 10})
+	attributed := owner.must(201, "POST", base+"/missions", map[string]any{"name": "Pipeline", "goal_metric": "revenue_attributed", "goal_target": 40})["id"].(string)
+	deals := owner.must(201, "POST", base+"/missions", map[string]any{"name": "Deals", "goal_metric": "revenue_deals", "goal_target": 100})["id"].(string)
+
+	exec := func(sql string, args ...any) string {
+		t.Helper()
+		var id string
+		if err := e.pool.QueryRow(ctx, sql, args...).Scan(&id); err != nil {
+			t.Fatalf("%s: %v", sql, err)
+		}
+		return id
+	}
+	seq := exec(`INSERT INTO sequences (workspace_id, name, mission_id) VALUES ($1, 'Outbound', $2) RETURNING id::text`, ws, attributed)
+	other := exec(`INSERT INTO sequences (workspace_id, name) VALUES ($1, 'Other') RETURNING id::text`, ws)
+	camp := exec(`INSERT INTO tracking_campaigns (workspace_id, name, slug, code, channel, source, medium, object_kind, object_id)
+		VALUES ($1, 'Outbound', 'outbound', 'code000001', 'outbound_email', 'outflare', 'email', 'sequence', $2) RETURNING id::text`, ws, seq)
+	otherCamp := exec(`INSERT INTO tracking_campaigns (workspace_id, name, slug, code, channel, source, medium, object_kind, object_id)
+		VALUES ($1, 'Other', 'other', 'code000002', 'outbound_email', 'outflare', 'email', 'sequence', $2) RETURNING id::text`, ws, other)
+	// A payment credited to the mission's campaign under the default model
+	// counts; one under another model, one in euros and one credited to
+	// another sequence don't.
+	pay := func(minor int, currency, campaign, model string) {
+		t.Helper()
+		ev := exec(`INSERT INTO customer_events (workspace_id, kind, name, occurred_at) VALUES ($1, 'track', 'payment.succeeded', now()) RETURNING id::text`, ws)
+		exec(`INSERT INTO attribution_conversions (event_id, workspace_id, name, occurred_at, value_minor, currency) VALUES ($1, $2, 'payment.succeeded', now(), $3, $4) RETURNING event_id::text`,
+			ev, ws, minor, currency)
+		exec(`INSERT INTO attribution_credits (event_id, workspace_id, model, position, channel, tracking_campaign_id, weight)
+			VALUES ($1, $2, $3, 0, 'outbound_email', $4, 1) RETURNING event_id::text`, ev, ws, model, campaign)
+	}
+	pay(4950, "USD", camp, "last_non_direct")
+	pay(10000, "USD", camp, "first_touch")
+	pay(10000, "EUR", camp, "last_non_direct")
+	pay(10000, "USD", otherCamp, "last_non_direct")
+	exec(`INSERT INTO deals (workspace_id, mission_id, source, state, amount_cents, currency, attribution) VALUES ($1, $2, 'manual', 'won', 12000, 'USD', 'manual') RETURNING id::text`, ws, deals)
+	exec(`INSERT INTO deals (workspace_id, mission_id, source, state, amount_cents, currency, attribution) VALUES ($1, $2, 'manual', 'open', 50000, 'USD', 'manual') RETURNING id::text`, ws, deals)
+
+	got := owner.must(200, "GET", base+"/missions/"+attributed, nil)["mission"].(map[string]any)
+	if p := got["progress"].(map[string]any); p["revenue_attributed_cents"] != 4950.0 || p["revenue_deals_cents"] != 0.0 {
+		t.Fatalf("attributed progress: %v", p)
+	}
+	if g := got["goal"].(map[string]any); g["current"] != 49.0 || g["reached"] != true {
+		t.Fatalf("attributed goal: %v", g)
+	}
+	got = owner.must(200, "GET", base+"/missions/"+deals, nil)["mission"].(map[string]any)
+	if p := got["progress"].(map[string]any); p["revenue_deals_cents"] != 12000.0 || p["revenue_attributed_cents"] != 0.0 {
+		t.Fatalf("deals progress: %v", p)
+	}
+	if g := got["goal"].(map[string]any); g["current"] != 120.0 || g["reached"] != true {
+		t.Fatalf("deals goal: %v", g)
+	}
+}
+
 func jsonInt(v any) string {
 	b, _ := json.Marshal(v)
 	return string(b)

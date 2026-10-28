@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import type { components, WorkspaceStats, WorkspaceStatus } from "@outflare/sdk";
+import type { AttributionChannels, components, WorkspaceStats, WorkspaceStatus } from "@outflare/sdk";
 import { useBrand } from "@/lib/brand";
 import { api } from "../api";
 import { Button, Card, Loading, PageHeader, Stat, Stats } from "../ui";
@@ -12,8 +12,9 @@ import { CommunityLinks } from "@/components/community-links";
 import { openGetStartedAt } from "./GetStarted";
 import { blockerTone, dotClass, type Tone } from "@/lib/status";
 import { tabNames } from "../shell";
+import { money, num, totals } from "./Channels";
 
-type Go = (tab: "ai" | "get-started" | "members" | "inbox" | "sequences" | "mailboxes" | "domains" | "leads" | "company" | "servers" | "connectors" | "missions" | "allocation" | "infrastructure" | "analytics" | "fixes" | "lifecycle" | "social" | "setup" | "brands") => void;
+type Go = (tab: "ai" | "get-started" | "members" | "inbox" | "sequences" | "mailboxes" | "domains" | "leads" | "company" | "servers" | "connectors" | "missions" | "allocation" | "infrastructure" | "analytics" | "fixes" | "lifecycle" | "social" | "setup" | "brands" | "channels") => void;
 
 // The page that resolves each area of blocker GET /status reports.
 const areaTab: Record<WorkspaceStatus["blockers"][number]["area"], Parameters<Go>[0]> = {
@@ -197,6 +198,8 @@ export function Overview({ ws, name, isAdmin, go, limited = false }: { ws: strin
         )}
       </section>
 
+      <ChannelTiles ws={ws} brand={handle} go={go} />
+
       <CommunityLinks />
 
       <Stats>
@@ -233,5 +236,35 @@ function Rows({ rows }: { rows: [string, number, boolean?][] }) {
         </div>
       ))}
     </dl>
+  );
+}
+
+// ChannelTiles is the CMO view's headline on Home: the last 28 days across
+// every channel, under the workspace's default model. It stays hidden until
+// the site has visits or conversions, and for anyone who can't see Channels.
+function ChannelTiles({ ws, brand, go }: { ws: string; brand?: string; go: Go }) {
+  const [report, setReport] = useState<AttributionChannels | null>(null);
+  useEffect(() => {
+    const to = new Date();
+    const day = (d: Date) => d.toISOString().slice(0, 10);
+    const query = { from: day(new Date(to.getTime() - 27 * 86_400_000)), to: day(to), ...(brand ? { brand } : {}) };
+    api.GET("/v1/workspaces/{ws}/attribution/channels", { params: { path: { ws }, query } }).then(({ data }) => setReport(data ?? null));
+  }, [ws, brand]);
+  if (!report) return null;
+  const t = totals(report);
+  if (t.visits === 0 && t.conversions === 0) return null;
+  return (
+    <section aria-labelledby="home-channels" className="space-y-2">
+      <div className="flex items-center">
+        <h2 id="home-channels" className="flex-1 text-[13px] font-medium text-muted-foreground">Channels · 28 days</h2>
+        <button onClick={() => go("channels")} className="font-mono text-[12px] text-muted-foreground hover:text-foreground">By channel →</button>
+      </div>
+      <Stats>
+        <Stat label="Visits" value={num(t.visits)} />
+        <Stat label="Conversions" value={num(t.conversions)} />
+        <Stat label="Revenue" value={money(t.revenue)} sub="net of refunds" />
+        <Stat label="Cost" value={money(t.cost)} />
+      </Stats>
+    </section>
   );
 }

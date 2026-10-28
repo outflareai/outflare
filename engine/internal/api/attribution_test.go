@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/outflareai/outflare/engine/internal/attribution"
+	"github.com/outflareai/outflare/engine/internal/digests"
 	"github.com/outflareai/outflare/engine/internal/track"
 )
 
@@ -54,6 +55,31 @@ func TestAttribution(t *testing.T) {
 	run := &attribution.Runner{Pool: e.pool, Log: slog.New(slog.DiscardHandler), Settle: time.Minute}
 	if _, _, err := run.Tick(ctx); err != nil {
 		t.Fatal(err)
+	}
+
+	// The weekly digest has the channels in brief, under the default model.
+	secs, err := digests.Build(ctx, e.pool, ws, digests.Period{Start: now.AddDate(0, 0, -7), End: now.Add(time.Minute)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var sec *digests.Section
+	for i := range secs {
+		if secs[i].ID == "channels" {
+			sec = &secs[i]
+		}
+	}
+	if sec == nil {
+		t.Fatalf("no channels section in %v", secs)
+	}
+	metrics := map[string]float64{}
+	for _, m := range sec.Metrics {
+		metrics[m.Key] = m.Value
+	}
+	if metrics["channel_visits"] != 3 || metrics["channel_conversions"] != 2 || metrics["channel_revenue_usd"] != 49 || metrics["channel_cost_usd"] != 150 {
+		t.Fatalf("channel metrics = %v", metrics)
+	}
+	if len(sec.Items) != 1 || sec.Items[0].Text != "Paid ads: 2 conversions, 49 USD" || sec.Items[0].Tab != "channels" {
+		t.Fatalf("channel items = %v", sec.Items)
 	}
 
 	byChannel := func(model string) map[string]map[string]any {

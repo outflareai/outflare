@@ -1,6 +1,6 @@
 # Digests
 
-A digest is a daily or weekly summary of the whole workspace in one place: what needs a person, fixes found and confirmed, deploys, site health, outreach, lifecycle email and missions, each number with the period before to compare. Every module that has something to say adds its own section, so a digest covers the whole tool, not one part of it.
+A digest is a daily or weekly summary of the whole workspace in one place: what needs a person, fixes found and confirmed, deploys, site health, outreach, lifecycle email, missions and channels (visits, conversions, revenue and cost), each number with the period before to compare. Every module that has something to say adds its own section, so a digest covers the whole tool, not one part of it.
 
 Each digest is kept in the app (**Settings → Digests**), sent as the `digest.ready` webhook (so Slack, a CRM or your own system can post it), and emailed only when you choose to.
 

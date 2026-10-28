@@ -536,6 +536,9 @@ func (e *Engine) prepare(ctx context.Context, tx pgx.Tx, enrollmentID string, sk
 	}
 	subject, _ = Render(subject, vars)
 	body, _ := Render(stepBody, vars)
+	if body, err = tagOwnLinks(ctx, tx, en, body, base); err != nil {
+		return nil, en, err
+	}
 	if trackClicks {
 		if body, err = tracking.Rewrite(ctx, tx, en.WorkspaceID, en.ID, en.SequenceID, en.NextStep, body, base, unsub); err != nil {
 			return nil, en, err

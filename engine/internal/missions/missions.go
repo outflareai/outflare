@@ -6,6 +6,7 @@ package missions
 import (
 	"context"
 	"errors"
+	"math"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -65,9 +66,15 @@ type Progress struct {
 	// Money recorded in the spend ledger against the mission, in US cents,
 	// with units priced by the workspace's rates.
 	SpendCents int64 `json:"spend_cents"`
+	// Revenue in US cents: payments credited to the campaigns of the
+	// mission's sequences under the workspace's default attribution model,
+	// net of refunds, and won deals tagged with the mission.
+	RevenueAttributedCents int64 `json:"revenue_attributed_cents"`
+	RevenueDealsCents      int64 `json:"revenue_deals_cents"`
 }
 
-// Value returns the progress on a goal metric.
+// Value returns the progress on a goal metric. Revenue goals are in whole
+// US dollars.
 func (p Progress) Value(metric string) int {
 	switch metric {
 	case "meetings":
@@ -78,6 +85,10 @@ func (p Progress) Value(metric string) int {
 		return p.Sends
 	case "leads":
 		return p.Leads
+	case "revenue_attributed":
+		return int(p.RevenueAttributedCents / 100)
+	case "revenue_deals":
+		return int(p.RevenueDealsCents / 100)
 	}
 	return 0
 }
@@ -103,6 +114,21 @@ func GetProgress(ctx context.Context, q outcomes.Querier, ws, missionID string) 
 	}
 	p.Meetings = rep.Totals.Meetings
 	p.SpendCents = rep.Totals.Spend.TotalCents
+	p.RevenueDealsCents = rep.Totals.WonCents
+	// Payments in other currencies are left out; nothing is converted.
+	var attributed float64
+	if err := q.QueryRow(ctx, `
+		SELECT coalesce(sum(cr.weight * c.value_minor), 0)::float8
+		FROM attribution_credits cr
+		JOIN attribution_conversions c ON c.event_id = cr.event_id
+		JOIN tracking_campaigns tc ON tc.id = cr.tracking_campaign_id AND tc.workspace_id = $1 AND tc.object_kind = 'sequence'
+		JOIN sequences s ON s.id::text = tc.object_id AND s.workspace_id = $1
+		WHERE cr.workspace_id = $1 AND s.mission_id = $2 AND c.currency = 'USD' AND c.value_minor IS NOT NULL
+		  AND cr.model = coalesce((SELECT model FROM attribution_settings WHERE workspace_id = $1), 'last_non_direct')`,
+		ws, missionID).Scan(&attributed); err != nil {
+		return p, err
+	}
+	p.RevenueAttributedCents = int64(math.Round(attributed))
 	return p, nil
 }
 

@@ -3084,7 +3084,8 @@ class Operations(_Mixin):
         ws: str | None = None,
         ends_at: str | None = None,
         goal: str | None = None,
-        goal_metric: Literal["meetings", "replies", "sends", "leads"] | None = None,
+        goal_metric: Literal["meetings", "replies", "sends", "leads", "revenue_attributed", "revenue_deals"]
+        | None = None,
         goal_target: int | None = None,
         instructions: str | None = None,
         max_sends: int | None = None,
@@ -19131,7 +19132,8 @@ class Operations(_Mixin):
         ws: str | None = None,
         ends_at: str | None = None,
         goal: str | None = None,
-        goal_metric: Literal["meetings", "replies", "sends", "leads"] | None = None,
+        goal_metric: Literal["meetings", "replies", "sends", "leads", "revenue_attributed", "revenue_deals"]
+        | None = None,
         goal_target: int | None = None,
         instructions: str | None = None,
         max_sends: int | None = None,

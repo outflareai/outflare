@@ -158,7 +158,10 @@ Search Console reports an average position over every search a page was
 shown for. Rank tracking answers a narrower question: where does the site
 rank on Google today for the keywords you care about. Track up to 100
 keywords at a time, or every page's target keyword, for one country and
-device (desktop or mobile). Each is checked weekly, or daily if you choose.
+device (desktop or mobile). Each is checked weekly, or daily if you choose. On the Keywords page,
+every search in Queries, Cannibalisation and a page's breakdown has a
+**Track** button that adds it in one click (US, desktop, weekly), and shows
+**Tracked** for keywords already followed.
 
 Checks read Google's top 100 organic results through the workspace's own
 DataForSEO or Geonode connection (see [SEO tools](seo.md)), never an account

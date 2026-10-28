@@ -423,9 +423,9 @@ func (in *missionInput) validate() error {
 	}
 	if m := in.GoalMetric.Value; m != nil {
 		switch *m {
-		case "meetings", "replies", "sends", "leads":
+		case "meetings", "replies", "sends", "leads", "revenue_attributed", "revenue_deals":
 		default:
-			return errInvalid("goal_metric is meetings, replies, sends or leads, or null")
+			return errInvalid("goal_metric is meetings, replies, sends, leads, revenue_attributed or revenue_deals, or null")
 		}
 	}
 	if t := in.GoalTarget.Value; t != nil && (*t < 1 || *t > 1000000) {

@@ -5,6 +5,7 @@ import (
 	"mime/quotedprintable"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -27,10 +28,13 @@ func TestTrackingDomainAndClicks(t *testing.T) {
 		t.Fatalf("verified: %v", td)
 	}
 
+	// Links to the brand's own site carry the sequence's campaign
+	// (outbound_email); the tracking domain is under it but its links don't.
+	owner.must(201, "POST", base+"/brands", map[string]any{"name": "Acme", "website": "acme-com.example"})
 	_, imp := owner.raw("POST", base+"/leads/import?list=L", "text/csv", "email,first_name\nli@one-io.example,Li\n")
 	seq := owner.must(201, "POST", base+"/sequences", map[string]any{
 		"name": "Links", "daily_new_limit": 10, "send_days": []int{1, 2, 3, 4, 5, 6, 7}, "send_start": "00:00", "send_end": "23:59", "track_clicks": true, "unsubscribe_header": false,
-		"steps": []map[string]any{{"subject": "Hi", "body": "See https://acme-com.example/pricing. Or opt out: {{unsubscribe_url}}"}},
+		"steps": []map[string]any{{"subject": "Hi", "body": "See https://acme-com.example/pricing. Docs: https://other.example/guide Or opt out: {{unsubscribe_url}}"}},
 	})
 	if seq["track_clicks"] != true || seq["unsubscribe_header"] != false {
 		t.Fatalf("settings: %v", seq)
@@ -67,7 +71,7 @@ func TestTrackingDomainAndClicks(t *testing.T) {
 		e.h.ServeHTTP(rec, req)
 		return rec
 	}
-	if rec := click("Mozilla/5.0 (compatible; Barracuda link scanner)"); rec.Code != http.StatusFound || rec.Header().Get("Location") != "https://acme-com.example/pricing" {
+	if rec := click("Mozilla/5.0 (compatible; Barracuda link scanner)"); rec.Code != http.StatusFound || !strings.HasPrefix(rec.Header().Get("Location"), "https://acme-com.example/pricing?utm_source=outflare&utm_medium=email&utm_campaign=links&ofc=") {
 		t.Fatalf("redirect: %d %v", rec.Code, rec.Header())
 	}
 	got := owner.must(200, "GET", base+"/sequences/"+seqID, nil)
@@ -84,6 +88,22 @@ func TestTrackingDomainAndClicks(t *testing.T) {
 	}
 	if rec := click("x"); rec.Code != http.StatusFound {
 		t.Fatal("repeat click")
+	}
+	if c := owner.must(200, "GET", base+"/tracking-campaigns?channel=outbound_email", nil)["data"].([]any); len(c) != 1 || c[0].(map[string]any)["slug"] != "links" {
+		t.Fatalf("campaign: %v", c)
+	}
+	if rows, err := e.pool.Query(t.Context(), `SELECT url FROM tracked_links`); err != nil {
+		t.Fatal(err)
+	} else {
+		urls := []string{}
+		for rows.Next() {
+			var u string
+			_ = rows.Scan(&u)
+			urls = append(urls, u)
+		}
+		if !slices.Contains(urls, "https://other.example/guide") || len(urls) != 2 {
+			t.Fatalf("tracked links: %v", urls)
+		}
 	}
 	tot := owner.must(200, "GET", base+"/reports?to="+clock.Now().Add(time.Hour).Format(time.RFC3339), nil)["totals"].(map[string]any)
 	if tot["clicks"] != 2.0 || tot["clicked_leads"] != 1.0 || tot["click_rate"] != 100.0 {

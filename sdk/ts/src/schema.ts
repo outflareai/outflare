@@ -19018,8 +19018,11 @@ export interface components {
             project_id?: string | null;
             /** @description The goal in words. */
             goal?: string;
-            /** @enum {string|null} */
-            goal_metric?: "meetings" | "replies" | "sends" | "leads" | null;
+            /**
+             * @description Revenue goals are in whole US dollars: revenue_attributed counts payments credited to the campaigns of the mission's sequences under the default attribution model, net of refunds; revenue_deals counts won deals tagged with the mission.
+             * @enum {string|null}
+             */
+            goal_metric?: "meetings" | "replies" | "sends" | "leads" | "revenue_attributed" | "revenue_deals" | null;
             goal_target?: number | null;
             /** @description Guidance on top of the project brief (Markdown). */
             instructions?: string;
@@ -19055,7 +19058,7 @@ export interface components {
             goal: {
                 text: string;
                 /** @enum {string|null} */
-                metric: "meetings" | "replies" | "sends" | "leads" | null;
+                metric: "meetings" | "replies" | "sends" | "leads" | "revenue_attributed" | "revenue_deals" | null;
                 target: number | null;
                 current: number;
                 reached: boolean;
@@ -19082,6 +19085,10 @@ export interface components {
                 leads: number;
                 meetings: number;
                 spend_cents: number;
+                /** @description US cents credited to the campaigns of the mission's sequences under the default attribution model, net of refunds. */
+                revenue_attributed_cents: number;
+                /** @description US cents of won deals tagged with the mission. */
+                revenue_deals_cents: number;
             };
             /**
              * @description What happens to a write made in the mission right now.

@@ -26,7 +26,7 @@ const models: { id: Model; label: string; help: string }[] = [
 const ranges = [7, 28, 90] as const;
 const day = (d: Date) => d.toISOString().slice(0, 10);
 
-const money = (list: Money[]) =>
+export const money = (list: Money[]) =>
   list.length === 0
     ? "—"
     : list
@@ -38,7 +38,7 @@ const money = (list: Money[]) =>
           }
         })
         .join(" + ");
-const num = (v: number) => (Number.isInteger(v) ? v.toLocaleString() : v.toLocaleString(undefined, { maximumFractionDigits: 1 }));
+export const num = (v: number) => (Number.isInteger(v) ? v.toLocaleString() : v.toLocaleString(undefined, { maximumFractionDigits: 1 }));
 
 // costPer is cost per conversion, and ret revenue over cost, when both are
 // in one currency.
@@ -54,6 +54,22 @@ function ret(r: Row): string {
   const c = one(r.cost), v = one(r.revenue);
   if (!c || !v || c.currency !== v.currency || c.amount_cents <= 0) return "—";
   return `${(v.amount_cents / c.amount_cents).toFixed(1)}×`;
+}
+
+// totals adds up every channel: cost includes spend not tied to one.
+export function totals(report: AttributionChannels) {
+  const rows = report.data;
+  const sum = (lists: Money[][]) => {
+    const by: Record<string, number> = {};
+    for (const list of lists) for (const m of list) by[m.currency] = (by[m.currency] ?? 0) + m.amount_cents;
+    return Object.entries(by).map(([currency, amount_cents]) => ({ currency, amount_cents }));
+  };
+  return {
+    visits: rows.reduce((s, r) => s + r.visits, 0),
+    conversions: rows.reduce((s, r) => s + r.conversions, 0),
+    revenue: sum(rows.map((r) => r.revenue)),
+    cost: sum([...rows.map((r) => r.cost), report.unallocated_cost]),
+  };
 }
 
 export function Channels({ ws, canManage, go }: Props) {
@@ -116,20 +132,7 @@ export function Channels({ ws, canManage, go }: Props) {
   if (!report) return <div className="space-y-6">{header}{error ? <ErrorText>{error}</ErrorText> : <Loading />}</div>;
 
   const rows = report.data;
-  const visits = rows.reduce((s, r) => s + r.visits, 0);
-  const conversions = rows.reduce((s, r) => s + r.conversions, 0);
-  const sum = (pick: (r: Row) => Money[]) => {
-    const by: Record<string, number> = {};
-    for (const r of rows) for (const m of pick(r)) by[m.currency] = (by[m.currency] ?? 0) + m.amount_cents;
-    return Object.entries(by).map(([currency, amount_cents]) => ({ currency, amount_cents }));
-  };
-  const revenue = sum((r) => r.revenue);
-  const cost = [...sum((r) => r.cost)];
-  for (const m of report.unallocated_cost) {
-    const c = cost.find((x) => x.currency === m.currency);
-    if (c) c.amount_cents += m.amount_cents;
-    else cost.push({ ...m });
-  }
+  const { visits, conversions, revenue, cost } = totals(report);
   const help = models.find((m) => m.id === shown)?.help ?? "";
 
   const columns: ColumnDef<Row>[] = [

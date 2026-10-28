@@ -73,6 +73,21 @@ Each takes `from`, `to`, `model` and `brand`. Reading needs
 same credits for ad-level results; the conversions each ad platform reports
 stay separate ([paid-media.md](paid-media.md)).
 
+Home shows the channels report's totals for the last 28 days (visits,
+conversions, revenue and cost) below Needs you, once the site has visits,
+for anyone with `analytics.read`.
+
+A mission can aim at revenue, in whole US dollars. `revenue_attributed`
+counts payments credited, under the default model and net of refunds, to the
+campaign links of the mission's sequences. `revenue_deals` counts won deals
+tagged with the mission. Money in other currencies is left out, never
+converted. Mission progress shows both as `revenue_attributed_cents` and
+`revenue_deals_cents`.
+
+The [digest](digests.md) has a Channels section: visits, conversions,
+revenue and cost per currency for the period against the one before, under
+the default model, and the three channels with the most conversions.
+
 ## Storage
 
 Migrations 0230 and 0231 add `channel`, `source`, `campaign`,
@@ -87,3 +102,8 @@ its weight). The code is `engine/internal/attribution`.
 `attribution.credited` (with `conversions`, `refunds` and `backfill`) after
 a run credits anything, `attribution.run_failed` when a run fails, and the
 audit action `attribution.settings_updated`.
+
+## Not built yet
+
+- Credit goes to people, not to companies or deals, and every conversion
+  counts the same whether the person was new or already known.

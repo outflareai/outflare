@@ -379,3 +379,16 @@ func (c Campaign) OwnLink(link string, hosts []string) string {
 	}
 	return tagged
 }
+
+// BrandHosts are the Hosts of a brand's website and domains, or of every
+// brand in the workspace when brandID is nil, for OwnLink.
+func BrandHosts(ctx context.Context, q Querier, ws string, brandID *string) ([]string, error) {
+	var sites []string
+	err := q.QueryRow(ctx, `
+		SELECT coalesce(array_agg(site), '{}') FROM brands b, unnest(array_prepend(b.website, b.domains)) site
+		WHERE b.workspace_id = $1 AND ($2::uuid IS NULL OR b.id = $2::uuid)`, ws, brandID).Scan(&sites)
+	if err != nil {
+		return nil, err
+	}
+	return Hosts(sites...), nil
+}

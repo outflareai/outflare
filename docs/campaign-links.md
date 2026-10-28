@@ -69,11 +69,12 @@ and lists it here with the rest:
 | --- | --- | --- | --- | --- |
 | Broadcasts | broadcast (`email_broadcast`) | `lifecycle_email` | `outflare` | Links in the email to the brand's own website and domains (any brand's, for an email with no brand) |
 | Journeys | journey (`journey`) | `lifecycle_email` | `outflare` | The same |
+| Sequences | sequence (`sequence`) | `outbound_email` | `outflare` | Links in each step to the sequence's brand's website and domains (any brand's, for a sequence with no brand), tagged before click tracking wraps them |
 | Social replies | watch (`social_watch`) | `reddit`, or `organic_social` for X and LinkedIn | the network | The watch's landing page, with each reply as `utm_content` |
 
 Links to other companies' sites are never tagged, and a link you tagged
-yourself (it already has `utm_campaign`) keeps your tags. Test emails are
-never tagged.
+yourself (it already has `utm_campaign`) keeps your tags. Test emails and test
+sends are never tagged.
 
 ## Partner links and `ref`
 

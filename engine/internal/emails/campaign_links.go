@@ -16,25 +16,10 @@ import (
 // email with none). Links to other sites, and links tagged by hand, stay as
 // written. The campaign is made with the first email that has such a link.
 func (s *Service) tagOwnLinks(ctx context.Context, tx pgx.Tx, ws string, brandID *string, trigger, ref, htmlBody, text string) (string, string, error) {
-	rows, err := tx.Query(ctx, `SELECT website, domains FROM brands WHERE workspace_id = $1 AND ($2::uuid IS NULL OR id = $2::uuid)`, ws, brandID)
+	hosts, err := utm.BrandHosts(ctx, tx, ws, brandID)
 	if err != nil {
 		return "", "", err
 	}
-	sites := []string{}
-	for rows.Next() {
-		var website string
-		var domains []string
-		if err := rows.Scan(&website, &domains); err != nil {
-			rows.Close()
-			return "", "", err
-		}
-		sites = append(append(sites, website), domains...)
-	}
-	rows.Close()
-	if err := rows.Err(); err != nil {
-		return "", "", err
-	}
-	hosts := utm.Hosts(sites...)
 	if len(hosts) == 0 || !mentionsAny(htmlBody+" "+text, hosts) {
 		return htmlBody, text, nil
 	}

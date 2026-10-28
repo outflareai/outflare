@@ -6,6 +6,16 @@ Each pull request that changes what Outflare does adds a change note in [changes
 
 ## [Unreleased]
 
+## [0.20.0] - 2026-10-28
+
+### Changed
+
+- Track a keyword's Google rank straight from the Keywords page: every search in Queries, Cannibalisation and a page's breakdown has a Track button, and keywords you already follow show as Tracked.
+- Missions can aim at revenue in US dollars: either payments credited to the campaign links in the mission's sequences, or won deals tagged with the mission. Progress shows both.
+- Digests now have a Channels section: visits, conversions, revenue and cost across every channel compared with the period before, and the three channels that brought the most conversions.
+- Home now shows the last 28 days of visits, conversions, revenue and cost across every channel, below Needs you, once your site has visits. Select By channel to open Analytics → Channels.
+- Sequences now tag links to your own website with a campaign link, like broadcasts and journeys do, so visits and revenue from cold email show under Outbound email in Analytics → Channels. Links to other sites and links you tagged yourself stay as written.
+
 ## [0.19.0] - 2026-10-28
 
 ### Added

@@ -23250,7 +23250,7 @@ components:
         name: { type: string }
         project_id: { type: [string, "null"], format: uuid }
         goal: { type: string, description: The goal in words. }
-        goal_metric: { type: [string, "null"], enum: [meetings, replies, sends, leads, null] }
+        goal_metric: { type: [string, "null"], enum: [meetings, replies, sends, leads, revenue_attributed, revenue_deals, null], description: "Revenue goals are in whole US dollars: revenue_attributed counts payments credited to the campaigns of the mission's sequences under the default attribution model, net of refunds; revenue_deals counts won deals tagged with the mission." }
         goal_target: { type: [integer, "null"], minimum: 1 }
         instructions: { type: string, description: Guidance on top of the project brief (Markdown). }
         plan: { type: string, description: The agent's plan (Markdown). }
@@ -23273,7 +23273,7 @@ components:
           required: [text, metric, target, current, reached]
           properties:
             text: { type: string }
-            metric: { type: [string, "null"], enum: [meetings, replies, sends, leads, null] }
+            metric: { type: [string, "null"], enum: [meetings, replies, sends, leads, revenue_attributed, revenue_deals, null] }
             target: { type: [integer, "null"] }
             current: { type: integer }
             reached: { type: boolean }
@@ -23294,13 +23294,15 @@ components:
             ends_at: { type: [string, "null"], format: date-time }
         progress:
           type: object
-          required: [sends, replies, leads, meetings, spend_cents]
+          required: [sends, replies, leads, meetings, spend_cents, revenue_attributed_cents, revenue_deals_cents]
           properties:
             sends: { type: integer }
             replies: { type: integer }
             leads: { type: integer }
             meetings: { type: integer }
             spend_cents: { type: integer }
+            revenue_attributed_cents: { type: integer, description: "US cents credited to the campaigns of the mission's sequences under the default attribution model, net of refunds." }
+            revenue_deals_cents: { type: integer, description: "US cents of won deals tagged with the mission." }
         writes:
           type: string
           enum: [run, wait_for_approval, dry_run, refused]

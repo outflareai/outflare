@@ -96,6 +96,60 @@ export function Keywords({ ws, go }: Props) {
   );
 }
 
+// The rank tracker as seen from the other sections: which keywords the
+// site already tracks, and a button to track one more in one click.
+const kwKey = (k: string) => k.trim().toLowerCase().replace(/\s+/g, " ");
+
+type Tracker = { tracked: Set<string>; ready: boolean; connected: boolean; add: (keyword: string) => Promise<void> };
+
+function useTracker(ws: string, site: string): Tracker {
+  const [tracked, setTracked] = useState<Set<string>>(new Set());
+  const [ready, setReady] = useState(false);
+  const [connected, setConnected] = useState(false);
+  useEffect(() => {
+    api.GET("/v1/workspaces/{ws}/seo-sites/{site}/rankings", { params: { path: { ws, site } } }).then(({ data }) => {
+      if (!data) return;
+      setTracked(new Set(data.data.map((t) => kwKey(t.keyword))));
+      setConnected(data.connections.length > 0);
+      setReady(true);
+    });
+  }, [ws, site]);
+  const add = async (keyword: string) => {
+    const { data, error } = await api.POST("/v1/workspaces/{ws}/seo-sites/{site}/rankings", { params: { path: { ws, site } }, body: { keywords: [keyword] } });
+    if (error) return toast(errorMessage(error), "error");
+    setTracked((t) => new Set(t).add(kwKey(keyword)));
+    toast(data?.added ? `Tracking "${keyword}". The first check has started.` : `"${keyword}" was already tracked.`);
+  };
+  return { tracked, ready, connected, add };
+}
+
+function TrackButton({ tracker, keyword, go }: { tracker: Tracker; keyword: string; go: Props["go"] }) {
+  const [busy, setBusy] = useState(false);
+  if (!tracker.ready || !keyword) return null;
+  if (tracker.tracked.has(kwKey(keyword))) return <Badge title="Rank tracking follows this keyword (Rankings)">Tracked</Badge>;
+  if (!tracker.connected)
+    return (
+      <Button variant="ghost" className="-my-1 h-6 px-2" title="Rank tracking needs a DataForSEO or Geonode connection" onClick={() => go("connectors", "geonode")}>
+        Track
+      </Button>
+    );
+  return (
+    <Button
+      variant="ghost"
+      className="-my-1 h-6 px-2"
+      disabled={busy}
+      title="Add to rank tracking: checked weekly on Google, US desktop"
+      onClick={async () => {
+        setBusy(true);
+        await tracker.add(keyword);
+        setBusy(false);
+      }}
+    >
+      Track
+    </Button>
+  );
+}
+
 function NoSource({ go }: { go: Props["go"] }) {
   return (
     <Empty title="Connect Google Search Console" action={<Button onClick={() => go("connectors", "google_search_console")}>Connect Search Console</Button>}>
@@ -122,6 +176,7 @@ function Performance({ ws, site, group, go }: { ws: string; site: string; group:
   const [range, setRange] = useState({ from: "", to: "" });
   const [picked, setPicked] = useState<SearchRow | null>(null);
   const [error, setError] = useState("");
+  const tracker = useTracker(ws, site);
 
   useEffect(() => {
     api.GET("/v1/workspaces/{ws}/seo-sites/{site}/search", { params: { path: { ws, site }, query: { group, limit: 500 } } }).then(({ data, error }) => {
@@ -158,6 +213,7 @@ function Performance({ ws, site, group, go }: { ws: string; site: string; group:
           <div className="space-y-1">
             <div className="font-mono text-[12px] break-all">{group === "page" ? pathOf(key(r)) : key(r)}</div>
             <div className="text-xs text-muted-foreground">{plural(r.clicks, "click")} · {plural(r.impressions, "impression")} · position {pos(r.position)}</div>
+            {group === "query" && <TrackButton tracker={tracker} keyword={key(r)} go={go} />}
           </div>
         )}
         columns={[
@@ -171,16 +227,19 @@ function Performance({ ws, site, group, go }: { ws: string; site: string; group:
           { id: "impressions", header: "Impressions", accessorFn: (r) => r.impressions, meta: { align: "right", mono: true }, cell: ({ row }) => num(row.original.impressions) },
           { id: "ctr", header: "CTR", accessorFn: (r) => r.ctr, meta: { align: "right", mono: true }, cell: ({ row }) => pct(row.original.ctr) },
           { id: "position", header: "Position", accessorFn: (r) => r.position, meta: { align: "right", mono: true }, cell: ({ row }) => pos(row.original.position) },
+          ...(group === "query"
+            ? [{ id: "track", header: "", enableSorting: false, meta: { align: "right" as const }, cell: ({ row }: { row: { original: SearchRow } }) => <TrackButton tracker={tracker} keyword={key(row.original)} go={go} /> }]
+            : []),
         ]}
       />
       <SourceLine src={src} />
-      {picked && <Breakdown ws={ws} site={site} row={picked} group={group} onClose={() => setPicked(null)} />}
+      {picked && <Breakdown ws={ws} site={site} row={picked} group={group} tracker={tracker} go={go} onClose={() => setPicked(null)} />}
     </div>
   );
 }
 
 // Breakdown shows the queries of one page, or the pages of one query.
-function Breakdown({ ws, site, row, group, onClose }: { ws: string; site: string; row: SearchRow; group: "page" | "query"; onClose: () => void }) {
+function Breakdown({ ws, site, row, group, tracker, go, onClose }: { ws: string; site: string; row: SearchRow; group: "page" | "query"; tracker: Tracker; go: Props["go"]; onClose: () => void }) {
   const [rows, setRows] = useState<SearchRow[] | null>(null);
   useEffect(() => {
     const query = group === "page" ? { page: row.page ?? "" } : { keyword: row.query ?? "" };
@@ -195,6 +254,7 @@ function Breakdown({ ws, site, row, group, onClose }: { ws: string; site: string
           <SheetDescription>
             {plural(row.clicks, "click")} · {plural(row.impressions, "impression")} · position {pos(row.position)}
           </SheetDescription>
+          {group === "query" && row.query && <div><TrackButton tracker={tracker} keyword={row.query} go={go} /></div>}
         </SheetHeader>
         <div className="space-y-3 px-4 pb-6 text-[13px]">
           <div className="flex items-center justify-between">
@@ -206,9 +266,12 @@ function Breakdown({ ws, site, row, group, onClose }: { ws: string; site: string
           {rows && rows.length > 0 && (
             <ul className="divide-y">
               {rows.map((r) => (
-                <li key={`${r.page}|${r.query}`} className="flex items-baseline justify-between gap-3 py-1.5">
+                <li key={`${r.page}|${r.query}`} className="flex items-center justify-between gap-3 py-1.5">
                   <span className={group === "page" ? "" : "font-mono text-[12px] break-all"}>{group === "page" ? r.query : pathOf(r.page ?? "")}</span>
-                  <span className="shrink-0 font-mono text-[12px] text-muted-foreground">{num(r.clicks)} · {num(r.impressions)} · {pos(r.position)}</span>
+                  <span className="flex shrink-0 items-center gap-2">
+                    <span className="font-mono text-[12px] text-muted-foreground">{num(r.clicks)} · {num(r.impressions)} · {pos(r.position)}</span>
+                    {group === "page" && <TrackButton tracker={tracker} keyword={r.query ?? ""} go={go} />}
+                  </span>
                 </li>
               ))}
             </ul>
@@ -486,6 +549,7 @@ function Cannibalisation({ ws, site, go }: { ws: string; site: string; go: Props
   const [rows, setRows] = useState<SearchCompetition[] | null>(null);
   const [src, setSrc] = useState<SearchSource | null | undefined>(undefined);
   const [error, setError] = useState("");
+  const tracker = useTracker(ws, site);
   useEffect(() => {
     api.GET("/v1/workspaces/{ws}/seo-sites/{site}/cannibalisation", { params: { path: { ws, site }, query: { limit: 200 } } }).then(({ data, error }) => {
       if (error || !data) return setError(errorMessage(error));
@@ -510,6 +574,7 @@ function Cannibalisation({ ws, site, go }: { ws: string; site: string; go: Props
           <div className="space-y-1">
             <div>{r.query}</div>
             <div className="text-xs text-muted-foreground">{plural(r.pages.length, "page")}, {num(r.impressions)} impressions</div>
+            <TrackButton tracker={tracker} keyword={r.query} go={go} />
           </div>
         )}
         columns={[
@@ -532,6 +597,7 @@ function Cannibalisation({ ws, site, go }: { ws: string; site: string; go: Props
               </ul>
             ),
           },
+          { id: "track", header: "", enableSorting: false, meta: { align: "right" }, cell: ({ row }) => <TrackButton tracker={tracker} keyword={row.original.query} go={go} /> },
         ]}
       />
       <SourceLine src={src} />
