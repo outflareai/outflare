@@ -185,6 +185,7 @@ export type PartnerReferral = Schemas["PartnerReferral"];
 export type PartnerReward = Schemas["PartnerReward"];
 export type PartnerPayout = Schemas["PartnerPayout"];
 export type PartnerAsset = Schemas["PartnerAsset"];
+export type PartnerImport = Schemas["PartnerImport"];
 export type PartnerPortalSettings = Schemas["PartnerPortalSettings"];
 export type SocialGrowth = Schemas["SocialGrowth"];
 export type SocialPublication = Schemas["SocialPublication"];

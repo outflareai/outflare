@@ -22,6 +22,7 @@ import (
 	"github.com/outflareai/outflare/engine/internal/connectors/linkedin"
 	"github.com/outflareai/outflare/engine/internal/connectors/manifest"
 	"github.com/outflareai/outflare/engine/internal/connectors/models"
+	"github.com/outflareai/outflare/engine/internal/connectors/partnerapps"
 	"github.com/outflareai/outflare/engine/internal/connectors/payments"
 	"github.com/outflareai/outflare/engine/internal/connectors/reddit"
 	"github.com/outflareai/outflare/engine/internal/connectors/seo"
@@ -47,6 +48,7 @@ func Available() []c.Connector {
 	out = append(out, seo.All()...)
 	out = append(out, emailsend.All()...)
 	out = append(out, payments.All()...)
+	out = append(out, partnerapps.All()...)
 	out = append(out, seo.Fetchers()...)
 	out = append(out, deploys.All()...)
 	out = append(out, ads.All()...)

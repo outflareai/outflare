@@ -6,6 +6,18 @@ Each pull request that changes what Outflare does adds a change note in [changes
 
 ## [Unreleased]
 
+## [0.23.0] - 2026-10-28
+
+### Changed
+
+- Missions can aim at revenue partners refer: credited partner sales less refunds, in whole US dollars, in the mission's brand's partner programs since it started.
+- Partners: import a program from Tolt with your own Tolt API key. Partners keep their link codes, so shared links keep working, and their promo codes, referred customers, sales and commissions (paid ones as paid payouts) come over too. Run it again until the day you switch: each run adds only what's new.
+
+### Upgrading
+
+- runs migration 0248.
+- runs migration 0247.
+
 ## [0.22.0] - 2026-10-28
 
 ### Added

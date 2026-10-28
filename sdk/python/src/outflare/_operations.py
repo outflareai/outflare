@@ -3315,8 +3315,7 @@ class Operations(_Mixin):
         ws: str | None = None,
         ends_at: str | None = None,
         goal: str | None = None,
-        goal_metric: Literal["meetings", "replies", "sends", "leads", "revenue_attributed", "revenue_deals"]
-        | None = None,
+        goal_metric: str | None = None,
         goal_target: int | None = None,
         instructions: str | None = None,
         max_sends: int | None = None,
@@ -8227,6 +8226,26 @@ class Operations(_Mixin):
             path={"id": id, "ws": ws},
         )
 
+    def get_partner_import(
+        self,
+        id: str,
+        import_: str,
+        *,
+        ws: str | None = None,
+    ) -> Any:
+        """Get an import.
+
+        Scope: partners.read. Its status, counts per kind and issues.
+
+        Needs: the partners.read scope.
+        GET /v1/workspaces/{ws}/partner-programs/{id}/imports/{import}
+        """
+        return self._call(
+            "GET",
+            "/v1/workspaces/{ws}/partner-programs/{id}/imports/{import}",
+            path={"id": id, "import": import_, "ws": ws},
+        )
+
     def get_partner_program(
         self,
         id: str,
@@ -13008,6 +13027,25 @@ class Operations(_Mixin):
                 "cursor": cursor,
                 "fields": fields,
             },
+        )
+
+    def list_partner_imports(
+        self,
+        id: str,
+        *,
+        ws: str | None = None,
+    ) -> Any:
+        """List a program's imports, newest first.
+
+        Scope: partners.read. The last 50 imports into the program, with what each brought and what it couldn't.
+
+        Needs: the partners.read scope.
+        GET /v1/workspaces/{ws}/partner-programs/{id}/imports
+        """
+        return self._call(
+            "GET",
+            "/v1/workspaces/{ws}/partner-programs/{id}/imports",
+            path={"id": id, "ws": ws},
         )
 
     def list_partner_payouts(
@@ -18321,6 +18359,39 @@ class Operations(_Mixin):
             idempotency_key=idempotency_key,
         )
 
+    def start_partner_import(
+        self,
+        id: str,
+        *,
+        ws: str | None = None,
+        integration_id: str | None = None,
+        source_program: str | None = None,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Import a partner program from Tolt.
+
+        Scope: partners.manage. Queues an import into this program from the workspace's partner platform connection (Tolt,
+        with your own API key). It brings partners with the code of their first link, so old links keep working (a code
+        that is taken or not allowed here gets a new one, noted in the summary), their payout details, promo codes,
+        referred customers, transactions with refunds, and commissions with their status, paid ones in paid payouts.
+        Run it as often as you like until switch-over day: every object is matched by its id there, so a run adds only
+        what is new and brings over status changes. Importing sends no reward webhooks and imported sales are not
+        customer events. One import runs at a time per program (409 conflict); 409 connector_needed when Tolt isn't
+        connected. With no source_program, the account's only program is used.
+
+        Needs: the partners.manage scope.
+        POST /v1/workspaces/{ws}/partner-programs/{id}/imports
+        """
+        return self._call(
+            "POST",
+            "/v1/workspaces/{ws}/partner-programs/{id}/imports",
+            path={"id": id, "ws": ws},
+            body={"integration_id": integration_id, "source_program": source_program},
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
     def start_passkey_sign_in(
         self,
         *,
@@ -21014,8 +21085,7 @@ class Operations(_Mixin):
         ws: str | None = None,
         ends_at: str | None = None,
         goal: str | None = None,
-        goal_metric: Literal["meetings", "replies", "sends", "leads", "revenue_attributed", "revenue_deals"]
-        | None = None,
+        goal_metric: str | None = None,
         goal_target: int | None = None,
         instructions: str | None = None,
         max_sends: int | None = None,

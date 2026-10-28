@@ -201,6 +201,14 @@ Show signed-in customers their referral link and what they've earned inside your
 
 The widget shows the program's title and welcome, the customer's link and promo codes, how many people they referred and became customers, and what they've earned and been paid, in the portal's accent colour and custom CSS. It is served from the portal's address even while the portal is closed, and only over HTTPS pages may frame it.
 
+## Importing from Tolt
+
+Bring a Tolt program in with your own Tolt API key (Connectors → Tolt): partners with their link codes, so their links keep working, payout details, promo codes, referred customers, transactions and commissions, paid ones as paid payouts. Run it as often as you like until the day you switch; each run adds only what's new. See [moving from Tolt](partners-tolt-migration.md).
+
+## Missions
+
+A mission can aim at referred revenue: `goal_metric` `revenue_referred`, in whole US dollars. It counts credited partner sales less refunds, in the partner programs of the mission's brand (every program when it has no brand), from when the mission started. Imported history never counts ([attribution](attribution.md)).
+
 ## Webhooks
 
 `partner_program.created`, `.updated`, `.rules_updated`; `partner.created`, `.updated`; `partner_referral.created`; `partner_conversion.created`; `partner_reward.created`, `.approved`, `.rejected`, `.reversed`, `.fulfilled`; `partner_payout.created`, `.paid`, `.canceled`. They are signed like every Outflare webhook ([events and webhooks](api-conventions.md#events-and-webhooks)). An action reward's `partner_reward.approved` carries `action`, `action_data`, `recipient_id` and `recipient_customer_id` (your own user id for the person to reward).
@@ -227,11 +235,11 @@ Operators get all three. Viewers get `partners.read`.
 | `POST .../partner-rewards/{id}/approve`, `.../reject` | manage |
 | `POST .../partner-rewards/{id}/fulfil` | conversions |
 | `POST .../partner-payouts`, `.../{id}/paid`, `.../{id}/cancel` | manage |
+| `POST .../partner-programs/{id}/imports` / `GET .../imports`, `.../imports/{import}` | manage / read |
 | `GET`/`POST /v1/partner-postbacks/{token}` | the postback secret |
 
 The MCP tools are listed in [mcp/README.md](../mcp/README.md): `list_partner_programs`, `add_partner`, `report_partner_conversion`, `create_partner_payouts` and the rest.
 
 ## Coming next
 
-- A re-runnable import from Tolt with your own Tolt API key. It keeps codes and links, so existing links keep working ([moving from Tolt](partners-tolt-migration.md)).
-- A fraud review queue, built on the shared fraud signals, with partner checks (self-referral, matching payment details, cookie stuffing) added as signals.
+- A fraud review queue with partner checks (self-referral, matching payment details, cookie stuffing). It's on hold for now.

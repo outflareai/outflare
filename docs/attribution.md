@@ -80,9 +80,12 @@ for anyone with `analytics.read`.
 A mission can aim at revenue, in whole US dollars. `revenue_attributed`
 counts payments credited, under the default model and net of refunds, to the
 campaign links of the mission's sequences. `revenue_deals` counts won deals
-tagged with the mission. Money in other currencies is left out, never
-converted. Mission progress shows both as `revenue_attributed_cents` and
-`revenue_deals_cents`.
+tagged with the mission. `revenue_referred` counts sales partners referred,
+less refunds, in the partner programs of the mission's brand (every program
+when it has no brand) since the mission started; imported history never
+counts ([partners.md](partners.md)). Money in other currencies is left out,
+never converted. Mission progress shows them as `revenue_attributed_cents`,
+`revenue_deals_cents` and `revenue_referred_cents`.
 
 The [digest](digests.md) has a Channels section: visits, conversions,
 revenue and cost per currency for the period against the one before, under

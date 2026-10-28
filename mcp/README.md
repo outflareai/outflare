@@ -216,6 +216,7 @@ Read (always available):
 | `list_partner_conversions`, `list_partner_referrals` | Leads, sales and refunds credited to partners, and each referred customer with how they were credited |
 | `list_partner_rewards`, `list_partner_payouts` | The reward ledger (cash, fees, actions, adjustments) and payouts |
 | `list_partner_assets` | Banners, copy and links a program shows partners on its portal |
+| `list_partner_imports`, `get_partner_import` | A program's imports from Tolt: status, counts per kind and issues |
 
 Write (left out when `OUTFLARE_MCP_READ_ONLY=1`):
 
@@ -344,6 +345,7 @@ Write (left out when `OUTFLARE_MCP_READ_ONLY=1`):
 | `log_partner_fee`, `adjust_partner_balance` | Log a fixed fee (an influencer's post) or correct what a partner is owed |
 | `report_partner_conversion` | Report a lead, sale or refund the way the workspace's backend does |
 | `approve_partner_reward`, `reject_partner_reward`, `fulfil_partner_reward` | Approve or reject a held reward, or mark an action reward done |
+| `start_partner_import` | Bring a Tolt program in with the workspace's own Tolt key, as often as needed until switch-over day |
 | `set_partner_portal`, `add_partner_asset` | Open and set up a program's partner portal (subdomain, look, sign-up form, sender), and add assets for partners |
 | `create_partner_payouts`, `mark_partner_payout_paid`, `cancel_partner_payout` | Gather what's due into payouts, then mark each paid (with a reference) once the workspace has paid it |
 | `set_analytics_site` | Pick the site an analytics connection reads by default |

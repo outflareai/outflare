@@ -297,6 +297,14 @@ var (
 		Namespace: namespace, Subsystem: "partners", Name: "rewards_total",
 		Help: "Reward ledger changes, by kind (cash, fee, action, adjustment) and event (created, approved, rejected, reversed, fulfilled, paid).",
 	}, []string{"kind", "event"})
+	partnerImports = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Namespace: namespace, Subsystem: "partners", Name: "imports_total",
+		Help: "Partner program imports from another platform that finished, by connector and outcome (done, failed).",
+	}, []string{"connector", "outcome"})
+	partnerImportObjects = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Namespace: namespace, Subsystem: "partners", Name: "import_objects_total",
+		Help: "Objects partner imports read, by kind (links, partners, promo_codes, customers, transactions, commissions) and result (created, updated, unchanged, skipped).",
+	}, []string{"kind", "result"})
 	partnerRewardsOverdue = prometheus.NewGauge(prometheus.GaugeOpts{
 		Namespace: namespace, Subsystem: "partners", Name: "rewards_overdue_seconds",
 		Help: "How long past its hold the oldest reward that should approve on its own has waited, as of this process's last round.",
@@ -348,7 +356,7 @@ var own = []prometheus.Collector{
 	adConversions, adConversionsOldest,
 	reviewReads, reviewsFound, socialReads, linkReads, linkPageChecks, archiveLookups,
 	socialPublishes,
-	partnerClicks, partnerConversions, partnerRewards, partnerRewardsOverdue,
+	partnerClicks, partnerConversions, partnerRewards, partnerRewardsOverdue, partnerImports, partnerImportObjects,
 	newsRuns, newsFound,
 	buildInfo,
 }
@@ -638,6 +646,18 @@ func PartnerConversion(typ, source, outcome string) {
 func PartnerRewards(kind, event string, n int) {
 	if n > 0 {
 		partnerRewards.WithLabelValues(kind, event).Add(float64(n))
+	}
+}
+
+// PartnerImport counts a finished partner import.
+func PartnerImport(connector, outcome string) {
+	partnerImports.WithLabelValues(connector, outcome).Inc()
+}
+
+// PartnerImportObjects counts n objects an import read.
+func PartnerImportObjects(kind, result string, n int) {
+	if n > 0 {
+		partnerImportObjects.WithLabelValues(kind, result).Add(float64(n))
 	}
 }
 

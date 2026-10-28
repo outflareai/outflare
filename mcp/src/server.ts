@@ -6361,7 +6361,7 @@ export function createServer({ client: gtm, workspace, agency, readOnly = false,
   const missionFields = {
     project_id: id.nullable().optional().describe("The project whose brief the mission works from."),
     goal: z.string().max(50000).optional().describe('The goal in words, e.g. "Book 10 meetings with fintech CFOs in Australia".'),
-    goal_metric: z.enum(["meetings", "replies", "sends", "leads", "revenue_attributed", "revenue_deals"]).nullable().optional().describe("Tracked number; set with goal_target. Revenue goals are whole US dollars: revenue_attributed is payments credited to the mission's sequences, revenue_deals is won deals tagged with the mission."),
+    goal_metric: z.enum(["meetings", "replies", "sends", "leads", "revenue_attributed", "revenue_deals", "revenue_referred"]).nullable().optional().describe("Tracked number; set with goal_target. Revenue goals are whole US dollars: revenue_attributed is payments credited to the mission's sequences, revenue_deals is won deals tagged with the mission, revenue_referred is sales partners referred since it started."),
     goal_target: z.number().int().min(1).nullable().optional(),
     instructions: z.string().max(50000).optional().describe("Guidance on top of the project brief, Markdown."),
     plan: z.string().max(50000).optional().describe("Your plan, Markdown. A person reads it before approving."),

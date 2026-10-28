@@ -41,7 +41,7 @@ const writesText: Record<Mission["writes"], string> = {
   refused: "Changes are refused. Reads still work while paused.",
 };
 
-const metricLabel = { meetings: "meetings", replies: "replies", sends: "emails sent", leads: "leads contacted", revenue_attributed: "USD revenue from its sequences", revenue_deals: "USD in won deals" } as const;
+const metricLabel = { meetings: "meetings", replies: "replies", sends: "emails sent", leads: "leads contacted", revenue_attributed: "USD revenue from its sequences", revenue_deals: "USD in won deals", revenue_referred: "USD referred by partners" } as const;
 const money = (cents: number) => (cents / 100).toLocaleString(undefined, { style: "currency", currency: "USD", maximumFractionDigits: cents % 100 ? 2 : 0 });
 // The end date in the viewer's time zone, with the zone named.
 const endsAt = (iso: string) => new Date(iso).toLocaleString(undefined, { weekday: "short", day: "numeric", month: "short", year: "numeric", hour: "numeric", minute: "2-digit", timeZoneName: "short" });

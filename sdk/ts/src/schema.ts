@@ -16578,6 +16578,68 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/workspaces/{ws}/partner-programs/{id}/imports": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                /** @description A program's id or slug. */
+                id: string;
+            };
+            cookie?: never;
+        };
+        /**
+         * List a program's imports, newest first
+         * @description Scope: partners.read. The last 50 imports into the program, with what each brought and what it couldn't.
+         */
+        get: operations["listPartnerImports"];
+        put?: never;
+        /**
+         * Import a partner program from Tolt
+         * @description Scope: partners.manage. Queues an import into this program from the workspace's partner platform connection (Tolt,
+         *     with your own API key). It brings partners with the code of their first link, so old links keep working (a code
+         *     that is taken or not allowed here gets a new one, noted in the summary), their payout details, promo codes,
+         *     referred customers, transactions with refunds, and commissions with their status, paid ones in paid payouts.
+         *     Run it as often as you like until switch-over day: every object is matched by its id there, so a run adds only
+         *     what is new and brings over status changes. Importing sends no reward webhooks and imported sales are not
+         *     customer events. One import runs at a time per program (409 conflict); 409 connector_needed when Tolt isn't
+         *     connected. With no source_program, the account's only program is used.
+         */
+        post: operations["startPartnerImport"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/workspaces/{ws}/partner-programs/{id}/imports/{import}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                /** @description A program's id or slug. */
+                id: string;
+                import: string;
+            };
+            cookie?: never;
+        };
+        /**
+         * Get an import
+         * @description Scope: partners.read. Its status, counts per kind and issues.
+         */
+        get: operations["getPartnerImport"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/workspaces/{ws}/partner-programs/{id}/widget-sessions": {
         parameters: {
             query?: never;
@@ -20785,10 +20847,10 @@ export interface components {
             /** @description The goal in words. */
             goal?: string;
             /**
-             * @description Revenue goals are in whole US dollars: revenue_attributed counts payments credited to the campaigns of the mission's sequences under the default attribution model, net of refunds; revenue_deals counts won deals tagged with the mission.
+             * @description Revenue goals are in whole US dollars: revenue_attributed counts payments credited to the campaigns of the mission's sequences under the default attribution model, net of refunds; revenue_deals counts won deals tagged with the mission; revenue_referred counts sales partners referred, less refunds, in the mission's brand's partner programs since it started.
              * @enum {string|null}
              */
-            goal_metric?: "meetings" | "replies" | "sends" | "leads" | "revenue_attributed" | "revenue_deals" | null;
+            goal_metric?: "meetings" | "replies" | "sends" | "leads" | "revenue_attributed" | "revenue_deals" | "revenue_referred" | null;
             goal_target?: number | null;
             /** @description Guidance on top of the project brief (Markdown). */
             instructions?: string;
@@ -20824,7 +20886,7 @@ export interface components {
             goal: {
                 text: string;
                 /** @enum {string|null} */
-                metric: "meetings" | "replies" | "sends" | "leads" | "revenue_attributed" | "revenue_deals" | null;
+                metric: "meetings" | "replies" | "sends" | "leads" | "revenue_attributed" | "revenue_deals" | "revenue_referred" | null;
                 target: number | null;
                 current: number;
                 reached: boolean;
@@ -20855,6 +20917,8 @@ export interface components {
                 revenue_attributed_cents: number;
                 /** @description US cents of won deals tagged with the mission. */
                 revenue_deals_cents: number;
+                /** @description US cents of sales partners referred, less refunds, in the mission's brand's partner programs (every program when it has no brand) since it started. Imported history never counts. */
+                revenue_referred_cents: number;
             };
             /**
              * @description What happens to a write made in the mission right now.
@@ -21658,6 +21722,55 @@ export interface components {
             email_from?: string;
             /** @description An email template's id or handle for the sign-in email, with sign_in_url, program_name and partner_name; Outflare's own wording when empty. */
             sign_in_template?: string;
+        };
+        PartnerImport: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            program_id: string;
+            /** Format: uuid */
+            integration_id: string | null;
+            /** @description The partner platform */
+            connector: string;
+            /** @description The program's id on the platform; empty until the import finds it. */
+            source_program: string;
+            /** @enum {string} */
+            status: "queued" | "running" | "done" | "failed";
+            summary: {
+                /** @description Per kind, in the order they are read. */
+                kinds: {
+                    /** @enum {string} */
+                    kind: "links" | "partners" | "promo_codes" | "customers" | "transactions" | "commissions";
+                    seen: number;
+                    created: number;
+                    /** @description A status brought over */
+                    updated: number;
+                    /** @description Here already. */
+                    unchanged: number;
+                    /** @description Couldn't come over; see issues. */
+                    skipped: number;
+                }[];
+                /** @description The first 100 things to look at, by the platform's id and a reason, never names or addresses. */
+                issues: {
+                    kind: string;
+                    external_id: string;
+                    /**
+                     * @description incomplete, no_email, link_param (a link's parameter isn't ref or via, which the website script reads),
+                     *     extra_link (a partner's second link: their code is the first), code_changed (the partner got a new
+                     *     code), partner_missing, customer_missing, promo_code_invalid, promo_code_taken, already_referred
+                     *     (another partner has the customer here), status_conflict (rejected there after it was approved here).
+                     */
+                    reason: string;
+                }[];
+                more_issues: number;
+            };
+            error: string | null;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            started_at: string | null;
+            /** Format: date-time */
+            finished_at: string | null;
         };
         PartnerAsset: {
             /** Format: uuid */
@@ -22841,7 +22954,7 @@ export interface components {
             created_at: string;
         };
         /** @enum {string} */
-        ConnectorCategory: "email_verification" | "email_sending" | "sequencer" | "mailbox_provider" | "dns" | "tags" | "crm" | "data" | "signals" | "analytics" | "seo" | "social" | "code" | "ads" | "payments" | "calendar" | "registrar" | "warehouse" | "notification" | "model" | "custom";
+        ConnectorCategory: "email_verification" | "email_sending" | "sequencer" | "mailbox_provider" | "dns" | "tags" | "crm" | "data" | "signals" | "analytics" | "seo" | "social" | "code" | "ads" | "payments" | "partners" | "calendar" | "registrar" | "warehouse" | "notification" | "model" | "custom";
         ConnectorField: {
             name: string;
             label: string;
@@ -62816,6 +62929,113 @@ export interface operations {
                 };
             };
             202: components["responses"]["MissionHeld"];
+            404: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    listPartnerImports: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                /** @description A program's id or slug. */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The imports. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["PartnerImport"][];
+                    };
+                };
+            };
+            404: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    startPartnerImport: {
+        parameters: {
+            query?: never;
+            header?: {
+                /**
+                 * @description Makes the write safe to retry. A repeat with the same key from the same caller within 24 hours gets the first
+                 *     answer back (with `Idempotent-Replayed: true`) instead of running again. The same key for a different request
+                 *     is refused with 422 `idempotency_key_reused`; while the first is still running, 409 `idempotency_in_progress`.
+                 *     Use a new random key, such as a UUID, for each distinct write.
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                /** @description A program's id or slug. */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /**
+                     * Format: uuid
+                     * @description The connection; the first connected partner platform when left out.
+                     */
+                    integration_id?: string;
+                    /** @description The program's id on the platform. */
+                    source_program?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description Queued. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PartnerImport"];
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            400: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    getPartnerImport: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                /** @description A program's id or slug. */
+                id: string;
+                import: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The import. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PartnerImport"];
+                };
+            };
             404: components["responses"]["Error"];
             default: components["responses"]["Error"];
         };

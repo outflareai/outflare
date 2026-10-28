@@ -167,7 +167,34 @@ export function registerPartnerTools(server: McpServer, gtm: MissionClient, work
     ({ program }) => call(() => gtm.GET("/v1/workspaces/{ws}/partner-programs/{id}/assets", { params: { path: { ws: workspace(), id: program } } })),
   );
 
+  server.registerTool(
+    "list_partner_imports",
+    { title: "List a program's imports from Tolt", description: "Newest first: status, counts per kind (created, updated, unchanged, skipped) and issues by Tolt id and reason.", inputSchema: { program }, annotations: read },
+    ({ program }) => call(() => gtm.GET("/v1/workspaces/{ws}/partner-programs/{id}/imports", { params: { path: { ws: workspace(), id: program } } })),
+  );
+
+  server.registerTool(
+    "get_partner_import",
+    { title: "Get an import from Tolt", description: "Its status, counts per kind and issues.", inputSchema: { program, import_id: id }, annotations: read },
+    ({ program, import_id }) => call(() => gtm.GET("/v1/workspaces/{ws}/partner-programs/{id}/imports/{import}", { params: { path: { ws: workspace(), id: program, import: import_id } } })),
+  );
+
   if (readOnly) return;
+
+  server.registerTool(
+    "start_partner_import",
+    {
+      title: "Import a partner program from Tolt",
+      description:
+        "Brings the workspace's Tolt program into this one, with its own Tolt connection: partners with their link codes, payout details, " +
+        "promo codes, referred customers, transactions and commissions, paid ones as paid payouts. Safe to run again until switch-over day: " +
+        "each run adds only what is new and brings over status changes. Sends no reward webhooks. Poll get_partner_import for the result. " +
+        "source_program is the Tolt program id, needed only when the account has more than one.",
+      inputSchema: { program, source_program: z.string().max(200).optional(), integration_id: id.optional() },
+      annotations: write,
+    },
+    ({ program, ...body }) => call(() => gtm.POST("/v1/workspaces/{ws}/partner-programs/{id}/imports", { params: { path: { ws: workspace(), id: program } }, body })),
+  );
 
   server.registerTool(
     "create_partner_program",

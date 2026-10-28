@@ -5951,6 +5951,112 @@
           "sort": "desc"
         }
       }
+    },
+    {
+      "type": "timeseries",
+      "title": "Partner imports from Tolt, by outcome",
+      "description": "Imports of partner programs from another platform (Tolt) that finished in the last hour, by connector and outcome. Imports are rare: a few runs around a workspace's switch-over day. failed means the platform refused the key, the program wasn't found or it kept failing; the import's own page says why.",
+      "id": 127,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 427
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (connector, outcome) (increase(outflare_partners_imports_total{job=\"$job\"}[1h]))",
+          "legendFormat": "{{connector}} {{outcome}}",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "fillOpacity": 10,
+            "stacking": {
+              "mode": "normal"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "mean",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Objects partner imports read, by kind and result",
+      "description": "What imports did with each object they read, per minute: created here, updated (a status brought over), unchanged (here already, normal on a second run) or skipped (listed on the import as an issue). A lot of skipped means the platform's data doesn't fit; look at the import's issues.",
+      "id": 128,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 427
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (kind, result) (rate(outflare_partners_import_objects_total{job=\"$job\"}[5m])) * 60",
+          "legendFormat": "{{kind}} {{result}}",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "fillOpacity": 10,
+            "stacking": {
+              "mode": "normal"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "mean",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
     }
   ]
 }

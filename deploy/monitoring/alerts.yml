@@ -375,6 +375,14 @@ groups:
         annotations:
           summary: "Partner link clicks aren't being stored (visitors still land); check the engine log for 'partners: store click'."
 
+      - alert: OutflarePartnerImportsFailing
+        # Imports run around a workspace's switch-over day; several failing
+        # at once is more than one workspace's key or program.
+        expr: sum(increase(outflare_partners_imports_total{outcome="failed"}[1h])) > 3
+        labels: { severity: info }
+        annotations:
+          summary: "Several partner imports from Tolt failed in the last hour; check partner_import.failed events for their error codes and the engine log for 'partner import'. A change in Tolt's API shows as many at once."
+
       - alert: OutflareReviewPagesNotRead
         # Pages are read once a day; two days without a read means the
         # hourly scheduler or the reviews.read jobs are stuck.

@@ -21843,6 +21843,82 @@ paths:
         "404": { $ref: "#/components/responses/Error" }
         "202": { $ref: "#/components/responses/MissionHeld" }
         default: { $ref: "#/components/responses/Error" }
+  /v1/workspaces/{ws}/partner-programs/{id}/imports:
+    parameters:
+      - { $ref: "#/components/parameters/Workspace" }
+      - { name: id, in: path, required: true, description: "A program's id or slug.", schema: { type: string } }
+    post:
+      operationId: startPartnerImport
+      x-outflare-access: { scope: partners.manage }
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      summary: Import a partner program from Tolt
+      description: |
+        Scope: partners.manage. Queues an import into this program from the workspace's partner platform connection (Tolt,
+        with your own API key). It brings partners with the code of their first link, so old links keep working (a code
+        that is taken or not allowed here gets a new one, noted in the summary), their payout details, promo codes,
+        referred customers, transactions with refunds, and commissions with their status, paid ones in paid payouts.
+        Run it as often as you like until switch-over day: every object is matched by its id there, so a run adds only
+        what is new and brings over status changes. Importing sends no reward webhooks and imported sales are not
+        customer events. One import runs at a time per program (409 conflict); 409 connector_needed when Tolt isn't
+        connected. With no source_program, the account's only program is used.
+      tags: [partners]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                integration_id: { type: string, format: uuid, description: "The connection; the first connected partner platform when left out." }
+                source_program: { type: string, description: "The program's id on the platform." }
+      responses:
+        "201":
+          description: Queued.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PartnerImport" }
+        "400": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        "202": { $ref: "#/components/responses/MissionHeld" }
+        default: { $ref: "#/components/responses/Error" }
+    get:
+      operationId: listPartnerImports
+      x-outflare-access: { scope: partners.read }
+      summary: List a program's imports, newest first
+      description: "Scope: partners.read. The last 50 imports into the program, with what each brought and what it couldn't."
+      tags: [partners]
+      responses:
+        "200":
+          description: The imports.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data: { type: array, items: { $ref: "#/components/schemas/PartnerImport" } }
+        "404": { $ref: "#/components/responses/Error" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/workspaces/{ws}/partner-programs/{id}/imports/{import}:
+    parameters:
+      - { $ref: "#/components/parameters/Workspace" }
+      - { name: id, in: path, required: true, description: "A program's id or slug.", schema: { type: string } }
+      - { name: import, in: path, required: true, schema: { type: string, format: uuid } }
+    get:
+      operationId: getPartnerImport
+      x-outflare-access: { scope: partners.read }
+      summary: Get an import
+      description: "Scope: partners.read. Its status, counts per kind and issues."
+      tags: [partners]
+      responses:
+        "200":
+          description: The import.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PartnerImport" }
+        "404": { $ref: "#/components/responses/Error" }
+        default: { $ref: "#/components/responses/Error" }
   /v1/workspaces/{ws}/partner-programs/{id}/widget-sessions:
     parameters:
       - { $ref: "#/components/parameters/Workspace" }
@@ -25451,7 +25527,7 @@ components:
         name: { type: string }
         project_id: { type: [string, "null"], format: uuid }
         goal: { type: string, description: The goal in words. }
-        goal_metric: { type: [string, "null"], enum: [meetings, replies, sends, leads, revenue_attributed, revenue_deals, null], description: "Revenue goals are in whole US dollars: revenue_attributed counts payments credited to the campaigns of the mission's sequences under the default attribution model, net of refunds; revenue_deals counts won deals tagged with the mission." }
+        goal_metric: { type: [string, "null"], enum: [meetings, replies, sends, leads, revenue_attributed, revenue_deals, revenue_referred, null], description: "Revenue goals are in whole US dollars: revenue_attributed counts payments credited to the campaigns of the mission's sequences under the default attribution model, net of refunds; revenue_deals counts won deals tagged with the mission; revenue_referred counts sales partners referred, less refunds, in the mission's brand's partner programs since it started." }
         goal_target: { type: [integer, "null"], minimum: 1 }
         instructions: { type: string, description: Guidance on top of the project brief (Markdown). }
         plan: { type: string, description: The agent's plan (Markdown). }
@@ -25474,7 +25550,7 @@ components:
           required: [text, metric, target, current, reached]
           properties:
             text: { type: string }
-            metric: { type: [string, "null"], enum: [meetings, replies, sends, leads, revenue_attributed, revenue_deals, null] }
+            metric: { type: [string, "null"], enum: [meetings, replies, sends, leads, revenue_attributed, revenue_deals, revenue_referred, null] }
             target: { type: [integer, "null"] }
             current: { type: integer }
             reached: { type: boolean }
@@ -25495,7 +25571,7 @@ components:
             ends_at: { type: [string, "null"], format: date-time }
         progress:
           type: object
-          required: [sends, replies, leads, meetings, spend_cents, revenue_attributed_cents, revenue_deals_cents]
+          required: [sends, replies, leads, meetings, spend_cents, revenue_attributed_cents, revenue_deals_cents, revenue_referred_cents]
           properties:
             sends: { type: integer }
             replies: { type: integer }
@@ -25504,6 +25580,7 @@ components:
             spend_cents: { type: integer }
             revenue_attributed_cents: { type: integer, description: "US cents credited to the campaigns of the mission's sequences under the default attribution model, net of refunds." }
             revenue_deals_cents: { type: integer, description: "US cents of won deals tagged with the mission." }
+            revenue_referred_cents: { type: integer, description: "US cents of sales partners referred, less refunds, in the mission's brand's partner programs (every program when it has no brand) since it started. Imported history never counts." }
         writes:
           type: string
           enum: [run, wait_for_approval, dry_run, refused]
@@ -26151,6 +26228,54 @@ components:
         signup_fields: { type: array, maxItems: 20, items: { $ref: "#/components/schemas/PartnerPortalField" } }
         email_from: { type: string, description: "The sender of sign-in links, on a verified sending domain of the workspace's own email provider. The portal can't sign anyone in without it." }
         sign_in_template: { type: string, description: "An email template's id or handle for the sign-in email, with sign_in_url, program_name and partner_name; Outflare's own wording when empty." }
+    PartnerImport:
+      type: object
+      required: [id, program_id, integration_id, connector, source_program, status, summary, error, created_at, started_at, finished_at]
+      properties:
+        id: { type: string, format: uuid }
+        program_id: { type: string, format: uuid }
+        integration_id: { type: [string, "null"], format: uuid }
+        connector: { type: string, description: The partner platform, such as tolt. }
+        source_program: { type: string, description: "The program's id on the platform; empty until the import finds it." }
+        status: { type: string, enum: [queued, running, done, failed] }
+        summary:
+          type: object
+          required: [kinds, issues, more_issues]
+          properties:
+            kinds:
+              type: array
+              description: Per kind, in the order they are read.
+              items:
+                type: object
+                required: [kind, seen, created, updated, unchanged, skipped]
+                properties:
+                  kind: { type: string, enum: [links, partners, promo_codes, customers, transactions, commissions] }
+                  seen: { type: integer }
+                  created: { type: integer }
+                  updated: { type: integer, description: A status brought over, or a refund added. }
+                  unchanged: { type: integer, description: Here already. }
+                  skipped: { type: integer, description: Couldn't come over; see issues. }
+            issues:
+              type: array
+              description: The first 100 things to look at, by the platform's id and a reason, never names or addresses.
+              items:
+                type: object
+                required: [kind, external_id, reason]
+                properties:
+                  kind: { type: string }
+                  external_id: { type: string }
+                  reason:
+                    type: string
+                    description: |
+                      incomplete, no_email, link_param (a link's parameter isn't ref or via, which the website script reads),
+                      extra_link (a partner's second link: their code is the first), code_changed (the partner got a new
+                      code), partner_missing, customer_missing, promo_code_invalid, promo_code_taken, already_referred
+                      (another partner has the customer here), status_conflict (rejected there after it was approved here).
+            more_issues: { type: integer }
+        error: { type: [string, "null"] }
+        created_at: { type: string, format: date-time }
+        started_at: { type: [string, "null"], format: date-time }
+        finished_at: { type: [string, "null"], format: date-time }
     PartnerAsset:
       type: object
       required: [id, kind, title, body, url, position, created_at]
@@ -26966,7 +27091,7 @@ components:
         created_at: { type: string, format: date-time }
     ConnectorCategory:
       type: string
-      enum: [email_verification, email_sending, sequencer, mailbox_provider, dns, tags, crm, data, signals, analytics, seo, social, code, ads, payments, calendar, registrar, warehouse, notification, model, custom]
+      enum: [email_verification, email_sending, sequencer, mailbox_provider, dns, tags, crm, data, signals, analytics, seo, social, code, ads, payments, partners, calendar, registrar, warehouse, notification, model, custom]
     ConnectorField:
       type: object
       required: [name, label, secret, optional]

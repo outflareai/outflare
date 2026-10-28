@@ -35,6 +35,7 @@ Credentials are sealed with the instance key (`OUTFLARE_SECRET_KEY`, AES-256-GCM
 | `social` | Reddit, with the workspace's own app: search, and replies a person approves from the brand's own account. X, with the workspace's own developer app, and LinkedIn, signed in to your own account: followers and your own posts' numbers, read every day. See [social.md](social.md) |
 | `crm` | HubSpot, Salesforce, Pipedrive, Attio |
 | `payments` | Stripe. Who pays you, read into customer records. See [Payments](#payments) |
+| `partners` | Tolt, read only: move a referral or affiliate program over. See [Partner programs](#partner-programs) |
 | `calendar` | Google Calendar, Outlook, Calendly, Cal.com |
 | `dns`, `registrar` | Cloudflare, Namecheap, GoDaddy, Route 53 |
 | `notification` | Slack: [alerts](alerts.md) posted to a channel the workspace picks |
@@ -166,6 +167,10 @@ Links work once, expire after 24 hours by default (10 minutes to 7 days), can be
 ## Switching from another sequencer
 
 Connectors with the `import.campaigns` capability (Instantly, Smartlead) implement `connectors.Importer`. `GET /v1/workspaces/{ws}/integrations/{id}/import-preview` reads the account live; `POST /v1/workspaces/{ws}/integrations/{id}/imports` runs an import in the background, and `GET /v1/workspaces/{ws}/imports/{id}` shows what it did. Campaigns become draft sequences, leads keep their step and mailbox, bounced and unsubscribed leads are suppressed, and sending accounts are matched by address (the ones still to connect are listed). Re-running updates the same sequences, tracked in `import_items`.
+
+## Partner programs
+
+Connectors with the `partners.import` capability (Tolt, with the workspace's own API key) implement `connectors.PartnerImporter`: they list the account's programs and read one page at a time of links, partners, promo codes, customers, transactions and commissions. `POST /v1/workspaces/{ws}/partner-programs/{id}/imports` runs an import into a program, again as often as needed until switch-over day ([moving from Tolt](partners-tolt-migration.md)). Outflare never changes anything in Tolt.
 
 ## Payments
 

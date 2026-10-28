@@ -190,6 +190,7 @@ func (s *Server) portalBase(ctx context.Context, program string, subdomain *stri
 // ---- Admin: the portal's settings, assets and impersonation ----
 
 func (s *Server) routesPartnerPortal(mux *http.ServeMux) {
+	s.routesPartnerImports(mux)
 	read, manage := auth.ScopePartnersRead, auth.ScopePartnersManage
 	mux.HandleFunc("PUT /v1/workspaces/{ws}/partner-programs/{id}/portal", s.inWorkspace(manage, s.setPartnerPortal))
 	mux.HandleFunc("GET /v1/workspaces/{ws}/partner-programs/{id}/assets", s.inWorkspace(read, s.listPartnerAssets))

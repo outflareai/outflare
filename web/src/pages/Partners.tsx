@@ -4,8 +4,9 @@
 // conversions; rewards are a ledger, and payouts are marked paid once the
 // workspace has paid them from its own account.
 
-import { useCallback, useEffect, useState, type FormEvent } from "react";
-import type { Partner, PartnerAsset, PartnerConversion, PartnerPayout, PartnerProgram, PartnerReward, PartnerRuleInput } from "@outflare/sdk";
+import { useCallback, useEffect, useState, type FormEvent, type ReactNode } from "react";
+import { appPath } from "@/lib/paths";
+import type { Partner, PartnerAsset, PartnerConversion, PartnerImport, PartnerPayout, PartnerProgram, PartnerReward, PartnerRuleInput } from "@outflare/sdk";
 import { api, errorMessage } from "../api";
 import { useBrand } from "@/lib/brand";
 import { Badge, Button, CopyButton, Empty, ErrorText, field, Input, Loading, Menu, PageHeader, Stat, Stats, ask, toast } from "../ui";
@@ -644,6 +645,7 @@ function ProgramSettings({ ws, program: p, canManage, onClose }: { ws: string; p
           )}
         </form>
         <PortalSection ws={ws} program={p} canManage={canManage} />
+        <ImportSection ws={ws} program={p} canManage={canManage} />
       </SheetContent>
     </Sheet>
   );
@@ -651,6 +653,93 @@ function ProgramSettings({ ws, program: p, canManage, onClose }: { ws: string; p
 
 // The hosted portal: where partners apply, sign in by email and see their
 // links, referred customers (masked), rewards and payouts.
+const importReasons: Record<string, string> = {
+  incomplete: "missing its id or partner",
+  no_email: "no email address",
+  link_param: "a link parameter other than ref or via, which the website script doesn't read",
+  extra_link: "a partner's second link (their code is the first)",
+  code_changed: "the code was taken or not allowed, so the partner got a new one",
+  partner_missing: "its partner didn't come over",
+  customer_missing: "its customer didn't come over",
+  promo_code_invalid: "a promo code with characters not allowed here",
+  promo_code_taken: "a promo code another partner has here",
+  already_referred: "another partner already has this customer here",
+  status_conflict: "rejected in Tolt after it was approved here",
+};
+
+// ImportSection brings a Tolt program in, as often as needed until the
+// switch-over day.
+function ImportSection({ ws, program: p, canManage }: { ws: string; program: PartnerProgram; canManage: boolean }) {
+  const [runs, setRuns] = useState<PartnerImport[]>([]);
+  const [source, setSource] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<ReactNode>("");
+  const load = useCallback(async () => {
+    const { data } = await api.GET("/v1/workspaces/{ws}/partner-programs/{id}/imports", { params: { path: { ws, id: p.id } } });
+    setRuns(data?.data ?? []);
+  }, [ws, p.id]);
+  useEffect(() => {
+    load();
+  }, [load]);
+  const running = runs.some((r) => r.status === "queued" || r.status === "running");
+  useEffect(() => {
+    if (!running) return;
+    const t = setInterval(load, 3000);
+    return () => clearInterval(t);
+  }, [running, load]);
+
+  async function start() {
+    setBusy(true);
+    setError("");
+    const { error } = await api.POST("/v1/workspaces/{ws}/partner-programs/{id}/imports", {
+      params: { path: { ws, id: p.id } }, body: source.trim() ? { source_program: source.trim() } : {},
+    });
+    setBusy(false);
+    if (error) {
+      if ((error as { error?: { code?: string } }).error?.code === "connector_needed") {
+        return setError(<>Connect Tolt first, with your own API key: <a className="underline underline-offset-2" href={appPath(ws, "connectors", "tolt")}>Connectors, Tolt</a>.</>);
+      }
+      return setError(errorMessage(error));
+    }
+    toast("Import started.");
+    load();
+  }
+
+  return (
+    <div className="space-y-3 border-t px-4 pt-4 pb-6">
+      <h3 className="text-[13px] font-medium">Import from Tolt</h3>
+      <p className="text-[12px] text-muted-foreground">Brings partners with their link codes (so their links keep working), payout details, promo codes, referred customers, transactions and commissions, paid ones as paid payouts. Run it as often as you like until you switch: each run adds only what's new and brings over status changes. Keep auto-approve off until then, so Tolt's own decisions come over.</p>
+      {canManage && (
+        <div className="flex flex-wrap items-end gap-2">
+          <Input label="Tolt program id" value={source} onChange={(e) => setSource(e.target.value)} placeholder="Only if your account has more than one" maxLength={200} />
+          <Button type="button" onClick={start} disabled={busy || running}>{running ? "Importing…" : runs.length ? "Run again" : "Import"}</Button>
+        </div>
+      )}
+      <ErrorText>{error}</ErrorText>
+      {runs.slice(0, 5).map((r) => (
+        <div key={r.id} className="space-y-1 rounded-md border p-3 text-[12px]">
+          <div className="flex items-center gap-2">
+            <Badge tone={r.status === "failed" ? "red" : r.status === "done" ? "green" : "blue"}>{r.status}</Badge>
+            <span className="text-muted-foreground">{ago(r.created_at)}</span>
+          </div>
+          {r.error && <p className="text-destructive">{r.error}</p>}
+          <p className="text-muted-foreground">
+            {r.summary.kinds.filter((k) => k.kind !== "links" && k.seen > 0).map((k) => `${k.kind.replace("_", " ")}: ${k.created} new, ${k.updated} updated${k.skipped ? `, ${k.skipped} skipped` : ""}`).join(" · ") || "Nothing read yet."}
+          </p>
+          {r.summary.issues.length > 0 && (
+            <details>
+              <summary className="cursor-pointer">{plural(r.summary.issues.length + r.summary.more_issues, "thing", "things")} to check</summary>
+              <ul className="mt-1 list-disc pl-5">
+                {r.summary.issues.map((i) => <li key={i.kind + i.external_id + i.reason}>{i.kind.replace("_", " ")} <code>{i.external_id}</code>: {importReasons[i.reason] ?? i.reason}</li>)}
+              </ul>
+            </details>
+          )}
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function PortalSection({ ws, program: p, canManage }: { ws: string; program: PartnerProgram; canManage: boolean }) {
   const [enabled, setEnabled] = useState(p.portal_enabled);
   const [sub, setSub] = useState(p.portal_subdomain ?? "");

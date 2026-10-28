@@ -251,6 +251,7 @@ func (s *Server) RegisterJobs(q *jobs.Queue) {
 	q.Handle(jobPartnerNotify, s.partnerNotifyJob)
 	q.Handle(jobPartnerBillingConversion, s.partnerBillingConversionJob)
 	q.Handle(jobPartnerPromoCode, s.partnerPromoCodeJob)
+	q.Handle(jobPartnerImport, s.partnerImportJob)
 	q.Handle(jobSetupInstall, s.setupInstallJob)
 	q.Handle(jobDNSAdd, s.dnsAddJob)
 	q.Handle(jobTrackingCheck, s.trackingCheckJob)

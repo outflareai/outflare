@@ -71,6 +71,10 @@ type Progress struct {
 	// net of refunds, and won deals tagged with the mission.
 	RevenueAttributedCents int64 `json:"revenue_attributed_cents"`
 	RevenueDealsCents      int64 `json:"revenue_deals_cents"`
+	// RevenueReferredCents is partner sales less refunds, credited in the
+	// mission's brand's partner programs (every program for a mission
+	// without a brand) since the mission started.
+	RevenueReferredCents int64 `json:"revenue_referred_cents"`
 }
 
 // Value returns the progress on a goal metric. Revenue goals are in whole
@@ -89,6 +93,8 @@ func (p Progress) Value(metric string) int {
 		return int(p.RevenueAttributedCents / 100)
 	case "revenue_deals":
 		return int(p.RevenueDealsCents / 100)
+	case "revenue_referred":
+		return int(p.RevenueReferredCents / 100)
 	}
 	return 0
 }
@@ -129,6 +135,17 @@ func GetProgress(ctx context.Context, q outcomes.Querier, ws, missionID string) 
 		return p, err
 	}
 	p.RevenueAttributedCents = int64(math.Round(attributed))
+	// Imported history (from before Outflare) never counts.
+	if err := q.QueryRow(ctx, `
+		SELECT coalesce(sum(CASE v.type WHEN 'sale' THEN v.amount_cents WHEN 'refund' THEN -v.amount_cents ELSE 0 END), 0)::bigint
+		FROM partner_conversions v
+		JOIN partner_programs pp ON pp.id = v.program_id
+		JOIN missions mi ON mi.id = $2 AND mi.workspace_id = $1
+		WHERE v.workspace_id = $1 AND v.currency = 'USD' AND v.source <> 'import'
+		  AND v.occurred_at >= coalesce(mi.started_at, mi.created_at)
+		  AND (mi.brand_id IS NULL OR pp.brand_id = mi.brand_id)`, ws, missionID).Scan(&p.RevenueReferredCents); err != nil {
+		return p, err
+	}
 	return p, nil
 }
 
