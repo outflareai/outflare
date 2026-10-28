@@ -6,6 +6,12 @@ Each pull request that changes what Outflare does adds a change note in [changes
 
 ## [Unreleased]
 
+## [0.16.0] - 2026-10-28
+
+### Changed
+
+- Add a lead by hand on the Leads page with **Add lead**, and click any lead to see its details, edit its name, company, title, links and custom fields, or delete it.
+
 ## [0.15.0] - 2026-10-28
 
 ### Changed

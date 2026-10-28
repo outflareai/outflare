@@ -4,6 +4,7 @@ import { api, errorMessage } from "../api";
 import { ask, Badge, Button, Card, Empty, ErrorText, field, FilePicker, Loading, PageHeader, toast } from "../ui";
 import { Search } from "lucide-react";
 import { DataTable } from "@/components/data-table";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { ago } from "../format";
 import type { Tab } from "../App";
 import { useBrand } from "@/lib/brand";
@@ -33,6 +34,8 @@ export function Leads({ ws, canManage, go }: { ws: string; canManage: boolean; g
   const [q, setQ] = useState("");
   const [loaded, setLoaded] = useState(false);
   const [importing, setImporting] = useState<boolean | null>(null);
+  // The lead open in the form: "new" to add one.
+  const [open, setOpen] = useState<Lead | "new" | null>(null);
 
   // Narrowed to the brand picked in the sidebar: leads on its lists.
   const { query: brandQuery } = useBrand(ws);
@@ -59,7 +62,7 @@ export function Leads({ ws, canManage, go }: { ws: string; canManage: boolean; g
     return () => clearTimeout(t);
   }, [load]);
 
-  async function remove(l: Lead) {
+  async function remove(l: Lead): Promise<boolean> {
     const r = await ask({
       title: `Delete ${l.email}?`,
       body: (
@@ -74,10 +77,11 @@ export function Leads({ ws, canManage, go }: { ws: string; canManage: boolean; g
         { label: "Delete and never email", value: "suppress", variant: "danger-solid" },
       ],
     });
-    if (!r) return;
+    if (!r || r.choice === "cancel") return false;
     await api.DELETE("/v1/workspaces/{ws}/leads/{id}", { params: { path: { ws, id: l.id }, query: { suppress: r.choice === "suppress" } } });
     toast(r.choice === "suppress" ? `Deleted ${l.email} and added it to the suppression list.` : `Deleted ${l.email}.`);
     load();
+    return true;
   }
 
   const listName = (id: string) => lists.find((l) => l.id === id)?.name;
@@ -89,8 +93,27 @@ export function Leads({ ws, canManage, go }: { ws: string; canManage: boolean; g
       <PageHeader
         title="Leads"
         description="The people your sequences email. Group them into lists, then add a list to a sequence."
-        action={canManage && !empty && <Button variant={showImport ? "ghost" : "primary"} onClick={() => setImporting(!showImport)}>{showImport ? "Close" : "Import leads"}</Button>}
+        action={
+          canManage && (
+            <div className="flex gap-2">
+              {!empty && <Button variant="ghost" onClick={() => setImporting(!showImport)}>{showImport ? "Close import" : "Import leads"}</Button>}
+              <Button onClick={() => setOpen("new")}>Add lead</Button>
+            </div>
+          )
+        }
       />
+      {open && (
+        <LeadDialog
+          ws={ws}
+          lead={open === "new" ? null : open}
+          lists={lists}
+          canManage={canManage}
+          listName={listName}
+          onClose={() => setOpen(null)}
+          onSaved={() => load()}
+          onDelete={async (l) => { if (await remove(l)) setOpen(null); }}
+        />
+      )}
       {showImport && <Import ws={ws} onDone={() => load()} go={go} />}
       {!loaded && <Loading />}
       {empty && !canManage && <Empty title="No leads yet" />}
@@ -99,6 +122,7 @@ export function Leads({ ws, canManage, go }: { ws: string; canManage: boolean; g
           <DataTable
             data={leads}
             rowId={(l) => l.id}
+            onRowClick={(l) => setOpen(l)}
             toolbar={
               <>
                 <label className="relative min-w-0 flex-1 basis-60">
@@ -133,7 +157,6 @@ export function Leads({ ws, canManage, go }: { ws: string; canManage: boolean; g
                     {l.suppressed && <Badge tone="red" title="On the suppression list: never emailed">Won't be emailed</Badge>}
                   </div>
                 </div>
-                {canManage && <Button variant="danger" onClick={() => remove(l)}>Delete</Button>}
               </div>
             )}
             hidden={["created"]}
@@ -231,5 +254,135 @@ function Import({ ws, onDone, go }: { ws: string; onDone: () => void; go: (t: Ta
         )}
       </form>
     </Card>
+  );
+}
+
+// The lead's own fields, in the order the form shows them.
+const leadFields = [
+  { key: "first_name", label: "First name" },
+  { key: "last_name", label: "Last name" },
+  { key: "company", label: "Company" },
+  { key: "title", label: "Job title" },
+  { key: "phone", label: "Phone" },
+  { key: "linkedin_url", label: "LinkedIn URL" },
+  { key: "website", label: "Website" },
+] as const;
+type LeadField = (typeof leadFields)[number]["key"];
+
+// Adds a lead, or shows one to read, change and delete.
+function LeadDialog({ ws, lead, lists, canManage, listName, onClose, onSaved, onDelete }: {
+  ws: string;
+  lead: Lead | null;
+  lists: LeadList[];
+  canManage: boolean;
+  listName: (id: string) => string | undefined;
+  onClose: () => void;
+  onSaved: () => void;
+  onDelete: (l: Lead) => void;
+}) {
+  const [email, setEmail] = useState("");
+  const [values, setValues] = useState<Record<LeadField, string>>(() => Object.fromEntries(leadFields.map((f) => [f.key, lead?.[f.key] ?? ""])) as Record<LeadField, string>);
+  const [custom, setCustom] = useState<{ key: string; value: string }[]>(() => Object.entries(lead?.custom ?? {}).map(([key, value]) => ({ key, value })));
+  const [listId, setListId] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const readOnly = !canManage;
+
+  async function submit(e: FormEvent) {
+    e.preventDefault();
+    setBusy(true);
+    const fields = Object.fromEntries(leadFields.map((f) => [f.key, values[f.key].trim()]));
+    const kept = custom.filter((c) => c.key.trim());
+    let res;
+    if (lead) {
+      // A custom field taken out of the form is removed.
+      const removed = Object.keys(lead.custom).filter((k) => !kept.some((c) => c.key.trim() === k));
+      res = await api.PATCH("/v1/workspaces/{ws}/leads/{id}", {
+        params: { path: { ws, id: lead.id } },
+        body: { ...fields, custom: { ...Object.fromEntries(kept.map((c) => [c.key.trim(), c.value])), ...Object.fromEntries(removed.map((k) => [k, null])) } },
+      });
+    } else {
+      res = await api.POST("/v1/workspaces/{ws}/leads", {
+        params: { path: { ws } },
+        body: {
+          email: email.trim(),
+          ...Object.fromEntries(Object.entries(fields).filter(([, v]) => v)),
+          ...(kept.length ? { custom: Object.fromEntries(kept.map((c) => [c.key.trim(), c.value])) } : {}),
+          ...(listId ? { list_id: listId } : {}),
+        },
+      });
+    }
+    setBusy(false);
+    if (res.error) return setError(errorMessage(res.error));
+    toast(lead ? `Saved ${lead.email}.` : `Added ${email.trim()}.`);
+    onSaved();
+    onClose();
+  }
+
+  return (
+    <Dialog open onOpenChange={(o) => !o && onClose()}>
+      <DialogContent className="sm:max-w-lg">
+        <form className="space-y-3 text-sm" onSubmit={submit}>
+          <DialogHeader>
+            <DialogTitle className="break-all">{lead ? lead.email : "Add a lead"}</DialogTitle>
+            <DialogDescription>
+              {lead
+                ? <>Added {ago(lead.created_at)}{lead.source ? ` from ${lead.source}` : ""}. The email address can't be changed: add the new address as a lead instead.</>
+                : "Only the email address is required. Name, company and every custom field can go in your emails, like {{first_name}}."}
+            </DialogDescription>
+          </DialogHeader>
+          {lead && (
+            <div className="flex flex-wrap items-center gap-1.5">
+              <Verdict v={lead.verification} />
+              {lead.suppressed && <Badge tone="red" title="On the suppression list: never emailed">Won't be emailed</Badge>}
+              {lead.list_ids.map((id) => listName(id)).filter(Boolean).map((n) => <Badge key={n} tone="grey">{n}</Badge>)}
+            </div>
+          )}
+          {!lead && (
+            <label className="block">
+              <span className="mb-1 block font-medium">Email</span>
+              <input type="email" required autoFocus className={`${field} w-full`} placeholder="ana@acme.example" value={email} onChange={(e) => setEmail(e.target.value)} />
+            </label>
+          )}
+          <div className="grid gap-3 sm:grid-cols-2">
+            {leadFields.map((f) => (
+              <label key={f.key} className={f.key === "linkedin_url" || f.key === "website" ? "block sm:col-span-2" : "block"}>
+                <span className="mb-1 block font-medium">{f.label}</span>
+                <input className={`${field} w-full`} readOnly={readOnly} value={values[f.key]} onChange={(e) => setValues({ ...values, [f.key]: e.target.value })} />
+              </label>
+            ))}
+          </div>
+          <div>
+            <span className="mb-1 block font-medium">Custom fields</span>
+            <div className="space-y-2">
+              {custom.map((c, i) => (
+                <div key={i} className="flex gap-2">
+                  <input aria-label="Field name" className={`${field} w-2/5`} placeholder="pain_point" readOnly={readOnly} value={c.key} onChange={(e) => setCustom(custom.map((x, j) => (j === i ? { ...x, key: e.target.value } : x)))} />
+                  <input aria-label="Value" className={`${field} min-w-0 flex-1`} readOnly={readOnly} value={c.value} onChange={(e) => setCustom(custom.map((x, j) => (j === i ? { ...x, value: e.target.value } : x)))} />
+                  {canManage && <Button type="button" variant="ghost" onClick={() => setCustom(custom.filter((_, j) => j !== i))}>Remove</Button>}
+                </div>
+              ))}
+              {custom.length === 0 && readOnly && <p className="text-muted-foreground">None.</p>}
+              {canManage && <button type="button" className="underline" onClick={() => setCustom([...custom, { key: "", value: "" }])}>Add a custom field</button>}
+            </div>
+          </div>
+          {!lead && lists.length > 0 && (
+            <label className="block">
+              <span className="mb-1 block font-medium">Add to a list <span className="font-normal text-muted-foreground">(optional)</span></span>
+              <select className={`${field} w-full`} value={listId} onChange={(e) => setListId(e.target.value)}>
+                <option value="">No list</option>
+                {lists.map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}
+              </select>
+            </label>
+          )}
+          <ErrorText>{error}</ErrorText>
+          <DialogFooter className="flex-row justify-end gap-2">
+            {lead && canManage && <Button type="button" variant="danger" className="mr-auto" onClick={() => onDelete(lead)}>Delete</Button>}
+            <Button type="button" variant="ghost" onClick={onClose}>{canManage ? "Cancel" : "Close"}</Button>
+            {canManage && <Button disabled={busy}>{busy ? "Saving…" : lead ? "Save" : "Add lead"}</Button>}
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
   );
 }
