@@ -266,4 +266,43 @@ export function registerABTestTools(
     },
     ({ test, variant }) => call(() => gtm.POST("/v1/workspaces/{ws}/ab-tests/{test}/ship", { params: { path: { ...path(), test } }, body: { variant } })),
   );
+
+  server.registerTool(
+    "list_ab_test_learnings",
+    {
+      title: "List what past A/B tests taught",
+      description:
+        "Finished A/B tests, newest first: the hypothesis, the goal, how each came out in a line, the version kept, and the learning the workspace's AI wrote when it ended. q finds tests whose name, hypothesis, flag or learning mention it. Read this before suggesting a new test, so it doesn't repeat one.",
+      inputSchema: { q: z.string().max(200).optional().describe("Words to look for, such as headline or pricing.") },
+      annotations: read,
+    },
+    ({ q }) => call(() => gtm.GET("/v1/workspaces/{ws}/ab-tests/learnings", { params: { path: path(), query: q ? { q } : {} } })),
+  );
+
+  server.registerTool(
+    "ask_ab_tests",
+    {
+      title: "Ask about past A/B tests",
+      description:
+        "The workspace's own AI model answers a question over the most recent 40 finished tests, citing the tests it drew on. Returns a queued run: read it with get_ab_test_ai_run.",
+      inputSchema: {
+        question: z.string().min(1).max(2000).describe('Such as "What have we learned about headlines on the pricing page?"'),
+        brand_id: z.string().uuid().optional().describe("Only this brand's tests and those of shared flags."),
+      },
+      annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true },
+    },
+    (body) => call(() => gtm.POST("/v1/workspaces/{ws}/ab-tests/ask", { params: { path: path() }, body })),
+  );
+
+  server.registerTool(
+    "write_ab_test_learning",
+    {
+      title: "Write a finished A/B test's learning",
+      description:
+        "The workspace's own AI model writes (or rewrites) what a finished test taught, kept on the test for the library. It is written on its own when a test ends, if the workspace has an AI model. Returns a queued run.",
+      inputSchema: { test: testRef },
+      annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true },
+    },
+    ({ test }) => call(() => gtm.POST("/v1/workspaces/{ws}/ab-tests/{test}/learning", { params: { path: { ...path(), test } } })),
+  );
 }

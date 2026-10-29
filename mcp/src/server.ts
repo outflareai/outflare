@@ -171,6 +171,15 @@ const read = { readOnlyHint: true, openWorldHint: false } as const;
 const write = { readOnlyHint: false, destructiveHint: false, openWorldHint: false } as const;
 const sends = { readOnlyHint: false, destructiveHint: false, openWorldHint: true } as const;
 
+// exclusion is who a journey, broadcast or sequence leaves out.
+const exclusion = z
+  .object({
+    lists: z.array(z.string()).max(20).describe("Lead list ids (smart or static), from list_smart_lists."),
+    tags: z.array(z.string().max(50)).max(20).describe("Tags on the person or their company, such as competitor."),
+  })
+  .optional()
+  .describe("Who it leaves out: people on these lists or with these tags, or at a company with one. Unlike suppression, it only keeps them out of this automation.");
+
 const settings = {
   name: z.string().max(200).optional(),
   pool_id: id.nullable().optional().describe("Restrict mailbox allocation to this pool. Null allows any mailbox."),
@@ -181,6 +190,7 @@ const settings = {
   daily_new_limit: z.number().int().min(1).nullable().optional().describe("Most leads started per day. Null is no cap."),
   daily_send_limit: z.number().int().min(1).max(1000000).nullable().optional().describe("Most emails sent in 24 hours, every step counted, on top of mailbox and domain limits. Null is no cap."),
   stop_on_reply: z.boolean().optional(),
+  exclude: exclusion,
   track_clicks: z.boolean().optional().describe("Rewrite links so clicks are counted. Off by default; rewritten links can hurt deliverability, so pair it with a verified tracking domain."),
   unsubscribe_header: z.boolean().optional().describe("Add List-Unsubscribe and one-click headers. On by default; Gmail and Yahoo expect them from bulk senders."),
   team_id: id.nullable().optional().describe("Team that owns the sequence; its senders' mailboxes are used first. Defaults to the token's team."),
@@ -256,7 +266,7 @@ export function createServer({ client: gtm, workspace, readOnly = false, mission
         "Start of every conversation: call get_context. It returns what Outflare already knows about the company (context and memories), the brands, " +
         "and the status: blockers worst first, each with fix.tool to call and fix.who (agent: you can fix it; person: tell them what to do on fix.page). " +
         "Never ask for anything it already holds. If context.ask_for_missing, ask for context.missing once, in one short message, and save the answers with update_context. " +
-        "When the person states a lasting preference or decision, save it with remember and say so in one line. Search list_memories before asking something they may have said before, and search_knowledge before answering a question about the business, its products, prices or policies. " +
+        "When the person states a lasting preference or decision, save it with remember and say so in one line. Search list_memories before asking something they may have said before, and find_knowledge (or ask_knowledge) before answering a question about the business, its products, prices or policies; quote only what it says. " +
         "Memories are notes, not permissions: limits, scopes and the send policy still decide what runs.\n\n" +
         "How things connect (read outflare://guide for more): a workspace is one company; it may market several brands (list_brands), each with its own website, context and sending setup, " +
         "so when brands exist pass brand to get_context and the list tools for brand work (a key bound to one brand sees only that brand and the shared records, and tools that need every brand answer 403; read a brand's context before writing copy, " +
@@ -2430,6 +2440,18 @@ export function createServer({ client: gtm, workspace, readOnly = false, mission
       annotations: read,
     },
     (query) => call(() => gtm.GET("/v1/workspaces/{ws}/attribution/campaigns", { params: { path, query } })),
+  );
+
+  server.registerTool(
+    "get_attribution_ads",
+    {
+      title: "Ad report",
+      description:
+        "What each paid ad campaign (or ad set, or ad) brought, beside what it cost: first-party visits, conversions and revenue credited to it under the model, joined by the network's ids the tracking template recorded, with the platform's spend and its own conversion count. A campaign with spend and no visits usually lacks its tracking template.",
+      inputSchema: { level: z.enum(["campaign", "adset", "ad"]).optional().describe("campaign by default."), ...attributionRange },
+      annotations: read,
+    },
+    (query) => call(() => gtm.GET("/v1/workspaces/{ws}/attribution/ads", { params: { path, query } })),
   );
 
   server.registerTool(
@@ -6782,7 +6804,7 @@ export function createServer({ client: gtm, workspace, readOnly = false, mission
         playbook_id: z.string().min(1).max(60),
         inputs: z.record(z.string(), z.string().max(500)).optional().describe("Values for the playbook's inputs, by name (get_playbook lists them)."),
         mode: z.enum(["dry_run", "approve_writes", "autonomous"]).optional(),
-        apply_kit: z.boolean().optional().describe("Also set up the playbook's setup kit (its pipeline, fields and email drafts). Check preview_kit first."),
+        apply_kit: z.boolean().optional().describe("Also set up the playbook's setup kit (its pipeline, fields, email drafts, and a flow kit's smart lists, rules and journeys, with the kit's inputs taken from inputs). Check preview_kit first."),
       },
       annotations: write,
     },
@@ -6795,7 +6817,7 @@ export function createServer({ client: gtm, workspace, readOnly = false, mission
       title: "Preview a setup kit",
       description:
         "What a playbook's setup kit (named by the playbook's kit) would add to this workspace: its pipeline as a record type with a stage field, fields on people and companies, " +
-        "option lists and email drafts. Each part is add, extend, reuse or conflict. Changes nothing. Show it to the person before apply_kit.",
+        "option lists and email drafts, and a flow kit's smart lists, rules and journeys (added as drafts). Each part is add, extend, reuse or conflict. Changes nothing. Show it to the person before apply_kit.",
       inputSchema: { kit_id: z.string().min(1).max(60) },
       annotations: read,
     },
@@ -6808,11 +6830,65 @@ export function createServer({ client: gtm, workspace, readOnly = false, mission
       title: "Set up a kit",
       description:
         "Add what preview_kit lists, in one step. It only adds: matching parts are reused, existing templates stay as they are, and email drafts are added unpublished. " +
+        "A flow kit's smart lists, rules and journeys are added as drafts that do nothing until a person turns them on; give its inputs (the kit lists them, such as the event that means activated). " +
         "Fails with conflict, changing nothing, while any part conflicts. Only after the person agreed to the preview.",
-      inputSchema: { kit_id: z.string().min(1).max(60) },
+      inputSchema: {
+        kit_id: z.string().min(1).max(60),
+        inputs: z.record(z.string(), z.string().max(200)).optional().describe("Values for a flow kit's inputs, by name: event names, a sequence's id, or text."),
+      },
       annotations: write,
     },
-    ({ kit_id }) => call(() => gtm.POST("/v1/workspaces/{ws}/kits/{id}/apply", { params: { path: { ws, id: kit_id } } })),
+    ({ kit_id, inputs }) => call(() => gtm.POST("/v1/workspaces/{ws}/kits/{id}/apply", { params: { path: { ws, id: kit_id } }, body: { inputs } })),
+  );
+
+  server.registerTool(
+    "export_kit",
+    {
+      title: "Export journeys as a kit",
+      description:
+        "Write journeys as a flow kit file (YAML) with what they use: the journeys they start or stop, their static lists, their emails as plain-text drafts, the rules that emit their trigger event and those rules' smart lists. " +
+        "Ids become the kit's own placeholders and sequences become inputs; events lists every event they name, and the ones given in inputs become inputs too, defaulting to themselves. notes say what changed on the way out. " +
+        "Another workspace sets it up with apply_kit_file; it can also be contributed to playbooks/kits by pull request. Changes nothing.",
+      inputSchema: {
+        journeys: z.array(id).min(1).max(20).describe("The journeys to export."),
+        rules: z.array(id).max(20).optional().describe("More rules to take along."),
+        inputs: z.array(z.string().max(200)).max(50).optional().describe("Events to turn into inputs (a first call's events lists them)."),
+        id: z.string().max(60).optional().describe("The kit's id, such as activate-new-trials. Left out: made from the title."),
+        title: z.string().max(80).optional(),
+        summary: z.string().max(200).optional(),
+      },
+      annotations: read,
+    },
+    (body) => call(() => gtm.POST("/v1/workspaces/{ws}/kits/export", { params: { path: { ws } }, body })),
+  );
+
+  server.registerTool(
+    "preview_kit_file",
+    {
+      title: "Preview a kit file",
+      description:
+        "What a kit file (YAML, such as from export_kit in another workspace) would add to this workspace, part by part (add, extend, reuse or conflict), and the inputs it takes. " +
+        "The file is checked as a shipped kit is. Changes nothing. Show it to the person before apply_kit_file.",
+      inputSchema: { yaml: z.string().min(1).max(500_000) },
+      annotations: read,
+    },
+    ({ yaml }) => call(() => gtm.POST("/v1/workspaces/{ws}/kits/preview", { params: { path: { ws } }, body: { yaml } })),
+  );
+
+  server.registerTool(
+    "apply_kit_file",
+    {
+      title: "Set up a kit file",
+      description:
+        "Add what preview_kit_file lists, in one step, like apply_kit: it only adds, every smart list, rule and journey is a draft until a person turns it on, and email drafts are unpublished. " +
+        "Give its inputs (preview_kit_file lists them; a sequence input takes one of this workspace's sequence ids). Fails with conflict, changing nothing, while any part conflicts. Only after the person agreed to the preview.",
+      inputSchema: {
+        yaml: z.string().min(1).max(500_000),
+        inputs: z.record(z.string(), z.string().max(200)).optional().describe("Values for the kit's inputs, by name: event names, a sequence's id, or text."),
+      },
+      annotations: write,
+    },
+    (body) => call(() => gtm.POST("/v1/workspaces/{ws}/kits/apply", { params: { path: { ws } }, body })),
   );
 
   server.registerTool(
@@ -8040,6 +8116,7 @@ export function createServer({ client: gtm, workspace, readOnly = false, mission
       .describe("topic (default): everyone the topic may go to. records: just these customer records."),
     data: z.record(z.string(), z.unknown()).optional().describe("Template variables for everyone; each person's own fields are under person, such as person.first_name."),
     track: z.object({ opens: z.boolean().nullable().optional(), clicks: z.boolean().nullable().optional() }).optional(),
+    exclude: exclusion,
   };
 
   server.registerTool(
@@ -8141,6 +8218,7 @@ export function createServer({ client: gtm, workspace, readOnly = false, mission
       .max(20)
       .optional()
       .describe("Attribute conditions: when any holds, the run ends before its next step, and nobody who already meets one starts."),
+    exclude: exclusion,
     steps: z
       .array(
         z.object({
@@ -8230,6 +8308,19 @@ export function createServer({ client: gtm, workspace, readOnly = false, mission
   );
 
   server.registerTool(
+    "get_automation_map",
+    {
+      title: "Get the automation map",
+      description:
+        "Every automation in the workspace as one graph: what sets each rule and journey off (events, field changes, smart lists), the events rules emit, and what journeys touch (lists, sequences, tags, other journeys), with each node's volume for the last 7 days. " +
+        "flags say what needs a look: loops, two journeys emailing the same people within a day, events nothing listens to, and live journeys whose trigger never fires. Use it to explain how a workspace's automations fit together before changing them.",
+      inputSchema: { brand: z.string().optional().describe("A brand's id or handle: only its automations and the shared ones.") },
+      annotations: read,
+    },
+    (query) => call(() => gtm.GET("/v1/workspaces/{ws}/automation-map", { params: { path, query } })),
+  );
+
+  server.registerTool(
     "get_journey",
     {
       title: "Get a journey",
@@ -8280,7 +8371,7 @@ export function createServer({ client: gtm, workspace, readOnly = false, mission
     {
       title: "Edit a live journey's draft version",
       description:
-        "A live (active or paused) journey is read-only: this starts a draft version from it (or reuses the draft already there) and, with any of trigger, entry, goal_event, exit_events, exit_conditions or steps, changes the draft. The live version keeps running until publish_journey.",
+        "A live (active or paused) journey is read-only: this starts a draft version from it (or reuses the draft already there) and, with any of trigger, entry, goal_event, exit_events, exit_conditions, exclude or steps, changes the draft. The live version keeps running until publish_journey.",
       inputSchema: {
         journey: z.string().describe("The journey's id."),
         trigger: journeyFields.trigger,
@@ -8288,6 +8379,7 @@ export function createServer({ client: gtm, workspace, readOnly = false, mission
         goal_event: journeyFields.goal_event,
         exit_events: journeyFields.exit_events,
         exit_conditions: journeyFields.exit_conditions,
+        exclude: journeyFields.exclude,
         steps: journeyFields.steps,
       },
       annotations: write,

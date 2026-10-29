@@ -181,7 +181,7 @@ func TestSiteFlagsClient(t *testing.T) {
 		Classes []string
 		Tracked []struct {
 			Event      string
-			Properties map[string]string
+			Properties map[string]any
 		}
 		Stored map[string]string
 	}) {
@@ -235,7 +235,7 @@ func TestSiteFlagsExposure(t *testing.T) {
 	}
 	type tracked struct {
 		Event      string
-		Properties map[string]string
+		Properties map[string]any
 	}
 	run := func(opts map[string]any) (got struct {
 		Anon    string
@@ -259,7 +259,7 @@ func TestSiteFlagsExposure(t *testing.T) {
 			if e.Event != "Experiment Viewed" {
 				t.Fatalf("unexpected event %+v", e)
 			}
-			out = append(out, e.Properties["flag"]+":"+e.Properties["variant"])
+			out = append(out, fmt.Sprint(e.Properties["flag"])+":"+fmt.Sprint(e.Properties["variant"]))
 		}
 		slices.Sort(out)
 		return out
@@ -298,5 +298,79 @@ func TestSiteFlagsExposure(t *testing.T) {
 	got = run(map[string]any{"href": "https://northpeak.example/?of_flag=hero:control", "flags": answer, "noTag": true, "quiet": true, "read": []string{"hero"}})
 	if len(got.Tracked) != 0 {
 		t.Fatalf("preview sent: %+v", got.Tracked)
+	}
+}
+
+// Flags the site's server decided go straight onto the page: no request,
+// the server's visitor id when the browser has none, and Experiment Viewed
+// says where the version came from and how long the visitor waited.
+func TestSiteFlagsBootstrap(t *testing.T) {
+	node, err := exec.LookPath("node")
+	if err != nil {
+		t.Skip("node not installed")
+	}
+	run := func(opts map[string]any) (got struct {
+		Anon     string
+		FlagAsks int
+		Classes  []string
+		Tracked  []struct {
+			Event      string
+			Properties map[string]any
+		}
+		Stored map[string]string
+	}) {
+		t.Helper()
+		b, _ := json.Marshal(opts)
+		out, err := exec.Command(node, "testdata/run_site.mjs", "site.js", string(b)).CombinedOutput()
+		if err != nil {
+			t.Fatalf("%v: %s", err, out)
+		}
+		if err := json.Unmarshal(out, &got); err != nil {
+			t.Fatalf("%v: %s", err, out)
+		}
+		return got
+	}
+	server := map[string]any{"anonymousId": "srv-4f1c2a9e", "flags": map[string]any{"hero": "faster", "chat-widget": false},
+		"payloads": map[string]any{"hero": map[string]any{"headline": "Ship faster"}}}
+	fetched := map[string]any{"flags": map[string]any{"hero": "control"}}
+
+	// The server's answer shows at once, without asking, for its visitor.
+	got := run(map[string]any{"href": "https://northpeak.example/pricing", "flags": fetched, "bootstrap": server, "quiet": true, "htmlClass": "of-wait"})
+	if got.FlagAsks != 0 || got.Anon != "srv-4f1c2a9e" || strings.Join(got.Classes, " ") != "of-flag-hero-faster" {
+		t.Fatalf("bootstrap: %+v", got)
+	}
+	if len(got.Tracked) != 1 || got.Tracked[0].Properties["variant"] != "faster" || got.Tracked[0].Properties["source"] != "bootstrap" {
+		t.Fatalf("exposure: %+v", got.Tracked)
+	}
+	if w, ok := got.Tracked[0].Properties["wait_ms"].(float64); !ok || w < 0 {
+		t.Fatalf("wait_ms: %+v", got.Tracked[0].Properties)
+	}
+	if !strings.Contains(got.Stored["of_flags"], `"faster"`) {
+		t.Fatalf("not kept for the next page: %v", got.Stored)
+	}
+
+	// Decided for someone else (the browser has its own id): ignored.
+	got = run(map[string]any{"href": "https://northpeak.example/pricing", "flags": fetched, "bootstrap": server, "quiet": true, "cookie": "of_aid=brw-77aa01bc"})
+	if got.FlagAsks != 1 || got.Anon != "brw-77aa01bc" || strings.Join(got.Classes, " ") != "of-flag-hero-control" {
+		t.Fatalf("someone else's bootstrap: %+v", got)
+	}
+	if len(got.Tracked) != 1 || got.Tracked[0].Properties["source"] != "fetched" {
+		t.Fatalf("fetched exposure: %+v", got.Tracked)
+	}
+	// Decided for this browser's id: used.
+	if got := run(map[string]any{"href": "https://northpeak.example/pricing", "flags": fetched, "bootstrap": server, "quiet": true, "cookie": "of_aid=srv-4f1c2a9e"}); got.FlagAsks != 0 || strings.Join(got.Classes, " ") != "of-flag-hero-faster" {
+		t.Fatalf("own bootstrap: %+v", got)
+	}
+
+	// Anything malformed is ignored, keys and versions are checked, and a
+	// payload only comes with a version that is on.
+	for _, bad := range []any{"{not json", map[string]any{"anonymousId": "x", "flags": map[string]any{"hero": "faster"}}, map[string]any{"anonymousId": "srv-4f1c2a9e"}} {
+		if got := run(map[string]any{"href": "https://northpeak.example/", "flags": fetched, "bootstrap": bad, "quiet": true}); got.FlagAsks != 1 || strings.Join(got.Classes, " ") != "of-flag-hero-control" {
+			t.Fatalf("bad bootstrap %v used: %+v", bad, got)
+		}
+	}
+	odd := map[string]any{"anonymousId": "srv-4f1c2a9e", "flags": map[string]any{"hero": "<b>x</b>", "Bad Key": "on", "pricing": "annual"}, "payloads": map[string]any{"hero": "x"}}
+	if got := run(map[string]any{"href": "https://northpeak.example/", "bootstrap": odd, "flags": fetched, "quiet": true}); strings.Join(got.Classes, " ") != "of-flag-pricing-annual" {
+		t.Fatalf("unchecked bootstrap values: %+v", got)
 	}
 }

@@ -16,6 +16,7 @@ import { DataTable, type ColumnDef } from "@/components/data-table";
 import { clean, newStep } from "@/components/journey-flow/model";
 import { StepPicker, useStepKinds } from "@/components/journey-flow/step-picker";
 import { Conditions, useFlowCatalog, type FlowCatalog } from "@/components/journey-flow/step-panel";
+import { KitNotice } from "@/components/kit-notice";
 import type { Go } from "./Lifecycle";
 
 type Status = Rule["status"];
@@ -385,6 +386,7 @@ function RuleDetail({ ws, id, canManage, lists, back, onCreated, go }: { ws: str
           </div>
         )}
       />
+      {r?.kit && r.status === "draft" && <KitNotice kit={r.kit} then="Dry-run it below to see who it would have fired for, then press Activate." />}
       {r?.stats && (
         <Stats cols={3}>
           <Stat label="Fired" value={r.stats.firings} />

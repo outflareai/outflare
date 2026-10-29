@@ -169,6 +169,8 @@ code, .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-
       me.read_only ? el("div", { "class": "banner", text: "You are seeing this portal as " + (me.name || me.email) + " sees it, read-only." }) : null,
       me.status === "pending" ? el("div", { "class": "banner", text: "Your application is waiting for approval. Your links work once you're approved." }) : null,
       me.status === "suspended" ? el("div", { "class": "banner", text: "Your partnership is paused. Contact the company to resume it." }) : null,
+      !me.read_only && !me.payout_method ? el("div", { "class": "banner" }, ["Add your payout details in ", el("a", { href: "#settings", text: "Settings" }),
+        " so the company can pay you. Payouts wait until you do."]) : null,
       el("div", { "class": "stats" }, [
         stat("Clicks", s.clicks), stat("Referred customers", s.customers + " of " + s.referrals), stat("Referred sales", money(s.sales_cents)),
         stat("On hold", money(s.pending_cents)), stat("Due to you", money(s.balance_cents)), stat("Paid", money(s.paid_cents))

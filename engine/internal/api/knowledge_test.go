@@ -35,7 +35,7 @@ func TestKnowledge(t *testing.T) {
 		"title": "Refund policy", "body": "# Refunds\n\nWe refund **any** plan within 30 days.", "collection_id": policies["id"],
 	})
 	if art["kind"] != "article" || art["visibility"] != "team" || art["status"] != "published" || art["version"] != 1.0 ||
-		art["excerpt"] != "Refunds We refund any plan within 30 days." || art["owner_id"] == nil || art["body"] == nil {
+		art["excerpt"] != "We refund any plan within 30 days." || art["owner_id"] == nil || art["body"] == nil {
 		t.Fatalf("article = %v", art)
 	}
 	snip := owner.must(201, "POST", kb+"/items", map[string]any{

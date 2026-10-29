@@ -1,7 +1,8 @@
 // Knowledge: the articles and quick answers a business wrote for its staff
-// and for every AI in Outflare. Agents search it before answering a
-// question about the business, and add to it when the person tells them
-// something worth keeping that is longer than a memory.
+// and for every AI in Outflare. Agents find what it says (or ask it for a
+// written answer with sources) before stating facts about the business,
+// and add to it when the person tells them something worth keeping that is
+// longer than a memory.
 
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
@@ -62,6 +63,43 @@ export function registerKnowledgeTools(
   );
 
   server.registerTool(
+    "find_knowledge",
+    {
+      title: "Find what the knowledge says",
+      description:
+        "The passages of the knowledge base that best answer a question, best first, by words and by meaning: what every AI in Outflare reads. " +
+        "Use it before stating facts about the business in copy, a reply or an answer, and quote only what it says. " +
+        "Set audience to customers when the answer is for a customer: only what customers may be told comes back.",
+      inputSchema: {
+        q: z.string().min(1).max(1000).describe("The question, in plain words."),
+        audience: z.enum(["team", "customers"]).optional().describe("team (default): every item. customers: only public and customers_ai items."),
+        brand: z.string().optional().describe("A brand's handle or id: that brand's knowledge and the shared knowledge."),
+        limit: z.number().int().min(1).max(20).optional(),
+      },
+      annotations: read,
+    },
+    (q) => call(() => gtm.GET("/v1/workspaces/{ws}/knowledge/passages", { params: { path: path(), query: withBrand(q) } })),
+  );
+
+  server.registerTool(
+    "ask_knowledge",
+    {
+      title: "Ask the knowledge base",
+      description:
+        "A short answer to a question, written by the workspace's own AI model from the knowledge base alone, with the passages it used (citations). " +
+        "answered false means the knowledge doesn't cover it: say so rather than guessing, and offer to write it down with add_knowledge. " +
+        "With no AI model connected, answer is null and passages still lists what is written.",
+      inputSchema: {
+        question: z.string().min(1).max(1000),
+        audience: z.enum(["team", "customers"]).optional().describe("Who the answer is for. customers: only what customers may be told."),
+        brand: z.string().optional().describe("A brand's handle or id."),
+      },
+      annotations: { readOnlyHint: true, openWorldHint: false },
+    },
+    (body) => call(() => gtm.POST("/v1/workspaces/{ws}/knowledge/ask", { params: { path: path() }, body })),
+  );
+
+  server.registerTool(
     "get_knowledge",
     {
       title: "Read knowledge",
@@ -94,7 +132,45 @@ export function registerKnowledgeTools(
     ({ item_id }) => call(() => gtm.GET("/v1/workspaces/{ws}/knowledge/items/{id}/versions", { params: { path: item(item_id) } })),
   );
 
+  server.registerTool(
+    "list_knowledge_gaps",
+    {
+      title: "List unanswered questions",
+      description:
+        "Questions asked of the knowledge base in the last 90 days that it couldn't answer, the most asked first, with how often customers asked. " +
+        "These are what to write next: draft each answer with add_knowledge, then dismiss_knowledge_gap with reason answered.",
+      inputSchema: { brand: z.string().optional().describe("A brand's handle or id.") },
+      annotations: read,
+    },
+    (q) => call(() => gtm.GET("/v1/workspaces/{ws}/knowledge/gaps", { params: { path: path(), query: withBrand(q) } })),
+  );
+
+  server.registerTool(
+    "get_knowledge_stats",
+    {
+      title: "Knowledge base at a glance",
+      description: "How much is written (articles, quick answers, live, drafts, due a check, in the bin), what each AI may use, and how many questions it answered in the last 30 days.",
+      inputSchema: { brand: z.string().optional().describe("A brand's handle or id.") },
+      annotations: read,
+    },
+    (q) => call(() => gtm.GET("/v1/workspaces/{ws}/knowledge/stats", { params: { path: path(), query: withBrand(q) } })),
+  );
+
   if (readOnly) return;
+
+  server.registerTool(
+    "dismiss_knowledge_gap",
+    {
+      title: "Set aside an unanswered question",
+      description: "Take a question off the list of unanswered ones, every time it was asked: answered once its answer is written, ignored when it needs none.",
+      inputSchema: {
+        question: z.string().min(1).max(1000).describe("The question as list_knowledge_gaps gives it."),
+        reason: z.enum(["answered", "ignored"]).optional(),
+      },
+      annotations: { ...write, idempotentHint: true },
+    },
+    (body) => call(() => gtm.POST("/v1/workspaces/{ws}/knowledge/gaps/dismiss", { params: { path: path() }, body })),
+  );
 
   server.registerTool(
     "add_knowledge",

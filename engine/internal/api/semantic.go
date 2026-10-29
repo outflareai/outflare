@@ -61,6 +61,11 @@ var semanticKinds = []struct{ kind, scope string }{
 	{"deal", auth.ScopeOutcomesRead},
 }
 
+// semanticJobKinds are what the embedding job keeps vectors for: the
+// kinds search covers, and knowledge passages, which retrieveKnowledge
+// searches with its own access rules.
+var semanticJobKinds = append(slices.Clone(semanticKinds), struct{ kind, scope string }{"knowledge", auth.ScopeWorkspaceRead})
+
 // semanticSources is, per kind, the text that is embedded and when it last
 // changed, for workspace $1. A merged or archived record has none.
 var semanticSources = map[string]string{
@@ -75,6 +80,11 @@ var semanticSources = map[string]string{
 		FROM meetings g WHERE g.workspace_id = $1`,
 	"deal": `SELECT d.id, d.updated_at AS changed_at, coalesce(d.name, '') || E'\n' || coalesce(d.stage, '') AS body
 		FROM deals d WHERE d.workspace_id = $1`,
+	// A passage's text changes only by being replaced, so it was made
+	// when it changed. Knowledge in the bin or in draft isn't embedded.
+	"knowledge": `SELECT c.id, c.created_at AS changed_at, i.title || coalesce(E'\n' || nullif(c.heading, ''), '') || E'\n' || c.text AS body
+		FROM knowledge_chunks c JOIN knowledge_items i ON i.id = c.item_id
+		WHERE c.workspace_id = $1 AND i.deleted_at IS NULL AND i.status = 'published'`,
 }
 
 // semanticState remembers whether the database has pgvector, so a request
@@ -262,7 +272,7 @@ func (s *Server) semanticView(ctx context.Context, ws string) (map[string]any, e
 	if err := s.pool.QueryRow(ctx, `SELECT count(*) FROM search_embeddings WHERE workspace_id = $1 AND model = $2`, ws, model).Scan(&embedded); err != nil {
 		return nil, err
 	}
-	for _, k := range semanticKinds {
+	for _, k := range semanticJobKinds {
 		var n int64
 		if err := s.pool.QueryRow(ctx, `SELECT count(*) FROM (`+semanticSources[k.kind]+`) x
 			LEFT JOIN search_embeddings e ON e.workspace_id = $1 AND e.kind = $2 AND e.item_id = x.id
@@ -428,6 +438,10 @@ func (s *Server) semanticEmbedJob(ctx context.Context, j jobs.Job) error {
 	if err != nil || !on {
 		return err
 	}
+	// Knowledge written before passages existed is split first.
+	if err := s.ensureKnowledgeChunks(ctx, ws); err != nil {
+		return err
+	}
 	ev := track.Event{Name: "search.embedded", ActorType: "system", Surface: "job", WorkspaceID: ws}
 	fail := func(code string, err error) error {
 		metrics.SemanticEmbedded("failed", 0, time.Since(start))
@@ -441,6 +455,8 @@ func (s *Server) semanticEmbedJob(ctx context.Context, j jobs.Job) error {
 		WHEN 'message' THEN NOT EXISTS (SELECT 1 FROM inbound_messages n WHERE n.id = e.item_id AND n.workspace_id = $1)
 		WHEN 'meeting' THEN NOT EXISTS (SELECT 1 FROM meetings g WHERE g.id = e.item_id AND g.workspace_id = $1)
 		WHEN 'deal' THEN NOT EXISTS (SELECT 1 FROM deals d WHERE d.id = e.item_id AND d.workspace_id = $1)
+		WHEN 'knowledge' THEN NOT EXISTS (SELECT 1 FROM knowledge_chunks c JOIN knowledge_items i ON i.id = c.item_id
+			WHERE c.id = e.item_id AND c.workspace_id = $1 AND i.deleted_at IS NULL)
 		ELSE true END`, ws)
 	if err != nil {
 		return err
@@ -459,7 +475,7 @@ func (s *Server) semanticEmbedJob(ctx context.Context, j jobs.Job) error {
 
 	// What is new or changed, newest first.
 	var items []semanticItem
-	for _, k := range semanticKinds {
+	for _, k := range semanticJobKinds {
 		if len(items) >= semanticRunItems {
 			break
 		}

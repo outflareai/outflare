@@ -83,7 +83,7 @@ func CheckAITool(t AITool) error {
 func (s *Server) usageTools() []aiTask {
 	out := slices.Clone(aiTasks)
 	out = append(out, aiTask{taskVisibilitySampling, "AI visibility sampling", "Asking the AI models chosen under AI visibility what they answer about your brands."},
-		aiTask{taskSemanticSearch, "Meaning-based search", "Turning your records, replies, meetings and deals into vectors, so search finds them by what they mean."})
+		aiTask{taskSemanticSearch, "Meaning-based search", "Turning your records, replies, meetings, deals and knowledge into vectors, so search and AI answers find them by what they mean."})
 	for _, t := range s.aiTools {
 		out = append(out, aiTask{t.ID, t.Name, t.Description})
 	}

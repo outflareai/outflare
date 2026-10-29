@@ -111,6 +111,9 @@ func Main(exts ...Extension) {
 	if cmd == "verify-app" || cmd == "unverify-app" {
 		os.Exit(verifyApp(context.Background(), log, cmd == "verify-app", os.Args[2:]))
 	}
+	if cmd == "features" {
+		os.Exit(featuresCommand(context.Background(), os.Args[2:]))
+	}
 	if cmd != "serve" && cmd != "migrate" && cmd != "version" {
 		// Anything else is the command line client.
 		os.Exit(cli.Run(context.Background(), cli.Env{

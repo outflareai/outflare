@@ -40,6 +40,36 @@ type PageFetcher interface {
 	FetchPage(ctx context.Context, c *Client, creds Creds, url string, renderJS bool) (FetchedPage, error)
 }
 
+// PageJobs is a PageFetcher that also reads a page in a browser as a job of
+// its own: StartPage sends the page once and returns the job's id, and
+// PageResult says whether it has finished. A caller that keeps the id can
+// pick a slow read up later without sending the page again.
+type PageJobs interface {
+	PageFetcher
+	StartPage(ctx context.Context, c *Client, creds Creds, url string) (string, error)
+	// PageResult reads a job once. done is false while it runs; a job the
+	// reader no longer knows ends done with a *PageError.
+	PageResult(ctx context.Context, c *Client, creds Creds, jobID string) (page FetchedPage, done bool, err error)
+}
+
+// PageError is a page the reader could not read for a reason of the
+// page's own: the site showed a bot check (Blocked), or the page took
+// longer than the reader allows. It is never an outage of the reader or a
+// wrong address, so a caller tries the page again later the same day. A
+// caller that doesn't look for it sees an unavailable error.
+type PageError struct {
+	Blocked bool
+	// Code is the reader's own code for it (CAPTCHA_CHALLENGE, TIMEOUT).
+	Code string
+}
+
+func (e *PageError) Error() string {
+	if e.Blocked {
+		return "the site showed the page reader a bot check (" + e.Code + ")"
+	}
+	return "the page took longer than the page reader allows (" + e.Code + ")"
+}
+
 // Reports an SEOReader can answer.
 const (
 	SEOOverview    = "overview"    // domain metrics: rating, backlinks, keywords, estimated traffic

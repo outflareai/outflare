@@ -267,6 +267,10 @@ export type Memory = Schemas["Memory"];
 export type KnowledgeItem = Schemas["KnowledgeItem"];
 export type KnowledgeCollection = Schemas["KnowledgeCollection"];
 export type KnowledgeVersion = Schemas["KnowledgeVersion"];
+export type KnowledgePassage = Schemas["KnowledgePassage"];
+export type KnowledgeAnswer = Schemas["KnowledgeAnswer"];
+export type KnowledgeStats = Schemas["KnowledgeStats"];
+export type KnowledgeGap = Schemas["KnowledgeGap"];
 export type Brand = Schemas["Brand"];
 export type BrandContext = Schemas["BrandContext"];
 export type BrandMoved = Schemas["BrandMoved"];
@@ -279,6 +283,7 @@ export type TrackingCampaignInput = Schemas["TrackingCampaignInput"];
 export type AttributionSettings = Schemas["AttributionSettings"];
 export type AttributionChannels = Schemas["AttributionChannels"];
 export type AttributionCampaignRow = Schemas["AttributionCampaignRow"];
+export type AttributionAdRow = Schemas["AttributionAdRow"];
 export type AttributionConversion = Schemas["AttributionConversion"];
 export type TrackingLink = Schemas["TrackingLink"];
 export type WorkspaceStatus = Schemas["WorkspaceStatus"];
@@ -591,4 +596,22 @@ export async function verifyWebhook(
     if (await crypto.subtle.verify("HMAC", key, mac, signed)) return JSON.parse(payload) as WebhookEvent;
   }
   throw new WebhookVerificationError("no signature matches the secret");
+}
+
+/**
+ * The tag that hands your server's flag decisions to the page, so the
+ * Outflare site script shows the visitor's version at once, with no request
+ * and no flash of the original. Decide with `POST .../flags/evaluate`
+ * (`gtm.POST("/v1/workspaces/{ws}/flags/evaluate", ...)`) for the visitor's
+ * id: the `of_aid` cookie when the browser has one, else an id you made
+ * (8 to 64 letters, digits and dashes), which the script then uses for
+ * this page. Put the tag anywhere in the page, before site.js runs. The
+ * JSON is escaped so content in payloads can't close the tag.
+ */
+export function flagsBootstrapTag(decisions: Pick<FlagDecisions, "flags"> & { payloads?: FlagDecisions["payloads"] }, anonymousId: string): string {
+  const json = JSON.stringify({ anonymousId, flags: decisions.flags, payloads: decisions.payloads ?? {} }).replace(
+    /[<>&\u2028\u2029]/g,
+    (c) => "\\u" + c.charCodeAt(0).toString(16).padStart(4, "0"),
+  );
+  return `<script type="application/json" id="outflare-flags">${json}</script>`;
 }

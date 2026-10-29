@@ -41,6 +41,18 @@ if event["type"] == "lead.replied":
 
 Pass the raw body, before any JSON parsing. It raises `WebhookVerificationError` when no signature matches or the delivery is more than five minutes old. To try a receiver on your machine, run `outflare listen --forward-to http://localhost:8000/webhooks`.
 
+## Flags without a flash
+
+`flags_bootstrap_tag()` turns your server's flag decisions into the tag the Outflare site script reads first, so a page you render shows the visitor's version in the first paint, escaped so a payload can't close the tag:
+
+```python
+from outflare import flags_bootstrap_tag
+
+anonymous_id = request.cookies.get("of_aid") or str(uuid.uuid4())
+decisions = client.evaluate_flags(anonymous_id=anonymous_id, url=str(request.url))
+html = html.replace("</head>", flags_bootstrap_tag(decisions, anonymous_id) + "</head>")
+```
+
 ## Develop
 
 `src/outflare/_operations.py` is generated: after changing `api/openapi.yaml`, run `go run ./engine/cmd/sdkgen` from the repository root. The engine's tests fail when it is out of date. Run this package's tests with `pip install -e '.[test]' && pytest`.

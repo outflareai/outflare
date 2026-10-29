@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"net/http"
 	"slices"
 	"strings"
@@ -29,6 +30,9 @@ func (s *Server) routesKits(mux *http.ServeMux) {
 	mux.HandleFunc("GET /v1/kits/{id}", s.getKitCatalog)
 	mux.HandleFunc("GET /v1/workspaces/{ws}/kits/{id}/preview", s.inWorkspace(auth.ScopeCustomersRead, s.previewKit))
 	mux.HandleFunc("POST /v1/workspaces/{ws}/kits/{id}/apply", s.inWorkspace(auth.ScopeCatalogManage, s.applyKitHandler))
+	mux.HandleFunc("POST /v1/workspaces/{ws}/kits/export", s.inWorkspace(auth.ScopeEmailsRead, s.exportKit))
+	mux.HandleFunc("POST /v1/workspaces/{ws}/kits/preview", s.inWorkspace(auth.ScopeCustomersRead, s.previewKitFile))
+	mux.HandleFunc("POST /v1/workspaces/{ws}/kits/apply", s.inWorkspace(auth.ScopeCatalogManage, s.applyKitFile))
 }
 
 // kitSource is where a kit's file lives on GitHub.
@@ -87,7 +91,7 @@ const (
 )
 
 type kitItem struct {
-	Kind   string `json:"kind"` // option_set, record_type, field or email_template
+	Kind   string `json:"kind"` // option_set, record_type, field, email_template, smart_list, rule or journey
 	Key    string `json:"key"`  // a field is type.field
 	Label  string `json:"label"`
 	Action string `json:"action"`
@@ -98,16 +102,19 @@ type kitItem struct {
 	onType   string
 	ktype    *playbooks.KitType
 	template *playbooks.KitTemplate
+	existing string // a flow part the kit added before
 }
 
 type kitPlan struct {
-	KitID     string    `json:"kit_id"`
-	Version   int       `json:"version"`
-	Title     string    `json:"title"`
-	Items     []kitItem `json:"items"`
-	Changes   int       `json:"changes"`
-	Conflicts int       `json:"conflicts"`
-	Applied   bool      `json:"applied"`
+	KitID   string `json:"kit_id"`
+	Version int    `json:"version"`
+	Title   string `json:"title"`
+	// The kit's inputs, which applying it takes values for.
+	Inputs    []playbooks.KitInput `json:"inputs"`
+	Items     []kitItem            `json:"items"`
+	Changes   int                  `json:"changes"`
+	Conflicts int                  `json:"conflicts"`
+	Applied   bool                 `json:"applied"`
 }
 
 func (p *kitPlan) add(it kitItem) {
@@ -132,7 +139,7 @@ func planKit(ctx context.Context, tx pgx.Tx, ws string, k playbooks.Kit) (*kitPl
 	if err != nil {
 		return nil, err
 	}
-	plan := &kitPlan{KitID: k.ID, Version: k.Version, Title: k.Title, Items: []kitItem{}}
+	plan := &kitPlan{KitID: k.ID, Version: k.Version, Title: k.Title, Inputs: k.Inputs, Items: []kitItem{}}
 	for _, ks := range k.OptionSets {
 		it := kitItem{Kind: "option_set", Key: ks.Key, Label: ks.Name, Action: kitAdd}
 		cur := c.optionSet(ks.Key)
@@ -222,6 +229,9 @@ func planKit(ctx context.Context, tx pgx.Tx, ws string, k playbooks.Kit) (*kitPl
 		}
 		plan.add(it)
 	}
+	if err := planFlows(ctx, tx, ws, k, plan); err != nil {
+		return nil, err
+	}
 	return plan, nil
 }
 
@@ -253,10 +263,15 @@ type errKitConflict string
 
 func (e errKitConflict) Error() string { return string(e) }
 
-// applyKit adds what kit k needs to workspace a.WorkspaceID, in tx. It
-// stops with errKitConflict when anything conflicts, and errDenied when
-// the kit adds email drafts the caller may not manage.
-func applyKit(ctx context.Context, tx pgx.Tx, a *access, k playbooks.Kit) (*kitPlan, error) {
+// applyKit adds what kit k needs to workspace a.WorkspaceID, in tx, with
+// inputs for a flow kit's inputs. It stops with errKitConflict when
+// anything conflicts, errDenied when the kit adds what the caller may not
+// manage, and errInvalid for inputs that don't fit.
+func applyKit(ctx context.Context, tx pgx.Tx, a *access, k playbooks.Kit, inputs map[string]string, source string) (*kitPlan, error) {
+	values, err := k.CheckInputs(inputs)
+	if err != nil {
+		return nil, errInvalid(err.Error())
+	}
 	// One kit at a time per workspace, so two people applying the same
 	// kit don't both add it.
 	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtext('kit:' || $1::text))`, a.WorkspaceID); err != nil {
@@ -277,6 +292,9 @@ func applyKit(ctx context.Context, tx pgx.Tx, a *access, k playbooks.Kit) (*kitP
 	}
 	if plan.addsTemplates() && !a.has(auth.ScopeEmailsManage) {
 		return plan, errDenied("this kit adds email drafts, which needs the emails.manage scope")
+	}
+	if err := flowScopes(plan, a); err != nil {
+		return plan, err
 	}
 	p := &a.principal
 	ws := a.WorkspaceID
@@ -364,12 +382,22 @@ func applyKit(ctx context.Context, tx pgx.Tx, a *access, k playbooks.Kit) (*kitP
 			return nil, err
 		}
 	}
+	if err := applyFlows(ctx, tx, a, k, plan, values); err != nil {
+		return nil, err
+	}
 	count := map[string]int{}
 	for _, it := range plan.Items {
 		count[it.Action]++
 	}
-	data := map[string]any{"kit_id": k.ID, "kit_version": k.Version, "added": count[kitAdd], "extended": count[kitExtend], "reused": count[kitReuse]}
-	if err := recordWithProps(ctx, tx, p, ws, "kit.applied", "kit", k.ID, data, data); err != nil {
+	data := map[string]any{"kit_id": k.ID, "kit_version": k.Version, "added": count[kitAdd], "extended": count[kitExtend], "reused": count[kitReuse], "source": source}
+	props, target := data, k.ID
+	if source == kitFromFile {
+		// A kit file's id is whatever its author wrote, so the product
+		// event leaves it out.
+		props, target = maps.Clone(data), ""
+		delete(props, "kit_id")
+	}
+	if err := recordWithProps(ctx, tx, p, ws, "kit.applied", "kit", target, data, props); err != nil {
 		return nil, err
 	}
 	plan.Applied = true
@@ -384,11 +412,65 @@ func (s *Server) kitFor(w http.ResponseWriter, r *http.Request) (playbooks.Kit, 
 	return k, ok
 }
 
+// Where an applied kit came from: the server's own catalog, or a kit
+// file in the request, such as one exported from another workspace.
+const (
+	kitFromCatalog = "catalog"
+	kitFromFile    = "file"
+)
+
 func (s *Server) previewKit(w http.ResponseWriter, r *http.Request) {
 	k, ok := s.kitFor(w, r)
 	if !ok {
 		return
 	}
+	s.writeKitPreview(w, r, k)
+}
+
+// kitFile is a kit file sent in a request, and values for its inputs.
+type kitFile struct {
+	YAML   string            `json:"yaml"`
+	Inputs map[string]string `json:"inputs"`
+}
+
+// readKitFile reads and checks a kit file from the request body, as CI
+// checks a shipped kit, or writes a 400.
+func readKitFile(w http.ResponseWriter, r *http.Request) (playbooks.Kit, map[string]string, bool) {
+	var in kitFile
+	if !decode(w, r, &in) {
+		return playbooks.Kit{}, nil, false
+	}
+	var k playbooks.Kit
+	err := errors.New("yaml is required")
+	if strings.TrimSpace(in.YAML) != "" {
+		if k, err = playbooks.ParseKit([]byte(in.YAML)); err == nil {
+			err = k.Validate()
+		}
+	}
+	if err != nil {
+		writeError(w, r, http.StatusBadRequest, "invalid_request", "the kit file: "+err.Error())
+		return playbooks.Kit{}, nil, false
+	}
+	return k, in.Inputs, true
+}
+
+func (s *Server) previewKitFile(w http.ResponseWriter, r *http.Request) {
+	k, _, ok := readKitFile(w, r)
+	if !ok {
+		return
+	}
+	s.writeKitPreview(w, r, k)
+}
+
+func (s *Server) applyKitFile(w http.ResponseWriter, r *http.Request) {
+	k, inputs, ok := readKitFile(w, r)
+	if !ok {
+		return
+	}
+	s.writeKitApply(w, r, k, inputs, kitFromFile)
+}
+
+func (s *Server) writeKitPreview(w http.ResponseWriter, r *http.Request, k playbooks.Kit) {
 	ctx := r.Context()
 	var plan *kitPlan
 	err := pgx.BeginTxFunc(ctx, s.pool, pgx.TxOptions{AccessMode: pgx.ReadOnly}, func(tx pgx.Tx) error {
@@ -408,12 +490,22 @@ func (s *Server) applyKitHandler(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	var in struct {
+		Inputs map[string]string `json:"inputs"`
+	}
+	if !decodeOptional(w, r, &in) {
+		return
+	}
+	s.writeKitApply(w, r, k, in.Inputs, kitFromCatalog)
+}
+
+func (s *Server) writeKitApply(w http.ResponseWriter, r *http.Request, k playbooks.Kit, inputs map[string]string, source string) {
 	a := accessFrom(r.Context())
 	ctx := r.Context()
 	var plan *kitPlan
 	err := pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
 		var err error
-		plan, err = applyKit(ctx, tx, a, k)
+		plan, err = applyKit(ctx, tx, a, k, inputs, source)
 		return err
 	})
 	if s.kitError(w, r, err) {
@@ -430,6 +522,8 @@ func (s *Server) kitError(w http.ResponseWriter, r *http.Request, err error) boo
 		return false
 	case errors.As(err, &conflict):
 		writeError(w, r, http.StatusConflict, "conflict", string(conflict))
+	case errors.As(err, new(errInvalid)):
+		writeError(w, r, http.StatusBadRequest, "invalid_request", err.Error())
 	case errors.As(err, new(errDenied)):
 		writeError(w, r, http.StatusForbidden, "forbidden", err.Error())
 	default:

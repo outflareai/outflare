@@ -4145,6 +4145,68 @@
     },
     {
       "type": "row",
+      "title": "Exclusions (people journeys, broadcasts and sequences leave out)",
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 282
+      },
+      "id": 185,
+      "panels": []
+    },
+    {
+      "type": "timeseries",
+      "title": "People left out by exclusions",
+      "description": "People an exclusion (lists and tags a journey, broadcast or sequence names) left out, per minute: journey (refused entry), broadcast (skipped), sequence (not enrolled). Normal: steady and small next to entries and sends. A sudden jump usually means a big list or a common tag was added to an exclusion; a drop to zero after a change may mean a list was emptied.",
+      "id": 186,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 283
+      },
+      "targets": [
+        {
+          "expr": "sum by (where) (rate(outflare_automations_excluded_total{job=\"$job\"}[5m])) * 60",
+          "legendFormat": "{{where}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "fillOpacity": 10,
+            "stacking": {
+              "mode": "none"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "mean",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "type": "row",
       "title": "Paid media (conversions sent back)",
       "id": 80,
       "collapsed": false,
@@ -4152,7 +4214,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 282
+        "y": 291
       },
       "panels": []
     },
@@ -4169,7 +4231,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 283
+        "y": 292
       },
       "targets": [
         {
@@ -4222,7 +4284,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 283
+        "y": 292
       },
       "targets": [
         {
@@ -4268,7 +4330,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 291
+        "y": 300
       },
       "panels": []
     },
@@ -4285,7 +4347,7 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 292
+        "y": 301
       },
       "targets": [
         {
@@ -4338,7 +4400,7 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 292
+        "y": 301
       },
       "targets": [
         {
@@ -4388,7 +4450,7 @@
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 292
+        "y": 301
       },
       "targets": [
         {
@@ -4438,7 +4500,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 300
+        "y": 309
       },
       "targets": [
         {
@@ -4488,7 +4550,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 300
+        "y": 309
       },
       "targets": [
         {
@@ -4537,7 +4599,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 308
+        "y": 317
       },
       "panels": []
     },
@@ -4554,7 +4616,7 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 309
+        "y": 318
       },
       "targets": [
         {
@@ -4607,7 +4669,7 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 309
+        "y": 318
       },
       "targets": [
         {
@@ -4657,7 +4719,7 @@
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 309
+        "y": 318
       },
       "targets": [
         {
@@ -4710,7 +4772,7 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 317
+        "y": 326
       },
       "targets": [
         {
@@ -4763,7 +4825,7 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 317
+        "y": 326
       },
       "targets": [
         {
@@ -4816,7 +4878,7 @@
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 317
+        "y": 326
       },
       "targets": [
         {
@@ -4865,7 +4927,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 325
+        "y": 334
       },
       "panels": []
     },
@@ -4882,7 +4944,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 326
+        "y": 335
       },
       "targets": [
         {
@@ -4932,7 +4994,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 326
+        "y": 335
       },
       "targets": [
         {
@@ -4982,7 +5044,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 334
+        "y": 343
       },
       "targets": [
         {
@@ -5032,7 +5094,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 334
+        "y": 343
       },
       "targets": [
         {
@@ -5082,7 +5144,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 342
+        "y": 351
       },
       "targets": [
         {
@@ -5128,7 +5190,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 350
+        "y": 359
       },
       "panels": []
     },
@@ -5145,7 +5207,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 351
+        "y": 360
       },
       "targets": [
         {
@@ -5195,7 +5257,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 351
+        "y": 360
       },
       "targets": [
         {
@@ -5241,7 +5303,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 359
+        "y": 368
       },
       "panels": []
     },
@@ -5258,7 +5320,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 360
+        "y": 369
       },
       "targets": [
         {
@@ -5308,7 +5370,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 360
+        "y": 369
       },
       "targets": [
         {
@@ -5354,7 +5416,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 368
+        "y": 377
       },
       "panels": []
     },
@@ -5371,7 +5433,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 369
+        "y": 378
       },
       "targets": [
         {
@@ -5421,7 +5483,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 369
+        "y": 378
       },
       "targets": [
         {
@@ -5471,7 +5533,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 377
+        "y": 386
       },
       "targets": [
         {
@@ -5517,7 +5579,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 385
+        "y": 394
       },
       "panels": []
     },
@@ -5534,7 +5596,7 @@
         "h": 8,
         "w": 24,
         "x": 0,
-        "y": 386
+        "y": 395
       },
       "targets": [
         {
@@ -5584,7 +5646,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 394
+        "y": 403
       },
       "targets": [
         {
@@ -5634,7 +5696,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 394
+        "y": 403
       },
       "targets": [
         {
@@ -5684,7 +5746,7 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 402
+        "y": 411
       },
       "targets": [
         {
@@ -5734,7 +5796,7 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 402
+        "y": 411
       },
       "targets": [
         {
@@ -5784,7 +5846,7 @@
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 402
+        "y": 411
       },
       "targets": [
         {
@@ -5834,7 +5896,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 410
+        "y": 419
       },
       "targets": [
         {
@@ -5879,7 +5941,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 418
+        "y": 427
       },
       "collapsed": false,
       "panels": []
@@ -5897,7 +5959,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 419
+        "y": 428
       },
       "targets": [
         {
@@ -5947,7 +6009,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 419
+        "y": 428
       },
       "targets": [
         {
@@ -6006,7 +6068,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 427
+        "y": 436
       },
       "targets": [
         {
@@ -6056,7 +6118,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 427
+        "y": 436
       },
       "targets": [
         {
@@ -6111,7 +6173,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 435
+        "y": 444
       },
       "panels": []
     },
@@ -6128,7 +6190,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 436
+        "y": 445
       },
       "targets": [
         {
@@ -6181,7 +6243,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 436
+        "y": 445
       },
       "targets": [
         {
@@ -6234,7 +6296,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 444
+        "y": 453
       },
       "targets": [
         {
@@ -6287,7 +6349,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 444
+        "y": 453
       },
       "targets": [
         {
@@ -6337,7 +6399,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 452
+        "y": 461
       },
       "targets": [
         {
@@ -6390,7 +6452,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 452
+        "y": 461
       },
       "targets": [
         {
@@ -6443,7 +6505,7 @@
         "h": 8,
         "w": 24,
         "x": 0,
-        "y": 460
+        "y": 469
       },
       "targets": [
         {
@@ -6491,7 +6553,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 468
+        "y": 477
       },
       "collapsed": false,
       "panels": []
@@ -6509,7 +6571,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 469
+        "y": 478
       },
       "targets": [
         {
@@ -6562,7 +6624,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 469
+        "y": 478
       },
       "targets": [
         {
@@ -6603,7 +6665,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 477
+        "y": 486
       },
       "panels": []
     },
@@ -6620,7 +6682,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 478
+        "y": 487
       },
       "targets": [
         {
@@ -6669,7 +6731,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 486
+        "y": 495
       },
       "panels": []
     },
@@ -6686,7 +6748,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 487
+        "y": 496
       },
       "targets": [
         {
@@ -6739,7 +6801,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 487
+        "y": 496
       },
       "targets": [
         {
@@ -6759,6 +6821,134 @@
             "fillOpacity": 10,
             "stacking": {
               "mode": "normal"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "mean",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "type": "row",
+      "title": "Knowledge (answers from the knowledge base)",
+      "id": 146,
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 504
+      },
+      "panels": []
+    },
+    {
+      "type": "timeseries",
+      "title": "Questions asked of knowledge, by outcome",
+      "description": "Questions per minute from the Ask box, agents and MCP: answered (the knowledge covers it), unanswered (a gap someone could write), no_ai (no AI model connected or the AI limit reached; passages only) and error. Normal is mostly answered; a rising share of error means the AI providers are failing (knowledge.answer_failed in the log).",
+      "id": 147,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 505
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (outcome) (rate(outflare_knowledge_asks_total{job=\"$job\"}[5m])) * 60",
+          "legendFormat": "{{outcome}}",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "fillOpacity": 10,
+            "stacking": {
+              "mode": "normal"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "mean",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Time to answer from knowledge",
+      "description": "How long a question takes: finding the passages and the AI model writing the answer, on the workspace's own key. Normal is a few seconds at the 95th percentile; slower means the AI provider is slow.",
+      "id": 148,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 505
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "histogram_quantile(0.5, sum by (le) (rate(outflare_knowledge_ask_seconds_bucket{job=\"$job\"}[5m])))",
+          "legendFormat": "p50",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          }
+        },
+        {
+          "refId": "B",
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(outflare_knowledge_ask_seconds_bucket{job=\"$job\"}[5m])))",
+          "legendFormat": "p95",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "custom": {
+            "fillOpacity": 10,
+            "stacking": {
+              "mode": "none"
             }
           }
         },

@@ -50,25 +50,27 @@ func (s *Server) routesABTests(mux *http.ServeMux) {
 }
 
 type abTestView struct {
-	ID         string          `json:"id"`
-	FlagID     string          `json:"flag_id"`
-	FlagKey    string          `json:"flag_key"`
-	BrandID    *string         `json:"brand_id"`
-	Name       string          `json:"name"`
-	Hypothesis string          `json:"hypothesis"`
-	Status     string          `json:"status"`
-	Control    string          `json:"control"`
-	Goals      []abtests.Goal  `json:"goals"`
-	Guardrails []abtests.Goal  `json:"guardrails"`
-	MinEffect  float64         `json:"min_effect"`
-	Baselines  []float64       `json:"baselines"`
-	StartedAt  *time.Time      `json:"started_at"`
-	FrozenAt   *time.Time      `json:"frozen_at"`
-	EndedAt    *time.Time      `json:"ended_at"`
-	Decision   string          `json:"decision"`
-	CreatedAt  time.Time       `json:"created_at"`
-	UpdatedAt  time.Time       `json:"updated_at"`
-	result     json.RawMessage // the snapshot kept when it ended
+	ID         string         `json:"id"`
+	FlagID     string         `json:"flag_id"`
+	FlagKey    string         `json:"flag_key"`
+	BrandID    *string        `json:"brand_id"`
+	Name       string         `json:"name"`
+	Hypothesis string         `json:"hypothesis"`
+	Status     string         `json:"status"`
+	Control    string         `json:"control"`
+	Goals      []abtests.Goal `json:"goals"`
+	Guardrails []abtests.Goal `json:"guardrails"`
+	MinEffect  float64        `json:"min_effect"`
+	Baselines  []float64      `json:"baselines"`
+	StartedAt  *time.Time     `json:"started_at"`
+	FrozenAt   *time.Time     `json:"frozen_at"`
+	EndedAt    *time.Time     `json:"ended_at"`
+	Decision   string         `json:"decision"`
+	// Learning is what a finished test taught, when the AI wrote it.
+	Learning  *abLearning     `json:"learning"`
+	CreatedAt time.Time       `json:"created_at"`
+	UpdatedAt time.Time       `json:"updated_at"`
+	result    json.RawMessage // the snapshot kept when it ended
 }
 
 type abTestInput struct {
@@ -82,7 +84,7 @@ type abTestInput struct {
 }
 
 const abTestCols = `t.id::text, t.flag_id::text, f.key, t.brand_id::text, t.name, t.hypothesis, t.status, t.control, t.goals, t.guardrails, t.min_effect, t.baselines,
-	t.started_at, t.frozen_at, t.ended_at, t.decision, t.created_at, t.updated_at, t.result`
+	t.started_at, t.frozen_at, t.ended_at, t.decision, t.learning, t.created_at, t.updated_at, t.result`
 
 func loadABTests(ctx context.Context, q abtests.Querier, ws, where string, args ...any) ([]abTestView, error) {
 	rows, err := q.Query(ctx, `SELECT `+abTestCols+` FROM ab_tests t JOIN flags f ON f.id = t.flag_id AND f.workspace_id = t.workspace_id
@@ -94,7 +96,7 @@ func loadABTests(ctx context.Context, q abtests.Querier, ws, where string, args 
 		var v abTestView
 		var goals, guardrails []byte
 		if err := row.Scan(&v.ID, &v.FlagID, &v.FlagKey, &v.BrandID, &v.Name, &v.Hypothesis, &v.Status, &v.Control, &goals, &guardrails, &v.MinEffect, &v.Baselines,
-			&v.StartedAt, &v.FrozenAt, &v.EndedAt, &v.Decision, &v.CreatedAt, &v.UpdatedAt, &v.result); err != nil {
+			&v.StartedAt, &v.FrozenAt, &v.EndedAt, &v.Decision, &v.Learning, &v.CreatedAt, &v.UpdatedAt, &v.result); err != nil {
 			return v, err
 		}
 		if err := json.Unmarshal(guardrails, &v.Guardrails); err != nil {
@@ -517,7 +519,10 @@ func (s *Server) endABTest(w http.ResponseWriter, r *http.Request) {
 			visitors += arm.Visitors
 		}
 		data["visitors"] = visitors
-		return recordWithProps(ctx, tx, &a.principal, a.WorkspaceID, "ab_test.ended", "ab_test", t.ID, data, data)
+		if err := recordWithProps(ctx, tx, &a.principal, a.WorkspaceID, "ab_test.ended", "ab_test", t.ID, data, data); err != nil {
+			return err
+		}
+		return s.queueABLearning(ctx, tx, &a.principal, a.WorkspaceID, a.ActorID, *t)
 	})
 }
 

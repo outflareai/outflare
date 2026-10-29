@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	neturl "net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -56,11 +57,12 @@ func (g Geonode) Test(ctx context.Context, cl *c.Client, creds c.Creds) (c.Accou
 	return c.Account{Name: "Geonode Scraper API", Details: map[string]string{"concurrency": strconv.Itoa(resp.Limit)}}, nil
 }
 
-// geonodePageWait is how long Geonode may take to read one page. Pages read
-// in a browser behind a bot check (Trustpilot, Capterra) take 25 seconds or
-// more; Geonode asked for 60. Outflare waits a little longer than Geonode,
-// so Geonode's own answer, read or failed, always arrives, and a page is
-// never sent again because Outflare gave up first.
+// geonodePageWait is how long a sync read may take: Geonode's timeout, in
+// milliseconds, counted from when Geonode receives the request with its
+// queue included, capped at 140 seconds, and free when it runs out. Pages
+// behind a bot check take 45 to 100 seconds and are read as jobs instead
+// (StartPage). Outflare waits a little longer than Geonode, so Geonode's
+// own answer, read or failed, arrives.
 const (
 	geonodePageWait = 60 * time.Second
 	geonodeHTTPWait = geonodePageWait + 15*time.Second
@@ -91,18 +93,137 @@ func (g Geonode) FetchPage(ctx context.Context, cl *c.Client, creds c.Creds, url
 	}
 	_ = json.Unmarshal(raw, &out)
 	cost := c.SEOCost{Units: float64(out.Tokens)}
-	switch {
-	case status == http.StatusOK:
+	if status == http.StatusOK {
 		if out.Metadata.URL == "" {
 			out.Metadata.URL = url
 		}
 		return c.FetchedPage{URL: out.Metadata.URL, Status: out.Metadata.HTTPStatus, HTML: out.Data.HTML, Cost: cost}, nil
-	case status == http.StatusUnprocessableEntity && out.Error != nil:
-		// The page could not be read: Geonode was blocked too, or the site
-		// failed. The code says which; the message may quote the site.
-		return c.FetchedPage{Cost: cost}, c.Errf(geonodeKind(out.Error.Code), "Geonode could not read the page (%s)", out.Error.Code)
 	}
-	return c.FetchedPage{Cost: cost}, c.HTTPError("Geonode", status, string(raw))
+	return c.FetchedPage{Cost: cost}, geonodePageFailed(status, raw)
+}
+
+// StartPage starts reading url in a browser as a Geonode job (async
+// processing) and returns its id. Pages behind a bot check take 45 to 100
+// seconds, longer than a sync read may last, so they are read this way:
+// sent once, then polled.
+func (g Geonode) StartPage(ctx context.Context, cl *c.Client, creds c.Creds, url string) (string, error) {
+	status, raw, err := g.post(ctx, cl, creds, "/v1/extract", map[string]any{
+		"url": url, "formats": []string{"html"}, "processing_mode": "async", "render_js": true,
+	})
+	if err != nil {
+		return "", err
+	}
+	if status != http.StatusAccepted && status != http.StatusOK {
+		return "", geonodePageFailed(status, raw)
+	}
+	var out struct {
+		JobID string `json:"job_id"`
+	}
+	if json.Unmarshal(raw, &out) != nil || out.JobID == "" {
+		return "", c.Errf(c.ErrUnavailable, "Geonode started a page read without a job id")
+	}
+	return out.JobID, nil
+}
+
+// PageResult reads a page job once (GET /v1/extract/{id}). A job that
+// failed on a bot check comes back as the page Geonode saw (403, the
+// challenge), so the caller sees a blocked page.
+func (g Geonode) PageResult(ctx context.Context, cl *c.Client, creds c.Creds, id string) (c.FetchedPage, bool, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, cl.Base("geonode", geonodeAPI)+"/v1/extract/"+neturl.PathEscape(id), nil)
+	if err != nil {
+		return c.FetchedPage{}, false, c.Errf(c.ErrInvalid, "bad Geonode address: %v", err)
+	}
+	for h, v := range g.header(creds) {
+		req.Header[h] = v
+	}
+	req.Header.Set("Accept", "application/json")
+	resp, err := cl.Do(req)
+	if err != nil {
+		return c.FetchedPage{}, false, c.Errf(c.ErrUnavailable, "could not reach Geonode: %v", err)
+	}
+	defer resp.Body.Close()
+	raw, err := io.ReadAll(io.LimitReader(resp.Body, 16<<20))
+	if err != nil {
+		return c.FetchedPage{}, false, c.Errf(c.ErrUnavailable, "reading the Geonode response: %v", err)
+	}
+	if resp.StatusCode == http.StatusNotFound {
+		// Gone (expired, or another key's): the page is read afresh.
+		return c.FetchedPage{}, true, &c.PageError{Code: "JOB_NOT_FOUND"}
+	}
+	if resp.StatusCode != http.StatusOK {
+		return c.FetchedPage{}, false, geonodeError(resp.StatusCode, raw)
+	}
+	var out struct {
+		Status string `json:"status"`
+		Data   struct {
+			HTML string `json:"html"`
+		} `json:"data"`
+		Metadata struct {
+			HTTPStatus int    `json:"http_status"`
+			URL        string `json:"url"`
+		} `json:"metadata"`
+		Tokens int `json:"tokens_charged"`
+		Error  *struct {
+			Code string `json:"code"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal(raw, &out); err != nil {
+		return c.FetchedPage{}, false, c.Errf(c.ErrUnavailable, "Geonode returned something that is not JSON")
+	}
+	page := c.FetchedPage{URL: out.Metadata.URL, Status: out.Metadata.HTTPStatus, HTML: out.Data.HTML, Cost: c.SEOCost{Units: float64(out.Tokens)}}
+	switch out.Status {
+	case "queued", "processing", "":
+		return c.FetchedPage{}, false, nil
+	case "completed":
+		return page, true, nil
+	}
+	if page.HTML != "" || page.Status != 0 {
+		return page, true, nil
+	}
+	code := "FAILED"
+	if out.Error != nil && out.Error.Code != "" {
+		code = out.Error.Code
+	}
+	return page, true, geonodePageCode(code)
+}
+
+// geonodePageFailed is a failed page read's error, from either of the
+// shapes Geonode answers with: {"error": {"code"}} (422) or a top-level
+// {"code"} (a sync read's 504 while it waits for a browser).
+func geonodePageFailed(status int, raw []byte) error {
+	type body struct {
+		Code string `json:"code"`
+	}
+	var e struct {
+		body
+		Error *body `json:"error"`
+	}
+	if json.Unmarshal(raw, &e) == nil && e.Error != nil {
+		e.body = *e.Error
+	}
+	if e.Code == "" && status == http.StatusGatewayTimeout {
+		e.Code = "TIMEOUT"
+	}
+	if e.Code == "" {
+		return c.HTTPError("Geonode", status, string(raw))
+	}
+	return geonodePageCode(e.Code)
+}
+
+// geonodePageCode sorts a page read's failure: a bot check or a slow page
+// is the page's own (a *c.PageError, tried again the same day), never a
+// wrong address or an outage. Geonode reports a Cloudflare challenge as
+// UNPROCESSABLE_CONTENT (a page without its content, the challenge named
+// in the message), not CAPTCHA_CHALLENGE. The message may quote the site,
+// so only the code is kept.
+func geonodePageCode(code string) error {
+	switch code {
+	case "CAPTCHA_CHALLENGE", "TEMPORARY_BLOCK", "PERMANENT_BLOCK", "UNPROCESSABLE_CONTENT":
+		return &c.PageError{Blocked: true, Code: code}
+	case "TIMEOUT", "WAIT_FOR_SELECTOR_TIMEOUT", "FAILED":
+		return &c.PageError{Code: code}
+	}
+	return c.Errf(geonodeKind(code), "Geonode could not read the page (%s)", code)
 }
 
 // geonodeSearchUSD is Geonode's list price per search, used when an answer
@@ -312,7 +433,7 @@ func (g Geonode) SERP(ctx context.Context, cl *c.Client, creds c.Creds, engine s
 // geonodeKind sorts Geonode's error codes into ours.
 func geonodeKind(code string) string {
 	switch code {
-	case "INVALID_URL", "INVALID_REQUEST", "VALIDATION_ERROR", "AUTH_REQUIRED", "UNPROCESSABLE_CONTENT":
+	case "INVALID_URL", "INVALID_REQUEST", "VALIDATION_ERROR", "AUTH_REQUIRED":
 		return c.ErrInvalid
 	case "UNAUTHORIZED", "INVALID_API_KEY":
 		return c.ErrAuth

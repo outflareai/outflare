@@ -89,6 +89,7 @@ export type UiEvent =
   | "ui.command_run" // a command palette command
   | "ui.copied" // a copy button
   | "ui.partner_install_viewed" // a tab of a partner program's install steps opened (step: script or conversions; way: html, nextjs, gtm, curl, node, postback)
+  | "ui.partners_filtered" // a program's partner list filtered (filter: payout_details, value: missing or all)
   | "ui.journey_step_picker_opened" // the journey builder's step picker opened (from: start, link, rule)
   | "ui.journey_step_added" // a step put into a journey being built, before it is saved (kind, group, at: start or the link it went on)
   | "ui.journey_step_removed" // a step taken out of a journey being built (kind, also_removed: steps only it led to)
@@ -98,11 +99,18 @@ export type UiEvent =
   | "ui.journey_change_undone" // an edit in the journey builder undone or redone, by button or keyboard (redo)
   | "ui.journey_version_viewed" // an older journey version shown read-only (version, current)
   | "ui.journey_test_opened" // test mode opened in the journey builder (version: live or draft, status)
+  | "ui.automation_map_node_picked" // a node picked on the automation map, lighting up what it sets off and what sets it off (kind)
+  | "ui.automation_map_flag_opened" // a flag on the automation map shown on the map (flag: loop, overlap, unheard or never_fires)
+  | "ui.automation_map_filtered" // the automation map switched between everything and only what's live (show)
   | "ui.journey_test_path_switched" // a test sent a branch the other way (to: yes or no)
+  | "ui.kit_export_opened" // the export panel opened on a journey (status)
+  | "ui.kit_downloaded" // an exported kit file downloaded (journeys, rules, inputs)
+  | "ui.kit_file_chosen" // a kit file picked from disk to apply on the Playbooks page
   | "ui.rule_trigger_picked" // the rule card's sentence builder switched to another kind of trigger (kind)
   | "ui.rule_followup_picked" // "When this fires, do…" picked a first step for a new journey (kind)
   | "ui.knowledge_formatted" // formatting used in the knowledge editor (command: h2, bold, ul, table, ...; how: toolbar, slash, key)
   | "ui.knowledge_pasted" // formatted text pasted into the knowledge editor and kept as Markdown
+  | "ui.knowledge_audience_picked" // the Ask box switched who the answer is for (audience: team, customers)
   | "ui.knowledge_started" // the knowledge editor opened for something new (kind: article, snippet; template: none or a starter's id)
   | "ui.playbook_opened" // a playbook opened on the Playbooks page (playbook_id, ready)
   | "ui.playbook_prompt_copied" // a playbook's prompt copied (playbook_id)

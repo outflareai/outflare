@@ -115,6 +115,10 @@ archived.
   no channel is `unallocated_cost`.
 - `GET /v1/workspaces/{ws}/attribution/campaigns?channel=`: the same per
   source and campaign.
+- `GET /v1/workspaces/{ws}/attribution/ads?level=`: the same per paid ad
+  campaign, ad set or ad, by the network's ids the tracking template
+  recorded, beside the platform's spend and conversion count
+  ([paid-media.md](paid-media.md#what-each-campaign-brought)).
 - `GET /v1/workspaces/{ws}/attribution/conversions`: credited conversions,
   newest first, with the visits that got the credit.
 - `GET` and `PATCH /v1/workspaces/{ws}/attribution/settings`: the default

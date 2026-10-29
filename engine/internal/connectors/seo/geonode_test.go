@@ -3,6 +3,7 @@ package seo
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -185,5 +186,91 @@ func TestGeonodeSERP(t *testing.T) {
 	}
 	if _, err := g.SERP(ctx, cl, creds, "bing", c.SERPQuery{Keyword: "x", Country: "US"}); c.KindOf(err) != c.ErrInvalid {
 		t.Fatalf("engine: %v", err)
+	}
+}
+
+// A page read in a browser runs as a job: sent once, then polled until it
+// ends. A bot check or a slow page is the page's own failure, never a
+// wrong address or an outage, whichever shape Geonode answers in.
+func TestGeonodePageJobs(t *testing.T) {
+	var posts, polls int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodPost && r.URL.Path == "/v1/extract":
+			var body map[string]any
+			json.NewDecoder(r.Body).Decode(&body)
+			posts++
+			switch body["url"] {
+			case "https://slow.example/":
+				w.WriteHeader(504)
+				io.WriteString(w, `{"code": "TIMEOUT", "message": "Browser extraction did not complete within the allowed time", "retryable": true}`)
+			case "https://cloudflare.example/":
+				w.WriteHeader(422)
+				io.WriteString(w, `{"error": {"code": "UNPROCESSABLE_CONTENT", "message": "Just a moment...", "retryable": false}, "tokens_charged": 0}`)
+			default:
+				if body["processing_mode"] != "async" || body["render_js"] != true {
+					t.Errorf("job request: %v", body)
+				}
+				w.WriteHeader(202)
+				io.WriteString(w, `{"job_id": "j1", "status": "queued", "status_url": "/v1/extract/j1"}`)
+			}
+		case r.URL.Path == "/v1/extract/j1":
+			polls++
+			if polls < 3 {
+				io.WriteString(w, `{"job_id": "j1", "status": "processing"}`)
+				return
+			}
+			io.WriteString(w, `{"job_id": "j1", "status": "completed", "data": {"html": "<h1>Reviews</h1>"}, "metadata": {"http_status": 200, "url": "https://reviews.example/"}, "tokens_charged": 1}`)
+		case r.URL.Path == "/v1/extract/blocked":
+			io.WriteString(w, `{"job_id": "blocked", "status": "failed", "data": {"html": "<title>Just a moment...</title>"}, "metadata": {"http_status": 403}, "error": {"code": "UNPROCESSABLE_CONTENT"}, "tokens_charged": 0}`)
+		default:
+			w.WriteHeader(404)
+			io.WriteString(w, `{"code": "NOT_FOUND"}`)
+		}
+	}))
+	defer srv.Close()
+	cl := &c.Client{BaseURLs: map[string]string{"geonode": srv.URL}}
+	creds := c.Creds{"api_key": "k"}
+	ctx := context.Background()
+	var g c.PageJobs = Geonode{}
+
+	id, err := g.StartPage(ctx, cl, creds, "https://reviews.example/")
+	if err != nil || id != "j1" {
+		t.Fatalf("start: %q %v", id, err)
+	}
+	for i := 1; ; i++ {
+		p, done, err := g.PageResult(ctx, cl, creds, id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if done {
+			if p.HTML != "<h1>Reviews</h1>" || p.Status != 200 || p.Cost.Units != 1 || i != 3 {
+				t.Fatalf("result after %d polls: %+v", i, p)
+			}
+			break
+		}
+	}
+	if posts != 1 {
+		t.Fatalf("the page was sent %d times", posts)
+	}
+
+	// A job that ended on a bot check gives the page Geonode saw.
+	p, done, err := g.PageResult(ctx, cl, creds, "blocked")
+	if !done || err != nil || !p.Blocked() {
+		t.Fatalf("blocked job: %+v %v %v", p, done, err)
+	}
+	// A job Geonode no longer knows ends, as the page's own failure.
+	var pe *c.PageError
+	if _, done, err := g.PageResult(ctx, cl, creds, "gone"); !done || !errors.As(err, &pe) {
+		t.Fatalf("gone job: %v %v", done, err)
+	}
+
+	// Sync reads: a 504 while Geonode waits for a browser is a slow page,
+	// and Cloudflare's challenge (UNPROCESSABLE_CONTENT) a blocked one.
+	if _, err := g.FetchPage(ctx, cl, creds, "https://slow.example/", true); !errors.As(err, &pe) || pe.Blocked || pe.Code != "TIMEOUT" {
+		t.Fatalf("slow page: %v", err)
+	}
+	if _, err := g.FetchPage(ctx, cl, creds, "https://cloudflare.example/", true); !errors.As(err, &pe) || !pe.Blocked || c.KindOf(err) == c.ErrInvalid {
+		t.Fatalf("blocked page: %v", err)
 	}
 }

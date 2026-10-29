@@ -27,62 +27,68 @@ import (
 // missing options to its own lists, never changes or removes anything
 // else, and stops at a conflict (package api).
 type Kit struct {
-	ID         string         `yaml:"id" json:"id"`
-	Version    int            `yaml:"version" json:"version"`
-	Title      string         `yaml:"title" json:"title"`
-	Summary    string         `yaml:"summary" json:"summary"`
-	OptionSets []KitOptionSet `yaml:"option_sets" json:"option_sets"`
-	Types      []KitType      `yaml:"record_types" json:"record_types"`
+	ID         string         `yaml:"id,omitempty" json:"id"`
+	Version    int            `yaml:"version,omitempty" json:"version"`
+	Title      string         `yaml:"title,omitempty" json:"title"`
+	Summary    string         `yaml:"summary,omitempty" json:"summary"`
+	OptionSets []KitOptionSet `yaml:"option_sets,omitempty" json:"option_sets"`
+	Types      []KitType      `yaml:"record_types,omitempty" json:"record_types"`
 	// Fields adds fields to record types the workspace already has, by
 	// type key: person, account, or a type this kit adds.
-	Fields    map[string][]KitField `yaml:"fields" json:"fields"`
-	Templates []KitTemplate         `yaml:"email_templates" json:"email_templates"`
+	Fields    map[string][]KitField `yaml:"fields,omitempty" json:"fields"`
+	Templates []KitTemplate         `yaml:"email_templates,omitempty" json:"email_templates"`
+	// Inputs, smart lists, rules and journeys make it a flow kit
+	// (flows.go): an automation added as drafts.
+	Inputs     []KitInput     `yaml:"inputs,omitempty" json:"inputs"`
+	SmartLists []KitSmartList `yaml:"smart_lists,omitempty" json:"smart_lists"`
+	Rules      []KitRule      `yaml:"rules,omitempty" json:"rules"`
+	Journeys   []KitJourney   `yaml:"journeys,omitempty" json:"journeys"`
 }
 
 // KitOptionSet is an option list, such as a pipeline's stages.
 type KitOptionSet struct {
-	Key     string      `yaml:"key" json:"key"`
-	Name    string      `yaml:"name" json:"name"`
-	Options []KitOption `yaml:"options" json:"options"`
+	Key     string      `yaml:"key,omitempty" json:"key"`
+	Name    string      `yaml:"name,omitempty" json:"name"`
+	Options []KitOption `yaml:"options,omitempty" json:"options"`
 }
 
 // KitOption is one choice in a list.
 type KitOption struct {
-	Key   string `yaml:"key" json:"key"`
-	Label string `yaml:"label" json:"label"`
+	Key   string `yaml:"key,omitempty" json:"key"`
+	Label string `yaml:"label,omitempty" json:"label"`
 }
 
 // KitType is a record type, such as a pipeline's deals. Stage names the
 // status field that holds its stages, so the CRM can show it as a board.
 type KitType struct {
-	Key         string     `yaml:"key" json:"key"`
-	Name        string     `yaml:"name" json:"name"`
-	Plural      string     `yaml:"plural" json:"plural"`
-	Description string     `yaml:"description" json:"description"`
-	Stage       string     `yaml:"stage" json:"stage,omitempty"`
-	Fields      []KitField `yaml:"fields" json:"fields"`
+	Key         string     `yaml:"key,omitempty" json:"key"`
+	Name        string     `yaml:"name,omitempty" json:"name"`
+	Plural      string     `yaml:"plural,omitempty" json:"plural"`
+	Description string     `yaml:"description,omitempty" json:"description"`
+	Stage       string     `yaml:"stage,omitempty" json:"stage,omitempty"`
+	Fields      []KitField `yaml:"fields,omitempty" json:"fields"`
 }
 
 // KitField is a field on a record type, in the catalog's own terms.
 type KitField struct {
-	Key         string `yaml:"key" json:"key"`
-	Label       string `yaml:"label" json:"label"`
-	Description string `yaml:"description" json:"description,omitempty"`
-	ValueType   string `yaml:"value_type" json:"value_type"`
-	OptionSet   string `yaml:"option_set" json:"option_set,omitempty"`
-	Multiple    bool   `yaml:"multiple" json:"multiple"`
-	TargetType  string `yaml:"target_type" json:"target_type,omitempty"`
-	Filterable  bool   `yaml:"filterable" json:"filterable"`
+	Key         string `yaml:"key,omitempty" json:"key"`
+	Label       string `yaml:"label,omitempty" json:"label"`
+	Description string `yaml:"description,omitempty" json:"description,omitempty"`
+	ValueType   string `yaml:"value_type,omitempty" json:"value_type"`
+	OptionSet   string `yaml:"option_set,omitempty" json:"option_set,omitempty"`
+	Multiple    bool   `yaml:"multiple,omitempty" json:"multiple"`
+	TargetType  string `yaml:"target_type,omitempty" json:"target_type,omitempty"`
+	Filterable  bool   `yaml:"filterable,omitempty" json:"filterable"`
 }
 
 // KitTemplate is an email draft. It is added unpublished, so a person
 // reads and publishes it before anything sends it.
 type KitTemplate struct {
-	Handle  string `yaml:"handle" json:"handle"`
-	Name    string `yaml:"name" json:"name"`
-	Purpose string `yaml:"purpose" json:"purpose"`
-	Subject string `yaml:"subject" json:"subject"`
-	Text    string `yaml:"text" json:"text"`
+	Handle  string `yaml:"handle,omitempty" json:"handle"`
+	Name    string `yaml:"name,omitempty" json:"name"`
+	Purpose string `yaml:"purpose,omitempty" json:"purpose"`
+	Subject string `yaml:"subject,omitempty" json:"subject"`
+	Text    string `yaml:"text,omitempty" json:"text"`
 }
 
 // KitValueTypes are the catalog's value types (package api checks they
@@ -134,6 +140,27 @@ func ParseKit(b []byte) (Kit, error) {
 	for i := range k.Templates {
 		k.Templates[i].Text = strings.TrimSpace(k.Templates[i].Text)
 	}
+	if k.Inputs == nil {
+		k.Inputs = []KitInput{}
+	}
+	if k.SmartLists == nil {
+		k.SmartLists = []KitSmartList{}
+	}
+	if k.Rules == nil {
+		k.Rules = []KitRule{}
+	}
+	if k.Journeys == nil {
+		k.Journeys = []KitJourney{}
+	}
+	for i := range k.SmartLists {
+		k.SmartLists[i].Description = unwrap(k.SmartLists[i].Description)
+	}
+	for i := range k.Rules {
+		k.Rules[i].Description = unwrap(k.Rules[i].Description)
+	}
+	for i := range k.Journeys {
+		k.Journeys[i].Description = unwrap(k.Journeys[i].Description)
+	}
 	return k, nil
 }
 
@@ -155,8 +182,8 @@ func (k Kit) Validate() error {
 	if n := len(k.Summary); n == 0 || n > 200 {
 		bad("summary is required, at most 200 characters")
 	}
-	if len(k.OptionSets)+len(k.Types)+len(k.Fields)+len(k.Templates) == 0 {
-		bad("a kit adds at least one option list, record type, field or email template")
+	if len(k.OptionSets)+len(k.Types)+len(k.Fields)+len(k.Templates) == 0 && !k.HasFlows() {
+		bad("a kit adds at least one option list, record type, field, email template, smart list, rule or journey")
 	}
 	sets := map[string]bool{}
 	for _, s := range k.OptionSets {
@@ -266,6 +293,7 @@ func (k Kit) Validate() error {
 			bad("email template %q has a mistake in %v", t.Handle, err)
 		}
 	}
+	k.validateFlows(bad)
 	return errors.Join(errs...)
 }
 

@@ -1,0 +1,88 @@
+id: account-health
+version: 1
+title: Account health
+summary: Rules that spot a key account going quiet and an unhappy NPS answer, and journeys that tell the owner and check in.
+
+inputs:
+  - name: usage_event
+    label: The event that shows someone is using the product
+    help: Something active customers do every week, such as project_updated.
+    kind: event
+    example: project_updated
+  - name: key_plan
+    label: The plan your key accounts are on
+    help: The value of the plan field on their records.
+    kind: text
+    example: enterprise
+  - name: nps_event
+    label: The event an NPS answer arrives as
+    help: With the score as a property named score, from 0 to 10.
+    kind: event
+    example: nps.submitted
+
+email_templates:
+  - handle: check-in
+    name: Account check-in
+    purpose: lifecycle
+    subject: Checking in, {{person.first_name}}
+    text: |
+      Hi {{person.first_name}},
+
+      We noticed things have been quiet on your account for a couple of
+      weeks. Is anything getting in the way? If it would help, reply and
+      we'll set up a short call.
+  - handle: detractor-follow-up
+    name: NPS follow-up
+    purpose: lifecycle
+    subject: Thanks for the honest answer
+    text: |
+      Hi {{person.first_name}},
+
+      Thank you for telling us how we're doing. We'd like to fix what's
+      not working: reply with the one thing that would make the biggest
+      difference, and a person will get back to you.
+
+smart_lists:
+  - key: key_accounts_quiet
+    name: Key accounts gone quiet
+    description: People on the key plan with no usage in the last 14 days.
+    rules:
+      - { attribute: plan, op: eq, value: "{{key_plan}}" }
+      - { event: "{{usage_event}}", op: not_exists, within_days: 14 }
+
+rules:
+  - key: key_account_quiet
+    name: Key account went quiet
+    description: Fires when someone on the key plan hasn't used the product for 14 days since they last did, at most once a month.
+    trigger: { kind: absence, event: "{{usage_event}}", within_seconds: 1209600 }
+    conditions: [{ attribute: plan, op: eq, value: "{{key_plan}}" }]
+    emit_event: account.went_quiet
+    cooldown_seconds: 2592000
+  - key: nps_detractor
+    name: NPS detractor
+    description: Fires on an NPS answer of 6 or less.
+    trigger: { kind: event, event: "{{nps_event}}" }
+    conditions: [{ property: score, op: lt, value: 7 }]
+    emit_event: nps.detractor
+
+journeys:
+  - key: check_in_quiet_accounts
+    name: Check in with quiet key accounts
+    description: Tells the owner, tags the account at risk, and sends a check-in. Ends as soon as they use the product again.
+    trigger: { kind: event, event: account.went_quiet }
+    entry: again
+    goal_event: "{{usage_event}}"
+    steps:
+      - { id: tell_owner, kind: alert, title: A key account has gone quiet, to: owner, next: tag }
+      - { id: tag, kind: add_tag, tag: at-risk, next: wait }
+      - { id: wait, kind: wait, wait_seconds: 172800, next: check_in }
+      - { id: check_in, kind: email, template: check-in }
+  - key: follow_up_detractors
+    name: Follow up NPS detractors
+    description: Tells the owner straight away and thanks the customer for the answer.
+    trigger: { kind: event, event: nps.detractor }
+    entry: again
+    steps:
+      - { id: tell_owner, kind: alert, title: An NPS detractor needs a call, to: owner, next: tag }
+      - { id: tag, kind: add_tag, tag: nps-detractor, next: thank }
+      - { id: thank, kind: email, template: detractor-follow-up }

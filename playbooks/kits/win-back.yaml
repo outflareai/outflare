@@ -1,0 +1,97 @@
+id: win-back
+version: 1
+title: Win back and churn
+summary: A journey that recovers a failed payment before it turns into churn, and one that wins back customers after they cancel.
+
+inputs:
+  - name: payment_failed_event
+    label: The event that means a payment failed
+    help: Send it from your billing system, such as payment.failed. Outflare's own payments sync records successful payments and cancellations, not failures.
+    kind: event
+    example: payment.failed
+  - name: paid_event
+    label: The event that means they paid
+    kind: event
+    example: payment.succeeded
+    default: payment.succeeded
+  - name: canceled_event
+    label: The event that means they cancelled
+    kind: event
+    example: subscription.canceled
+    default: subscription.canceled
+
+email_templates:
+  - handle: payment-failed
+    name: Payment failed
+    purpose: lifecycle
+    subject: Your payment didn't go through
+    text: |
+      Hi {{person.first_name}},
+
+      We couldn't take your last payment. It's usually an expired card.
+      Updating it takes a minute, and nothing changes on your account
+      in the meantime.
+  - handle: payment-failed-reminder
+    name: Payment failed, reminder
+    purpose: lifecycle
+    subject: Still a problem with your payment
+    text: |
+      Hi {{person.first_name}},
+
+      Your payment still hasn't gone through. Please update your card so
+      your account keeps running. Reply if something's wrong and a person
+      will help.
+  - handle: win-back
+    name: Win back
+    purpose: lifecycle
+    subject: "{{person.first_name}}, here's what's new since you left"
+    text: |
+      Hi {{person.first_name}},
+
+      You cancelled a few weeks ago. Since then we've shipped a few of the
+      things people asked for most. If any of them were why you left,
+      it might be worth another look.
+  - handle: win-back-last
+    name: Win back, last note
+    purpose: lifecycle
+    subject: One last note from us
+    text: |
+      Hi {{person.first_name}},
+
+      This is the last email about coming back. If there's one thing we
+      could have done better, reply and tell us: a person reads every
+      answer.
+
+smart_lists:
+  - key: canceled_last_90_days
+    name: Cancelled in the last 90 days
+    description: People who cancelled in the last 90 days and haven't paid since.
+    rules:
+      - { event: "{{canceled_event}}", op: exists, within_days: 90 }
+      - { event: "{{paid_event}}", op: not_exists, within_days: 90 }
+
+journeys:
+  - key: recover_failed_payment
+    name: Recover a failed payment
+    description: Two reminders to update their card, then an alert to their owner. Ends as soon as they pay.
+    trigger: { kind: event, event: "{{payment_failed_event}}" }
+    entry: again
+    goal_event: "{{paid_event}}"
+    steps:
+      - { id: first, kind: email, template: payment-failed, next: wait }
+      - { id: wait, kind: wait, wait_seconds: 259200, next: reminder }
+      - { id: reminder, kind: email, template: payment-failed-reminder, next: wait_again }
+      - { id: wait_again, kind: wait, wait_seconds: 259200, next: tell_owner }
+      - { id: tell_owner, kind: alert, title: A payment is still failing after two reminders, to: owner, next: at_risk }
+      - { id: at_risk, kind: add_tag, tag: payment-at-risk }
+  - key: win_back_canceled
+    name: Win back cancelled customers
+    description: Two emails over a month after someone cancels. Ends if they pay again.
+    trigger: { kind: event, event: "{{canceled_event}}" }
+    entry: again
+    goal_event: "{{paid_event}}"
+    steps:
+      - { id: wait, kind: wait, wait_seconds: 1209600, next: offer }
+      - { id: offer, kind: email, template: win-back, next: wait_more }
+      - { id: wait_more, kind: wait, wait_seconds: 1209600, next: last }
+      - { id: last, kind: email, template: win-back-last }

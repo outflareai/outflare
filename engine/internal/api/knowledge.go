@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -389,6 +390,8 @@ type knowledgeItemView struct {
 	CreatedAt    time.Time  `json:"created_at"`
 	UpdatedAt    time.Time  `json:"updated_at"`
 	DeletedAt    *time.Time `json:"deleted_at"`
+	// How many AI answers cited it in the last 30 days.
+	Uses30d int `json:"uses_30d"`
 }
 
 // knowledgeSearchVector is the expression knowledge_items_search indexes;
@@ -397,7 +400,8 @@ const knowledgeSearchVector = `(setweight(to_tsvector('simple', i.title), 'A') |
 
 const knowledgeItemColumns = `
 	i.id::text, i.kind, i.title, i.body, i.visibility, i.status, i.brand_id::text, i.collection_id::text, i.version,
-	ou.id::text, ou.name, to_char(i.review_by, 'YYYY-MM-DD'), ca.display_name, ua.display_name, i.created_at, i.updated_at, i.deleted_at`
+	ou.id::text, ou.name, to_char(i.review_by, 'YYYY-MM-DD'), ca.display_name, ua.display_name, i.created_at, i.updated_at, i.deleted_at,
+	(SELECT count(*)::int FROM knowledge_uses ku WHERE ku.item_id = i.id AND ku.created_at > now() - interval '30 days')`
 
 const knowledgeItemJoins = `
 	FROM knowledge_items i
@@ -409,7 +413,7 @@ func scanKnowledgeItem(row pgx.Row, full bool, extra ...any) (knowledgeItemView,
 	var v knowledgeItemView
 	var body string
 	dest := append([]any{&v.ID, &v.Kind, &v.Title, &body, &v.Visibility, &v.Status, &v.BrandID, &v.CollectionID, &v.Version,
-		&v.OwnerID, &v.OwnerName, &v.ReviewBy, &v.CreatedBy, &v.UpdatedBy, &v.CreatedAt, &v.UpdatedAt, &v.DeletedAt}, extra...)
+		&v.OwnerID, &v.OwnerName, &v.ReviewBy, &v.CreatedBy, &v.UpdatedBy, &v.CreatedAt, &v.UpdatedAt, &v.DeletedAt, &v.Uses30d}, extra...)
 	if err := row.Scan(dest...); err != nil {
 		return v, err
 	}
@@ -420,16 +424,29 @@ func scanKnowledgeItem(row pgx.Row, full bool, extra ...any) (knowledgeItemView,
 	return v, nil
 }
 
+// listMarker is a Markdown list item's marker: "- ", "* ", "1. ", "- [ ] ".
+var listMarker = regexp.MustCompile(`^([-*+]|\d+[.)])\s+(\[[ xX]\]\s+)?`)
+
 // knowledgeExcerpt is the start of a body as plain text, for lists.
 func knowledgeExcerpt(body string) string {
 	var lines []string
 	for _, l := range strings.Split(body, "\n") {
 		l = strings.TrimSpace(l)
-		// Table rules and code fences say nothing.
-		if strings.Trim(l, "|-: ") == "" || strings.HasPrefix(l, "```") {
+		// Headings, tables and code fences read badly run together; the
+		// prose and list items make the excerpt.
+		if strings.Trim(l, "|-: ") == "" || strings.HasPrefix(l, "```") || strings.HasPrefix(l, "#") || strings.HasPrefix(l, "|") {
 			continue
 		}
+		l = listMarker.ReplaceAllString(l, "")
 		lines = append(lines, l)
+	}
+	if len(lines) == 0 {
+		// Only headings or a table: better something than nothing.
+		for _, l := range strings.Split(body, "\n") {
+			if l = strings.TrimSpace(l); strings.Trim(l, "|-: ") != "" && !strings.HasPrefix(l, "```") {
+				lines = append(lines, l)
+			}
+		}
 	}
 	r := strings.NewReplacer("#", "", "*", "", "_", "", "`", "", ">", "", "|", " ", "[ ]", "", "[x]", "", "[", "", "]", "")
 	text := strings.Join(strings.Fields(r.Replace(strings.Join(lines, " "))), " ")
@@ -697,6 +714,9 @@ func (s *Server) createKnowledgeItem(w http.ResponseWriter, r *http.Request) {
 			SELECT workspace_id, id, version, title, body, created_by FROM knowledge_items WHERE id = $1`, id); err != nil {
 			return err
 		}
+		if err := writeKnowledgeChunks(ctx, tx, id); err != nil {
+			return err
+		}
 		v, err = knowledgeItemFor(ctx, tx, a, id, false)
 		if err != nil {
 			return err
@@ -795,6 +815,9 @@ func (s *Server) updateKnowledgeItem(w http.ResponseWriter, r *http.Request) {
 			if _, err := tx.Exec(ctx, `
 				INSERT INTO knowledge_versions (workspace_id, item_id, version, title, body, created_by)
 				SELECT workspace_id, id, version, title, body, updated_by FROM knowledge_items WHERE id = $1`, cur.ID); err != nil {
+				return err
+			}
+			if err := writeKnowledgeChunks(ctx, tx, cur.ID); err != nil {
 				return err
 			}
 		}
@@ -958,6 +981,9 @@ func (s *Server) restoreKnowledgeVersion(w http.ResponseWriter, r *http.Request)
 		if _, err := tx.Exec(ctx, `
 			INSERT INTO knowledge_versions (workspace_id, item_id, version, title, body, created_by)
 			SELECT workspace_id, id, version, title, body, updated_by FROM knowledge_items WHERE id = $1`, cur.ID); err != nil {
+			return err
+		}
+		if err := writeKnowledgeChunks(ctx, tx, cur.ID); err != nil {
 			return err
 		}
 		if v, err = knowledgeItemFor(ctx, tx, a, cur.ID, false); err != nil {

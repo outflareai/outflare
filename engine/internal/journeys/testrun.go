@@ -8,6 +8,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
+	"github.com/outflareai/outflare/engine/internal/customers"
 	"github.com/outflareai/outflare/engine/internal/track"
 )
 
@@ -94,21 +95,21 @@ func (s *Service) Test(ctx context.Context, ws, journeyID string, in TestInput) 
 	}
 	out := &TestResult{Version: "live", Steps: []TestStep{}}
 	if in.Draft {
-		var filter, steps, exitConds []byte
-		err := tx.QueryRow(ctx, `SELECT trigger_event, trigger_filter, entry, steps, exit_events, exit_conditions FROM journey_versions
+		var filter, steps, exitConds, exclude []byte
+		err := tx.QueryRow(ctx, `SELECT trigger_event, trigger_filter, entry, steps, exit_events, exit_conditions, exclude FROM journey_versions
 			WHERE workspace_id = $1 AND journey_id = $2 AND status = 'draft'`, ws, j.id).
-			Scan(&triggerEvent, &filter, &j.entry, &steps, &j.exitEvents, &exitConds)
+			Scan(&triggerEvent, &filter, &j.entry, &steps, &j.exitEvents, &exitConds, &exclude)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, ErrNoDraft
 		}
 		if err != nil {
 			return nil, err
 		}
-		j.filter, j.steps, j.exitConditions = nil, nil, nil
+		j.filter, j.steps, j.exitConditions, j.exclude = nil, nil, nil, customers.Exclusion{}
 		for _, p := range []struct {
 			raw []byte
 			to  any
-		}{{filter, &j.filter}, {steps, &j.steps}, {exitConds, &j.exitConditions}} {
+		}{{filter, &j.filter}, {steps, &j.steps}, {exitConds, &j.exitConditions}, {exclude, &j.exclude}} {
 			if err := json.Unmarshal(p.raw, p.to); err != nil {
 				return nil, err
 			}

@@ -2,9 +2,13 @@ package api
 
 import (
 	"context"
+	"errors"
 	"net/http"
+	"time"
 
 	"github.com/jackc/pgx/v5"
+
+	"github.com/outflareai/outflare/engine/internal/auth"
 )
 
 // Workspace routes for extensions. An extension (the hosted Cloud) serves
@@ -64,6 +68,69 @@ func (c *Caller) Writes(brand *string) bool { return c.a.writes(brand) }
 // product event of the same name once the request succeeds.
 func (c *Caller) Record(ctx context.Context, tx pgx.Tx, action, targetType, targetID string, data map[string]any) error {
 	return record(ctx, tx, &c.a.principal, c.WorkspaceID, action, targetType, targetID, data)
+}
+
+// MissionDraft is a mission an extension starts for the caller, such as a
+// loop's brief. Like any mission it does nothing until a person approves it,
+// and everything it does goes through the API's gate, limits and audit log.
+type MissionDraft struct {
+	Name, Goal, Instructions, Plan string
+	// Mode is dry_run (the default), approve_writes or autonomous.
+	Mode          string
+	MaxSpendCents *int64
+	EndsAt        *time.Time
+}
+
+// ErrMissionInvalid is a draft the API would refuse with 400; its message
+// says why. ErrMissionDenied is a caller who may not start missions (403).
+var (
+	ErrMissionInvalid = errors.New("invalid mission")
+	ErrMissionDenied  = errors.New("not allowed to start missions")
+)
+
+// missionError keeps the API's message under the exported kinds.
+type missionError struct {
+	kind error
+	msg  string
+}
+
+func (e missionError) Error() string { return e.msg }
+func (e missionError) Unwrap() error { return e.kind }
+
+// StartMission creates a mission draft for the caller in tx, as POST
+// /v1/workspaces/{ws}/missions does: the caller needs missions.run, it
+// records mission.created, and it waits for a person's approval. It
+// returns the mission's id.
+func (c *Caller) StartMission(ctx context.Context, tx pgx.Tx, d MissionDraft) (string, error) {
+	if !c.Has(auth.ScopeMissionsRun) {
+		return "", missionError{ErrMissionDenied, "starting a mission needs the missions.run scope"}
+	}
+	in := missionInput{Name: &d.Name, Goal: &d.Goal, Instructions: &d.Instructions, Plan: &d.Plan,
+		MaxSpendCents: optional[int64]{Set: d.MaxSpendCents != nil, Value: d.MaxSpendCents}}
+	if d.EndsAt != nil {
+		at := d.EndsAt.Format(time.RFC3339)
+		in.EndsAt = optional[string]{Set: true, Value: &at}
+	}
+	if d.Mode != "" {
+		in.Mode = &d.Mode
+	}
+	if err := in.validate(); err != nil {
+		return "", exportMissionError(err)
+	}
+	id, err := c.s.insertMission(ctx, tx, c.a, &in)
+	return id, exportMissionError(err)
+}
+
+func exportMissionError(err error) error {
+	var inv errInvalid
+	var denied errDenied
+	switch {
+	case errors.As(err, &inv):
+		return missionError{ErrMissionInvalid, string(inv)}
+	case errors.As(err, &denied):
+		return missionError{ErrMissionDenied, string(denied)}
+	}
+	return err
 }
 
 // Internal logs err and answers 500 without saying what went wrong.

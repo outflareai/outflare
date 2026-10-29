@@ -20,7 +20,9 @@
 // with outflare.flag once they arrive. tracked lists the track events sent.
 // cookies (an object) adds cookies to cookie, consent is the data-consent
 // mode (granted by default), track an event to send after the page view,
-// and bodies lists what each post sent.
+// and bodies lists what each post sent. bootstrap is the JSON (an object,
+// or a string as written) of a <script id="outflare-flags"> the site's
+// server put in the page.
 import { readFileSync } from "node:fs";
 import vm from "node:vm";
 
@@ -84,6 +86,10 @@ const document = {
     else jar.set(k.trim(), v);
   },
   addEventListener() {},
+  getElementById: (id) =>
+    id === "outflare-flags" && opt.bootstrap !== undefined
+      ? { textContent: typeof opt.bootstrap === "string" ? opt.bootstrap : JSON.stringify(opt.bootstrap) }
+      : null,
   querySelectorAll: (q) =>
     q.includes("data-category") ? held.filter((h) => h.getAttribute("type") === "text/plain" && h.getAttribute("data-of-loaded") === null)
     : q.includes("cookie-policy") ? spots

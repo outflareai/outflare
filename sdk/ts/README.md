@@ -102,6 +102,18 @@ else console.log("created", lead.id);
 
 A client made without `mission` is typed without those answers, since it never gets them. A client that sets the header itself, as the MCP server does, passes `missions: true` to get the same typing as one with `mission`.
 
+## Flags without a flash
+
+`flagsBootstrapTag()` turns your server's flag decisions into the tag the Outflare site script reads first, so a page rendered on your server (or at the edge) shows the visitor's version in the first paint. It escapes the JSON so a payload can't close the tag:
+
+```ts
+import { flagsBootstrapTag } from "@outflare/sdk";
+
+const anonymousId = cookies.get("of_aid") ?? crypto.randomUUID();
+const { data } = await gtm.POST("/v1/workspaces/{ws}/flags/evaluate", { params: { path: { ws } }, body: { anonymous_id: anonymousId, url } });
+html = html.replace("</head>", flagsBootstrapTag(data!, anonymousId) + "</head>");
+```
+
 ## Webhooks
 
 `verifyWebhook()` checks a delivery's signature and age and returns the typed event. Pass the raw body, before any JSON parsing. It uses Web Crypto, so it runs in Node 18+, Deno, Bun, Cloudflare Workers and browsers:

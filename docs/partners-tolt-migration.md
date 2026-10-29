@@ -30,7 +30,7 @@ Each run reads the whole Tolt program and brings in what isn't in Outflare yet. 
 
 | From Tolt | Becomes |
 | --- | --- |
-| Partners | Partners, each a customer record found by email. Their code is their first link's value, so `?ref=<code>` and `?via=<code>` links keep working. Every status is read (active, pending, suspended, rejected) and kept. Tolt's API has no payout details, so partners give theirs on the portal. |
+| Partners | Partners, each a customer record found by email. Their code is their first link's value, so `?ref=<code>` and `?via=<code>` links keep working. Every status is read (active, pending, suspended, rejected) and kept. Tolt's API has no payout details, so partners give theirs on the portal; until they do, their payouts wait (their balance is kept). |
 | Links | The partner's code. A partner's second link, or a link whose parameter isn't `ref` or `via` (the only two the website script reads), is listed under issues. |
 | Promo codes | The partner's promo codes, kept as they are: they already exist in your billing account. |
 | Customers | Referred customers, matched by your own `customer_id` and email the same way the conversion API matches them. Tolt's own customer id (`cus_...`, what `tolt.signup()` returned) is kept as one of their user ids, so if your backend stored it and reports renewals with `customer_id: "cus_..."`, those still credit the partner. Running the import again adds it to customers an earlier run brought over. |
@@ -56,7 +56,7 @@ Each run lists what it couldn't bring over, by Tolt id and reason (never names o
 
 | `unreadable` | Tolt's answer for a whole kind couldn't be read (not JSON, no list in it) or Tolt refused the request. The import read the other kinds; the issue's message names the kind, the HTTP status, the content type and the answer's top-level keys. Send us that message. If no kind could be read, the run fails with it. |
 
-The import reads Tolt's v2 API (`https://platform.tolt.com/v2`, the same API key as v1): it pages with `next_cursor` until `has_more` is false, reads partners one status at a time so none is left out, then reads by id any partner a link, promo code, customer or commission names that the list left out (Tolt lists only onboarded partners), waits as Tolt asks when it is rate limited (25 calls a second per key), and reads amounts as minor units (cents). A commission in a Tolt payout comes over as paid. Tolt's v2 has no payout details: ask partners to confirm theirs on the portal before the first payout. The import reads a list however Tolt wraps it: `data` as a list, `data.data` (as Tolt's customers list answers), or a list under the kind's own name, with `has_more` as a boolean or a string. When Tolt sends `total_count`, the engine log notes it with the first page (`tolt list`), to compare with the count the import read.
+The import reads Tolt's v2 API (`https://platform.tolt.com/v2`, the same API key as v1): it pages with `next_cursor` until `has_more` is false, reads partners one status at a time so none is left out, then reads by id any partner a link, promo code, customer or commission names that the list left out (Tolt lists only onboarded partners), waits as Tolt asks when it is rate limited (25 calls a second per key), and reads amounts as minor units (cents). A commission in a Tolt payout comes over as paid. Tolt's v2 has no payout details: the portal asks each partner to add theirs, "No payout details" on the Partners tab lists who hasn't, and their payouts wait until they do. The import reads a list however Tolt wraps it: `data` as a list, `data.data` (as Tolt's customers list answers), or a list under the kind's own name, with `has_more` as a boolean or a string. When Tolt sends `total_count`, the engine log notes it with the first page (`tolt list`), to compare with the count the import read.
 
 If Tolt answers the next page with the same objects again, the run stops with the error code `pagination_stuck` rather than reading forever. Tell us: it means Tolt pages differently from what the import expects.
 
@@ -84,7 +84,7 @@ If your backend receives Tolt's webhooks (for example commission events at your 
 | --- | --- |
 | Envelope `{type, timestamp, data}` | `{id, type, created_at, workspace_id, actor, target, data}`; `target.id` is the changed object's id |
 | `commission.created` | `partner_reward.created` |
-| `commission.updated` (approved, paid, rejected) | `partner_reward.approved`, `partner_reward.rejected`, `partner_reward.reversed` (a refund took it back), `partner_payout.paid` (it was paid in a payout) |
+| `commission.updated` (approved, paid, rejected) | `partner_reward.approved`, `partner_reward.rejected`, `partner_reward.reversed` (a refund took it back), `partner_payout.paid` (it was paid in a payout; `reward_ids` lists the rewards) |
 | `transaction.created` _check_ | `partner_conversion.created` with `type` `sale` (or `refund`) |
 | `customer.created` _check_ | `partner_referral.created` |
 | `partner.created` _check_ | `partner.created` |
@@ -95,17 +95,17 @@ The fields of a commission event, one by one:
 | --- | --- |
 | `id` (`comm_...`) | `target.id` (the reward's id) |
 | `amount` (string, cents) | `amount_cents` (integer) |
-| `revenue` (string, cents) | not on the reward: the conversion's `amount_cents` (`GET .../partner-conversions?partner_id=...`, or the `partner_conversion.created` event with the same `conversion_id`) |
+| `revenue` (string, cents) | `revenue_cents` (integer, the sale's amount; for a reversal, the refund's) |
 | `currency` (often null) | `currency` (always set, the program's) |
 | `status` (`pending`, ...) | the event type, and `status` on `.approved` and later |
-| `approval_type`, `scheduled_approval_date` | the reward's `hold_until` (`GET .../partner-rewards`); the flow's approval sets it |
+| `approval_type`, `scheduled_approval_date` | `hold_until`; the program's hold sets it |
 | `type` (`reward`) | `kind` (`cash`, `fee`, `action`, `adjustment`) |
 | `partner_id` (`part_...`) | `partner_id` (Outflare's id for them; the import maps each Tolt partner to one) |
-| `customer_id` (`cus_...`) | not on the reward: the conversion's `record_id` |
-| `transaction_id` (`txn_...`), `charge_id` | `conversion_id`; the conversion's `external_id` is the `charge_id` you sent |
+| `customer_id` (`cus_...`) | `customer_id` (the user id your backend sent for them, "" if it never sent one) and `record_id` (Outflare's customer record) |
+| `transaction_id` (`txn_...`), `charge_id` | `conversion_id`, and `external_id`: the `charge_id` you sent with the sale |
 | `program_id` (`prg_...`) | `program_id` |
 | `flow_id` (`flw_...`) | not on the reward yet |
-| `payout_id` | on `partner_payout.*` events |
+| `payout_id` | `target.id` of the `partner_payout.*` events, whose `reward_ids` name the rewards |
 | `is_self_referral` | never credited: a self-referral isn't rewarded |
 | `charge_status`, `source`, `organization_id`, `campaign_id`, `is_ad_click`, `deducted_commission_amount` | no equivalent |
 

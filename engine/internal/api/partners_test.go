@@ -83,6 +83,16 @@ func TestPartnerAffiliateProgram(t *testing.T) {
 		t.Fatalf("sale = %v", sale)
 	}
 	reward := rw[0].(map[string]any)["id"].(string)
+	// The reward's webhook carries the sale, as a platform's commission webhook did.
+	var hook map[string]any
+	if err := e.pool.QueryRow(context.Background(), `SELECT data FROM audit_events WHERE workspace_id = $1 AND action = 'partner_reward.created' AND target_id = $2`,
+		ws, reward).Scan(&hook); err != nil {
+		t.Fatal(err)
+	}
+	if hook["customer_id"] != "u-1" || hook["external_id"] != "ch_1" || hook["revenue_cents"] != float64(10000) || hook["conversion_type"] != "sale" ||
+		hook["record_id"] == "" || hook["hold_until"] == nil {
+		t.Fatalf("reward webhook data = %v", hook)
+	}
 	if again := owner.must(200, "POST", conv, map[string]any{"type": "sale", "customer_id": "u-1", "amount_cents": 10000, "external_id": "ch_1"}); again["duplicate"] != true {
 		t.Fatalf("retried sale = %v", again)
 	}
@@ -184,6 +194,11 @@ func TestPartnerAffiliateProgram(t *testing.T) {
 		if !names[n] {
 			t.Errorf("no %s event", n)
 		}
+	}
+	var paidRewards int
+	if err := e.pool.QueryRow(context.Background(), `SELECT jsonb_array_length(data->'reward_ids') FROM audit_events
+		WHERE workspace_id = $1 AND action = 'partner_payout.paid' LIMIT 1`, ws).Scan(&paidRewards); err != nil || paidRewards == 0 {
+		t.Fatalf("partner_payout.paid reward_ids = %d, %v", paidRewards, err)
 	}
 }
 

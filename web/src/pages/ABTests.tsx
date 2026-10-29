@@ -13,7 +13,7 @@ import { BrandBadge } from "@/components/brand-badge";
 import { DataTable } from "@/components/data-table";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import type { Tab } from "@/lib/paths";
-import { DayChart, LiftChart, measured, perVisitor, PlanPanel, SuggestPanel, SummaryPanel, VersionsPanel } from "./ABTestsAI";
+import { DayChart, LearningsPanel, LiftChart, measured, perVisitor, PlanPanel, SuggestPanel, SummaryPanel, VersionsPanel } from "./ABTestsAI";
 
 type Props = { ws: string; canManage: boolean; go: (t: Tab) => void };
 
@@ -51,6 +51,7 @@ export function ABTests({ ws, canManage, go }: Props) {
   const [open, setOpen] = useState<ABTest | null>(null);
   const [creating, setCreating] = useState<{ flag: string; seed?: Seed } | null>(null);
   const [suggesting, setSuggesting] = useState(false);
+  const [learnings, setLearnings] = useState(false);
   const [error, setError] = useState("");
 
   const loadFlags = useCallback(() => {
@@ -77,12 +78,13 @@ export function ABTests({ ws, canManage, go }: Props) {
       <PageHeader
         title="A/B tests"
         description="Pick a feature flag with two or more versions, say what counts as success, and see which version wins. The numbers stay honest however often you check."
-        action={canManage && (
+        action={
           <div className="flex gap-2">
-            <Button variant="ghost" onClick={() => setSuggesting(true)}>Suggest tests</Button>
-            <Button onClick={newTest}>New test</Button>
+            <Button variant="ghost" onClick={() => setLearnings(true)}>Learnings</Button>
+            {canManage && <Button variant="ghost" onClick={() => setSuggesting(true)}>Suggest tests</Button>}
+            {canManage && <Button onClick={newTest}>New test</Button>}
           </div>
-        )}
+        }
       />
       <ErrorText>{error}</ErrorText>
       {tests === null ? (
@@ -129,6 +131,19 @@ export function ABTests({ ws, canManage, go }: Props) {
       {open && <TestSheet ws={ws} test={open} flag={flags.find((f) => f.id === open.flag_id)} canManage={canManage} onClose={() => setOpen(null)} onChanged={load} onFlagChanged={loadFlags} />}
       {creating !== null && (
         <NewTestSheet ws={ws} flags={splits} flag={creating.flag} seed={creating.seed} go={go} onClose={() => setCreating(null)} onSaved={(t) => { setCreating(null); load(); setOpen(t); }} onFlagChanged={loadFlags} />
+      )}
+      {learnings && (
+        <Sheet open onOpenChange={(o) => !o && setLearnings(false)}>
+          <SheetContent className="w-full overflow-y-auto sm:max-w-2xl">
+            <SheetHeader>
+              <SheetTitle>Learnings</SheetTitle>
+              <SheetDescription>What your finished tests taught. Your AI model writes each learning when a test ends.</SheetDescription>
+            </SheetHeader>
+            <div className="px-4 pb-6">
+              <LearningsPanel ws={ws} canAsk={canManage} />
+            </div>
+          </SheetContent>
+        </Sheet>
       )}
       {suggesting && (
         <Sheet open onOpenChange={(o) => !o && setSuggesting(false)}>
@@ -508,6 +523,13 @@ function TestSheet({ ws, test, flag, canManage, onClose, onChanged, onFlagChange
           ) : (
             <>
               {v && v.text && <div className={`rounded-md border px-3 py-2 ${toneClass[v.tone]}`}>{v.text}</div>}
+              {test.learning && (
+                <Card title="What it taught">
+                  <p className="font-medium">{test.learning.headline}</p>
+                  <p>{test.learning.learning}</p>
+                  {test.learning.tags.length > 0 && <p className="text-[12px] text-muted-foreground">{test.learning.tags.join(", ")}</p>}
+                </Card>
+              )}
               {canManage && <SummaryPanel ws={ws} testID={test.id} />}
               {results.result.goals[0]?.days && results.result.goals[0].days.length > 1 && (
                 <Card title={`${goalText(results.result.goals[0].goal)}${measured(results.result.goals[0].goal) ? "" : " rate"}, day by day`}>

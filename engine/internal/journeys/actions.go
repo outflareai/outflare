@@ -16,6 +16,7 @@ import (
 	"github.com/outflareai/outflare/engine/internal/customers"
 	"github.com/outflareai/outflare/engine/internal/jobs"
 	"github.com/outflareai/outflare/engine/internal/leads"
+	"github.com/outflareai/outflare/engine/internal/metrics"
 	"github.com/outflareai/outflare/engine/internal/smartlists"
 )
 
@@ -478,12 +479,13 @@ func enrollInSequence(ctx context.Context, x *act) (string, string, error) {
 	if err != nil || why != "" {
 		return "skipped", why, err
 	}
-	var here, suppressed, elsewhere bool
+	var here, suppressed, excluded, elsewhere bool
 	if err := x.tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM enrollments WHERE sequence_id = $1 AND lead_id = $2),
 			EXISTS (`+leads.SuppressedSQL("l.workspace_id", "l.email")+`),
+			`+customers.ExcludedByColumnSQL("$3::uuid", "(SELECT q.exclude FROM sequences q WHERE q.id = $1)")+`,
 			EXISTS (SELECT 1 FROM enrollments e JOIN sequences q ON q.id = e.sequence_id WHERE e.lead_id = l.id AND e.status = 'active'
 				AND e.sequence_id <> $1 AND q.status IN ('active', 'paused'))
-		FROM leads l WHERE l.id = $2`, x.st.SequenceID, leadID).Scan(&here, &suppressed, &elsewhere); err != nil {
+		FROM leads l WHERE l.id = $2`, x.st.SequenceID, leadID, x.r.recordID).Scan(&here, &suppressed, &excluded, &elsewhere); err != nil {
 		return "", "", err
 	}
 	switch {
@@ -491,6 +493,9 @@ func enrollInSequence(ctx context.Context, x *act) (string, string, error) {
 		return "skipped", "already in the sequence", nil
 	case suppressed:
 		return "skipped", "suppressed", nil
+	case excluded:
+		metrics.Excluded("sequence")
+		return "skipped", "excluded by the sequence's exclusion", nil
 	case elsewhere && !x.st.AllowElsewhere:
 		return "skipped", "active in another sequence", nil
 	}

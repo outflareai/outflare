@@ -42,9 +42,15 @@ func (s *Server) routesQuery(mux *http.ServeMux) {
 }
 
 // readsOnly reports whether a POST only reads, so an agent kept to
-// missions may send it outside one: a query's SQL is too long for a URL.
+// missions may send it outside one: a query's SQL is too long for a URL,
+// and a question to the knowledge base can be too.
 func readsOnly(r *http.Request) bool {
-	return r.Method == http.MethodPost && r.URL.Path == "/v1/workspaces/"+r.PathValue("ws")+"/query"
+	if r.Method != http.MethodPost {
+		return false
+	}
+	base := "/v1/workspaces/" + r.PathValue("ws")
+	// Asking the knowledge only reads it (it keeps the question, for the gaps).
+	return r.URL.Path == base+"/query" || r.URL.Path == base+"/knowledge/ask"
 }
 
 const (
@@ -74,7 +80,6 @@ var queryTables = []queryTable{
 	{"consents", auth.ScopeCustomersRead, "Every consent grant and withdrawal; the latest per record, channel, topic and purpose is current."},
 	{"subscriptions", auth.ScopeCustomersRead, "Payment subscriptions from Stripe and other payment connections; monthly_minor is MRR in minor units."},
 	{"brands", auth.ScopeWorkspaceRead, "The workspace's brands."},
-	{"projects", auth.ScopeProjectsRead, "Former projects (removed), kept until a later release drops them."},
 	{"leads", auth.ScopeLeadsRead, "Leads for outreach; hidden from callers kept to some brands."},
 	{"sequences", auth.ScopeSequencesRead, "Outreach sequences."},
 	{"enrollments", auth.ScopeSequencesRead, "Leads in sequences and where each is."},

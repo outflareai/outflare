@@ -517,6 +517,8 @@ func (s *Server) buildHandler() http.Handler {
 	s.routesConversionDefinitions(mux)
 	s.routesCustomerProfiles(mux)
 	s.routesKnowledge(mux)
+	s.routesKnowledgeRetrieval(mux)
+	s.routesKnowledgeInsights(mux)
 	s.routesVerification(mux)
 	s.routesClassify(mux)
 	s.routesWorkspaceDomains(mux)

@@ -58,11 +58,16 @@ const (
 // "2 weeks ago".
 func Parse(platform, page string, now time.Time) Read {
 	var r Read
+	// fromData is a page whose own data says whether a next page exists.
+	fromData := false
 	switch platform {
 	case Trustpilot:
 		r = trustpilotNextData(page)
 	case Capterra:
 		r = capterraData(page)
+		// Capterra draws a "Next page" button on every page, even the
+		// only one, so its data decides.
+		fromData = len(r.Reviews) > 0
 	}
 	if r.Score == nil || r.Count == nil || len(r.Reviews) == 0 {
 		r = mergeRead(r, jsonLD(page))
@@ -70,7 +75,7 @@ func Parse(platform, page string, now time.Time) Read {
 	if platform == Google {
 		r = mergeRead(r, googleMaps(page, now))
 	}
-	if !r.More {
+	if !r.More && !fromData {
 		r.More = hasNextPage(page)
 	}
 	for i := range r.Reviews {

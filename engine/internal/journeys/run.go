@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -16,6 +17,7 @@ import (
 	"github.com/outflareai/outflare/engine/internal/customers"
 	"github.com/outflareai/outflare/engine/internal/emails"
 	"github.com/outflareai/outflare/engine/internal/jobs"
+	"github.com/outflareai/outflare/engine/internal/metrics"
 )
 
 // JobRun moves one run along until it waits or ends.
@@ -52,17 +54,19 @@ type journey struct {
 	// (any of them) end it before its next step.
 	exitEvents     []string
 	exitConditions []Condition
+	// Who never enters.
+	exclude customers.Exclusion
 }
 
 func loadJourney(ctx context.Context, q jobs.Querier, ws, id string, lock bool) (*journey, error) {
 	var j journey
-	var filter, steps, exitConds []byte
-	sql := `SELECT id, workspace_id, status, trigger_kind, entry, version, brand_id, trigger_filter, steps, exit_events, exit_conditions FROM journeys
+	var filter, steps, exitConds, exclude []byte
+	sql := `SELECT id, workspace_id, status, trigger_kind, entry, version, brand_id, trigger_filter, steps, exit_events, exit_conditions, exclude FROM journeys
 		WHERE workspace_id = $1 AND id = $2`
 	if lock {
 		sql += ` FOR SHARE`
 	}
-	err := q.QueryRow(ctx, sql, ws, id).Scan(&j.id, &j.ws, &j.status, &j.triggerKind, &j.entry, &j.version, &j.brandID, &filter, &steps, &j.exitEvents, &exitConds)
+	err := q.QueryRow(ctx, sql, ws, id).Scan(&j.id, &j.ws, &j.status, &j.triggerKind, &j.entry, &j.version, &j.brandID, &filter, &steps, &j.exitEvents, &exitConds, &exclude)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil
 	}
@@ -76,6 +80,9 @@ func loadJourney(ctx context.Context, q jobs.Querier, ws, id string, lock bool) 
 		return nil, err
 	}
 	if err := json.Unmarshal(exitConds, &j.exitConditions); err != nil {
+		return nil, err
+	}
+	if err := json.Unmarshal(exclude, &j.exclude); err != nil {
 		return nil, err
 	}
 	return &j, nil
@@ -202,6 +209,9 @@ func Enroll(ctx context.Context, tx pgx.Tx, ws, journeyID, recordID string, even
 	}
 	why, err := refusal(ctx, tx, ws, j, recordID, context, manual)
 	if err != nil || why != "" {
+		if strings.HasPrefix(why, customers.ExcludedPrefix) {
+			metrics.Excluded("journey")
+		}
 		return "", why, err
 	}
 	first := ""
@@ -233,8 +243,8 @@ func Enroll(ctx context.Context, tx pgx.Tx, ws, journeyID, recordID string, even
 const notPerson = "not a person on a customer record"
 
 // refusal is why a person can't start a run of j now, or "": they are not
-// a person in its brand, already meet its exit criteria, don't meet its
-// filter (unless manual), or its entry rule says no.
+// a person in its brand, are excluded, already meet its exit criteria,
+// don't meet its filter (unless manual), or its entry rule says no.
 func refusal(ctx context.Context, tx pgx.Tx, ws string, j *journey, recordID string, context map[string]any, manual bool) (string, error) {
 	var brand *string
 	var attrs []byte
@@ -248,6 +258,10 @@ func refusal(ctx context.Context, tx pgx.Tx, ws string, j *journey, recordID str
 	}
 	if j.brandID != nil && (brand == nil || *brand != *j.brandID) {
 		return "not in the journey's brand", nil
+	}
+	// Exclusions keep people out even when added by hand.
+	if why, err := customers.Excluded(ctx, tx, ws, recordID, j.exclude); err != nil || why != "" {
+		return why, err
 	}
 	var attributes map[string]any
 	_ = json.Unmarshal(attrs, &attributes)

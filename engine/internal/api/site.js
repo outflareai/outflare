@@ -55,7 +55,10 @@
 // flash before a variant, give <html> the class of-wait from an inline
 // script in <head>, with a style that hides the page while it is there:
 // the script takes it off as soon as the flags arrive, and your inline
-// script after a second or two at most. ?of_flag=key:variant on any page
+// script after a second or two at most. Better still, decide the flags on
+// your own server (POST .../flags/evaluate) and hand them to the page in
+// <script type="application/json" id="outflare-flags">: the script uses
+// them at once, with no request. ?of_flag=key:variant on any page
 // shows that variant to you alone for the rest of the visit, to preview it.
 //
 // A visitor joins a flag's A/B test when the page shows them its version:
@@ -71,7 +74,7 @@
   if (!script) return;
   var key = script.getAttribute("data-key") || "";
   // Sent with every batch, so Outflare can tell a site running an old copy.
-  var VERSION = "6";
+  var VERSION = "7";
   // Events go where the script came from: a path the site forwards keeps
   // its prefix.
   var src = new URL(script.src, location.href);
@@ -128,7 +131,7 @@
   function writeCookie(id) { setCookie(COOKIE, id, consented); }
   // An id cookie already there was set with consent.
   var stored = readCookie();
-  var anon = stored || uuid();
+  var anon = stored || uuid(), carriedID = false, started = Date.now();
   // A link from one of the site's other domains carries the visitor's id,
   // valid for two minutes so a shared link doesn't merge its readers. It
   // counts only when the visitor came from another listed domain, so a
@@ -138,11 +141,32 @@
     if (carried !== null) {
       var parts = carried.split("."), age = Date.now() / 1000 - Number(parts[1]), from = "";
       try { from = registrable(new URL(d.referrer).hostname); } catch (e) {}
-      if (from && from !== registrable(location.hostname) && /^[A-Za-z0-9-]{8,64}$/.test(parts[0]) && age >= -60 && age < 120) anon = parts[0];
+      if (from && from !== registrable(location.hostname) && /^[A-Za-z0-9-]{8,64}$/.test(parts[0]) && age >= -60 && age < 120) { anon = parts[0]; carriedID = true; }
       here.searchParams.delete("_ofa");
       history.replaceState(history.state, "", here.pathname + here.search + here.hash);
     }
   } catch (e) {}
+  // Flags the site's own server decided for this page, handed over in
+  // <script type="application/json" id="outflare-flags"> as
+  // {"anonymousId", "flags", "payloads"}: the page shows the visitor's
+  // version at once, with no request and no flash. They count only for the
+  // visitor they were decided for: this page's id, or the server's own when
+  // the browser has none yet.
+  var boot = null;
+  try {
+    var bootEl = d.getElementById && d.getElementById("outflare-flags");
+    var b = bootEl && JSON.parse(bootEl.textContent || "null");
+    if (b && typeof b.anonymousId === "string" && /^[A-Za-z0-9-]{8,64}$/.test(b.anonymousId) && b.flags && typeof b.flags === "object" &&
+      (b.anonymousId === anon || (!stored && !carriedID))) {
+      anon = b.anonymousId;
+      boot = { flags: {}, payloads: {} };
+      for (var bk in b.flags) {
+        var bv = b.flags[bk];
+        if (/^[a-z0-9][a-z0-9_-]{0,63}$/.test(bk) && (bv === false || (typeof bv === "string" && /^[a-z0-9][a-z0-9_-]{0,63}$/.test(bv)))) boot.flags[bk] = bv;
+      }
+      if (b.payloads && typeof b.payloads === "object") for (bk in b.payloads) if (boot.flags[bk]) boot.payloads[bk] = b.payloads[bk];
+    }
+  } catch (e) { boot = null; }
   // A click on a tracked link in an email the workspace sent carries a
   // token (ofvisit) signed by Outflare. It goes with the first page view, so
   // Outflare can tell whose visit it is, and leaves the address at once.
@@ -324,9 +348,14 @@
   // rules can depend on the page), and kept for the visit so the next page
   // starts with the last answer.
   var FLAGS = "of_flags", SEEN = "of_flags_seen", classFlags = script.getAttribute("data-flags") !== null, flagsWanted = classFlags, flagState = null, flagWaiters = [], flagClasses = [], seen = {};
+  // Where the flags in use came from (bootstrap: the server's, kept: the
+  // last page's, fetched: asked for) and how long after the script started
+  // they were first shown, sent with Experiment Viewed so a test can tell
+  // whether visitors waited long enough to see the original first.
+  var flagSource = "", flagWait = -1, bootURL = boot ? location.href : "";
   try {
     var kept = JSON.parse(sessionStorage.getItem(FLAGS) || "null");
-    if (kept && kept.anon === anon) flagState = kept;
+    if (kept && kept.anon === anon) flagState = kept, flagSource = "kept";
     var keptSeen = JSON.parse(sessionStorage.getItem(SEEN) || "null");
     if (keptSeen && keptSeen.anon === anon) seen = keptSeen.flags || {};
   } catch (e) {}
@@ -339,10 +368,15 @@
     if (!v || seen[k] === v) return;
     seen[k] = v;
     try { sessionStorage.setItem(SEEN, JSON.stringify({ anon: anon, flags: seen })); } catch (e) {}
-    track("Experiment Viewed", { flag: k, variant: v });
+    track("Experiment Viewed", { flag: k, variant: v, source: flagSource, wait_ms: Math.max(flagWait, 0) });
   }
-  function applyFlags(state) {
+  function applyFlags(state, source) {
     flagState = state;
+    // The first answer shown is the one the visitor saw first.
+    if (flagWait < 0) {
+      flagWait = Date.now() - started;
+      if (source) flagSource = source;
+    }
     var root = d.documentElement, cls = [];
     for (var k in state.flags) if (variant(k)) cls.push("of-flag-" + k + "-" + variant(k));
     flagClasses.forEach(function (c) { root.classList.remove(c); });
@@ -377,6 +411,8 @@
   }
   function loadFlags() {
     flagsWanted = true;
+    // The server already decided this page.
+    if (bootURL && bootURL === location.href) return applyFlags(flagState, "bootstrap");
     if (!w.fetch) return applyFlags({ anon: anon, flags: {}, payloads: {} });
     var body = JSON.stringify({ key: key, anonymousId: anon, url: location.href, referrer: lastURL || d.referrer, language: navigator.language || "", preview: previewed() });
     fetch(api + "/v1/site/flags", { method: "POST", body: body, headers: { "Content-Type": "text/plain" } })
@@ -384,11 +420,16 @@
       .then(function (out) {
         var state = { anon: anon, flags: (out && out.flags) || (flagState && flagState.flags) || {}, payloads: (out && out.payloads) || (flagState && flagState.payloads) || {} };
         if (out) try { sessionStorage.setItem(FLAGS, JSON.stringify(state)); } catch (e) {}
-        applyFlags(state);
+        applyFlags(state, out ? "fetched" : "");
       }, function () { applyFlags(flagState || { anon: anon, flags: {}, payloads: {} }); });
   }
-  // The last answer shows at once; a fresh one follows.
-  if (flagState) applyFlags(flagState);
+  // The server's answer, or else the last one, shows at once; a fresh one
+  // follows unless the server's covers this page.
+  if (boot) {
+    flagState = { anon: anon, flags: boot.flags, payloads: boot.payloads };
+    try { sessionStorage.setItem(FLAGS, JSON.stringify(flagState)); } catch (e) {}
+    applyFlags(flagState, "bootstrap");
+  } else if (flagState) applyFlags(flagState);
 
   // Links to the site's other domains carry the visitor's id.
   function registrable(host) {

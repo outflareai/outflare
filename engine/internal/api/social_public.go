@@ -93,7 +93,7 @@ func (p publicProfiles) SocialStats(ctx context.Context, cl *connectors.Client, 
 	render := !slices.Contains(sociallinks.JSONKinds, p.channel)
 	page, err := p.fetch.FetchPage(ctx, cl, creds, pub.ReadURL, render)
 	if err != nil {
-		return connectors.SocialStats{}, err
+		return connectors.SocialStats{}, pageFailed(err)
 	}
 	if page.Status == 404 || page.Status == 410 {
 		return connectors.SocialStats{}, readFailed(readNotFound, "there is no public profile at %s", pub.URL)

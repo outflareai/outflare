@@ -38,6 +38,19 @@ func answerABTestAI(w http.ResponseWriter, body string) {
 			// A key the flag already has is renamed.
 			map[string]any{"key": "control", "content": map[string]any{"headline": "Built for agencies"}, "rationale": "Names the audience."},
 		}}
+	case strings.Contains(body, "You write the learning of a finished A/B test"):
+		kind = "learning"
+		answer = map[string]any{"headline": "Shorter headlines lift signups", "learning": "A five-word headline beat the long one on signups.",
+			"tags": []string{"Headline", "pricing", "headline", "Not A Tag!"}}
+	case strings.Contains(body, "You answer a marketer's question about their company's past A/B tests"):
+		kind = "ask"
+		// Cite the first test given, and one that wasn't.
+		var cite []string
+		// The body is JSON, so a newline in the prompt is the two characters \n.
+		if i := strings.Index(body, `\n### `); i >= 0 && len(body) >= i+42 {
+			cite = append(cite, body[i+6:i+42])
+		}
+		answer = map[string]any{"answer": "Short headlines won before.", "test_ids": append(cite, "00000000-0000-0000-0000-000000000000")}
 	default:
 		answer = map[string]any{"headline": "The faster headline won", "summary": "It lifted signups a lot.", "next_steps": []string{"Ship it", "Archive the flag"}}
 	}

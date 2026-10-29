@@ -1,0 +1,73 @@
+id: trial-activation
+version: 1
+title: Trial and activation
+summary: A list of trials that haven't activated, a rule that spots a stalled sign-up, and a journey that nudges them and tells their owner.
+
+inputs:
+  - name: signup_event
+    label: The event that means signed up
+    kind: event
+    example: signed_up
+    default: signed_up
+  - name: activated_event
+    label: The event that means activated
+    help: The action that shows a new user got value, such as creating their first project.
+    kind: event
+    example: project_created
+
+email_templates:
+  - handle: activation-nudge
+    name: Activation nudge
+    purpose: lifecycle
+    subject: "{{person.first_name}}, one step to get going"
+    text: |
+      Hi {{person.first_name}},
+
+      You signed up a few days ago but haven't taken the first step yet.
+      It takes two minutes, and it's where it starts to pay off.
+
+      Reply to this email if anything is in the way: a person reads it.
+  - handle: activation-tip
+    name: Activation tip
+    purpose: lifecycle
+    subject: A shortcut for your first week
+    text: |
+      Hi {{person.first_name}},
+
+      One thing that helps new users most is starting from a template
+      rather than a blank page. Pick the one closest to what you do and
+      change it from there.
+
+smart_lists:
+  - key: trial_not_activated
+    name: Trials not activated
+    description: People who signed up in the last 14 days and haven't activated yet.
+    rules:
+      - { event: "{{signup_event}}", op: exists, within_days: 14 }
+      - { event: "{{activated_event}}", op: not_exists }
+
+rules:
+  - key: stalled_after_signup
+    name: Stalled after sign-up
+    description: Fires once when someone signs up and doesn't activate within 3 days.
+    trigger: { kind: absence, start_event: "{{signup_event}}", event: "{{activated_event}}", within_seconds: 259200 }
+    emit_event: trial.stalled
+    fire: once
+
+journeys:
+  - key: activate_new_trials
+    name: Activate new trials
+    description: Nudges a stalled trial towards its first win, and tells their owner when the nudge goes unread. Ends as soon as they activate.
+    trigger: { kind: event, event: trial.stalled }
+    goal_event: "{{activated_event}}"
+    steps:
+      - { id: nudge, kind: email, template: activation-nudge, next: wait }
+      - { id: wait, kind: wait, wait_seconds: 172800, next: opened }
+      - id: opened
+        kind: branch
+        name: Opened the nudge?
+        conditions: [{ email: opened, step: nudge, op: exists }]
+        then: tip
+        else: tell_owner
+      - { id: tell_owner, kind: alert, title: A new trial hasn't activated or opened their nudge, to: owner, next: tip }
+      - { id: tip, kind: email, template: activation-tip }

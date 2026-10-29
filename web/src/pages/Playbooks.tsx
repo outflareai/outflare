@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react
 import type { KitPlan, PlaybookConnectionNeed, WorkspacePlaybook } from "@outflare/sdk";
 import { track } from "@/lib/analytics";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
+import { KitFileSheet, KitPlanList } from "@/components/kit-export";
 import { api, errorMessage } from "../api";
 import { Badge, Button, CopyButton, Empty, ErrorText, field, Input, Loading, PageHeader, toast, type tones } from "../ui";
 import { plural } from "../format";
@@ -24,20 +25,13 @@ const contributeURL = "https://github.com/outflareai/outflare/tree/main/playbook
 
 const needKey = (n: PlaybookConnectionNeed) => n.capability ?? n.category ?? n.label;
 
-const kitAction: Record<KitPlan["items"][number]["action"], { label: string; tone: keyof typeof tones }> = {
-  add: { label: "Adds", tone: "blue" },
-  extend: { label: "Extends", tone: "blue" },
-  reuse: { label: "Have", tone: "green" },
-  conflict: { label: "Conflict", tone: "amber" },
-};
-const kitKind: Record<KitPlan["items"][number]["kind"], string> = { option_set: "List", record_type: "Pipeline", field: "Field", email_template: "Email draft" };
-
 export function Playbooks({ ws, canManage, go }: Props) {
   const [list, setList] = useState<WorkspacePlaybook[] | null>(null);
   const [error, setError] = useState("");
   const [view, setView] = useState<View>("all");
   const [open, setOpen] = useState("");
   const [names, setNames] = useState<Record<string, string>>({});
+  const [kitFile, setKitFile] = useState(false);
 
   const load = useCallback(async () => {
     const { data, error } = await api.GET("/v1/workspaces/{ws}/playbooks", { params: { path: { ws } } });
@@ -61,7 +55,12 @@ export function Playbooks({ ws, canManage, go }: Props) {
       <PageHeader
         title="Playbooks"
         description="Ready-made recipes for growth. Each one says what it needs, runs as a mission on your own accounts, and waits for your approval before it changes anything. Copy the prompt into your own AI app, or start it here."
-        action={<a className="text-[13px] text-muted-foreground underline-offset-4 hover:text-foreground hover:underline" href={contributeURL} target="_blank" rel="noreferrer">Write your own playbook</a>}
+        action={
+          <div className="flex flex-wrap items-center gap-3">
+            <a className="text-[13px] text-muted-foreground underline-offset-4 hover:text-foreground hover:underline" href={contributeURL} target="_blank" rel="noreferrer">Write your own playbook</a>
+            {canManage && <Button variant="ghost" onClick={() => setKitFile(true)}>Apply a kit file</Button>}
+          </div>
+        }
       />
       <ErrorText>{error}</ErrorText>
       <div className="flex flex-wrap items-center gap-2">
@@ -98,6 +97,7 @@ export function Playbooks({ ws, canManage, go }: Props) {
           ))}
         </div>
       )}
+      {kitFile && <KitFileSheet ws={ws} onClose={() => setKitFile(false)} onApplied={() => { setKitFile(false); go("journeys"); }} />}
       {current && <PlaybookSheet ws={ws} playbook={current} names={names} canManage={canManage} go={go} onClose={() => setOpen("")} />}
     </div>
   );
@@ -177,20 +177,11 @@ function PlaybookSheet({ ws, playbook: p, names, canManage, go, onClose }: { ws:
             <section className="space-y-2">
               <h3 className="font-medium">What it sets up</h3>
               <p className="text-muted-foreground">
-                {kit.changes === 0 && kit.conflicts === 0 ? "Everything it needs is already set up." : "The setup kit adds what's missing to your CRM and email drafts. It only adds: nothing you have changes, and drafts wait for you to publish them."}
+                {kit.changes === 0 && kit.conflicts === 0 ? "Everything it needs is already set up." : kit.items.some((it) => it.kind === "journey" || it.kind === "rule")
+                  ? "The setup kit adds what's missing: CRM fields, email drafts and automations. It only adds, and nothing goes live: you read the emails and turn each rule and journey on yourself."
+                  : "The setup kit adds what's missing to your CRM and email drafts. It only adds: nothing you have changes, and drafts wait for you to publish them."}
               </p>
-              <ul className="space-y-1.5">
-                {kit.items.filter((it) => it.kind !== "field" || it.action !== "reuse").map((it) => (
-                  <li key={it.kind + it.key} className="flex items-start gap-2">
-                    <Badge tone={kitAction[it.action].tone}>{kitAction[it.action].label}</Badge>
-                    <span className="min-w-0">
-                      {kitKind[it.kind]}: {it.label}
-                      {it.detail && <span className="text-muted-foreground"> · {it.detail}</span>}
-                    </span>
-                  </li>
-                ))}
-              </ul>
-              {kit.conflicts > 0 && <p className="text-[12px] text-muted-foreground">A conflict is something you already have under the same name but set up differently. Change it first, or start without the setup and build it your way.</p>}
+              <KitPlanList plan={kit} />
             </section>
           )}
 

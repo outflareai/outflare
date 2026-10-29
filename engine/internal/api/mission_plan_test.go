@@ -52,8 +52,13 @@ func (fakeClaude) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if strings.Contains(string(body), "proposing A/B tests") || strings.Contains(string(body), "You write versions of website copy") ||
-		strings.Contains(string(body), "You explain an A/B test's results") {
+		strings.Contains(string(body), "You explain an A/B test's results") || strings.Contains(string(body), "You write the learning of a finished A/B test") ||
+		strings.Contains(string(body), "You answer a marketer's question about their company's past A/B tests") {
 		answerABTestAI(w, string(body))
+		return
+	}
+	if strings.Contains(string(body), "You answer questions for a business using only the passages") {
+		answerKnowledgeQuestion(w, string(body))
 		return
 	}
 	if strings.Contains(string(body), "You read one web page for a link building team") {

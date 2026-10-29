@@ -317,3 +317,68 @@ export function LiftChart({ days, control, goal }: { days: NonNullable<ABTestRes
   );
 }
 
+type LibraryItem = { id: string; name: string; hypothesis: string; flag_key: string; decision: string; winner: string; goal: string; outcome: string; ended_at: string | null; learning: { headline: string; learning: string; tags: string[] } | null };
+
+// LearningsPanel is the library of finished tests and what they taught,
+// searchable, with questions answered over it by the workspace's AI model.
+export function LearningsPanel({ ws, canAsk }: { ws: string; canAsk: boolean }) {
+  const [q, setQ] = useState("");
+  const [items, setItems] = useState<LibraryItem[] | null>(null);
+  const [error, setError] = useState("");
+  const [question, setQuestion] = useState("");
+  const ai = useAIRun(ws);
+  useEffect(() => {
+    let live = true;
+    const t = window.setTimeout(async () => {
+      const { data, error } = await api.GET("/v1/workspaces/{ws}/ab-tests/learnings", { params: { path: { ws }, query: q ? { q } : {} } });
+      if (!live) return;
+      setError(error ? errorMessage(error) : "");
+      setItems((data?.data as LibraryItem[] | undefined) ?? []);
+    }, 300);
+    return () => {
+      live = false;
+      window.clearTimeout(t);
+    };
+  }, [ws, q]);
+  const answer = ai.ready?.output as { answer: string; test_ids: string[] } | null | undefined;
+  const byID = new Map((items ?? []).map((i) => [i.id, i]));
+  return (
+    <div className="space-y-3 text-[13px]">
+      {canAsk && (
+        <div className="space-y-2 rounded-md border p-3">
+          <span className="block font-medium">Ask about past tests</span>
+          <textarea aria-label="Question" className={`${field} w-full`} rows={2} maxLength={2000} placeholder="What have we learned about headlines on the pricing page?" value={question} onChange={(e) => setQuestion(e.target.value)} />
+          <Button disabled={ai.busy || !question.trim()} onClick={() => ai.start(() => api.POST("/v1/workspaces/{ws}/ab-tests/ask", { params: { path: { ws } }, body: { question: question.trim() } }))}>
+            {ai.busy ? "Thinking…" : "Ask"}
+          </Button>
+          <ErrorText>{ai.error}</ErrorText>
+          {answer && (
+            <div className="space-y-1">
+              <p className="whitespace-pre-wrap">{answer.answer}</p>
+              {answer.test_ids.length > 0 && <p className="text-[12px] text-muted-foreground">From: {answer.test_ids.map((id) => byID.get(id)?.name ?? id).join(", ")}</p>}
+              <p className="text-[12px] text-muted-foreground">Written by {ai.ready?.model} from your finished tests. Check it against the results.</p>
+            </div>
+          )}
+        </div>
+      )}
+      <input aria-label="Search past tests" className={`${field} w-full`} placeholder="Search past tests: headline, pricing…" value={q} onChange={(e) => setQ(e.target.value)} />
+      <ErrorText>{error}</ErrorText>
+      {items && items.length === 0 && <p className="text-muted-foreground">{q ? "No finished test mentions that." : "No finished tests yet. What each one taught shows here when it ends."}</p>}
+      {items?.map((i) => (
+        <div key={i.id} className="space-y-1 rounded-md border p-3">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <span className="font-medium">{i.learning?.headline ?? i.name}</span>
+            {i.winner ? <Badge tone="green">{i.winner} won</Badge> : <Badge tone="grey">No clear winner</Badge>}
+          </div>
+          {i.learning && <p>{i.learning.learning}</p>}
+          <p className="text-muted-foreground">{i.outcome}</p>
+          <p className="text-[12px] text-muted-foreground">
+            {i.name} · <span className="font-mono">{i.flag_key}</span> · judged on {i.goal}{i.decision ? ` · kept ${i.decision}` : ""}
+            {i.learning && i.learning.tags.length > 0 && ` · ${i.learning.tags.join(", ")}`}
+          </p>
+        </div>
+      ))}
+    </div>
+  );
+}
+

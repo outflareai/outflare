@@ -78,6 +78,10 @@ Agents forget everything between chats, and different clients share nothing. Out
 | `remember` | Save one lasting fact, preference or decision in a sentence. Never transcripts |
 | `list_memories` | Search memories before asking something the person may have said before |
 | `update_memory`, `forget` | Correct or delete a memory |
+| `find_knowledge` | The passages of the knowledge base that best answer a question, by words and meaning: what every AI in Outflare reads. Use before stating facts about the business; `audience: customers` returns only what customers may be told |
+| `ask_knowledge` | A short answer written by the workspace's own AI model from the knowledge alone, with its sources. `answered: false` is a gap: say so, and offer `add_knowledge` |
+| `list_knowledge_gaps`, `dismiss_knowledge_gap` | The questions the knowledge couldn't answer, most asked first: what to write next. Set one aside once answered or when it needs no answer |
+| `get_knowledge_stats` | How much is written, what each AI may use, and how many questions it answered this month |
 | `search_knowledge`, `get_knowledge` | Search the knowledge base (articles and quick answers the business wrote) before answering a question about its products, prices or policies, then read the best match. Never tell a customer what is `team` |
 | `add_knowledge`, `update_knowledge` | Write down a policy, process, product detail or stock answer longer than a memory, or correct one (the old text is kept as a version) |
 | `delete_knowledge`, `restore_knowledge` | Move an item to the bin (kept 30 days), or take it out |
@@ -125,6 +129,7 @@ Read (always available):
 | `list_email_topics` | Subscription topics for lifecycle email, such as product updates |
 | `list_email_broadcasts`, `get_email_broadcast` | Lifecycle emails sent to many people at once, with results; who was skipped and why |
 | `list_journeys`, `get_journey`, `list_journey_runs`, `list_journey_step_kinds` | If-this-then-that flows for people on customer records, what each step did, who is in them, and every kind of step a journey can have |
+| `get_automation_map` | Every rule and journey as one graph, with what sets each off, what it touches, its volume for the last 7 days, and flags for loops, overlapping emails, unused events and journeys that never start. Needs `emails.read` and `customers.read` |
 | `list_rules`, `get_rule`, `simulate_rule`, `list_rule_firings` | The rules engine: rules that turn what happens to records into business events, a dry run of what one would have done, and when it fired for whom |
 | `list_emails`, `get_email`, `get_email_recipient` | Transactional and lifecycle emails with delivery status, opens, clicks and what triggered each; one email's content and timeline; everything one address was sent |
 | `list_lead_lists`, `get_lead_list` | Lead lists with sizes, search settings and the latest build |
@@ -132,7 +137,7 @@ Read (always available):
 | `list_smart_lists`, `get_smart_list`, `list_smart_list_members`, `preview_smart_list` | Smart lists: people on customer records who match rules now (a field, an event in the last N days, being in a lead list), who is in each, and how many a set of rules would pick |
 | `list_flags`, `get_flag`, `evaluate_flags` | Feature flags: switches and splits (A/B tests) the website script and servers read, and which version a given visitor gets and why |
 | `list_ab_tests`, `get_ab_test`, `get_ab_test_results`, `get_ab_test_breakdown` | A/B tests of feature flags, and how each version is doing on conversion, count or revenue per visitor: chance to beat the control, lift with its range, whether it is safe to stop, the winner, and the results by device, source, country or new and returning visitors |
-| `plan_ab_test`, `get_ab_test_ai_run` | How long a test would take from the site's real traffic, and the answer of an AI run |
+| `plan_ab_test`, `get_ab_test_ai_run`, `list_ab_test_learnings` | How long a test would take from the site's real traffic, the answer of an AI run, and the library of what past tests taught |
 | `list_data_providers` | Connected data providers that search, find emails or enrich, and the filters each understands |
 | `list_list_runs`, `get_list_run` | Builds, refreshes and enrichments: found, added, skipped by reason, credits spent |
 | `get_lead_sources` | Which data provider a lead came from |
@@ -177,7 +182,9 @@ Read (always available):
 | `list_senders`, `list_teams` | Who mailboxes send as, and the teams that own sequences and senders |
 | `use_mission` | Act inside a mission from now on, or stop (null) |
 | `list_playbooks`, `get_playbook`, `start_playbook` | Ready-made playbooks with whether the workspace is ready for each (connections and data still missing); start one as a mission draft with its prompt filled in. Needs `missions.read`, and `missions.run` to start |
-| `preview_kit`, `apply_kit` | What a playbook's setup kit (a pipeline, fields on people and companies, option lists, email drafts) would add, and setting it up once the person agrees. It only adds and stops at a conflict. Needs `customers.read` to preview; `catalog.manage`, and `emails.manage` for email drafts, to apply |
+| `preview_kit`, `apply_kit` | What a playbook's setup kit (a pipeline, fields on people and companies, option lists, email drafts, and a flow kit's smart lists, rules and journeys) would add, and setting it up once the person agrees, with the kit's inputs. It only adds, adds automations as drafts, and stops at a conflict. Needs `customers.read` to preview; `catalog.manage`, plus `emails.manage` for email drafts and journeys and `customers.manage` for smart lists and rules, to apply |
+| `export_kit` | Journeys written out as a flow kit file, with the journeys, lists, emails and rules they use. Ids become placeholders, sequences and chosen events become inputs, and the file is checked as a shipped kit is. Changes nothing. Needs `emails.read` and `customers.read` |
+| `preview_kit_file`, `apply_kit_file` | The same as `preview_kit` and `apply_kit`, for a kit file sent with the call, such as one exported from another workspace. Same scopes |
 | `list_missions`, `get_mission` | Missions; check in on one: its brand's context, what writes do now, limits, progress, open connect requests, notes from people |
 | `list_mission_actions`, `get_mission_action` | Writes held or dry-run in a mission, and their decisions and results |
 | `list_mission_calls` | Every call made in a mission |
@@ -260,7 +267,7 @@ Write (left out when `OUTFLARE_MCP_READ_ONLY=1`):
 | `add_to_static_list`, `remove_from_static_list` | Put people in, or take them out of, a static list (`create_smart_list` with kind static), which holds the people put in it |
 | `create_flag`, `update_flag`, `archive_flag` | Add a switch or a split between versions, turn it on or off, change who gets it, or archive it |
 | `create_ab_test`, `update_ab_test`, `get_ab_test_checklist`, `start_ab_test`, `end_ab_test`, `freeze_ab_test`, `duplicate_ab_test`, `ship_ab_test` | Set up an A/B test of a flag with its control, goals and guardrails, check it before it starts, start measuring, stop new visitors joining, end it with the version chosen, copy it into a new draft, or ship a version to everyone |
-| `suggest_ab_tests`, `write_ab_test_versions`, `summarize_ab_test` | Have the workspace's own AI model suggest tests, write versions of a flag from a prompt, or summarise results (the engine decides the recommendation) |
+| `suggest_ab_tests`, `write_ab_test_versions`, `summarize_ab_test`, `write_ab_test_learning`, `ask_ab_tests` | Have the workspace's own AI model suggest tests, write versions of a flag from a prompt, summarise results (the engine decides the recommendation), write what a finished test taught, or answer a question over past tests |
 | `cancel_list_run` | Stop a run; leads already added stay |
 | `create_sequence` | Create a draft sequence with steps (it sends nothing yet) |
 | `update_sequence` | Change settings (including optional click tracking and the unsubscribe header), or set status `active`, `paused` or `archived` |
@@ -354,6 +361,7 @@ Write (left out when `OUTFLARE_MCP_READ_ONLY=1`):
 | `list_attribution_models`, `create_attribution_model`, `update_attribution_model`, `archive_attribution_model` | The workspace's own attribution models: windows per channel, channels left out, position weights and half-life, each change a new version |
 | `list_conversion_definitions`, `create_conversion_definition`, `update_conversion_definition`, `archive_conversion_definition`, `list_conversion_presets`, `add_conversion_preset` | What the workspace counts as a conversion: an event, filters, a value and each ad network's name for it, with presets by kind of business |
 | `get_attribution_channels`, `get_attribution_campaigns` | Visits, conversions, revenue and cost per channel, and per source and campaign, under any model |
+| `get_attribution_ads` | Per paid ad campaign, ad set or ad: first-party visits, credited conversions and revenue beside the platform's spend and its own conversion count |
 | `list_attribution_conversions` | Credited sign-ups, payments and refunds with the visits that got the credit |
 | `list_ad_connections` | List connected ad platforms and what each still needs |
 | `list_ad_accounts` | List ad accounts with currency, brand and sync status |
@@ -430,7 +438,7 @@ Write (left out when `OUTFLARE_MCP_READ_ONLY=1`):
 | `list_social_publications`, `create_social_publication`, `update_social_publication`, `draft_social_publication`, `cancel_social_publication` | The brand's own original posts on X and LinkedIn: write one or have the workspace's own AI draft it, with a tracked link and an optional time; a person approves each one in Outflare before it posts (there is no approve tool) |
 | `list_social_series`, `create_social_series`, `update_social_series`, `add_series_post` | Recurring posts such as a daily changelog summary: a person approves the series once, then each post handed in goes out with no other approval, up to its daily limit |
 
-Tools carry MCP annotations: read tools are marked read-only, tools that delete or end something (`delete_lead`, `delete_smart_list`, `archive_flag`, `end_ab_test`, `ship_ab_test`, `delete_webhook`, `delete_inbox_tag`, `delete_inbox_view`, `delete_email_domain`, `delete_email_template`, `delete_spend_entry`, `disconnect_integration`, `stop_enrollment`, `stop_mission`, `complete_mission`, `cancel_infra_plan`, `move_mailboxes`, `delete_seo_site`, `stop_crawl`, `delete_ai_cohort`, `delete_ai_prompt`, `stop_ai_run`, `delete_social_watch`, `cancel_social_publication`, `delete_ai_fact`) are marked destructive, and the tools that cause email to go out (`update_sequence`, `enroll_leads`, `reply_to_inbox_message`, `set_warmup`, `resolve_orphaned_follow_ups`, `approve_infra_plan`, `test_webhook`, `redeliver_webhook`, `send_email`) are marked as reaching the outside world, so clients can ask before running them, and so is `add_series_post`, which posts on the brand's account. So are the tools that spend data provider credits (`preview_lead_search`, `create_lead_list`, `run_lead_list`) and SEO calls (`get_seo_report`, `sync_seo`), and the tools that ask AI models on the workspace's own key (`run_ai_prompts`, `suggest_ab_tests`, `write_ab_test_versions`, `summarize_ab_test`). Crawls and ownership checks (`start_crawl`, `verify_seo_site`) visit the site too.
+Tools carry MCP annotations: read tools are marked read-only, tools that delete or end something (`delete_lead`, `delete_smart_list`, `archive_flag`, `end_ab_test`, `ship_ab_test`, `delete_webhook`, `delete_inbox_tag`, `delete_inbox_view`, `delete_email_domain`, `delete_email_template`, `delete_spend_entry`, `disconnect_integration`, `stop_enrollment`, `stop_mission`, `complete_mission`, `cancel_infra_plan`, `move_mailboxes`, `delete_seo_site`, `stop_crawl`, `delete_ai_cohort`, `delete_ai_prompt`, `stop_ai_run`, `delete_social_watch`, `cancel_social_publication`, `delete_ai_fact`) are marked destructive, and the tools that cause email to go out (`update_sequence`, `enroll_leads`, `reply_to_inbox_message`, `set_warmup`, `resolve_orphaned_follow_ups`, `approve_infra_plan`, `test_webhook`, `redeliver_webhook`, `send_email`) are marked as reaching the outside world, so clients can ask before running them, and so is `add_series_post`, which posts on the brand's account. So are the tools that spend data provider credits (`preview_lead_search`, `create_lead_list`, `run_lead_list`) and SEO calls (`get_seo_report`, `sync_seo`), and the tools that ask AI models on the workspace's own key (`run_ai_prompts`, `suggest_ab_tests`, `write_ab_test_versions`, `summarize_ab_test`, `write_ab_test_learning`, `ask_ab_tests`). Crawls and ownership checks (`start_crawl`, `verify_seo_site`) visit the site too.
 
 ### Analytics prompts and resources
 

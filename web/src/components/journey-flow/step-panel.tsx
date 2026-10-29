@@ -10,6 +10,7 @@ import { Button, CopyButton, field, Input } from "@/ui";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import type { Go } from "@/pages/Lifecycle";
 import { track } from "@/lib/analytics";
+import { ExclusionPicker, type Exclusion } from "@/components/exclusion-picker";
 import { kindOf, leadsTo, opText, outputLabel, outputs, stepLabel, type Problem, type SettingsSchema, type Step, type StepKind } from "./model";
 
 type EventDefinition = Schemas["EventDefinition"];
@@ -323,10 +324,11 @@ export type TriggerFields = {
   filter: JourneyCondition[];
   entry: "once" | "again";
   goal: string;
+  exclude: Exclusion;
 };
 
-export function TriggerPanel({ value, onChange, editable, catalog, rule, onClose }: {
-  value: TriggerFields; onChange: (v: TriggerFields) => void; editable: boolean; catalog: FlowCatalog; rule?: ReactNode; onClose: () => void;
+export function TriggerPanel({ ws, value, onChange, editable, catalog, rule, onClose }: {
+  ws: string; value: TriggerFields; onChange: (v: TriggerFields) => void; editable: boolean; catalog: FlowCatalog; rule?: ReactNode; onClose: () => void;
 }) {
   const disabled = !editable;
   const events = catalog.events.map((e) => e.name);
@@ -367,6 +369,8 @@ export function TriggerPanel({ value, onChange, editable, catalog, rule, onClose
             <EventInput id="flow-goal-events" label="Goal (optional)" value={value.goal} onChange={(v) => onChange({ ...value, goal: v })} events={events}
               hint="Doing this event ends their run: they reached the goal." placeholder="upgraded" />
           </fieldset>
+          <ExclusionPicker ws={ws} value={value.exclude} onChange={(x) => onChange({ ...value, exclude: x })} disabled={disabled}
+            what="Never lets in, even when added by hand," />
           <div className="flex justify-end border-t pt-4"><Button type="button" onClick={onClose}>Done</Button></div>
         </div>
       </SheetContent>

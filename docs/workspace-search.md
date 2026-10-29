@@ -26,7 +26,7 @@ To count or add things up rather than find them, use [Query](query.md).
 
 ## Meaning-based search
 
-`mode=meaning` finds what means the same in other words: "unhappy with price" finds a reply saying "too expensive for us", and "asking about an API" finds "can we integrate it with our stack?". It covers records, mail received, meetings and deals (not lifecycle email or outreach sent), with the same scopes and brands as above. Agents pass `mode: "meaning"` to `search_workspace`.
+`mode=meaning` finds what means the same in other words: "unhappy with price" finds a reply saying "too expensive for us", and "asking about an API" finds "can we integrate it with our stack?". It covers records, mail received, meetings and deals (not lifecycle email or outreach sent); the same vectors are kept for [knowledge](knowledge.md) passages, which AI answers search with their own rules, with the same scopes and brands as above. Agents pass `mode: "meaning"` to `search_workspace`.
 
 ```sh
 curl "$OUTFLARE_URL/v1/workspaces/$WS/search?q=unhappy+with+price&mode=meaning" -H "Authorization: Bearer $OUTFLARE_TOKEN"

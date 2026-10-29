@@ -28,6 +28,7 @@ func (s *Server) routesAttribution(mux *http.ServeMux) {
 	mux.HandleFunc("PATCH /v1/workspaces/{ws}/attribution/settings", s.inWorkspace(manage, s.updateAttributionSettings))
 	mux.HandleFunc("GET /v1/workspaces/{ws}/attribution/channels", s.inWorkspace(read, s.attributionChannels))
 	mux.HandleFunc("GET /v1/workspaces/{ws}/attribution/campaigns", s.inWorkspace(read, s.attributionCampaigns))
+	mux.HandleFunc("GET /v1/workspaces/{ws}/attribution/ads", s.inWorkspace(read, s.attributionAds))
 	mux.HandleFunc("GET /v1/workspaces/{ws}/attribution/conversions", s.inWorkspace(read, s.listAttributionConversions))
 }
 
@@ -288,12 +289,13 @@ func moneyList(m map[string]float64) []money {
 }
 
 // creditRows reads credits under the filter's model, grouped by keys
-// (columns of attribution_credits cr), calling add for each group.
-func (s *Server) creditRows(ctx context.Context, ws string, f attributionFilter, keys, where string, args []any,
+// (columns of attribution_credits cr, or of tables join adds), calling add
+// for each group.
+func (s *Server) creditRows(ctx context.Context, ws string, f attributionFilter, join, keys, where string, args []any,
 	add func(key []any, name string, weight float64, currency *string, value *float64) error) error {
 	args = append([]any{ws, f.from, f.to, f.model}, args...)
 	sql := `SELECT ` + keys + `, c.name, sum(cr.weight)::float8, c.currency, sum(cr.weight * c.value_minor)::float8
-		FROM attribution_credits cr JOIN attribution_conversions c ON c.event_id = cr.event_id
+		FROM attribution_credits cr JOIN attribution_conversions c ON c.event_id = cr.event_id` + join + `
 		WHERE cr.workspace_id = $1 AND cr.model = $4 AND c.occurred_at >= $2::date AND c.occurred_at < $3::date + 1` + where +
 		f.brand.sql(`c.brand_id`, &args) + `
 		GROUP BY ` + keys + `, c.name, c.currency`
@@ -381,7 +383,7 @@ func (s *Server) attributionChannels(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	err = s.creditRows(ctx, a.WorkspaceID, f, `cr.channel`, ``, nil, func(key []any, name string, weight float64, currency *string, value *float64) error {
+	err = s.creditRows(ctx, a.WorkspaceID, f, ``, `cr.channel`, ``, nil, func(key []any, name string, weight float64, currency *string, value *float64) error {
 		ch, _ := key[0].(string)
 		row(ch).addCredit(name, weight, currency, value)
 		return nil
@@ -506,7 +508,7 @@ func (s *Server) attributionCampaigns(w http.ResponseWriter, r *http.Request) {
 		s.internal(w, r, err)
 		return
 	}
-	err = s.creditRows(ctx, a.WorkspaceID, f, `cr.channel, cr.source, cr.campaign, cr.tracking_campaign_id::text`,
+	err = s.creditRows(ctx, a.WorkspaceID, f, ``, `cr.channel, cr.source, cr.campaign, cr.tracking_campaign_id::text`,
 		` AND ($5 = '' OR cr.channel = $5)`, []any{channel},
 		func(key []any, name string, weight float64, currency *string, value *float64) error {
 			row(key).addCredit(name, weight, currency, value)

@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"html/template"
@@ -18,6 +19,7 @@ import (
 	"github.com/outflareai/outflare/engine/internal/customers"
 	"github.com/outflareai/outflare/engine/internal/leads"
 	"github.com/outflareai/outflare/engine/internal/mailbox"
+	"github.com/outflareai/outflare/engine/internal/metrics"
 	"github.com/outflareai/outflare/engine/internal/missions"
 	"github.com/outflareai/outflare/engine/internal/sending"
 )
@@ -64,6 +66,9 @@ type sequenceView struct {
 	// Most sends in 24 hours from every step together.
 	DailySendLimit *int `json:"daily_send_limit"`
 	StopOnReply    bool `json:"stop_on_reply"`
+	// Who is never enrolled: people on these lists or with these tags, or
+	// at a company with one (leads linked to a customer record).
+	Exclude customers.Exclusion `json:"exclude"`
 	// Mailbox allocation.
 	TeamID             *string         `json:"team_id"`
 	Priority           string          `json:"priority"`
@@ -109,7 +114,7 @@ func (s *Server) loadSequences(ctx context.Context, ws string, id *string) ([]se
 		       COALESCE(st.active_daily, 0), st.needed_daily, COALESCE(st.note, ''), to_char(st.planned_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"'),
 		       (SELECT count(*)::int FROM mailbox_assignments ma WHERE ma.sequence_id = sequences.id AND ma.state = 'active'),
 		       ARRAY(SELECT sender_id::text FROM sequence_senders ss WHERE ss.sequence_id = sequences.id ORDER BY sender_id),
-		       sequences.mission_id::text
+		       sequences.mission_id::text, sequences.exclude
 		FROM sequences LEFT JOIN allocation_status st ON st.sequence_id = sequences.id
 		WHERE sequences.workspace_id = $1 AND (($2::uuid IS NULL AND sequences.status <> 'archived') OR sequences.id = $2)
 		ORDER BY sequences.created_at DESC`, ws, id)
@@ -119,11 +124,14 @@ func (s *Server) loadSequences(ctx context.Context, ws string, id *string) ([]se
 	list, err := pgx.CollectRows(rows, func(r pgx.CollectableRow) (sequenceView, error) {
 		var v sequenceView
 		var prio int16
+		var exclude []byte
 		err := r.Scan(&v.ID, &v.Name, &v.Status, &v.BrandID, &v.PoolID, &v.Timezone, &v.SendDays, &v.SendStart, &v.SendEnd,
 			&v.DailyNewLimit, &v.DailySendLimit, &v.StopOnReply, &v.CreatedAt, &v.UpdatedAt,
 			&v.TeamID, &prio, &v.TargetDaily, &v.MinDaily, &v.AllocationMode, &v.StartedByAgent,
 			&v.Allocation.ActiveDaily, &v.Allocation.NeededDaily, &v.Allocation.Note, &v.Allocation.PlannedAt,
-			&v.Allocation.Mailboxes, &v.PreferredSenderIDs, &v.MissionID)
+			&v.Allocation.Mailboxes, &v.PreferredSenderIDs, &v.MissionID, &exclude)
+		_ = json.Unmarshal(exclude, &v.Exclude)
+		v.Exclude = v.Exclude.Clean()
 		v.Priority = priorityNames[prio]
 		v.Steps = []stepView{}
 		v.Links = []linkView{}
@@ -259,6 +267,8 @@ type sequenceSettings struct {
 	SendEnd       *string          `json:"send_end"`
 	DailyNewLimit optional[int]    `json:"daily_new_limit"`
 	StopOnReply   *bool            `json:"stop_on_reply"`
+	// Who is never enrolled.
+	Exclude *customers.Exclusion `json:"exclude"`
 	// Most sends in 24 hours, every step counted; null for no cap.
 	DailySendLimit optional[int] `json:"daily_send_limit"`
 
@@ -466,6 +476,9 @@ func (s *Server) createSequence(w http.ResponseWriter, r *http.Request) {
 		if id, err = s.insertSequence(ctx, tx, a, &req.sequenceSettings, req.Steps); err != nil {
 			return err
 		}
+		if err := s.saveExclusion(r, tx, a.WorkspaceID, id, req.Exclude); err != nil {
+			return err
+		}
 		return record(ctx, tx, &a.principal, a.WorkspaceID, "sequence.created", "sequence", id, map[string]any{"name": *req.Name})
 	})
 	if s.seqError(w, r, err) {
@@ -650,6 +663,9 @@ func (s *Server) updateSequence(w http.ResponseWriter, r *http.Request) {
 			return err
 		}
 		if err := writePreferred(ctx, tx, id, req.PreferredSenderIDs); err != nil {
+			return err
+		}
+		if err := s.saveExclusion(r, tx, a.WorkspaceID, id, req.Exclude); err != nil {
 			return err
 		}
 		if req.Status != nil && *req.Status == "active" && old != "active" {
@@ -931,6 +947,8 @@ func (s *Server) enroll(w http.ResponseWriter, r *http.Request) {
 		Enrolled        int `json:"enrolled"`
 		AlreadyEnrolled int `json:"already_enrolled"`
 		Suppressed      int `json:"suppressed"`
+		// Left out by the sequence's exclusion.
+		Excluded        int `json:"excluded"`
 		ActiveElsewhere int `json:"active_elsewhere"`
 	}
 	err := pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
@@ -963,6 +981,7 @@ func (s *Server) enroll(w http.ResponseWriter, r *http.Request) {
 				SELECT l.id, l.email,
 					EXISTS (SELECT 1 FROM enrollments e WHERE e.sequence_id = $1 AND e.lead_id = l.id) AS here,
 					EXISTS (`+leads.SuppressedSQL("l.workspace_id", "l.email")+`) AS suppressed,
+					`+customers.ExcludedByColumnSQL("l.record_id", "(SELECT q.exclude FROM sequences q WHERE q.id = $1)")+` AS excluded,
 					EXISTS (SELECT 1 FROM enrollments e JOIN sequences q ON q.id = e.sequence_id
 						WHERE e.lead_id = l.id AND e.status = 'active' AND e.sequence_id <> $1 AND q.status IN ('active', 'paused')) AS elsewhere
 				FROM leads l
@@ -973,24 +992,26 @@ func (s *Server) enroll(w http.ResponseWriter, r *http.Request) {
 			), ins AS (
 				INSERT INTO enrollments (workspace_id, sequence_id, lead_id, next_send_at)
 				SELECT $2, $1, id, now() FROM cand
-				WHERE NOT here AND NOT suppressed AND NOT (elsewhere AND $5)
+				WHERE NOT here AND NOT suppressed AND NOT excluded AND NOT (elsewhere AND $5)
 				ON CONFLICT DO NOTHING
 				RETURNING 1
 			)
 			SELECT (SELECT count(*) FROM ins),
 			       count(*) FILTER (WHERE here),
 			       count(*) FILTER (WHERE NOT here AND suppressed),
-			       count(*) FILTER (WHERE NOT here AND NOT suppressed AND elsewhere AND $5)
+			       count(*) FILTER (WHERE NOT here AND NOT suppressed AND excluded),
+			       count(*) FILTER (WHERE NOT here AND NOT suppressed AND NOT excluded AND elsewhere AND $5)
 			FROM cand`, id, a.WorkspaceID, req.LeadIDs, req.ListID, skip,
-		).Scan(&res.Enrolled, &res.AlreadyEnrolled, &res.Suppressed, &res.ActiveElsewhere)
+		).Scan(&res.Enrolled, &res.AlreadyEnrolled, &res.Suppressed, &res.Excluded, &res.ActiveElsewhere)
 		if err != nil {
 			return err
 		}
+		metrics.ExcludedN("sequence", res.Excluded)
 		if res.Enrolled == 0 {
 			return nil
 		}
 		return record(ctx, tx, &a.principal, a.WorkspaceID, "sequence.leads_enrolled", "sequence", id, map[string]any{
-			"enrolled": res.Enrolled, "suppressed": res.Suppressed, "active_elsewhere": res.ActiveElsewhere,
+			"enrolled": res.Enrolled, "suppressed": res.Suppressed, "excluded": res.Excluded, "active_elsewhere": res.ActiveElsewhere,
 		})
 	})
 	if s.seqError(w, r, err) {
@@ -1299,4 +1320,18 @@ func (s *Server) unsubscribe(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	unsubscribeTmpl.Execute(w, map[string]bool{"Done": true}) //nolint:errcheck
+}
+
+// saveExclusion checks and stores a sequence's exclusion, when the request
+// sets one.
+func (s *Server) saveExclusion(r *http.Request, tx pgx.Tx, ws, id string, x *customers.Exclusion) error {
+	if x == nil {
+		return nil
+	}
+	clean, err := s.checkExclusion(r, ws, *x)
+	if err != nil {
+		return err
+	}
+	_, err = tx.Exec(r.Context(), `UPDATE sequences SET exclude = $3 WHERE workspace_id = $1 AND id = $2`, ws, id, clean)
+	return err
 }

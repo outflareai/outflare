@@ -1,0 +1,68 @@
+id: activate-new-trials
+version: 1
+title: Activate new trials before they go cold
+summary: Spot sign-ups that stall before their first win, nudge them with a short journey, and tell their owner when the nudge goes unread.
+description: |
+  Most trials that never convert stall in the first few days: people sign
+  up, look around, and never take the step that shows them the value.
+  This playbook adds a ready-made automation as drafts: a list of trials
+  that haven't activated, a rule that spots anyone who signs up and
+  doesn't activate within three days, and a journey that sends them a
+  nudge, tells their owner if they don't open it, and sends one last tip.
+  The journey ends the moment someone activates. Nothing goes live until
+  you've read the emails and pressed Activate.
+tier: obvious
+goals: [activation, retention]
+publisher: outflare
+author: { github: outflareai }
+kit: trial-activation
+needs:
+  data:
+    - { check: customer_events, label: Sign-up and product events sent to Outflare }
+  connections:
+    - capability: email.send
+      label: An email provider for lifecycle email
+      recommended: [resend, postmark, amazon_ses]
+inputs:
+  - name: brand
+    label: Brand
+    example: Northpeak
+  - name: signup_event
+    label: The event that means signed up
+    example: signed_up
+  - name: activated_event
+    label: The event that means activated
+    help: The action that shows a new user got value. Leave it empty and the agent suggests one from your events.
+    example: project_created
+    optional: true
+steps:
+  - say: Look at the events new users send in their first week and pick the one that best marks activation, unless one was given.
+    tools: [listEventDefinitions, listCustomerEvents]
+  - say: Check what the setup kit would add, then add it with those events. Its list, rule and journey arrive as drafts.
+    tools: [previewKit, applyKit]
+  - say: Rewrite the two emails in the brand's voice, and dry-run the rule to see how many sign-ups it would have caught.
+    tools: [getBrandContext, updateEmailTemplate, simulateRule]
+  - say: Test the journey with a recent sign-up, then ask a person to read the emails and turn the rule and the journey on.
+    tools: [getJourney, testJourney]
+guardrails:
+  - The rule and the journey are turned on only after a person approves them.
+  - Contact rules and opt-outs apply to every email, and the journey stops as soon as someone activates.
+measure:
+  - metric: Activation rate
+    how: "Share of new sign-ups who activate within 7 days, before and after."
+  - metric: Stalled trials recovered
+    how: "Share of people the rule caught who activated within 14 days of the nudge."
+prompt: |
+  Run the "Activate new trials" playbook for {{brand}}. Sign-ups arrive as
+  {{signup_event}}. Find the event that best shows a new user got value
+  (use "{{activated_event}}" if I gave one), then preview and apply the
+  trial-activation setup kit with those two events. Rewrite its two emails
+  in our voice, dry-run the "Stalled after sign-up" rule over the last 30
+  days, and test the "Activate new trials" journey with a recent sign-up.
+  Don't turn anything on: show me the emails, the dry run and the test
+  first.
+example: |
+  Northpeak's rule would have caught 214 sign-ups in the last 30 days who
+  never created a project. The journey's test with a recent one showed
+  the nudge, a two-day wait, and an alert to their owner because the nudge
+  wasn't opened.

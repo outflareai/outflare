@@ -2,8 +2,12 @@ package api_test
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"testing"
+	"time"
+
+	"github.com/jackc/pgx/v5"
 
 	"github.com/outflareai/outflare/engine/internal/api"
 	"github.com/outflareai/outflare/engine/internal/connectors"
@@ -112,5 +116,68 @@ func TestCompanyDomain(t *testing.T) {
 		if got := customers.CompanyDomain(in); got != want {
 			t.Errorf("%q = %q, want %q", in, got, want)
 		}
+	}
+}
+
+// An extension starts a mission for the caller, such as a loop's brief: a
+// draft that waits for a person, through the same checks as the API.
+func TestExtensionStartsMission(t *testing.T) {
+	got := track.Capture(t)
+	var e *env
+	e = freshEnvWith(t, func(o *api.Options) {
+		o.WorkspaceRoutes = []api.WorkspaceRoute{{
+			Pattern: "POST /v1/workspaces/{ws}/loop/start", Scope: "missions.read",
+			Handler: func(w http.ResponseWriter, r *http.Request, c *api.Caller) {
+				var in struct {
+					Name   string `json:"name"`
+					Past   bool   `json:"past"`
+					Budget int64  `json:"budget"`
+				}
+				if !c.Decode(w, r, &in) {
+					return
+				}
+				d := api.MissionDraft{Name: in.Name, Goal: "Ten live links a month", Instructions: "Keep the link playbooks running.", Plan: "1. Read the results.",
+					Mode: "approve_writes", MaxSpendCents: &in.Budget}
+				if in.Past {
+					at := time.Now().Add(-time.Hour)
+					d.EndsAt = &at
+				}
+				ctx := r.Context()
+				var id string
+				err := pgx.BeginFunc(ctx, e.pool, func(tx pgx.Tx) error {
+					var err error
+					id, err = c.StartMission(ctx, tx, d)
+					return err
+				})
+				switch {
+				case errors.Is(err, api.ErrMissionInvalid):
+					api.WriteError(w, r, http.StatusBadRequest, "invalid_request", err.Error())
+				case errors.Is(err, api.ErrMissionDenied):
+					api.WriteError(w, r, http.StatusForbidden, "forbidden", err.Error())
+				case err != nil:
+					c.Internal(w, r, err)
+				default:
+					api.WriteJSON(w, http.StatusCreated, map[string]any{"mission_id": id})
+				}
+			},
+		}}
+	})
+	owner, ws := setupOwner(t, e.h)
+	base := "/v1/workspaces/" + ws
+
+	id := owner.must(201, "POST", base+"/loop/start", map[string]any{"name": "Link autopilot", "budget": 5000})["mission_id"].(string)
+	m := owner.must(200, "GET", base+"/missions/"+id, nil)["mission"].(map[string]any)
+	if m["status"] != "draft" || m["name"] != "Link autopilot" || m["mode"] != "approve_writes" || m["limits"].(map[string]any)["max_spend_cents"].(float64) != 5000 {
+		t.Fatalf("mission: %v", m)
+	}
+	if res := owner.must(400, "POST", base+"/loop/start", map[string]any{"name": " "}); res["error"].(map[string]any)["message"] != "name is required, up to 200 characters" {
+		t.Fatalf("no name: %v", res)
+	}
+	owner.must(400, "POST", base+"/loop/start", map[string]any{"name": "Late", "past": true})
+	out := owner.must(201, "POST", base+"/api-tokens", map[string]any{"name": "Reader", "scopes": []string{"missions.read"}})
+	reader := &client{t: t, h: e.h, bearer: out["token"].(string)}
+	reader.must(403, "POST", base+"/loop/start", map[string]any{"name": "Not mine"})
+	if n := len(named(got(), "mission.created")); n != 1 {
+		t.Fatalf("mission.created: %d", n)
 	}
 }

@@ -222,6 +222,11 @@ var (
 		Namespace: namespace, Subsystem: "rules", Name: "evaluations_total",
 		Help: "Rules evaluated for a record, by trigger kind and outcome (fired; or why not: no_match, duplicate, cooldown, late, before_live, too_deep, manual; absence clocks started and stopped).",
 	}, []string{"trigger", "outcome"})
+	// Exclusions: people a journey, broadcast or sequence left out.
+	excluded = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Namespace: namespace, Subsystem: "automations", Name: "excluded_total",
+		Help: "People an automation's exclusion left out, by where (journey: refused entry; broadcast: skipped; sequence: not enrolled).",
+	}, []string{"where"})
 	queryRuns = prometheus.NewCounterVec(prometheus.CounterOpts{
 		Namespace: namespace, Subsystem: "query", Name: "runs_total",
 		Help: "Queries run, by outcome (success, invalid, timeout, unavailable, error).",
@@ -246,6 +251,14 @@ var (
 	semanticDuration = prometheus.NewHistogram(prometheus.HistogramOpts{
 		Namespace: namespace, Subsystem: "semantic_search", Name: "embed_run_seconds",
 		Help: "Time one embedding job took, the provider's API included.", Buckets: []float64{.1, .5, 1, 2.5, 5, 10, 30, 60, 120, 300},
+	})
+	knowledgeAsks = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Namespace: namespace, Subsystem: "knowledge", Name: "asks_total",
+		Help: "Questions asked of the knowledge base, by outcome (answered, unanswered, no_ai, error).",
+	}, []string{"outcome"})
+	knowledgeAskDuration = prometheus.NewHistogram(prometheus.HistogramOpts{
+		Namespace: namespace, Subsystem: "knowledge", Name: "ask_seconds",
+		Help: "Time to answer a question from knowledge: finding passages and the AI model's answer.", Buckets: []float64{.1, .25, .5, 1, 2.5, 5, 10, 20, 30, 60},
 	})
 	semanticAvailable = prometheus.NewGauge(prometheus.GaugeOpts{
 		Namespace: namespace, Subsystem: "semantic_search", Name: "available",
@@ -280,7 +293,7 @@ var (
 	// page reader.
 	reviewReads = prometheus.NewCounterVec(prometheus.CounterOpts{
 		Namespace: namespace, Subsystem: "reviews", Name: "page_reads_total",
-		Help: "Review page reads, by platform and outcome (success, blocked, page_not_found, not_a_review_page, save_failed, connector_error).",
+		Help: "Review page reads, by platform and outcome (success, pending, blocked, slow_page, page_not_found, not_a_review_page, save_failed, connector_error).",
 	}, []string{"platform", "outcome"})
 	// Scheduled syncs of connections (analytics, Search Console, page
 	// conversions, ads, SEO snapshots).
@@ -292,7 +305,7 @@ var (
 	// public profiles in brand links.
 	socialReads = prometheus.NewCounterVec(prometheus.CounterOpts{
 		Namespace: namespace, Subsystem: "social", Name: "account_reads_total",
-		Help: "Social account reads, by channel and outcome (success, blocked, page_not_found, invalid_address, no_follower_count, save_failed, connector_error).",
+		Help: "Social account reads, by channel and outcome (success, blocked, slow_page, page_not_found, invalid_address, no_follower_count, save_failed, connector_error).",
 	}, []string{"channel", "outcome"})
 	reviewsFound = prometheus.NewCounterVec(prometheus.CounterOpts{
 		Namespace: namespace, Subsystem: "reviews", Name: "new_total",
@@ -397,8 +410,8 @@ var own = []prometheus.Collector{
 	hooksReceived, hookEvents, hookLag,
 	domainConnectLookups, domainConnectDuration,
 	queryRuns, queryDuration, queryRows,
-	ruleEvaluations,
-	semanticRuns, semanticItems, semanticDuration, semanticAvailable, semanticWorkspaces,
+	ruleEvaluations, excluded,
+	semanticRuns, semanticItems, semanticDuration, semanticAvailable, semanticWorkspaces, knowledgeAsks, knowledgeAskDuration,
 	adConversions, adConversionsOldest,
 	meetingEvents, meetingEventsPending,
 	reviewReads, reviewsFound, socialReads, syncRuns, linkReads, linkPageChecks, archiveLookups, linkPitches, linkReplies, linkLiveChecks, webSearches,
@@ -555,6 +568,17 @@ func FlagCache(hit bool) {
 // and outcome.
 func RuleEvaluated(trigger, outcome string) { ruleEvaluations.WithLabelValues(trigger, outcome).Inc() }
 
+// Excluded records people an exclusion left out of a journey, a
+// broadcast or a sequence.
+func Excluded(where string) { excluded.WithLabelValues(where).Inc() }
+
+// ExcludedN records n people an exclusion left out at once.
+func ExcludedN(where string, n int) {
+	if n > 0 {
+		excluded.WithLabelValues(where).Add(float64(n))
+	}
+}
+
 // ABResults records counting one A/B test's results: its outcome (ok,
 // error) and time.
 func ABResults(outcome string, d time.Duration) {
@@ -575,6 +599,13 @@ func SemanticEmbedded(outcome string, items int, d time.Duration) {
 	semanticRuns.WithLabelValues(outcome).Inc()
 	semanticItems.Add(float64(items))
 	semanticDuration.Observe(d.Seconds())
+}
+
+// KnowledgeAsked records one question asked of the knowledge base: its
+// outcome and how long the answer took.
+func KnowledgeAsked(outcome string, d time.Duration) {
+	knowledgeAsks.WithLabelValues(outcome).Inc()
+	knowledgeAskDuration.Observe(d.Seconds())
 }
 
 // SetSemanticAvailable says whether the database has pgvector.

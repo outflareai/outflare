@@ -57,6 +57,8 @@ type ruleView struct {
 	ManualEdits     bool              `json:"manual_edits"`
 	Version         int               `json:"version"`
 	ActivatedAt     *time.Time        `json:"activated_at"`
+	// The flow kit that added it, if one did.
+	Kit *kitRef `json:"kit"`
 	// How often it fired: only on a single rule.
 	Stats     *ruleStats `json:"stats,omitempty"`
 	CreatedAt time.Time  `json:"created_at"`
@@ -71,16 +73,18 @@ func (v ruleView) engine(ws string) rules.Rule {
 }
 
 const ruleSelect = `SELECT id, name, description, status, brand_id, record_type, trigger, conditions, match, emit_event, fire,
-	cooldown_seconds, manual_edits, version, activated_at, created_at, updated_at FROM rules WHERE workspace_id = $1`
+	cooldown_seconds, manual_edits, version, activated_at, created_at, updated_at, kit_id, kit_key FROM rules WHERE workspace_id = $1`
 
 func scanRuleView(row pgx.Row) (ruleView, error) {
 	var v ruleView
 	var trigger, conds []byte
+	var kitID, kitKey *string
 	err := row.Scan(&v.ID, &v.Name, &v.Description, &v.Status, &v.BrandID, &v.RecordType, &trigger, &conds, &v.Match, &v.EmitEvent, &v.Fire,
-		&v.CooldownSeconds, &v.ManualEdits, &v.Version, &v.ActivatedAt, &v.CreatedAt, &v.UpdatedAt)
+		&v.CooldownSeconds, &v.ManualEdits, &v.Version, &v.ActivatedAt, &v.CreatedAt, &v.UpdatedAt, &kitID, &kitKey)
 	if err != nil {
 		return v, err
 	}
+	v.Kit = newKitRef(kitID, kitKey)
 	v.Conditions = []rules.Condition{}
 	_ = json.Unmarshal(trigger, &v.Trigger)
 	_ = json.Unmarshal(conds, &v.Conditions)

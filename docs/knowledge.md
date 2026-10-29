@@ -35,6 +35,22 @@ Every change to an item's title or text keeps the earlier version. Open **Histor
 
 Deleting moves an item to the **bin**. It stays there for 30 days and can be restored; then it is deleted for good. You can also empty it from the bin straight away.
 
+## How AI uses it
+
+Every AI in Outflare reads the knowledge base the same way, so what you write is what agents, missions, MCP clients and (as they ship) support replies say.
+
+- **Passages.** Each item is split into passages: a quick answer is one, an article one per section (each heading starts a new one), with long sections cut at paragraphs. They are rebuilt whenever the text changes.
+- **Finding them.** A question finds passages by its words (title, section heading and text, any of the question's words) and, when [meaning-based search](workspace-search.md#meaning-based-search) runs, by what it means, so "is it expensive?" finds the section on pricing. With no AI connection that makes embeddings, words alone still work. Passages of knowledge in the bin or in draft are never found.
+- **Who it's for.** Every question is asked for the team (every item) or for customers (only **Public** and **Customers via AI** items). An answer meant for a customer can't see **Team only** knowledge at all: it is left out before the AI model reads anything.
+- **Brands.** A brand's question finds that brand's knowledge and the shared knowledge, never another brand's.
+- **Answers.** Asking has the workspace's own AI model (the **Knowledge answers** task under Settings, AI model, on your own key and AI limit) write a short answer from the passages it found and nothing else, citing them. When they don't cover the question, it says so instead of guessing: that is a gap worth writing.
+- **Agents.** `get_context` and a mission's check-in say how much knowledge there is and to check it before stating facts; the built-in agent is told to as well.
+- **Kept for later.** Each question, whether it was answered, and which items the answer used are kept, for use counts and the list of gaps.
+
+### Ask your knowledge
+
+The **Ask** box on the Knowledge page asks a question the way an agent would. Pick who the answer is for (your team, or a customer), and it shows the answer with the articles it used, each one click from its editor. A question the knowledge doesn't cover offers **Write the answer**, which starts a quick answer with the question filled in. Without an AI model it still shows the passages it found.
+
 ## The API and MCP
 
 | What | API | MCP |
@@ -45,6 +61,8 @@ Deleting moves an item to the **bin**. It stays there for 30 days and can be res
 | Change | `PATCH .../knowledge/items/{id}` | `update_knowledge` |
 | Delete (to the bin), restore | `DELETE .../knowledge/items/{id}`, `POST .../knowledge/items/{id}/restore` | `delete_knowledge`, `restore_knowledge` |
 | History | `GET .../knowledge/items/{id}/versions`, `POST .../versions/{n}/restore` | `list_knowledge_versions`, `restore_knowledge_version` |
+| Find passages for a question | `GET .../knowledge/passages?q=&audience=` | `find_knowledge` |
+| Ask for an answer with sources | `POST .../knowledge/ask` | `ask_knowledge` |
 | Folders | `GET`, `POST .../knowledge/collections`, `PATCH`, `DELETE .../knowledge/collections/{id}` | `list_knowledge_folders`, `add_knowledge_folder`, `update_knowledge_folder`, `delete_knowledge_folder` |
 
 ```sh

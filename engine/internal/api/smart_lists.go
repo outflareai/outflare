@@ -45,20 +45,25 @@ type smartListView struct {
 	Members     int               `json:"members"`
 	RefreshedAt *time.Time        `json:"refreshed_at"`
 	ErrorCode   *string           `json:"error_code"`
-	CreatedAt   time.Time         `json:"created_at"`
-	UpdatedAt   time.Time         `json:"updated_at"`
+	// The flow kit that added it, if one did.
+	Kit       *kitRef   `json:"kit"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
 }
 
 const smartListSelect = `SELECT l.id, l.name, l.description, l.kind, l.brand_id, l.rules, l.match, l.members, l.refreshed_at, l.error_code,
-	l.created_at, l.updated_at FROM smart_lists l WHERE l.workspace_id = $1`
+	l.created_at, l.updated_at, l.kit_id, l.kit_key FROM smart_lists l WHERE l.workspace_id = $1`
 
 func scanSmartList(row pgx.Row) (smartListView, error) {
 	var v smartListView
 	var rules []byte
-	err := row.Scan(&v.ID, &v.Name, &v.Description, &v.Kind, &v.BrandID, &rules, &v.Match, &v.Members, &v.RefreshedAt, &v.ErrorCode, &v.CreatedAt, &v.UpdatedAt)
+	var kitID, kitKey *string
+	err := row.Scan(&v.ID, &v.Name, &v.Description, &v.Kind, &v.BrandID, &rules, &v.Match, &v.Members, &v.RefreshedAt, &v.ErrorCode, &v.CreatedAt, &v.UpdatedAt,
+		&kitID, &kitKey)
 	if err != nil {
 		return v, err
 	}
+	v.Kit = newKitRef(kitID, kitKey)
 	v.Rules = []smartlists.Rule{}
 	if v.Kind == smartlists.KindStatic {
 		// A static list's stored rules only keep older versions from

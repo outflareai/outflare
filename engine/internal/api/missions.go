@@ -312,6 +312,16 @@ func (s *Server) getMission(w http.ResponseWriter, r *http.Request) {
 		s.internal(w, r, err)
 		return
 	}
+	// What the knowledge base holds for the mission's brand, and how to use it.
+	brandKey := ""
+	if v.BrandID != nil {
+		brandKey = *v.BrandID
+	}
+	knowledge, err := s.knowledgeSummary(ctx, a, brandKey)
+	if err != nil {
+		s.internal(w, r, err)
+		return
+	}
 	updates, err := s.missionUpdates(ctx, v.ID, 0, 20, false)
 	if err != nil {
 		s.internal(w, r, err)
@@ -336,7 +346,7 @@ func (s *Server) getMission(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
 		"mission": v,
 		"brand":   brand,
-		"company": map[string]any{"context": company, "memories": memories, "markdown": md},
+		"company": map[string]any{"context": company, "memories": memories, "knowledge": knowledge, "markdown": md + knowledgeMarkdown(knowledge)},
 		"updates": updates,
 		// Connectors the agent asked a person to set up, still open.
 		"open_connect_requests": requests,

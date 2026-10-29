@@ -53,12 +53,37 @@ The script then asks for the visitor's flags as the page loads (and again after 
 
 ### No flicker
 
-The script loads without holding up the page, so the original can show for a moment before a version replaces it. To prevent that, put this in `<head>` before anything else: the page stays hidden until the flags arrive, and never longer than one and a half seconds.
+The script loads without holding up the page, so the original can show for a moment before a version replaces it. There are two ways to prevent that.
+
+**Decide on your server (best).** Your server asks for the visitor's flags ([below](#on-your-servers)), renders their version, and hands the same answer to the page in a tag the script reads before anything else. The visitor sees their version in the first paint, the script makes no request for it, and the test still counts them when the page shows it.
+
+```html
+<script type="application/json" id="outflare-flags">{"anonymousId":"the visitor's id","flags":{"pricing-headline":"faster"},"payloads":{}}</script>
+```
+
+Decide for the `of_aid` cookie when the browser has one. Without it, make an id (8 to 64 letters, digits and dashes): the script uses the server's id for that page, and keeps it in the cookie only when the visitor's consent allows, as it does its own. An answer decided for a different id than the browser's is ignored, and the script asks as usual. The SDKs build the tag, escaped so content in a payload can't break out of it:
+
+```ts
+import { createClient, flagsBootstrapTag } from "@outflare/sdk";
+
+const anonymousId = cookies.get("of_aid") ?? crypto.randomUUID();
+const { data } = await gtm.POST("/v1/workspaces/{ws}/flags/evaluate", {
+  params: { path: { ws } },
+  body: { anonymous_id: anonymousId, url: request.url, user_agent: request.headers.get("user-agent") ?? "" },
+});
+html = html.replace("</head>", flagsBootstrapTag(data!, anonymousId) + "</head>");
+```
+
+In Python, `outflare.flags_bootstrap_tag(client.evaluate_flags(...), anonymous_id)`. The same works at the edge (a Cloudflare Worker or Next.js middleware in front of a static site): decide, rewrite the HTML for the version, and add the tag. Keep the API token on the server: the evaluate call needs `analytics.read`, never something the browser sees.
+
+**Hide the page until the flags arrive.** On a static site with no server of your own, put this in `<head>` before anything else: the page stays hidden until the flags arrive, and never longer than one and a half seconds.
 
 ```html
 <script>document.documentElement.classList.add("of-wait"); setTimeout(function () { document.documentElement.classList.remove("of-wait"); }, 1500);</script>
 <style>.of-wait body { opacity: 0 }</style>
 ```
+
+Within a visit, the next page starts with the last answer at once. The [A/B test checklist](ab-tests.md#before-you-start) shows how long visitors actually waited for their version.
 
 ### Preview a version
 

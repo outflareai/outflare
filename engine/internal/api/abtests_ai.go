@@ -40,13 +40,16 @@ const (
 	maxVersionField = 8
 )
 
-var abAIKinds = []string{"suggest", "versions", "summary"}
+var abAIKinds = []string{"suggest", "versions", "summary", "learning", "ask"}
 
 func (s *Server) routesABTestAI(mux *http.ServeMux) {
 	read, manage := auth.ScopeAnalyticsRead, auth.ScopeAnalyticsManage
 	mux.HandleFunc("POST /v1/workspaces/{ws}/ab-tests/suggestions", s.inWorkspace(manage, s.suggestABTests))
 	mux.HandleFunc("POST /v1/workspaces/{ws}/ab-tests/versions", s.inWorkspace(manage, s.writeABVersions))
 	mux.HandleFunc("POST /v1/workspaces/{ws}/ab-tests/{test}/summary", s.inWorkspace(manage, s.summarizeABTest))
+	mux.HandleFunc("POST /v1/workspaces/{ws}/ab-tests/{test}/learning", s.inWorkspace(manage, s.writeABLearning))
+	mux.HandleFunc("GET /v1/workspaces/{ws}/ab-tests/learnings", s.inWorkspace(read, s.listABLearnings))
+	mux.HandleFunc("POST /v1/workspaces/{ws}/ab-tests/ask", s.inWorkspace(manage, s.askABTests))
 	mux.HandleFunc("GET /v1/workspaces/{ws}/ab-test-ai-runs", s.inWorkspace(read, s.listABAIRuns))
 	mux.HandleFunc("GET /v1/workspaces/{ws}/ab-test-ai-runs/{run}", s.inWorkspace(read, s.getABAIRun))
 }
@@ -171,29 +174,10 @@ func (s *Server) startABAIRun(w http.ResponseWriter, r *http.Request, kind strin
 		writeError(w, r, http.StatusConflict, "connector_needed", "this uses your own AI model: connect one under Settings, AI model")
 		return
 	}
-	raw, _ := json.Marshal(input)
 	var id string
 	err = pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
-		if err := tx.QueryRow(ctx, `INSERT INTO ab_test_ai_runs (workspace_id, brand_id, kind, test_id, flag_id, input, created_by)
-			VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id::text`, a.WorkspaceID, brandID, kind, testID, flagID, raw, nullIfEmpty(a.ActorID)).Scan(&id); err != nil {
-			return err
-		}
-		if _, err := jobs.Enqueue(ctx, tx, jobs.NewJob{Kind: jobABTestAI, WorkspaceID: &a.WorkspaceID, Payload: map[string]string{"run_id": id},
-			IdempotencyKey: jobABTestAI + ":" + id, MaxAttempts: 2}); err != nil {
-			return err
-		}
-		data := map[string]any{"kind": kind, "run_id": id, "brand_id": brandID}
-		if testID != nil {
-			data["test_id"] = *testID
-		}
-		if flagID != nil {
-			data["flag_id"] = *flagID
-		}
-		target, targetID := "ab_test_ai_run", id
-		if testID != nil {
-			target, targetID = "ab_test", *testID
-		}
-		return recordWithProps(ctx, tx, &a.principal, a.WorkspaceID, "ab_test.ai_requested", target, targetID, data, data)
+		id, err = queueABAIRun(ctx, tx, &a.principal, a.WorkspaceID, a.ActorID, kind, brandID, testID, flagID, input)
+		return err
 	})
 	if err != nil {
 		s.internal(w, r, err)
@@ -205,6 +189,33 @@ func (s *Server) startABAIRun(w http.ResponseWriter, r *http.Request, kind strin
 		return
 	}
 	writeJSON(w, http.StatusAccepted, list[0])
+}
+
+// queueABAIRun stores a run and queues its job in tx, and records
+// ab_test.ai_requested.
+func queueABAIRun(ctx context.Context, tx pgx.Tx, p *principal, ws, actorID, kind string, brandID, testID, flagID *string, input any) (string, error) {
+	raw, _ := json.Marshal(input)
+	var id string
+	if err := tx.QueryRow(ctx, `INSERT INTO ab_test_ai_runs (workspace_id, brand_id, kind, test_id, flag_id, input, created_by)
+		VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id::text`, ws, brandID, kind, testID, flagID, raw, nullIfEmpty(actorID)).Scan(&id); err != nil {
+		return "", err
+	}
+	if _, err := jobs.Enqueue(ctx, tx, jobs.NewJob{Kind: jobABTestAI, WorkspaceID: &ws, Payload: map[string]string{"run_id": id},
+		IdempotencyKey: jobABTestAI + ":" + id, MaxAttempts: 2}); err != nil {
+		return "", err
+	}
+	data := map[string]any{"kind": kind, "run_id": id, "brand_id": brandID}
+	if testID != nil {
+		data["test_id"] = *testID
+	}
+	if flagID != nil {
+		data["flag_id"] = *flagID
+	}
+	target, targetID := "ab_test_ai_run", id
+	if testID != nil {
+		target, targetID = "ab_test", *testID
+	}
+	return id, recordWithProps(ctx, tx, p, ws, "ab_test.ai_requested", target, targetID, data, data)
 }
 
 type abSuggestInput struct {
@@ -453,6 +464,12 @@ func (s *Server) RunABTestAI(ctx context.Context, ws, id string, last bool) erro
 	case "summary":
 		system, schema = abSummarySystem, abSummarySchema()
 		prompt, finish, err = s.abSummaryPrompt(ctx, ws, run)
+	case "learning":
+		system, schema = abLearningSystem, abLearningSchema()
+		prompt, finish, err = s.abLearningPrompt(ctx, ws, run)
+	case "ask":
+		system, schema = abAskSystem, abAskSchema()
+		prompt, finish, err = s.abAskPrompt(ctx, ws, run)
 	default:
 		return fail("internal", "Unknown kind of AI run.", fmt.Errorf("ab test ai run kind %q", run.kind))
 	}
@@ -464,7 +481,8 @@ func (s *Server) RunABTestAI(ctx context.Context, ws, id string, last bool) erro
 	}
 	resp, err := ai.Model.Chat(ctx, llm.Request{System: system, Messages: []llm.Message{{Role: "user", Text: prompt}}, JSONSchema: schema, MaxTokens: 3000})
 	name := ai.Provider.Name
-	label := map[string]string{"suggest": "suggested A/B tests", "versions": "wrote A/B test versions", "summary": "summarised an A/B test"}[run.kind]
+	label := map[string]string{"suggest": "suggested A/B tests", "versions": "wrote A/B test versions", "summary": "summarised an A/B test",
+		"learning": "wrote an A/B test learning", "ask": "answered a question about A/B tests"}[run.kind]
 	if serr := recordAISpend(ctx, s.pool, ai, ws, nil, run.actorID, resp.Usage, "ab_test_ai:"+id, name+" "+label); serr != nil {
 		s.log.Error("ab test ai spend", "run_id", id, "err", serr)
 	}
@@ -791,49 +809,7 @@ func (s *Server) abSummaryPrompt(ctx context.Context, ws string, run abAIRun) (s
 	if winner != "" {
 		fmt.Fprintf(&b, "Winner: %s\n", winner)
 	}
-	if res.SampleRatio {
-		fmt.Fprintf(&b, "The split between versions is broken (chance by luck %.4f).\n", res.SampleRatioP)
-	}
-	if res.CorrectedFor > 1 {
-		fmt.Fprintf(&b, "%d versions compete with %s, so every p-value and range is corrected for %d chances of a false winner.\n", res.CorrectedFor, t.Control, res.CorrectedFor)
-	}
-	for i, g := range res.Goals {
-		label := "Decides the test"
-		if g.Exploratory {
-			label = "Exploratory: watched alongside, never decides"
-		}
-		fmt.Fprintf(&b, "\n## Goal %d (%s): %s\n", i+1, label, describeGoal(g.Goal))
-		for _, a := range g.Arms {
-			switch g.Metric {
-			case abtests.MetricCount:
-				fmt.Fprintf(&b, "%s: %d visitors, %d reached it, %.3f times per visitor\n", a.Variant, a.Visitors, a.Conversions, a.Mean)
-			case abtests.MetricValue:
-				fmt.Fprintf(&b, "%s: %d visitors, %d with a value, %.2f per visitor (total %.2f)\n", a.Variant, a.Visitors, a.Conversions, a.Mean, a.Sum)
-			default:
-				fmt.Fprintf(&b, "%s: %d visitors, %d converted (%.2f%%)\n", a.Variant, a.Visitors, a.Conversions, a.Rate()*100)
-			}
-		}
-		for _, c := range g.Comparisons {
-			fmt.Fprintf(&b, "%s vs %s: chance to beat %.1f%%, lift %+.1f%% (always-valid range %+.1f%% to %+.1f%%), always-valid p %.4f, safe to stop: %v\n",
-				c.Variant, t.Control, c.ChanceToBeat*100, c.Lift*100, c.LiftLow*100, c.LiftHigh*100, c.PValue, c.PValue < abtests.Alpha)
-		}
-	}
-	for i, g := range res.Guardrails {
-		better := "higher is better"
-		if g.Goal.Better == "lower" {
-			better = "lower is better"
-		}
-		fmt.Fprintf(&b, "\n## Guardrail %d (%s, never decides): %s\n", i+1, better, describeGoal(g.Goal))
-		for _, c := range g.Comparisons {
-			fmt.Fprintf(&b, "%s vs %s: lift %+.1f%%, always-valid p %.4f\n", c.Variant, t.Control, c.Lift*100, c.PValue)
-		}
-		if len(g.Harmed) > 0 {
-			fmt.Fprintf(&b, "Clearly hurt by: %s\n", strings.Join(g.Harmed, ", "))
-		}
-	}
-	if res.Crossovers > 0 {
-		fmt.Fprintf(&b, "\n%d visitors saw more than one version.\n", res.Crossovers)
-	}
+	writeABResults(&b, t, res)
 	finish := func(text string) (any, map[string]any, error) {
 		var out struct {
 			Headline  string   `json:"headline"`
@@ -858,6 +834,54 @@ func (s *Server) abSummaryPrompt(ctx context.Context, ws string, run abAIRun) (s
 			map[string]any{"recommendation": rec, "had_winner": winner != ""}, nil
 	}
 	return b.String(), finish, nil
+}
+
+// writeABResults writes a test's results as prompt data: the split, the
+// correction, each goal's arms and comparisons, and the guardrails.
+func writeABResults(b *strings.Builder, t abTestView, res abtests.Result) {
+	if res.SampleRatio {
+		fmt.Fprintf(b, "The split between versions is broken (chance by luck %.4f).\n", res.SampleRatioP)
+	}
+	if res.CorrectedFor > 1 {
+		fmt.Fprintf(b, "%d versions compete with %s, so every p-value and range is corrected for %d chances of a false winner.\n", res.CorrectedFor, t.Control, res.CorrectedFor)
+	}
+	for i, g := range res.Goals {
+		label := "Decides the test"
+		if g.Exploratory {
+			label = "Exploratory: watched alongside, never decides"
+		}
+		fmt.Fprintf(b, "\n## Goal %d (%s): %s\n", i+1, label, describeGoal(g.Goal))
+		for _, a := range g.Arms {
+			switch g.Metric {
+			case abtests.MetricCount:
+				fmt.Fprintf(b, "%s: %d visitors, %d reached it, %.3f times per visitor\n", a.Variant, a.Visitors, a.Conversions, a.Mean)
+			case abtests.MetricValue:
+				fmt.Fprintf(b, "%s: %d visitors, %d with a value, %.2f per visitor (total %.2f)\n", a.Variant, a.Visitors, a.Conversions, a.Mean, a.Sum)
+			default:
+				fmt.Fprintf(b, "%s: %d visitors, %d converted (%.2f%%)\n", a.Variant, a.Visitors, a.Conversions, a.Rate()*100)
+			}
+		}
+		for _, c := range g.Comparisons {
+			fmt.Fprintf(b, "%s vs %s: chance to beat %.1f%%, lift %+.1f%% (always-valid range %+.1f%% to %+.1f%%), always-valid p %.4f, safe to stop: %v\n",
+				c.Variant, t.Control, c.ChanceToBeat*100, c.Lift*100, c.LiftLow*100, c.LiftHigh*100, c.PValue, c.PValue < abtests.Alpha)
+		}
+	}
+	for i, g := range res.Guardrails {
+		better := "higher is better"
+		if g.Goal.Better == "lower" {
+			better = "lower is better"
+		}
+		fmt.Fprintf(b, "\n## Guardrail %d (%s, never decides): %s\n", i+1, better, describeGoal(g.Goal))
+		for _, c := range g.Comparisons {
+			fmt.Fprintf(b, "%s vs %s: lift %+.1f%%, always-valid p %.4f\n", c.Variant, t.Control, c.Lift*100, c.PValue)
+		}
+		if len(g.Harmed) > 0 {
+			fmt.Fprintf(b, "Clearly hurt by: %s\n", strings.Join(g.Harmed, ", "))
+		}
+	}
+	if res.Crossovers > 0 {
+		fmt.Fprintf(b, "\n%d visitors saw more than one version.\n", res.Crossovers)
+	}
 }
 
 // describeGoal says what a goal measures, for a prompt.

@@ -129,6 +129,11 @@ func TestParseCapterraPageData(t *testing.T) {
 	if x := p.Reviews[0]; x.ExternalID != "Capterra___2001" || x.Rating != 5 || x.Author != "Ana P." || x.PostedAt.Format("2006-01-02") != "2025-10-28" || x.Reply != "Thank you, Ana!" {
 		t.Fatalf("product review: %+v", x)
 	}
+	// Capterra draws a "Next page" button even on a product's only page:
+	// its data, not the button, says whether there is a page 2.
+	if one := Parse(Capterra, read(t, "capterra_single_page.html"), time.Now()); one.More || len(one.Reviews) != 1 {
+		t.Fatalf("single page: %+v", one)
+	}
 }
 
 func TestPlatformRules(t *testing.T) {

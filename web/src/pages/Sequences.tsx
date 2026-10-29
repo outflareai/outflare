@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState, type FormEvent } from "react"
 import type { Enrollment, Lead, LeadList, MailboxPool, Sender, Sequence, StepInput, Team } from "@outflare/sdk";
 import { useBrand } from "@/lib/brand";
 import { BrandBadge } from "@/components/brand-badge";
+import { ExclusionPicker, noExclusion } from "@/components/exclusion-picker";
 import { api, errorMessage } from "../api";
 import type { Tab } from "../App";
 import { ask, Badge, Button, Card, confirmAction, Empty, ErrorText, field, Loading, Menu, PageHeader, Stat, Stats, toast } from "../ui";
@@ -245,7 +246,7 @@ function Settings({ ws, seq, canManage, onChange, markDirty, go }: { ws: string;
   const initial = {
     name: seq.name, pool_id: seq.pool_id, timezone: seq.timezone, send_days: seq.send_days, send_start: seq.send_start, send_end: seq.send_end, daily_new_limit: seq.daily_new_limit, daily_send_limit: seq.daily_send_limit, stop_on_reply: seq.stop_on_reply,
     team_id: seq.team_id, priority: seq.priority, target_daily: seq.target_daily, min_daily: seq.min_daily, allocation_mode: seq.allocation_mode, preferred_sender_ids: seq.preferred_sender_ids,
-    track_clicks: seq.track_clicks, unsubscribe_header: seq.unsubscribe_header,
+    track_clicks: seq.track_clicks, unsubscribe_header: seq.unsubscribe_header, exclude: seq.exclude ?? noExclusion,
   };
   const [s, setS] = useState(initial);
   const [saved, setSaved] = useState(JSON.stringify(initial));
@@ -391,6 +392,8 @@ function Settings({ ws, seq, canManage, onChange, markDirty, go }: { ws: string;
               )}
             </div>
           </details>
+          {!linked && <ExclusionPicker ws={ws} value={s.exclude} onChange={(x) => setS({ ...s, exclude: x })} disabled={!canManage}
+            what="Never enrolls" />}
           {!linked && <label className="flex items-start gap-2">
             <input type="checkbox" className="mt-0.5" checked={s.stop_on_reply} onChange={(e) => setS({ ...s, stop_on_reply: e.target.checked })} />
             <span><span className="font-medium">Stop when they reply</span><span className="block text-xs text-muted-foreground">Recommended. Auto-replies such as out-of-office don't count.</span></span>
@@ -644,7 +647,7 @@ function Leads({ ws, seq, canManage, onChange, go }: { ws: string; seq: Sequence
     e.preventDefault();
     const { data, error } = await api.POST("/v1/workspaces/{ws}/sequences/{id}/enrollments", { params: { path }, body: { list_id: listId } });
     if (error) return setMsg(errorMessage(error));
-    const skipped = [data.already_enrolled && `${data.already_enrolled} already in`, data.suppressed && `${data.suppressed} on the suppression list`, data.active_elsewhere && `${data.active_elsewhere} in another active sequence`].filter(Boolean);
+    const skipped = [data.already_enrolled && `${data.already_enrolled} already in`, data.suppressed && `${data.suppressed} on the suppression list`, data.excluded && `${data.excluded} left out by the exclusion`, data.active_elsewhere && `${data.active_elsewhere} in another active sequence`].filter(Boolean);
     setMsg(`Added ${plural(data.enrolled, "lead")}.${skipped.length ? ` Skipped ${skipped.join(", ")}.` : ""}${seq.status !== "active" && data.enrolled > 0 ? " They start once you start sending." : ""}`);
     setListId("");
     load();

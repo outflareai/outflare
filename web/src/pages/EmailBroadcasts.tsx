@@ -7,6 +7,7 @@ import { useCallback, useEffect, useState, type FormEvent } from "react";
 import type { EmailBroadcast, EmailBroadcastRecipient, EmailTemplate, EmailTopic } from "@outflare/sdk";
 import { api, errorMessage } from "../api";
 import { useBrand } from "@/lib/brand";
+import { ExclusionPicker, noExclusion, type Exclusion } from "@/components/exclusion-picker";
 import { Badge, Button, Card, confirmAction, Empty, ErrorText, field, Input, Loading, PageHeader, Stat, Stats, toast } from "../ui";
 import { ago, plural, stamp } from "../format";
 import { DataTable, type ColumnDef } from "@/components/data-table";
@@ -173,7 +174,7 @@ function BroadcastDetail({ ws, id, canManage, back, go }: { ws: string; id: stri
       />
       {s.emails === 0 && b.audience_size !== null ? (
         <Stats cols={2}>
-          <Stat label="Audience" value={b.audience_size} sub="people, before their choices" />
+          <Stat label="Audience" value={b.audience_size} sub={b.audience_excluded ? `people, before their choices; ${b.audience_excluded} left out by the exclusion` : "people, before their choices"} />
           <Stat label="Topic" value={b.topic?.name ?? "None"} sub={b.topic ? "people who left it are skipped" : "only people who left all marketing email are skipped"} />
         </Stats>
       ) : (
@@ -250,6 +251,7 @@ function BroadcastDialog({ ws, broadcast, onClose, onSaved }: { ws: string; broa
   const [name, setName] = useState(broadcast?.name ?? "");
   const [template, setTemplate] = useState(broadcast?.template.id ?? "");
   const [topic, setTopic] = useState<string | undefined>(broadcast ? broadcast.topic?.key ?? "" : undefined);
+  const [exclude, setExclude] = useState<Exclusion>(broadcast?.exclude ?? noExclusion);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   useEffect(() => {
@@ -262,7 +264,7 @@ function BroadcastDialog({ ws, broadcast, onClose, onSaved }: { ws: string; broa
   async function save(e: FormEvent) {
     e.preventDefault();
     setBusy(true);
-    const body = { name, template, ...(topic !== undefined ? { topic: topic || null } : {}) };
+    const body = { name, template, exclude, ...(topic !== undefined ? { topic: topic || null } : {}) };
     const res = broadcast
       ? await api.PATCH("/v1/workspaces/{ws}/email-broadcasts/{id}", { params: { path: { ws, id: broadcast.id } }, body })
       : await api.POST("/v1/workspaces/{ws}/email-broadcasts", { params: { path: { ws } }, body });
@@ -299,6 +301,7 @@ function BroadcastDialog({ ws, broadcast, onClose, onSaved }: { ws: string; broa
               </select>
               <span className="block text-[12px] text-muted-foreground">Who it goes to, and what the unsubscribe link leaves. The template's topic unless you pick another.</span>
             </label>
+            <ExclusionPicker ws={ws} value={exclude} onChange={setExclude} what="Skips" />
             <ErrorText>{error}</ErrorText>
             <div className="flex justify-end gap-2">
               <Button type="button" variant="ghost" onClick={onClose}>Cancel</Button>

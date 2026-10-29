@@ -1,0 +1,72 @@
+id: win-back-churned-customers
+version: 1
+title: Save failed payments and win back cancelled customers
+summary: Recover failed payments before they become churn, and win back customers a few weeks after they cancel.
+description: |
+  A lot of churn isn't a decision: a card expires, the payment fails, and
+  the account lapses without anyone noticing. And some people who cancel
+  would come back if they heard what changed. This playbook adds two
+  journeys as drafts: one that sends two reminders when a payment fails
+  and alerts the customer's owner if it's still failing, and one that
+  writes to people two and four weeks after they cancel. Both stop the
+  moment the customer pays. Nothing goes live until you've read the
+  emails and pressed Activate.
+tier: obvious
+goals: [retention, revenue]
+publisher: outflare
+author: { github: outflareai }
+kit: win-back
+needs:
+  data:
+    - { check: customer_events, label: "Payment and subscription events, sent to Outflare or from a connected payments account" }
+  connections:
+    - capability: email.send
+      label: An email provider for lifecycle email
+      recommended: [resend, postmark, amazon_ses]
+inputs:
+  - name: brand
+    label: Brand
+    example: Northpeak
+  - name: payment_failed_event
+    label: The event that means a payment failed
+    help: The event your billing system sends, such as payment.failed.
+    example: payment.failed
+  - name: paid_event
+    label: The event that means they paid
+    example: payment.succeeded
+    optional: true
+  - name: canceled_event
+    label: The event that means they cancelled
+    example: subscription.canceled
+    optional: true
+steps:
+  - say: Check which payment and cancellation events the workspace receives, and that the failed-payment event arrives.
+    tools: [listEventDefinitions, listCustomerEvents]
+  - say: Check what the setup kit would add, then add it with those events. Its list and two journeys arrive as drafts.
+    tools: [previewKit, applyKit]
+  - say: Rewrite the four emails in the brand's voice.
+    tools: [getBrandContext, updateEmailTemplate]
+  - say: Test both journeys with a recent customer, then ask a person to read the emails and turn the journeys on.
+    tools: [getJourney, testJourney]
+guardrails:
+  - The journeys are turned on only after a person approves them.
+  - Never offer a discount or a refund in these emails unless a person approves it.
+  - Contact rules and opt-outs apply to every email, and each journey stops as soon as the customer pays.
+measure:
+  - metric: Failed payments recovered
+    how: "Share of failed payments followed by a payment within 7 days, before and after."
+  - metric: Customers won back
+    how: "Share of cancelled customers who pay again within 60 days."
+prompt: |
+  Run the "Save failed payments and win back cancelled customers" playbook
+  for {{brand}}. Failed payments arrive as {{payment_failed_event}},
+  payments as {{paid_event}} and cancellations as {{canceled_event}}.
+  Check these events arrive, then preview and apply the win-back setup kit
+  with them. Rewrite its four emails in our voice, and test both journeys
+  with a recent customer. Don't turn anything on: show me the emails and
+  the tests first.
+example: |
+  Northpeak's billing system sends payment.failed. The test of "Recover a
+  failed payment" with a customer whose card had expired showed both
+  reminders, then an alert to their account manager, and the
+  payment-at-risk tag.

@@ -247,7 +247,14 @@ func (s *Server) startPlaybook(w http.ResponseWriter, r *http.Request) {
 	err = pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
 		var err error
 		if in.ApplyKit {
-			if _, err = applyKit(ctx, tx, a, kit); err != nil {
+			// The playbook takes every input its kit does (playbooks test).
+			kitInputs := map[string]string{}
+			for _, ki := range kit.Inputs {
+				if v, ok := in.Inputs[ki.Name]; ok {
+					kitInputs[ki.Name] = v
+				}
+			}
+			if _, err = applyKit(ctx, tx, a, kit, kitInputs, kitFromCatalog); err != nil {
 				return err
 			}
 		}
@@ -258,7 +265,7 @@ func (s *Server) startPlaybook(w http.ResponseWriter, r *http.Request) {
 		return recordWithProps(ctx, tx, &a.principal, a.WorkspaceID, "playbook.started", "mission", id,
 			map[string]any{"playbook_id": p.ID, "playbook_version": p.Version, "mission_id": id, "mode": modeOr(in.Mode)}, props)
 	})
-	if errors.As(err, new(errKitConflict)) && s.kitError(w, r, err) {
+	if (errors.As(err, new(errKitConflict)) || errors.As(err, new(errInvalid)) || errors.As(err, new(errDenied))) && s.kitError(w, r, err) {
 		return
 	}
 	if s.missionError(w, r, err) {

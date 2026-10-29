@@ -89,6 +89,8 @@ A static list holds the people someone, the API or a journey puts in it, such as
 
 Only people count: not companies, merged or archived records, or, for a brand's list, another brand's people. A static list is used wherever a smart list is: [rules](rules.md) acting on people joining or leaving it hear of each change.
 
+Lists also work as exclusions: a journey, broadcast or sequence can leave out everyone on chosen lists (see Exclusions in [lifecycle-email.md](lifecycle-email.md)).
+
 ## Smart lists
 
 A smart list is a group of people on your [customer records](customers.md) that keeps itself up to date: Outflare adds people when they start matching its rules and removes them when they stop. Make one from **Lists → New list → Smart list**, pick the rules, watch the count change as you go, and save.

@@ -211,9 +211,13 @@ func (s *Server) findPartner(w http.ResponseWriter, r *http.Request, ws, id stri
 func (s *Server) listPartners(w http.ResponseWriter, r *http.Request) {
 	a := accessFrom(r.Context())
 	q := r.URL.Query()
-	status, program, record := q.Get("status"), q.Get("program"), q.Get("record_id")
+	status, program, record, details := q.Get("status"), q.Get("program"), q.Get("record_id"), q.Get("payout_details")
 	if status != "" && !slices.Contains([]string{"pending", "active", "suspended", "rejected"}, status) {
 		writeError(w, r, http.StatusBadRequest, "invalid_request", "status is pending, active, suspended or rejected")
+		return
+	}
+	if details != "" && details != "missing" && details != "set" {
+		writeError(w, r, http.StatusBadRequest, "invalid_request", "payout_details is missing or set")
 		return
 	}
 	if record != "" && !validUUID(record) {
@@ -232,10 +236,10 @@ func (s *Server) listPartners(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	args := []any{a.WorkspaceID, status, strings.ToLower(program), record, before, limit + 1}
+	args := []any{a.WorkspaceID, status, strings.ToLower(program), record, before, limit + 1, details}
 	rows, err := s.pool.Query(r.Context(), partnerSelect+`
 		AND ($2 = '' OR m.status = $2) AND ($3 = '' OR p.id::text = $3 OR p.slug = $3) AND ($4 = '' OR m.record_id::text = $4)
-		AND ($5::timestamptz IS NULL OR m.created_at < $5)`+sel.sql("p.brand_id", &args)+`
+		AND ($5::timestamptz IS NULL OR m.created_at < $5) AND ($7 = '' OR (m.payout_method IS NULL) = ($7 = 'missing'))`+sel.sql("p.brand_id", &args)+`
 		ORDER BY m.created_at DESC LIMIT $6`, args...)
 	if err != nil {
 		s.internal(w, r, err)
@@ -861,15 +865,16 @@ func (s *Server) getPartnerProgramStats(w http.ResponseWriter, r *http.Request) 
 		Partners map[string]int `json:"partners"`
 		partnerStats
 	}
-	var active, pending, suspended, rejected int
+	var active, pending, suspended, rejected, missing int
 	st := &v.partnerStats
 	err := s.pool.QueryRow(r.Context(), `
-		WITH m AS (SELECT id, status FROM partner_memberships WHERE workspace_id = $1 AND program_id = $2),
+		WITH m AS (SELECT id, status, payout_method FROM partner_memberships WHERE workspace_id = $1 AND program_id = $2),
 		     w AS (SELECT w.* FROM partner_rewards w JOIN m ON m.id = w.membership_id WHERE w.workspace_id = $1)
 		SELECT (SELECT count(*) FILTER (WHERE status = 'active') FROM m)::int,
 		       (SELECT count(*) FILTER (WHERE status = 'pending') FROM m)::int,
 		       (SELECT count(*) FILTER (WHERE status = 'suspended') FROM m)::int,
 		       (SELECT count(*) FILTER (WHERE status = 'rejected') FROM m)::int,
+		       (SELECT count(*) FILTER (WHERE status = 'active' AND payout_method IS NULL) FROM m)::int,
 		       (SELECT count(*) FROM partner_clicks k JOIN m ON m.id = k.membership_id WHERE k.workspace_id = $1)::int,
 		       (SELECT count(*) FROM partner_referrals f JOIN m ON m.id = f.membership_id WHERE f.workspace_id = $1)::int,
 		       (SELECT count(*) FROM partner_referrals f JOIN m ON m.id = f.membership_id WHERE f.workspace_id = $1 AND f.first_sale_at IS NOT NULL)::int,
@@ -881,12 +886,13 @@ func (s *Server) getPartnerProgramStats(w http.ResponseWriter, r *http.Request) 
 		       COALESCE((SELECT sum(amount_cents) FILTER (WHERE status = 'paid') FROM w WHERE side = 'partner' AND kind <> 'action'), 0)::bigint,
 		       COALESCE((SELECT sum(amount_cents) FILTER (WHERE status = 'approved' AND payout_id IS NULL) FROM w WHERE side = 'partner' AND kind <> 'action'), 0)::bigint,
 		       (SELECT count(*) FROM w WHERE kind = 'action' AND status = 'approved')::int`, a.WorkspaceID, prog.ID).
-		Scan(&active, &pending, &suspended, &rejected, &st.Clicks, &st.Referrals, &st.Customers, &st.SalesCents, &st.PendingCents,
+		Scan(&active, &pending, &suspended, &rejected, &missing, &st.Clicks, &st.Referrals, &st.Customers, &st.SalesCents, &st.PendingCents,
 			&st.ApprovedCents, &st.PaidCents, &st.BalanceCents, &st.PendingActions)
 	if err != nil {
 		s.internal(w, r, err)
 		return
 	}
-	v.Partners = map[string]int{"total": active + pending + suspended + rejected, "active": active, "pending": pending, "suspended": suspended, "rejected": rejected}
+	v.Partners = map[string]int{"total": active + pending + suspended + rejected, "active": active, "pending": pending, "suspended": suspended, "rejected": rejected,
+		"missing_payout_details": missing}
 	writeJSON(w, http.StatusOK, v)
 }

@@ -16,6 +16,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/outflareai/outflare/engine/internal/audit"
+	"github.com/outflareai/outflare/engine/internal/customers"
 	"github.com/outflareai/outflare/engine/internal/jobs"
 	"github.com/outflareai/outflare/engine/internal/leads"
 )
@@ -463,6 +464,7 @@ func AddReferral(ctx context.Context, tx pgx.Tx, ws, inboundID, sequenceID strin
 			SELECT $1, s.id, l.id, now() FROM sequences s, leads l
 			WHERE s.id = $2 AND s.workspace_id = $1 AND s.status <> 'archived' AND l.id = $3
 			  AND NOT EXISTS (`+leads.SuppressedSQL("l.workspace_id", "l.email")+`)
+			  AND NOT `+customers.ExcludedByColumnSQL("l.record_id", "s.exclude")+`
 			ON CONFLICT DO NOTHING`, ws, sequenceID, ref.LeadID)
 		if err != nil {
 			return nil, err

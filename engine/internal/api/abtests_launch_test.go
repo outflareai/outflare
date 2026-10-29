@@ -1,6 +1,7 @@
 package api_test
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/outflareai/outflare/engine/internal/track"
@@ -81,5 +82,55 @@ func TestABTestsChecklistAndShip(t *testing.T) {
 	}
 	if names["ab_test.shipped"] != 2 || names["ab_test.ended"] != 1 || names["flag.updated"] < 3 {
 		t.Errorf("events: %v", names)
+	}
+}
+
+// The checklist says how long visitors waited for their version, from the
+// timing the site script sends with Experiment Viewed, once enough were
+// timed, and suggests deciding on the server when most were fetched slowly.
+func TestABTestsDeliveryCheck(t *testing.T) {
+	e := freshEnv(t)
+	owner, ws := setupOwner(t, e.h)
+	base := "/v1/workspaces/" + ws
+	owner.must(201, "POST", base+"/flags", map[string]any{"key": "cta", "name": "Call to action",
+		"variants": []map[string]any{{"key": "control", "weight": 50}, {"key": "bold", "weight": 50}}})
+	id := owner.must(201, "POST", base+"/ab-tests", map[string]any{"flag": "cta", "goals": []map[string]any{{"kind": "event", "name": "signup_started"}}})["id"].(string)
+	delivery := func() map[string]any {
+		t.Helper()
+		for _, c := range owner.must(200, "GET", base+"/ab-tests/"+id+"/checklist", nil)["checks"].([]any) {
+			if c := c.(map[string]any); c["id"] == "delivery" {
+				return c
+			}
+		}
+		return nil
+	}
+	seen := func(n int, source string, waitMs int) {
+		t.Helper()
+		if _, err := e.pool.Exec(t.Context(), `
+			INSERT INTO customer_events (workspace_id, kind, name, anonymous_id, properties, context, occurred_at)
+			SELECT $1::uuid, 'track', 'experiment_viewed', $2 || i, jsonb_build_object('flag', 'cta', 'variant', 'bold', 'source', $2::text, 'wait_ms', $3::int), '{}'::jsonb, now() - interval '1 day'
+			FROM generate_series(1, $4::int) i`, ws, source, waitMs, n); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// Older scripts send no timing, and a few timed visitors aren't enough.
+	if _, err := e.pool.Exec(t.Context(), `INSERT INTO customer_events (workspace_id, kind, name, anonymous_id, properties, context, occurred_at)
+		SELECT $1::uuid, 'track', 'experiment_viewed', 'old-' || i, '{"flag": "cta", "variant": "bold"}', '{}', now() - interval '1 day' FROM generate_series(1, 50) i`, ws); err != nil {
+		t.Fatal(err)
+	}
+	seen(10, "bootstrap", 5)
+	if c := delivery(); c != nil {
+		t.Fatalf("delivery without enough timing: %v", c)
+	}
+	// Mostly decided on the server: quick.
+	seen(30, "bootstrap", 8)
+	if c := delivery(); c["status"] != "ok" || !strings.Contains(c["text"].(string), "8 ms") {
+		t.Fatalf("quick delivery: %v", c)
+	}
+	// Most fetched slowly: a warning that says what to do.
+	seen(80, "fetched", 1200)
+	if c := delivery(); c["status"] != "warn" || !strings.Contains(c["text"].(string), "1.2 seconds") || !strings.Contains(c["text"].(string), "on your server") {
+		t.Fatalf("slow delivery: %v", c)
 	}
 }

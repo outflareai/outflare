@@ -6,6 +6,35 @@ Each pull request that changes what Outflare does adds a change note in [changes
 
 ## [Unreleased]
 
+## [0.37.0] - 2026-10-29
+
+### Changed
+
+- Share a journey with another workspace: Export as a kit writes it out, with the lists, emails and rules it uses, and Apply a kit file on the Playbooks page sets it up there as drafts. Tick the events the other workspace may call something else, and it names its own when it applies the kit.
+
+### Fixed
+
+- Trustpilot and Capterra review pages are now read as Geonode jobs that can take as long as the page needs, without sending a page twice. A page behind Cloudflare is tried again the same day instead of waiting a day, Capterra no longer asks for a second page that doesn't exist, and a first read that stops partway reads the history again.
+
+## [0.36.0] - 2026-10-29
+
+### Added
+
+- The automation map shows every rule and journey in one picture: what sets each one off, what it does next, and how often in the last 7 days. It also flags what needs a look: loops, two journeys emailing the same people within a day, events nothing uses, and live journeys that never start. Find it under Lifecycle, or ask your AI app through MCP.
+- See what each ad campaign brought by Outflare's own count: tracked visits, conversions and revenue credited under your attribution model, beside its spend and what the platform claims. Campaigns that spend without tracked visits are flagged, so a missing tracking template is easy to spot.
+- Knowledge answers: ask your knowledge base a question and get a short answer from your own AI model with the articles it used, for your team or for customers (who only ever hear what you've marked for them). Agents and missions now check your knowledge before stating facts, and find it by meaning as well as by words.
+
+### Changed
+
+- Partners: reward webhooks now carry the sale behind them (its amount, the charge id your backend sent, and the customer's own user id), plus when the hold ends, and `partner_payout.paid` lists the rewards it paid. A backend that handled Tolt's commission webhooks finds the same facts without extra calls.
+- Feature flags and A/B tests: a page your server renders can hand its flag decisions to the website script, so visitors see their version in the first paint with no flash of the original. The SDKs build the tag. The A/B test checklist now shows how long visitors waited for their version, and says what to do when some may have seen the original first.
+- The last of projects is gone from the database: briefs, daily caps, reply rules and tokens moved to brands and sequences in an earlier release, and nothing has read projects since.
+- A/B tests: when a test ends, your own AI model writes what it taught, and a Learnings library lists every finished test, searchable, with questions answered over them, such as "what have we learned about headlines?".
+
+### Upgrading
+
+- this release deletes the projects table and every project link. Take a database backup first if you want to keep a copy of the old project rows.
+
 ## [0.35.0] - 2026-10-29
 
 ### Changed

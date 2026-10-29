@@ -97,6 +97,14 @@ func (s *Server) abChecklist(ctx context.Context, ws string, t abTestView, f fla
 		add("exposures", "ok", fmt.Sprintf("Pages showed its versions to %d visitors in the last 7 days.", seen))
 	}
 
+	// How long visitors waited for their version, as the site script
+	// measured it: a long wait means the original can show first.
+	if c, ok, err := s.abDeliveryCheck(ctx, ws, f.Key); err != nil {
+		return nil, err
+	} else if ok {
+		out = append(out, c)
+	}
+
 	if len(t.Goals) > 0 {
 		g := t.Goals[0]
 		now := time.Now()
@@ -188,6 +196,9 @@ func (s *Server) shipABTest(w http.ResponseWriter, r *http.Request) {
 			if err := recordWithProps(ctx, tx, &a.principal, a.WorkspaceID, "ab_test.ended", "ab_test", t.ID, data, data); err != nil {
 				return err
 			}
+			if err := s.queueABLearning(ctx, tx, &a.principal, a.WorkspaceID, a.ActorID, *t); err != nil {
+				return err
+			}
 		} else if _, err := tx.Exec(ctx, `UPDATE ab_tests SET decision = $3, updated_at = now() WHERE id = $1 AND workspace_id = $2`, t.ID, a.WorkspaceID, in.Variant); err != nil {
 			return err
 		}
@@ -217,4 +228,46 @@ func (s *Server) shipABTest(w http.ResponseWriter, r *http.Request) {
 	if flagID != "" {
 		s.flagCache.forget(a.WorkspaceID)
 	}
+}
+
+// abDeliveryMin is how many timed exposures the delivery line needs, and
+// abDeliverySlowMs the wait (for one visitor in ten) above which visitors
+// may see the original before their version.
+const (
+	abDeliveryMin    = 20
+	abDeliverySlowMs = 400
+)
+
+// abDeliveryCheck reads the wait the site script reports with Experiment
+// Viewed (wait_ms, and source: bootstrap, kept or fetched) over the last 7
+// days. ok is false until enough visitors have been timed.
+func (s *Server) abDeliveryCheck(ctx context.Context, ws, key string) (abCheck, bool, error) {
+	var n, fetched int64
+	var p90 *float64
+	if err := s.pool.QueryRow(ctx, `
+		SELECT count(*), count(*) FILTER (WHERE properties->>'source' = 'fetched'),
+			percentile_cont(0.9) WITHIN GROUP (ORDER BY (properties->>'wait_ms')::float)
+		FROM customer_events
+		WHERE workspace_id = $1 AND name = $2 AND properties->>'flag' = $3 AND occurred_at > now() - interval '7 days'
+			AND properties->>'wait_ms' ~ '^[0-9]{1,6}$'`, ws, abtests.ExposureEvent, key).Scan(&n, &fetched, &p90); err != nil {
+		return abCheck{}, false, err
+	}
+	if n < abDeliveryMin || p90 == nil {
+		return abCheck{}, false, nil
+	}
+	if *p90 > abDeliverySlowMs {
+		text := fmt.Sprintf("One visitor in ten waited over %s for their version, so some may see the original first.", waitText(*p90))
+		if fetched*2 > n {
+			text += " Decide the flags on your server and hand them to the page, so the version shows at once, or hide the page with of-wait until it arrives."
+		}
+		return abCheck{"delivery", "warn", text}, true, nil
+	}
+	return abCheck{"delivery", "ok", fmt.Sprintf("Nine visitors in ten saw their version within %s.", waitText(*p90))}, true, nil
+}
+
+func waitText(ms float64) string {
+	if ms >= 1000 {
+		return fmt.Sprintf("%.1f seconds", ms/1000)
+	}
+	return fmt.Sprintf("%.0f ms", ms)
 }

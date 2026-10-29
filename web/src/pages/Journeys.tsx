@@ -23,8 +23,11 @@ import {
   type Change, type Problem, type Slot, type Step, type StepKind,
 } from "@/components/journey-flow/model";
 import { StepPicker, useStepKinds } from "@/components/journey-flow/step-picker";
+import { noExclusion } from "@/components/exclusion-picker";
 import { EventInput, StepPanel, TriggerPanel, useFlowCatalog, type TriggerFields } from "@/components/journey-flow/step-panel";
 import { TestPanel, type TestMarks } from "@/components/journey-flow/test-mode";
+import { KitNotice } from "@/components/kit-notice";
+import { KitExportSheet } from "@/components/kit-export";
 import type { Go } from "./Lifecycle";
 
 type Status = Journey["status"];
@@ -185,11 +188,11 @@ function NewJourneyDialog({ ws, onClose, onSaved }: { ws: string; onClose: () =>
 // Work is the part of a journey the builder edits: what a version holds.
 type Work = { trigger: TriggerFields; steps: Step[] };
 
-type Source = Pick<Journey, "trigger" | "entry" | "goal_event" | "steps">;
+type Source = Pick<Journey, "trigger" | "entry" | "goal_event" | "exclude" | "steps">;
 
 function workFrom(src: Source): Work {
   return {
-    trigger: { kind: src.trigger.kind, event: src.trigger.event ?? "", filter: src.trigger.filter, entry: src.entry, goal: src.goal_event ?? "" },
+    trigger: { kind: src.trigger.kind, event: src.trigger.event ?? "", filter: src.trigger.filter, entry: src.entry, goal: src.goal_event ?? "", exclude: src.exclude ?? noExclusion },
     steps: src.steps as Step[],
   };
 }
@@ -198,7 +201,7 @@ function bodyOf(w: Work) {
   const t = w.trigger;
   return {
     trigger: t.kind === "event" ? { kind: t.kind, event: t.event, filter: t.filter } : { kind: t.kind },
-    entry: t.entry, goal_event: t.goal || null, steps: clean(w.steps),
+    entry: t.entry, goal_event: t.goal || null, exclude: t.exclude, steps: clean(w.steps),
   };
 }
 
@@ -318,7 +321,7 @@ function TriggerCard({ t, rule, sim, go }: { t: TriggerFields; rule?: Rule; sim:
         </span>
       )}
       <span className="truncate text-muted-foreground">
-        {t.filter.length ? `Only if ${t.filter.map((c) => conditionText(c, [])).join(" and ")} · ` : ""}{t.entry === "once" ? "Once per person" : "Again after they finish"}{t.goal ? ` · Goal: ${t.goal}` : ""}
+        {t.filter.length ? `Only if ${t.filter.map((c) => conditionText(c, [])).join(" and ")} · ` : ""}{t.entry === "once" ? "Once per person" : "Again after they finish"}{t.goal ? ` · Goal: ${t.goal}` : ""}{t.exclude.lists.length + t.exclude.tags.length ? ` · Leaves out ${t.exclude.lists.length + t.exclude.tags.length === 1 ? "one list or tag" : `${t.exclude.lists.length + t.exclude.tags.length} lists and tags`}` : ""}
       </span>
       {sim && <span className="truncate text-muted-foreground" title={sim.note}>Dry run: {plural(sim.records, "person", "people")} in {sim.window_days} days{sim.truncated ? " (at least)" : ""}</span>}
     </>
@@ -341,6 +344,7 @@ function JourneyDetail({ ws, id, canManage, back, go }: { ws: string; id: string
   const [picker, setPicker] = useState<Slot | null>(null);
   const [publishing, setPublishing] = useState(false);
   const [renaming, setRenaming] = useState(false);
+  const [exporting, setExporting] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   // Test mode: a person's path through the flow, without doing anything.
@@ -552,6 +556,8 @@ function JourneyDetail({ ws, id, canManage, back, go }: { ws: string; id: string
     <Notice tone="blue">Editing a draft of version {j.version}. Everyone keeps going through version {j.version} until you publish.</Notice>
   ) : live && canManage && !mobile ? (
     <Notice tone="grey">Live and read-only. Press Edit to make a draft version; publish it to swap it in.</Notice>
+  ) : j.status === "draft" && j.kit ? (
+    <KitNotice kit={j.kit} then="Read and publish its emails, check its steps, press Test to try it with someone, then Review and activate." />
   ) : null;
 
   return (
@@ -575,11 +581,15 @@ function JourneyDetail({ ws, id, canManage, back, go }: { ws: string; id: string
             {j.status === "active" && !draft && <Button variant="ghost" onClick={() => act("pause")} disabled={busy}>Pause</Button>}
             {j.status === "draft" && <Button onClick={() => setPublishing(true)} disabled={busy}>Review and activate</Button>}
             {j.status === "paused" && !draft && <Button onClick={() => act("activate")} disabled={busy || errors > 0} title={errors ? "Fix the problems first" : undefined}>Activate</Button>}
-            <Menu items={[
-              { label: "Name and description", onClick: () => setRenaming(true) },
-              (j.status !== "draft" || j.stats.entered > 0) && { label: "Archive", onClick: () => act("archive"), danger: true },
-            ]} />
             </>}
+            <Menu items={[
+              canManage && { label: "Name and description", onClick: () => setRenaming(true) },
+              { label: "Export as a kit", onClick: () => {
+                track("ui.kit_export_opened", { status: j.status });
+                setExporting(true);
+              } },
+              canManage && (j.status !== "draft" || j.stats.entered > 0) && { label: "Archive", onClick: () => act("archive"), danger: true },
+            ]} />
           </div>
         )}
       />
@@ -637,7 +647,7 @@ function JourneyDetail({ ws, id, canManage, back, go }: { ws: string; id: string
           onChange={(x) => work && setSteps(replace(work.steps, x))} onRemove={() => removeStep(open.id)} onClose={() => setPanel(null)} />
       )}
       {panel === "trigger" && (
-        <TriggerPanel value={shown.trigger} editable={editable} catalog={catalog} onClose={() => setPanel(null)}
+        <TriggerPanel ws={ws} value={shown.trigger} editable={editable} catalog={catalog} onClose={() => setPanel(null)}
           onChange={(t) => work && change({ ...work, trigger: t })}
           rule={rule && (
             <p className="text-[12px] text-muted-foreground">
@@ -651,6 +661,7 @@ function JourneyDetail({ ws, id, canManage, back, go }: { ws: string; id: string
           onPublish={j.status === "draft" ? () => act("activate", true) : publish}
           onOpen={(sid) => { setPublishing(false); setPanel(sid ? { step: sid } : "trigger"); }} onClose={() => setPublishing(false)} />
       )}
+      {exporting && <KitExportSheet ws={ws} journey={id} onClose={() => setExporting(false)} />}
       {renaming && <RenameDialog ws={ws} j={j} onClose={() => setRenaming(false)} onSaved={(v) => { setRenaming(false); setJ({ ...v, step_stats: j.step_stats, at_step: j.at_step, email_stats: j.email_stats }); }} />}
     </div>
   );

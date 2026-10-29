@@ -8,11 +8,13 @@ import (
 	"net/http/httptest"
 	"os"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/outflareai/outflare/engine/internal/api"
 	"github.com/outflareai/outflare/engine/internal/track"
 )
 
@@ -26,6 +28,17 @@ type fakeReviewSite struct {
 	// a G2 page shown only in a browser (a bot check otherwise).
 	rendered []string
 	g2       string
+	// posts counts each address sent to /v1/extract; jobs are the async
+	// reads by id, and slow the addresses whose job takes slowPolls polls
+	// before it ends.
+	posts     map[string]int
+	jobs      map[string]map[string]any
+	slow      map[string]bool
+	slowPolls int
+	polls     map[string]int
+	// failed are the addresses whose job ends on Cloudflare's challenge,
+	// reported without the page (UNPROCESSABLE_CONTENT).
+	failed map[string]bool
 }
 
 func (f *fakeReviewSite) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -41,8 +54,28 @@ func (f *fakeReviewSite) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		URL    string `json:"url"`
 		Query  string `json:"query"`
 		Render bool   `json:"render_js"`
+		Mode   string `json:"processing_mode"`
 	}
 	json.NewDecoder(r.Body).Decode(&req)
+	if r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/v1/extract/") {
+		id := strings.TrimPrefix(r.URL.Path, "/v1/extract/")
+		job, ok := f.jobs[id]
+		if !ok {
+			http.NotFound(w, r)
+			return
+		}
+		f.polls[id]++
+		if f.slow[job["url"].(string)] && f.polls[id] <= f.slowPolls {
+			io.WriteString(w, `{"status": "processing"}`)
+			return
+		}
+		if f.failed[job["url"].(string)] {
+			io.WriteString(w, `{"status": "failed", "error": {"code": "UNPROCESSABLE_CONTENT", "retryable": false}, "tokens_charged": 0}`)
+			return
+		}
+		json.NewEncoder(w).Encode(job["answer"])
+		return
+	}
 	switch r.URL.Path {
 	case "/v1/usage/concurrency":
 		io.WriteString(w, `{"work_concurrency_in_use": 0, "work_concurrency_limit": 5}`)
@@ -79,7 +112,20 @@ func (f *fakeReviewSite) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			}}})
 			page, status = `<html><body><script id="__NEXT_DATA__" type="application/json">`+string(data)+`</script></body></html>`, 200
 		}
-		json.NewEncoder(w).Encode(map[string]any{"data": map[string]any{"html": page}, "metadata": map[string]any{"http_status": status, "url": req.URL}, "tokens_charged": 1})
+		answer := map[string]any{"data": map[string]any{"html": page}, "metadata": map[string]any{"http_status": status, "url": req.URL}, "tokens_charged": 1}
+		if f.posts == nil {
+			f.posts, f.jobs, f.polls = map[string]int{}, map[string]map[string]any{}, map[string]int{}
+		}
+		f.posts[req.URL]++
+		if req.Mode == "async" {
+			id := "job-" + strconv.Itoa(len(f.jobs)+1)
+			answer["status"] = "completed"
+			f.jobs[id] = map[string]any{"url": req.URL, "answer": answer}
+			w.WriteHeader(http.StatusAccepted)
+			json.NewEncoder(w).Encode(map[string]any{"job_id": id, "status": "queued"})
+			return
+		}
+		json.NewEncoder(w).Encode(answer)
 	default:
 		http.NotFound(w, r)
 	}
@@ -452,20 +498,119 @@ func TestReviewPageReadRetries(t *testing.T) {
 	owner.must(404, "POST", base+"/reviews/pages/00000000-0000-0000-0000-000000000000/read", nil)
 
 	codes := map[string]int{}
-	retried := 0
 	for _, ev := range got() {
 		switch ev.Name {
 		case "review_page.read_failed":
 			codes[ev.ErrorCode]++
-		case "review_page.read":
-			if ev.Props["rendered_retry"] == true {
-				retried++
-			}
 		case "review_page.read_requested":
 			codes["requested"]++
 		}
 	}
-	if codes["blocked"] != 3 || codes["page_not_found"] != 1 || codes["requested"] != 2 || retried != 0 {
-		t.Fatalf("events: %v, rendered retries %d", codes, retried)
+	if codes["blocked"] != 3 || codes["page_not_found"] != 1 || codes["requested"] != 2 {
+		t.Fatalf("events: %v", codes)
+	}
+}
+
+// A review page is read as a job at Geonode: a job still running when the
+// round stops waiting is kept and picked up by the next round, never sent
+// again. A first read that stops early isn't taken as the page's whole
+// history, and a page behind Cloudflare is tried again the same day.
+func TestReviewPageJobs(t *testing.T) {
+	got := track.Capture(t)
+	e := freshEnv(t)
+	owner, ws := setupOwner(t, e.h)
+	base := "/v1/workspaces/" + ws
+	ctx := context.Background()
+	t.Cleanup(api.SetReviewJobTimes(time.Millisecond, 50*time.Millisecond))
+	p1 := "https://www.trustpilot.com/review/northpeak.example?sort=recency"
+	p2 := "https://www.trustpilot.com/review/northpeak.example?page=2&sort=recency"
+	site := &fakeReviewSite{slow: map[string]bool{p1: true}, slowPolls: 1 << 30, failed: map[string]bool{}}
+	site.reviews = []map[string]any{trustpilotReview("r1", 5, "Ana", 48*time.Hour, "")}
+	srv := httptest.NewServer(site)
+	t.Cleanup(srv.Close)
+	e.integrations.Client.BaseURLs["geonode"] = srv.URL
+	owner.must(201, "POST", base+"/brands", map[string]any{"name": "Northpeak", "handle": "northpeak", "website": "https://northpeak.example", "links": []map[string]any{
+		{"kind": "trustpilot", "url": "https://www.trustpilot.com/review/northpeak.example"},
+	}})
+	gn := owner.must(201, "POST", base+"/integrations", map[string]any{"connector": "geonode", "credentials": map[string]string{"api_key": "gn-key"}})["id"].(string)
+	type state struct {
+		job, code     *string
+		failures      int
+		backfilled    bool
+		nextInMinutes float64
+	}
+	read := func() state {
+		t.Helper()
+		if err := e.srv.ReadReviewPages(ctx, ws, gn); err != nil {
+			t.Fatal(err)
+		}
+		var s state
+		if err := e.pool.QueryRow(ctx, `SELECT pending_job_id, last_error_code, failures, backfilled_at IS NOT NULL,
+			EXTRACT(epoch FROM next_read_at - now()) / 60 FROM review_pages WHERE workspace_id = $1`, ws).
+			Scan(&s.job, &s.code, &s.failures, &s.backfilled, &s.nextInMinutes); err != nil {
+			t.Fatal(err)
+		}
+		e.pool.Exec(ctx, `UPDATE review_pages SET next_read_at = now() WHERE workspace_id = $1`, ws)
+		return s
+	}
+
+	// Geonode is still reading: the job is kept, nothing failed, and the
+	// next round looks again in five minutes.
+	if s := read(); s.job == nil || s.failures != 0 || s.code != nil || s.backfilled || s.nextInMinutes < 4 || s.nextInMinutes > 6 {
+		t.Fatalf("pending: %+v", s)
+	}
+	// The job finishes, but page 2 is blocked: the first page is kept, the
+	// page wasn't sent again, and the history is read again soon.
+	site.mu.Lock()
+	site.slowPolls, site.failed[p2] = 0, true
+	site.mu.Unlock()
+	if s := read(); s.job != nil || s.failures != 0 || s.backfilled || s.nextInMinutes < 10 || s.nextInMinutes > 20 {
+		t.Fatalf("stopped early: %+v", s)
+	}
+	if site.posts[p1] != 1 {
+		t.Fatalf("page 1 sent %d times", site.posts[p1])
+	}
+	if pages := owner.must(200, "GET", base+"/reviews/pages", nil)["data"].([]any); pages[0].(map[string]any)["score"] == nil {
+		t.Fatalf("first page not kept: %v", pages)
+	}
+	// It keeps failing: the history is read again on the usual ladder,
+	// and after five tries what was read is kept as the page's history.
+	waits := []float64{}
+	for i := 0; i < 3; i++ {
+		s := read()
+		if s.backfilled {
+			t.Fatalf("history kept after %d tries", i+2)
+		}
+		waits = append(waits, s.nextInMinutes)
+	}
+	if waits[0] < 50 || waits[0] > 70 || waits[2] < 230 || waits[2] > 250 {
+		t.Fatalf("waits between history reads: %v", waits)
+	}
+	if s := read(); !s.backfilled || s.nextInMinutes < 23*60 {
+		t.Fatalf("history kept after five tries: %+v", s)
+	}
+	e.pool.Exec(ctx, `UPDATE review_pages SET backfilled_at = NULL WHERE workspace_id = $1`, ws)
+	// Page 2 reads now: the history is done and the page waits a day.
+	site.mu.Lock()
+	delete(site.failed, p2)
+	site.mu.Unlock()
+	if s := read(); !s.backfilled || s.nextInMinutes < 23*60 {
+		t.Fatalf("backfilled: %+v", s)
+	}
+	// Cloudflare's challenge on the page is a bot check, tried again the
+	// same day, never a wrong address.
+	site.mu.Lock()
+	site.failed[p1] = true
+	site.mu.Unlock()
+	if s := read(); s.code == nil || *s.code != "blocked" || s.failures != 1 || s.nextInMinutes > 20 {
+		t.Fatalf("blocked: %+v", s)
+	}
+
+	names := map[string]int{}
+	for _, ev := range got() {
+		names[ev.Name]++
+	}
+	if names["review_page.read_pending"] != 1 || names["review_page.backfilled"] != 2 || names["review_page.read_failed"] != 1 {
+		t.Fatalf("events: %v", names)
 	}
 }

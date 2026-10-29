@@ -102,6 +102,7 @@ export function registerPartnerTools(server: McpServer, gtm: MissionClient, work
         program: z.string().optional().describe("A program's id or slug."),
         status: z.enum(["pending", "active", "suspended", "rejected"]).optional(),
         record_id: id.optional().describe("The partner's customer record."),
+        payout_details: z.enum(["missing", "set"]).optional().describe("missing: only partners who haven't given payout details; set: only those who have."),
         ...page,
       },
       annotations: read,

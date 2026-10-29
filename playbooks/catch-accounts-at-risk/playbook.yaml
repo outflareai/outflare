@@ -1,0 +1,67 @@
+id: catch-accounts-at-risk
+version: 1
+title: Catch key accounts at risk before they churn
+summary: Spot a key account going quiet or an unhappy NPS answer, tell its owner the same day, and check in.
+description: |
+  Big accounts rarely churn out of the blue: usage fades for a few weeks,
+  or someone gives a low NPS score that nobody follows up. This playbook
+  adds two rules and two journeys as drafts. One rule spots a key account
+  that hasn't used the product for two weeks; the other spots an NPS
+  answer of 6 or less. Their journeys tell the account's owner straight
+  away, tag the record, and send a short check-in. The quiet-account
+  journey ends the moment they're active again. Nothing goes live until
+  you've read the emails and turned them on.
+tier: clever
+goals: [retention, revenue]
+publisher: outflare
+author: { github: outflareai }
+kit: account-health
+needs:
+  data:
+    - { check: records, label: Customer records with their plan }
+    - { check: customer_events, label: Product usage events sent to Outflare }
+  connections:
+    - capability: email.send
+      label: An email provider for lifecycle email
+      recommended: [resend, postmark, amazon_ses]
+inputs:
+  - name: brand
+    label: Brand
+    example: Northpeak
+  - name: usage_event
+    label: The event that shows someone is using the product
+    example: project_updated
+  - name: key_plan
+    label: The plan your key accounts are on
+    example: enterprise
+  - name: nps_event
+    label: The event an NPS answer arrives as
+    example: nps.submitted
+steps:
+  - say: Check the usage and NPS events the workspace receives, and that key accounts have the plan field set.
+    tools: [listEventDefinitions, listCustomerEvents, listRecords]
+  - say: Check what the setup kit would add, then add it with those values. Its list, rules and journeys arrive as drafts.
+    tools: [previewKit, applyKit]
+  - say: Rewrite the two emails in the brand's voice, and dry-run both rules to see how many accounts they would have caught.
+    tools: [getBrandContext, updateEmailTemplate, simulateRule]
+  - say: Test both journeys with a key account, then ask a person to turn the rules and journeys on.
+    tools: [getJourney, testJourney]
+guardrails:
+  - The rules and journeys are turned on only after a person approves them.
+  - The owner hears first; the customer gets one short check-in, never a sales pitch.
+measure:
+  - metric: Key accounts recovered
+    how: "Share of quiet key accounts active again within 30 days of the alert."
+  - metric: Detractors followed up
+    how: "Share of NPS answers of 6 or less with a reply or a call within 7 days."
+prompt: |
+  Run the "Catch key accounts at risk" playbook for {{brand}}. Usage
+  arrives as {{usage_event}}, key accounts are on the {{key_plan}} plan,
+  and NPS answers arrive as {{nps_event}} with a score property. Check
+  these, then preview and apply the account-health setup kit with them.
+  Rewrite its two emails in our voice, dry-run both rules over the last 30
+  days, and test both journeys with a key account. Don't turn anything on:
+  show me the dry runs and the tests first.
+example: |
+  For Northpeak, the "Key account went quiet" rule would have caught four
+  enterprise accounts in the last 30 days; two of them later cancelled.

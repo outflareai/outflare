@@ -72,25 +72,57 @@ func rewardAuditData(ctx context.Context, tx pgx.Tx, w partnerRewardView) (map[s
 		return nil, err
 	}
 	d := map[string]any{"program_id": w.ProgramID, "program_kind": kind, "partner_id": w.PartnerID, "side": w.Side, "kind": w.Kind,
-		"recipient_id": w.RecipientID, "amount_cents": w.AmountCents, "currency": w.Currency, "status": w.Status}
-	if w.ConversionID != nil {
-		d["conversion_id"] = *w.ConversionID
-	}
+		"recipient_id": w.RecipientID, "amount_cents": w.AmountCents, "currency": w.Currency, "status": w.Status, "hold_until": w.HoldUntil}
 	if w.ReversesID != nil {
 		d["reverses_id"] = *w.ReversesID
+	}
+	if w.ConversionID != nil {
+		if err := addConversionData(ctx, tx, d, *w.ConversionID); err != nil {
+			return nil, err
+		}
 	}
 	if w.Action != "" {
 		d["action"], d["action_data"] = w.Action, w.ActionData
 		// The recipient's own user id, so the workspace's system knows whom to grant.
-		var uid string
-		err := tx.QueryRow(ctx, `SELECT value FROM record_identities WHERE record_id = $1 AND namespace = 'user_id' AND valid_to IS NULL
-			ORDER BY verified DESC, valid_from LIMIT 1`, w.RecipientID).Scan(&uid)
-		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		uid, err := recordUserID(ctx, tx, w.RecipientID)
+		if err != nil {
 			return nil, err
 		}
 		d["recipient_customer_id"] = uid
 	}
 	return d, nil
+}
+
+// addConversionData adds to a reward's webhook data the conversion that
+// earned it, so a system that handled another platform's commission
+// webhooks finds the same facts on the reward: the sale's amount
+// (revenue_cents), the id the backend sent with it (external_id, such as
+// a charge id), and the referred customer (record_id, and customer_id,
+// the backend's own user id for them, "" when it never sent one).
+func addConversionData(ctx context.Context, tx pgx.Tx, d map[string]any, conv string) error {
+	var typ, external, record string
+	var amount int64
+	if err := tx.QueryRow(ctx, `SELECT type, external_id, amount_cents, record_id::text FROM partner_conversions WHERE id = $1`, conv).
+		Scan(&typ, &external, &amount, &record); err != nil {
+		return err
+	}
+	uid, err := recordUserID(ctx, tx, record)
+	if err != nil {
+		return err
+	}
+	d["conversion_id"], d["conversion_type"], d["external_id"], d["revenue_cents"], d["record_id"], d["customer_id"] = conv, typ, external, amount, record, uid
+	return nil
+}
+
+// recordUserID is the backend's own user id for a customer record, or "".
+func recordUserID(ctx context.Context, tx pgx.Tx, record string) (string, error) {
+	var uid string
+	err := tx.QueryRow(ctx, `SELECT value FROM record_identities WHERE record_id = $1 AND namespace = 'user_id' AND valid_to IS NULL
+		ORDER BY verified DESC, valid_from LIMIT 1`, record).Scan(&uid)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", nil
+	}
+	return uid, err
 }
 
 // approvePartnerReward approves a pending entry (by is auto, refund or
@@ -460,8 +492,10 @@ func (s *Server) createPartnerPayouts(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx := r.Context()
 	made := []string{}
+	waiting := 0
 	err := pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
-		rows, err := tx.Query(ctx, `SELECT m.id::text, p.id::text, p.currency, p.min_payout_cents, sum(w.amount_cents)::bigint
+		rows, err := tx.Query(ctx, `SELECT m.id::text, p.id::text, p.currency, p.min_payout_cents, sum(w.amount_cents)::bigint,
+			m.source = 'import' AND m.payout_method IS NULL
 			FROM partner_rewards w JOIN partner_memberships m ON m.id = w.membership_id JOIN partner_programs p ON p.id = m.program_id
 			WHERE w.workspace_id = $1 AND w.status = 'approved' AND w.payout_id IS NULL AND w.side = 'partner' AND w.kind <> 'action'
 			  AND ($2 = '' OR m.id::text = $2) AND ($3 = '' OR p.id::text = lower($3) OR p.slug = lower($3))
@@ -473,16 +507,24 @@ func (s *Server) createPartnerPayouts(w http.ResponseWriter, r *http.Request) {
 		type due struct {
 			membership, program, currency string
 			min, total                    int64
+			noDetails                     bool
 		}
 		list, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (due, error) {
 			var d due
-			return d, row.Scan(&d.membership, &d.program, &d.currency, &d.min, &d.total)
+			return d, row.Scan(&d.membership, &d.program, &d.currency, &d.min, &d.total, &d.noDetails)
 		})
 		if err != nil {
 			return err
 		}
 		for _, d := range list {
 			if d.total <= 0 || d.total < d.min {
+				continue
+			}
+			// An imported partner whose platform didn't give their payout
+			// details (Tolt's v2 has none) waits until they add them on the
+			// portal; their balance stays and is paid in a later payout.
+			if d.noDetails {
+				waiting++
 				continue
 			}
 			var id string
@@ -523,7 +565,7 @@ func (s *Server) createPartnerPayouts(w http.ResponseWriter, r *http.Request) {
 	if list == nil {
 		list = []partnerPayoutView{}
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"data": list})
+	writeJSON(w, http.StatusOK, map[string]any{"data": list, "waiting_for_details": waiting})
 }
 
 func onePayout(ctx context.Context, tx pgx.Tx, sql string, args ...any) (partnerPayoutView, error) {
@@ -602,23 +644,26 @@ func (s *Server) markPartnerPayoutPaid(w http.ResponseWriter, r *http.Request) {
 			v.ID, strings.TrimSpace(in.Note), strings.TrimSpace(in.Reference), paid); err != nil {
 			return err
 		}
-		rows, err := tx.Query(ctx, `UPDATE partner_rewards SET status = 'paid', updated_at = now() WHERE payout_id = $1 RETURNING kind`, v.ID)
+		rows, err := tx.Query(ctx, `UPDATE partner_rewards SET status = 'paid', updated_at = now() WHERE payout_id = $1 RETURNING id::text, kind`, v.ID)
 		if err != nil {
 			return err
 		}
-		kinds, err := pgx.CollectRows(rows, pgx.RowTo[string])
+		type paidReward struct{ ID, Kind string }
+		rewards, err := pgx.CollectRows(rows, pgx.RowToStructByPos[paidReward])
 		if err != nil {
 			return err
 		}
-		for _, k := range kinds {
-			metrics.PartnerRewards(k, "paid", 1)
+		ids := make([]string, len(rewards))
+		for i, w := range rewards {
+			ids[i] = w.ID
+			metrics.PartnerRewards(w.Kind, "paid", 1)
 		}
 		if err := enqueuePartnerNotify(ctx, tx, a.WorkspaceID, partnerNotify{Kind: "payout_paid", PartnerID: v.PartnerID, Ref: v.ID}); err != nil {
 			return err
 		}
 		return partnerRecord(ctx, tx, &a.principal, a.WorkspaceID, "partner_payout.paid", "partner_payout", v.ID, map[string]any{
 			"partner_id": v.PartnerID, "program_id": v.ProgramID, "amount_cents": v.AmountCents, "currency": v.Currency,
-			"reference": strings.TrimSpace(in.Reference), "has_note": in.Note != ""})
+			"reference": strings.TrimSpace(in.Reference), "has_note": in.Note != "", "reward_ids": ids})
 	})
 }
 

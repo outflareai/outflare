@@ -644,8 +644,11 @@ func (c *conversionRun) leadOrSale(ctx context.Context) error {
 		if err != nil {
 			return err
 		}
-		if err := c.audit(ctx, "partner_reward.created", "partner_reward", id, rewardData(m, e.Side, e.Kind, recipient, conv, e.AmountCents,
-			e.Rule.Action, e.Rule.ActionData)); err != nil {
+		d, err := rewardData(ctx, tx, m, e.Side, e.Kind, recipient, conv, e.AmountCents, e.Rule.Action, e.Rule.ActionData, hold)
+		if err != nil {
+			return err
+		}
+		if err := c.audit(ctx, "partner_reward.created", "partner_reward", id, d); err != nil {
 			return err
 		}
 		if m.autoApprove && !hold.After(time.Now()) {
@@ -689,16 +692,21 @@ func (c *conversionRun) duplicate(ctx context.Context, conv string) error {
 	return c.finish(ctx, conv)
 }
 
-func rewardData(m *membershipRow, side, kind, recipient, conv string, amount int64, action string, actionData map[string]any) map[string]any {
+// rewardData is a new reward's webhook data, with the conversion that
+// earned it.
+func rewardData(ctx context.Context, tx pgx.Tx, m *membershipRow, side, kind, recipient, conv string, amount int64, action string,
+	actionData map[string]any, hold time.Time) (map[string]any, error) {
 	d := map[string]any{"program_id": m.programID, "program_kind": m.kind, "partner_id": m.id, "side": side, "kind": kind,
-		"recipient_id": recipient, "amount_cents": amount, "currency": m.currency}
+		"recipient_id": recipient, "amount_cents": amount, "currency": m.currency, "hold_until": hold}
 	if conv != "" {
-		d["conversion_id"] = conv
+		if err := addConversionData(ctx, tx, d, conv); err != nil {
+			return nil, err
+		}
 	}
 	if action != "" {
 		d["action"], d["action_data"] = action, actionData
 	}
-	return d
+	return d, nil
 }
 
 // refund records a refund of a sale. Rewards from the sale still on hold
@@ -825,7 +833,10 @@ func (c *conversionRun) reverse(ctx context.Context, m *membershipRow, w partner
 	if err != nil {
 		return err
 	}
-	d := rewardData(m, w.Side, "adjustment", w.RecipientID, conv, amount, w.Action, w.ActionData)
+	d, err := rewardData(ctx, c.tx, m, w.Side, "adjustment", w.RecipientID, conv, amount, w.Action, w.ActionData, w.HoldUntil)
+	if err != nil {
+		return err
+	}
 	d["reverses_id"], d["reason"] = w.ID, why
 	if err := c.audit(ctx, "partner_reward.reversed", "partner_reward", id, d); err != nil {
 		return err

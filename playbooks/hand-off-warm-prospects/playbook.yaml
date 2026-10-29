@@ -1,0 +1,64 @@
+id: hand-off-warm-prospects
+version: 1
+title: Hand off warm prospects the moment they say yes
+summary: Stop every sequence at a prospect's company as soon as they book a meeting, tell their owner, and start high-intent people on a sequence.
+description: |
+  The worst moment in outbound is the follow-up that lands after someone
+  already said yes: their colleague gets step three of a cold sequence the
+  day after the meeting was booked. This playbook adds two journeys as
+  drafts. When a prospect is interested, the first stops every sequence at
+  their company, tags them, adds them to a "Handed over to sales" list and
+  tells their owner. When someone shows strong intent, such as requesting
+  a demo, the second starts them on the sequence you choose, unless
+  they're already in one. Nothing goes live until you've checked them and
+  pressed Activate.
+tier: obvious
+goals: [customers, replies]
+publisher: outflare
+author: { github: outflareai }
+kit: outbound-handoff
+needs:
+  data:
+    - { check: leads, label: Leads in sequences }
+    - { check: customer_events, label: Meeting or intent events sent to Outflare }
+  connections: []
+inputs:
+  - name: interested_event
+    label: The event that means a prospect is interested
+    example: meeting.booked
+    optional: true
+  - name: high_intent_event
+    label: The event that shows strong buying intent
+    help: Sent from your own backend, such as demo_requested.
+    example: demo_requested
+  - name: sequence
+    label: The sequence for high-intent people
+    help: Its name or id.
+    example: Demo follow-up
+steps:
+  - say: Check which meeting and intent events the workspace receives, and find the sequence for high-intent people.
+    tools: [listEventDefinitions, listCustomerEvents, listSequences]
+  - say: Check what the setup kit would add, then add it with those events and the sequence's id. Its list and two journeys arrive as drafts.
+    tools: [previewKit, applyKit]
+  - say: Test both journeys with a recent prospect, then ask a person to turn them on.
+    tools: [getJourney, testJourney]
+guardrails:
+  - The journeys are turned on only after a person approves them.
+  - A prospect already in another sequence isn't started on a second one.
+measure:
+  - metric: Emails after a yes
+    how: "Sequence emails sent to anyone at a company after someone there booked a meeting, before and after."
+  - metric: High-intent follow-up
+    how: "Share of high-intent prospects who replied or booked a meeting within 14 days."
+prompt: |
+  Run the "Hand off warm prospects" playbook. Interested prospects arrive
+  as {{interested_event}} and strong intent as {{high_intent_event}}. Find
+  the sequence "{{sequence}}" and its id, then preview and apply the
+  outbound-handoff setup kit with those events and that sequence. Test
+  both journeys with a recent prospect. Don't turn anything on: show me
+  the tests first.
+example: |
+  At Northpeak a booked meeting arrives as meeting.booked. The test of
+  "Hand off interested prospects" with a prospect from Acme showed the two
+  sequences at Acme stopped, the sales-handoff tag, and an alert to the
+  account owner.

@@ -193,7 +193,11 @@ jobs:
         run: scripts/test-shard.sh $PART
       # A test that failed and then passed on its own re-run (test-shard.sh)
       # doesn't fail the check, but gets an issue so it is fixed, not ignored.
+      # Issues are filed only in the private engine repository, where the
+      # team works on them; anywhere else (this file is also published) the
+      # run only warns.
       - name: File flaky tests
+        if: github.repository == 'outflareai/engine'
         env:
           FLAKY_FILE: ${{ runner.temp }}/flaky.txt
           GH_TOKEN: ${{ github.token }}

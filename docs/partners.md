@@ -174,6 +174,8 @@ To pay them in bulk, download the due payouts as CSV: Payouts → Download CSV, 
 
 Outflare has no PayPal, Wise or crypto integration and never stores bank details. A partner's `payout_method` is free text, such as "PayPal: ana@example.com", stored sealed like connector keys. Structured payout fields and tax forms may come later.
 
+**Partners without payout details.** The portal's dashboard asks a partner with no payout details to add them in Settings. On the Partners tab, "No payout details (N)" lists them (`GET .../partners?payout_details=missing`; the program's `stats` count them as `partners.missing_payout_details`). A partner brought in by an import whose platform didn't give their details (Tolt's API has none) gets no payout until they add them: "Make due payouts" leaves their balance as it is and counts them in `waiting_for_details`, and their next payout includes it. Partners added in Outflare are paid as before, details or not.
+
 ## Partner portal
 
 Each program can have a hosted portal where partners apply, sign in and see how they're doing. It is off until you open it (Partners → program → Settings, or `PUT .../partner-programs/{id}/portal`).
@@ -238,7 +240,7 @@ A mission can aim at referred revenue: `goal_metric` `revenue_referred`, in whol
 
 ## Webhooks
 
-`partner_program.created`, `.updated`, `.rules_updated`; `partner.created`, `.updated`; `partner_referral.created`; `partner_conversion.created`; `partner_reward.created`, `.approved`, `.rejected`, `.reversed`, `.fulfilled`; `partner_payout.created`, `.paid`, `.canceled`. They are signed like every Outflare webhook ([events and webhooks](api-conventions.md#events-and-webhooks)). An action reward's `partner_reward.approved` carries `action`, `action_data`, `recipient_id` and `recipient_customer_id` (your own user id for the person to reward).
+`partner_program.created`, `.updated`, `.rules_updated`; `partner.created`, `.updated`; `partner_referral.created`; `partner_conversion.created`; `partner_reward.created`, `.approved`, `.rejected`, `.reversed`, `.fulfilled`; `partner_payout.created`, `.paid`, `.canceled`. They are signed like every Outflare webhook ([events and webhooks](api-conventions.md#events-and-webhooks)). Every `partner_reward.*` event from a conversion carries the sale: `conversion_id`, `conversion_type`, `revenue_cents`, `external_id` (the id your backend sent, such as a charge id), `record_id` and `customer_id` (your own user id for the referred customer); `partner_payout.paid` lists the `reward_ids` it paid. An action reward's `partner_reward.approved` carries `action`, `action_data`, `recipient_id` and `recipient_customer_id` (your own user id for the person to reward).
 
 ## Scopes
 

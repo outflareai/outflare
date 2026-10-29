@@ -126,3 +126,25 @@ def test_token_is_required(monkeypatch):
     monkeypatch.delenv("OUTFLARE_TOKEN", raising=False)
     with pytest.raises(ValueError):
         Outflare()
+
+
+def test_flags_bootstrap_tag_is_escaped():
+    from outflare import flags_bootstrap_tag
+
+    tag = flags_bootstrap_tag(
+        {
+            "flags": {"hero": "faster", "chat": False},
+            "payloads": {"hero": {"headline": "</script><b>Ship & go</b>"}},
+            "reasons": {"hero": "match"},
+        },
+        "srv-4f1c2a9e",
+    )
+    start = '<script type="application/json" id="outflare-flags">'
+    assert tag.startswith(start) and tag.endswith("</script>")
+    inner = tag[len(start) : -len("</script>")]
+    assert not any(c in inner for c in "<>&")
+    assert json.loads(inner) == {
+        "anonymousId": "srv-4f1c2a9e",
+        "flags": {"hero": "faster", "chat": False},
+        "payloads": {"hero": {"headline": "</script><b>Ship & go</b>"}},
+    }

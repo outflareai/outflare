@@ -359,6 +359,22 @@ groups:
         annotations:
           summary: "Most embedding jobs fail; check search.embed_failed events and the engine log for the provider's error (a bad key, AI limits reached or the provider down)."
 
+      - alert: OutflareKnowledgeAnswersFailing
+        # Questions asked of the knowledge base end in an error rather
+        # than an answer: the AI providers are failing or rejecting keys.
+        expr: sum(rate(outflare_knowledge_asks_total{outcome="error"}[30m])) / sum(rate(outflare_knowledge_asks_total[30m])) > 0.5 and sum(increase(outflare_knowledge_asks_total[30m])) > 5
+        for: 30m
+        labels: { severity: warning }
+        annotations:
+          summary: "Most questions asked of the knowledge base fail; check knowledge.answer_failed events and the engine log for the provider's error (a bad key, AI limits reached or the provider down)."
+
+      - alert: OutflareKnowledgeAnswersSlow
+        expr: histogram_quantile(0.95, sum by (le) (rate(outflare_knowledge_ask_seconds_bucket[30m]))) > 20 and sum(increase(outflare_knowledge_asks_total[30m])) > 5
+        for: 30m
+        labels: { severity: info }
+        annotations:
+          summary: "Answers from the knowledge base take over 20 seconds at the 95th percentile; the AI providers are slow, or the workspaces' Knowledge answers model is a slow one (Settings, AI model)."
+
       - alert: OutflareAdConversionsFailing
         # Ad platforms refusing conversions sent back: a sign-in, token or
         # conversion action changed at the platform.
@@ -443,7 +459,8 @@ groups:
           summary: "A review page ({{ $labels.platform }}) hasn't been read for over two days; check the reviews.read jobs and the engine log for reviews.scheduler_failed."
 
       - alert: OutflareReviewPageReadsFailing
-        expr: sum(rate(outflare_reviews_page_reads_total{outcome!="success"}[6h])) / sum(rate(outflare_reviews_page_reads_total[6h])) > 0.5 and sum(increase(outflare_reviews_page_reads_total[6h])) > 20
+        # pending (a page still being read, picked up next round) is no failure.
+        expr: sum(rate(outflare_reviews_page_reads_total{outcome!~"success|pending"}[6h])) / sum(rate(outflare_reviews_page_reads_total[6h])) > 0.5 and sum(increase(outflare_reviews_page_reads_total[6h])) > 20
         for: 1h
         labels: { severity: warning }
         annotations:
@@ -467,13 +484,14 @@ groups:
         annotations:
           summary: "Over half of news search runs fail with a provider or internal error; check the news_search.run_failed events by error code and the engine log."
       - alert: OutflareReviewPagesStuck
-        # A page that failed 3 reads in a row, retries in a browser included,
-        # with an error Outflare has to fix: the site changed its page (the
-        # parser in engine/internal/reviews/parse.go), it blocks the page
-        # reader even in a browser, or the read couldn't be saved. Errors a
-        # workspace fixes itself (its key, quota, a wrong address) show on
-        # its Reviews page instead and don't alert.
-        expr: sum by (platform, code) (outflare_reviews_stuck_pages{code=~"not_a_review_page|blocked|save_failed|unknown"}) > 0
+        # A page that failed 3 reads in a row, retries included, with an
+        # error Outflare has to fix: the site changed its page (the parser in
+        # engine/internal/reviews/parse.go), the page is slower than the page
+        # reader allows, or the read couldn't be saved. A site that blocks
+        # the page reader (blocked) is the reader's to get past, not
+        # Outflare's, and errors a workspace fixes itself (its key, quota, a
+        # wrong address) show on its Reviews page instead; neither alerts.
+        expr: sum by (platform, code) (outflare_reviews_stuck_pages{code=~"not_a_review_page|slow_page|save_failed|unknown"}) > 0
         for: 30m
         labels: { severity: warning }
         annotations:
@@ -495,7 +513,7 @@ groups:
         # reader, or the read couldn't be saved. Errors a workspace fixes
         # itself (its key, credits, a wrong address) show on its Social page
         # instead and don't alert. Each missed day is a gap in follower growth.
-        expr: sum by (channel, code) (outflare_social_stuck_accounts{code=~"blocked|no_follower_count|save_failed|unknown"}) > 0
+        expr: sum by (channel, code) (outflare_social_stuck_accounts{code=~"blocked|slow_page|no_follower_count|save_failed|unknown"}) > 0
         for: 30m
         labels: { severity: warning }
         annotations:

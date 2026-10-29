@@ -276,6 +276,11 @@ func (s *Server) getContext(w http.ResponseWriter, r *http.Request) {
 	if brands == nil {
 		brands = []contextBrand{}
 	}
+	knowledge, err := s.knowledgeSummary(ctx, a, brandID)
+	if err != nil {
+		s.internal(w, r, err)
+		return
+	}
 	md := contextMarkdown(v, mems)
 	if brand != nil {
 		md += brandMarkdown(brand)
@@ -295,12 +300,14 @@ func (s *Server) getContext(w http.ResponseWriter, r *http.Request) {
 		}
 		md += sb.String()
 	}
+	md += knowledgeMarkdown(knowledge)
 	writeJSON(w, http.StatusOK, map[string]any{
 		"context":      v,
 		"brand":        brand,
 		"brands":       brands,
 		"memories":     mems,
 		"memory_count": total,
+		"knowledge":    knowledge,
 		"markdown":     md,
 	})
 }

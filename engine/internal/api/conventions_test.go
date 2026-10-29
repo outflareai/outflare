@@ -30,6 +30,7 @@ var unpagedLists = map[string]string{
 	"listSocialPosts":           "the top posts of a period bounded by days, in the chosen order",
 	"listVisitors":              "a ranking by score over days, at most 200, with totals of every visitor",
 	"searchWorkspace":           "the best matches, at most 100, ranked: refine the words to find others",
+	"findKnowledgePassages":     "the best passages for a question, at most 20, ranked: ask in other words to find others",
 }
 
 func TestDocumentFollowsConventions(t *testing.T) {

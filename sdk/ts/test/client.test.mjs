@@ -117,3 +117,19 @@ test("paginate follows next_cursor", async () => {
   }
   assert.deepEqual(ids, ["a", "b", "c"]);
 });
+
+test("flagsBootstrapTag hands decisions to the page, escaped", async () => {
+  const { flagsBootstrapTag } = await import("../dist/index.js");
+  const tag = flagsBootstrapTag(
+    { flags: { hero: "faster", chat: false }, payloads: { hero: { headline: "</script><b>Ship & go</b>" } } },
+    "srv-4f1c2a9e",
+  );
+  assert.ok(tag.startsWith('<script type="application/json" id="outflare-flags">'));
+  const inner = tag.slice(tag.indexOf(">") + 1, tag.lastIndexOf("</script>"));
+  assert.ok(!/[<>&]/.test(inner), inner);
+  assert.deepEqual(JSON.parse(inner), {
+    anonymousId: "srv-4f1c2a9e",
+    flags: { hero: "faster", chat: false },
+    payloads: { hero: { headline: "</script><b>Ship & go</b>" } },
+  });
+});

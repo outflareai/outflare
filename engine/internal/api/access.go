@@ -16,6 +16,7 @@ import (
 
 	"github.com/outflareai/outflare/engine/internal/allocation"
 	"github.com/outflareai/outflare/engine/internal/auth"
+	"github.com/outflareai/outflare/engine/internal/features"
 	"github.com/outflareai/outflare/engine/internal/oauth"
 	"github.com/outflareai/outflare/engine/internal/sysmail"
 	"github.com/outflareai/outflare/engine/internal/track"
@@ -322,6 +323,9 @@ type workspaceView struct {
 	// A test workspace: its mailboxes are simulated, so nothing it sends
 	// reaches anyone.
 	Test bool `json:"test"`
+	// Parts of Outflare switched on for this workspace (package
+	// features). Left out when none is on, and in lists of workspaces.
+	Features []string `json:"features,omitempty"`
 }
 
 func scanWorkspace(row pgx.Row, v *workspaceView, withRole bool) error {
@@ -466,6 +470,11 @@ func (s *Server) writeWorkspace(w http.ResponseWriter, r *http.Request, id, role
 	}
 	row := s.pool.QueryRow(r.Context(), `SELECT w.id, w.name, w.slug, w.test FROM workspaces w WHERE w.id = $1`, id)
 	if err := scanWorkspace(row, &v, false); err != nil {
+		s.internal(w, r, err)
+		return
+	}
+	var err error
+	if v.Features, err = features.List(r.Context(), s.pool, id); err != nil {
 		s.internal(w, r, err)
 		return
 	}

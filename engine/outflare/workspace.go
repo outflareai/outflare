@@ -69,6 +69,18 @@ func RecordSystem(ctx context.Context, tx pgx.Tx, workspaceID, action, targetTyp
 		ActorType: "system", Data: data})
 }
 
+// Missions an extension starts for the caller (Caller.StartMission): a
+// loop is an agent inside a mission, so it passes the API's gate, limits
+// and audit log, and waits for a person's approval like any mission.
+type MissionDraft = api.MissionDraft
+
+// ErrMissionInvalid and ErrMissionDenied sort Caller.StartMission's errors
+// (errors.Is): a 400 and a 403, with a message to show.
+var (
+	ErrMissionInvalid = api.ErrMissionInvalid
+	ErrMissionDenied  = api.ErrMissionDenied
+)
+
 // Company records.
 type Company = customers.Company
 

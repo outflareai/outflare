@@ -6,6 +6,7 @@
 
 import { useCallback, useEffect, useState, type FormEvent, type ReactNode } from "react";
 import { appPath } from "@/lib/paths";
+import { track } from "@/lib/analytics";
 import type { Partner, PartnerAsset, PartnerStats, PartnerConversion, PartnerImport, PartnerPayout, PartnerProgram, PartnerReferral, PartnerReward, PartnerRuleInput } from "@outflare/sdk";
 import { api, errorMessage } from "../api";
 import { useBrand } from "@/lib/brand";
@@ -133,7 +134,7 @@ function ownRate(rules: PartnerProgram["rules"], partner: string) {
 }
 
 // A program's totals across all its partners.
-type PartnerProgramStats = PartnerStats & { partners: { total: number; active: number; pending: number; suspended: number; rejected: number } };
+type PartnerProgramStats = PartnerStats & { partners: { total: number; active: number; pending: number; suspended: number; rejected: number; missing_payout_details: number } };
 
 // A page of a list, newest first, and the cursor to the next.
 type Page<T> = { list: T[]; next: string | null; error?: string };
@@ -177,11 +178,15 @@ function PartnerList({ ws, program, canManage }: { ws: string; program: PartnerP
   const [rules, setRules] = useState(program.rules);
   const [adding, setAdding] = useState(false);
   const [totals, setTotals] = useState<PartnerProgramStats | null>(null);
+  // Only partners who haven't given payout details (imported ones re-enter them on the portal).
+  const [missingOnly, setMissingOnly] = useState(false);
   useEffect(() => setRules(program.rules), [program.rules]);
   const get = useCallback(async (before?: string): Promise<Page<Partner>> => {
-    const { data, error } = await api.GET("/v1/workspaces/{ws}/partners", { params: { path: { ws }, query: { program: program.id, limit: pageSize, ...(before ? { before } : {}) } } });
+    const { data, error } = await api.GET("/v1/workspaces/{ws}/partners", {
+      params: { path: { ws }, query: { program: program.id, limit: pageSize, ...(before ? { before } : {}), ...(missingOnly ? { payout_details: "missing" as const } : {}) } },
+    });
     return { list: data?.data ?? [], next: data?.next_before ?? null, error: error ? errorMessage(error) : "" };
-  }, [ws, program.id]);
+  }, [ws, program.id, missingOnly]);
   const { list, next, error, reload, more } = usePages(get);
   // The tiles count every partner, not just the loaded page.
   const load = useCallback(async () => {
@@ -290,7 +295,7 @@ function PartnerList({ ws, program, canManage }: { ws: string; program: PartnerP
       cell: ({ row: { original: p } }) => (
         <span className="block min-w-0">
           <span className="block truncate font-medium">{p.name || p.email || p.code}</span>
-          <span className="block truncate font-mono text-[12px] text-muted-foreground">{p.code}{ownRate(rules, p.id) && ` · own rate ${ruleText(ownRate(rules, p.id)!, c)}`}{p.promo_codes.length > 0 && ` · ${p.promo_codes.map((c) => c.code + (c.status === "failed" ? " (not made in billing)" : c.status === "pending" ? " (making…)" : "")).join(", ")}`}</span>
+          <span className="block truncate font-mono text-[12px] text-muted-foreground">{p.code}{ownRate(rules, p.id) && ` · own rate ${ruleText(ownRate(rules, p.id)!, c)}`}{p.promo_codes.length > 0 && ` · ${p.promo_codes.map((c) => c.code + (c.status === "failed" ? " (not made in billing)" : c.status === "pending" ? " (making…)" : "")).join(", ")}`}{!p.payout_method && " · no payout details"}</span>
         </span>
       ),
     },
@@ -336,7 +341,7 @@ function PartnerList({ ws, program, canManage }: { ws: string; program: PartnerP
           <Stat label="Due to partners" value={money(totals.balance_cents, c)} sub={`${money(totals.pending_cents, c)} on hold`} />
         </Stats>
       )}
-      {list.length === 0 ? (
+      {list.length === 0 && !missingOnly ? (
         <Empty title="No partners yet" action={canManage && <Button onClick={() => setAdding(true)}>Add partner</Button>}>
           Add someone by email, or a customer record you already have. Each partner gets a ref code, a short link and a tagged campaign link.
         </Empty>
@@ -346,7 +351,16 @@ function PartnerList({ ws, program, canManage }: { ws: string; program: PartnerP
           data={list}
           rowId={(p) => p.id}
           searchPlaceholder="Search partners"
-          toolbar={canManage && <Button onClick={() => setAdding(true)}>Add partner</Button>}
+          toolbar={
+            <>
+              {(missingOnly || (totals?.partners.missing_payout_details ?? 0) > 0) && (
+                <Button variant={missingOnly ? "primary" : "ghost"} onClick={() => { track("ui.partners_filtered", { filter: "payout_details", value: missingOnly ? "all" : "missing" }); setMissingOnly(!missingOnly); }}>
+                  {missingOnly ? "All partners" : `No payout details (${totals?.partners.missing_payout_details})`}
+                </Button>
+              )}
+              {canManage && <Button onClick={() => setAdding(true)}>Add partner</Button>}
+            </>
+          }
           empty="No partners match."
           mobile={(p) => (
             <span className="block min-w-0">
@@ -585,7 +599,8 @@ function Payouts({ ws, program, canManage }: { ws: string; program: PartnerProgr
     const { data, error } = await api.POST("/v1/workspaces/{ws}/partner-payouts", { params: { path: { ws } }, body: { program: program.id } });
     if (error) return toast(errorMessage(error), "error");
     const n = data?.data.length ?? 0;
-    toast(n ? `${plural(n, "payout")} due. Pay them from your own account, then mark each paid.` : `Nobody's balance has reached the ${money(program.min_payout_cents, program.currency)} minimum yet.`);
+    const waiting = data?.waiting_for_details ? ` ${plural(data.waiting_for_details, "partner")} still need to add payout details on the portal; theirs wait.` : "";
+    toast((n ? `${plural(n, "payout")} due. Pay them from your own account, then mark each paid.` : `Nobody's balance has reached the ${money(program.min_payout_cents, program.currency)} minimum yet.`) + waiting);
     load();
   }
   // download saves the due payouts, with each partner's payout details, as

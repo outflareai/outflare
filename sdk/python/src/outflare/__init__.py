@@ -14,6 +14,7 @@ from ._client import _Base
 from ._errors import OutflareError, WebhookVerificationError
 from ._operations import Operations
 from ._version import __version__
+from .flags import flags_bootstrap_tag
 from .webhooks import verify_webhook
 
 
@@ -35,4 +36,12 @@ def is_held(answer: Any) -> bool:
     return isinstance(answer, dict) and "mission_action" in answer and "approval_required" in answer
 
 
-__all__ = ["Outflare", "OutflareError", "WebhookVerificationError", "__version__", "is_held", "verify_webhook"]
+__all__ = [
+    "Outflare",
+    "OutflareError",
+    "WebhookVerificationError",
+    "__version__",
+    "flags_bootstrap_tag",
+    "is_held",
+    "verify_webhook",
+]

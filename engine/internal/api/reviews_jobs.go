@@ -224,6 +224,11 @@ type dueReviewPage struct {
 	// only showed its reviews once read in a browser.
 	failures int
 	renderJS bool
+	// jobID is the page reader's job still reading jobURL, started at jobAt.
+	jobID, jobURL string
+	jobAt         time.Time
+	// backfillTries is how many first reads stopped partway.
+	backfillTries int
 }
 
 // A review page read that found no reviews or rating on a page that wasn't
@@ -241,14 +246,16 @@ func (s *Server) ReadReviewPages(ctx context.Context, ws, integrationID string) 
 	if err := s.syncReviewPages(ctx, ws); err != nil {
 		return err
 	}
-	rows, err := s.pool.Query(ctx, `SELECT id::text, platform, url, brand_id::text, backfilled_at IS NOT NULL, failures, render_js FROM review_pages
+	rows, err := s.pool.Query(ctx, `SELECT id::text, platform, url, brand_id::text, backfilled_at IS NOT NULL, failures, render_js,
+		COALESCE(pending_job_id, ''), COALESCE(pending_job_url, ''), COALESCE(pending_job_at, 'epoch'), backfill_tries FROM review_pages
 		WHERE workspace_id = $1 AND status = 'active' AND next_read_at <= now() + interval '1 minute' ORDER BY next_read_at LIMIT 200`, ws)
 	if err != nil {
 		return err
 	}
 	var due []dueReviewPage
 	var d dueReviewPage
-	if _, err := pgx.ForEachRow(rows, []any{&d.id, &d.platform, &d.url, &d.brand, &d.backfilled, &d.failures, &d.renderJS}, func() error { due = append(due, d); return nil }); err != nil {
+	if _, err := pgx.ForEachRow(rows, []any{&d.id, &d.platform, &d.url, &d.brand, &d.backfilled, &d.failures, &d.renderJS, &d.jobID, &d.jobURL, &d.jobAt, &d.backfillTries},
+		func() error { due = append(due, d); return nil }); err != nil {
 		return err
 	}
 	if len(due) == 0 {
@@ -301,35 +308,75 @@ type reviewBug struct{ err error }
 func (e *reviewBug) Error() string { return "saving a review page's read failed: " + e.err.Error() }
 func (e *reviewBug) Unwrap() error { return e.err }
 
-// fetchReviewPage reads one page of reviews and parses it. A first page
-// that shows no reviews is read again in a browser, once, when it wasn't
-// already: sites behind a bot check, and pages built by their script,
-// often show their reviews that way. It reports whether the browser read
-// was the one that worked.
-func fetchReviewPage(ctx context.Context, o *connectors.Opened, f connectors.PageFetcher, platform, url string, render, retry bool, now time.Time) (reviews.Read, connectors.FetchedPage, bool, float64, error) {
-	res, err := f.FetchPage(ctx, o.Client, o.Creds, url, render)
-	cost := res.Cost.Units
-	var r reviews.Read
-	if err == nil {
-		r = reviews.Parse(platform, res.HTML, now)
+// A page read in a browser runs as a job at the page reader when it can
+// (connectors.PageJobs): sent once, then asked for its result every
+// reviewJobPoll. A round waits reviewJobWait for one page; a job still
+// running then is kept on the page (pending_job_id) and picked up by the
+// next round, reviewJobRecheck later, never sent again. A kept job older
+// than reviewJobKeep is taken as lost and the page is sent afresh (Geonode
+// keeps a finished job's page for 24 hours).
+var (
+	reviewJobPoll    = 5 * time.Second
+	reviewJobWait    = 150 * time.Second
+	reviewJobRecheck = 5 * time.Minute
+	reviewJobKeep    = time.Hour
+)
+
+// reviewBackfillTries is how many first reads that stopped partway are
+// read again before what they read is kept as the page's history.
+const reviewBackfillTries = 5
+
+// errPagePending is a page whose job is still running when the round
+// stops waiting for it.
+var errPagePending = errors.New("the page reader is still reading the page")
+
+// fetchReviewURL reads one page of reviews: as a job when the reader runs
+// them, picking up the page's own running job for the same address,
+// otherwise with one wait for the answer. Saving the job on the page
+// failing is a *reviewBug.
+func (s *Server) fetchReviewURL(ctx context.Context, ws string, o *connectors.Opened, f connectors.PageFetcher, p *dueReviewPage, url string, render bool) (connectors.FetchedPage, error) {
+	j, ok := f.(connectors.PageJobs)
+	if !ok || !render {
+		return f.FetchPage(ctx, o.Client, o.Creds, url, render)
 	}
-	k := connectors.KindOf(err)
-	if !retry || render || r.Found() || (err != nil && k != connectors.ErrUnavailable) || res.Status == 404 || res.Status == 410 {
-		return r, res, false, cost, err
+	id := ""
+	if p.jobID != "" && p.jobURL == url && time.Since(p.jobAt) < reviewJobKeep {
+		id = p.jobID
 	}
-	res2, err2 := f.FetchPage(ctx, o.Client, o.Creds, url, true)
-	cost += res2.Cost.Units
-	if err2 != nil {
-		if err != nil {
-			return r, res, false, cost, err
+	if id == "" {
+		var err error
+		if id, err = j.StartPage(ctx, o.Client, o.Creds, url); err != nil {
+			return connectors.FetchedPage{}, err
 		}
-		return r, res, false, cost, nil // the first answer says more
+		p.jobID, p.jobURL, p.jobAt = id, url, time.Now()
+		if _, err := s.pool.Exec(ctx, `UPDATE review_pages SET pending_job_id = $3, pending_job_url = $4, pending_job_at = now()
+			WHERE workspace_id = $1 AND id = $2`, ws, p.id, id, url); err != nil {
+			return connectors.FetchedPage{}, &reviewBug{err}
+		}
 	}
-	r2 := reviews.Parse(platform, res2.HTML, now)
-	if !r2.Found() && err == nil {
-		return r, res, false, cost, nil
+	deadline := time.Now().Add(reviewJobWait)
+	for {
+		page, done, err := j.PageResult(ctx, o.Client, o.Creds, id)
+		if done {
+			p.jobID = ""
+			if _, uerr := s.pool.Exec(ctx, `UPDATE review_pages SET pending_job_id = NULL, pending_job_url = NULL, pending_job_at = NULL
+				WHERE workspace_id = $1 AND id = $2 AND pending_job_id = $3`, ws, p.id, id); uerr != nil {
+				return page, &reviewBug{uerr}
+			}
+			return page, err
+		}
+		if err != nil {
+			return page, err // the reader's own failure; the job is kept for the next round
+		}
+		if time.Now().After(deadline) {
+			return connectors.FetchedPage{}, errPagePending
+		}
+		select {
+		case <-ctx.Done():
+			return connectors.FetchedPage{}, errPagePending
+		case <-time.After(reviewJobPoll):
+		}
 	}
-	return r2, res2, r2.Found(), cost, nil
 }
 
 // readReviewPage reads one review page and keeps what it found.
@@ -389,19 +436,37 @@ func (s *Server) readReviewPage(ctx context.Context, ws string, o *connectors.Op
 		}
 	}
 	now := time.Now()
-	rendered := false
+	// complete is false when a later page couldn't be read: what the first
+	// pages gave is kept, and a first read (the backfill) isn't done yet.
+	complete := true
 	for n := 1; n <= limit; n++ {
-		r, res, viaBrowser, cost, err := fetchReviewPage(ctx, o, f, p.platform, reviews.PageURL(page, n), render, n == 1, now)
-		tokens += cost
-		if n == 1 && viaBrowser {
-			render, rendered = true, true
-		}
-		if err != nil {
-			if n > 1 {
-				break // keep what the first pages gave
+		res, err := s.fetchReviewURL(ctx, ws, o, f, &p, reviews.PageURL(page, n), render)
+		tokens += res.Cost.Units
+		var bug *reviewBug
+		switch {
+		case errors.As(err, &bug):
+			return fail(readSaveFailed, bug.err)
+		case errors.Is(err, errPagePending) && n == 1:
+			// Nothing read yet: the next round picks the job up.
+			ev.Name = "review_page.read_pending"
+			ev.Props["tokens"], ev.Props["duration_ms"] = tokens, time.Since(start).Milliseconds()
+			track.Emit(ctx, ev)
+			metrics.ReviewPageRead(p.platform, "pending", 0)
+			if _, uerr := s.pool.Exec(ctx, `UPDATE review_pages SET next_read_at = now() + make_interval(secs => $3), updated_at = now()
+				WHERE workspace_id = $1 AND id = $2`, ws, p.id, reviewJobRecheck.Seconds()); uerr != nil {
+				return &reviewBug{uerr}
 			}
-			return fail("connector_"+connectors.KindOf(err), err)
+			return nil
+		case err != nil && n > 1:
+			complete = false
+		case err != nil:
+			err = pageFailed(err)
+			return fail(readCode(err), err)
 		}
+		if !complete {
+			break
+		}
+		r := reviews.Parse(p.platform, res.HTML, now)
 		if n == 1 {
 			if !r.Found() {
 				switch {
@@ -441,13 +506,13 @@ func (s *Server) readReviewPage(ctx context.Context, ws string, o *connectors.Op
 		}
 	}
 	p.renderJS = render
-	added, replied, err := s.saveReviews(ctx, ws, p, first, found, !p.backfilled)
+	added, replied, err := s.saveReviews(ctx, ws, p, first, found, !p.backfilled, complete)
 	if err != nil {
 		return fail(readSaveFailed, err)
 	}
 	metrics.ReviewPageRead(p.platform, "success", added)
 	ev.Props["reviews"], ev.Props["new"], ev.Props["replies"], ev.Props["tokens"] = len(found), added, replied, tokens
-	ev.Props["render_js"], ev.Props["rendered_retry"] = render, rendered
+	ev.Props["render_js"], ev.Props["complete"] = render, complete
 	ev.Props["duration_ms"] = time.Since(start).Milliseconds()
 	track.Emit(ctx, ev)
 	return nil
@@ -455,8 +520,11 @@ func (s *Server) readReviewPage(ctx context.Context, ws string, o *connectors.Op
 
 // saveReviews keeps a page's reviews and its numbers for today, and
 // reports how many reviews and replies were new. A first read records one
-// event for the whole history, not one per review.
-func (s *Server) saveReviews(ctx context.Context, ws string, p dueReviewPage, head reviews.Read, found []reviews.Review, backfill bool) (int, int, error) {
+// event for the whole history, not one per review. A first read that
+// stopped early (complete false) keeps what it found but isn't done: the
+// page is read again from the start soon (retry.After), and only a full
+// read, or the reviewBackfillTries-th, marks the history read.
+func (s *Server) saveReviews(ctx context.Context, ws string, p dueReviewPage, head reviews.Read, found []reviews.Review, backfill, complete bool) (int, int, error) {
 	added, replied := 0, 0
 	ids := make([]string, 0, len(found))
 	for _, x := range found {
@@ -522,13 +590,23 @@ func (s *Server) saveReviews(ctx context.Context, ws string, p dueReviewPage, he
 				}
 			}
 		}
+		next := reviewReadEvery
+		if backfill && !complete {
+			if p.backfillTries+1 >= reviewBackfillTries {
+				complete = true // keep what the reads found as the history
+			} else {
+				next = retry.After(p.backfillTries + 1)
+			}
+		}
 		if _, err := tx.Exec(ctx, `UPDATE review_pages SET score = COALESCE($3, score), review_count = COALESCE($4, review_count),
 			name = COALESCE(NULLIF($5, ''), name), last_read_at = now(), last_error = NULL, last_error_code = NULL, failures = 0,
-			render_js = $7, backfilled_at = COALESCE(backfilled_at, now()), next_read_at = now() + make_interval(secs => $6), updated_at = now()
-			WHERE workspace_id = $1 AND id = $2`, ws, p.id, head.Score, head.Count, truncate(head.Name, 300), reviewReadEvery.Seconds(), p.renderJS); err != nil {
+			render_js = $7, backfilled_at = CASE WHEN $8 THEN COALESCE(backfilled_at, now()) ELSE backfilled_at END,
+			backfill_tries = CASE WHEN $8 THEN 0 WHEN $9 THEN backfill_tries + 1 ELSE backfill_tries END,
+			next_read_at = now() + make_interval(secs => $6), updated_at = now()
+			WHERE workspace_id = $1 AND id = $2`, ws, p.id, head.Score, head.Count, truncate(head.Name, 300), next.Seconds(), p.renderJS, complete, backfill); err != nil {
 			return err
 		}
-		if backfill {
+		if backfill && complete {
 			if err := audit.Record(ctx, tx, audit.Event{WorkspaceID: ws, ActorType: "system", Action: "review_page.backfilled", TargetType: "review_page", TargetID: p.id,
 				Data: map[string]any{"platform": p.platform, "reviews": added}}); err != nil {
 				return err

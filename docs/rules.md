@@ -83,6 +83,10 @@ The emitted event goes on the record's timeline with source `rule`, and is appro
 - Change and audience rules look at records and list members as they are now.
 - A simulation looks at up to 50,000 events or records. `truncated` says there were more, and then the numbers are a lower bound. It stops after 15 seconds with `query_timeout`.
 
+## Rules from playbooks
+
+Some playbooks bring rules in a setup kit, such as "Stalled after sign-up" (activate new trials) or "Key account went quiet" (catch key accounts at risk). Applying the kit adds them as drafts, filled in with the events you give, and the rule card says which kit added one. Dry-run it, then activate it. Applying the kit again leaves it as it is.
+
 ## Managing rules
 
 | | |

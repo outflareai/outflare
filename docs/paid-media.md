@@ -96,6 +96,23 @@ To credit sales to each ad by its id, paste the network's tracking template
 into it ([website tracking](website-tracking.md#ad-tracking-templates)): every
 paid click then lands with the network's own campaign, ad set and ad ids.
 
+### What each campaign brought
+
+**Paid ads → What each campaign brought** puts Outflare's own count beside
+each campaign's spend. It shows the visits that came through the campaign
+(matched by the ids its tracking template put on the landing page), and the
+conversions and revenue [attribution](attribution.md) credits to those visits
+under the workspace's model, with the return on spend. The platform's own
+conversion count is shown next to it for comparison, never added in.
+
+A campaign with spend and no tracked visits is listed too: it usually has no
+tracking template yet.
+
+`GET /v1/workspaces/{ws}/attribution/ads` (MCP `get_attribution_ads`) gives the
+same rows. It takes `level` (`campaign`, `adset` or `ad`), `from`, `to`,
+`model` and `brand`. Ad accounts sync campaigns only, so ad sets and ads come
+with first-party numbers but no name or spend.
+
 ## Sending conversions back
 
 A conversion rule sends one customer event (such as `signed_up` or

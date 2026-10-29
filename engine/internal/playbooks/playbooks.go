@@ -387,8 +387,19 @@ func Load(fsys fs.FS, c *Catalog) ([]Playbook, error) {
 		if dir := path.Dir(f); err == nil && dir != p.ID {
 			err = fmt.Errorf("the folder is %q but the id is %q; they must match", dir, p.ID)
 		}
-		if err == nil && p.Kit != "" && !slices.ContainsFunc(kits, func(k Kit) bool { return k.ID == p.Kit }) {
-			err = fmt.Errorf("kit %q is not in playbooks/kits", p.Kit)
+		if err == nil && p.Kit != "" {
+			i := slices.IndexFunc(kits, func(k Kit) bool { return k.ID == p.Kit })
+			if i < 0 {
+				err = fmt.Errorf("kit %q is not in playbooks/kits", p.Kit)
+			}
+			// Starting the playbook with apply_kit passes its inputs on to
+			// the kit, so it takes every input the kit needs.
+			for j := 0; err == nil && i >= 0 && j < len(kits[i].Inputs); j++ {
+				in := kits[i].Inputs[j]
+				if !slices.ContainsFunc(p.Inputs, func(pi Input) bool { return pi.Name == in.Name }) {
+					err = fmt.Errorf("its kit %q takes the input %s, so the playbook needs it too", p.Kit, in.Name)
+				}
+			}
 		}
 		if err != nil {
 			errs = append(errs, fmt.Errorf("playbooks/%s: %w", f, err))

@@ -50,9 +50,14 @@ type emailBroadcastView struct {
 	ProviderID      *string           `json:"provider_id"`
 	BrandID         *string           `json:"brand_id"`
 	Audience        broadcastAudience `json:"audience"`
+	// Who it leaves out: people on these lists or with these tags, or at
+	// a company with one. They are skipped with the reason.
+	Exclude customers.Exclusion `json:"exclude"`
 	// How many people the audience has now, before anyone's choices: only
 	// on a single broadcast that has not started.
 	AudienceSize *int `json:"audience_size"`
+	// How many of them the exclusion leaves out: only with audience_size.
+	AudienceExcluded *int `json:"audience_excluded,omitempty"`
 	// The audience by contact basis, and what looks wrong about sending
 	// to it: only on a single broadcast that has not started.
 	AudienceBases map[string]int   `json:"audience_bases,omitempty"`
@@ -80,7 +85,7 @@ type templateRef struct {
 
 const emailBroadcastSelect = `
 	SELECT b.id, b.name, b.status, b.status_reason, t.id, t.handle, t.name, b.template_version, tp.id, tp.key, tp.name,
-	       b.from_address, b.provider_id, b.brand_id, b.audience_kind, b.record_ids::text[], b.audience_ref, b.data,
+	       b.from_address, b.provider_id, b.brand_id, b.audience_kind, b.record_ids::text[], b.audience_ref, b.data, b.exclude,
 	       b.track_opens, b.track_clicks, b.send_at, b.started_at, b.finished_at, b.recipients, b.skipped,
 	       COALESCE(st.emails, 0), COALESCE(st.sent, 0), COALESCE(st.delivered, 0), COALESCE(st.opened, 0), COALESCE(st.clicked, 0),
 	       COALESCE(st.bounced, 0), COALESCE(st.complained, 0), COALESCE(st.not_sent, 0),
@@ -105,15 +110,17 @@ const emailBroadcastSelect = `
 func scanEmailBroadcast(row pgx.Row) (emailBroadcastView, error) {
 	var v emailBroadcastView
 	var topic nullTopic
-	var data []byte
+	var data, exclude []byte
 	err := row.Scan(&v.ID, &v.Name, &v.Status, &v.StatusReason, &v.Template.ID, &v.Template.Handle, &v.Template.Name, &v.TemplateVersion,
-		&topic.ID, &topic.Key, &topic.Name, &v.From, &v.ProviderID, &v.BrandID, &v.Audience.Kind, &v.Audience.RecordIDs, &v.Audience.Ref, &data,
+		&topic.ID, &topic.Key, &topic.Name, &v.From, &v.ProviderID, &v.BrandID, &v.Audience.Kind, &v.Audience.RecordIDs, &v.Audience.Ref, &data, &exclude,
 		&v.Track.Opens, &v.Track.Clicks, &v.SendAt, &v.StartedAt, &v.FinishedAt, &v.Recipients, &v.Skipped,
 		&v.Stats.Emails, &v.Stats.Sent, &v.Stats.Delivered, &v.Stats.Opened, &v.Stats.Clicked, &v.Stats.Bounced, &v.Stats.Complained,
 		&v.Stats.NotSent, &v.Stats.Unsubscribed, &v.CreatedAt, &v.UpdatedAt)
 	v.Topic = topic.ref()
 	v.Data = map[string]any{}
 	_ = json.Unmarshal(data, &v.Data)
+	_ = json.Unmarshal(exclude, &v.Exclude)
+	v.Exclude = v.Exclude.Clean()
 	if v.Audience.RecordIDs == nil {
 		v.Audience.RecordIDs = []string{}
 	}
@@ -171,6 +178,14 @@ func (s *Server) findEmailBroadcast(w http.ResponseWriter, r *http.Request, ws, 
 			return nil, false
 		}
 		v.AudienceSize = &n
+		if !v.Exclude.Empty() {
+			x, err := emails.AudienceExcluded(r.Context(), s.pool, ws, v.BrandID, v.Audience.Kind, v.Audience.RecordIDs, v.Exclude)
+			if err != nil {
+				s.internal(w, r, err)
+				return nil, false
+			}
+			v.AudienceExcluded = &x
+		}
 		if v.AudienceBases, err = emails.AudienceBases(r.Context(), s.pool, ws, v.BrandID, v.Audience.Kind, v.Audience.RecordIDs); err != nil {
 			s.internal(w, r, err)
 			return nil, false
@@ -193,14 +208,15 @@ func (s *Server) getEmailBroadcast(w http.ResponseWriter, r *http.Request) {
 }
 
 type broadcastFields struct {
-	Name       *string            `json:"name"`
-	Template   *string            `json:"template"`
-	Topic      optional[string]   `json:"topic"`
-	From       *string            `json:"from"`
-	ProviderID optional[string]   `json:"provider_id"`
-	BrandID    optional[string]   `json:"brand_id"`
-	Audience   *broadcastAudience `json:"audience"`
-	Data       map[string]any     `json:"data"`
+	Name       *string              `json:"name"`
+	Template   *string              `json:"template"`
+	Topic      optional[string]     `json:"topic"`
+	From       *string              `json:"from"`
+	ProviderID optional[string]     `json:"provider_id"`
+	BrandID    optional[string]     `json:"brand_id"`
+	Audience   *broadcastAudience   `json:"audience"`
+	Data       map[string]any       `json:"data"`
+	Exclude    *customers.Exclusion `json:"exclude"`
 	Track      *struct {
 		Opens  optional[bool] `json:"opens"`
 		Clicks optional[bool] `json:"clicks"`
@@ -213,6 +229,7 @@ type broadcastRow struct {
 	topicID, providerID, brandID     *string
 	recordIDs                        []string
 	data                             map[string]any
+	exclude                          customers.Exclusion
 	trackOpens, trackClicks          *bool
 }
 
@@ -300,6 +317,13 @@ func (s *Server) applyBroadcast(r *http.Request, ws string, f broadcastFields, b
 		}
 		b.data = f.Data
 	}
+	if f.Exclude != nil {
+		x, err := s.checkExclusion(r, ws, *f.Exclude)
+		if err != nil {
+			return err
+		}
+		b.exclude = x
+	}
 	if f.Track != nil {
 		if f.Track.Opens.Set {
 			b.trackOpens = f.Track.Opens.Value
@@ -322,7 +346,7 @@ func (s *Server) createEmailBroadcast(w http.ResponseWriter, r *http.Request) {
 		bad("name and template are required")
 		return
 	}
-	b := broadcastRow{audience: "topic", recordIDs: []string{}, data: map[string]any{}}
+	b := broadcastRow{audience: "topic", recordIDs: []string{}, data: map[string]any{}, exclude: customers.Exclusion{}.Clean()}
 	err := s.applyBroadcast(r, a.WorkspaceID, f, &b)
 	var inv errInvalid
 	if errors.As(err, &inv) {
@@ -342,10 +366,10 @@ func (s *Server) createEmailBroadcast(w http.ResponseWriter, r *http.Request) {
 			createdBy = &a.ActorID
 		}
 		if err := tx.QueryRow(ctx, `INSERT INTO email_broadcasts (workspace_id, name, template_id, topic_id, from_address, provider_id, brand_id,
-			audience_kind, record_ids, data, track_opens, track_clicks, created_by, request_id)
-			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::uuid[], $10, $11, $12, $13, NULLIF($14, '')) RETURNING id`,
+			audience_kind, record_ids, data, track_opens, track_clicks, created_by, request_id, exclude)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::uuid[], $10, $11, $12, $13, NULLIF($14, ''), $15) RETURNING id`,
 			a.WorkspaceID, b.name, b.templateID, b.topicID, b.from, b.providerID, b.brandID, b.audience, b.recordIDs, data,
-			b.trackOpens, b.trackClicks, createdBy, RequestID(ctx)).Scan(&id); err != nil {
+			b.trackOpens, b.trackClicks, createdBy, RequestID(ctx), b.exclude).Scan(&id); err != nil {
 			return err
 		}
 		return record(ctx, tx, &a.principal, a.WorkspaceID, "email_broadcast.created", "email_broadcast", id,
@@ -372,13 +396,13 @@ func (s *Server) updateEmailBroadcast(w http.ResponseWriter, r *http.Request) {
 	if !decode(w, r, &f) {
 		return
 	}
-	onlyName := f.Template == nil && !f.Topic.Set && f.From == nil && !f.ProviderID.Set && !f.BrandID.Set && f.Audience == nil && f.Data == nil && f.Track == nil
+	onlyName := f.Template == nil && !f.Topic.Set && f.From == nil && !f.ProviderID.Set && !f.BrandID.Set && f.Audience == nil && f.Data == nil && f.Track == nil && f.Exclude == nil
 	if cur.Status != "draft" && !onlyName {
 		writeError(w, r, http.StatusConflict, "conflict", "the broadcast is "+cur.Status+"; only its name can change")
 		return
 	}
 	b := broadcastRow{name: cur.Name, templateID: cur.Template.ID, from: cur.From, audience: cur.Audience.Kind, providerID: cur.ProviderID,
-		brandID: cur.BrandID, recordIDs: cur.Audience.RecordIDs, data: cur.Data, trackOpens: cur.Track.Opens, trackClicks: cur.Track.Clicks}
+		brandID: cur.BrandID, recordIDs: cur.Audience.RecordIDs, data: cur.Data, exclude: cur.Exclude, trackOpens: cur.Track.Opens, trackClicks: cur.Track.Clicks}
 	if cur.Topic != nil {
 		b.topicID = &cur.Topic.ID
 	}
@@ -396,9 +420,9 @@ func (s *Server) updateEmailBroadcast(w http.ResponseWriter, r *http.Request) {
 	err = pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
 		data, _ := json.Marshal(b.data)
 		if _, err := tx.Exec(ctx, `UPDATE email_broadcasts SET name = $3, template_id = $4, topic_id = $5, from_address = $6, provider_id = $7,
-			brand_id = $8, audience_kind = $9, record_ids = $10::uuid[], data = $11, track_opens = $12, track_clicks = $13, updated_at = now()
+			brand_id = $8, audience_kind = $9, record_ids = $10::uuid[], data = $11, track_opens = $12, track_clicks = $13, exclude = $14, updated_at = now()
 			WHERE workspace_id = $1 AND id = $2`, a.WorkspaceID, cur.ID, b.name, b.templateID, b.topicID, b.from, b.providerID, b.brandID,
-			b.audience, b.recordIDs, data, b.trackOpens, b.trackClicks); err != nil {
+			b.audience, b.recordIDs, data, b.trackOpens, b.trackClicks, b.exclude); err != nil {
 			return err
 		}
 		return record(ctx, tx, &a.principal, a.WorkspaceID, "email_broadcast.updated", "email_broadcast", cur.ID, nil)

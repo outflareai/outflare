@@ -159,6 +159,57 @@ email_templates:                 # drafts, in the email template syntax
 
 Fields use the catalog's value types: `text`, `number`, `currency`, `date`, `timestamp`, `checkbox`, `select`, `status`, `rating`, `email`, `phone`, `url`, `location`, `record_reference` and `actor_reference`. `select` and `status` fields name an `option_set` (the kit's own, or a built-in one such as `country` or `industry`); `record_reference` fields name a `target_type`; `multiple: true` is for text, select, email, phone, url and reference fields. The same `go test ./engine/internal/playbooks/` checks kits, and the engine's tests apply every shipped kit to an empty workspace.
 
+### Flow kits: smart lists, rules and journeys
+
+A kit can also bring a whole automation, so a playbook such as `activate-new-trials` arrives ready to check and turn on. Add any of `smart_lists`, `rules` and `journeys`, each written the way the API takes it (`POST .../smart-lists`, `.../rules`, `.../journeys`), plus `inputs` for the values that differ from one workspace to the next:
+
+```yaml
+inputs:
+  - name: activated_event        # used below as {{activated_event}}
+    label: The event that means activated
+    kind: event                  # event (an event name), sequence (a sequence's id) or text
+    example: project_created     # required, except for sequences
+    default: ""                  # optional: used when the person leaves it empty
+    optional: false
+
+smart_lists:
+  - key: trial_not_activated     # its key in the kit
+    name: Trials not activated
+    rules:                       # or kind: static, for a list journeys add people to
+      - { event: signed_up, op: exists, within_days: 14 }
+      - { event: "{{activated_event}}", op: not_exists }
+
+rules:
+  - key: stalled_after_signup
+    name: Stalled after sign-up
+    trigger: { kind: absence, start_event: signed_up, event: "{{activated_event}}", within_seconds: 259200 }
+    emit_event: trial.stalled
+
+journeys:
+  - key: activate_new_trials
+    name: Activate new trials
+    trigger: { kind: event, event: trial.stalled }
+    goal_event: "{{activated_event}}"
+    steps:
+      - { id: nudge, kind: email, template: activation-nudge }   # one of the kit's own email drafts
+```
+
+- `{{name}}` is an input's value; `{{smart_list.key}}` and `{{journey.key}}` are the ids of the kit's own parts, for an audience rule's `list_id` or a journey step's `list_id` or `journey_id`. Placeholders go only in text settings; email drafts keep their own `{{person.x}}` variables.
+- A journey's email steps send the kit's own lifecycle email drafts, by handle, and its `transactional_email` steps the kit's own transactional drafts. An `assign_owner` step can't go in a kit: it names members of one workspace.
+- Applying the kit adds each part as a draft: rules and journeys stay in draft until a person turns them on, and a smart list only fills. Each remembers its kit and key, so applying the kit again leaves it as it is; another part with the same name is a conflict.
+- A playbook that names a flow kit takes every input the kit takes, under the same name, and passes them on when it is started with `apply_kit`.
+- The checks fill each kit in with its inputs' examples and run the API's own checks on every part, so a kit that would fail to apply fails CI instead.
+
+### Exporting a flow as a kit
+
+You don't have to write a flow kit by hand. Build the journey in a workspace, then choose **Export as a kit** in its menu (or `POST /v1/workspaces/{ws}/kits/export`, MCP `export_kit`):
+
+- It takes along what the journey uses: the journeys it starts or stops, the static lists it adds people to, the emails it sends (as plain-text drafts), the rules that emit the event that starts it, and the smart lists those rules watch.
+- Ids become `{{journey.key}}` and `{{smart_list.key}}`, and a sequence becomes an input. Tick the events another workspace may name differently, and each becomes an input with yours as its default.
+- The file is checked the way CI checks a kit, so it applies as written. A smart list built on other lists or news searches, or an `assign_owner` step, can't go in a kit, and the export says so. A `move_deal` step keeps its pipeline's keys, and a note reminds you the other workspace needs the same pipeline.
+
+Another workspace sets the file up with **Apply a kit file** on the Playbooks page (`POST /v1/workspaces/{ws}/kits/apply`, MCP `apply_kit_file`): a preview first, then every part as a draft. To share it with everyone, save it as `playbooks/kits/<id>.yaml`, give it a playbook that names it, and send a pull request.
+
 ## Writing a good playbook
 
 - **Start from the outcome.** The title says what the person gets ("Answer every interested reply within the hour"), not which feature it uses.

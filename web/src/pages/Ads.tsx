@@ -9,6 +9,7 @@ import { ago } from "../format";
 import type { Tab } from "../App";
 import { AdConversions } from "./AdConversions";
 import { AdTrackingTemplates } from "./AdTracking";
+import { AdResults } from "./AdResults";
 
 // Paid ads: spend, clicks and what each platform says it brought in, read
 // every six hours from the workspace's own ad accounts. Conversions and ROAS
@@ -188,6 +189,8 @@ export function Ads({ ws, canManage, go }: Props) {
           ]}
         />
       </Card>
+
+      <AdResults ws={ws} from={day(new Date(Date.now() - (days - 1) * 86_400_000))} to={day(new Date())} brand={brandKey} go={go} />
 
       <AdConversions ws={ws} canManage={canManage} accounts={accounts} />
 

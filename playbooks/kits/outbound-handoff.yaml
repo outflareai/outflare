@@ -1,0 +1,47 @@
+id: outbound-handoff
+version: 1
+title: Outbound handoff
+summary: When a prospect says yes, stop every sequence at their company and hand them to their owner; when someone shows strong intent, start them on a sequence.
+
+inputs:
+  - name: interested_event
+    label: The event that means a prospect is interested
+    help: A booked meeting, or an event your CRM or inbox sends when a reply says yes.
+    kind: event
+    example: meeting.booked
+    default: meeting.booked
+  - name: high_intent_event
+    label: The event that shows strong buying intent
+    help: Sent from your own backend, such as demo_requested or pricing_viewed. Events from the website tracking script can't start automations.
+    kind: event
+    example: demo_requested
+  - name: sequence
+    label: The sequence for high-intent people
+    kind: sequence
+    example: Demo follow-up
+
+smart_lists:
+  - key: handed_over
+    name: Handed over to sales
+    description: Everyone the handoff journey passed to their owner.
+    kind: static
+
+journeys:
+  - key: hand_off_interested
+    name: Hand off interested prospects
+    description: Stops cold email to the prospect's whole company, tags them and tells their owner, so nobody keeps emailing someone who already said yes.
+    trigger: { kind: event, event: "{{interested_event}}" }
+    entry: again
+    steps:
+      - { id: stop, kind: stop_sequences, scope: company, next: tag }
+      - { id: tag, kind: add_tag, tag: sales-handoff, next: list }
+      - { id: list, kind: add_to_list, list_id: "{{smart_list.handed_over}}", next: tell_owner }
+      - { id: tell_owner, kind: alert, title: A prospect is interested and ready for you, text: Their company's sequences are stopped., to: owner }
+  - key: follow_up_high_intent
+    name: Follow up high intent
+    description: Starts someone who shows strong intent on a sequence, unless they're already in another one, and tells their owner.
+    trigger: { kind: event, event: "{{high_intent_event}}" }
+    exit_events: ["{{interested_event}}"]
+    steps:
+      - { id: enroll, kind: enroll_in_sequence, sequence_id: "{{sequence}}", next: tell_owner }
+      - { id: tell_owner, kind: alert, title: A high-intent prospect started a sequence, to: owner }

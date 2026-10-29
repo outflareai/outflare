@@ -282,6 +282,7 @@ with the rule's dry run. On a phone the flow is read-only.
 - **Exit criteria.**
   - `exit_events`: doing any of these ends the run at once, even mid-wait, with reason `exit_event`.
   - `exit_conditions`: attribute conditions. When any holds, the run ends before its next step (`exit_condition`). Someone who already meets one never starts. This includes a manual add, which answers 409.
+- **Exclusions.** `exclude` names lists (smart or static) and tags. People on any of the lists, with any of the tags, or who work at a company with one, never start, even when added by hand. The refusal says why: `excluded: on the list Hands off`, `excluded: tagged competitor` or `excluded: their company is tagged competitor`. Broadcasts and sequences take the same `exclude` (see Exclusions).
 - **Changing it.** Activating checks every email step's template is
   published, and that the lists, journeys and sequences action steps name
   are the workspace's. A journey that hasn't gone live yet changes freely. A live
@@ -300,6 +301,23 @@ with the rule's dry run. On a phone the flow is read-only.
   A paused journey can still be changed directly (`PATCH`), which moves
   everyone in it onto the change. Pausing holds every run where it is;
   activating again moves them on. Archiving ends its runs.
+- **From a playbook.** Four playbooks bring a ready-made automation as a
+  setup kit: activate new trials, save failed payments and win back
+  cancelled customers, hand off warm prospects, and catch key accounts at
+  risk. Applying the kit (on the Playbooks page, `POST .../kits/{id}/apply`
+  with the kit's inputs, or MCP `apply_kit`) adds its email drafts, lists,
+  rules and journeys as drafts, and the builder shows which kit a journey
+  came from. Nothing runs until you publish its emails and activate it.
+  Applying the kit again leaves what it added as it is.
+- **Sharing it.** **Export as a kit** (the journey's menu,
+  `POST .../kits/export`, or MCP `export_kit`) writes the journey as a
+  kit file, with the journeys it starts, the lists it adds people to, its
+  emails as plain-text drafts and the rules that start it. Ids become the
+  kit's own references, a sequence becomes a setting, and so does each
+  event you tick, so a workspace that sends other events names its own.
+  Another workspace sets it up from **Apply a kit file** on the Playbooks
+  page (`POST .../kits/apply`, MCP `apply_kit_file`), all as drafts; or
+  send the file as a playbook by pull request.
 - **Testing it.** **Test** takes one person through the journey (the live
   version, or the draft you're editing, as last saved) and lights up the
   path they would take: which way each check goes, the subject of each
@@ -316,6 +334,52 @@ with the rule's dry run. On a phone the flow is read-only.
   completed, exited and failed, and per step how many were sent, skipped,
   waited, or went yes or no, and how many are on it now (`at_step`). `GET .../journeys/{id}/runs` lists the people
   in it, and one run lists what each of its steps did.
+
+## Exclusions
+
+Suppression stops all email to an address, and topics and consent are what a person chose. An exclusion is narrower: it keeps people out of the automations that name it, such as "Active deal: hands off", "Competitors" or "Partners". Journeys, broadcasts and sequences each take `exclude: {"lists": [...], "tags": [...]}`:
+
+- **Lists** are lead lists, smart or static (`GET .../smart-lists`), up to 20.
+- **Tags** match the person's own `tags` field or the tags of a company they work at (their `companies` field), up to 20.
+
+What happens to someone it leaves out:
+- **A journey** never lets them in, even when they're added by hand, and says why.
+- **A broadcast** skips them, and the recipient's `skipped` gives the reason. Before it goes, the broadcast shows `audience_excluded`: how many of its audience it leaves out now.
+- **A sequence** doesn't enroll them. The enroll answer counts them as `excluded`. A lead counts only once it is linked to a customer record. The same goes for journey `enroll_in_sequence` steps and referrals added from replies.
+
+In the app, the journey's trigger panel, the broadcast form and the sequence settings each have a **Leave out** section.
+
+## The automation map
+
+**Automation map** (Lifecycle) shows every rule and journey in the
+workspace as one picture, laid out left to right:
+
+- what sets each one off: events, field changes and smart lists
+- the events rules emit, and the journeys that start on them
+- what journeys touch: static lists, sequences, tags and other journeys
+
+Each card shows its last 7 days: how often an event happened, how often
+a rule fired, how many people entered a journey. Pick a card to light up
+everything it sets off and everything that sets it off, then **Open** it.
+**Only what's live** hides draft and paused rules and journeys, and the
+brand picked in the sidebar limits it to that brand's automations and
+the shared ones.
+
+Above the map, **What needs a look** lists:
+
+- **Loops:** rules and journeys that set each other off, drafts
+  included: a journey that enters another that enters it back, or rules
+  whose events start each other.
+- **Overlaps:** two journeys that emailed the same people within a day
+  of each other in the last 7 days.
+- **Events nobody uses:** an event a rule emits that no journey, rule or
+  list listens to.
+- **Journeys that never start:** a live journey whose trigger event
+  hasn't happened in 30 days.
+
+`GET /v1/workspaces/{ws}/automation-map` (MCP `get_automation_map`)
+returns the same graph, so an agent can explain a workspace's automations
+before changing them. It needs `emails.read` and `customers.read`.
 
 ## One person's history
 

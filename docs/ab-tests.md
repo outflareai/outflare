@@ -51,6 +51,7 @@ A draft's **Before you start** checklist (`GET .../ab-tests/{id}/checklist`, MCP
 - the flag: archived, one version or a missing control can't start; a flag that's off is turned on when the test starts;
 - another running test of the same flag, which must end first;
 - whether pages showed the flag's versions in the last 7 days, so visitors will join;
+- how long visitors waited for their version, once at least 20 were timed: a warning when one in ten waited over 400 ms, since they may have seen the original first, with what to do ([decide on your server, or hide the page](feature-flags.md#no-flicker));
 - whether visitors reach the first goal, and how long the test is likely to take;
 - guardrails, if there are none.
 
@@ -64,7 +65,7 @@ These are typical stopping points from the same test the results use: half of te
 
 ## Who is counted
 
-A visitor joins a test the first time a page **shows them** the flag's version, not when the flag is decided. Pages that never show the change don't dilute the results. The website script sends a track event, Experiment Viewed (stored as `experiment_viewed`, with properties `flag` and `variant`), once per visit for each flag:
+A visitor joins a test the first time a page **shows them** the flag's version, not when the flag is decided. Pages that never show the change don't dilute the results. The website script sends a track event, Experiment Viewed (stored as `experiment_viewed`, with properties `flag` and `variant`, plus `source` and `wait_ms`: where the first version the visitor saw came from, `bootstrap` from your server, `kept` from the last page or `fetched`, and how long after the script started it showed), once per visit for each flag:
 
 - when the page reads the flag with `outflare.flag("key")` or `outflare.flagPayload("key")`, or reads it from what `outflare.onFlags(fn)` gives;
 - with `data-flags` on the script's tag, for every flag whose class (`of-flag-<flag>-<version>`) goes on `<html>`, since a CSS-only test shows its version that way. Leave `data-flags` off pages that don't show a test if you want those visitors left out.
@@ -148,6 +149,10 @@ With the workspace's own AI model connected (Settings, AI model; it is the **A/B
 - **Suggest tests** (**Suggest tests** on the A/B tests page, `POST .../ab-tests/suggestions`, MCP `suggest_ab_tests`): ideas from the site's busiest pages, the goals visitors reach, the brand's context and the tests already run, each with a hypothesis, the page, the change, the goal, its versions, and the planner's estimate for that page and goal. **Use this** fills in a new test.
 - **Write versions** (in the new-test form and a draft test, `POST .../ab-tests/versions`, MCP `write_ab_test_versions`): new versions of a flag's content (its headline, call to action or other text fields) from a prompt such as "a shorter, more urgent headline for agencies", in the brand's voice. **Add to flag** puts a version into the flag's split.
 - **Summarise** (a running or finished test, `POST .../ab-tests/{id}/summary`, MCP `summarize_ab_test`): the results in plain English with next steps. What it recommends (ship the winner, weigh a guardrail the winner hurts, keep the original, fix the split, keep it running, stop and try something bolder, or wait) and why is decided by Outflare from the numbers; the AI only puts it into words.
+- **Learnings** (written on its own when a test ends; `POST .../ab-tests/{id}/learning`, MCP `write_ab_test_learning`, to rewrite one): what a finished test taught, in a headline, a short paragraph and a few tags (such as `headline` or `pricing`), kept on the test. A test without a clear winner taught that the change made no large difference, and the learning says so.
+- **Ask about past tests** (**Learnings** on the A/B tests page, `POST .../ab-tests/ask`, MCP `ask_ab_tests`): a question such as "what have we learned about headlines on the pricing page?", answered over the most recent 40 finished tests, citing the tests it drew on.
+
+The **Learnings** library (`GET .../ab-tests/learnings`, MCP `list_ab_test_learnings`) lists every finished test, newest first, with its hypothesis, how it came out in a line, the version kept and its learning; search finds tests by their name, hypothesis, flag or learning. It works without an AI model too, just without the written learnings.
 
 Each returns a run to poll (`GET .../ab-test-ai-runs/{run}`, MCP `get_ab_test_ai_run`) until it is ready or failed, with the reason in words. The AI is told never to invent facts, numbers, testimonials or prices, and to treat page paths, past tests and prompts as data. Check generated copy before visitors see it. Without an AI model the helpers answer `409 connector_needed`.
 

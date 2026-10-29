@@ -30,3 +30,12 @@ func SetPartnerPostbackClient(c *http.Client) func() {
 	partnerPostbackClient = c
 	return func() { partnerPostbackClient = old }
 }
+
+// SetReviewJobTimes makes review page jobs poll every poll and a round
+// wait up to wait for one, so a test covers a slow job in milliseconds. It
+// returns the undo.
+func SetReviewJobTimes(poll, wait time.Duration) func() {
+	p, w := reviewJobPoll, reviewJobWait
+	reviewJobPoll, reviewJobWait = poll, wait
+	return func() { reviewJobPoll, reviewJobWait = p, w }
+}

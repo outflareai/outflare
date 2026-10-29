@@ -12,6 +12,7 @@ import (
 
 	"github.com/outflareai/outflare/engine/internal/customers"
 	"github.com/outflareai/outflare/engine/internal/jobs"
+	"github.com/outflareai/outflare/engine/internal/metrics"
 )
 
 // Broadcasts: one lifecycle email sent to many people on customer records
@@ -122,6 +123,7 @@ type broadcast struct {
 	sentBy                                 *string
 	topicKey, topicName                    string
 	topicDefault                           bool
+	exclude                                customers.Exclusion
 }
 
 // broadcastStep makes the emails for the next batch of the audience, and
@@ -130,13 +132,13 @@ func (s *Service) broadcastStep(ctx context.Context, id string) (bool, error) {
 	done := false
 	err := pgx.BeginFunc(ctx, s.Pool, func(tx pgx.Tx) error {
 		var b broadcast
-		var data []byte
+		var data, exclude []byte
 		err := tx.QueryRow(ctx, `SELECT b.workspace_id, b.status, b.template_id, b.from_address, b.audience_kind, b.brand_id, b.topic_id,
 			b.provider_id, b.template_version, b.record_ids::text[], b.data, b.track_opens, b.track_clicks, b.cursor_record::text, b.sent_by,
-			COALESCE(tp.key, ''), COALESCE(tp.name, ''), COALESCE(tp.subscribed_by_default, true)
+			COALESCE(tp.key, ''), COALESCE(tp.name, ''), COALESCE(tp.subscribed_by_default, true), b.exclude
 			FROM email_broadcasts b LEFT JOIN email_topics tp ON tp.id = b.topic_id WHERE b.id = $1 FOR UPDATE OF b`, id).
 			Scan(&b.ws, &b.status, &b.templateID, &b.from, &b.audience, &b.brandID, &b.topicID, &b.providerID, &b.version, &b.recordIDs,
-				&data, &b.trackOpens, &b.trackClicks, &b.cursor, &b.sentBy, &b.topicKey, &b.topicName, &b.topicDefault)
+				&data, &b.trackOpens, &b.trackClicks, &b.cursor, &b.sentBy, &b.topicKey, &b.topicName, &b.topicDefault, &exclude)
 		if errors.Is(err, pgx.ErrNoRows) {
 			done = true
 			return nil
@@ -158,6 +160,7 @@ func (s *Service) broadcastStep(ctx context.Context, id string) (bool, error) {
 			return nil
 		}
 		_ = json.Unmarshal(data, &b.data)
+		_ = json.Unmarshal(exclude, &b.exclude)
 		who := System
 		if b.sentBy != nil {
 			who.ActorID = *b.sentBy
@@ -258,6 +261,16 @@ func AudienceSize(ctx context.Context, q jobs.Querier, ws string, brandID *strin
 	return n, err
 }
 
+// AudienceExcluded is how many people of a broadcast's audience its
+// exclusion leaves out now.
+func AudienceExcluded(ctx context.Context, q jobs.Querier, ws string, brandID *string, kind string, recordIDs []string, x customers.Exclusion) (int, error) {
+	x = x.Clean()
+	var n int
+	err := q.QueryRow(ctx, `SELECT count(*)::int`+audienceWhere+` AND `+customers.ExcludedSQL("r.id", "$5::uuid[]", "$6::text[]"),
+		ws, brandID, kind, recordIDs, x.Lists, x.Tags).Scan(&n)
+	return n, err
+}
+
 // AudienceBases counts a broadcast's audience now by contact basis
 // (customers.Basis): opted_in, opted_out, customer, third_party, unknown.
 func AudienceBases(ctx context.Context, q interface {
@@ -301,8 +314,15 @@ func audienceBatch(ctx context.Context, tx pgx.Tx, b broadcast) ([]person, error
 	})
 }
 
-// broadcastSkip is why a person does not get a broadcast, or "".
+// broadcastSkip is why a person does not get a broadcast, or "": its
+// exclusion, then their own choices.
 func broadcastSkip(ctx context.Context, tx pgx.Tx, b broadcast, p person) (string, error) {
+	if why, err := customers.Excluded(ctx, tx, b.ws, p.id, b.exclude); err != nil || why != "" {
+		if why != "" {
+			metrics.Excluded("broadcast")
+		}
+		return why, err
+	}
 	return skipFor(ctx, tx, b.ws, p.id, p.origin, b.topicKey, b.topicName, b.topicDefault)
 }
 

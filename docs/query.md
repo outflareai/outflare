@@ -29,7 +29,6 @@ Agents use the MCP tools `list_query_tables` and `run_query`.
 | `record_identities`, `record_relationships` | `customers.read` | Emails, phones, ids and domains; links between records |
 | `customer_events`, `consents`, `subscriptions` | `customers.read` | Product events, the consent log, payment subscriptions (`monthly_minor` is MRR in minor units) |
 | `brands` | `workspace.read` | The workspace's brands |
-| `projects` | `projects.read` | Former projects (removed), kept until a later release drops them |
 | `leads` | `leads.read` | Leads for outreach |
 | `sequences`, `enrollments`, `messages` | `sequences.read` | Sequences, who is in them, and the emails they sent (without bodies) |
 | `replies` | `inbox.read` | Mail received, with its AI label, without bodies |
