@@ -8699,6 +8699,95 @@ paths:
         "503": { $ref: "#/components/responses/Error" }
         "202": { $ref: "#/components/responses/MissionHeld" }
         default: { $ref: "#/components/responses/Error" }
+  /v1/workspaces/{ws}/search-results:
+    parameters: [{ $ref: "#/components/parameters/Workspace" }]
+    post:
+      operationId: readSearchResults
+      x-outflare-access: { scope: seo.manage }
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      summary: Search the web (costs money)
+      description: |
+        Scope: seo.manage. Reads one search engine results page for any
+        `query`, as typed into the search box (operators such as
+        `intitle:` and `-site:` work on Google), from the workspace's own
+        SERP connection: DataForSEO or Geonode, the one rank tracking uses
+        unless `integration_id` names another. Link building uses it to find
+        resource pages, the pages that rank for a topic and pages that name
+        a brand. It costs money within the connection's monthly budget
+        (about $0.02 a search on DataForSEO, $0.005 on Geonode), so send
+        `estimate_only` first to see the cost and the budget. Organic
+        results only, best first; nothing is kept but the cost, in the
+        Outcomes ledger. 409 `connector_needed` without a SERP connection,
+        402 `budget_reached` past the budget.
+      tags: [seo]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [query]
+              properties:
+                query: { type: string, minLength: 1, maxLength: 400, examples: ["hiking gear intitle:resources", "\"Northpeak\" -site:northpeak.example"] }
+                country: { type: string, pattern: "^[A-Za-z]{2}$", default: US }
+                device: { type: string, enum: [desktop, mobile], default: desktop }
+                depth: { type: integer, minimum: 10, maximum: 100, default: 10, description: "Results to read; more costs more on some connections." }
+                engine: { type: string, description: "One of the connection's engines, such as google (the default)." }
+                integration_id: { type: string, format: uuid }
+                estimate_only: { type: boolean, description: "Answer the cost and the budget without searching." }
+      responses:
+        "200":
+          description: The results, or the estimate (estimate_only).
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - type: object
+                    title: SearchResults
+                    required: [query, integration_id, connector, engine, country, device, items, partial, spent, unit]
+                    properties:
+                      query: { type: string }
+                      integration_id: { type: string, format: uuid }
+                      connector: { type: string }
+                      engine: { type: string }
+                      country: { type: string }
+                      device: { type: string }
+                      items:
+                        type: array
+                        items:
+                          type: object
+                          required: [position, url, domain, title]
+                          properties:
+                            position: { type: integer }
+                            url: { type: string }
+                            domain: { type: string }
+                            title: { type: string }
+                      partial: { type: boolean, description: "The engine stopped before depth." }
+                      spent: { type: number, description: "What it cost, in unit." }
+                      unit: { type: string, enum: [USD, API unit] }
+                  - type: object
+                    title: SearchEstimate
+                    required: [query, integration_id, connector, estimate, budget]
+                    properties:
+                      query: { type: string }
+                      integration_id: { type: string, format: uuid }
+                      connector: { type: string }
+                      estimate: { type: number, description: "About what the search costs, in the budget's unit." }
+                      budget:
+                        type: object
+                        required: [unit, limit, spent, default, unlimited]
+                        properties:
+                          unit: { type: string, enum: [USD, API unit] }
+                          limit: { type: number }
+                          spent: { type: number }
+                          default: { type: boolean }
+                          unlimited: { type: boolean }
+        "400": { $ref: "#/components/responses/Error" }
+        "402": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        "202": { $ref: "#/components/responses/MissionHeld" }
+        default: { $ref: "#/components/responses/Error" }
   /v1/workspaces/{ws}/link-reads/dead-pages:
     parameters: [{ $ref: "#/components/parameters/Workspace" }]
     get:

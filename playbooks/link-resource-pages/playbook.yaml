@@ -1,0 +1,66 @@
+id: link-resource-pages
+version: 1
+title: Get listed on resource pages
+summary: Find pages that list the best resources on your topic and ask to be added, with a note about why your page belongs there.
+description: |
+  Resource pages exist to link out: "useful links", "best tools",
+  "further reading". Their editors want good additions, so a relevant
+  page and a short note is often enough. This playbook searches for them
+  on your topic, has your AI confirm each one really is a list that fits,
+  and pitches the editors.
+tier: obvious
+goals: [search]
+publisher: outflare
+author: { github: outflareai }
+needs:
+  data:
+    - { check: seo_site, label: Your site added to SEO }
+    - { check: mailboxes, label: A mailbox to send pitches from }
+  connections:
+    - capability: serp.read
+      label: DataForSEO or Geonode, to search Google (paid, within its budget)
+      recommended: [dataforseo, geonode]
+    - capability: plan
+      label: An AI model to read pages and write openers, unless you run this from your own AI app
+      optional: true
+      recommended: [claude, openai]
+inputs:
+  - name: site
+    label: Site
+    example: northpeak.example
+  - name: topic
+    label: Topic
+    example: backpacking
+steps:
+  - say: Search Google for resource pages on the topic, such as "useful resources", "best tools" and intitle:resources, after showing what the searches cost.
+    tools: [listSEOSites, readSearchResults]
+  - say: Add the results as resource page prospects.
+    tools: [addLinkProspects]
+  - say: Check each new prospect's page with OutflareBot (free apart from the AI read) for whether it is up, already links, its broken links, what it is about and who to contact.
+    tools: [checkLinkProspects, listLinkProspects]
+  - say: Keep the pages the AI read as lists of resources on your topic, and delete the rest.
+    tools: [getLinkProspect, deleteLinkProspect]
+  - say: Pick a sequence for the pitches whose first step uses {{custom.opener}}, or draft one (held, nothing sends) if none does.
+    tools: [listLinkSequences, createSequence, previewSequence]
+  - say: Start a pitch for each prospect worth asking, to its best contact. The workspace's AI writes an opener about their page, and each pitch waits for a person to approve it.
+    tools: [startLinkPitch, listLinkPitches]
+  - say: Report what was pitched and, later, what replied, agreed and went live.
+    tools: [getLinkResults, listLinkProspects]
+guardrails:
+  - Never offers or agrees to pay for a link; a reply asking for money waits for a person.
+  - Every pitch waits for a person's approval, unless they turned approval off for that sequence.
+  - One pitch per website at a time, and never to a website that opted out or declined recently.
+  - Every search shows its cost first and stays within the connection's budget.
+measure:
+  - { metric: Live links, how: "Prospects from this playbook that reached Live within 60 days (Link building, Results tab)." }
+  - { metric: Live links per pitch, how: "Live links divided by pitches sent for this method, on the Results tab." }
+prompt: |
+  Run the "Get listed on resource pages" playbook for {{site}} on
+  {{topic}}. Search Google for resource pages on the topic (show me the
+  cost first), check them, keep the real lists that fit, and pitch each
+  with an opener that says which of our pages belongs on it and why.
+  Every pitch waits for my approval.
+example: |
+  Eight searches for backpacking resource pages cost 0.16 USD and found
+  70 pages; 34 were real lists that fit, 30 had a contact, and 6 added
+  Northpeak's gear checklist.

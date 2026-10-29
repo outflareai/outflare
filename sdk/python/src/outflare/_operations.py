@@ -16609,6 +16609,55 @@ class Operations(_Mixin):
             idempotency_key=idempotency_key,
         )
 
+    def read_search_results(
+        self,
+        *,
+        ws: str | None = None,
+        country: str | None = None,
+        depth: int | None = None,
+        device: Literal["desktop", "mobile"] | None = None,
+        engine: str | None = None,
+        estimate_only: bool | None = None,
+        integration_id: str | None = None,
+        query: str,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Search the web (costs money).
+
+        Scope: seo.manage. Reads one search engine results page for any
+        `query`, as typed into the search box (operators such as
+        `intitle:` and `-site:` work on Google), from the workspace's own
+        SERP connection: DataForSEO or Geonode, the one rank tracking uses
+        unless `integration_id` names another. Link building uses it to find
+        resource pages, the pages that rank for a topic and pages that name
+        a brand. It costs money within the connection's monthly budget
+        (about $0.02 a search on DataForSEO, $0.005 on Geonode), so send
+        `estimate_only` first to see the cost and the budget. Organic
+        results only, best first; nothing is kept but the cost, in the
+        Outcomes ledger. 409 `connector_needed` without a SERP connection,
+        402 `budget_reached` past the budget.
+
+        Needs: the seo.manage scope.
+        POST /v1/workspaces/{ws}/search-results
+        """
+        return self._call(
+            "POST",
+            "/v1/workspaces/{ws}/search-results",
+            path={"ws": ws},
+            body={
+                "country": country,
+                "depth": depth,
+                "device": device,
+                "engine": engine,
+                "estimate_only": estimate_only,
+                "integration_id": integration_id,
+                "query": query,
+            },
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
     def reask_consent_banner(
         self,
         id: str,

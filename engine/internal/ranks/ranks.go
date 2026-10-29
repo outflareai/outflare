@@ -420,12 +420,18 @@ func amount(unit string, c connectors.SEOCost) float64 {
 // record puts one check's cost in the Outcomes ledger, counted against the
 // connection's budget.
 func (s *Service) record(ctx context.Context, o *connectors.Opened, unit, host string, t tracked, cost connectors.SEOCost) error {
+	return recordCost(ctx, s.Pool, o, unit, host, fmt.Sprintf("Rank check on %s (%s, %s)", t.engine, t.country, t.device), cost)
+}
+
+// recordCost puts a SERP call's cost in the Outcomes ledger, counted
+// against the connection's budget.
+func recordCost(ctx context.Context, pool *pgxpool.Pool, o *connectors.Opened, unit, host, note string, cost connectors.SEOCost) error {
 	units := amount(unit, cost)
 	id := o.ID
 	e := outcomes.Entry{
 		WorkspaceID: o.WorkspaceID, Category: outcomes.CategoryData, Provider: o.Connector.Definition().ID,
 		IntegrationID: &id, Units: &units, UnitName: unit, OccurredAt: time.Now(), Source: outcomes.SourceAuto,
-		Domain: host, Note: fmt.Sprintf("Rank check on %s (%s, %s)", t.engine, t.country, t.device),
+		Domain: host, Note: note,
 	}
 	if cost.Estimated {
 		e.Note += ", estimated from the price list"
@@ -434,6 +440,6 @@ func (s *Service) record(ctx context.Context, o *connectors.Opened, unit, host s
 		cents := int64(math.Round(cost.USD * 100))
 		e.AmountCents, e.Currency = &cents, "USD"
 	}
-	_, _, err := outcomes.Record(ctx, s.Pool, e)
+	_, _, err := outcomes.Record(ctx, pool, e)
 	return err
 }

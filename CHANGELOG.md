@@ -6,6 +6,12 @@ Each pull request that changes what Outflare does adds a change note in [changes
 
 ## [Unreleased]
 
+## [0.31.0] - 2026-10-29
+
+### Added
+
+- Eight link building playbooks, one for each way of earning links: competitors' links, broken links, lost links, competitors' dead pages, resource pages, promoting a new page, unlinked mentions, and partners. Outflare can also now search Google on your own DataForSEO or Geonode.
+
 ## [0.30.0] - 2026-10-29
 
 ### Changed

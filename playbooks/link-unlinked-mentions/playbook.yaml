@@ -1,0 +1,64 @@
+id: link-unlinked-mentions
+version: 1
+title: Turn mentions of your brand into links
+summary: Find pages that name your brand without linking to you and ask them to add the link.
+description: |
+  A writer who mentions you already likes you; adding a link is a small
+  ask. This playbook finds pages that name the brand without linking,
+  from the news watch's coverage and a web search, and asks each one to
+  turn the mention into a link.
+tier: obvious
+goals: [search]
+publisher: outflare
+author: { github: outflareai }
+needs:
+  data:
+    - { check: seo_site, label: Your site added to SEO }
+    - { check: mailboxes, label: A mailbox to send pitches from }
+  connections:
+    - capability: serp.read
+      label: DataForSEO or Geonode, to search Google (paid, within its budget)
+      recommended: [dataforseo, geonode]
+    - capability: plan
+      label: An AI model to read pages and write openers, unless you run this from your own AI app
+      optional: true
+      recommended: [claude, openai]
+inputs:
+  - name: site
+    label: Site
+    example: northpeak.example
+  - name: brand
+    label: Brand
+    example: Northpeak
+steps:
+  - say: Read coverage the news watch kept for the brand, and search Google for pages that name it, leaving out its own site, after showing the cost.
+    tools: [listSEOSites, getBrandContext, listCoverage, readSearchResults]
+  - say: Add those pages as mention prospects. Pages that already link to you are kept out when checked.
+    tools: [addLinkProspects]
+  - say: Check each new prospect's page with OutflareBot (free apart from the AI read) for whether it is up, already links, its broken links, what it is about and who to contact.
+    tools: [checkLinkProspects, listLinkProspects]
+  - say: Pick a sequence for the pitches whose first step uses {{custom.opener}}, or draft one (held, nothing sends) if none does.
+    tools: [listLinkSequences, createSequence, previewSequence]
+  - say: Start a pitch for each prospect worth asking, to its best contact. The workspace's AI writes an opener about their page, and each pitch waits for a person to approve it.
+    tools: [startLinkPitch, listLinkPitches]
+  - say: Report what was pitched and, later, what replied, agreed and went live.
+    tools: [getLinkResults, listLinkProspects]
+guardrails:
+  - Never offers or agrees to pay for a link; a reply asking for money waits for a person.
+  - Every pitch waits for a person's approval, unless they turned approval off for that sequence.
+  - One pitch per website at a time, and never to a website that opted out or declined recently.
+  - Every search shows its cost first and stays within the connection's budget.
+  - Thanks the writer for the mention; never asks them to change what they wrote.
+measure:
+  - { metric: Live links, how: "Prospects from this playbook that reached Live within 60 days (Link building, Results tab)." }
+  - { metric: Live links per pitch, how: "Live links divided by pitches sent for this method, on the Results tab." }
+prompt: |
+  Run the "Turn mentions into links" playbook for {{brand}} on {{site}}.
+  Find pages that name {{brand}} without linking, from the news watch's
+  coverage and a Google search that leaves out our own site (show me the
+  cost first). Add them as prospects, check which still don't link, and
+  pitch each with a thank-you that asks for the link. Every pitch waits
+  for my approval.
+example: |
+  Northpeak was named on 45 pages; 29 didn't link. 21 had a contact,
+  and 9 added the link after a thank-you note.

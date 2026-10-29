@@ -1,0 +1,70 @@
+id: link-broken-links
+version: 1
+title: Replace broken links on pages about your topic
+summary: Search for pages on your topic, find the links on them that are dead, and offer your page as the replacement.
+description: |
+  Every page that lists tools or guides collects dead links over time,
+  and their owners rarely notice. Pointing out a broken link is a favour,
+  and offering a page that covers the same ground makes saying yes easy.
+  This playbook searches for pages on your topic, has OutflareBot check
+  every outbound link on them (with what the Internet Archive kept of the
+  dead ones), and pitches the pages with a broken link your page can
+  replace.
+tier: clever
+goals: [search]
+publisher: outflare
+author: { github: outflareai }
+needs:
+  data:
+    - { check: seo_site, label: Your site added to SEO }
+    - { check: mailboxes, label: A mailbox to send pitches from }
+  connections:
+    - capability: serp.read
+      label: DataForSEO or Geonode, to search Google (paid, within its budget)
+      recommended: [dataforseo, geonode]
+    - capability: plan
+      label: An AI model to read pages and write openers, unless you run this from your own AI app
+      optional: true
+      recommended: [claude, openai]
+inputs:
+  - name: site
+    label: Site
+    example: northpeak.example
+  - name: topics
+    label: Topics
+    help: Two to five, the way people search for them.
+    example: hiking backpacks, trail running gear
+steps:
+  - say: Search Google for pages on each topic that list tools, guides or resources, after showing what the searches cost.
+    tools: [listSEOSites, readSearchResults]
+  - say: Add the pages that list outbound links as broken link prospects.
+    tools: [addLinkProspects]
+  - say: Check each new prospect's page with OutflareBot (free apart from the AI read) for whether it is up, already links, its broken links, what it is about and who to contact.
+    tools: [checkLinkProspects, listLinkProspects]
+  - say: Keep the pages with a broken link your page can replace, say which one in the prospect's note, and set the page to offer. Delete the rest.
+    tools: [getLinkProspect, updateLinkProspect, deleteLinkProspect]
+  - say: Pick a sequence for the pitches whose first step uses {{custom.opener}}, or draft one (held, nothing sends) if none does.
+    tools: [listLinkSequences, createSequence, previewSequence]
+  - say: Start a pitch for each prospect worth asking, to its best contact. The workspace's AI writes an opener about their page, and each pitch waits for a person to approve it.
+    tools: [startLinkPitch, listLinkPitches]
+  - say: Report what was pitched and, later, what replied, agreed and went live.
+    tools: [getLinkResults, listLinkProspects]
+guardrails:
+  - Never offers or agrees to pay for a link; a reply asking for money waits for a person.
+  - Every pitch waits for a person's approval, unless they turned approval off for that sequence.
+  - One pitch per website at a time, and never to a website that opted out or declined recently.
+  - Every search shows its cost first and stays within the connection's budget.
+measure:
+  - { metric: Live links, how: "Prospects from this playbook that reached Live within 60 days (Link building, Results tab)." }
+  - { metric: Live links per pitch, how: "Live links divided by pitches sent for this method, on the Results tab." }
+prompt: |
+  Run the "Replace broken links" playbook for {{site}} on these topics:
+  {{topics}}. Search Google for pages that list resources on each topic
+  (show me the cost first), check their outbound links, and keep the
+  pages with a dead link one of our pages can replace. Pitch each with an
+  opener that names the broken link and our replacement. Every pitch
+  waits for my approval.
+example: |
+  Twelve searches for Northpeak's topics cost 0.24 USD and found 96
+  pages; OutflareBot found a dead link on 23 of them, 15 had a fitting
+  Northpeak guide, and 5 swapped the link within a month.

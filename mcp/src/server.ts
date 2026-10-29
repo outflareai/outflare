@@ -4706,6 +4706,27 @@ export function createServer({ client: gtm, workspace, readOnly = false, mission
   );
 
   server.registerTool(
+    "search_web",
+    {
+      title: "Search the web",
+      description:
+        "Reads one search results page for a query from the workspace's own DataForSEO or Geonode connection (the one rank tracking uses): organic results, best first. " +
+        "Google operators work, such as intitle:resources or \"Northpeak\" -site:northpeak.example. Costs money within the connection's budget (about $0.02 a search on DataForSEO), " +
+        "so call it with estimate_only first and tell the person the cost. Fails with connector_needed without a SERP connection. Add pages worth asking with add_link_prospects.",
+      inputSchema: {
+        query: z.string().min(1).max(400),
+        country: z.string().length(2).optional().describe("Two-letter country code; default US."),
+        device: z.enum(["desktop", "mobile"]).optional(),
+        depth: z.number().int().min(10).max(100).optional().describe("Results to read; default 10."),
+        integration_id: id.optional(),
+        estimate_only: z.boolean().optional().describe("Only answer the cost and the budget."),
+      },
+      annotations: { ...write, openWorldHint: true },
+    },
+    (body) => call(() => gtm.POST("/v1/workspaces/{ws}/search-results", { params: { path: { ws } }, body })),
+  );
+
+  server.registerTool(
     "read_links",
     {
       title: "Read who links to a page or domain",

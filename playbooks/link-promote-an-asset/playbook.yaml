@@ -1,0 +1,72 @@
+id: link-promote-an-asset
+version: 1
+title: Promote a new page to the sites that link to its topic
+summary: When you publish a guide, study or tool, find who links to the pages that rank for its topic and tell them about yours.
+description: |
+  The sites most likely to link to a new page are the ones already
+  linking to the pages that rank for the same topic. This playbook
+  searches for the topic, reads who links to the top results, and pitches
+  those sites with what your page adds.
+tier: clever
+goals: [search]
+publisher: outflare
+author: { github: outflareai }
+needs:
+  data:
+    - { check: seo_site, label: Your site added to SEO }
+    - { check: mailboxes, label: A mailbox to send pitches from }
+  connections:
+    - capability: serp.read
+      label: DataForSEO or Geonode, to search Google (paid, within its budget)
+      recommended: [dataforseo, geonode]
+    - capability: seo.read
+      label: Ahrefs or DataForSEO, to read who links to a page (paid, within its budget)
+      recommended: [ahrefs, dataforseo]
+    - capability: plan
+      label: An AI model to read pages and write openers, unless you run this from your own AI app
+      optional: true
+      recommended: [claude, openai]
+inputs:
+  - name: site
+    label: Site
+    example: northpeak.example
+  - name: page
+    label: Your new page
+    example: https://northpeak.example/guides/layering
+  - name: topic
+    label: What people search for to find it
+    example: how to layer for hiking
+steps:
+  - say: Read your page so the pitch can say what it adds.
+    tools: [listSEOSites, listCrawlPages]
+  - say: Search Google for the topic and keep the top pages that aren't yours, after showing the cost.
+    tools: [readSearchResults]
+  - say: Read who links to the top three to five of them, after showing the cost and the budget.
+    tools: [readLinks, getLinkRead]
+  - say: Add the linking pages as content prospects, with your new page as the page to offer.
+    tools: [addLinkProspects]
+  - say: Check each new prospect's page with OutflareBot (free apart from the AI read) for whether it is up, already links, its broken links, what it is about and who to contact.
+    tools: [checkLinkProspects, listLinkProspects]
+  - say: Pick a sequence for the pitches whose first step uses {{custom.opener}}, or draft one (held, nothing sends) if none does.
+    tools: [listLinkSequences, createSequence, previewSequence]
+  - say: Start a pitch for each prospect worth asking, to its best contact. The workspace's AI writes an opener about their page, and each pitch waits for a person to approve it.
+    tools: [startLinkPitch, listLinkPitches]
+  - say: Report what was pitched and, later, what replied, agreed and went live.
+    tools: [getLinkResults, listLinkProspects]
+guardrails:
+  - Never offers or agrees to pay for a link; a reply asking for money waits for a person.
+  - Every pitch waits for a person's approval, unless they turned approval off for that sequence.
+  - One pitch per website at a time, and never to a website that opted out or declined recently.
+  - Every search and paid read shows its cost first and stays within the connection's budget.
+measure:
+  - { metric: Live links, how: "Prospects from this playbook that reached Live within 60 days (Link building, Results tab)." }
+  - { metric: Live links per pitch, how: "Live links divided by pitches sent for this method, on the Results tab." }
+prompt: |
+  Run the "Promote a new page" playbook for {{page}} on {{site}}. Search
+  Google for "{{topic}}" (show me the cost first), read who links to the
+  top results, and add those linking pages as prospects with our page to
+  offer. Check them and pitch the strongest with an opener that says
+  what our page adds to theirs. Every pitch waits for my approval.
+example: |
+  Northpeak's layering guide: one search and three link reads cost 0.31
+  USD and found 88 linking pages; 40 fit, 25 were pitched and 5 linked.

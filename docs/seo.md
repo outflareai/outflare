@@ -455,6 +455,38 @@ in the link building settings (`PATCH /link-building/settings`, MCP
 (`pitch_cooldown_days`, 60 by default). Your own lost links need no paid
 read: your backlinks already name the page that dropped the link.
 
+### Searching the web
+
+`POST /search-results` (MCP `search_web`) reads one Google results page
+for any query, as you'd type it (operators such as `intitle:` and
+`-site:` work), from your own DataForSEO or Geonode connection: the one
+rank tracking uses, or `integration_id`. It costs money within the
+connection's budget (about $0.02 a search on DataForSEO, $0.005 on
+Geonode), so ask with `estimate_only` first. You get the organic results,
+best first; only the cost is kept, in Outcomes. Without a SERP
+connection, it answers `409 connector_needed`.
+
+### Link building playbooks
+
+One [playbook](../playbooks/README.md) per way of earning links, each
+from find to pitch. Starting one creates a mission; every paid search or
+read shows its cost first, and every pitch waits for approval unless its
+sequence skips it.
+
+| Playbook | Finds | Needs |
+| --- | --- | --- |
+| `link-competitor-gaps` | Pages linking to your competitors but not to you | Ahrefs or DataForSEO |
+| `link-broken-links` | Pages on your topic with a dead link your page can replace | DataForSEO or Geonode |
+| `link-reclaim-lost-links` | Links you lost: redirects for links to your dead pages, and a note to sites that dropped one | Nothing paid |
+| `link-competitor-dead-pages` | Sites linking to a competitor's deleted page | Ahrefs or DataForSEO |
+| `link-resource-pages` | Resource lists on your topic | DataForSEO or Geonode |
+| `link-promote-an-asset` | Sites linking to the pages that rank for your new page's topic | Both |
+| `link-unlinked-mentions` | Pages that name your brand without a link | DataForSEO or Geonode |
+| `link-partners-and-customers` | Partner and customer sites that don't link to you | Nothing paid |
+
+Each needs your site in SEO and a mailbox to send from. Your AI model
+reads pages and writes openers; without one, you write them.
+
 ## API
 
 ```sh

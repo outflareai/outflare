@@ -575,3 +575,11 @@ groups:
         labels: { severity: info }
         annotations:
           summary: "Over half of checks of agreed and live links can't reach the page: OutflareBot may be blocked or the page checks broken; check link_prospect.check_failed and link_live.schedule_failed in the engine log."
+
+      - alert: OutflareWebSearchesFailing
+        # budget_reached is a workspace's own limit working as meant.
+        expr: sum(rate(outflare_seo_web_searches_total{outcome!~"done|budget_reached"}[6h])) / sum(rate(outflare_seo_web_searches_total[6h])) > 0.5 and sum(increase(outflare_seo_web_searches_total[6h])) > 10
+        for: 1h
+        labels: { severity: warning }
+        annotations:
+          summary: "Over half of web searches (search-results) fail for reasons other than a budget: DataForSEO's or Geonode's search API may be failing or have changed; check api.called for readSearchResults by error code."

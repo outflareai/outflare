@@ -5684,7 +5684,7 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 385
+        "y": 402
       },
       "targets": [
         {
@@ -5734,7 +5734,7 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 385
+        "y": 402
       },
       "targets": [
         {
@@ -5784,12 +5784,62 @@
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 385
+        "y": 402
       },
       "targets": [
         {
           "refId": "A",
           "expr": "sum by (outcome) (rate(outflare_seo_link_live_checks_total{job=\"$job\"}[1h]))",
+          "legendFormat": "{{outcome}}",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps",
+          "custom": {
+            "fillOpacity": 10
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "mean",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Web searches, by outcome",
+      "description": "Searches on workspaces' own DataForSEO or Geonode (search-results, used by link building playbooks), per hour. Normal: mostly done, some budget_reached. connector_unavailable or connector_invalid rising means the provider's search API is failing or changed: check web_search.done and api.called for readSearchResults by error code.",
+      "id": 130,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 410
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (outcome) (rate(outflare_seo_web_searches_total{job=\"$job\"}[1h]))",
           "legendFormat": "{{outcome}}",
           "datasource": {
             "type": "prometheus",
@@ -5829,7 +5879,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 402
+        "y": 418
       },
       "collapsed": false,
       "panels": []
@@ -5847,7 +5897,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 403
+        "y": 419
       },
       "targets": [
         {
@@ -5897,7 +5947,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 403
+        "y": 419
       },
       "targets": [
         {
@@ -5956,7 +6006,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 411
+        "y": 427
       },
       "targets": [
         {
@@ -6006,7 +6056,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 402
+        "y": 418
       },
       "targets": [
         {
@@ -6061,7 +6111,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 410
+        "y": 426
       },
       "panels": []
     },
@@ -6078,7 +6128,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 411
+        "y": 427
       },
       "targets": [
         {
@@ -6131,7 +6181,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 411
+        "y": 427
       },
       "targets": [
         {
@@ -6184,7 +6234,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 419
+        "y": 435
       },
       "targets": [
         {
@@ -6237,7 +6287,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 419
+        "y": 435
       },
       "targets": [
         {
@@ -6287,7 +6337,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 427
+        "y": 443
       },
       "targets": [
         {
@@ -6340,7 +6390,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 427
+        "y": 443
       },
       "targets": [
         {
@@ -6393,7 +6443,7 @@
         "h": 8,
         "w": 24,
         "x": 0,
-        "y": 435
+        "y": 451
       },
       "targets": [
         {

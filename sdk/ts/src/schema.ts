@@ -6318,6 +6318,40 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/workspaces/{ws}/search-results": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Search the web (costs money)
+         * @description Scope: seo.manage. Reads one search engine results page for any
+         *     `query`, as typed into the search box (operators such as
+         *     `intitle:` and `-site:` work on Google), from the workspace's own
+         *     SERP connection: DataForSEO or Geonode, the one rank tracking uses
+         *     unless `integration_id` names another. Link building uses it to find
+         *     resource pages, the pages that rank for a topic and pages that name
+         *     a brand. It costs money within the connection's monthly budget
+         *     (about $0.02 a search on DataForSEO, $0.005 on Geonode), so send
+         *     `estimate_only` first to see the cost and the budget. Organic
+         *     results only, best first; nothing is kept but the cost, in the
+         *     Outcomes ledger. 409 `connector_needed` without a SERP connection,
+         *     402 `budget_reached` past the budget.
+         */
+        post: operations["readSearchResults"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/workspaces/{ws}/link-reads/dead-pages": {
         parameters: {
             query?: never;
@@ -46335,6 +46369,106 @@ export interface operations {
             409: components["responses"]["Error"];
             502: components["responses"]["Error"];
             503: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    readSearchResults: {
+        parameters: {
+            query?: never;
+            header?: {
+                /**
+                 * @description Makes the write safe to retry. A repeat with the same key from the same caller within 24 hours gets the first
+                 *     answer back (with `Idempotent-Replayed: true`) instead of running again. The same key for a different request
+                 *     is refused with 422 `idempotency_key_reused`; while the first is still running, 409 `idempotency_in_progress`.
+                 *     Use a new random key, such as a UUID, for each distinct write.
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /**
+                     * @example hiking gear intitle:resources
+                     * @example "Northpeak" -site:northpeak.example
+                     */
+                    query: string;
+                    /** @default US */
+                    country?: string;
+                    /**
+                     * @default desktop
+                     * @enum {string}
+                     */
+                    device?: "desktop" | "mobile";
+                    /**
+                     * @description Results to read; more costs more on some connections.
+                     * @default 10
+                     */
+                    depth?: number;
+                    /** @description One of the connection's engines, such as google (the default). */
+                    engine?: string;
+                    /** Format: uuid */
+                    integration_id?: string;
+                    /** @description Answer the cost and the budget without searching. */
+                    estimate_only?: boolean;
+                };
+            };
+        };
+        responses: {
+            /** @description The results, or the estimate (estimate_only). */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        query: string;
+                        /** Format: uuid */
+                        integration_id: string;
+                        connector: string;
+                        engine: string;
+                        country: string;
+                        device: string;
+                        items: {
+                            position: number;
+                            url: string;
+                            domain: string;
+                            title: string;
+                        }[];
+                        /** @description The engine stopped before depth. */
+                        partial: boolean;
+                        /** @description What it cost, in unit. */
+                        spent: number;
+                        /** @enum {string} */
+                        unit: "USD" | "API unit";
+                    } | {
+                        query: string;
+                        /** Format: uuid */
+                        integration_id: string;
+                        connector: string;
+                        /** @description About what the search costs, in the budget's unit. */
+                        estimate: number;
+                        budget: {
+                            /** @enum {string} */
+                            unit: "USD" | "API unit";
+                            limit: number;
+                            spent: number;
+                            default: boolean;
+                            unlimited: boolean;
+                        };
+                    };
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            400: components["responses"]["Error"];
+            402: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            409: components["responses"]["Error"];
             default: components["responses"]["Error"];
         };
     };

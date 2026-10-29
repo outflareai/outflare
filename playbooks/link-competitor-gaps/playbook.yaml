@@ -1,0 +1,72 @@
+id: link-competitor-gaps
+version: 1
+title: Get links from sites that link to your competitors
+summary: Find pages that link to two or more of your competitors but not to you, check them, and pitch the best with an opener about their page.
+description: |
+  A site that links to several of your competitors has already decided
+  your category is worth linking to; it just hasn't heard of you. This
+  playbook reads which sites link to your tracked competitors and not to
+  you, reads their linking pages within your SEO budget, keeps the
+  strongest that fit, and pitches each with an opener about that page.
+tier: obvious
+goals: [search]
+publisher: outflare
+author: { github: outflareai }
+needs:
+  data:
+    - { check: seo_site, label: Your site added to SEO }
+    - { check: mailboxes, label: A mailbox to send pitches from }
+  connections:
+    - capability: seo.read
+      label: Ahrefs or DataForSEO, to read who links to a page (paid, within its budget)
+      recommended: [ahrefs, dataforseo]
+    - capability: plan
+      label: An AI model to read pages and write openers, unless you run this from your own AI app
+      optional: true
+      recommended: [claude, openai]
+inputs:
+  - name: site
+    label: Site
+    example: northpeak.example
+  - name: competitors
+    label: Competitors to start from
+    help: Leave it empty to use the competitors you track in SEO.
+    example: acme-trail.example, summitgear.example
+    optional: true
+steps:
+  - say: Find the site and its tracked competitors, and read the sites that link to competitors but not to you.
+    tools: [listSEOSites, listSEOCompetitors, getSEOCompetitorGaps]
+  - say: For the strongest gap sites, read which of their pages link to each competitor, after showing the cost and the budget.
+    tools: [readLinks, getLinkRead]
+  - say: Add those pages as competitor gap prospects, with the competitor they link to as evidence. Sites that already link to you, competitors and opted-out sites are kept out on their own.
+    tools: [addLinkProspects]
+  - say: Check each new prospect's page with OutflareBot (free apart from the AI read) for whether it is up, already links, its broken links, what it is about and who to contact.
+    tools: [checkLinkProspects, listLinkProspects]
+  - say: Keep the ones that fit and choose your page to offer for each.
+    tools: [updateLinkProspect, deleteLinkProspect]
+  - say: Pick a sequence for the pitches whose first step uses {{custom.opener}}, or draft one (held, nothing sends) if none does.
+    tools: [listLinkSequences, createSequence, previewSequence]
+  - say: Start a pitch for each prospect worth asking, to its best contact. The workspace's AI writes an opener about their page, and each pitch waits for a person to approve it.
+    tools: [startLinkPitch, listLinkPitches]
+  - say: Report what was pitched and, later, what replied, agreed and went live.
+    tools: [getLinkResults, listLinkProspects]
+guardrails:
+  - Never offers or agrees to pay for a link; a reply asking for money waits for a person.
+  - Every pitch waits for a person's approval, unless they turned approval off for that sequence.
+  - One pitch per website at a time, and never to a website that opted out or declined recently.
+  - Every paid read shows its cost first and stays within the connection's budget.
+measure:
+  - { metric: Live links, how: "Prospects from this playbook that reached Live within 60 days (Link building, Results tab)." }
+  - { metric: Live links per pitch, how: "Live links divided by pitches sent for this method, on the Results tab." }
+prompt: |
+  Run the "Get links from sites that link to your competitors" playbook
+  for {{site}}. Start from {{competitors}}, or the competitors tracked in
+  SEO. Find sites that link to two or more of them but not to us, read
+  their linking pages (show me the cost first), add the best as link
+  prospects, check them, and pitch the twenty strongest that fit, each
+  with an opener about their page. Every pitch waits for my approval.
+example: |
+  For northpeak.example the gaps report had 140 sites linking to two
+  competitors and not to Northpeak. Reading the top 30 cost 0.90 USD and
+  found 52 pages; 31 fit after the page checks, 20 were pitched, and 4
+  linked within six weeks.

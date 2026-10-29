@@ -477,6 +477,7 @@ func (s *Server) buildHandler() http.Handler {
 	s.routesNews(mux)
 	s.routesLinkReads(mux)
 	s.routesLinkPitches(mux)
+	s.routesSearchResults(mux)
 	s.routesDigests(mux)
 	s.routesSEOTargets(mux)
 	s.routesSEORanks(mux)

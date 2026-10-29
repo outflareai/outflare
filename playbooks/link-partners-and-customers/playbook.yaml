@@ -1,0 +1,57 @@
+id: link-partners-and-customers
+version: 1
+title: Get links from your partners and customers
+summary: Find the partners and customers whose websites don't link to you yet, and ask for a spot on their partners or integrations page.
+description: |
+  The people who already work with you are the easiest yes: a partner
+  page, an integrations list, a customer story. This playbook goes
+  through your partner and customer companies, checks which websites
+  don't link to you yet, and asks each one, from your own relationship.
+tier: obvious
+goals: [search]
+publisher: outflare
+author: { github: outflareai }
+needs:
+  data:
+    - { check: seo_site, label: Your site added to SEO }
+    - { check: mailboxes, label: A mailbox to send pitches from }
+  connections:
+    - capability: plan
+      label: An AI model to read pages and write openers, unless you run this from your own AI app
+      optional: true
+      recommended: [claude, openai]
+inputs:
+  - name: site
+    label: Site
+    example: northpeak.example
+steps:
+  - say: List partner and customer companies with a website, and leave out the ones whose sites already link to you.
+    tools: [listSEOSites, listRecords, listBacklinks]
+  - say: Add each one's partners, integrations or customers page (or home page) as a partner prospect.
+    tools: [addLinkProspects]
+  - say: Check each new prospect's page with OutflareBot (free apart from the AI read) for whether it is up, already links, its broken links, what it is about and who to contact.
+    tools: [checkLinkProspects, listLinkProspects]
+  - say: Pick a sequence for the pitches whose first step uses {{custom.opener}}, or draft one (held, nothing sends) if none does.
+    tools: [listLinkSequences, createSequence, previewSequence]
+  - say: Start a pitch for each prospect worth asking, to its best contact. The workspace's AI writes an opener about their page, and each pitch waits for a person to approve it.
+    tools: [startLinkPitch, listLinkPitches]
+  - say: Report what was pitched and, later, what replied, agreed and went live.
+    tools: [getLinkResults, listLinkProspects]
+guardrails:
+  - Never offers or agrees to pay for a link; a reply asking for money waits for a person.
+  - Every pitch waits for a person's approval, unless they turned approval off for that sequence.
+  - One pitch per website at a time, and never to a website that opted out or declined recently.
+  - Asks the person who owns the relationship before pitching a customer.
+measure:
+  - { metric: Live links, how: "Prospects from this playbook that reached Live within 60 days (Link building, Results tab)." }
+  - { metric: Live links per pitch, how: "Live links divided by pitches sent for this method, on the Results tab." }
+prompt: |
+  Run the "Get links from your partners and customers" playbook for
+  {{site}}. Go through our partner and customer companies, find the ones
+  whose websites don't link to us yet, add their partners or
+  integrations page as a prospect, check them, and pitch each one with a
+  friendly note from our relationship. Every pitch waits for my approval.
+example: |
+  Northpeak had 60 partner and customer companies with a website; 38
+  didn't link. 30 had a partners page or contact, and 12 added Northpeak
+  within a month.

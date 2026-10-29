@@ -360,6 +360,8 @@ var (
 		"Replies to link pitches the workspace's AI read, by what they say (agreed, declined, wants_payment, wants_content, other, no_ai, ai_unavailable, ai_failed).", "kind")
 	linkLiveChecks = linkCounter("link_live_checks_total",
 		"Checks of agreed and live links, by what they found (live, not_yet, removed, still_live, unreachable).", "outcome")
+	webSearches = linkCounter("web_searches_total",
+		"Searches on workspaces' own SERP connections (search-results), by outcome (done, budget_reached, connector_invalid, connector_auth, connector_quota, connector_unavailable).", "outcome")
 
 	buildInfo = prometheus.NewGaugeVec(prometheus.GaugeOpts{
 		Namespace: namespace, Name: "build_info",
@@ -386,7 +388,7 @@ var own = []prometheus.Collector{
 	semanticRuns, semanticItems, semanticDuration, semanticAvailable, semanticWorkspaces,
 	adConversions, adConversionsOldest,
 	meetingEvents, meetingEventsPending,
-	reviewReads, reviewsFound, socialReads, syncRuns, linkReads, linkPageChecks, archiveLookups, linkPitches, linkReplies, linkLiveChecks,
+	reviewReads, reviewsFound, socialReads, syncRuns, linkReads, linkPageChecks, archiveLookups, linkPitches, linkReplies, linkLiveChecks, webSearches,
 	socialPublishes,
 	partnerClicks, partnerConversions, partnerRewards, partnerRewardsOverdue, partnerImports, partnerImportObjects, partnerPostbacks,
 	newsRuns, newsFound, newsReads,
@@ -631,6 +633,9 @@ func LinkPitchWritten(outcome string) { linkPitches.WithLabelValues(outcome).Inc
 
 // LinkReplyRead records one reply to a pitch the AI read.
 func LinkReplyRead(kind string) { linkReplies.WithLabelValues(kind).Inc() }
+
+// WebSearch records one search on a workspace's SERP connection.
+func WebSearch(outcome string) { webSearches.WithLabelValues(outcome).Inc() }
 
 // LinkLiveCheck records one check of an agreed or live link.
 func LinkLiveCheck(outcome string) { linkLiveChecks.WithLabelValues(outcome).Inc() }

@@ -1,0 +1,66 @@
+id: link-reclaim-lost-links
+version: 1
+title: Win back the links you lost
+summary: Fix links that point to your broken pages, and ask sites that dropped a link to you to add it back.
+description: |
+  Lost links are the cheapest to get back: the site linked to you once.
+  Some point to a page you moved or deleted, and a redirect on your side
+  wins them back without asking anyone. Others were dropped when a page
+  was edited, and a short, friendly note often restores them. This
+  playbook does both, from the backlinks you already track, at no cost.
+tier: obvious
+goals: [search]
+publisher: outflare
+author: { github: outflareai }
+needs:
+  data:
+    - { check: seo_site, label: Your site added to SEO }
+    - { check: mailboxes, label: A mailbox to send pitches from }
+  connections:
+    - capability: plan
+      label: An AI model to read pages and write openers, unless you run this from your own AI app
+      optional: true
+      recommended: [claude, openai]
+inputs:
+  - name: site
+    label: Site
+    example: northpeak.example
+  - name: days
+    label: How far back to look
+    help: Days of lost links to win back; 90 if left empty.
+    example: "90"
+    optional: true
+steps:
+  - say: Find the site and read the links you lost and the fixes the backlinks found, such as links to your pages that now return 404.
+    tools: [listSEOSites, listBacklinkEvents, listFixes]
+  - say: Turn links to your own broken pages into redirect fixes for a person or a coding agent; those need no email.
+    tools: [getFix, getFixPrompt]
+  - say: Add the pages that dropped a link as reclaim prospects, with the page they linked to as the page to offer.
+    tools: [reclaimLinkProspects]
+  - say: Check each new prospect's page with OutflareBot (free apart from the AI read) for whether it is up, already links, its broken links, what it is about and who to contact.
+    tools: [checkLinkProspects, listLinkProspects]
+  - say: Pick a sequence for the pitches whose first step uses {{custom.opener}}, or draft one (held, nothing sends) if none does.
+    tools: [listLinkSequences, createSequence, previewSequence]
+  - say: Start a pitch for each prospect worth asking, to its best contact. The workspace's AI writes an opener about their page, and each pitch waits for a person to approve it.
+    tools: [startLinkPitch, listLinkPitches]
+  - say: Report what was pitched and, later, what replied, agreed and went live.
+    tools: [getLinkResults, listLinkProspects]
+guardrails:
+  - Never offers or agrees to pay for a link; a reply asking for money waits for a person.
+  - Every pitch waits for a person's approval, unless they turned approval off for that sequence.
+  - One pitch per website at a time, and never to a website that opted out or declined recently.
+  - Never changes your site itself; redirects go to the fixes list for a person or a coding agent.
+measure:
+  - { metric: Live links, how: "Prospects from this playbook that reached Live within 60 days (Link building, Results tab)." }
+  - { metric: Live links per pitch, how: "Live links divided by pitches sent for this method, on the Results tab." }
+prompt: |
+  Run the "Win back the links you lost" playbook for {{site}}, for links
+  lost in the last {{days}} days (90 if empty). Turn links to our broken
+  pages into redirect fixes, add the pages that dropped a link as reclaim
+  prospects, check which are still up and who to ask, and pitch each one
+  with a short note about the link it used to have. Every pitch waits for
+  my approval.
+example: |
+  Northpeak had lost 37 links in 90 days: 11 pointed at a guide that had
+  moved, fixed with one redirect, and 26 pages had dropped the link. 19
+  were still up with a contact, and 7 added the link back.
