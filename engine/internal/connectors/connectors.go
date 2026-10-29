@@ -114,6 +114,12 @@ type OAuth struct {
 	// is registered, the code comes back to a callback URL that carries
 	// the state, and the connection stores the key like a pasted one.
 	KeyExchange bool `json:"key_exchange,omitempty"`
+	// AppIDAuthCode: the consent screen names the app app_id, the callback
+	// carries auth_code, and the code is traded in a JSON body of app_id,
+	// secret and auth_code whose answer sits in a {code, message, data}
+	// envelope (TikTok's Marketing API). The token has no expiry; the
+	// advertiser accounts it was granted come back with it.
+	AppIDAuthCode bool `json:"-"`
 }
 
 // Definition is a connector's catalog entry.

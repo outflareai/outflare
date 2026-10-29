@@ -30,6 +30,11 @@ const fields = {
   hypothesis: z.string().max(2000).optional().describe("What the team expects and why."),
   control: z.string().optional().describe('The flag version the others are compared with. Default: "control" if the flag has one, else its first.'),
   goals: z.array(goal).min(1).max(5).optional().describe("What counts as success; the first is the one the test is judged on. Fixed once it starts."),
+  guardrails: z
+    .array(goal.extend({ better: z.enum(["higher", "lower"]).optional().describe("Which way is good: higher (default) or lower, such as for errors or refunds.") }))
+    .max(5)
+    .optional()
+    .describe("Metrics a winner mustn't hurt, such as errors or refunds; flagged when a version clearly makes one worse, never deciding the winner. Fixed once it starts."),
   min_effect: z
     .number()
     .min(0.01)
@@ -186,7 +191,7 @@ export function registerABTestTools(
     "update_ab_test",
     {
       title: "Change an A/B test",
-      description: "Its name or hypothesis at any time; its control, goals and min_effect only while it is a draft.",
+      description: "Its name or hypothesis at any time; its control, goals, guardrails and min_effect only while it is a draft.",
       inputSchema: { test: testRef, ...fields },
       annotations: write,
     },
@@ -213,5 +218,28 @@ export function registerABTestTools(
       annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: false },
     },
     ({ test, decision }) => call(() => gtm.POST("/v1/workspaces/{ws}/ab-tests/{test}/end", { params: { path: { ...path(), test } }, body: { decision } })),
+  );
+
+  server.registerTool(
+    "freeze_ab_test",
+    {
+      title: "Freeze or unfreeze an A/B test",
+      description:
+        "frozen true stops new visitors joining a running test while those already in keep counting, so it can finish on the visitors it has (such as before a launch that would change the traffic); false lets them join again.",
+      inputSchema: { test: testRef, frozen: z.boolean() },
+      annotations: write,
+    },
+    ({ test, frozen }) => call(() => gtm.POST("/v1/workspaces/{ws}/ab-tests/{test}/freeze", { params: { path: { ...path(), test } }, body: { frozen } })),
+  );
+
+  server.registerTool(
+    "duplicate_ab_test",
+    {
+      title: "Duplicate an A/B test",
+      description: "A new draft with the same flag, control, goals, guardrails and hypothesis, to run a test again or try a variation.",
+      inputSchema: { test: testRef },
+      annotations: write,
+    },
+    ({ test }) => call(() => gtm.POST("/v1/workspaces/{ws}/ab-tests/{test}/duplicate", { params: { path: { ...path(), test } } })),
   );
 }

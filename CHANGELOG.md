@@ -6,6 +6,16 @@ Each pull request that changes what Outflare does adds a change note in [changes
 
 ## [Unreleased]
 
+## [0.27.0] - 2026-10-29
+
+### Added
+
+- TikTok Ads: sign in with TikTok For Business to read each ad account's campaigns and daily spend, impressions, clicks and conversions, and send your conversions back to a TikTok pixel through the Events API.
+
+### Changed
+
+- A/B tests: add guardrails a winner mustn't hurt, get an alert when a test is safe to stop, its split breaks or a guardrail is hurt, freeze a test so new visitors stop joining, and duplicate a test. Visitors from your own company are left out.
+
 ## [0.26.0] - 2026-10-29
 
 ### Changed

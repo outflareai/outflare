@@ -14,6 +14,9 @@ An alert says something needs a person now. Any part of Outflare raises one, onc
 | --- | --- | --- |
 | `reply.hot` | A reply is labelled `interested`, `meeting_booked` or `question` by the rules, a person, or the AI at 80% or more (a label waiting for review alerts once confirmed). Once per reply. | Who the reply is assigned to, else who made the sequence. |
 | `visitor.hot` | A known person or company reaches the workspace's hot score on its website ([website visitors](website-visitors.md)), at most once a week each. | Nobody in particular, so the owners and admins. |
+| `ab_test.ready` | A running [A/B test](ab-tests.md) has a clear result (a winner, or the control) and is safe to stop, once per test. | The owners and admins. |
+| `ab_test.split_broken` | A running A/B test's visitors split far from the flag's weights, once per test. | The owners and admins. |
+| `ab_test.guardrail_hurt` | A version of a running A/B test clearly makes one of its guardrails worse, once per guardrail and version. | The owners and admins. |
 
 A module adds a kind with `alerts.Register` (an id, a title, the scope needed to see it, and how to describe one) and raises it with `alerts.Raise`.
 

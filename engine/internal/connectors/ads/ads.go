@@ -1,9 +1,9 @@
 // Package ads connects the workspace's own ad accounts: Google Ads, Meta,
-// Microsoft Advertising, Reddit Ads, X Ads and LinkedIn Ads. Each one maps
-// its own reports onto connectors.AdsReader (accounts, campaigns, daily
-// numbers per campaign, money in micros of the account's currency), so a
-// person or an agent reads every platform the same way. Google, Meta,
-// Microsoft and Reddit also take conversions back (connectors.
+// Microsoft Advertising, Reddit Ads, X Ads, LinkedIn Ads and TikTok Ads.
+// Each one maps its own reports onto connectors.AdsReader (accounts,
+// campaigns, daily numbers per campaign, money in micros of the account's
+// currency), so a person or an agent reads every platform the same way. Google, Meta,
+// Microsoft, Reddit and TikTok also take conversions back (connectors.
 // ConversionSender); nothing here changes campaigns, budgets or ads.
 //
 // Every connection uses the workspace's own account and keys: Outflare's
@@ -29,7 +29,7 @@ import (
 
 // All returns every available ad connector.
 func All() []c.Connector {
-	return []c.Connector{GoogleAds{}, MetaAds{}, MicrosoftAds{}, RedditAds{}, XAds{}, LinkedInAds{}}
+	return []c.Connector{GoogleAds{}, MetaAds{}, MicrosoftAds{}, RedditAds{}, XAds{}, LinkedInAds{}, TikTokAds{}}
 }
 
 func def(id, name, site, docs, keyURL, summary, description string) c.Definition {

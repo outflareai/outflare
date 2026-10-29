@@ -51,7 +51,7 @@ func fake(t *testing.T, routes map[string]any) (*c.Client, *[]seen, string) {
 	t.Cleanup(srv.Close)
 	cl := &c.Client{BaseURLs: map[string]string{}}
 	for _, id := range []string{"google_ads", "meta_ads", "microsoft_ads.customer", "microsoft_ads.campaign", "microsoft_ads.reporting",
-		"reddit_ads", "reddit_ads.conversions", "x_ads", "linkedin_ads"} {
+		"reddit_ads", "reddit_ads.conversions", "x_ads", "linkedin_ads", "tiktok_ads"} {
 		cl.BaseURLs[id] = srv.URL
 	}
 	return cl, &reqs, srv.URL
@@ -75,8 +75,8 @@ func TestDefinitions(t *testing.T) {
 			t.Errorf("%s offers OAuth without a consent screen", d.ID)
 		}
 	}
-	if len(ids) != 6 {
-		t.Fatalf("want six ad platforms, got %d", len(ids))
+	if len(ids) != 7 {
+		t.Fatalf("want seven ad platforms, got %d", len(ids))
 	}
 }
 
@@ -464,5 +464,133 @@ func TestRedditAdsConversions(t *testing.T) {
 	last := (*reqs)[len(*reqs)-1]
 	if last.header.Get("Authorization") != "Bearer ct" || !strings.Contains(last.body, `"click_id":"r1"`) || !strings.Contains(last.body, `"tracking_type":"Purchase"`) || !strings.Contains(last.body, `"conversion_id":"msg-1"`) {
 		t.Fatalf("reddit %s %v", last.body, last.header)
+	}
+}
+
+func TestTikTokAds(t *testing.T) {
+	cl, reqs, _ := fake(t, map[string]any{
+		"GET /advertiser/info/": map[string]any{"code": 0, "message": "OK", "data": map[string]any{"list": []any{
+			map[string]any{"advertiser_id": "700", "name": "Northpeak", "currency": "usd", "timezone": "Etc/GMT+5", "display_timezone": "America/New_York"}}}},
+		"GET /campaign/get/": map[string]any{"code": 0, "data": map[string]any{
+			"list": []any{
+				map[string]any{"campaign_id": "c1", "campaign_name": "Spark", "operation_status": "ENABLE", "objective_type": "WEB_CONVERSIONS", "budget": 50.5, "budget_mode": "BUDGET_MODE_DAY"},
+				map[string]any{"campaign_id": "c2", "campaign_name": "Old", "operation_status": "DISABLE", "secondary_status": "CAMPAIGN_STATUS_DELETE", "budget_mode": "BUDGET_MODE_INFINITE"},
+			},
+			"page_info": map[string]any{"page": 1, "total_page": 1}}},
+		"GET /report/integrated/get/": map[string]any{"code": 0, "data": map[string]any{
+			"list": []any{map[string]any{
+				"dimensions": map[string]any{"campaign_id": "c1", "stat_time_day": "2026-10-01 00:00:00"},
+				"metrics":    map[string]any{"campaign_name": "Spark", "spend": "12.34", "impressions": "1000", "clicks": "25", "conversion": "3"}}},
+			"page_info": map[string]any{"page": 1, "total_page": 1}}},
+	})
+	tk := TikTokAds{}
+	if _, err := tk.AdAccounts(ctx, cl, c.Creds{"access_token": "tok"}); c.KindOf(err) != c.ErrAuth {
+		t.Fatalf("no granted accounts: %v", err)
+	}
+	creds := c.Creds{"access_token": "tok", "advertiser_ids": "700"}
+	accts, err := tk.AdAccounts(ctx, cl, creds)
+	if err != nil || len(accts) != 1 || accts[0].Currency != "USD" || accts[0].TimeZone != "America/New_York" {
+		t.Fatalf("accounts %+v %v", accts, err)
+	}
+	first := (*reqs)[len(*reqs)-1]
+	if first.header.Get("Access-Token") != "tok" || !strings.Contains(first.query, "advertiser_ids=%5B%22700%22%5D") {
+		t.Fatalf("advertiser info call %s %v", first.query, first.header)
+	}
+	camps, err := tk.AdCampaigns(ctx, cl, creds, accts[0])
+	if err != nil || len(camps) != 2 || camps[0].Status != c.AdActive || *camps[0].DailyBudgetMicros != 50_500_000 ||
+		camps[1].Status != c.AdRemoved || camps[1].DailyBudgetMicros != nil {
+		t.Fatalf("campaigns %+v %v", camps, err)
+	}
+	// 45 days go in two windows of at most 30.
+	n := len(*reqs)
+	days, err := tk.AdDays(ctx, cl, creds, accts[0], "2026-09-01", "2026-10-15")
+	if err != nil || len(days) != 2 || days[0].SpendMicros != 12_340_000 || days[0].Date != "2026-10-01" || *days[0].Conversions != 3 || days[0].Clicks != 25 {
+		t.Fatalf("days %+v %v", days, err)
+	}
+	if got := (*reqs)[n:]; len(got) != 2 || !strings.Contains(got[0].query, "end_date=2026-09-30") || !strings.Contains(got[1].query, "start_date=2026-10-01") {
+		t.Fatalf("report windows %+v", got)
+	}
+}
+
+func TestTikTokAdsRefusals(t *testing.T) {
+	cl, _, _ := fake(t, map[string]any{
+		"GET /advertiser/info/": map[string]any{"code": 40105, "message": "Access token is incorrect or has been revoked."},
+		"GET /campaign/get/":    map[string]any{"code": 40002, "message": "advertiser_id is invalid"},
+	})
+	tk, creds := TikTokAds{}, c.Creds{"access_token": "tok", "advertiser_ids": "700"}
+	if _, err := tk.AdAccounts(ctx, cl, creds); c.KindOf(err) != c.ErrAuth {
+		t.Fatalf("a revoked token is an auth error: %v", err)
+	}
+	if _, err := tk.AdCampaigns(ctx, cl, creds, c.AdAccount{ID: "700"}); err == nil || c.KindOf(err) == c.ErrAuth {
+		t.Fatalf("a bad request is not an auth error: %v", err)
+	}
+}
+
+func TestTikTokAdsConversions(t *testing.T) {
+	cl, reqs, _ := fake(t, map[string]any{
+		"GET /pixel/list/":   map[string]any{"code": 0, "data": map[string]any{"pixels": []any{map[string]any{"pixel_code": "PX1", "pixel_name": "Site"}}, "page_info": map[string]any{"page": 1, "total_page": 1}}},
+		"POST /event/track/": map[string]any{"code": 0, "message": "OK"},
+	})
+	tk, acct := TikTokAds{}, c.AdAccount{ID: "700"}
+	if got := c.MissingSetup(TikTokAds{}, c.Creds{}); len(got) != 0 {
+		t.Fatalf("the events token is optional: %+v", got)
+	}
+	creds := c.Creds{"access_token": "tok"}
+	ts, err := tk.ConversionTargets(ctx, cl, creds, acct)
+	if err != nil || len(ts) != 1 || ts[0].ID != "PX1" {
+		t.Fatalf("targets %+v %v", ts, err)
+	}
+	cv := conv(0, map[string]string{"ttclid": "tt1", "ttp": "cookie1"})
+	cv.EventType = "CompletePayment"
+	empty := c.AdConversion{EventID: "msg-2", Index: 1, ClickIDs: map[string]string{"gclid": "g"}}
+	res, err := tk.SendConversions(ctx, cl, creds, acct, ts[0], []c.AdConversion{cv, empty})
+	if err != nil || !res[0].OK || !res[1].Skipped {
+		t.Fatalf("send %+v %v", res, err)
+	}
+	last := (*reqs)[len(*reqs)-1]
+	for _, want := range []string{`"event_source_id":"PX1"`, `"event":"CompletePayment"`, `"ttclid":"tt1"`, `"ttp":"cookie1"`, `"event_id":"msg-1"`, `"value":12.5`, `"email":"` + c.HashID("ana@acme.example") + `"`} {
+		if !strings.Contains(last.body, want) {
+			t.Fatalf("event body lacks %s: %s", want, last.body)
+		}
+	}
+	if last.header.Get("Access-Token") != "tok" {
+		t.Fatalf("sends with the sign-in token: %v", last.header)
+	}
+	// An Events API token, when given, is used instead.
+	if _, err := tk.SendConversions(ctx, cl, c.Creds{"access_token": "tok", "events_token": "ev"}, acct, ts[0], []c.AdConversion{cv}); err != nil {
+		t.Fatal(err)
+	}
+	if got := (*reqs)[len(*reqs)-1].header.Get("Access-Token"); got != "ev" {
+		t.Fatalf("events token not used: %q", got)
+	}
+}
+
+// TikTok's sign-in names the app app_id and trades an auth_code in JSON.
+func TestTikTokSignIn(t *testing.T) {
+	d := TikTokAds{}.Definition()
+	app := c.OAuthApp{ClientID: "app-test-not-real", ClientSecret: "secret-test-not-real"}
+	u := c.AuthURL(d, app, "https://app.example.com/v1/integrations/oauth/callback", "st", "verifier")
+	if !strings.HasPrefix(u, "https://business-api.tiktok.com/portal/auth?") || !strings.Contains(u, "app_id=app-test-not-real") || !strings.Contains(u, "state=st") || strings.Contains(u, "client_id") {
+		t.Fatalf("auth url %s", u)
+	}
+	cl, reqs, srv := fake(t, map[string]any{
+		"POST /oauth2/access_token": map[string]any{"code": 0, "message": "OK", "data": map[string]any{"access_token": "tok", "advertiser_ids": []string{"700", "701"}}},
+	})
+	cl.BaseURLs["tiktok_ads.token"] = srv + "/oauth2/access_token/"
+	creds, err := c.Exchange(ctx, cl, d, app, "code-1", "https://app.example.com/cb", "verifier")
+	if err != nil || creds["access_token"] != "tok" || creds["advertiser_ids"] != "700,701" || creds["expires_at"] != "" {
+		t.Fatalf("exchange %+v %v", creds, err)
+	}
+	if body := (*reqs)[0].body; !strings.Contains(body, `"auth_code":"code-1"`) || !strings.Contains(body, `"secret":"secret-test-not-real"`) {
+		t.Fatalf("exchange body %s", body)
+	}
+	// No refresh token and no expiry: the token is kept as it is.
+	if same, refreshed, err := c.Refresh(ctx, cl, d, app, creds); err != nil || refreshed || same["access_token"] != "tok" {
+		t.Fatalf("refresh %+v %v %v", same, refreshed, err)
+	}
+	cl2, _, srv2 := fake(t, map[string]any{"POST /oauth2/access_token": map[string]any{"code": 40108, "message": "auth_code expired"}})
+	cl2.BaseURLs["tiktok_ads.token"] = srv2 + "/oauth2/access_token/"
+	if _, err := c.Exchange(ctx, cl2, d, app, "old", "https://app.example.com/cb", "v"); c.KindOf(err) != c.ErrAuth {
+		t.Fatalf("a refused code: %v", err)
 	}
 }

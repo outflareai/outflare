@@ -106,7 +106,7 @@ func TestAdsSyncAndReports(t *testing.T) {
 		t.Fatalf("empty: %v", got)
 	}
 	cat := owner.must(200, "GET", base+"/connectors?category=ads", nil)["data"].([]any)
-	if len(cat) != 6 {
+	if len(cat) != 7 {
 		t.Fatalf("ads catalog: %d", len(cat))
 	}
 

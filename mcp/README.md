@@ -256,7 +256,7 @@ Write (left out when `OUTFLARE_MCP_READ_ONLY=1`):
 | `run_lead_list` | Build, refresh or enrich a list (spends provider credits, within the caps) |
 | `create_smart_list`, `update_smart_list`, `refresh_smart_list`, `delete_smart_list` | Make a list that keeps itself up to date from rules, change its rules, bring it up to date now, or delete it (its people stay) |
 | `create_flag`, `update_flag`, `archive_flag` | Add a switch or a split between versions, turn it on or off, change who gets it, or archive it |
-| `create_ab_test`, `update_ab_test`, `start_ab_test`, `end_ab_test` | Set up an A/B test of a flag with its control and goals, start measuring, and end it with the version chosen |
+| `create_ab_test`, `update_ab_test`, `start_ab_test`, `end_ab_test`, `freeze_ab_test`, `duplicate_ab_test` | Set up an A/B test of a flag with its control, goals and guardrails, start measuring, stop new visitors joining, end it with the version chosen, or copy it into a new draft |
 | `suggest_ab_tests`, `write_ab_test_versions`, `summarize_ab_test` | Have the workspace's own AI model suggest tests, write versions of a flag from a prompt, or summarise results (the engine decides the recommendation) |
 | `cancel_list_run` | Stop a run; leads already added stay |
 | `create_sequence` | Create a draft sequence with steps (it sends nothing yet) |

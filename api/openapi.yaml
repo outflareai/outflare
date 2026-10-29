@@ -18365,6 +18365,57 @@ paths:
               schema: { $ref: "#/components/schemas/ABTest" }
         "202": { $ref: "#/components/responses/MissionHeld" }
         default: { $ref: "#/components/responses/Error" }
+  /v1/workspaces/{ws}/ab-tests/{test}/freeze:
+    parameters:
+      - { $ref: "#/components/parameters/Workspace" }
+      - { name: test, in: path, required: true, schema: { type: string, format: uuid } }
+    post:
+      operationId: freezeABTest
+      x-outflare-access: { scope: analytics.manage }
+      summary: Freeze or unfreeze an A/B test
+      description: |
+        Scope: analytics.manage. frozen true stops new visitors joining a running test while those already in keep
+        counting, so it can finish on the visitors it has (such as before a launch that would change the traffic);
+        false lets them join again, counting those who arrived meanwhile. 409 unless the test is running.
+      tags: [ab-tests]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [frozen]
+              properties:
+                frozen: { type: boolean }
+      responses:
+        "200":
+          description: The test.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ABTest" }
+        "202": { $ref: "#/components/responses/MissionHeld" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/workspaces/{ws}/ab-tests/{test}/duplicate:
+    parameters:
+      - { $ref: "#/components/parameters/Workspace" }
+      - { name: test, in: path, required: true, schema: { type: string, format: uuid } }
+    post:
+      operationId: duplicateABTest
+      x-outflare-access: { scope: analytics.manage }
+      summary: Duplicate an A/B test
+      description: |
+        Scope: analytics.manage. Adds a draft with the same flag, control, goals, guardrails, smallest change and
+        hypothesis, named "(copy)": to run a test again or a variation of it.
+      tags: [ab-tests]
+      responses:
+        "201":
+          description: The new draft.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ABTest" }
+        "202": { $ref: "#/components/responses/MissionHeld" }
+        default: { $ref: "#/components/responses/Error" }
   /v1/workspaces/{ws}/ab-tests/{test}/results:
     parameters:
       - { $ref: "#/components/parameters/Workspace" }
@@ -27855,9 +27906,10 @@ components:
         property: { type: string, maxLength: 64, description: "For a value goal on an event: the event property holding the number, such as revenue. Values below 0 count as 0.", example: revenue }
         window_hours: { type: integer, minimum: 0, maximum: 8784, description: "Count only what happens within this many hours of the visitor first seeing their version; 0 or absent: until the test ends." }
         cap: { type: number, minimum: 0, description: "For count and value goals: the most one visitor can add, so a few huge orders can't swing the result; 0 or absent: no cap." }
+        better: { type: string, enum: [higher, lower], description: "Guardrails only: which way is good. higher (the default) or lower, such as for an error event or refunds." }
     ABTest:
       type: object
-      required: [id, flag_id, flag_key, brand_id, name, hypothesis, status, control, goals, min_effect, baselines, started_at, ended_at, decision, created_at, updated_at]
+      required: [id, flag_id, flag_key, brand_id, name, hypothesis, status, control, goals, guardrails, min_effect, baselines, started_at, frozen_at, ended_at, decision, created_at, updated_at]
       properties:
         id: { type: string, format: uuid }
         flag_id: { type: string, format: uuid }
@@ -27868,6 +27920,8 @@ components:
         status: { type: string, enum: [draft, running, done] }
         control: { type: string, description: The flag variant the others are compared with. }
         goals: { type: array, items: { $ref: "#/components/schemas/ABTestGoal" }, description: The first is the one the test is judged on. }
+        guardrails: { type: array, items: { $ref: "#/components/schemas/ABTestGoal" }, description: "Watched alongside, to catch a version that makes something else worse; they never decide the winner." }
+        frozen_at: { type: [string, "null"], format: date-time, description: "When new visitors stopped joining; null while they join." }
         min_effect: { type: number, minimum: 0.01, maximum: 1, description: "The smallest relative change worth detecting: 0.25 is +25%. The always-valid p-value is tuned to find changes of about this size." }
         baselines: { type: [array, "null"], items: { type: number }, description: "Each goal's mean per visitor on the site (its conversion rate, for a conversion goal) over the 28 days before the test started, which fixes the test's tuning for its whole life; 0 for a goal with too little history (its live control mean is used). Null before the test starts." }
         started_at: { type: [string, "null"], format: date-time }
@@ -27884,6 +27938,7 @@ components:
         hypothesis: { type: string, maxLength: 2000 }
         control: { type: string, description: 'One of the flag''s variants. Default: "control" if it has one, else its first.' }
         goals: { type: array, minItems: 1, maxItems: 5, items: { $ref: "#/components/schemas/ABTestGoal" } }
+        guardrails: { type: array, maxItems: 5, items: { $ref: "#/components/schemas/ABTestGoal" }, description: "Up to 5 metrics a winner mustn't hurt, each with better (higher or lower). Fixed once the test starts." }
         min_effect:
           type: number
           minimum: 0.01
@@ -27981,7 +28036,7 @@ components:
         winner: { type: string, description: 'The version the results favour on the first goal: one at least 95% likely to beat the control with p_value under 0.05, or the control when every other is that likely to be worse; "" while none is clear or the split looks wrong.' }
         result:
           type: object
-          required: [arms, goals, sample_ratio_p, sample_ratio_mismatch, min_effect, corrected_for, computed_at]
+          required: [arms, goals, guardrails, crossovers, sample_ratio_p, sample_ratio_mismatch, min_effect, corrected_for, computed_at]
           properties:
             arms: { type: array, items: { $ref: "#/components/schemas/ABTestArm" }, description: "Visitors per version, control first." }
             goals:
@@ -28005,6 +28060,21 @@ components:
                       properties:
                         date: { type: string, format: date }
                         arms: { type: array, items: { $ref: "#/components/schemas/ABTestArm" } }
+            guardrails:
+              type: array
+              description: Each guardrail's arms and comparisons, and the versions that clearly hurt it.
+              items:
+                type: object
+                required: [goal, arms, comparisons, metric, exploratory, harmed]
+                properties:
+                  goal: { $ref: "#/components/schemas/ABTestGoal" }
+                  metric: { type: string, enum: [conversion, count, value] }
+                  exploratory: { type: boolean }
+                  arms: { type: array, items: { $ref: "#/components/schemas/ABTestArm" } }
+                  comparisons: { type: [array, "null"], items: { $ref: "#/components/schemas/ABTestComparison" } }
+                  baseline: { type: number }
+                  harmed: { type: array, items: { type: string }, description: "Versions that make it worse (in its bad direction), at least 95% likely and safe to stop." }
+            crossovers: { type: integer, description: "Visitors who saw more than one version. They count under the first; many of them means something (a cache, a server that assigns differently) shows versions inconsistently." }
             sample_ratio_p: { type: number, description: "The chance of a split this uneven by luck." }
             sample_ratio_mismatch: { type: boolean, description: "True when sample_ratio_p is under 0.001: something (a redirect, a cache, bots) is breaking the split, so there is no winner." }
             min_effect: { type: number, description: The smallest change the p-values were tuned to detect. }

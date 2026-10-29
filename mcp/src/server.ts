@@ -2352,7 +2352,7 @@ export function createServer({ client: gtm, workspace, readOnly = false, mission
     (query) => call(() => gtm.GET("/v1/workspaces/{ws}/attribution/conversions", { params: { path, query } })),
   );
 
-  const adConnector = z.enum(["google_ads", "meta_ads", "microsoft_ads", "reddit_ads", "x_ads", "linkedin_ads"]).optional();
+  const adConnector = z.enum(["google_ads", "meta_ads", "microsoft_ads", "reddit_ads", "x_ads", "linkedin_ads", "tiktok_ads"]).optional();
   const adDay = z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional();
 
   server.registerTool(
@@ -2360,7 +2360,7 @@ export function createServer({ client: gtm, workspace, readOnly = false, mission
     {
       title: "List connected ad platforms",
       description:
-        "Each connected ad platform (Google Ads, Meta Ads, Microsoft Ads, Reddit Ads, X Ads, LinkedIn Ads), its accounts and sync status, and setup_needed when it still waits for a field such as a developer token. " +
+        "Each connected ad platform (Google Ads, Meta Ads, Microsoft Ads, Reddit Ads, X Ads, LinkedIn Ads, TikTok Ads), its accounts and sync status, and setup_needed when it still waits for a field such as a developer token. " +
         "A person adds that field in Integrations; agents never handle keys.",
       inputSchema: {},
       annotations: read,

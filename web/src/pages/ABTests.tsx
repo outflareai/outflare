@@ -158,14 +158,14 @@ function useEvents(ws: string) {
   return events;
 }
 
-function GoalsEditor({ goals, setGoals, events }: { goals: ABTestGoal[]; setGoals: (g: ABTestGoal[]) => void; events: string[] }) {
+function GoalsEditor({ goals, setGoals, events, guardrail }: { goals: ABTestGoal[]; setGoals: (g: ABTestGoal[]) => void; events: string[]; guardrail?: boolean }) {
   const set = (i: number, g: ABTestGoal) => setGoals(goals.map((x, k) => (k === i ? g : x)));
   return (
     <div className="space-y-2">
       <datalist id="ab-events">{events.map((e) => <option key={e} value={e} />)}</datalist>
       {goals.map((g, i) => (
         <div key={i} className="flex flex-wrap items-center gap-2 rounded-md border p-2">
-          <span className="w-16 text-[12px] text-muted-foreground">{i === 0 ? "Judged on" : "Also"}</span>
+          <span className="w-16 text-[12px] text-muted-foreground">{guardrail ? "Guard" : i === 0 ? "Judged on" : "Also"}</span>
           <select aria-label="Kind" className={field} value={g.kind} onChange={(e) => set(i, e.target.value === "page" ? { kind: "page", path: "/" } : e.target.value === "deal" ? { kind: "deal", metric: "value" } : { kind: "event", name: "" })}>
             <option value="event">Event</option>
             <option value="page">Page viewed</option>
@@ -187,7 +187,13 @@ function GoalsEditor({ goals, setGoals, events }: { goals: ABTestGoal[]; setGoal
           {g.kind === "event" && g.metric === "value" && (
             <input aria-label="Property" className={`${field} w-28 font-mono`} required pattern="[A-Za-z_][A-Za-z0-9_]*" placeholder="revenue" value={g.property ?? ""} onChange={(e) => set(i, { ...g, property: e.target.value.trim() })} />
           )}
-          {goals.length > 1 && <Button type="button" variant="ghost" onClick={() => setGoals(goals.filter((_, k) => k !== i))}>Remove</Button>}
+          {guardrail && (
+            <select aria-label="Better" className={field} value={g.better ?? "higher"} onChange={(e) => set(i, { ...g, better: e.target.value === "lower" ? "lower" : undefined })}>
+              <option value="higher">Higher is better</option>
+              <option value="lower">Lower is better</option>
+            </select>
+          )}
+          {(guardrail || goals.length > 1) && <Button type="button" variant="ghost" onClick={() => setGoals(goals.filter((_, k) => k !== i))}>Remove</Button>}
           <details className="basis-full text-[12px] text-muted-foreground">
             <summary className="cursor-pointer">Window{measured(g) ? " and cap" : ""}{g.window_hours ? ` · ${g.window_hours} h` : ""}{g.cap ? ` · cap ${g.cap}` : ""}</summary>
             <div className="mt-2 flex flex-wrap items-center gap-3">
@@ -208,7 +214,11 @@ function GoalsEditor({ goals, setGoals, events }: { goals: ABTestGoal[]; setGoal
           </details>
         </div>
       ))}
-      {goals.length < 5 && <Button type="button" variant="ghost" onClick={() => setGoals([...goals, { kind: "event", name: "" }])}>Watch another goal</Button>}
+      {goals.length < 5 && (
+        <Button type="button" variant="ghost" onClick={() => setGoals([...goals, guardrail ? { kind: "event", name: "", better: "lower" } : { kind: "event", name: "" }])}>
+          {guardrail ? "Add a guardrail" : "Watch another goal"}
+        </Button>
+      )}
     </div>
   );
 }
@@ -244,6 +254,7 @@ function NewTestSheet({ ws, flags, flag: initial, seed, go, onClose, onSaved, on
   const [name, setName] = useState(seed?.name ?? "");
   const [hypothesis, setHypothesis] = useState(seed?.hypothesis ?? "");
   const [goals, setGoals] = useState<ABTestGoal[]>([seed?.goal ?? { kind: "event", name: "" }]);
+  const [guardrails, setGuardrails] = useState<ABTestGoal[]>([]);
   const [minEffect, setMinEffect] = useState(0.25);
   const [writing, setWriting] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -259,7 +270,7 @@ function NewTestSheet({ ws, flags, flag: initial, seed, go, onClose, onSaved, on
     e.preventDefault();
     setBusy(true);
     setError("");
-    const { data, error } = await api.POST("/v1/workspaces/{ws}/ab-tests", { params: { path: { ws } }, body: { flag: flagKey, control: ctl, name: name.trim() || undefined, hypothesis, goals, min_effect: minEffect } });
+    const { data, error } = await api.POST("/v1/workspaces/{ws}/ab-tests", { params: { path: { ws } }, body: { flag: flagKey, control: ctl, name: name.trim() || undefined, hypothesis, goals, guardrails, min_effect: minEffect } });
     setBusy(false);
     if (error) return setError(errorMessage(error));
     toast(`Added ${data!.name}. Start it when the pages are ready.`);
@@ -304,6 +315,11 @@ function NewTestSheet({ ws, flags, flag: initial, seed, go, onClose, onSaved, on
               <span className="block font-medium">Goals</span>
               <GoalsEditor goals={goals} setGoals={setGoals} events={events} />
               <p className="text-[12px] text-muted-foreground">A visitor converts when they reach a goal after seeing their version; measure times or value per visitor to compare averages, such as revenue per visitor. The first goal decides the winner; the rest are exploratory. Goals can't change once the test starts.</p>
+            </div>
+            <div className="space-y-2">
+              <span className="block font-medium">Guardrails <span className="font-normal text-muted-foreground">(optional)</span></span>
+              <GoalsEditor goals={guardrails} setGoals={setGuardrails} events={events} guardrail />
+              <p className="text-[12px] text-muted-foreground">Metrics a winner mustn't hurt, such as errors or refunds. You get an alert when a version clearly makes one worse; they never decide the winner.</p>
             </div>
             <EffectPicker value={minEffect} onChange={setMinEffect} />
             <PlanPanel ws={ws} flag={flagKey} goal={goals[0]} minEffect={minEffect} />
@@ -355,6 +371,7 @@ function TestSheet({ ws, test, flag, canManage, onClose, onChanged, onFlagChange
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const [goals, setGoals] = useState<ABTestGoal[]>(test.goals);
+  const [guardrails, setGuardrails] = useState<ABTestGoal[]>(test.guardrails);
   const [minEffect, setMinEffect] = useState(test.min_effect);
   const [decision, setDecision] = useState("");
 
@@ -362,6 +379,7 @@ function TestSheet({ ws, test, flag, canManage, onClose, onChanged, onFlagChange
     setResults(null);
     setError("");
     setGoals(test.goals);
+    setGuardrails(test.guardrails);
     setMinEffect(test.min_effect);
     if (test.status === "draft") return;
     api.GET("/v1/workspaces/{ws}/ab-tests/{test}/results", { params: { path: { ws, test: test.id } } }).then(({ data, error }) => {
@@ -375,9 +393,9 @@ function TestSheet({ ws, test, flag, canManage, onClose, onChanged, onFlagChange
 
   async function start() {
     setBusy(true);
-    const changed = JSON.stringify(goals) !== JSON.stringify(test.goals) || minEffect !== test.min_effect;
+    const changed = JSON.stringify(goals) !== JSON.stringify(test.goals) || JSON.stringify(guardrails) !== JSON.stringify(test.guardrails) || minEffect !== test.min_effect;
     if (changed) {
-      const { error } = await api.PATCH("/v1/workspaces/{ws}/ab-tests/{test}", { params: { path: { ws, test: test.id } }, body: { goals, min_effect: minEffect } });
+      const { error } = await api.PATCH("/v1/workspaces/{ws}/ab-tests/{test}", { params: { path: { ws, test: test.id } }, body: { goals, guardrails, min_effect: minEffect } });
       if (error) {
         setBusy(false);
         return setError(errorMessage(error));
@@ -406,6 +424,25 @@ function TestSheet({ ws, test, flag, canManage, onClose, onChanged, onFlagChange
     onChanged();
   }
 
+  async function freeze(frozen: boolean) {
+    if (frozen && !(await confirmAction(`Freeze ${test.name}?`, "New visitors stop joining; those already in keep counting, so the test can finish on the visitors it has. You can unfreeze it.", "Freeze"))) return;
+    setBusy(true);
+    const { error } = await api.POST("/v1/workspaces/{ws}/ab-tests/{test}/freeze", { params: { path: { ws, test: test.id } }, body: { frozen } });
+    setBusy(false);
+    if (error) return setError(errorMessage(error));
+    toast(frozen ? `${test.name} is frozen: no new visitors join.` : `${test.name} lets new visitors join again.`);
+    onChanged();
+  }
+
+  async function duplicate() {
+    setBusy(true);
+    const { data, error } = await api.POST("/v1/workspaces/{ws}/ab-tests/{test}/duplicate", { params: { path: { ws, test: test.id } } });
+    setBusy(false);
+    if (error) return setError(errorMessage(error));
+    toast(`Added ${data.name} as a draft.`);
+    onChanged();
+  }
+
   const names = (v: string) => (v === test.control ? `${v} (control)` : v);
   const variants = flag?.variants.map((v) => v.key) ?? results?.result.arms.map((a) => a.variant) ?? [];
   const v = results ? verdict(results, (x) => x) : null;
@@ -418,6 +455,7 @@ function TestSheet({ ws, test, flag, canManage, onClose, onChanged, onFlagChange
           <SheetDescription>
             Flag <span className="font-mono">{test.flag_key}</span>, compared with <span className="font-mono">{test.control}</span>.
             {test.started_at && ` Started ${ago(test.started_at)}.`}
+            {test.frozen_at && test.status === "running" && ` Frozen ${ago(test.frozen_at)}: no new visitors join.`}
             {test.ended_at && ` Ended ${ago(test.ended_at)}${test.decision ? `, kept ${test.decision}` : ", kept no version"}.`}
           </SheetDescription>
         </SheetHeader>
@@ -431,6 +469,12 @@ function TestSheet({ ws, test, flag, canManage, onClose, onChanged, onFlagChange
                 <span className="block font-medium">Goals</span>
                 {canManage ? <GoalsEditor goals={goals} setGoals={setGoals} events={events} /> : <p className="font-mono">{test.goals.map(goalText).join(", ")}</p>}
               </div>
+              {(canManage || test.guardrails.length > 0) && (
+                <div className="space-y-2">
+                  <span className="block font-medium">Guardrails</span>
+                  {canManage ? <GoalsEditor goals={guardrails} setGoals={setGuardrails} events={events} guardrail /> : <p className="font-mono">{test.guardrails.map(goalText).join(", ")}</p>}
+                </div>
+              )}
               {canManage ? <EffectPicker value={minEffect} onChange={setMinEffect} /> : <p>Tuned to find changes of {signed(test.min_effect)} or more.</p>}
               <PlanPanel ws={ws} flag={test.flag_id} goal={goals[0]} minEffect={minEffect} />
               {canManage && flag && (
@@ -467,12 +511,21 @@ function TestSheet({ ws, test, flag, canManage, onClose, onChanged, onFlagChange
                   <GoalTable goal={g.goal} arms={g.arms} comparisons={g.comparisons ?? []} control={test.control} names={names} />
                 </Card>
               ))}
+              {results.result.guardrails.map((g, gi) => (
+                <Card key={`guard-${gi}`} title={`Guardrail: ${goalText(g.goal)} (${g.goal.better === "lower" ? "lower" : "higher"} is better)`}>
+                  {g.harmed.length > 0 && (
+                    <div className={`mb-2 rounded-md border px-3 py-2 ${toneClass.amber}`}>{g.harmed.map(names).join(", ")} clearly {g.harmed.length === 1 ? "makes" : "make"} this worse. Weigh that before shipping.</div>
+                  )}
+                  <GoalTable goal={g.goal} arms={g.arms} comparisons={g.comparisons ?? []} control={test.control} names={names} />
+                </Card>
+              ))}
               <BreakdownPanel ws={ws} testID={test.id} control={test.control} names={names} />
               <p className="text-[12px] text-muted-foreground">
                 Visitors split {results.result.arms.map((a) => `${a.variant} ${a.visitors.toLocaleString()}`).join(" · ")}
                 {results.result.sample_ratio_mismatch ? " — further from the flag's weights than luck explains." : " — in line with the flag's weights."}{" "}
                 Tuned to find changes of {signed(results.result.min_effect)} or more.{" "}
                 {results.result.corrected_for > 1 && `${results.result.corrected_for} versions compete with the control, so the results are corrected for that many chances of a false winner. `}
+                {results.result.crossovers > 0 && `${results.result.crossovers.toLocaleString()} visitors saw more than one version (they count under the first)${results.result.crossovers * 100 > results.result.arms.reduce((n, a) => n + a.visitors, 0) ? ": more than 1%, so check nothing (a cache, a server) shows versions inconsistently" : ""}. `}
                 {test.status === "running" ? `Counted ${ago(results.result.computed_at)}; reload for the latest.` : "As they stood when the test ended."}
               </p>
               {test.status === "running" && canManage && (
@@ -485,6 +538,12 @@ function TestSheet({ ws, test, flag, canManage, onClose, onChanged, onFlagChange
                     </select>
                   </label>
                   <Button variant="ghost" disabled={busy} onClick={end}>{busy ? "Ending…" : "End test"}</Button>
+                  <Button variant="ghost" disabled={busy} onClick={() => freeze(!test.frozen_at)}>{test.frozen_at ? "Let new visitors join" : "Freeze"}</Button>
+                </div>
+              )}
+              {canManage && (
+                <div className="flex gap-2">
+                  <Button variant="ghost" disabled={busy} onClick={duplicate}>Duplicate as a new draft</Button>
                 </div>
               )}
             </>

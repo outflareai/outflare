@@ -530,6 +530,13 @@ func Run(ctx context.Context, log *slog.Logger, cmd string, exts ...Extension) e
 			defer wg.Done()
 			apiServer.RunSocial(ctx, time.Minute)
 		}()
+		// Running A/B tests' checks: alerts when one is ready, its split
+		// breaks or a guardrail is hurt.
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			apiServer.RunABTests(ctx, 5*time.Minute)
+		}()
 		// Each visit's channel, and the credit for each conversion.
 		wg.Add(1)
 		go func() {

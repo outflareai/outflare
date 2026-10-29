@@ -440,7 +440,7 @@ curl -H "Authorization: Bearer $TOKEN" "$URL/v1/workspaces/$WS/analytics/history
 
 ## Paid media
 
-Connect Google Ads, Meta Ads, Microsoft Advertising, Reddit Ads, X Ads and LinkedIn Ads with your own ad accounts (Google and Microsoft also need your own developer token). Every six hours Outflare stores each account's campaigns and daily spend, impressions, clicks and platform-reported conversions, puts the spend in the costs ledger under the account's brand, and answers it through `GET /v1/workspaces/$WS/ads/...` and the MCP tools `list_ad_campaigns` and `get_ads_summary`. It only reads; nothing changes in your ad accounts. See [docs/paid-media.md](docs/paid-media.md).
+Connect Google Ads, Meta Ads, Microsoft Advertising, Reddit Ads, X Ads, LinkedIn Ads and TikTok Ads with your own ad accounts (Google and Microsoft also need your own developer token). Every six hours Outflare stores each account's campaigns and daily spend, impressions, clicks and platform-reported conversions, puts the spend in the costs ledger under the account's brand, and answers it through `GET /v1/workspaces/$WS/ads/...` and the MCP tools `list_ad_campaigns` and `get_ads_summary`. It only reads; nothing changes in your ad accounts. See [docs/paid-media.md](docs/paid-media.md).
 
 ## SEO
 

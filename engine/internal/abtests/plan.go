@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"math"
+	"slices"
 	"strings"
 	"time"
 )
@@ -274,6 +275,8 @@ const (
 	RecommendWait        = "wait"         // too few visitors to say anything
 	RecommendExtend      = "extend"       // keep it running
 	RecommendStop        = "stop"         // unlikely to finish in 8 more weeks
+	// The winner clearly hurts a guardrail: a person weighs the trade.
+	RecommendCheckGuardrails = "check_guardrails"
 )
 
 // Recommend says what to do with a running or finished test's results, and
@@ -288,6 +291,11 @@ func Recommend(r Result, control string, minEffect float64, started, now time.Ti
 	case r.SampleRatio:
 		return RecommendFixSplit, "Visitors split between versions far from the flag's weights, so the results can't be trusted until the cause (a redirect, a cache, bots) is fixed."
 	case w != "" && w != control:
+		for _, g := range r.Guardrails {
+			if slices.Contains(g.Harmed, w) {
+				return RecommendCheckGuardrails, fmt.Sprintf("%s is at least 95%% likely to beat %s and safe to stop, but it clearly hurts a guardrail. Weigh the gain against that cost before shipping it.", w, control)
+			}
+		}
 		return RecommendShip, fmt.Sprintf("%s is at least 95%% likely to beat %s and the result is safe to stop.", w, control)
 	case w == control:
 		return RecommendKeepControl, fmt.Sprintf("Every version is at least 95%% likely to do worse than %s, and the result is safe to stop.", control)

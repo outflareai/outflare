@@ -84,6 +84,32 @@ For each goal and each version against the control:
 
 The **winner** is a version at least 95% likely to beat the control with a p-value under 0.05 on the first goal; or the control, when every other version is at most 5% likely to beat it with the same proof; otherwise none yet. The maths is exact, with no sampling, so every reload gives the same numbers. A simulation in the engine's tests (identical versions, results checked every day, stopping at the first winner, at 1–5% base rates and 200–5,000 visitors a day) finds false winners well under 5% of the time; so does one for revenue per visitor (few buyers, skewed amounts, one to three versions against the control).
 
+## Guardrails
+
+A test can watch up to 5 **guardrails** (`guardrails`, set while it's a draft): metrics a winner mustn't hurt, such as errors, refunds, unsubscribes or won deals. Each is a goal, with `better` saying which way is good (`higher`, the default, or `lower`):
+
+```json
+"guardrails": [{ "kind": "event", "name": "error_shown", "better": "lower" }, { "kind": "deal", "metric": "value" }]
+```
+
+The results show each guardrail like a goal, and list in `harmed` the versions that clearly make it worse: at least 95% likely, and safe to stop. A guardrail never decides the winner, but a winner that hurts one is called out, and the results summary recommends weighing the trade (`check_guardrails`) instead of shipping it.
+
+## Alerts
+
+Every few hours Outflare checks each running test and raises an [alert](alerts.md), once, when it becomes safe to stop (`ab_test.ready`), when its split breaks (`ab_test.split_broken`), and when a version clearly hurts a guardrail (`ab_test.guardrail_hurt`). They go to the owners and admins, by email or Slack as the workspace chooses. Outflare only tells you: ending a test and shipping the winner stay yours.
+
+## Freezing and duplicating
+
+- **Freeze** a running test (`POST .../ab-tests/{id}/freeze` with `{"frozen": true}`, MCP `freeze_ab_test`) to stop new visitors joining while those already in keep counting: to let it finish on the visitors it has, such as before a launch that would change the traffic. Unfreezing lets them join again, counting those who arrived meanwhile.
+- **Duplicate** a test (`POST .../ab-tests/{id}/duplicate`, MCP `duplicate_ab_test`) to get a draft with the same flag, control, goals, guardrails and hypothesis, to run it again or try a variation.
+
+## Data quality
+
+- **Your own team is left out.** Visitors from the companies left out on the Visitors page (its *exclude domains*, such as your own) don't count in any test.
+- **Bots** never reach a test: the website script doesn't send bots' events.
+- **Crossovers**: `crossovers` counts visitors who saw more than one version. They count under the first; many of them means something, such as a cache or a server that assigns differently, shows versions inconsistently.
+- **The split check** (above) catches visitors lost or double-counted.
+
 ## Breakdowns
 
 **Breakdown** on a test (`GET .../ab-tests/{id}/breakdown?by=device`, MCP `get_ab_test_breakdown`) shows the first goal within groups of visitors:
@@ -105,7 +131,7 @@ With the workspace's own AI model connected (Settings, AI model; it is the **A/B
 
 - **Suggest tests** (**Suggest tests** on the A/B tests page, `POST .../ab-tests/suggestions`, MCP `suggest_ab_tests`): ideas from the site's busiest pages, the goals visitors reach, the brand's context and the tests already run, each with a hypothesis, the page, the change, the goal, its versions, and the planner's estimate for that page and goal. **Use this** fills in a new test.
 - **Write versions** (in the new-test form and a draft test, `POST .../ab-tests/versions`, MCP `write_ab_test_versions`): new versions of a flag's content (its headline, call to action or other text fields) from a prompt such as "a shorter, more urgent headline for agencies", in the brand's voice. **Add to flag** puts a version into the flag's split.
-- **Summarise** (a running or finished test, `POST .../ab-tests/{id}/summary`, MCP `summarize_ab_test`): the results in plain English with next steps. What it recommends (ship the winner, keep the original, fix the split, keep it running, stop and try something bolder, or wait) and why is decided by Outflare from the numbers; the AI only puts it into words.
+- **Summarise** (a running or finished test, `POST .../ab-tests/{id}/summary`, MCP `summarize_ab_test`): the results in plain English with next steps. What it recommends (ship the winner, weigh a guardrail the winner hurts, keep the original, fix the split, keep it running, stop and try something bolder, or wait) and why is decided by Outflare from the numbers; the AI only puts it into words.
 
 Each returns a run to poll (`GET .../ab-test-ai-runs/{run}`, MCP `get_ab_test_ai_run`) until it is ready or failed, with the reason in words. The AI is told never to invent facts, numbers, testimonials or prices, and to treat page paths, past tests and prompts as data. Check generated copy before visitors see it. Without an AI model the helpers answer `409 connector_needed`.
 

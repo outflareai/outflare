@@ -13809,6 +13809,57 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/workspaces/{ws}/ab-tests/{test}/freeze": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                test: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Freeze or unfreeze an A/B test
+         * @description Scope: analytics.manage. frozen true stops new visitors joining a running test while those already in keep
+         *     counting, so it can finish on the visitors it has (such as before a launch that would change the traffic);
+         *     false lets them join again, counting those who arrived meanwhile. 409 unless the test is running.
+         */
+        post: operations["freezeABTest"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/workspaces/{ws}/ab-tests/{test}/duplicate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                test: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Duplicate an A/B test
+         * @description Scope: analytics.manage. Adds a draft with the same flag, control, goals, guardrails, smallest change and
+         *     hypothesis, named "(copy)": to run a test again or a variation of it.
+         */
+        post: operations["duplicateABTest"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/workspaces/{ws}/ab-tests/{test}/results": {
         parameters: {
             query?: never;
@@ -23861,6 +23912,11 @@ export interface components {
             window_hours?: number;
             /** @description For count and value goals: the most one visitor can add, so a few huge orders can't swing the result; 0 or absent: no cap. */
             cap?: number;
+            /**
+             * @description Guardrails only: which way is good. higher (the default) or lower, such as for an error event or refunds.
+             * @enum {string}
+             */
+            better?: "higher" | "lower";
         };
         ABTest: {
             /** Format: uuid */
@@ -23883,6 +23939,13 @@ export interface components {
             control: string;
             /** @description The first is the one the test is judged on. */
             goals: components["schemas"]["ABTestGoal"][];
+            /** @description Watched alongside, to catch a version that makes something else worse; they never decide the winner. */
+            guardrails: components["schemas"]["ABTestGoal"][];
+            /**
+             * Format: date-time
+             * @description When new visitors stopped joining; null while they join.
+             */
+            frozen_at: string | null;
             /** @description The smallest relative change worth detecting: 0.25 is +25%. The always-valid p-value is tuned to find changes of about this size. */
             min_effect: number;
             /** @description Each goal's mean per visitor on the site (its conversion rate, for a conversion goal) over the 28 days before the test started, which fixes the test's tuning for its whole life; 0 for a goal with too little history (its live control mean is used). Null before the test starts. */
@@ -23907,6 +23970,8 @@ export interface components {
             /** @description One of the flag's variants. Default: "control" if it has one, else its first. */
             control?: string;
             goals?: components["schemas"]["ABTestGoal"][];
+            /** @description Up to 5 metrics a winner mustn't hurt, each with better (higher or lower). Fixed once the test starts. */
+            guardrails?: components["schemas"]["ABTestGoal"][];
             /** @description The smallest relative change worth detecting, such as 0.1 (+10%) for a busy site or 0.5 (+50%) for a bold change. Default 0.25. Smaller finds small changes but needs more visitors; fixed once the test starts. */
             min_effect?: number;
         };
@@ -24046,6 +24111,20 @@ export interface components {
                         arms: components["schemas"]["ABTestArm"][];
                     }[];
                 }[];
+                /** @description Each guardrail's arms and comparisons, and the versions that clearly hurt it. */
+                guardrails: {
+                    goal: components["schemas"]["ABTestGoal"];
+                    /** @enum {string} */
+                    metric: "conversion" | "count" | "value";
+                    exploratory: boolean;
+                    arms: components["schemas"]["ABTestArm"][];
+                    comparisons: components["schemas"]["ABTestComparison"][] | null;
+                    baseline?: number;
+                    /** @description Versions that make it worse (in its bad direction), at least 95% likely and safe to stop. */
+                    harmed: string[];
+                }[];
+                /** @description Visitors who saw more than one version. They count under the first; many of them means something (a cache, a server that assigns differently) shows versions inconsistently. */
+                crossovers: number;
                 /** @description The chance of a split this uneven by luck. */
                 sample_ratio_p: number;
                 /** @description True when sample_ratio_p is under 0.001: something (a redirect, a cache, bots) is breaking the split, so there is no winner. */
@@ -58330,6 +58409,64 @@ export interface operations {
         responses: {
             /** @description The test, done. */
             200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ABTest"];
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            default: components["responses"]["Error"];
+        };
+    };
+    freezeABTest: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                test: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    frozen: boolean;
+                };
+            };
+        };
+        responses: {
+            /** @description The test. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ABTest"];
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            default: components["responses"]["Error"];
+        };
+    };
+    duplicateABTest: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                test: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The new draft. */
+            201: {
                 headers: {
                     [name: string]: unknown;
                 };

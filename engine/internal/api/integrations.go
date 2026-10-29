@@ -809,7 +809,11 @@ func (s *Server) integrationCallback(w http.ResponseWriter, r *http.Request) {
 		fail("this connector is no longer available")
 		return
 	}
-	creds, err := connectors.Exchange(r.Context(), s.integrations.Client, def, app, q.Get("code"), s.integrationRedirectURI(), st.Verifier)
+	code := q.Get("code")
+	if code == "" {
+		code = q.Get("auth_code") // TikTok's name for it
+	}
+	creds, err := connectors.Exchange(r.Context(), s.integrations.Client, def, app, code, s.integrationRedirectURI(), st.Verifier)
 	if err != nil {
 		fail(truncate(err.Error(), 300))
 		return

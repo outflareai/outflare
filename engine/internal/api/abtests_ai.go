@@ -53,6 +53,7 @@ func (s *Server) routesABTestAI(mux *http.ServeMux) {
 
 func (s *Server) registerABTestJobs(q *jobs.Queue) {
 	q.Handle(jobABTestAI, s.abTestAIJob)
+	q.Handle(jobABTestCheck, s.abTestCheckJob)
 }
 
 type abAIRunView struct {
@@ -816,6 +817,22 @@ func (s *Server) abSummaryPrompt(ctx context.Context, ws string, run abAIRun) (s
 			fmt.Fprintf(&b, "%s vs %s: chance to beat %.1f%%, lift %+.1f%% (always-valid range %+.1f%% to %+.1f%%), always-valid p %.4f, safe to stop: %v\n",
 				c.Variant, t.Control, c.ChanceToBeat*100, c.Lift*100, c.LiftLow*100, c.LiftHigh*100, c.PValue, c.PValue < abtests.Alpha)
 		}
+	}
+	for i, g := range res.Guardrails {
+		better := "higher is better"
+		if g.Goal.Better == "lower" {
+			better = "lower is better"
+		}
+		fmt.Fprintf(&b, "\n## Guardrail %d (%s, never decides): %s\n", i+1, better, describeGoal(g.Goal))
+		for _, c := range g.Comparisons {
+			fmt.Fprintf(&b, "%s vs %s: lift %+.1f%%, always-valid p %.4f\n", c.Variant, t.Control, c.Lift*100, c.PValue)
+		}
+		if len(g.Harmed) > 0 {
+			fmt.Fprintf(&b, "Clearly hurt by: %s\n", strings.Join(g.Harmed, ", "))
+		}
+	}
+	if res.Crossovers > 0 {
+		fmt.Fprintf(&b, "\n%d visitors saw more than one version.\n", res.Crossovers)
 	}
 	finish := func(text string) (any, map[string]any, error) {
 		var out struct {

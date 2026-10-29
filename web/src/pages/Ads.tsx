@@ -22,6 +22,7 @@ const platforms: { id: string; name: string }[] = [
   { id: "reddit_ads", name: "Reddit Ads" },
   { id: "x_ads", name: "X Ads" },
   { id: "linkedin_ads", name: "LinkedIn Ads" },
+  { id: "tiktok_ads", name: "TikTok Ads" },
 ];
 const platformName = (id: string) => platforms.find((p) => p.id === id)?.name ?? id;
 
@@ -114,7 +115,7 @@ export function Ads({ ws, canManage, go }: Props) {
     return (
       <div className="space-y-6">
         {header}
-        <Card title="Connect an ad account" description="Google Ads, Meta Ads, Microsoft Advertising, Reddit Ads, X Ads and LinkedIn Ads. Each one is your own account: Outflare never provides one, and nothing is read until you connect it.">
+        <Card title="Connect an ad account" description="Google Ads, Meta Ads, Microsoft Advertising, Reddit Ads, X Ads, LinkedIn Ads and TikTok Ads. Each one is your own account: Outflare never provides one, and nothing is read until you connect it.">
           {canManage ? <Button onClick={() => go("connectors", "ads")}>Connect an ad platform</Button> : <p className="text-[13px] text-muted-foreground">Ask an admin to connect your ad accounts.</p>}
         </Card>
       </div>

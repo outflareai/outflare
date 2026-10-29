@@ -22,6 +22,7 @@ stays off until the workspace connects it.
 | Reddit Ads (`reddit_ads`) | Sign in with Reddit (read-only ads access) | Nothing |
 | X Ads (`x_ads`) | Your own X developer app's API key and secret, plus an access token and secret for the account that runs the ads | Ads API access approved for that app by X |
 | LinkedIn Ads (`linkedin_ads`) | Sign in with LinkedIn (`r_ads`, `r_ads_reporting`) | Advertising API access approved for the app by LinkedIn |
+| TikTok Ads (`tiktok_ads`) | Sign in with TikTok For Business and choose the ad accounts to share (Ad Account Management and Reporting read access). To add accounts later, connect again. | Nothing |
 
 Signing in uses the operator's OAuth app (`CONNECTOR_<ID>_CLIENT_ID` and
 `_CLIENT_SECRET`, see [connectors.md](connectors.md)); the tokens it produces
@@ -81,6 +82,7 @@ conversion on one ad account:
 | Meta Ads | A pixel (dataset), as a standard event such as Purchase or Lead | `fbc` (from `fbclid`), `fbp`, hashed email, phone and record id | The system user assigned to the pixel |
 | Microsoft Advertising | An offline conversion goal | `msclkid`; hashed email and phone | The developer token above |
 | Reddit Ads | The Conversions API, as SignUp, Lead, Purchase and so on | `rdt_cid`, hashed email and record id | The workspace's own Conversions API access token, from Reddit Ads Manager → Events Manager |
+| TikTok Ads | A pixel, through the Events API, as CompletePayment, CompleteRegistration, SubmitForm and so on | `ttclid`, the `_ttp` cookie (`ttp`), hashed email, phone and record id | The sign-in's Pixel and Events access; if TikTok refuses it, an Events API access token from Events Manager on the connection |
 
 How it works:
 
@@ -91,8 +93,8 @@ How it works:
   latest visit with that platform's click id in the 90 days before it. Email and
   phone come from the person's record, hashed with SHA-256 before they leave;
   nothing is sent in the clear and nothing is copied into the send log.
-- The event's message id is the conversion's id (Google's order id, Meta's and
-  Reddit's event id). On the website, `outflare.track()` returns it: pass it to
+- The event's message id is the conversion's id (Google's order id, Meta's,
+  Reddit's and TikTok's event id). On the website, `outflare.track()` returns it: pass it to
   the browser pixel as its event id (`fbq('track', 'Purchase', {}, {eventID:
   id})`) and the platform counts a conversion once when both send it.
 - The value comes from an event property (in major units, 12.50, or minor units,

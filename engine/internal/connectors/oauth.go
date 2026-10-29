@@ -125,6 +125,10 @@ func AuthURL(d Definition, app OAuthApp, redirectURI, state, verifier string) st
 		}
 		return d.OAuth.AuthURL + "?" + q.Encode()
 	}
+	if d.OAuth.AppIDAuthCode {
+		q := url.Values{"app_id": {app.ClientID}, "redirect_uri": {redirectURI}, "state": {state}}
+		return d.OAuth.AuthURL + "?" + q.Encode()
+	}
 	q := url.Values{
 		"response_type":         {"code"},
 		"client_id":             {app.ClientID},
@@ -174,6 +178,9 @@ type tokenResponse struct {
 func Exchange(ctx context.Context, cl *Client, d Definition, app OAuthApp, code, redirectURI, verifier string) (Creds, error) {
 	if d.OAuth.KeyExchange {
 		return keyExchange(ctx, cl, d, code, verifier)
+	}
+	if d.OAuth.AppIDAuthCode {
+		return appIDExchange(ctx, cl, d, app, code)
 	}
 	return tokenCall(ctx, cl, d, url.Values{
 		"grant_type": {"authorization_code"}, "code": {code}, "redirect_uri": {redirectURI},
@@ -275,4 +282,27 @@ func keyExchange(ctx context.Context, cl *Client, d Definition, code, verifier s
 		return nil, Errf(ErrAuth, "%s did not hand back a key; connect it again", d.Name)
 	}
 	return Creds{"api_key": out.Key}, nil
+}
+
+// appIDExchange trades an auth_code for a token the AppIDAuthCode way.
+// The advertiser ids the person granted are kept beside the token.
+func appIDExchange(ctx context.Context, cl *Client, d Definition, app OAuthApp, code string) (Creds, error) {
+	body, _ := json.Marshal(map[string]string{"app_id": app.ClientID, "secret": app.ClientSecret, "auth_code": code})
+	req, _ := http.NewRequestWithContext(ctx, http.MethodPost, cl.Base(d.ID+".token", d.OAuth.TokenURL), strings.NewReader(string(body)))
+	req.Header.Set("Content-Type", "application/json")
+	var out struct {
+		Code    int    `json:"code"`
+		Message string `json:"message"`
+		Data    struct {
+			AccessToken   string   `json:"access_token"`
+			AdvertiserIDs []string `json:"advertiser_ids"`
+		} `json:"data"`
+	}
+	if _, err := DoJSON(ctx, cl, d.Name, req, &out); err != nil {
+		return nil, err
+	}
+	if out.Code != 0 || out.Data.AccessToken == "" {
+		return nil, Errf(ErrAuth, "%s refused the sign-in: %s", d.Name, out.Message)
+	}
+	return Creds{"access_token": out.Data.AccessToken, "advertiser_ids": strings.Join(out.Data.AdvertiserIDs, ",")}, nil
 }

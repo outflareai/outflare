@@ -84,6 +84,7 @@ func TestRecommend(t *testing.T) {
 		{"keep going", result(Arm{Visitors: 4000, Conversions: 160}, Arm{Visitors: 4000, Conversions: 170}, false), 14, RecommendExtend},
 		// 50 a week per version: hopeless.
 		{"stop", result(Arm{Visitors: 400, Conversions: 16}, Arm{Visitors: 400, Conversions: 17}, false), 56, RecommendStop},
+		{"winner hurts a guardrail", harmed(result(Arm{Visitors: 4000, Conversions: 160}, Arm{Visitors: 4000, Conversions: 260}, false)), 14, RecommendCheckGuardrails},
 	} {
 		got, why := Recommend(tc.r, "control", 0.25, start, start.AddDate(0, 0, tc.days))
 		if got != tc.want || why == "" {
@@ -94,3 +95,8 @@ func TestRecommend(t *testing.T) {
 
 // rate is the moments of a conversion goal with rate p.
 func rate(p float64) Moments { return Moments{p, p * (1 - p)} }
+
+func harmed(r Result) Result {
+	r.Guardrails = []GuardrailResult{{Harmed: []string{"b"}}}
+	return r
+}

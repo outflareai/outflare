@@ -26,8 +26,12 @@ import (
 // ExposureEvent is the catalog name of Experiment Viewed.
 const ExposureEvent = "experiment_viewed"
 
-// MaxGoals is the most goals a test watches.
-const MaxGoals = 5
+// MaxGoals is the most goals a test watches, and MaxGuardrails the most
+// guardrails.
+const (
+	MaxGoals      = 5
+	MaxGuardrails = 5
+)
 
 var (
 	eventRe    = regexp.MustCompile(`^[a-z][a-z0-9_]*(\.[a-z0-9_]+)*$`)
@@ -66,6 +70,9 @@ type Goal struct {
 	Property    string  `json:"property,omitempty"`
 	WindowHours int     `json:"window_hours,omitempty"`
 	Cap         float64 `json:"cap,omitempty"`
+	// Better is which way is good, for a guardrail: "higher" (the default)
+	// or "lower", such as for an error event or a refund.
+	Better string `json:"better,omitempty"`
 }
 
 // MetricOf is the goal's metric, MetricConversion when unset.
@@ -82,8 +89,27 @@ func CheckGoals(gs []Goal) string {
 		return fmt.Sprintf("give 1 to %d goals; the first is the one the test is judged on", MaxGoals)
 	}
 	for _, g := range gs {
+		if g.Better != "" {
+			return "better is for guardrails only: a goal is always better higher"
+		}
 		if msg := checkGoal(g); msg != "" {
 			return msg
+		}
+	}
+	return ""
+}
+
+// CheckGuardrails says what is wrong with a test's guardrails, or "".
+func CheckGuardrails(gs []Goal) string {
+	if len(gs) > MaxGuardrails {
+		return fmt.Sprintf("give at most %d guardrails", MaxGuardrails)
+	}
+	for _, g := range gs {
+		if g.Better != "" && g.Better != "higher" && g.Better != "lower" {
+			return `a guardrail's better is "higher" or "lower"`
+		}
+		if msg := checkGoal(g); msg != "" {
+			return "guardrail: " + msg
 		}
 	}
 	return ""
@@ -127,6 +153,7 @@ func checkGoal(g Goal) string {
 // transaction.
 type Querier interface {
 	Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error)
+	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
 }
 
 // Spec is what Results needs of a test.
@@ -146,7 +173,16 @@ type Spec struct {
 	// sequential test's tuning. A missing or zero one falls back to the
 	// live control mean.
 	Baselines []float64
-	From, To  time.Time
+	// Guardrails are watched alongside, to catch a version that hurts
+	// something else.
+	Guardrails []Goal
+	From, To   time.Time
+	// JoinUntil, when set, is when new visitors stopped joining (the test
+	// was frozen); those already in keep counting until To.
+	JoinUntil time.Time
+	// ExcludeDomains leaves out visitors from these companies (the
+	// workspace's own team), as on the Visitors page.
+	ExcludeDomains []string
 }
 
 // Day is the cumulative arms at the end of one day (UTC), control first;
@@ -176,11 +212,24 @@ type GoalResult struct {
 	Days []Day `json:"days,omitempty"`
 }
 
+// GuardrailResult is a guardrail's arms and comparisons, and the versions
+// that clearly hurt it: worse than the control in its bad direction, with
+// the same proof as a winner (at least 95% likely, and safe to stop).
+type GuardrailResult struct {
+	GoalResult
+	Harmed []string `json:"harmed"`
+}
+
 // Result is a test's results at a moment.
 type Result struct {
 	// Visitors per variant who joined the test, control first.
-	Arms  []Arm        `json:"arms"`
-	Goals []GoalResult `json:"goals"`
+	Arms       []Arm             `json:"arms"`
+	Goals      []GoalResult      `json:"goals"`
+	Guardrails []GuardrailResult `json:"guardrails"`
+	// Crossovers is how many visitors saw more than one version: they count
+	// under the first, but many of them means something (a cache, a
+	// server that assigns differently) is showing versions inconsistently.
+	Crossovers int64 `json:"crossovers"`
 	// The chance of a split this uneven by luck; below 0.001 the results
 	// shouldn't be trusted (SampleRatioP).
 	SampleRatioP float64 `json:"sample_ratio_p"`
@@ -237,9 +286,67 @@ func Results(ctx context.Context, q Querier, ws string, s Spec) (Result, error) 
 		}
 		res.Goals = append(res.Goals, gr)
 	}
+	res.Guardrails = []GuardrailResult{}
+	for _, g := range s.Guardrails {
+		days, err := count(ctx, q, ws, s, g, order)
+		if err != nil {
+			return res, err
+		}
+		looks := make([][]Arm, len(days))
+		for j, d := range days {
+			looks[j] = d.Arms
+		}
+		list := make([]Arm, len(order))
+		for j, v := range order {
+			list[j] = Arm{Variant: v}
+		}
+		if len(days) > 0 {
+			list = days[len(days)-1].Arms
+		} else {
+			looks = [][]Arm{list}
+		}
+		gr := GuardrailResult{GoalResult: GoalResult{Goal: g, Arms: list, Metric: g.MetricOf(), Exploratory: true,
+			Comparisons: CompareSeries(looks, g.MetricOf(), s.MinEffect, 0)}, Harmed: []string{}}
+		for _, c := range gr.Comparisons {
+			worse := c.ChanceToBeat <= 0.05
+			if g.Better == "lower" {
+				worse = c.ChanceToBeat >= 0.95
+			}
+			if worse && c.PValue < Alpha {
+				gr.Harmed = append(gr.Harmed, c.Variant)
+			}
+		}
+		res.Guardrails = append(res.Guardrails, gr)
+	}
+	var err error
+	if res.Crossovers, err = crossovers(ctx, q, ws, s); err != nil {
+		return res, err
+	}
 	res.SampleRatioP = SampleRatioP(res.Arms, weights)
 	res.SampleRatio = res.SampleRatioP < 0.001
 	return res, nil
+}
+
+// crossovers counts visitors who saw more than one of the flag's versions
+// while the test ran.
+func crossovers(ctx context.Context, q Querier, ws string, s Spec) (int64, error) {
+	var n int64
+	err := q.QueryRow(ctx, `
+		SELECT count(*) FROM (
+			SELECT anonymous_id FROM customer_events
+			WHERE workspace_id = $1 AND name = $2 AND properties->>'flag' = $3 AND occurred_at >= $4 AND occurred_at < $5
+				AND anonymous_id IS NOT NULL AND properties->>'variant' IS NOT NULL
+			GROUP BY anonymous_id HAVING count(DISTINCT properties->>'variant') > 1
+		) x`, ws, ExposureEvent, s.FlagKey, s.From, joinUntil(s)).Scan(&n)
+	return n, err
+}
+
+// joinUntil is when visitors stopped joining: JoinUntil, or To.
+func joinUntil(s Spec) time.Time {
+	if !s.JoinUntil.IsZero() && s.JoinUntil.Before(s.To) {
+		return s.JoinUntil
+	}
+	return s.To
 }
 
 func controlFirst(s Spec) ([]string, []int) {
@@ -367,13 +474,23 @@ func tally(ctx context.Context, q Querier, ws string, s Spec, g Goal, order []st
 	}
 	// params gives every placeholder a type, used by the goal or not.
 	rows, err := q.Query(ctx, `
-		WITH params AS (SELECT $5::text, $6::int, $7::text, $8::float8), seen AS (
+		WITH params AS (SELECT $5::text, $6::int, $7::text, $8::float8, $9::timestamptz, $10::text[]), first AS (
 			SELECT DISTINCT ON (e.anonymous_id) e.anonymous_id, (e.properties->>'variant') || chr(31) || `+seg+` AS variant, e.occurred_at
 			FROM customer_events e `+join+`
 			WHERE e.workspace_id = $1 AND e.name = $2 AND e.properties->>'flag' = $3
 				AND e.occurred_at >= ($4::timestamptz[])[1] AND e.occurred_at < ($4::timestamptz[])[2]
 				AND e.anonymous_id IS NOT NULL AND e.properties->>'variant' IS NOT NULL
 			ORDER BY e.anonymous_id, e.occurred_at
+		), seen AS (
+			-- Joined before new visitors stopped, and not from a company
+			-- the workspace leaves out.
+			SELECT * FROM first f WHERE f.occurred_at < $9::timestamptz
+				AND (cardinality($10::text[]) = 0 OR NOT EXISTS (
+					SELECT 1 FROM site_visitors sv, unnest($10::text[]) x
+					WHERE sv.workspace_id = $1 AND sv.anonymous_id = f.anonymous_id AND (
+						sv.company_domain = x OR sv.company_domain LIKE '%.' || x
+						OR EXISTS (SELECT 1 FROM record_identities d WHERE d.record_id IN (sv.account_id, sv.record_id)
+							AND d.namespace = 'domain' AND d.valid_to IS NULL AND (d.value = x OR d.value LIKE '%.' || x)))))
 		), hits AS (`+hits+`
 		), daily AS (
 			SELECT anonymous_id, variant, to_char(at AT TIME ZONE 'UTC', 'YYYY-MM-DD') AS day, sum(val) AS dv
@@ -388,7 +505,7 @@ func tally(ctx context.Context, q Querier, ws string, s Spec, g Goal, order []st
 		SELECT variant, to_char(occurred_at AT TIME ZONE 'UTC', 'YYYY-MM-DD'), count(*), 0, 0::float8, 0::float8 FROM seen GROUP BY 1, 2
 		UNION ALL
 		SELECT variant, day, 0, count(*) FILTER (WHERE v > 0 AND pv = 0), sum(v - pv), sum(v * v - pv * pv) FROM inc GROUP BY 1, 2`,
-		ws, ExposureEvent, s.FlagKey, []time.Time{s.From, s.To}, arg, window, prop, capv)
+		ws, ExposureEvent, s.FlagKey, []time.Time{s.From, s.To}, arg, window, prop, capv, joinUntil(s), nonNil(s.ExcludeDomains))
 	if err != nil {
 		return nil, err
 	}
@@ -495,3 +612,10 @@ func Winner(r Result, control string) string {
 
 // HasVariant reports whether v is one of a flag's variants.
 func HasVariant(variants []string, v string) bool { return slices.Contains(variants, v) }
+
+func nonNil(s []string) []string {
+	if s == nil {
+		return []string{}
+	}
+	return s
+}

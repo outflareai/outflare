@@ -41,6 +41,8 @@ func (s *Server) routesABTests(mux *http.ServeMux) {
 	mux.HandleFunc("PATCH /v1/workspaces/{ws}/ab-tests/{test}", s.inWorkspace(manage, s.updateABTest))
 	mux.HandleFunc("POST /v1/workspaces/{ws}/ab-tests/{test}/start", s.inWorkspace(manage, s.startABTest))
 	mux.HandleFunc("POST /v1/workspaces/{ws}/ab-tests/{test}/end", s.inWorkspace(manage, s.endABTest))
+	mux.HandleFunc("POST /v1/workspaces/{ws}/ab-tests/{test}/freeze", s.inWorkspace(manage, s.freezeABTest))
+	mux.HandleFunc("POST /v1/workspaces/{ws}/ab-tests/{test}/duplicate", s.inWorkspace(manage, s.duplicateABTest))
 	mux.HandleFunc("GET /v1/workspaces/{ws}/ab-tests/{test}/results", s.inWorkspace(read, s.abTestResults))
 	mux.HandleFunc("GET /v1/workspaces/{ws}/ab-tests/{test}/breakdown", s.inWorkspace(read, s.abTestBreakdown))
 }
@@ -55,9 +57,11 @@ type abTestView struct {
 	Status     string          `json:"status"`
 	Control    string          `json:"control"`
 	Goals      []abtests.Goal  `json:"goals"`
+	Guardrails []abtests.Goal  `json:"guardrails"`
 	MinEffect  float64         `json:"min_effect"`
 	Baselines  []float64       `json:"baselines"`
 	StartedAt  *time.Time      `json:"started_at"`
+	FrozenAt   *time.Time      `json:"frozen_at"`
 	EndedAt    *time.Time      `json:"ended_at"`
 	Decision   string          `json:"decision"`
 	CreatedAt  time.Time       `json:"created_at"`
@@ -71,11 +75,12 @@ type abTestInput struct {
 	Hypothesis *string         `json:"hypothesis"`
 	Control    *string         `json:"control"`
 	Goals      *[]abtests.Goal `json:"goals"`
+	Guardrails *[]abtests.Goal `json:"guardrails"`
 	MinEffect  *float64        `json:"min_effect"`
 }
 
-const abTestCols = `t.id::text, t.flag_id::text, f.key, t.brand_id::text, t.name, t.hypothesis, t.status, t.control, t.goals, t.min_effect, t.baselines,
-	t.started_at, t.ended_at, t.decision, t.created_at, t.updated_at, t.result`
+const abTestCols = `t.id::text, t.flag_id::text, f.key, t.brand_id::text, t.name, t.hypothesis, t.status, t.control, t.goals, t.guardrails, t.min_effect, t.baselines,
+	t.started_at, t.frozen_at, t.ended_at, t.decision, t.created_at, t.updated_at, t.result`
 
 func loadABTests(ctx context.Context, q abtests.Querier, ws, where string, args ...any) ([]abTestView, error) {
 	rows, err := q.Query(ctx, `SELECT `+abTestCols+` FROM ab_tests t JOIN flags f ON f.id = t.flag_id AND f.workspace_id = t.workspace_id
@@ -85,9 +90,12 @@ func loadABTests(ctx context.Context, q abtests.Querier, ws, where string, args 
 	}
 	list, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (abTestView, error) {
 		var v abTestView
-		var goals []byte
-		if err := row.Scan(&v.ID, &v.FlagID, &v.FlagKey, &v.BrandID, &v.Name, &v.Hypothesis, &v.Status, &v.Control, &goals, &v.MinEffect, &v.Baselines,
-			&v.StartedAt, &v.EndedAt, &v.Decision, &v.CreatedAt, &v.UpdatedAt, &v.result); err != nil {
+		var goals, guardrails []byte
+		if err := row.Scan(&v.ID, &v.FlagID, &v.FlagKey, &v.BrandID, &v.Name, &v.Hypothesis, &v.Status, &v.Control, &goals, &guardrails, &v.MinEffect, &v.Baselines,
+			&v.StartedAt, &v.FrozenAt, &v.EndedAt, &v.Decision, &v.CreatedAt, &v.UpdatedAt, &v.result); err != nil {
+			return v, err
+		}
+		if err := json.Unmarshal(guardrails, &v.Guardrails); err != nil {
 			return v, err
 		}
 		return v, json.Unmarshal(goals, &v.Goals)
@@ -232,8 +240,8 @@ func applyABInput(t *abTestView, f flagView, in abTestInput) error {
 	if len(t.Hypothesis) > maxABHypothesis {
 		return errInvalid("hypothesis is at most 2,000 characters")
 	}
-	if (in.Control != nil || in.Goals != nil || in.MinEffect != nil) && t.Status != "draft" {
-		return errABConflict("the control, goals and smallest change are fixed once a test starts, so its results can't be reshaped; start a new test to measure something else")
+	if (in.Control != nil || in.Goals != nil || in.Guardrails != nil || in.MinEffect != nil) && t.Status != "draft" {
+		return errABConflict("the control, goals, guardrails and smallest change are fixed once a test starts, so its results can't be reshaped; start a new test (or duplicate this one) to measure something else")
 	}
 	if in.MinEffect != nil {
 		t.MinEffect = *in.MinEffect
@@ -262,6 +270,15 @@ func applyABInput(t *abTestView, f flagView, in abTestInput) error {
 	if msg := abtests.CheckGoals(t.Goals); msg != "" {
 		return errInvalid(msg)
 	}
+	if in.Guardrails != nil {
+		t.Guardrails = *in.Guardrails
+	}
+	if t.Guardrails == nil {
+		t.Guardrails = []abtests.Goal{}
+	}
+	if msg := abtests.CheckGuardrails(t.Guardrails); msg != "" {
+		return errInvalid(msg)
+	}
 	return nil
 }
 
@@ -274,7 +291,7 @@ func abAuditData(t abTestView) map[string]any {
 		kinds[i], metrics[i] = g.Kind, g.MetricOf()
 	}
 	return map[string]any{"flag_id": t.FlagID, "status": t.Status, "goals": len(t.Goals), "goal_kinds": kinds, "goal_metrics": metrics,
-		"min_effect": t.MinEffect, "brand_id": t.BrandID}
+		"guardrails": len(t.Guardrails), "min_effect": t.MinEffect, "brand_id": t.BrandID}
 }
 
 func (s *Server) createABTest(w http.ResponseWriter, r *http.Request) {
@@ -311,9 +328,10 @@ func (s *Server) createABTest(w http.ResponseWriter, r *http.Request) {
 			return errInvalid("a workspace can have at most 500 A/B tests")
 		}
 		goals, _ := json.Marshal(t.Goals)
-		if err := tx.QueryRow(ctx, `INSERT INTO ab_tests (workspace_id, brand_id, flag_id, name, hypothesis, control, goals, min_effect, created_by)
-			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING id::text`,
-			a.WorkspaceID, t.BrandID, t.FlagID, t.Name, t.Hypothesis, t.Control, goals, t.MinEffect, nullIfEmpty(a.ActorID)).Scan(&id); err != nil {
+		guardrails, _ := json.Marshal(t.Guardrails)
+		if err := tx.QueryRow(ctx, `INSERT INTO ab_tests (workspace_id, brand_id, flag_id, name, hypothesis, control, goals, guardrails, min_effect, created_by)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING id::text`,
+			a.WorkspaceID, t.BrandID, t.FlagID, t.Name, t.Hypothesis, t.Control, goals, guardrails, t.MinEffect, nullIfEmpty(a.ActorID)).Scan(&id); err != nil {
 			return err
 		}
 		data := abAuditData(t)
@@ -383,8 +401,9 @@ func (s *Server) updateABTest(w http.ResponseWriter, r *http.Request) {
 			return err
 		}
 		goals, _ := json.Marshal(t.Goals)
-		if _, err := tx.Exec(ctx, `UPDATE ab_tests SET name = $3, hypothesis = $4, control = $5, goals = $6, min_effect = $7, updated_at = now() WHERE id = $1 AND workspace_id = $2`,
-			t.ID, a.WorkspaceID, t.Name, t.Hypothesis, t.Control, goals, t.MinEffect); err != nil {
+		guardrails, _ := json.Marshal(t.Guardrails)
+		if _, err := tx.Exec(ctx, `UPDATE ab_tests SET name = $3, hypothesis = $4, control = $5, goals = $6, guardrails = $7, min_effect = $8, updated_at = now() WHERE id = $1 AND workspace_id = $2`,
+			t.ID, a.WorkspaceID, t.Name, t.Hypothesis, t.Control, goals, guardrails, t.MinEffect); err != nil {
 			return err
 		}
 		data := abAuditData(*t)
@@ -441,7 +460,7 @@ func (s *Server) startABTest(w http.ResponseWriter, r *http.Request) {
 		if recorded > 0 {
 			stored, _ = json.Marshal(baselines)
 		}
-		if _, err := tx.Exec(ctx, `UPDATE ab_tests SET status = 'running', started_at = now(), baselines = $3, updated_at = now() WHERE id = $1 AND workspace_id = $2`,
+		if _, err := tx.Exec(ctx, `UPDATE ab_tests SET status = 'running', started_at = now(), baselines = $3, next_check_at = now() + interval '1 hour', updated_at = now() WHERE id = $1 AND workspace_id = $2`,
 			t.ID, a.WorkspaceID, stored); err != nil {
 			return err
 		}
@@ -505,13 +524,9 @@ func (s *Server) abResults(ctx context.Context, q abtests.Querier, ws string, t 
 	start := time.Now()
 	ctx, cancel := context.WithTimeout(ctx, abResultsTimeout)
 	defer cancel()
-	spec := abtests.Spec{FlagKey: f.Key, Control: t.Control, Goals: t.Goals, MinEffect: t.MinEffect, Baselines: t.Baselines, To: to}
-	if t.StartedAt != nil {
-		spec.From = *t.StartedAt
-	}
-	for _, v := range f.Variants {
-		spec.Variants = append(spec.Variants, v.Key)
-		spec.Weights = append(spec.Weights, v.Weight)
+	spec, err := abSpec(ctx, q, ws, t, f, to)
+	if err != nil {
+		return abtests.Result{}, err
 	}
 	res, err := abtests.Results(ctx, q, ws, spec)
 	outcome := "ok"
@@ -520,6 +535,25 @@ func (s *Server) abResults(ctx context.Context, q abtests.Querier, ws string, t 
 	}
 	metrics.ABResults(outcome, time.Since(start))
 	return res, err
+}
+
+// abSpec is what the results of t (of flag f) are counted from, up to to:
+// its goals and guardrails, who joined before it froze, and leaving out the
+// companies the workspace hides on the Visitors page (its own team).
+func abSpec(ctx context.Context, q abtests.Querier, ws string, t abTestView, f flagView, to time.Time) (abtests.Spec, error) {
+	spec := abtests.Spec{FlagKey: f.Key, Control: t.Control, Goals: t.Goals, Guardrails: t.Guardrails, MinEffect: t.MinEffect, Baselines: t.Baselines, To: to}
+	if t.StartedAt != nil {
+		spec.From = *t.StartedAt
+	}
+	if t.FrozenAt != nil {
+		spec.JoinUntil = *t.FrozenAt
+	}
+	for _, v := range f.Variants {
+		spec.Variants = append(spec.Variants, v.Key)
+		spec.Weights = append(spec.Weights, v.Weight)
+	}
+	err := q.QueryRow(ctx, `SELECT coalesce((SELECT exclude_domains FROM visitor_settings WHERE workspace_id = $1), '{}')`, ws).Scan(&spec.ExcludeDomains)
+	return spec, err
 }
 
 // abTestResults gives a running test's results now, or a finished test's
@@ -585,10 +619,10 @@ func (s *Server) abTestBreakdown(w http.ResponseWriter, r *http.Request) {
 	start := time.Now()
 	ctx, cancel := context.WithTimeout(r.Context(), abResultsTimeout)
 	defer cancel()
-	spec := abtests.Spec{FlagKey: f.Key, Control: t.Control, Goals: t.Goals, MinEffect: t.MinEffect, From: *t.StartedAt, To: to}
-	for _, v := range f.Variants {
-		spec.Variants = append(spec.Variants, v.Key)
-		spec.Weights = append(spec.Weights, v.Weight)
+	spec, err := abSpec(ctx, s.pool, a.WorkspaceID, t, f, to)
+	if err != nil {
+		s.internal(w, r, err)
+		return
 	}
 	b, err := abtests.Breakdown(ctx, s.pool, a.WorkspaceID, spec, by)
 	outcome := "ok"
@@ -674,4 +708,93 @@ func planWarning(f flagView, tr abtests.Traffic, p abtests.Plan) string {
 			p.MinEffect*100, p.Detectable8Weeks*100)
 	}
 	return ""
+}
+
+// freezeABTest stops new visitors joining a running test, or lets them join
+// again: those already in keep counting, so a test can finish on the
+// visitors it has, such as before a launch that would change the traffic.
+func (s *Server) freezeABTest(w http.ResponseWriter, r *http.Request) {
+	var in struct {
+		Frozen *bool `json:"frozen"`
+	}
+	if !decode(w, r, &in) {
+		return
+	}
+	a := accessFrom(r.Context())
+	s.changeABTest(w, r, func(ctx context.Context, tx pgx.Tx, t *abTestView, f flagView) error {
+		if in.Frozen == nil {
+			return errInvalid("frozen is required: true stops new visitors joining, false lets them join again")
+		}
+		if t.Status != "running" {
+			return errABConflict("only a running test can be frozen or unfrozen")
+		}
+		if *in.Frozen == (t.FrozenAt != nil) {
+			return nil
+		}
+		action := "ab_test.frozen"
+		sql := `UPDATE ab_tests SET frozen_at = now(), updated_at = now() WHERE id = $1 AND workspace_id = $2`
+		if !*in.Frozen {
+			// Visitors who arrived while it was frozen join when it
+			// unfreezes, as if it never froze.
+			action = "ab_test.unfrozen"
+			sql = `UPDATE ab_tests SET frozen_at = NULL, updated_at = now() WHERE id = $1 AND workspace_id = $2`
+		}
+		if _, err := tx.Exec(ctx, sql, t.ID, a.WorkspaceID); err != nil {
+			return err
+		}
+		data := abAuditData(*t)
+		return recordWithProps(ctx, tx, &a.principal, a.WorkspaceID, action, "ab_test", t.ID, data, data)
+	})
+}
+
+// duplicateABTest adds a draft with the same flag, control, goals,
+// guardrails, smallest change and hypothesis: to run a test again, or a
+// variation of it, without retyping it.
+func (s *Server) duplicateABTest(w http.ResponseWriter, r *http.Request) {
+	a := accessFrom(r.Context())
+	cur, ok := s.oneABTest(w, r)
+	if !ok {
+		return
+	}
+	ctx := r.Context()
+	var id string
+	err := pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
+		f, err := s.abFlag(ctx, tx, a.WorkspaceID, cur.FlagID)
+		if err != nil {
+			return err
+		}
+		if f.Status == "archived" {
+			return errABConflict("this test's flag is archived; test a live one")
+		}
+		if !a.writes(nil, f.BrandID) {
+			return errDenied(brandLimitedMessage)
+		}
+		var n int
+		if err := tx.QueryRow(ctx, `SELECT count(*) FROM ab_tests WHERE workspace_id = $1`, a.WorkspaceID).Scan(&n); err != nil {
+			return err
+		}
+		if n >= maxABTests {
+			return errInvalid("a workspace can have at most 500 A/B tests")
+		}
+		name := cur.Name
+		if !strings.HasSuffix(name, " (copy)") {
+			name = cutUTF8(name, 193) + " (copy)"
+		}
+		goals, _ := json.Marshal(cur.Goals)
+		guardrails, _ := json.Marshal(cur.Guardrails)
+		if err := tx.QueryRow(ctx, `INSERT INTO ab_tests (workspace_id, brand_id, flag_id, name, hypothesis, control, goals, guardrails, min_effect, created_by)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING id::text`,
+			a.WorkspaceID, f.BrandID, f.ID, name, cur.Hypothesis, cur.Control, goals, guardrails, cur.MinEffect, nullIfEmpty(a.ActorID)).Scan(&id); err != nil {
+			return err
+		}
+		t := cur
+		t.Status, t.BrandID = "draft", f.BrandID
+		data := abAuditData(t)
+		data["duplicated_from"] = cur.ID
+		return recordWithProps(ctx, tx, &a.principal, a.WorkspaceID, "ab_test.created", "ab_test", id, data, data)
+	})
+	if s.abWriteError(w, r, err) {
+		return
+	}
+	s.writeABTest(w, r, id, http.StatusCreated)
 }

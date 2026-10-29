@@ -2114,6 +2114,7 @@ class Operations(_Mixin):
         control: str | None = None,
         flag: str | None = None,
         goals: list[dict[str, Any]] | None = None,
+        guardrails: list[dict[str, Any]] | None = None,
         hypothesis: str | None = None,
         min_effect: float | None = None,
         name: str | None = None,
@@ -2139,6 +2140,7 @@ class Operations(_Mixin):
                 "control": control,
                 "flag": flag,
                 "goals": goals,
+                "guardrails": guardrails,
                 "hypothesis": hypothesis,
                 "min_effect": min_effect,
                 "name": name,
@@ -5662,6 +5664,28 @@ class Operations(_Mixin):
             idempotency_key=idempotency_key,
         )
 
+    def duplicate_ab_test(
+        self,
+        test: str,
+        *,
+        ws: str | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Duplicate an A/B test.
+
+        Scope: analytics.manage. Adds a draft with the same flag, control, goals, guardrails, smallest change and
+        hypothesis, named "(copy)": to run a test again or a variation of it.
+
+        Needs: the analytics.manage scope.
+        POST /v1/workspaces/{ws}/ab-tests/{test}/duplicate
+        """
+        return self._call(
+            "POST",
+            "/v1/workspaces/{ws}/ab-tests/{test}/duplicate",
+            path={"test": test, "ws": ws},
+            idempotency_key=idempotency_key,
+        )
+
     def edit_link_pitch(
         self,
         pitch: str,
@@ -6025,6 +6049,33 @@ class Operations(_Mixin):
             "/v1/workspaces/{ws}/partner-payouts/export",
             path={"ws": ws},
             query={"brand": brand, "status": status, "program": program},
+        )
+
+    def freeze_ab_test(
+        self,
+        test: str,
+        *,
+        ws: str | None = None,
+        frozen: bool,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Freeze or unfreeze an A/B test.
+
+        Scope: analytics.manage. frozen true stops new visitors joining a running test while those already in keep
+        counting, so it can finish on the visitors it has (such as before a launch that would change the traffic);
+        false lets them join again, counting those who arrived meanwhile. 409 unless the test is running.
+
+        Needs: the analytics.manage scope.
+        POST /v1/workspaces/{ws}/ab-tests/{test}/freeze
+        """
+        return self._call(
+            "POST",
+            "/v1/workspaces/{ws}/ab-tests/{test}/freeze",
+            path={"test": test, "ws": ws},
+            body={"frozen": frozen},
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
         )
 
     def fulfil_partner_reward(
@@ -19344,6 +19395,7 @@ class Operations(_Mixin):
         control: str | None = None,
         flag: str | None = None,
         goals: list[dict[str, Any]] | None = None,
+        guardrails: list[dict[str, Any]] | None = None,
         hypothesis: str | None = None,
         min_effect: float | None = None,
         name: str | None = None,
@@ -19366,6 +19418,7 @@ class Operations(_Mixin):
                 "control": control,
                 "flag": flag,
                 "goals": goals,
+                "guardrails": guardrails,
                 "hypothesis": hypothesis,
                 "min_effect": min_effect,
                 "name": name,

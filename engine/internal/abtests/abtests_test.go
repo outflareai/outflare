@@ -36,6 +36,7 @@ func TestCheckGoals(t *testing.T) {
 		{[]abtests.Goal{{Kind: "event", Name: "signup", Metric: "mean"}}, false},
 		{[]abtests.Goal{{Kind: "event", Name: "signup", Cap: 5}}, false},
 		{[]abtests.Goal{{Kind: "event", Name: "signup", WindowHours: -1}}, false},
+		{[]abtests.Goal{{Kind: "event", Name: "signup", Better: "lower"}}, false},
 	} {
 		if got := abtests.CheckGoals(c.goals) == ""; got != c.ok {
 			t.Errorf("CheckGoals(%+v) ok = %v, want %v", c.goals, got, c.ok)
@@ -412,5 +413,95 @@ func TestBreakdown(t *testing.T) {
 	}
 	if b, err := abtests.Breakdown(ctx, pool, ws, spec, "browser"); err != nil || len(b.Segments) != 0 {
 		t.Errorf("unknown dimension: %+v, %v", b, err)
+	}
+}
+
+func TestCheckGuardrails(t *testing.T) {
+	if msg := abtests.CheckGuardrails(nil); msg != "" {
+		t.Errorf("no guardrails: %q", msg)
+	}
+	if msg := abtests.CheckGuardrails([]abtests.Goal{{Kind: "event", Name: "error_shown", Better: "lower"}, {Kind: "deal", Metric: "value"}}); msg != "" {
+		t.Errorf("valid guardrails: %q", msg)
+	}
+	for _, g := range []abtests.Goal{{Kind: "event", Name: "error_shown", Better: "down"}, {Kind: "page", Path: "nope"}} {
+		if abtests.CheckGuardrails([]abtests.Goal{g}) == "" {
+			t.Errorf("CheckGuardrails(%+v) passed", g)
+		}
+	}
+	if abtests.CheckGuardrails(make([]abtests.Goal, abtests.MaxGuardrails+1)) == "" {
+		t.Error("too many guardrails passed")
+	}
+}
+
+// TestGuardrailsFreezeAndQuality: a guardrail a version clearly hurts is
+// flagged, in its bad direction; visitors who join after the test froze or
+// come from an excluded company are left out; and visitors who saw two
+// versions are counted.
+func TestGuardrailsFreezeAndQuality(t *testing.T) {
+	url := os.Getenv("TEST_DATABASE_URL")
+	if url == "" {
+		t.Skip("TEST_DATABASE_URL not set")
+	}
+	ctx := context.Background()
+	pool, err := db.Connect(ctx, url)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(pool.Close)
+	if _, err := db.Migrate(ctx, pool); err != nil {
+		t.Fatal(err)
+	}
+	var ws string
+	if err := pool.QueryRow(ctx, `INSERT INTO workspaces (name, slug) VALUES ('AB', 'ab-' || substr(gen_random_uuid()::text, 1, 8)) RETURNING id::text`).Scan(&ws); err != nil {
+		t.Fatal(err)
+	}
+	start := time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC)
+	exec := func(sql string, args ...any) {
+		t.Helper()
+		if _, err := pool.Exec(ctx, sql, args...); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// 2,000 visitors a version in the first hours. The new version gets
+	// as many signups, but four times the errors.
+	exec(`WITH v AS (SELECT i, CASE WHEN i % 2 = 0 THEN 'control' ELSE 'new' END AS variant FROM generate_series(1, 4000) i)
+		INSERT INTO customer_events (workspace_id, kind, name, anonymous_id, properties, occurred_at)
+		SELECT $1::uuid, 'track', 'experiment_viewed', 'v' || i, jsonb_build_object('flag', 'hero', 'variant', variant), $2::timestamptz + interval '1 minute' FROM v
+		UNION ALL
+		SELECT $1::uuid, 'track', 'signup_started', 'v' || i, '{}', $2::timestamptz + interval '2 hours' FROM v WHERE i % 10 < 2
+		UNION ALL
+		SELECT $1::uuid, 'track', 'error_shown', 'v' || i, '{}', $2::timestamptz + interval '2 hours' FROM v
+		WHERE (variant = 'control' AND i % 20 = 0) OR (variant = 'new' AND i % 5 = 1)`, ws, start)
+	// Late: joined after the freeze at 12:00. Staff: from the workspace's
+	// own company. Both are left out. v1 also saw control: a crossover.
+	exec(`INSERT INTO customer_events (workspace_id, kind, name, anonymous_id, properties, occurred_at) VALUES
+		($1, 'track', 'experiment_viewed', 'late', '{"flag": "hero", "variant": "control"}', $2::timestamptz + interval '13 hours'),
+		($1, 'track', 'experiment_viewed', 'staff', '{"flag": "hero", "variant": "control"}', $2::timestamptz + interval '1 hour'),
+		($1, 'track', 'experiment_viewed', 'v1', '{"flag": "hero", "variant": "control"}', $2::timestamptz + interval '3 hours')`, ws, start)
+	exec(`INSERT INTO site_visitors (workspace_id, anonymous_id, company_domain, first_seen_at, last_seen_at) VALUES ($1, 'staff', 'eu.northpeak.example', $2, $2)`, ws, start)
+
+	spec := abtests.Spec{FlagKey: "hero", Variants: []string{"control", "new"}, Weights: []int{50, 50}, Control: "control",
+		Goals:      []abtests.Goal{{Kind: "event", Name: "signup_started"}},
+		Guardrails: []abtests.Goal{{Kind: "event", Name: "error_shown", Better: "lower"}, {Kind: "event", Name: "signup_started"}},
+		From:       start, To: start.Add(48 * time.Hour), JoinUntil: start.Add(12 * time.Hour),
+		ExcludeDomains: []string{"northpeak.example"}}
+	res, err := abtests.Results(ctx, pool, ws, spec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Arms[0].Visitors != 2000 || res.Arms[1].Visitors != 2000 {
+		t.Errorf("arms = %+v: late and staff visitors should be left out", res.Arms)
+	}
+	if len(res.Guardrails) != 2 {
+		t.Fatalf("guardrails = %+v", res.Guardrails)
+	}
+	if g := res.Guardrails[0]; len(g.Harmed) != 1 || g.Harmed[0] != "new" || g.Arms[1].Conversions != 400 {
+		t.Errorf("error guardrail: harmed %v, arms %+v", g.Harmed, g.Arms)
+	}
+	if g := res.Guardrails[1]; len(g.Harmed) != 0 {
+		t.Errorf("signup guardrail: harmed %v", g.Harmed)
+	}
+	if res.Crossovers != 1 {
+		t.Errorf("crossovers = %d, want 1", res.Crossovers)
 	}
 }
