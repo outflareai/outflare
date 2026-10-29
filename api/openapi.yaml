@@ -21289,7 +21289,8 @@ paths:
       summary: Change a journey
       description: |
         Scope: emails.manage. A draft or paused journey changes freely; an active one only its name and description, so
-        pause it first. Runs on a step that was removed exit when they move on.
+        start a draft version (POST .../draft) and publish it, or pause it first. Changing a paused journey moves the
+        people in it onto the change; runs on a step that was removed exit when they move on.
       tags: [emails]
       requestBody:
         required: true
@@ -21373,6 +21374,142 @@ paths:
         "409": { $ref: "#/components/responses/Error" }
         "202": { $ref: "#/components/responses/MissionHeld" }
         default: { $ref: "#/components/responses/Error" }
+  /v1/workspaces/{ws}/journeys/{id}/versions:
+    parameters:
+      - { $ref: "#/components/parameters/Workspace" }
+      - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+    get:
+      operationId: listJourneyVersions
+      x-outflare-access: { scope: emails.read }
+      summary: A journey's versions, the draft first
+      description: |
+        Scope: emails.read. Every version that went live, newest first, with how many people are going through each
+        now, and the draft version being edited, if there is one.
+      tags: [emails]
+      responses:
+        "200":
+          description: Versions.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data: { type: array, items: { $ref: "#/components/schemas/JourneyVersion" } }
+        "404": { $ref: "#/components/responses/Error" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/workspaces/{ws}/journeys/{id}/draft:
+    parameters:
+      - { $ref: "#/components/parameters/Workspace" }
+      - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+    post:
+      operationId: createJourneyDraft
+      x-outflare-access: { scope: emails.manage }
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      summary: Start a draft version of a live journey
+      description: |
+        Scope: emails.manage. A live (active or paused) journey is read-only: this copies its trigger, entry, goal and
+        steps into a draft version to edit, while the live version keeps running. 200 with the draft already there, if
+        there is one. A journey that hasn't gone live yet is changed directly (409).
+      tags: [emails]
+      responses:
+        "201":
+          description: The new draft.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/JourneyVersion" }
+        "200":
+          description: The draft already there.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/JourneyVersion" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        "202": { $ref: "#/components/responses/MissionHeld" }
+        default: { $ref: "#/components/responses/Error" }
+    get:
+      operationId: getJourneyDraft
+      x-outflare-access: { scope: emails.read }
+      summary: Get a journey's draft version
+      description: "Scope: emails.read. 404 when it has none."
+      tags: [emails]
+      responses:
+        "200":
+          description: The draft.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/JourneyVersion" }
+        "404": { $ref: "#/components/responses/Error" }
+        default: { $ref: "#/components/responses/Error" }
+    patch:
+      operationId: updateJourneyDraft
+      x-outflare-access: { scope: emails.manage }
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      summary: Change a journey's draft version
+      description: |
+        Scope: emails.manage. The same checks as changing a journey. The name and description belong to the journey
+        and change with PATCH on it.
+      tags: [emails]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/JourneyDraftInput" }
+      responses:
+        "200":
+          description: The draft.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/JourneyVersion" }
+        "400": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        "202": { $ref: "#/components/responses/MissionHeld" }
+        default: { $ref: "#/components/responses/Error" }
+    delete:
+      operationId: discardJourneyDraft
+      x-outflare-access: { scope: emails.manage }
+      summary: Throw away a journey's draft version
+      description: "Scope: emails.manage. The live version is untouched."
+      tags: [emails]
+      responses:
+        "204": { description: Discarded. }
+        "404": { $ref: "#/components/responses/Error" }
+        "202": { $ref: "#/components/responses/MissionHeld" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/workspaces/{ws}/journeys/{id}/publish:
+    parameters:
+      - { $ref: "#/components/parameters/Workspace" }
+      - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+    post:
+      operationId: publishJourney
+      x-outflare-access: { scope: emails.manage }
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      summary: Publish a journey's draft version
+      description: |
+        Scope: emails.manage. Swaps the draft's trigger, entry, goal and steps in as the journey's next version, after
+        the checks activating does, plus that every step can be reached from the first. The old version is kept. People
+        already in the journey finish on the version they entered on (runs keep, the default), or move onto the new
+        one at the same step (runs move), where anyone on a step it removed exits.
+      tags: [emails]
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                runs: { type: string, enum: [keep, move], default: keep, description: "What happens to the people in it now." }
+      responses:
+        "200":
+          description: The journey, on its new version.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Journey" }
+        "400": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        "202": { $ref: "#/components/responses/MissionHeld" }
+        default: { $ref: "#/components/responses/Error" }
   /v1/workspaces/{ws}/journeys/{id}/runs:
     parameters:
       - { $ref: "#/components/parameters/Workspace" }
@@ -21388,6 +21525,7 @@ paths:
         - { $ref: "#/components/parameters/Fields" }
         - { name: status, in: query, schema: { $ref: "#/components/schemas/JourneyRunStatus" } }
         - { name: record, in: query, description: Only this person's runs., schema: { type: string, format: uuid } }
+        - { name: step, in: query, description: "Only runs on this step now (with status active: the people waiting there).", schema: { type: string } }
         - { name: after, in: query, description: A run id; the runs after it., schema: { type: string, format: uuid } }
         - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 200, default: 50 } }
       responses:
@@ -26761,7 +26899,7 @@ components:
         steps: { type: array, maxItems: 100, items: { $ref: "#/components/schemas/JourneyStep" }, description: The first step starts. }
     Journey:
       type: object
-      required: [id, name, description, status, brand_id, trigger, entry, goal_event, steps, version, activated_at, stats, created_at, updated_at]
+      required: [id, name, description, status, brand_id, trigger, entry, goal_event, steps, version, activated_at, draft_updated_at, stats, created_at, updated_at]
       properties:
         id: { type: string, format: uuid }
         name: { type: string }
@@ -26778,8 +26916,9 @@ components:
         entry: { type: string, enum: [once, again] }
         goal_event: { type: [string, "null"] }
         steps: { type: array, items: { $ref: "#/components/schemas/JourneyStep" } }
-        version: { type: integer, description: Goes up each time the steps change. }
+        version: { type: integer, description: Goes up each time what it does (trigger, entry, goal or steps) changes. }
         activated_at: { type: [string, "null"], format: date-time }
+        draft_updated_at: { type: [string, "null"], format: date-time, description: "When its draft version last changed; null when it has none." }
         stats:
           type: object
           required: [entered, active, completed, exited, failed]
@@ -26793,11 +26932,53 @@ components:
           type: object
           description: "Only on a single journey: by step id, how many runs had each outcome (sent, skipped, waited, yes, no, failed)."
           additionalProperties: { type: object, additionalProperties: { type: integer } }
+        at_step:
+          type: object
+          description: "Only on a single journey: by step id, how many people are on that step now."
+          additionalProperties: { type: integer }
+        email_stats:
+          type: object
+          description: "Only on a single journey: by email step id, how many of its emails were delivered, opened and clicked."
+          additionalProperties:
+            type: object
+            required: [delivered, opened, clicked]
+            properties:
+              delivered: { type: integer }
+              opened: { type: integer }
+              clicked: { type: integer }
         created_at: { type: string, format: date-time }
         updated_at: { type: string, format: date-time }
+    JourneyDraftInput:
+      type: object
+      properties:
+        trigger: { $ref: "#/components/schemas/JourneyTrigger" }
+        entry: { type: string, enum: [once, again] }
+        goal_event: { type: [string, "null"] }
+        steps: { type: array, maxItems: 100, items: { $ref: "#/components/schemas/JourneyStep" }, description: The first step starts. }
+    JourneyVersion:
+      type: object
+      required: [id, status, version, trigger, entry, goal_event, steps, runs_active, created_at, updated_at, published_at]
+      properties:
+        id: { type: string, format: uuid }
+        status: { type: string, enum: [draft, published], description: "draft: being edited. published: went live once." }
+        version: { type: [integer, "null"], description: The version number; null for the draft. }
+        trigger:
+          type: object
+          required: [kind, event, filter]
+          properties:
+            kind: { type: string, enum: [event, manual] }
+            event: { type: [string, "null"] }
+            filter: { type: array, items: { $ref: "#/components/schemas/JourneyCondition" } }
+        entry: { type: string, enum: [once, again] }
+        goal_event: { type: [string, "null"] }
+        steps: { type: array, items: { $ref: "#/components/schemas/JourneyStep" } }
+        runs_active: { type: integer, description: People going through this version now. }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+        published_at: { type: [string, "null"], format: date-time }
     JourneyRun:
       type: object
-      required: [id, journey_id, record_id, name, status, step, next_at, exit_reason, steps_taken, context, entered_at, finished_at]
+      required: [id, journey_id, record_id, name, status, step, next_at, exit_reason, version, steps_taken, context, entered_at, finished_at]
       properties:
         id: { type: string, format: uuid }
         journey_id: { type: string, format: uuid }
@@ -26807,6 +26988,7 @@ components:
         step: { type: [string, "null"], description: The step it is on. }
         next_at: { type: [string, "null"], format: date-time, description: When a wait ends. }
         exit_reason: { type: [string, "null"], description: "goal, exit_step, manual, archived, step_removed, email_failed." }
+        version: { type: [integer, "null"], description: "The journey version this run goes through; null for a run from before versions, which follows the current one." }
         steps_taken: { type: integer }
         context: { type: object, additionalProperties: true, description: "The event's properties, or the data it was added with; emails see it as event.*." }
         entered_at: { type: string, format: date-time }

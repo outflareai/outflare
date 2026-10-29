@@ -35,3 +35,18 @@ func TestCheck(t *testing.T) {
 		t.Error("an event condition in a trigger filter was allowed")
 	}
 }
+
+func TestUnreachable(t *testing.T) {
+	steps := []Step{
+		{ID: "hi", Kind: KindEmail, Template: "welcome", Next: "check"},
+		{ID: "check", Kind: KindBranch, Then: "done"},
+		{ID: "lost", Kind: KindWait, WaitSeconds: 60, Next: "done"},
+		{ID: "done", Kind: KindExit},
+	}
+	if got := Unreachable(steps); len(got) != 1 || got[0] != "lost" {
+		t.Fatalf("Unreachable = %v", got)
+	}
+	if got := Unreachable(nil); got != nil {
+		t.Fatalf("Unreachable(nil) = %v", got)
+	}
+}

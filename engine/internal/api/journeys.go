@@ -29,6 +29,12 @@ func (s *Server) routesJourneys(mux *http.ServeMux) {
 	mux.HandleFunc("POST /v1/workspaces/{ws}/journeys/{id}/activate", s.inWorkspace(manage, s.activateJourney))
 	mux.HandleFunc("POST /v1/workspaces/{ws}/journeys/{id}/pause", s.inWorkspace(manage, s.pauseJourney))
 	mux.HandleFunc("POST /v1/workspaces/{ws}/journeys/{id}/archive", s.inWorkspace(manage, s.archiveJourney))
+	mux.HandleFunc("GET /v1/workspaces/{ws}/journeys/{id}/versions", s.inWorkspace(read, s.listJourneyVersions))
+	mux.HandleFunc("POST /v1/workspaces/{ws}/journeys/{id}/draft", s.inWorkspace(manage, s.createJourneyDraft))
+	mux.HandleFunc("GET /v1/workspaces/{ws}/journeys/{id}/draft", s.inWorkspace(read, s.getJourneyDraft))
+	mux.HandleFunc("PATCH /v1/workspaces/{ws}/journeys/{id}/draft", s.inWorkspace(manage, s.updateJourneyDraft))
+	mux.HandleFunc("DELETE /v1/workspaces/{ws}/journeys/{id}/draft", s.inWorkspace(manage, s.discardJourneyDraft))
+	mux.HandleFunc("POST /v1/workspaces/{ws}/journeys/{id}/publish", s.inWorkspace(manage, s.publishJourney))
 	mux.HandleFunc("GET /v1/workspaces/{ws}/journeys/{id}/runs", s.inWorkspace(read, s.listJourneyRuns))
 	mux.HandleFunc("POST /v1/workspaces/{ws}/journeys/{id}/runs", s.inWorkspace(send, s.addJourneyRun))
 	mux.HandleFunc("GET /v1/workspaces/{ws}/journeys/{id}/runs/{run}", s.inWorkspace(read, s.getJourneyRun))
@@ -62,18 +68,26 @@ type journeyView struct {
 	Version     int             `json:"version"`
 	ActivatedAt *time.Time      `json:"activated_at"`
 	Stats       journeyStats    `json:"stats"`
+	// When its draft version last changed, or nil when it has none.
+	DraftUpdatedAt *time.Time `json:"draft_updated_at"`
 	// What each step did, by step id and outcome (sent, skipped, yes,
-	// no, waited): only on a single journey.
+	// no, waited), and how many people are on each step now: only on a
+	// single journey.
 	StepStats map[string]map[string]int `json:"step_stats,omitempty"`
-	CreatedAt time.Time                 `json:"created_at"`
-	UpdatedAt time.Time                 `json:"updated_at"`
+	AtStep    map[string]int            `json:"at_step,omitempty"`
+	// What became of each email step's emails: delivered, opened and
+	// clicked, by step id. Only on a single journey.
+	EmailStats map[string]map[string]int `json:"email_stats,omitempty"`
+	CreatedAt  time.Time                 `json:"created_at"`
+	UpdatedAt  time.Time                 `json:"updated_at"`
 }
 
 const journeySelect = `
 	SELECT j.id, j.name, j.description, j.status, j.brand_id, j.trigger_kind, j.trigger_event, j.trigger_filter, j.entry, j.goal_event,
 	       j.steps, j.version, j.activated_at,
 	       COALESCE(st.entered, 0), COALESCE(st.active, 0), COALESCE(st.completed, 0), COALESCE(st.exited, 0), COALESCE(st.failed, 0),
-	       j.created_at, j.updated_at
+	       j.created_at, j.updated_at,
+	       (SELECT d.updated_at FROM journey_versions d WHERE d.journey_id = j.id AND d.status = 'draft')
 	FROM journeys j
 	LEFT JOIN LATERAL (
 		SELECT count(*)::int AS entered,
@@ -89,7 +103,7 @@ func scanJourney(row pgx.Row) (journeyView, error) {
 	var filter, steps []byte
 	err := row.Scan(&v.ID, &v.Name, &v.Description, &v.Status, &v.BrandID, &v.Trigger.Kind, &v.Trigger.Event, &filter, &v.Entry, &v.GoalEvent,
 		&steps, &v.Version, &v.ActivatedAt, &v.Stats.Entered, &v.Stats.Active, &v.Stats.Completed, &v.Stats.Exited, &v.Stats.Failed,
-		&v.CreatedAt, &v.UpdatedAt)
+		&v.CreatedAt, &v.UpdatedAt, &v.DraftUpdatedAt)
 	if err != nil {
 		return v, err
 	}
@@ -173,6 +187,50 @@ func (s *Server) getJourney(w http.ResponseWriter, r *http.Request) {
 			v.StepStats[step] = map[string]int{}
 		}
 		v.StepStats[step][outcome] = n
+	}
+	if err := rows.Err(); err != nil {
+		s.internal(w, r, err)
+		return
+	}
+	rows, err = s.pool.Query(r.Context(), `SELECT step, count(*)::int FROM journey_runs
+		WHERE workspace_id = $1 AND journey_id = $2 AND status = 'active' AND step IS NOT NULL GROUP BY step`, a.WorkspaceID, v.ID)
+	if err != nil {
+		s.internal(w, r, err)
+		return
+	}
+	v.AtStep = map[string]int{}
+	for rows.Next() {
+		var step string
+		var n int
+		if err := rows.Scan(&step, &n); err != nil {
+			rows.Close()
+			s.internal(w, r, err)
+			return
+		}
+		v.AtStep[step] = n
+	}
+	if err := rows.Err(); err != nil {
+		s.internal(w, r, err)
+		return
+	}
+	rows, err = s.pool.Query(r.Context(), `SELECT rs.step, count(*) FILTER (WHERE e.delivered_at IS NOT NULL)::int,
+		count(*) FILTER (WHERE e.opened_at IS NOT NULL)::int, count(*) FILTER (WHERE e.clicked_at IS NOT NULL)::int
+		FROM journey_run_steps rs JOIN emails e ON e.id = rs.email_id AND e.workspace_id = rs.workspace_id
+		WHERE rs.workspace_id = $1 AND rs.journey_id = $2 GROUP BY rs.step`, a.WorkspaceID, v.ID)
+	if err != nil {
+		s.internal(w, r, err)
+		return
+	}
+	v.EmailStats = map[string]map[string]int{}
+	for rows.Next() {
+		var step string
+		var delivered, opened, clicked int
+		if err := rows.Scan(&step, &delivered, &opened, &clicked); err != nil {
+			rows.Close()
+			s.internal(w, r, err)
+			return
+		}
+		v.EmailStats[step] = map[string]int{"delivered": delivered, "opened": opened, "clicked": clicked}
 	}
 	if err := rows.Err(); err != nil {
 		s.internal(w, r, err)
@@ -341,8 +399,10 @@ func (s *Server) journeyApplied(w http.ResponseWriter, r *http.Request, err erro
 }
 
 // updateJourney changes a draft or paused journey. While it is active only
-// its name and description change: pause it to change its steps, so no
-// run is midway through steps that are being rewritten.
+// its name and description change: make a draft version and publish it,
+// or pause it, so no run is midway through steps that are being
+// rewritten. Changing a paused journey moves everyone in it onto the
+// change, as a publish with runs move does.
 func (s *Server) updateJourney(w http.ResponseWriter, r *http.Request) {
 	a := accessFrom(r.Context())
 	cur, ok := s.findJourney(w, r, a.WorkspaceID, r.PathValue("id"))
@@ -369,8 +429,10 @@ func (s *Server) updateJourney(w http.ResponseWriter, r *http.Request) {
 	err := pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
 		filter, _ := json.Marshal(v.Trigger.Filter)
 		steps, _ := json.Marshal(v.Steps)
+		// Any change to what it does is a new version; a paused journey's
+		// runs go through it.
 		bump := 0
-		if f.Steps != nil {
+		if !f.onlyLabels() {
 			bump = 1
 		}
 		if _, err := tx.Exec(ctx, `UPDATE journeys SET brand_id = $3, name = $4, description = $5, trigger_kind = $6, trigger_event = $7,
@@ -378,6 +440,12 @@ func (s *Server) updateJourney(w http.ResponseWriter, r *http.Request) {
 			WHERE workspace_id = $1 AND id = $2`, a.WorkspaceID, cur.ID, v.BrandID, v.Name, v.Description, v.Trigger.Kind, v.Trigger.Event,
 			filter, v.Entry, v.GoalEvent, steps, bump); err != nil {
 			return err
+		}
+		if bump == 1 && cur.Status == "paused" {
+			if _, err := tx.Exec(ctx, `UPDATE journey_runs SET journey_version = $3, updated_at = now()
+				WHERE workspace_id = $1 AND journey_id = $2 AND status = 'active'`, a.WorkspaceID, cur.ID, cur.Version+1); err != nil {
+				return err
+			}
 		}
 		return record(ctx, tx, &a.principal, a.WorkspaceID, "journey.updated", "journey", cur.ID, map[string]any{"steps_changed": f.Steps != nil})
 	})
@@ -454,7 +522,9 @@ func (s *Server) setJourneyStatus(w http.ResponseWriter, r *http.Request, a *acc
 		data := map[string]any{"from": cur.Status}
 		switch to {
 		case "active":
-			if cur.Status == "paused" {
+			// The version going live is kept, for the runs that enter on it.
+			err = keepJourneyVersion(ctx, tx, a, cur.ID)
+			if err == nil && cur.Status == "paused" {
 				err = journeys.Resume(ctx, tx, a.WorkspaceID, cur.ID)
 			}
 		case "archived":
@@ -499,6 +569,7 @@ type journeyRunView struct {
 	Step       *string        `json:"step"`
 	NextAt     *time.Time     `json:"next_at"`
 	ExitReason *string        `json:"exit_reason"`
+	Version    *int           `json:"version"`
 	StepsTaken int            `json:"steps_taken"`
 	Context    map[string]any `json:"context"`
 	EnteredAt  time.Time      `json:"entered_at"`
@@ -508,7 +579,7 @@ type journeyRunView struct {
 }
 
 const journeyRunSelect = `
-	SELECT r.id, r.journey_id, r.record_id, COALESCE(rc.name, ''), r.status, r.step, r.next_at, r.exit_reason, r.steps_taken, r.context,
+	SELECT r.id, r.journey_id, r.record_id, COALESCE(rc.name, ''), r.status, r.step, r.next_at, r.exit_reason, r.journey_version, r.steps_taken, r.context,
 	       r.entered_at, r.finished_at
 	FROM journey_runs r LEFT JOIN records rc ON rc.id = r.record_id
 	WHERE r.workspace_id = $1 AND r.journey_id = $2`
@@ -516,7 +587,7 @@ const journeyRunSelect = `
 func scanJourneyRun(row pgx.Row) (journeyRunView, error) {
 	var v journeyRunView
 	var ctxJSON []byte
-	err := row.Scan(&v.ID, &v.JourneyID, &v.RecordID, &v.Name, &v.Status, &v.Step, &v.NextAt, &v.ExitReason, &v.StepsTaken, &ctxJSON,
+	err := row.Scan(&v.ID, &v.JourneyID, &v.RecordID, &v.Name, &v.Status, &v.Step, &v.NextAt, &v.ExitReason, &v.Version, &v.StepsTaken, &ctxJSON,
 		&v.EnteredAt, &v.FinishedAt)
 	v.Context = map[string]any{}
 	_ = json.Unmarshal(ctxJSON, &v.Context)
@@ -533,7 +604,7 @@ func (s *Server) listJourneyRuns(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	q := r.URL.Query()
-	status, after, record := q.Get("status"), q.Get("after"), q.Get("record")
+	status, after, record, step := q.Get("status"), q.Get("after"), q.Get("record"), q.Get("step")
 	switch {
 	case status != "" && !slices.Contains(journeyRunStatuses, status):
 		writeError(w, r, http.StatusBadRequest, "invalid_request", "status is one of "+strings.Join(journeyRunStatuses, ", "))
@@ -556,7 +627,8 @@ func (s *Server) listJourneyRuns(w http.ResponseWriter, r *http.Request) {
 	}
 	rows, err := s.pool.Query(r.Context(), journeyRunSelect+` AND ($3 = '' OR r.status = $3) AND ($4 = '' OR r.record_id::text = $4)
 		AND ($5 = '' OR (r.entered_at, r.id) < (SELECT entered_at, id FROM journey_runs WHERE id = $5::uuid))
-		ORDER BY r.entered_at DESC, r.id DESC LIMIT $6`, a.WorkspaceID, cur.ID, status, record, after, limit+1)
+		AND ($7 = '' OR r.step = $7)
+		ORDER BY r.entered_at DESC, r.id DESC LIMIT $6`, a.WorkspaceID, cur.ID, status, record, after, limit+1, step)
 	if err != nil {
 		s.internal(w, r, err)
 		return

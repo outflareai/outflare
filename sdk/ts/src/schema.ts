@@ -16114,7 +16114,8 @@ export interface paths {
         /**
          * Change a journey
          * @description Scope: emails.manage. A draft or paused journey changes freely; an active one only its name and description, so
-         *     pause it first. Runs on a step that was removed exit when they move on.
+         *     start a draft version (POST .../draft) and publish it, or pause it first. Changing a paused journey moves the
+         *     people in it onto the change; runs on a step that was removed exit when they move on.
          */
         patch: operations["updateJourney"];
         trace?: never;
@@ -16186,6 +16187,97 @@ export interface paths {
          * @description Scope: emails.manage. Stops it for good and ends its active runs.
          */
         post: operations["archiveJourney"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/workspaces/{ws}/journeys/{id}/versions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        /**
+         * A journey's versions, the draft first
+         * @description Scope: emails.read. Every version that went live, newest first, with how many people are going through each
+         *     now, and the draft version being edited, if there is one.
+         */
+        get: operations["listJourneyVersions"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/workspaces/{ws}/journeys/{id}/draft": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        /**
+         * Get a journey's draft version
+         * @description Scope: emails.read. 404 when it has none.
+         */
+        get: operations["getJourneyDraft"];
+        put?: never;
+        /**
+         * Start a draft version of a live journey
+         * @description Scope: emails.manage. A live (active or paused) journey is read-only: this copies its trigger, entry, goal and
+         *     steps into a draft version to edit, while the live version keeps running. 200 with the draft already there, if
+         *     there is one. A journey that hasn't gone live yet is changed directly (409).
+         */
+        post: operations["createJourneyDraft"];
+        /**
+         * Throw away a journey's draft version
+         * @description Scope: emails.manage. The live version is untouched.
+         */
+        delete: operations["discardJourneyDraft"];
+        options?: never;
+        head?: never;
+        /**
+         * Change a journey's draft version
+         * @description Scope: emails.manage. The same checks as changing a journey. The name and description belong to the journey
+         *     and change with PATCH on it.
+         */
+        patch: operations["updateJourneyDraft"];
+        trace?: never;
+    };
+    "/v1/workspaces/{ws}/journeys/{id}/publish": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Publish a journey's draft version
+         * @description Scope: emails.manage. Swaps the draft's trigger, entry, goal and steps in as the journey's next version, after
+         *     the checks activating does, plus that every step can be reached from the first. The old version is kept. People
+         *     already in the journey finish on the version they entered on (runs keep, the default), or move onto the new
+         *     one at the same step (runs move), where anyone on a step it removed exits.
+         */
+        post: operations["publishJourney"];
         delete?: never;
         options?: never;
         head?: never;
@@ -22553,10 +22645,15 @@ export interface components {
             entry: "once" | "again";
             goal_event: string | null;
             steps: components["schemas"]["JourneyStep"][];
-            /** @description Goes up each time the steps change. */
+            /** @description Goes up each time what it does (trigger */
             version: number;
             /** Format: date-time */
             activated_at: string | null;
+            /**
+             * Format: date-time
+             * @description When its draft version last changed; null when it has none.
+             */
+            draft_updated_at: string | null;
             stats: {
                 entered: number;
                 active: number;
@@ -22570,10 +22667,59 @@ export interface components {
                     [key: string]: number;
                 };
             };
+            /** @description Only on a single journey: by step id, how many people are on that step now. */
+            at_step?: {
+                [key: string]: number;
+            };
+            /** @description Only on a single journey: by email step id, how many of its emails were delivered, opened and clicked. */
+            email_stats?: {
+                [key: string]: {
+                    delivered: number;
+                    opened: number;
+                    clicked: number;
+                };
+            };
             /** Format: date-time */
             created_at: string;
             /** Format: date-time */
             updated_at: string;
+        };
+        JourneyDraftInput: {
+            trigger?: components["schemas"]["JourneyTrigger"];
+            /** @enum {string} */
+            entry?: "once" | "again";
+            goal_event?: string | null;
+            /** @description The first step starts. */
+            steps?: components["schemas"]["JourneyStep"][];
+        };
+        JourneyVersion: {
+            /** Format: uuid */
+            id: string;
+            /**
+             * @description draft: being edited. published: went live once.
+             * @enum {string}
+             */
+            status: "draft" | "published";
+            /** @description The version number; null for the draft. */
+            version: number | null;
+            trigger: {
+                /** @enum {string} */
+                kind: "event" | "manual";
+                event: string | null;
+                filter: components["schemas"]["JourneyCondition"][];
+            };
+            /** @enum {string} */
+            entry: "once" | "again";
+            goal_event: string | null;
+            steps: components["schemas"]["JourneyStep"][];
+            /** @description People going through this version now. */
+            runs_active: number;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            updated_at: string;
+            /** Format: date-time */
+            published_at: string | null;
         };
         JourneyRun: {
             /** Format: uuid */
@@ -22593,6 +22739,8 @@ export interface components {
             next_at: string | null;
             /** @description goal, exit_step, manual, archived, step_removed, email_failed. */
             exit_reason: string | null;
+            /** @description The journey version this run goes through; null for a run from before versions, which follows the current one. */
+            version: number | null;
             steps_taken: number;
             /** @description The event's properties, or the data it was added with; emails see it as event.*. */
             context: {
@@ -62244,6 +62392,219 @@ export interface operations {
             default: components["responses"]["Error"];
         };
     };
+    listJourneyVersions: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Versions. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["JourneyVersion"][];
+                    };
+                };
+            };
+            404: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    getJourneyDraft: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The draft. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["JourneyVersion"];
+                };
+            };
+            404: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    createJourneyDraft: {
+        parameters: {
+            query?: never;
+            header?: {
+                /**
+                 * @description Makes the write safe to retry. A repeat with the same key from the same caller within 24 hours gets the first
+                 *     answer back (with `Idempotent-Replayed: true`) instead of running again. The same key for a different request
+                 *     is refused with 422 `idempotency_key_reused`; while the first is still running, 409 `idempotency_in_progress`.
+                 *     Use a new random key, such as a UUID, for each distinct write.
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The draft already there. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["JourneyVersion"];
+                };
+            };
+            /** @description The new draft. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["JourneyVersion"];
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    discardJourneyDraft: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            202: components["responses"]["MissionHeld"];
+            /** @description Discarded. */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            404: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    updateJourneyDraft: {
+        parameters: {
+            query?: never;
+            header?: {
+                /**
+                 * @description Makes the write safe to retry. A repeat with the same key from the same caller within 24 hours gets the first
+                 *     answer back (with `Idempotent-Replayed: true`) instead of running again. The same key for a different request
+                 *     is refused with 422 `idempotency_key_reused`; while the first is still running, 409 `idempotency_in_progress`.
+                 *     Use a new random key, such as a UUID, for each distinct write.
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["JourneyDraftInput"];
+            };
+        };
+        responses: {
+            /** @description The draft. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["JourneyVersion"];
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            400: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    publishJourney: {
+        parameters: {
+            query?: never;
+            header?: {
+                /**
+                 * @description Makes the write safe to retry. A repeat with the same key from the same caller within 24 hours gets the first
+                 *     answer back (with `Idempotent-Replayed: true`) instead of running again. The same key for a different request
+                 *     is refused with 422 `idempotency_key_reused`; while the first is still running, 409 `idempotency_in_progress`.
+                 *     Use a new random key, such as a UUID, for each distinct write.
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": {
+                    /**
+                     * @description What happens to the people in it now.
+                     * @default keep
+                     * @enum {string}
+                     */
+                    runs?: "keep" | "move";
+                };
+            };
+        };
+        responses: {
+            /** @description The journey, on its new version. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Journey"];
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            400: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
     listJourneyRuns: {
         parameters: {
             query?: {
@@ -62260,6 +62621,8 @@ export interface operations {
                 status?: components["schemas"]["JourneyRunStatus"];
                 /** @description Only this person's runs. */
                 record?: string;
+                /** @description Only runs on this step now (with status active: the people waiting there). */
+                step?: string;
                 /** @description A run id; the runs after it. */
                 after?: string;
                 limit?: number;

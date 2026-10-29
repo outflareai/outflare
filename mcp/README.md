@@ -330,6 +330,7 @@ Write (left out when `OUTFLARE_MCP_READ_ONLY=1`):
 | `create_email_topic`, `update_email_topic` | Add, rename or archive a topic people can choose on the preference page |
 | `create_email_broadcast`, `update_email_broadcast`, `send_email_broadcast`, `cancel_email_broadcast` | Draft a newsletter or announcement to a topic's subscribers or a list of customer records, send it now or later, or stop it |
 | `create_journey`, `update_journey`, `activate_journey`, `pause_journey`, `archive_journey`, `add_to_journey`, `exit_journey_run` | Build a flow that an event starts (send an email, wait, branch, exit), turn it on or off, and add or take out people |
+| `list_journey_versions`, `edit_journey_draft`, `publish_journey`, `discard_journey_draft` | Change a live journey safely: edit a draft version beside it, then publish it (people in it finish on their version, or move onto the new one); every version that went live is kept |
 | `create_rule`, `update_rule`, `activate_rule`, `pause_rule`, `archive_rule` | Build a rule (an event happens, a field changes, something doesn't happen in time, someone joins or leaves a smart list) that emits a business event, and turn it on or off |
 | `create_infra_plan`, `update_infra_plan` | Draft or change a plan for domains and mailboxes; a draft buys nothing |
 | `approve_infra_plan` | Start buying, on the user's own supplier account (needs `infrastructure.approve`) |

@@ -38,6 +38,7 @@ func (s *Service) Register(q *jobs.Queue) {
 // journey is a journey as runs read it.
 type journey struct {
 	id, ws, status, triggerKind, entry string
+	version                            int
 	brandID                            *string
 	filter                             []Condition
 	steps                              []Step
@@ -46,11 +47,11 @@ type journey struct {
 func loadJourney(ctx context.Context, q jobs.Querier, ws, id string, lock bool) (*journey, error) {
 	var j journey
 	var filter, steps []byte
-	sql := `SELECT id, workspace_id, status, trigger_kind, entry, brand_id, trigger_filter, steps FROM journeys WHERE workspace_id = $1 AND id = $2`
+	sql := `SELECT id, workspace_id, status, trigger_kind, entry, version, brand_id, trigger_filter, steps FROM journeys WHERE workspace_id = $1 AND id = $2`
 	if lock {
 		sql += ` FOR SHARE`
 	}
-	err := q.QueryRow(ctx, sql, ws, id).Scan(&j.id, &j.ws, &j.status, &j.triggerKind, &j.entry, &j.brandID, &filter, &steps)
+	err := q.QueryRow(ctx, sql, ws, id).Scan(&j.id, &j.ws, &j.status, &j.triggerKind, &j.entry, &j.version, &j.brandID, &filter, &steps)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil
 	}
@@ -64,6 +65,26 @@ func loadJourney(ctx context.Context, q jobs.Querier, ws, id string, lock bool) 
 		return nil, err
 	}
 	return &j, nil
+}
+
+// pin swaps in the steps of the version a run goes through, when it is not
+// the journey's current one. A version that was never kept (a run from
+// before versions) leaves the current steps.
+func (j *journey) pin(ctx context.Context, q jobs.Querier, version *int) error {
+	if version == nil || *version == j.version {
+		return nil
+	}
+	var steps []byte
+	err := q.QueryRow(ctx, `SELECT steps FROM journey_versions WHERE workspace_id = $1 AND journey_id = $2 AND status = 'published' AND version = $3`,
+		j.ws, j.id, *version).Scan(&steps)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	j.steps = nil
+	return json.Unmarshal(steps, &j.steps)
 }
 
 func (j *journey) step(id string) *Step {
@@ -199,8 +220,10 @@ func Enroll(ctx context.Context, tx pgx.Tx, ws, journeyID, recordID string, even
 	}
 	ctxJSON, _ := json.Marshal(context)
 	var id string
-	err = tx.QueryRow(ctx, `INSERT INTO journey_runs (workspace_id, journey_id, record_id, step, trigger_event_id, context)
-		VALUES ($1, $2, $3, NULLIF($4, ''), $5, $6) ON CONFLICT DO NOTHING RETURNING id::text`, ws, journeyID, recordID, first, eventID, ctxJSON).Scan(&id)
+	// The run goes through the version it entered on, even after a new one
+	// is published.
+	err = tx.QueryRow(ctx, `INSERT INTO journey_runs (workspace_id, journey_id, record_id, step, trigger_event_id, context, journey_version)
+		VALUES ($1, $2, $3, NULLIF($4, ''), $5, $6, $7) ON CONFLICT DO NOTHING RETURNING id::text`, ws, journeyID, recordID, first, eventID, ctxJSON, j.version).Scan(&id)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return "", "already in the journey", nil
 	}
@@ -278,6 +301,7 @@ func (s *Service) runJob(ctx context.Context, job jobs.Job) error {
 type run struct {
 	id, journeyID, recordID string
 	step                    *string
+	version                 *int
 	nextAt                  *time.Time
 	context                 map[string]any
 	entered                 time.Time
@@ -290,9 +314,9 @@ func (s *Service) advance(ctx context.Context, ws, runID string) (bool, error) {
 	err := pgx.BeginFunc(ctx, s.Pool, func(tx pgx.Tx) error {
 		var r run
 		var ctxJSON []byte
-		err := tx.QueryRow(ctx, `SELECT id, journey_id, record_id, step, next_at, context, entered_at, steps_taken FROM journey_runs
+		err := tx.QueryRow(ctx, `SELECT id, journey_id, record_id, step, journey_version, next_at, context, entered_at, steps_taken FROM journey_runs
 			WHERE workspace_id = $1 AND id = $2 AND status = 'active' FOR UPDATE`, ws, runID).
-			Scan(&r.id, &r.journeyID, &r.recordID, &r.step, &r.nextAt, &ctxJSON, &r.entered, &r.taken)
+			Scan(&r.id, &r.journeyID, &r.recordID, &r.step, &r.version, &r.nextAt, &ctxJSON, &r.entered, &r.taken)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil
 		}
@@ -315,6 +339,9 @@ func (s *Service) advance(ctx context.Context, ws, runID string) (bool, error) {
 			return s.finish(ctx, tx, ws, r, "completed", "")
 		case r.taken >= 500:
 			return s.finish(ctx, tx, ws, r, "failed", "too many steps")
+		}
+		if err := j.pin(ctx, tx, r.version); err != nil {
+			return err
 		}
 		st := j.step(*r.step)
 		if st == nil {

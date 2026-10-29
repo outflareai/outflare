@@ -210,6 +210,23 @@ A journey is an if-this-then-that flow for people on customer records,
 such as onboarding or win-back (`.../journeys`, MCP `create_journey` and
 `activate_journey`). It is a draft until it is activated.
 
+In the app, Lifecycle → Journeys draws each journey as a flow from the top
+down: the trigger card first, then the steps, with a check's Yes and No
+side by side and End where a path finishes. Press **+** on any link to
+add a step there from the searchable step picker, and select a step (or
+the trigger) to change it in the side panel, which also lists the
+template fields it can use (`{{person.first_name}}`, `{{event.plan}}`).
+Each step shows its live numbers (an email's sends with its open and
+click rates, a check's Yes and No split) and how many people are on it
+now; its side panel lists who. Anything that would stop it going live (an
+unpublished template, a step nothing leads to, a check with no condition)
+is marked on the step in red, and on the map a long flow gets in its
+corner. Changes save as you go, and Undo and Redo (⌘Z, ⇧⌘Z) step through
+them. **Review and activate** (or **Review and publish**) is the last look
+before it goes live: who starts it, a checklist of every step, what
+changed and what happens to the people in it now. The trigger card links to the [rule](rules.md) that emits its event,
+with the rule's dry run. On a phone the flow is read-only.
+
 - **Trigger.** Kind `event` starts a run when a customer event with that
   name lands on a person's timeline (`{"kind": "event", "event":
   "signed_up"}`) and the event is approved in the event catalog, if the
@@ -243,12 +260,25 @@ such as onboarding or win-back (`.../journeys`, MCP `create_journey` and
 - **Goal.** When the person does `goal_event`, their run ends with reason
   `goal`.
 - **Changing it.** Activating checks every email step's template is
-  published. A draft or paused journey changes freely; an active one only
-  its name and description, so pause it first. Pausing holds every run
-  where it is; activating again moves them on. Archiving ends its runs.
+  published. A journey that hasn't gone live yet changes freely. A live
+  one is read-only: **Edit** makes a draft version beside it (`POST
+  .../journeys/{id}/draft`, then `PATCH .../draft`; MCP
+  `edit_journey_draft`) while the live version keeps running, and
+  **Publish** (`POST .../journeys/{id}/publish`, MCP `publish_journey`)
+  swaps it in as the next version, after the activation checks and a check
+  that every step can be reached. You choose what happens to the people
+  already in it: they finish on the version they entered on (`runs`
+  `keep`, the default), or move onto the new version at the same step
+  (`move`), where anyone on a step it removed exits. Every version that
+  went live is kept (`GET .../journeys/{id}/versions`), with how many
+  people are still going through it, and can be opened read-only and
+  compared with the live one. Its name and description change any time.
+  A paused journey can still be changed directly (`PATCH`), which moves
+  everyone in it onto the change. Pausing holds every run where it is;
+  activating again moves them on. Archiving ends its runs.
 - **Results.** A journey shows how many people entered, are in it,
   completed, exited and failed, and per step how many were sent, skipped,
-  waited, or went yes or no. `GET .../journeys/{id}/runs` lists the people
+  waited, or went yes or no, and how many are on it now (`at_step`). `GET .../journeys/{id}/runs` lists the people
   in it, and one run lists what each of its steps did.
 
 ## One person's history

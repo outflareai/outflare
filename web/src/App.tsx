@@ -34,6 +34,7 @@ import { Templates } from "./pages/EmailTemplates";
 import { Topics } from "./pages/EmailTopics";
 import { Broadcasts } from "./pages/EmailBroadcasts";
 import { Journeys } from "./pages/Journeys";
+import { Rules } from "./pages/Rules";
 import { Overview } from "./pages/Overview";
 import { GetStarted } from "./pages/GetStarted";
 import { Domains } from "./pages/Domains";
@@ -556,6 +557,7 @@ function Shell({ me, onSignOut, onReload }: { me: Me; onSignOut: () => void; onR
         {ready && ws && tab === "templates" && <Templates key={ws.id} ws={ws.id} canManage={writer} canSend={writer} myEmail={me.user.email ?? ""} open={item ?? ""} onOpen={(id) => setItem(id || undefined)} go={setTab} />}
         {ready && ws && tab === "broadcasts" && <Broadcasts key={ws.id} ws={ws.id} canManage={writer} open={item ?? ""} onOpen={(id) => setItem(id || undefined)} go={setTab} />}
         {ready && ws && tab === "journeys" && <Journeys key={ws.id} ws={ws.id} canManage={writer} open={item ?? ""} onOpen={(id) => setItem(id || undefined)} go={setTab} />}
+        {ready && ws && tab === "rules" && <Rules key={ws.id} ws={ws.id} canManage={writer} open={item ?? ""} onOpen={(id) => setItem(id || undefined)} go={setTab} />}
         {ready && ws && tab === "topics" && <Topics key={ws.id} ws={ws.id} canManage={writer} go={setTab} />}
         {ready && ws && tab === "providers" && <Providers key={ws.id} ws={ws.id} canManage={isAdmin} open={item ?? ""} onOpen={(id) => setItem(id || undefined)} go={setTab} />}
         {ready && ws && tab === "inbox" && <Inbox key={ws.id} ws={ws.id} canManage={writer} open={item} setOpen={setItem} onRead={() => setUnread((n) => Math.max(0, n - 1))} />}

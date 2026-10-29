@@ -88,6 +88,16 @@ export type UiEvent =
   | "ui.request_failed" // a call never got an answer (offline, blocked)
   | "ui.command_run" // a command palette command
   | "ui.copied" // a copy button
+  | "ui.journey_step_picker_opened" // the journey builder's step picker opened (from: start, link, rule)
+  | "ui.journey_step_added" // a step put into a journey being built, before it is saved (kind, group, at: start or the link it went on)
+  | "ui.journey_step_removed" // a step taken out of a journey being built (kind, also_removed: steps only it led to)
+  | "ui.journey_step_linked" // a step's link pointed at another step or the end in the side panel (kind, output, to: step or end)
+  | "ui.journey_step_opened" // a step's side panel opened in the journey builder (kind, editable)
+  | "ui.journey_trigger_opened" // the trigger card's side panel opened (editable)
+  | "ui.journey_change_undone" // an edit in the journey builder undone or redone, by button or keyboard (redo)
+  | "ui.journey_version_viewed" // an older journey version shown read-only (version, current)
+  | "ui.rule_trigger_picked" // the rule card's sentence builder switched to another kind of trigger (kind)
+  | "ui.rule_followup_picked" // "When this fires, do…" picked a first step for a new journey (kind)
   | "ui.playbook_opened" // a playbook opened on the Playbooks page (playbook_id, ready)
   | "ui.playbook_prompt_copied" // a playbook's prompt copied (playbook_id)
   | "ui.dialog_answered" // a confirm or prompt dialog: the choice, or cancelled

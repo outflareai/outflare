@@ -7852,11 +7852,62 @@ export function createServer({ client: gtm, workspace, agency, readOnly = false,
     "update_journey",
     {
       title: "Change a journey",
-      description: "Change a draft or paused journey. An active one only changes its name and description: pause_journey first.",
+      description: "Change a journey that hasn't gone live yet, or a paused one (which moves the people in it onto the change). A live journey's steps change through edit_journey_draft and publish_journey; its name and description change here any time.",
       inputSchema: { journey: z.string().describe("The journey's id."), ...journeyFields },
       annotations: write,
     },
     ({ journey, ...body }) => call(() => gtm.PATCH("/v1/workspaces/{ws}/journeys/{id}", { params: { path: { ws, id: journey } }, body })),
+  );
+
+  server.registerTool(
+    "list_journey_versions",
+    {
+      title: "List a journey's versions",
+      description: "Every version of a journey that went live, newest first, with how many people are going through each now, and the draft version being edited, if there is one.",
+      inputSchema: { journey: z.string().describe("The journey's id.") },
+      annotations: read,
+    },
+    ({ journey }) => call(() => gtm.GET("/v1/workspaces/{ws}/journeys/{id}/versions", { params: { path: { ws, id: journey } } })),
+  );
+
+  server.registerTool(
+    "edit_journey_draft",
+    {
+      title: "Edit a live journey's draft version",
+      description:
+        "A live (active or paused) journey is read-only: this starts a draft version from it (or reuses the draft already there) and, with any of trigger, entry, goal_event or steps, changes the draft. The live version keeps running until publish_journey.",
+      inputSchema: { journey: z.string().describe("The journey's id."), trigger: journeyFields.trigger, entry: journeyFields.entry, goal_event: journeyFields.goal_event, steps: journeyFields.steps },
+      annotations: write,
+    },
+    async ({ journey, ...body }) => {
+      const path = { ws, id: journey };
+      const started = await gtm.POST("/v1/workspaces/{ws}/journeys/{id}/draft", { params: { path } });
+      if (started.error || Object.values(body).every((v) => v === undefined)) return call(async () => started);
+      return call(() => gtm.PATCH("/v1/workspaces/{ws}/journeys/{id}/draft", { params: { path }, body }));
+    },
+  );
+
+  server.registerTool(
+    "publish_journey",
+    {
+      title: "Publish a journey's draft version",
+      description:
+        "Swap the draft version in as the journey's next version. Confirm with the user first: from now on new people get it. runs keep (the default): people already in it finish on the version they entered on. runs move: they carry on from the same step in the new one, and anyone on a removed step exits. Refuses steps nothing leads to and unpublished templates.",
+      inputSchema: { journey: z.string().describe("The journey's id."), runs: z.enum(["keep", "move"]).optional() },
+      annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: true },
+    },
+    ({ journey, runs }) => call(() => gtm.POST("/v1/workspaces/{ws}/journeys/{id}/publish", { params: { path: { ws, id: journey } }, body: runs ? { runs } : {} })),
+  );
+
+  server.registerTool(
+    "discard_journey_draft",
+    {
+      title: "Discard a journey's draft version",
+      description: "Throw away the draft version of a live journey. The live version is untouched.",
+      inputSchema: { journey: z.string().describe("The journey's id.") },
+      annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: false },
+    },
+    ({ journey }) => call(() => gtm.DELETE("/v1/workspaces/{ws}/journeys/{id}/draft", { params: { path: { ws, id: journey } } })),
   );
 
   server.registerTool(

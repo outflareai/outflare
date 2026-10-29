@@ -90,6 +90,7 @@ export const tabNames: Record<Tab, string> = {
   topics: "Topics",
   broadcasts: "Broadcasts",
   journeys: "Journeys",
+  rules: "Rules",
   providers: "Email providers",
   company: "About your company",
   brands: "Brands",
@@ -138,6 +139,7 @@ export const tabBlurbs: Record<Tab, string> = {
   topics: "What people can choose to get, such as product updates, and leave one at a time from the unsubscribe link.",
   broadcasts: "One lifecycle email to many people at once, such as a newsletter or a launch.",
   journeys: "Flows an event starts: send an email, wait, branch on what people did, exit.",
+  rules: "Turn what people do, or don't do, into events of your own that journeys start on: signed up and didn't activate within 7 days.",
   providers: "Amazon SES, Postmark or Resend, connected step by step, and the domains you send from.",
   "link-building": "Pages that could link to your site, from every way of earning links, followed until the link is live; one website pitched at a time.",
   news: "Saved news searches on your own Geonode: follow a topic and who writes about it, and keep every article about your brand as its coverage.",
@@ -211,6 +213,7 @@ export const tabDocs: Partial<Record<Tab, string>> = {
   topics: "/docs/guides/lifecycle-email/#topics-and-the-preference-page",
   broadcasts: "/docs/guides/lifecycle-email/#broadcasts",
   journeys: "/docs/guides/lifecycle-email/#journeys",
+  rules: "/docs/guides/rules/",
   providers: "/docs/integrations/email-providers/",
   allocation: "/docs/guides/mailbox-allocation/",
   senders: "/docs/guides/mailbox-allocation/",
@@ -269,7 +272,7 @@ export const modules: Module[] = [
   { id: "visitors", label: "Visitors", icon: "visitors", tabs: ["visitors"] },
   { id: "outreach", label: "Outreach", icon: "sequences", tabs: ["sequences", "link-building", "news", "allocation", "reports"] },
   { id: "deliverability", label: "Deliverability", icon: "mailboxes", tabs: ["infrastructure", "mailboxes", "domains", "warmup", "servers", "senders"] },
-  { id: "lifecycle", label: "Lifecycle", icon: "lifecycle", tabs: ["lifecycle", "broadcasts", "journeys", "templates", "topics", "emails", "providers"] },
+  { id: "lifecycle", label: "Lifecycle", icon: "lifecycle", tabs: ["lifecycle", "broadcasts", "journeys", "rules", "templates", "topics", "emails", "providers"] },
   { id: "seo", label: "SEO", icon: "seo", tabs: ["seo-overview", "audits", "fixes", "experiments", "keywords", "seo", "backlinks", "ai-visibility", "competitors"] },
   { id: "social", label: "Social", icon: "social", tabs: ["social", "reddit"] },
   { id: "reviews", label: "Reviews", icon: "reviews", tabs: ["reviews"] },
@@ -286,7 +289,7 @@ const allModules = modules;
 
 // Pages that work for someone kept to some brands. The others need every
 // brand (the API answers 403), so they are hidden from them.
-const brandTabs: readonly Tab[] = ["overview", "seo-overview", "audits", "fixes", "experiments", "keywords", "ai-visibility", "backlinks", "competitors", "link-building", "news", "reddit", "social", "reviews", "ads", "visitors", "tracking", "flags", "ab-tests", "inbox", "projects", "sequences", "leads", "lists", "lead-finder", "suppression", "mailboxes", "domains", "company", "brands", "setup", "ideal-customers", "members", "account", "instance"];
+const brandTabs: readonly Tab[] = ["overview", "seo-overview", "audits", "fixes", "experiments", "keywords", "ai-visibility", "backlinks", "competitors", "link-building", "news", "reddit", "social", "reviews", "ads", "visitors", "tracking", "flags", "ab-tests", "inbox", "projects", "sequences", "leads", "lists", "rules", "lead-finder", "suppression", "mailboxes", "domains", "company", "brands", "setup", "ideal-customers", "members", "account", "instance"];
 export const canOpen = (ws: Workspace | undefined, t: Tab) => !ws?.brand_ids?.length || brandTabs.includes(t);
 
 // The sidebar keeps two things. Pins are kept in this browser for the
@@ -996,6 +999,10 @@ function callFor(tab: Tab, ws: string, item?: string): Call {
       return item
         ? { title: "One journey", path: "/v1/workspaces/{ws}/journeys/{id}", params: { ...base, id: item }, mcp: "get_journey", ask: "How is this journey doing, and where do people drop out?", scope: "emails.read" }
         : { title: "Journeys", path: "/v1/workspaces/{ws}/journeys", params: base, mcp: "list_journeys", ask: "Build an onboarding journey: when someone signs up, send the welcome email, wait two days, and send tips unless they upgraded.", scope: "emails.read" };
+    case "rules":
+      return item
+        ? { title: "One rule", path: "/v1/workspaces/{ws}/rules/{id}", params: { ...base, id: item }, mcp: "get_rule", ask: "What would this rule have done over the last 30 days, and which journeys start on its event?", scope: "customers.read" }
+        : { title: "Rules", path: "/v1/workspaces/{ws}/rules", params: base, mcp: "list_rules", ask: "Make a rule that emits customer.stalled when someone signs up and doesn't activate within 7 days, unless they're on enterprise, and dry-run it.", scope: "customers.read" };
     case "topics":
       return { title: "Email topics", path: "/v1/workspaces/{ws}/email-topics", params: base, mcp: "list_email_topics", ask: "Add topics for product updates and our monthly newsletter, and put my lifecycle templates in the right one.", scope: "emails.read" };
     case "providers":

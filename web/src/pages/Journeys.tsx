@@ -1,17 +1,29 @@
 // Journeys: if-this-then-that flows for people on customer records. An
 // event on someone's timeline (or a manual add) starts a run that sends
 // lifecycle emails, waits, branches on what they did and exits. The page
-// lists journeys, builds their steps and shows who is in them.
+// lists journeys, builds their steps in the top-down flow builder
+// (components/journey-flow) and shows who is in them. A live journey is
+// read-only: Edit makes a draft version and Publish swaps it in.
 
-import { useCallback, useEffect, useState, type FormEvent, type ReactNode } from "react";
-import type { EmailTemplate, Journey, JourneyCondition, JourneyRun, JourneyStep } from "@outflare/sdk";
+import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from "react";
+import { Check, CircleAlert, Redo2, Undo2 } from "lucide-react";
+import type { EmailTemplate, Journey, JourneyRun, JourneyVersion, Rule, RuleSimulation } from "@outflare/sdk";
 import { api, errorMessage } from "../api";
 import { useBrand } from "@/lib/brand";
-import { Badge, Button, Card, confirmAction, Empty, ErrorText, field, Input, Loading, PageHeader, Stat, Stats, toast } from "../ui";
+import { track } from "@/lib/analytics";
+import { cn } from "@/lib/utils";
+import { useIsMobile } from "@/hooks/use-mobile";
+import { Badge, Button, Card, confirmAction, Empty, ErrorText, field, Input, Loading, Menu, PageHeader, Stat, Stats, toast } from "../ui";
 import { ago, plural, stamp } from "../format";
 import { DataTable, type ColumnDef } from "@/components/data-table";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { Facts } from "./Emails";
+import { Flow, type StepCard } from "@/components/journey-flow/flow";
+import {
+  changes, clean, conditionText, errorCount, insert, newStep, problems, remove, replace, stepLabel,
+  type Change, type Problem, type Slot, type Step, type StepKind,
+} from "@/components/journey-flow/model";
+import { StepPicker, useStepKinds } from "@/components/journey-flow/step-picker";
+import { EventInput, StepPanel, TriggerPanel, useFlowCatalog, type TriggerFields } from "@/components/journey-flow/step-panel";
 import type { Go } from "./Lifecycle";
 
 type Status = Journey["status"];
@@ -30,33 +42,6 @@ function StatusBadge({ j }: { j: Journey }) {
 function triggerText(j: Pick<Journey, "trigger">) {
   if (j.trigger.kind === "manual") return "When someone is added";
   return `When someone does ${j.trigger.event}`;
-}
-
-function waitText(s: number) {
-  if (s % 86400 === 0) return plural(s / 86400, "day");
-  if (s % 3600 === 0) return plural(s / 3600, "hour");
-  return plural(Math.round(s / 60), "minute");
-}
-
-const opText: Record<JourneyCondition["op"], string> = { eq: "is", neq: "is not", gt: "is more than", lt: "is less than", contains: "contains", exists: "is set", not_exists: "is not set" };
-
-function conditionText(c: JourneyCondition, steps: JourneyStep[]) {
-  const did = c.op === "exists";
-  if (c.event) return `${did ? "did" : "didn't do"} ${c.event}`;
-  if (c.email) return `${did ? "" : "not "}${c.email} ${label(steps.find((s) => s.id === c.step)) || c.step}`;
-  const what = c.attribute ?? `event ${c.property}`;
-  return c.op === "exists" || c.op === "not_exists" ? `${what} ${opText[c.op]}` : `${what} ${opText[c.op]} ${JSON.stringify(c.value)}`;
-}
-
-function label(s?: JourneyStep) {
-  if (!s) return "";
-  if (s.name) return s.name;
-  switch (s.kind) {
-    case "email": return `Send ${s.template}`;
-    case "wait": return `Wait ${waitText(s.wait_seconds ?? 0)}`;
-    case "branch": return "Check";
-    case "exit": return "Exit";
-  }
 }
 
 const columns: ColumnDef<Journey>[] = [
@@ -147,15 +132,6 @@ function useEvents(ws: string) {
   return events;
 }
 
-function EventInput({ id, label, value, onChange, events, hint, required, placeholder = "signed_up" }: { id: string; label: string; value: string; onChange: (v: string) => void; events: string[]; hint?: string; required?: boolean; placeholder?: string }) {
-  return (
-    <>
-      <Input label={label} hint={hint} value={value} onChange={(e) => onChange(e.target.value.trim())} placeholder={placeholder} list={id} required={required} pattern="[a-z][a-z0-9_]*(\.[a-z0-9_]+)*" />
-      <datalist id={id}>{events.map((e) => <option key={e} value={e} />)}</datalist>
-    </>
-  );
-}
-
 function NewJourneyDialog({ ws, onClose, onSaved }: { ws: string; onClose: () => void; onSaved: (j: Journey) => void }) {
   const events = useEvents(ws);
   const [name, setName] = useState("");
@@ -203,57 +179,399 @@ function NewJourneyDialog({ ws, onClose, onSaved }: { ws: string; onClose: () =>
   );
 }
 
+// ---- One journey: the flow builder ----
+
+// Work is the part of a journey the builder edits: what a version holds.
+type Work = { trigger: TriggerFields; steps: Step[] };
+
+type Source = Pick<Journey, "trigger" | "entry" | "goal_event" | "steps">;
+
+function workFrom(src: Source): Work {
+  return {
+    trigger: { kind: src.trigger.kind, event: src.trigger.event ?? "", filter: src.trigger.filter, entry: src.entry, goal: src.goal_event ?? "" },
+    steps: src.steps as Step[],
+  };
+}
+
+function bodyOf(w: Work) {
+  const t = w.trigger;
+  return {
+    trigger: t.kind === "event" ? { kind: t.kind, event: t.event, filter: t.filter } : { kind: t.kind },
+    entry: t.entry, goal_event: t.goal || null, steps: clean(w.steps),
+  };
+}
+
+const outcomeText: Record<string, string> = { sent: "sent", skipped: "skipped", waiting: "waiting", waited: "waited", yes: "yes", no: "no", failed: "failed", exited: "exited" };
+
+// stepCard is what a step's card says: its label, a detail line, and its
+// live numbers.
+const pct = (n: number, of: number) => `${Math.round((100 * n) / of)}%`;
+
+function stepCard(s: Step, j: Journey, kinds: StepKind[], templates: EmailTemplate[], steps: Step[], probs: Problem[]): StepCard {
+  const st = j.step_stats?.[s.id] ?? {};
+  const em = j.email_stats?.[s.id];
+  const n = (o: string) => st[o] ?? 0;
+  const numbers: StepCard["numbers"] = [];
+  let detail: string | undefined;
+  switch (s.kind) {
+    case "email": {
+      const t = templates.find((x) => x.handle === s.template || x.id === s.template);
+      // The label already names the template, unless the step has a name.
+      if (s.name || (t && !t.published_version)) detail = t ? `${t.name}${t.published_version ? "" : " (not published)"}` : s.template;
+      if (n("sent")) numbers.push({ text: `${n("sent")} sent` });
+      // Opens and clicks as rates of delivered email, as email tools show them.
+      if (em?.delivered) numbers.push({ text: `${pct(em.opened, em.delivered)} opened` }, { text: `${pct(em.clicked, em.delivered)} clicked` });
+      if (n("skipped")) numbers.push({ text: `${n("skipped")} skipped`, tone: "amber" });
+      break;
+    }
+    case "wait":
+      if (n("waited")) numbers.push({ text: `${n("waited")} waited` });
+      break;
+    case "branch":
+      detail = (s.conditions ?? []).map((c) => conditionText(c, steps)).join(s.match === "any" ? " or " : " and ");
+      if (n("yes") || n("no")) numbers.push({ text: `Yes ${n("yes")} (${pct(n("yes"), n("yes") + n("no"))})` }, { text: `No ${n("no")}` });
+      break;
+    case "exit":
+      if (n("exited")) numbers.push({ text: `${n("exited")} exited` });
+      break;
+    default:
+      for (const [o, c] of Object.entries(st)) if (o !== "waiting" && o !== "failed") numbers.push({ text: `${c} ${outcomeText[o] ?? o}` });
+  }
+  if (n("failed")) numbers.push({ text: `${n("failed")} failed`, tone: "red" });
+  return { label: stepLabel(s, kinds, templates), detail, numbers, here: j.at_step?.[s.id] ?? 0, problems: probs };
+}
+
+// StepResults is what a step has done and who is on it now, in its side
+// panel: each number leads to the people behind it, as in email tools.
+function StepResults({ ws, j, step, card }: { ws: string; j: Journey; step: Step; card: StepCard }) {
+  const [runs, setRuns] = useState<JourneyRun[] | null>(null);
+  const here = j.at_step?.[step.id] ?? 0;
+  useEffect(() => {
+    setRuns(null);
+    if (!here) return;
+    api.GET("/v1/workspaces/{ws}/journeys/{id}/runs", { params: { path: { ws, id: j.id }, query: { status: "active", step: step.id, limit: 20 } } }).then(({ data }) => setRuns(data?.data ?? []));
+  }, [ws, j.id, step.id, here]);
+  if (!card.numbers.length && !here) return null;
+  return (
+    <div className="space-y-2 rounded-md border p-3 text-[13px]">
+      {card.numbers.length > 0 && <p><span className="font-medium">So far: </span>{card.numbers.map((n) => n.text).join(" · ")}</p>}
+      {here > 0 && (
+        <div>
+          <span className="font-medium">On this step now: {here}</span>
+          {!runs ? <Loading /> : (
+            <ul className="mt-1 space-y-0.5">
+              {runs.map((r) => (
+                <li key={r.id} className="flex justify-between gap-2">
+                  <span className="truncate">{r.name || "Unnamed person"}</span>
+                  <span className="shrink-0 text-muted-foreground">{r.next_at ? `until ${stamp(r.next_at)}` : ago(r.entered_at)}</span>
+                </li>
+              ))}
+              {here > runs.length && <li className="text-muted-foreground">and {here - runs.length} more</li>}
+            </ul>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// useRules is the workspace's rules, to link a trigger to the rule that
+// emits its event. Someone who can't read rules sees no link.
+function useRules(ws: string) {
+  const [rules, setRules] = useState<Rule[]>([]);
+  useEffect(() => {
+    api.GET("/v1/workspaces/{ws}/rules", { params: { path: { ws } } }).then(({ data }) => setRules(data?.data ?? []));
+  }, [ws]);
+  return rules;
+}
+
+function useTemplates(ws: string) {
+  const [templates, setTemplates] = useState<EmailTemplate[] | null>(null);
+  useEffect(() => {
+    api.GET("/v1/workspaces/{ws}/email-templates", { params: { path: { ws } } }).then(({ data }) =>
+      setTemplates((data?.data ?? []).filter((t) => t.purpose === "lifecycle" && t.status === "active")),
+    );
+  }, [ws]);
+  return templates;
+}
+
+// RuleDryRun is what the rule behind a trigger would have done lately.
+function useDryRun(ws: string, rule?: Rule) {
+  const [sim, setSim] = useState<RuleSimulation | null>(null);
+  useEffect(() => {
+    setSim(null);
+    if (!rule) return;
+    api.POST("/v1/workspaces/{ws}/rules/{id}/simulate", { params: { path: { ws, id: rule.id } }, body: { days: 30 } }).then(({ data }) => setSim(data ?? null));
+  }, [ws, rule?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+  return sim;
+}
+
+function TriggerCard({ t, rule, sim, go }: { t: TriggerFields; rule?: Rule; sim: RuleSimulation | null; go: Go }) {
+  return (
+    <>
+      <span className="truncate text-[13px] font-medium">{t.kind === "manual" ? "When someone is added" : <>When someone does <code>{t.event || "…"}</code></>}</span>
+      {rule && (
+        <span className="truncate text-muted-foreground">
+          Emitted by the rule{" "}
+          <button type="button" className="underline" onClick={(e) => { e.stopPropagation(); go("rules", rule.id); }}>{rule.name}</button>
+        </span>
+      )}
+      <span className="truncate text-muted-foreground">
+        {t.filter.length ? `Only if ${t.filter.map((c) => conditionText(c, [])).join(" and ")} · ` : ""}{t.entry === "once" ? "Once per person" : "Again after they finish"}{t.goal ? ` · Goal: ${t.goal}` : ""}
+      </span>
+      {sim && <span className="truncate text-muted-foreground" title={sim.note}>Dry run: {plural(sim.records, "person", "people")} in {sim.window_days} days{sim.truncated ? " (at least)" : ""}</span>}
+    </>
+  );
+}
+
 function JourneyDetail({ ws, id, canManage, back, go }: { ws: string; id: string; canManage: boolean; back: () => void; go: Go }) {
+  const kinds = useStepKinds(ws);
+  const templates = useTemplates(ws);
+  const catalog = useFlowCatalog(ws);
+  const rules = useRules(ws);
+  const mobile = useIsMobile();
   const [j, setJ] = useState<Journey | null>(null);
-  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState<JourneyVersion | null>(null);
+  const [versions, setVersions] = useState<JourneyVersion[] | null>(null);
+  const [viewing, setViewing] = useState<JourneyVersion | null>(null);
+  const [work, setWork] = useState<Work | null>(null);
+  const [dirty, setDirty] = useState(false);
+  const [panel, setPanel] = useState<{ step: string } | "trigger" | null>(null);
+  const [picker, setPicker] = useState<Slot | null>(null);
+  const [publishing, setPublishing] = useState(false);
+  const [renaming, setRenaming] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
-  const load = useCallback(async () => {
+  // Changes save themselves a moment after the last edit, as in other flow
+  // builders; undo and redo walk back through this session's edits.
+  const [saving, setSaving] = useState<"saved" | "saving" | "failed">("saved");
+  const [saveError, setSaveError] = useState("");
+  const past = useRef<Work[]>([]);
+  const future = useRef<Work[]>([]);
+  const workRef = useRef<Work | null>(null);
+  workRef.current = work;
+  const saveRef = useRef<() => Promise<boolean>>(async () => false);
+  const undoRef = useRef<(redo: boolean) => void>(() => {});
+
+  const loadVersions = useCallback(async () => {
+    const { data } = await api.GET("/v1/workspaces/{ws}/journeys/{id}/versions", { params: { path: { ws, id } } });
+    setVersions(data?.data ?? []);
+  }, [ws, id]);
+  // load reads the journey; with fresh, it also starts the builder again
+  // from what is saved (its own steps for a journey not live yet, else its
+  // draft version).
+  const load = useCallback(async (fresh = true) => {
     const { data, error } = await api.GET("/v1/workspaces/{ws}/journeys/{id}", { params: { path: { ws, id } } });
-    if (error) return setError(errorMessage(error));
-    setJ(data!);
+    if (error || !data) return setError(errorMessage(error));
+    setJ(data);
+    if (!fresh) return;
+    let d: JourneyVersion | null = null;
+    if (data.draft_updated_at) {
+      const res = await api.GET("/v1/workspaces/{ws}/journeys/{id}/draft", { params: { path: { ws, id } } });
+      d = res.data ?? null;
+    }
+    setDraft(d);
+    setWork(data.status === "draft" ? workFrom(data) : d ? workFrom(d) : null);
+    setDirty(false);
+    past.current = [];
+    future.current = [];
   }, [ws, id]);
   useEffect(() => {
     load();
-  }, [load]);
+    loadVersions();
+  }, [load, loadVersions]);
+  // Live numbers: look again every 30 seconds while people move through it.
+  useEffect(() => {
+    if (j?.status !== "active") return;
+    const t = setInterval(() => document.visibilityState === "visible" && load(false), 30000);
+    return () => clearInterval(t);
+  }, [j?.status, load]);
+
+  useEffect(() => {
+    if (!dirty || !work) return;
+    const t = setTimeout(() => saveRef.current(), 1200);
+    return () => clearTimeout(t);
+  }, [dirty, work]);
+  useEffect(() => {
+    if (!dirty && saving !== "saving") return;
+    const warn = (e: BeforeUnloadEvent) => e.preventDefault();
+    window.addEventListener("beforeunload", warn);
+    return () => window.removeEventListener("beforeunload", warn);
+  }, [dirty, saving]);
+  useEffect(() => {
+    const key = (e: KeyboardEvent) => {
+      const t = e.target as HTMLElement | null;
+      if (!(e.metaKey || e.ctrlKey) || t?.closest("input, textarea, select, [contenteditable]")) return;
+      const k = e.key.toLowerCase();
+      if (k !== "z" && k !== "y") return;
+      e.preventDefault();
+      undoRef.current(k === "y" || e.shiftKey);
+    };
+    window.addEventListener("keydown", key);
+    return () => window.removeEventListener("keydown", key);
+  }, []);
+
+  const shown: Work | null = viewing ? workFrom(viewing) : work ?? (j ? workFrom(j) : null);
+  const editable = !!(canManage && !mobile && !viewing && work && j && j.status !== "archived");
+  const probs = useMemo(() => (shown ? problems(kinds, shown.steps, templates) : new Map<string, Problem[]>()), [shown, kinds, templates]);
+  const rule = useMemo(() => shown?.trigger.kind === "event" ? rules.find((r) => r.emit_event === shown.trigger.event && r.status !== "archived") : undefined, [rules, shown?.trigger.kind, shown?.trigger.event]);
+  const sim = useDryRun(ws, rule);
 
   if (error && !j) return <Empty title="Could not load this journey" action={<Button onClick={back}>All journeys</Button>}>{error}</Empty>;
-  if (!j) return <Loading />;
+  if (!j || !shown || !templates) return <Loading />;
 
-  async function act(to: "activate" | "pause" | "archive") {
+  const errors = errorCount(probs);
+  const live = j.status === "active" || j.status === "paused";
+  const change = (w: Work) => {
+    if (work) past.current = [...past.current.slice(-49), work];
+    future.current = [];
+    setWork(w);
+    setDirty(true);
+  };
+  undoRef.current = (redo) => {
+    if (!editable || !work) return;
+    const from = redo ? future : past;
+    const to = redo ? past : future;
+    const w = from.current.pop();
+    if (!w) return;
+    to.current.push(work);
+    track("ui.journey_change_undone", { redo });
+    setWork(w);
+    setDirty(true);
+  };
+  const setSteps = (steps: Step[]) => work && change({ ...work, steps });
+
+  async function save(): Promise<boolean> {
+    const sent = workRef.current;
+    if (!sent || !j) return false;
+    setSaving("saving");
+    const res = j.status === "draft"
+      ? await api.PATCH("/v1/workspaces/{ws}/journeys/{id}", { params: { path: { ws, id } }, body: bodyOf(sent) })
+      : await api.PATCH("/v1/workspaces/{ws}/journeys/{id}/draft", { params: { path: { ws, id } }, body: bodyOf(sent) });
+    if (res.error) {
+      setSaving("failed");
+      setSaveError(errorMessage(res.error));
+      return false;
+    }
+    setSaving("saved");
+    setSaveError("");
+    // Edits made while it saved still need saving.
+    if (workRef.current === sent) setDirty(false);
+    if (j.status !== "draft") setDraft(res.data as JourneyVersion);
+    else setJ({ ...(res.data as Journey), step_stats: j.step_stats, at_step: j.at_step, email_stats: j.email_stats });
+    return true;
+  }
+  saveRef.current = save;
+
+  async function act(to: "activate" | "pause" | "archive", reviewed = false) {
     const ask = {
-      activate: ["Activate this journey?", j!.trigger.kind === "event" ? `From now on, everyone who does ${j!.trigger.event} starts it and gets its emails.` : "People you add start it and get its emails.", "Activate", false],
+      activate: ["Activate this journey?", shown!.trigger.kind === "event" ? `From now on, everyone who does ${shown!.trigger.event} starts it and gets its emails.` : "People you add start it and get its emails.", "Activate", false],
       pause: ["Pause this journey?", "No one new starts, and everyone in it stays where they are until you activate it again.", "Pause", false],
       archive: ["Archive this journey?", "It stops for good and everyone in it is taken out. This can't be undone.", "Archive", true],
     }[to] as [string, string, string, boolean];
-    if (!(await confirmAction(...ask))) return;
+    if (!reviewed && !(await confirmAction(...ask))) return;
+    if (to === "activate" && dirty && !(await save())) return;
     setBusy(true);
     const path = `/v1/workspaces/{ws}/journeys/{id}/${to}` as "/v1/workspaces/{ws}/journeys/{id}/activate";
     const { data, error } = await api.POST(path, { params: { path: { ws, id } } });
     setBusy(false);
     if (error || !data) return toast(errorMessage(error), "error");
-    setJ({ ...data, step_stats: j!.step_stats });
     toast({ activate: "Active.", pause: "Paused.", archive: "Archived." }[to]);
+    setPublishing(false);
+    await load();
+    loadVersions();
   }
 
+  async function edit() {
+    setBusy(true);
+    const { data, error } = await api.POST("/v1/workspaces/{ws}/journeys/{id}/draft", { params: { path: { ws, id } } });
+    setBusy(false);
+    if (error || !data) return toast(errorMessage(error), "error");
+    setViewing(null);
+    setDraft(data);
+    setWork(workFrom(data));
+    setDirty(false);
+    past.current = [];
+    future.current = [];
+    loadVersions();
+  }
+
+  async function discard() {
+    if (!(await confirmAction("Throw away this draft?", "Your changes are lost. The live version keeps running as it is.", "Discard"))) return;
+    const { error } = await api.DELETE("/v1/workspaces/{ws}/journeys/{id}/draft", { params: { path: { ws, id } } });
+    if (error) return toast(errorMessage(error), "error");
+    toast("Draft discarded.");
+    await load();
+    loadVersions();
+  }
+
+  async function publish(runs: "keep" | "move") {
+    if (dirty && !(await save())) return;
+    setBusy(true);
+    const { data, error } = await api.POST("/v1/workspaces/{ws}/journeys/{id}/publish", { params: { path: { ws, id } }, body: { runs } });
+    setBusy(false);
+    if (error || !data) return toast(errorMessage(error), "error");
+    setPublishing(false);
+    toast(`Version ${data.version} is live.`);
+    await load();
+    loadVersions();
+  }
+
+  function addStep(slot: Slot, k: StepKind) {
+    if (!work) return;
+    const s = newStep(kinds, k.kind, work.steps, templates ?? [], work.trigger.goal);
+    track("ui.journey_step_added", { kind: k.kind, group: k.group, at: slot.from === null ? "start" : slot.field });
+    setSteps(insert(kinds, work.steps, slot, s));
+    setPicker(null);
+    setPanel({ step: s.id });
+  }
+
+  async function removeStep(id: string) {
+    if (!work) return;
+    const gone = work.steps.find((s) => s.id === id);
+    const { steps, dropped } = remove(kinds, work.steps, id);
+    if (dropped.length && !(await confirmAction("Remove this step?", `These steps only it leads to go too: ${dropped.map((d) => stepLabel(d, kinds, templates ?? [])).join(", ")}.`, "Remove"))) return;
+    track("ui.journey_step_removed", { kind: gone?.kind, also_removed: dropped.length });
+    setSteps(steps);
+    setPanel(null);
+  }
+
+  const open = panel && panel !== "trigger" ? shown.steps.find((s) => s.id === panel.step) : undefined;
+  const liveVersion = versions?.find((v) => v.status === "published" && v.version === j.version);
   const s = j.stats;
-  const changeable = j.status === "draft" || j.status === "paused";
+  const banner = viewing ? (
+    <Notice tone="grey" action={<Button variant="ghost" onClick={() => setViewing(null)}>Back to {work && j.status !== "draft" ? "the draft" : "the live version"}</Button>}>
+      Version {viewing.version}{viewing.published_at ? `, published ${stamp(viewing.published_at)}` : ""}. Read-only.{viewing.runs_active ? ` ${plural(viewing.runs_active, "person is", "people are")} still going through it.` : ""}
+    </Notice>
+  ) : draft && live ? (
+    <Notice tone="blue">Editing a draft of version {j.version}. Everyone keeps going through version {j.version} until you publish.</Notice>
+  ) : live && canManage && !mobile ? (
+    <Notice tone="grey">Live and read-only. Press Edit to make a draft version; publish it to swap it in.</Notice>
+  ) : null;
+
   return (
     <div className="space-y-6">
       <PageHeader
         back={{ label: "Journeys", onClick: back }}
-        title={<span className="flex items-center gap-2">{j.name} <StatusBadge j={j} /></span>}
+        title={<span className="flex flex-wrap items-center gap-2">{j.name} <StatusBadge j={j} />{live && <Badge tone="grey">v{j.version}</Badge>}</span>}
         description={j.description || undefined}
-        action={canManage && j.status !== "archived" && !editing && (
+        action={canManage && j.status !== "archived" && (
           <div className="flex flex-wrap gap-2">
-            {changeable && <Button variant="ghost" onClick={() => setEditing(true)}>Edit</Button>}
-            {j.status !== "draft" || j.stats.entered > 0 ? <Button variant="ghost" onClick={() => act("archive")} disabled={busy}>Archive</Button> : null}
-            {j.status === "active" && <Button variant="ghost" onClick={() => act("pause")} disabled={busy}>Pause</Button>}
-            {changeable && <Button onClick={() => act("activate")} disabled={busy || j.steps.length === 0}>Activate</Button>}
+            {editable && <SaveState state={dirty && saving === "saved" ? "pending" : saving} error={saveError} retry={() => saveRef.current()}
+              undo={past.current.length > 0 ? () => undoRef.current(false) : undefined} redo={future.current.length > 0 ? () => undoRef.current(true) : undefined} />}
+            {live && !draft && !mobile && <Button variant="ghost" onClick={edit} disabled={busy}>Edit</Button>}
+            {live && draft && <Button variant="ghost" onClick={discard} disabled={busy}>Discard draft</Button>}
+            {live && draft && <Button onClick={() => setPublishing(true)} disabled={busy}>Review and publish</Button>}
+            {j.status === "active" && !draft && <Button variant="ghost" onClick={() => act("pause")} disabled={busy}>Pause</Button>}
+            {j.status === "draft" && <Button onClick={() => setPublishing(true)} disabled={busy}>Review and activate</Button>}
+            {j.status === "paused" && !draft && <Button onClick={() => act("activate")} disabled={busy || errors > 0} title={errors ? "Fix the problems first" : undefined}>Activate</Button>}
+            <Menu items={[
+              { label: "Name and description", onClick: () => setRenaming(true) },
+              (j.status !== "draft" || j.stats.entered > 0) && { label: "Archive", onClick: () => act("archive"), danger: true },
+            ]} />
           </div>
         )}
       />
-      {j.status === "active" && canManage && <p className="text-[13px] text-muted-foreground">To change its steps, pause it first. People in it wait where they are while it is paused.</p>}
       <Stats cols={5}>
         <Stat label="Entered" value={s.entered} />
         <Stat label="In it now" value={s.active} />
@@ -261,349 +579,253 @@ function JourneyDetail({ ws, id, canManage, back, go }: { ws: string; id: string
         <Stat label="Exited" value={s.exited} sub="goal, exit step or taken out" />
         <Stat label="Failed" value={s.failed} tone={s.failed ? "red" : undefined} />
       </Stats>
-      {editing ? (
-        <JourneyEditor ws={ws} journey={j} onCancel={() => setEditing(false)} onSaved={(v) => { setEditing(false); setJ({ ...v, step_stats: j.step_stats }); }} go={go} />
-      ) : (
-        <>
-          <div className="grid gap-4 lg:grid-cols-2">
-            <Card title="Starts">
-              <Facts rows={[
-                ["Trigger", triggerText(j)],
-                ...(j.trigger.filter.length ? [["Only if", j.trigger.filter.map((c) => conditionText(c, j.steps)).join(" and ")] as [string, ReactNode]] : []),
-                ["Entry", j.entry === "once" ? "Once per person, ever" : "Again after they finish"],
-                ["Goal", j.goal_event ? `Doing ${j.goal_event} ends their run` : "None"],
-                ["Activated", j.activated_at ? stamp(j.activated_at) : "Not yet"],
-              ]} />
-            </Card>
-            <Card title="Who gets its emails">
-              <p className="text-[13px] text-muted-foreground">
-                People on your customer records with a verified email address. Each email is filled in with their own fields ({"{{person.first_name}}"}) and the event's ({"{{event.plan}}"}). Anyone who left the email's topic or all marketing email is skipped and goes on to the next step.
-              </p>
-            </Card>
-          </div>
-          <Card title="Steps" action={changeable && canManage && <Button variant="ghost" onClick={() => setEditing(true)}>Edit steps</Button>}>
-            {j.steps.length === 0 ? <p className="text-[13px] text-muted-foreground">No steps yet. Edit the journey to add an email, a wait or a check.</p> : <StepList j={j} go={go} />}
-          </Card>
-        </>
+      {banner}
+      {mobile && canManage && (work || live) && <p className="text-[13px] text-muted-foreground">Open this journey on a wider screen to change it.</p>}
+      <Flow
+        steps={shown.steps} kinds={kinds}
+        trigger={<TriggerCard t={shown.trigger} rule={rule} sim={sim} go={go} />}
+        card={(x) => stepCard(x, j, kinds, templates, shown.steps, probs.get(x.id) ?? [])}
+        selected={open?.id}
+        onOpen={(sid) => {
+          track("ui.journey_step_opened", { kind: shown.steps.find((x) => x.id === sid)?.kind, editable });
+          setPanel({ step: sid });
+        }}
+        onOpenTrigger={() => {
+          track("ui.journey_trigger_opened", { editable });
+          setPanel("trigger");
+        }}
+        onAdd={editable ? (slot) => {
+          track("ui.journey_step_picker_opened", { from: slot.from === null ? "start" : "link" });
+          setPicker(slot);
+        } : undefined}
+      />
+      <ProblemSummary probs={probs} steps={shown.steps} kinds={kinds} templates={templates} live={live} onOpen={(sid) => setPanel(sid ? { step: sid } : "trigger")} />
+      {versions && versions.some((v) => v.status === "published") && (
+        <VersionsCard versions={versions} current={j.version} viewing={viewing} kinds={kinds} templates={templates} live={liveVersion}
+          onView={(v) => {
+            track("ui.journey_version_viewed", { version: v.version ?? undefined, current: v.version === j.version });
+            setPanel(null);
+            setViewing(v.version === j.version && !work ? null : v);
+          }} />
       )}
       {j.stats.entered > 0 && <RunsCard ws={ws} j={j} canManage={canManage} go={go} />}
+      {picker && <StepPicker kinds={kinds} onPick={(k) => addStep(picker, k)} onClose={() => setPicker(null)} onConnect={() => go("connectors")} />}
+      {open && (
+        <StepPanel step={open} steps={shown.steps} kinds={kinds} templates={templates} catalog={catalog} event={shown.trigger.kind === "event" ? shown.trigger.event : null}
+          problems={probs.get(open.id) ?? []} editable={editable} go={go}
+          extra={!viewing && <StepResults ws={ws} j={j} step={open} card={stepCard(open, j, kinds, templates, shown.steps, [])} />}
+          onChange={(x) => work && setSteps(replace(work.steps, x))} onRemove={() => removeStep(open.id)} onClose={() => setPanel(null)} />
+      )}
+      {panel === "trigger" && (
+        <TriggerPanel value={shown.trigger} editable={editable} catalog={catalog} onClose={() => setPanel(null)}
+          onChange={(t) => work && change({ ...work, trigger: t })}
+          rule={rule && (
+            <p className="text-[12px] text-muted-foreground">
+              The rule <button type="button" className="underline" onClick={() => go("rules", rule.id)}>{rule.name}</button> emits this event.
+              {sim && ` It would have fired for ${plural(sim.records, "person", "people")} in the last ${sim.window_days} days.`}
+            </p>
+          )} />
+      )}
+      {publishing && work && (
+        <ReviewDialog j={j} work={work} kinds={kinds} templates={templates} probs={probs} rule={rule} sim={sim} busy={busy}
+          onPublish={j.status === "draft" ? () => act("activate", true) : publish}
+          onOpen={(sid) => { setPublishing(false); setPanel(sid ? { step: sid } : "trigger"); }} onClose={() => setPublishing(false)} />
+      )}
+      {renaming && <RenameDialog ws={ws} j={j} onClose={() => setRenaming(false)} onSaved={(v) => { setRenaming(false); setJ({ ...v, step_stats: j.step_stats, at_step: j.at_step, email_stats: j.email_stats }); }} />}
     </div>
   );
 }
 
-const outcomeText: Record<string, string> = { sent: "sent", skipped: "skipped", waiting: "waiting", waited: "waited", yes: "yes", no: "no", failed: "failed", exited: "exited" };
-
-function StepList({ j, go }: { j: Journey; go: Go }) {
-  const byID = new Map(j.steps.map((s) => [s.id, s]));
-  const to = (id?: string) => (id ? label(byID.get(id)) : "End");
+function Notice({ tone, children, action }: { tone: "grey" | "blue"; children: ReactNode; action?: ReactNode }) {
   return (
-    <ol className="space-y-2">
-      {j.steps.map((s, i) => {
-        const stats = j.step_stats?.[s.id] ?? {};
-        return (
-          <li key={s.id} className="rounded-md border p-3 text-[13px]">
-            <div className="flex flex-wrap items-baseline justify-between gap-2">
-              <span className="font-medium"><span className="mr-2 text-muted-foreground">{i + 1}</span>{label(s)}</span>
-              <span className="text-[12px] text-muted-foreground">
-                {Object.entries(stats).filter(([o]) => o !== "waiting").map(([o, n]) => `${n} ${outcomeText[o] ?? o}`).join(" · ")}
-              </span>
-            </div>
-            <div className="mt-1 text-[12px] text-muted-foreground">
-              {s.kind === "email" && <>Template <button className="underline" onClick={() => go("templates", s.template)}>{s.template}</button>, then {to(s.next)}</>}
-              {s.kind === "wait" && <>Then {to(s.next)}</>}
-              {s.kind === "branch" && <>If {(s.conditions ?? []).map((c) => conditionText(c, j.steps)).join(s.match === "any" ? " or " : " and ")}: {to(s.then)}. Otherwise: {to(s.else)}.</>}
-              {s.kind === "exit" && <>Ends their run.</>}
-            </div>
-          </li>
-        );
-      })}
-    </ol>
+    <div className={cn("flex flex-wrap items-center justify-between gap-2 rounded-md border px-3 py-2 text-[13px]", tone === "blue" ? "border-blue-500/40 bg-blue-500/5" : "bg-muted/40")}>
+      <span>{children}</span>
+      {action}
+    </div>
   );
 }
 
-// ---- Building a journey ----
-
-type Unit = 60 | 3600 | 86400;
-const units: [Unit, string][] = [[60, "minutes"], [3600, "hours"], [86400, "days"]];
-
-function newID(kind: JourneyStep["kind"], steps: JourneyStep[]) {
-  for (let n = 1; ; n++) {
-    const id = `${kind}-${n}`;
-    if (!steps.some((s) => s.id === id)) return id;
-  }
+function ProblemSummary({ probs, steps, kinds, templates, live, onOpen }: { probs: Map<string, Problem[]>; steps: Step[]; kinds: StepKind[]; templates: EmailTemplate[]; live: boolean; onOpen: (id: string) => void }) {
+  const rows = [...probs.entries()].flatMap(([sid, list]) => list.map((p) => ({ sid, p })));
+  if (!rows.length) return null;
+  const errors = rows.filter((r) => r.p.level === "error").length;
+  return (
+    <Card title={errors ? `${plural(errors, "problem")} to fix before it can ${live ? "be published" : "go live"}` : "Worth a look"}>
+      <ul className="space-y-1 text-[13px]">
+        {rows.map(({ sid, p }, i) => (
+          <li key={i} className="flex gap-2">
+            <span className={p.level === "error" ? "text-red-700 dark:text-red-400" : "text-amber-700 dark:text-amber-400"}>{p.level === "error" ? "Problem" : "Warning"}</span>
+            {sid ? <button type="button" className="font-medium underline" onClick={() => onOpen(sid)}>{stepLabel(steps.find((s) => s.id === sid), kinds, templates)}</button> : <span className="font-medium">Journey</span>}
+            <span className="text-muted-foreground">{p.text}</span>
+          </li>
+        ))}
+      </ul>
+    </Card>
+  );
 }
 
-function parseValue(v: string): unknown {
-  if (v === "true" || v === "false") return v === "true";
-  if (v.trim() !== "" && !Number.isNaN(Number(v))) return Number(v);
-  return v;
+function ChangeList({ list }: { list: Change[] }) {
+  if (!list.length) return <p className="text-[13px] text-muted-foreground">The steps are the same; the trigger, entry or goal may differ.</p>;
+  const tone = { added: "green", removed: "red", changed: "amber" } as const;
+  return (
+    <ul className="space-y-1 text-[13px]">
+      {list.map((c, i) => <li key={i} className="flex items-center gap-2"><Badge tone={tone[c.kind]}>{c.kind}</Badge>{c.label}</li>)}
+    </ul>
+  );
 }
 
-function JourneyEditor({ ws, journey, onCancel, onSaved, go }: { ws: string; journey: Journey; onCancel: () => void; onSaved: (j: Journey) => void; go: Go }) {
-  const events = useEvents(ws);
-  const [templates, setTemplates] = useState<EmailTemplate[] | null>(null);
-  const [name, setName] = useState(journey.name);
-  const [description, setDescription] = useState(journey.description);
-  const [kind, setKind] = useState(journey.trigger.kind);
-  const [event, setEvent] = useState(journey.trigger.event ?? "");
-  const [filter, setFilter] = useState<JourneyCondition[]>(journey.trigger.filter);
-  const [entry, setEntry] = useState(journey.entry);
-  const [goal, setGoal] = useState(journey.goal_event ?? "");
-  const [steps, setSteps] = useState<JourneyStep[]>(journey.steps);
-  const [busy, setBusy] = useState(false);
+function VersionsCard({ versions, current, viewing, kinds, templates, live, onView }: {
+  versions: JourneyVersion[]; current: number; viewing: JourneyVersion | null; kinds: StepKind[]; templates: EmailTemplate[]; live?: JourneyVersion; onView: (v: JourneyVersion) => void;
+}) {
+  const published = versions.filter((v) => v.status === "published");
+  return (
+    <Card title="Versions" description="Every version that went live is kept. People finish on the version they entered on unless a publish moved them.">
+      <ul className="divide-y text-[13px]">
+        {published.map((v) => (
+          <li key={v.id} className="flex flex-wrap items-center justify-between gap-2 py-2">
+            <span className="flex items-center gap-2">
+              <span className="font-medium">Version {v.version}</span>
+              {v.version === current && <Badge tone="green">Live</Badge>}
+              {viewing?.id === v.id && <Badge tone="blue">Showing</Badge>}
+              <span className="text-muted-foreground">{v.published_at ? `published ${ago(v.published_at)}` : ""}{v.runs_active ? ` · ${plural(v.runs_active, "person", "people")} in it` : ""}</span>
+            </span>
+            <Button variant="ghost" onClick={() => onView(v)}>View</Button>
+          </li>
+        ))}
+      </ul>
+      {viewing && live && viewing.id !== live.id && (
+        <div className="mt-3 space-y-2 border-t pt-3">
+          <span className="block text-[13px] font-medium">From version {viewing.version} to the live version {live.version}</span>
+          <ChangeList list={changes(viewing.steps as Step[], live.steps as Step[], kinds, templates)} />
+        </div>
+      )}
+    </Card>
+  );
+}
+
+// SaveState says whether the builder's edits are saved, with undo and redo.
+function SaveState({ state, error, retry, undo, redo }: { state: "pending" | "saving" | "saved" | "failed"; error: string; retry: () => void; undo?: () => void; redo?: () => void }) {
+  const btn = "flex size-8 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-40";
+  return (
+    <span className="flex items-center gap-1 text-[12px] text-muted-foreground">
+      <button type="button" className={btn} onClick={undo} disabled={!undo} aria-label="Undo" title="Undo (⌘Z)"><Undo2 className="size-4" /></button>
+      <button type="button" className={btn} onClick={redo} disabled={!redo} aria-label="Redo" title="Redo (⇧⌘Z)"><Redo2 className="size-4" /></button>
+      {state === "failed" ? (
+        <span className="flex items-center gap-1 text-red-700 dark:text-red-400" title={error}>
+          <CircleAlert className="size-3.5" />Not saved: {error.slice(0, 80)} <button type="button" className="underline" onClick={retry}>Try again</button>
+        </span>
+      ) : <span className="w-16">{state === "saved" ? "Saved" : "Saving…"}</span>}
+    </span>
+  );
+}
+
+// ReviewDialog is the last look before a journey goes live or a new
+// version is published: what starts it, whether every step is ready, what
+// changed, and what happens to the people already in it.
+function ReviewDialog({ j, work, kinds, templates, probs, rule, sim, busy, onPublish, onOpen, onClose }: {
+  j: Journey; work: Work; kinds: StepKind[]; templates: EmailTemplate[]; probs: Map<string, Problem[]>; rule?: Rule; sim: RuleSimulation | null; busy: boolean;
+  onPublish: (runs: "keep" | "move") => void; onOpen: (step: string) => void; onClose: () => void;
+}) {
+  const [runs, setRuns] = useState<"keep" | "move">("keep");
+  const first = j.status === "draft";
+  const list = changes(j.steps as Step[], work.steps, kinds, templates);
+  const ids = new Set(work.steps.map((s) => s.id));
+  const stranded = Object.entries(j.at_step ?? {}).filter(([sid]) => !ids.has(sid)).reduce((n, [, c]) => n + c, 0);
+  const rows = [...probs.entries()].flatMap(([sid, ps]) => ps.map((p) => ({ sid, p })));
+  const errors = rows.filter((r) => r.p.level === "error");
+  const warnings = rows.filter((r) => r.p.level === "warning");
+  const emails = work.steps.filter((s) => s.kind === "email").length;
+  const t = work.trigger;
+  const item = (ok: boolean, text: ReactNode) => (
+    <li className="flex items-start gap-2">
+      {ok ? <Check className="mt-0.5 size-4 shrink-0 text-green-600 dark:text-green-400" /> : <CircleAlert className="mt-0.5 size-4 shrink-0 text-red-600 dark:text-red-400" />}
+      <span>{text}</span>
+    </li>
+  );
+  return (
+    <Dialog open onOpenChange={(o) => !o && onClose()}>
+      <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-lg">
+        <DialogHeader>
+          <DialogTitle>{first ? "Review and activate" : `Review and publish version ${j.version + 1}`}</DialogTitle>
+          <DialogDescription>{first ? "Once it's on, it emails people as they qualify." : `It replaces version ${j.version} for everyone who starts from now on. Version ${j.version} is kept.`}</DialogDescription>
+        </DialogHeader>
+        <div className="space-y-4 text-[13px]">
+          <div>
+            <span className="font-medium">Who starts it</span>
+            <p className="text-muted-foreground">
+              {t.kind === "manual" ? "People you add, by hand or through the API." : <>Everyone who does <code>{t.event}</code>{t.filter.length ? `, if ${t.filter.map((c) => conditionText(c, [])).join(" and ")}` : ""}, {t.entry === "once" ? "once per person" : "again after they finish"}.</>}
+              {rule && sim && ` Its rule ${rule.name} would have fired for ${plural(sim.records, "person", "people")} in the last ${sim.window_days} days.`}
+            </p>
+          </div>
+          <ul className="space-y-1">
+            {item(errors.length === 0, errors.length === 0 ? `All ${plural(work.steps.length, "step")} are set up` : `${plural(errors.length, "problem")} to fix first`)}
+            {errors.map(({ sid, p }, i) => (
+              <li key={i} className="ml-6 text-red-700 dark:text-red-400">
+                {sid ? <button type="button" className="underline" onClick={() => onOpen(sid)}>{stepLabel(work.steps.find((s) => s.id === sid), kinds, templates)}</button> : "Journey"}: {p.text}
+              </li>
+            ))}
+            {emails > 0 && item(!errors.some((r) => r.p.template), `${plural(emails, "email")}, each from a published template, skipping anyone who opted out`)}
+            {warnings.length > 0 && <li className="ml-6 text-amber-700 dark:text-amber-400">{plural(warnings.length, "thing")} worth a look: {warnings.map((w) => w.p.text).join(" ")}</li>}
+          </ul>
+          {!first && (
+            <div>
+              <span className="font-medium">What changes</span>
+              <ChangeList list={list} />
+            </div>
+          )}
+          {!first && j.stats.active > 0 && (
+            <fieldset className="space-y-2">
+              <legend className="mb-1 font-medium">The {plural(j.stats.active, "person", "people")} in it now</legend>
+              <label className="flex items-start gap-2">
+                <input type="radio" name="runs" checked={runs === "keep"} onChange={() => setRuns("keep")} className="mt-1" />
+                <span><span className="font-medium">Finish on their version</span> (recommended)<span className="block text-muted-foreground">They go on exactly as when they entered. Only new people get the new version.</span></span>
+              </label>
+              <label className="flex items-start gap-2">
+                <input type="radio" name="runs" checked={runs === "move"} onChange={() => setRuns("move")} className="mt-1" />
+                <span><span className="font-medium">Move onto the new version</span><span className="block text-muted-foreground">
+                  They carry on from the same step in the new version.{stranded ? ` ${plural(stranded, "person is", "people are")} on a step it removes and will exit.` : ""}
+                </span></span>
+              </label>
+            </fieldset>
+          )}
+          <div className="flex justify-end gap-2">
+            <Button type="button" variant="ghost" onClick={onClose}>Cancel</Button>
+            <Button onClick={() => onPublish(runs)} disabled={busy || errors.length > 0}>{first ? "Activate" : "Publish"}</Button>
+          </div>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function RenameDialog({ ws, j, onClose, onSaved }: { ws: string; j: Journey; onClose: () => void; onSaved: (j: Journey) => void }) {
+  const [name, setName] = useState(j.name);
+  const [description, setDescription] = useState(j.description);
   const [error, setError] = useState("");
-  useEffect(() => {
-    api.GET("/v1/workspaces/{ws}/email-templates", { params: { path: { ws } } }).then(({ data }) =>
-      setTemplates((data?.data ?? []).filter((t) => t.purpose === "lifecycle" && t.status === "active")),
-    );
-  }, [ws]);
-
-  const set = (i: number, s: JourneyStep) => setSteps((all) => all.map((x, k) => (k === i ? s : x)));
-  function add(k: JourneyStep["kind"]) {
-    setSteps((all) => {
-      const s: JourneyStep = { id: newID(k, all), kind: k };
-      if (k === "email") s.template = templates?.find((t) => t.published_version)?.handle ?? templates?.[0]?.handle ?? "";
-      if (k === "wait") s.wait_seconds = 86400;
-      if (k === "branch") s.conditions = [{ event: goal || "upgraded", op: "not_exists" }];
-      // The step before goes on to the new one when it went nowhere.
-      const last = all[all.length - 1];
-      const linked = !last ? all
-        : (last.kind === "email" || last.kind === "wait") && !last.next ? [...all.slice(0, -1), { ...last, next: s.id }]
-        : last.kind === "branch" && !last.then ? [...all.slice(0, -1), { ...last, then: s.id }]
-        : all;
-      return [...linked, s];
-    });
-  }
-  function remove(i: number) {
-    setSteps((all) => {
-      const gone = all[i].id;
-      const after = all[i].kind === "email" || all[i].kind === "wait" ? all[i].next : undefined;
-      // Whatever went to it goes where it went.
-      return all.filter((_, k) => k !== i).map((s) => ({
-        ...s,
-        ...(s.next === gone ? { next: after } : {}),
-        ...(s.then === gone ? { then: after } : {}),
-        ...(s.else === gone ? { else: after } : {}),
-        ...(s.conditions ? { conditions: s.conditions.filter((c) => c.step !== gone) } : {}),
-      }));
-    });
-  }
-  function move(i: number, by: -1 | 1) {
-    setSteps((all) => {
-      const k = i + by;
-      if (k < 0 || k >= all.length) return all;
-      const out = [...all];
-      [out[i], out[k]] = [out[k], out[i]];
-      return out;
-    });
-  }
-
   async function save(e: FormEvent) {
     e.preventDefault();
-    setBusy(true);
-    const clean = steps.map((s) => Object.fromEntries(Object.entries(s).filter(([, v]) => v !== undefined && v !== "")) as JourneyStep);
-    const { data, error } = await api.PATCH("/v1/workspaces/{ws}/journeys/{id}", {
-      params: { path: { ws, id: journey.id } },
-      body: {
-        name, description, entry, goal_event: goal || null, steps: clean,
-        trigger: kind === "event" ? { kind, event, filter } : { kind },
-      },
-    });
-    setBusy(false);
+    const { data, error } = await api.PATCH("/v1/workspaces/{ws}/journeys/{id}", { params: { path: { ws, id: j.id } }, body: { name, description } });
     if (error || !data) return setError(errorMessage(error));
-    toast(journey.status === "draft" ? "Saved. Activate it when it's ready." : "Saved.");
     onSaved(data);
   }
-
-  if (!templates) return <Loading />;
   return (
-    <form onSubmit={save} className="space-y-4">
-      <Card title="Starts">
-        <div className="grid gap-3 sm:grid-cols-2">
-          <Input label="Name" value={name} onChange={(e) => setName(e.target.value)} maxLength={200} required />
+    <Dialog open onOpenChange={(o) => !o && onClose()}>
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle>Name and description</DialogTitle>
+          <DialogDescription>These change straight away, even while it runs.</DialogDescription>
+        </DialogHeader>
+        <form onSubmit={save} className="space-y-3">
+          <Input label="Name" value={name} onChange={(e) => setName(e.target.value)} maxLength={200} required autoFocus />
           <Input label="Description" value={description} onChange={(e) => setDescription(e.target.value)} maxLength={2000} placeholder="Optional" />
-          <label className="block space-y-1 text-[13px]">
-            <span className="font-medium">Trigger</span>
-            <select aria-label="Trigger" className={`${field} w-full`} value={kind} onChange={(e) => setKind(e.target.value as typeof kind)}>
-              <option value="event">When someone does an event</option>
-              <option value="manual">When someone is added</option>
-            </select>
-          </label>
-          {kind === "event" ? <EventInput id="journey-trigger-events" label="Event" value={event} onChange={setEvent} events={events} required /> : <span />}
-          <label className="block space-y-1 text-[13px]">
-            <span className="font-medium">Entry</span>
-            <select aria-label="Entry" className={`${field} w-full`} value={entry} onChange={(e) => setEntry(e.target.value as typeof entry)}>
-              <option value="once">Once per person, ever</option>
-              <option value="again">Again after they finish</option>
-            </select>
-          </label>
-          <EventInput id="journey-goal-events" label="Goal (optional)" value={goal} onChange={setGoal} events={events} hint="Doing this event ends their run." placeholder="upgraded" />
-        </div>
-        {kind === "event" && (
-          <div className="mt-3 space-y-2">
-            <span className="block text-[13px] font-medium">Only if</span>
-            <Conditions list={filter} onChange={setFilter} steps={[]} filter />
+          <ErrorText>{error}</ErrorText>
+          <div className="flex justify-end gap-2">
+            <Button type="button" variant="ghost" onClick={onClose}>Cancel</Button>
+            <Button disabled={!name.trim()}>Save</Button>
           </div>
-        )}
-      </Card>
-      <Card title="Steps" description="People start at the first step. Each step goes on to the one it names; a journey only moves forward.">
-        <div className="space-y-3">
-          {steps.length === 0 && <p className="text-[13px] text-muted-foreground">Add the first step: usually an email.</p>}
-          {steps.map((s, i) => (
-            <StepEdit key={s.id} n={i + 1} step={s} steps={steps} templates={templates} onChange={(v) => set(i, v)} onRemove={() => remove(i)}
-              onMove={(by) => move(i, by)} go={go} />
-          ))}
-          <div className="flex flex-wrap gap-2">
-            <Button type="button" variant="ghost" onClick={() => add("email")}>Add an email</Button>
-            <Button type="button" variant="ghost" onClick={() => add("wait")}>Add a wait</Button>
-            <Button type="button" variant="ghost" onClick={() => add("branch")}>Add a check</Button>
-            <Button type="button" variant="ghost" onClick={() => add("exit")}>Add an exit</Button>
-          </div>
-        </div>
-      </Card>
-      <ErrorText>{error}</ErrorText>
-      <div className="flex justify-end gap-2">
-        <Button type="button" variant="ghost" onClick={onCancel}>Cancel</Button>
-        <Button disabled={busy || !name.trim()}>Save</Button>
-      </div>
-    </form>
-  );
-}
-
-function Goto({ label: text, value, onChange, steps, from }: { label: string; value?: string; onChange: (v?: string) => void; steps: JourneyStep[]; from: string }) {
-  return (
-    <label className="block space-y-1 text-[13px]">
-      <span className="font-medium">{text}</span>
-      <select aria-label={text} className={`${field} w-full`} value={value ?? ""} onChange={(e) => onChange(e.target.value || undefined)}>
-        <option value="">End (completed)</option>
-        {steps.filter((s) => s.id !== from).map((s) => <option key={s.id} value={s.id}>{steps.indexOf(s) + 1}. {label(s)}</option>)}
-      </select>
-    </label>
-  );
-}
-
-function StepEdit({ n, step: s, steps, templates, onChange, onRemove, onMove, go }: {
-  n: number; step: JourneyStep; steps: JourneyStep[]; templates: EmailTemplate[]; onChange: (s: JourneyStep) => void; onRemove: () => void; onMove: (by: -1 | 1) => void; go: Go;
-}) {
-  const unit: Unit = s.wait_seconds && s.wait_seconds % 86400 === 0 ? 86400 : s.wait_seconds && s.wait_seconds % 3600 === 0 ? 3600 : 60;
-  const tpl = templates.find((t) => t.handle === s.template || t.id === s.template);
-  const kindText = { email: "Send an email", wait: "Wait", branch: "Check", exit: "Exit" }[s.kind];
-  return (
-    <div className="rounded-md border p-3">
-      <div className="mb-2 flex items-center justify-between gap-2">
-        <span className="text-[13px] font-medium"><span className="mr-2 text-muted-foreground">{n}</span>{kindText}</span>
-        <span className="flex gap-1">
-          <Button type="button" variant="ghost" onClick={() => onMove(-1)} aria-label="Move up" disabled={n === 1}>↑</Button>
-          <Button type="button" variant="ghost" onClick={() => onMove(1)} aria-label="Move down" disabled={n === steps.length}>↓</Button>
-          <Button type="button" variant="ghost" onClick={onRemove}>Remove</Button>
-        </span>
-      </div>
-      <div className="grid gap-3 sm:grid-cols-2">
-        {s.kind === "email" && (
-          <>
-            <label className="block space-y-1 text-[13px]">
-              <span className="font-medium">Template</span>
-              <select aria-label="Template" className={`${field} w-full`} value={tpl?.handle ?? s.template ?? ""} onChange={(e) => onChange({ ...s, template: e.target.value })} required>
-                <option value="">Choose a template</option>
-                {templates.map((t) => <option key={t.id} value={t.handle}>{t.name}{t.published_version ? "" : " (not published yet)"}</option>)}
-              </select>
-              {templates.length === 0 && <span className="block text-[12px] text-muted-foreground">Write a lifecycle template first, under <button type="button" className="underline" onClick={() => go("templates")}>Templates</button>.</span>}
-              {tpl && !tpl.published_version && <span className="block text-[12px] text-amber-700 dark:text-amber-400">Publish it before activating the journey.</span>}
-            </label>
-            <Goto label="Then" value={s.next} onChange={(v) => onChange({ ...s, next: v })} steps={steps} from={s.id} />
-          </>
-        )}
-        {s.kind === "wait" && (
-          <>
-            <div className="flex items-end gap-2">
-              <Input label="Wait" type="number" min={1} value={String((s.wait_seconds ?? 60) / unit)} onChange={(e) => onChange({ ...s, wait_seconds: Math.max(1, Number(e.target.value)) * unit })} required />
-              <select aria-label="Unit" className={field} value={unit} onChange={(e) => onChange({ ...s, wait_seconds: ((s.wait_seconds ?? 60) / unit) * Number(e.target.value) })}>
-                {units.map(([u, t]) => <option key={u} value={u}>{t}</option>)}
-              </select>
-            </div>
-            <Goto label="Then" value={s.next} onChange={(v) => onChange({ ...s, next: v })} steps={steps} from={s.id} />
-          </>
-        )}
-        {s.kind === "branch" && (
-          <>
-            <div className="space-y-2 sm:col-span-2">
-              <label className="flex items-center gap-2 text-[13px]">
-                <span className="font-medium">If</span>
-                <select aria-label="Match" className={field} value={s.match ?? "all"} onChange={(e) => onChange({ ...s, match: e.target.value as "all" | "any" })}>
-                  <option value="all">all of these hold</option>
-                  <option value="any">any of these holds</option>
-                </select>
-              </label>
-              <Conditions list={s.conditions ?? []} onChange={(c) => onChange({ ...s, conditions: c })} steps={steps.filter((x) => x.kind === "email")} />
-            </div>
-            <Goto label="Yes: go to" value={s.then} onChange={(v) => onChange({ ...s, then: v })} steps={steps} from={s.id} />
-            <Goto label="No: go to" value={s.else} onChange={(v) => onChange({ ...s, else: v })} steps={steps} from={s.id} />
-          </>
-        )}
-        {s.kind === "exit" && <p className="text-[13px] text-muted-foreground sm:col-span-2">Ends their run here.</p>}
-      </div>
-    </div>
-  );
-}
-
-type Test = "attribute" | "property" | "event" | "email";
-
-function testOf(c: JourneyCondition): Test {
-  return c.event !== undefined ? "event" : c.email !== undefined ? "email" : c.property !== undefined ? "property" : "attribute";
-}
-
-// Conditions edits a list of tests. A trigger's filter only tests the
-// person and the event; a check can also ask what they did since.
-function Conditions({ list, onChange, steps, filter }: { list: JourneyCondition[]; onChange: (c: JourneyCondition[]) => void; steps: JourneyStep[]; filter?: boolean }) {
-  const set = (i: number, c: JourneyCondition) => onChange(list.map((x, k) => (k === i ? c : x)));
-  const tests: [Test, string][] = [["attribute", "Their field"], ["property", "The event's property"], ...(filter ? [] : [["event", "They did an event"], ["email", "An email of this journey"]] as [Test, string][])];
-  return (
-    <div className="space-y-2">
-      {list.map((c, i) => {
-        const t = testOf(c);
-        const did = t === "event" || t === "email";
-        return (
-          <div key={i} className="flex flex-wrap items-center gap-2">
-            <select aria-label="Test" className={field} value={t} onChange={(e) => {
-              const v = e.target.value as Test;
-              set(i, v === "event" ? { event: "", op: "exists" } : v === "email" ? { email: "opened", step: steps[0]?.id ?? "", op: "exists" } : { [v]: "", op: "eq", value: "" });
-            }}>
-              {tests.map(([v, text]) => <option key={v} value={v}>{text}</option>)}
-            </select>
-            {(t === "attribute" || t === "property") && (
-              <input aria-label="Field" className={field} placeholder={t === "attribute" ? "plan" : "amount"} value={(t === "attribute" ? c.attribute : c.property) ?? ""}
-                onChange={(e) => set(i, { ...c, [t]: e.target.value.trim() })} required />
-            )}
-            {t === "event" && <input aria-label="Event" className={field} placeholder="upgraded" value={c.event ?? ""} onChange={(e) => set(i, { ...c, event: e.target.value.trim() })} required />}
-            {t === "email" && (
-              <>
-                <select aria-label="Email step" className={field} value={c.step ?? ""} onChange={(e) => set(i, { ...c, step: e.target.value })} required>
-                  {steps.map((s) => <option key={s.id} value={s.id}>{label(s)}</option>)}
-                </select>
-                <select aria-label="Was" className={field} value={c.email} onChange={(e) => set(i, { ...c, email: e.target.value as JourneyCondition["email"] })}>
-                  <option value="delivered">was delivered</option>
-                  <option value="opened">was opened</option>
-                  <option value="clicked">was clicked</option>
-                </select>
-              </>
-            )}
-            <select aria-label="Op" className={field} value={c.op} onChange={(e) => set(i, { ...c, op: e.target.value as JourneyCondition["op"] })}>
-              {did ? (
-                <>
-                  <option value="exists">{t === "event" ? "did" : "yes"}</option>
-                  <option value="not_exists">{t === "event" ? "didn't" : "no"}</option>
-                </>
-              ) : (Object.keys(opText) as JourneyCondition["op"][]).map((o) => <option key={o} value={o}>{opText[o]}</option>)}
-            </select>
-            {!did && c.op !== "exists" && c.op !== "not_exists" && (
-              <input aria-label="Value" className={field} placeholder="pro" value={c.value === undefined ? "" : String(c.value)} onChange={(e) => set(i, { ...c, value: parseValue(e.target.value) })} required />
-            )}
-            <Button type="button" variant="ghost" onClick={() => onChange(list.filter((_, k) => k !== i))}>Remove</Button>
-          </div>
-        );
-      })}
-      <Button type="button" variant="ghost" onClick={() => onChange([...list, filter ? { attribute: "", op: "eq", value: "" } : { event: "", op: "exists" }])}>Add a condition</Button>
-    </div>
+        </form>
+      </DialogContent>
+    </Dialog>
   );
 }
 
@@ -634,7 +856,7 @@ function RunsCard({ ws, j, canManage, go }: { ws: string; j: Journey; canManage:
               <button className="flex w-full flex-wrap items-baseline justify-between gap-2 py-2 text-left hover:bg-muted/40" onClick={() => setOpen(r.id)}>
                 <span className="min-w-0 truncate font-medium">{r.name || "Unnamed person"}</span>
                 <span className="text-muted-foreground">
-                  {r.status === "active" ? `${label(j.steps.find((s) => s.id === r.step)) || "Starting"}${r.next_at ? `, until ${stamp(r.next_at)}` : ""}` : `${runText[r.status]}${r.exit_reason ? `: ${exitText[r.exit_reason] ?? r.exit_reason}` : ""}`}
+                  {r.status === "active" ? `${stepLabel(j.steps.find((s) => s.id === r.step) as Step | undefined) || "Starting"}${r.next_at ? `, until ${stamp(r.next_at)}` : ""}` : `${runText[r.status]}${r.exit_reason ? `: ${exitText[r.exit_reason] ?? r.exit_reason}` : ""}`}
                   {" · "}{ago(r.entered_at)}
                 </span>
               </button>
@@ -662,7 +884,7 @@ function RunDialog({ ws, j, id, canManage, go, onClose, onChanged }: { ws: strin
     setR({ ...data, history: r?.history });
     onChanged();
   }
-  const byID = new Map(j.steps.map((s) => [s.id, s]));
+  const byID = new Map(j.steps.map((s) => [s.id, s as Step]));
   return (
     <Dialog open onOpenChange={(o) => !o && onClose()}>
       <DialogContent className="sm:max-w-lg">
@@ -675,7 +897,7 @@ function RunDialog({ ws, j, id, canManage, go, onClose, onChanged }: { ws: strin
             <ol className="space-y-1 text-[13px]">
               {(r.history ?? []).map((h, i) => (
                 <li key={i} className="flex flex-wrap items-baseline justify-between gap-2">
-                  <span>{label(byID.get(h.step)) || h.step}: <span className="text-muted-foreground">{outcomeText[h.outcome] ?? h.outcome}{h.detail ? ` (${h.detail})` : ""}</span></span>
+                  <span>{stepLabel(byID.get(h.step)) || h.step}: <span className="text-muted-foreground">{outcomeText[h.outcome] ?? h.outcome}{h.detail ? ` (${h.detail})` : ""}</span></span>
                   <span className="text-[12px] text-muted-foreground">
                     {h.email_id && <button className="mr-2 underline" onClick={() => go("emails", h.email_id!)}>The email</button>}
                     {ago(h.at)}

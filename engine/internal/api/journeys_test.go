@@ -186,6 +186,9 @@ func TestJourneys(t *testing.T) {
 	if st["entered"] != 2.0 || st["completed"] != 1.0 || st["exited"] != 1.0 || j["step_stats"].(map[string]any)["welcome"].(map[string]any)["sent"] != 2.0 {
 		t.Fatalf("journey = %v", j)
 	}
+	if es := j["email_stats"].(map[string]any)["welcome"].(map[string]any); es["delivered"] == nil || es["opened"] != 0.0 {
+		t.Fatalf("email_stats = %v", j["email_stats"])
+	}
 
 	// Pause to change the steps, then archive; an archived journey takes no one.
 	owner.must(200, "POST", base+"/journeys/"+id+"/pause", nil)

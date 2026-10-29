@@ -194,3 +194,14 @@ tbody tr {
   @apply outline-2 outline-offset-2 outline-ring;
 }
 }
+
+/* The journey flow builder (components/journey-flow): React Flow's links
+   and attribution in the app's own colours, in light and dark. */
+.journey-flow {
+  --xy-edge-stroke: color-mix(in oklch, var(--muted-foreground) 70%, transparent);
+  --xy-edge-stroke-width: 1.5;
+  --xy-attribution-background-color: transparent;
+}
+.journey-flow .react-flow__attribution a {
+  color: var(--muted-foreground);
+}

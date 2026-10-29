@@ -4,7 +4,17 @@ Rules are the rules engine of the [customer data platform](customers.md). A rule
 
 A rule never sends anything itself. "What happened" (the event) and "what we did about it" (the journey's email, the webhook) stay separate, so one business event can drive several automations, and each can be changed on its own.
 
-Everything here works the same from the REST API and the MCP server. The web app has no rules page yet.
+Everything here works the same from the REST API, the MCP server and the web app (Lifecycle → Rules).
+
+## In the app
+
+Each rule is a card you read as a sentence: "**When** someone does **signed_up** **and doesn't** do **product_activated** **within** **7 days**, **if** plan is not enterprise, **emit** customer.stalled." Pick the kind of trigger from the first blank and fill in the rest. The card also has:
+
+- **Dry run**: what it would have done over the last 7, 30 or 90 days (below).
+- **Where its event goes**: the journeys that start on its event, or end when it happens.
+- **When this fires, do…**: pick a first step, and a draft journey that starts on the rule's event opens in the [journey builder](lifecycle-email.md#journeys).
+
+A rule changes while it is a draft or paused.
 
 ## Triggers
 

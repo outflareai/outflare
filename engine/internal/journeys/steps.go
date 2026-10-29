@@ -224,3 +224,45 @@ func CheckFilter(filter []Condition) string {
 	}
 	return ""
 }
+
+// Links is the steps a step goes on to: next, or then and else.
+func (st Step) Links() []string {
+	out := []string{}
+	for _, to := range []string{st.Next, st.Then, st.Else} {
+		if to != "" {
+			out = append(out, to)
+		}
+	}
+	return out
+}
+
+// Unreachable is the ids of the steps no run can get to from the first
+// step, in order. A journey can be saved with them while it is being
+// built, but not published.
+func Unreachable(steps []Step) []string {
+	if len(steps) == 0 {
+		return nil
+	}
+	byID := map[string]Step{}
+	for _, st := range steps {
+		byID[st.ID] = st
+	}
+	seen := map[string]bool{}
+	todo := []string{steps[0].ID}
+	for len(todo) > 0 {
+		id := todo[len(todo)-1]
+		todo = todo[:len(todo)-1]
+		if seen[id] {
+			continue
+		}
+		seen[id] = true
+		todo = append(todo, byID[id].Links()...)
+	}
+	var out []string
+	for _, st := range steps {
+		if !seen[st.ID] {
+			out = append(out, st.ID)
+		}
+	}
+	return out
+}

@@ -53,7 +53,6 @@ func (e *env) runCookieScans(t *testing.T) {
 
 func TestCookiePolicyKeepsItselfUpToDate(t *testing.T) {
 	e := freshEnv(t)
-	e.runCookieScans(t)
 	site := northpeakSite(t)
 	owner, ws := setupOwner(t, e.h)
 	base := "/v1/workspaces/" + ws
@@ -70,6 +69,10 @@ func TestCookiePolicyKeepsItselfUpToDate(t *testing.T) {
 	if again := owner.must(200, "POST", path+"/cookie-scans", nil); again["id"] != scan["id"] {
 		t.Fatalf("a second scan while one waits: %v", again)
 	}
+	// Only now start working scans: a worker running from the start can
+	// finish the first scan before the second request, which then rightly
+	// starts a new one.
+	e.runCookieScans(t)
 	out := waitFor(t, owner, path+"/cookies", func(m map[string]any) bool {
 		s, _ := m["scan"].(map[string]any)
 		return s != nil && (s["status"] == "done" || s["status"] == "failed")

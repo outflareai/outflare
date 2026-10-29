@@ -3143,6 +3143,29 @@ class Operations(_Mixin):
             idempotency_key=idempotency_key,
         )
 
+    def create_journey_draft(
+        self,
+        id: str,
+        *,
+        ws: str | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Start a draft version of a live journey.
+
+        Scope: emails.manage. A live (active or paused) journey is read-only: this copies its trigger, entry, goal and
+        steps into a draft version to edit, while the live version keeps running. 200 with the draft already there, if
+        there is one. A journey that hasn't gone live yet is changed directly (409).
+
+        Needs: the emails.manage scope.
+        POST /v1/workspaces/{ws}/journeys/{id}/draft
+        """
+        return self._call(
+            "POST",
+            "/v1/workspaces/{ws}/journeys/{id}/draft",
+            path={"id": id, "ws": ws},
+            idempotency_key=idempotency_key,
+        )
+
     def create_lead_list(
         self,
         *,
@@ -5457,6 +5480,27 @@ class Operations(_Mixin):
         return self._call(
             "DELETE",
             "/v1/workspaces/{ws}/webhooks/{id}",
+            path={"id": id, "ws": ws},
+            idempotency_key=idempotency_key,
+        )
+
+    def discard_journey_draft(
+        self,
+        id: str,
+        *,
+        ws: str | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Throw away a journey's draft version.
+
+        Scope: emails.manage. The live version is untouched.
+
+        Needs: the emails.manage scope.
+        DELETE /v1/workspaces/{ws}/journeys/{id}/draft
+        """
+        return self._call(
+            "DELETE",
+            "/v1/workspaces/{ws}/journeys/{id}/draft",
             path={"id": id, "ws": ws},
             idempotency_key=idempotency_key,
         )
@@ -7812,6 +7856,25 @@ class Operations(_Mixin):
         return self._call(
             "GET",
             "/v1/workspaces/{ws}/journeys/{id}",
+            path={"id": id, "ws": ws},
+        )
+
+    def get_journey_draft(
+        self,
+        id: str,
+        *,
+        ws: str | None = None,
+    ) -> Any:
+        """Get a journey's draft version.
+
+        Scope: emails.read. 404 when it has none.
+
+        Needs: the emails.read scope.
+        GET /v1/workspaces/{ws}/journeys/{id}/draft
+        """
+        return self._call(
+            "GET",
+            "/v1/workspaces/{ws}/journeys/{id}/draft",
             path={"id": id, "ws": ws},
         )
 
@@ -12196,6 +12259,7 @@ class Operations(_Mixin):
         fields: list[str] | None = None,
         status: Literal["active", "completed", "exited", "failed"] | None = None,
         record: str | None = None,
+        step: str | None = None,
         after: str | None = None,
         limit: int | None = None,
     ) -> Any:
@@ -12215,9 +12279,30 @@ class Operations(_Mixin):
                 "fields": fields,
                 "status": status,
                 "record": record,
+                "step": step,
                 "after": after,
                 "limit": limit,
             },
+        )
+
+    def list_journey_versions(
+        self,
+        id: str,
+        *,
+        ws: str | None = None,
+    ) -> Any:
+        """A journey's versions, the draft first.
+
+        Scope: emails.read. Every version that went live, newest first, with how many people are going through each
+        now, and the draft version being edited, if there is one.
+
+        Needs: the emails.read scope.
+        GET /v1/workspaces/{ws}/journeys/{id}/versions
+        """
+        return self._call(
+            "GET",
+            "/v1/workspaces/{ws}/journeys/{id}/versions",
+            path={"id": id, "ws": ws},
         )
 
     def list_journeys(
@@ -15581,6 +15666,34 @@ class Operations(_Mixin):
             "/v1/workspaces/{ws}/email-templates/{id}/publish",
             path={"id": id, "ws": ws},
             body={"note": note},
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
+    def publish_journey(
+        self,
+        id: str,
+        *,
+        ws: str | None = None,
+        runs: Literal["keep", "move"] | None = None,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Publish a journey's draft version.
+
+        Scope: emails.manage. Swaps the draft's trigger, entry, goal and steps in as the journey's next version, after
+        the checks activating does, plus that every step can be reached from the first. The old version is kept. People
+        already in the journey finish on the version they entered on (runs keep, the default), or move onto the new
+        one at the same step (runs move), where anyone on a step it removed exits.
+
+        Needs: the emails.manage scope.
+        POST /v1/workspaces/{ws}/journeys/{id}/publish
+        """
+        return self._call(
+            "POST",
+            "/v1/workspaces/{ws}/journeys/{id}/publish",
+            path={"id": id, "ws": ws},
+            body={"runs": runs},
             extra_body=extra_body,
             idempotency_key=idempotency_key,
         )
@@ -20744,7 +20857,8 @@ class Operations(_Mixin):
         """Change a journey.
 
         Scope: emails.manage. A draft or paused journey changes freely; an active one only its name and description, so
-        pause it first. Runs on a step that was removed exit when they move on.
+        start a draft version (POST .../draft) and publish it, or pause it first. Changing a paused journey moves the
+        people in it onto the change; runs on a step that was removed exit when they move on.
 
         Needs: the emails.manage scope.
         PATCH /v1/workspaces/{ws}/journeys/{id}
@@ -20762,6 +20876,35 @@ class Operations(_Mixin):
                 "steps": steps,
                 "trigger": trigger,
             },
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
+    def update_journey_draft(
+        self,
+        id: str,
+        *,
+        ws: str | None = None,
+        entry: Literal["once", "again"] | None = None,
+        goal_event: str | None = None,
+        steps: list[dict[str, Any]] | None = None,
+        trigger: dict[str, Any] | None = None,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Change a journey's draft version.
+
+        Scope: emails.manage. The same checks as changing a journey. The name and description belong to the journey
+        and change with PATCH on it.
+
+        Needs: the emails.manage scope.
+        PATCH /v1/workspaces/{ws}/journeys/{id}/draft
+        """
+        return self._call(
+            "PATCH",
+            "/v1/workspaces/{ws}/journeys/{id}/draft",
+            path={"id": id, "ws": ws},
+            body={"entry": entry, "goal_event": goal_event, "steps": steps, "trigger": trigger},
             extra_body=extra_body,
             idempotency_key=idempotency_key,
         )

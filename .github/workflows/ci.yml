@@ -329,4 +329,7 @@ jobs:
         if: steps.added.outputs.count != '0'
         run: |
           git checkout --quiet "$BASE"
-          go test -count=1 -p 1 ./engine/...
+          # The whole API package runs here in one go (the engine job
+          # splits it in two), so it needs more than go test's default
+          # 10 minutes.
+          go test -count=1 -p 1 -timeout 30m ./engine/...
