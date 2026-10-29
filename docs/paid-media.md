@@ -24,10 +24,31 @@ stays off until the workspace connects it.
 | LinkedIn Ads (`linkedin_ads`) | Sign in with LinkedIn (`r_ads`, `r_ads_reporting`) | Advertising API access approved for the app by LinkedIn |
 | TikTok Ads (`tiktok_ads`) | Sign in with TikTok For Business and choose the ad accounts to share (Ad Account Management and Reporting read access). To add accounts later, connect again. | Nothing |
 | Snapchat Ads (`snapchat_ads`) | Sign in with Snapchat (`snapchat-marketing-api`). Every ad account of every organization you belong to is listed. | Nothing |
+| Taboola Ads (`taboola_ads`) | Your own Backstage API client id and secret, and optionally an account id. A network account reads every advertiser account under it; without an account id, the credentials' own account is read. | Backstage API access, which your Taboola account manager grants and issues the credentials for |
+| Outbrain Ads (`outbrain_ads`) | Your own Outbrain username and password. Outflare trades them for an Amplify API token (`GET /login`), keeps the token sealed with them and gets a new one every 25 days (a token lasts 30). Every marketer the login can see is listed; spend is in the currency of the marketer's budgets. | Amplify API access for that login, which you request from Outbrain |
+| Apple Ads (`apple_ads`, formerly Apple Search Ads) | Your own Apple Ads API user: its client id, team id and key id from Account Settings → API, and the private key whose public half you uploaded there (see below). Every ad account the user can reach is listed, App Store and Apple Maps. | An API role for that user (API Account Read Only is enough) |
+| Amazon Ads (`amazon_ads`) | Sign in with Amazon (Login with Amazon, `advertising::campaign_management`). Every advertising profile the sign-in reaches is an ad account: one advertiser in one marketplace, with its currency and time zone, in North America, Europe or the Far East. Sponsored Products campaigns are read; their daily numbers come from Amazon's reports, which Amazon builds in a few minutes, so a sync can take longer than for other platforms. Purchases and sales are Amazon's seven-day attribution. | Nothing |
+| Pinterest Ads (`pinterest_ads`) | Sign in with Pinterest (`ads:read`, read-only) | Nothing |
+
+**Apple Ads** has no sign-in: it uses OAuth client credentials that belong to
+your own Apple Ads organization. An account administrator invites a user with
+an API role; that user makes a P-256 key pair
+(`openssl ecparam -genkey -name prime256v1 -noout -out private-key.pem`, then
+`openssl ec -in private-key.pem -pubout -out public-key.pem`), pastes the public
+key into Apple Ads under Account Settings → API, and gives Outflare the client
+id, team id and key id shown there with the private key. Outflare keeps them
+sealed, signs a short-lived client secret with the key when it syncs, and trades
+it with Apple for a one-hour access token, held only in memory. It reads through
+the Apple Ads Platform API, which replaces the Campaign Management API (v5) that
+Apple turns off on January 26, 2027. Taps are the clicks; for App Store
+campaigns, total installs (tap and view-through) are the conversions. Apple
+Maps campaigns report spend, impressions and taps only.
 
 Signing in uses the operator's OAuth app (`CONNECTOR_<ID>_CLIENT_ID` and
 `_CLIENT_SECRET`, see [connectors.md](connectors.md)); the tokens it produces
-belong to the workspace's own ad account. When a connection still needs a
+belong to the workspace's own ad account. Amazon Ads also sends that app's
+client id (not its secret) with every call, as Amazon requires, so the
+connection keeps it beside the workspace's tokens. When a connection still needs a
 developer token, `GET /v1/workspaces/{ws}/ads/connections` lists it under
 `setup_needed`, and a person adds it in Integrations
 (`PUT /v1/workspaces/{ws}/ads/connections/{id}/setup`). Outflare checks the
@@ -89,6 +110,23 @@ conversion on one ad account:
 | Reddit Ads | The Conversions API, as SignUp, Lead, Purchase and so on | `rdt_cid`, hashed email and record id | The workspace's own Conversions API access token, from Reddit Ads Manager → Events Manager |
 | TikTok Ads | A pixel, through the Events API, as CompletePayment, CompleteRegistration, SubmitForm and so on | `ttclid`, the `_ttp` cookie (`ttp`), hashed email, phone and record id | The sign-in's Pixel and Events access; if TikTok refuses it, an Events API access token from Events Manager on the connection |
 | Snapchat Ads | A Snap Pixel, through the Conversions API, as PURCHASE, SIGN_UP, SUBSCRIBE and so on | `ScCid`, the `_scid` cookie (`scid`), hashed email, phone and record id | The sign-in's access; if Snapchat refuses it, a Conversions API token from Ads Manager → Business Details on the connection |
+| Taboola Ads | An active event-based conversion (Realize → Tracking, "Create conversions using code"), by its event name, as a server-to-server action | `tblci` only | Nothing: the bulk S2S endpoint takes no token |
+| Pinterest Ads | The Conversions API, as checkout, signup, lead and so on | `epik`, hashed email, phone and record id | The workspace's own conversion access token, from Pinterest Ads Manager → Conversions |
+
+Taboola matches only on its click id: a conversion with no `tblci` from the
+click is skipped. Taboola accepts each batch at once and processes it later
+without reporting back, so `sent` there means Taboola received it; check the
+conversion's numbers in Realize. Revenue goes only in the currencies Taboola
+lists for S2S (USD, EUR, GBP and 16 others); in any other currency the
+conversion is sent without it.
+
+Apple Ads takes no conversions: its ads open the App Store, not your website,
+and Apple measures installs in your app through its AdServices framework, so
+there is nothing for Outflare to send back.
+
+Amazon Ads doesn't take conversions back yet: its conversion events match on
+hashed identifiers per advertiser account rather than on an ad click, and are
+still in beta.
 
 How it works:
 
@@ -100,7 +138,7 @@ How it works:
   phone come from the person's record, hashed with SHA-256 before they leave;
   nothing is sent in the clear and nothing is copied into the send log.
 - The event's message id is the conversion's id (Google's order id, Meta's,
-  Reddit's, TikTok's and Snapchat's event id). On the website, `outflare.track()` returns it: pass it to
+  Reddit's, TikTok's, Snapchat's and Pinterest's event id, Taboola's order id). On the website, `outflare.track()` returns it: pass it to
   the browser pixel as its event id (`fbq('track', 'Purchase', {}, {eventID:
   id})`) and the platform counts a conversion once when both send it.
 - The value comes from an event property (in major units, 12.50, or minor units,
@@ -133,6 +171,10 @@ The MCP tools are `list_ad_conversion_targets`, `list_ad_conversion_rules`,
 `create_ad_conversion_rule`, `update_ad_conversion_rule`,
 `delete_ad_conversion_rule`, `list_ad_conversion_sends`, `get_ad_settings` and
 `set_ad_settings`. X and LinkedIn follow once their API access is approved.
+
+Outbrain Ads only reads: the Amplify API has no call that takes conversions.
+Outbrain's click id (`ob_click_id`) is still recorded on each visit, so its
+clicks count in Outflare's own attribution.
 
 ## Coming next
 

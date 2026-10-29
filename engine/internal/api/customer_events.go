@@ -262,7 +262,7 @@ func (s *Server) ingestCustomerEvents(w http.ResponseWriter, r *http.Request) {
 	}
 	brand, err := s.recordBrand(ctx, a, top.get("brand_id", "brandId"))
 	if err == nil {
-		brand, err = brandWrite(ctx, s.pool, a, nil, brand)
+		brand, err = brandWrite(ctx, s.pool, a, brand)
 	}
 	if s.allocError(w, r, err) {
 		return
@@ -541,7 +541,7 @@ func ownerOf(ctx context.Context, tx pgx.Tx, a *access, namespace, value string)
 	if err != nil {
 		return nil, nil, err
 	}
-	if !a.writes(nil, brand) {
+	if !a.writes(brand) {
 		return nil, nil, errSharedRecord
 	}
 	return &id, brand, nil

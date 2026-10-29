@@ -48,7 +48,9 @@ func TestGeonode(t *testing.T) {
 	if err != nil || p.Status != 200 || p.HTML != "<h1>Hi</h1>" || p.URL != "https://example.com/final" || p.Cost.Units != 2 {
 		t.Fatalf("page: %+v %v", p, err)
 	}
-	if body["render_js"] != true || body["processing_mode"] != "sync" {
+	// Pages behind a bot check take 25 seconds or more in a browser: Geonode
+	// gets 60 to read one.
+	if body["render_js"] != true || body["processing_mode"] != "sync" || body["timeout"] != 60000.0 {
 		t.Fatalf("request: %v", body)
 	}
 	if _, err := g.FetchPage(context.Background(), cl, c.Creds{"api_key": "k"}, "https://example.com/blocked", false); c.KindOf(err) != c.ErrQuota {

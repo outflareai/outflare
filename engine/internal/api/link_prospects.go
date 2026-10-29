@@ -299,7 +299,7 @@ func (s *Server) addLinkProspects(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	site := seosync.ProspectSite{ID: sites[0].ID, BrandID: sites[0].BrandID, Host: sites[0].Host}
-	if !a.writes(nil, site.BrandID) {
+	if !a.writes(site.BrandID) {
 		writeError(w, r, http.StatusForbidden, "forbidden", string(errSharedRecord))
 		return
 	}
@@ -401,7 +401,7 @@ func (s *Server) reclaimLinkProspects(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	site := seosync.ProspectSite{ID: sites[0].ID, BrandID: sites[0].BrandID, Host: sites[0].Host}
-	if !a.writes(nil, site.BrandID) {
+	if !a.writes(site.BrandID) {
 		writeError(w, r, http.StatusForbidden, "forbidden", string(errSharedRecord))
 		return
 	}
@@ -425,7 +425,7 @@ func (s *Server) checkLinkProspect(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if !a.writes(nil, p.BrandID) {
+	if !a.writes(p.BrandID) {
 		writeError(w, r, http.StatusForbidden, "forbidden", string(errSharedRecord))
 		return
 	}
@@ -479,7 +479,7 @@ func (s *Server) checkLinkProspects(w http.ResponseWriter, r *http.Request) {
 		writeError(w, r, http.StatusNotFound, "not_found", "site not found")
 		return
 	}
-	if !a.writes(nil, sites[0].BrandID) {
+	if !a.writes(sites[0].BrandID) {
 		writeError(w, r, http.StatusForbidden, "forbidden", string(errSharedRecord))
 		return
 	}
@@ -583,7 +583,7 @@ func (s *Server) updateLinkProspect(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if !a.writes(nil, p.BrandID) {
+	if !a.writes(p.BrandID) {
 		writeError(w, r, http.StatusForbidden, "forbidden", string(errSharedRecord))
 		return
 	}
@@ -670,7 +670,7 @@ func (s *Server) deleteLinkProspect(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if !a.writes(nil, p.BrandID) {
+	if !a.writes(p.BrandID) {
 		writeError(w, r, http.StatusForbidden, "forbidden", string(errSharedRecord))
 		return
 	}

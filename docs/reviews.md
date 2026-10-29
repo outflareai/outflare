@@ -23,8 +23,7 @@ Outflare reads each active page once a day through the workspace's own page read
 
 When a read fails, Outflare says why on the Reviews page and tries again on its own:
 
-- G2 and Google pages are always read in a browser (G2 shows anything else a bot check), which costs more Geonode tokens per page.
-- A page that shows no reviews (often a bot check, or a page built by its script) is read again in a browser straight away. If that works, later reads of the page start in a browser.
+- Every review page (Trustpilot, G2, Capterra and Google) is read in a browser from the start, because the sites show anything else a bot check. That costs more Geonode tokens per page, but each page is sent to Geonode once, and Geonode gets up to 60 seconds to read it (a page behind a bot check often takes 25 seconds or more).
 - After that, a failed read is tried again the same day, so the day's numbers still come in: after 15 minutes, then 1 and 2 hours, then every 4 hours until one works. Only a wrong address (`page_not_found`) waits for the next day's read, since a person has to fix it.
 - **Try again** on the page (or `POST /v1/workspaces/{ws}/reviews/pages/{id}/read`, the `read_review_page` MCP tool) reads it now.
 

@@ -125,7 +125,7 @@ func (m aivisModels) ForTask(ctx context.Context, ws, task string, cents int64) 
 // Spent books a call on the workspace's own provider bill.
 func (m aivisModels) Spent(ctx context.Context, ws string, c aivis.Choice, u llm.Usage, ref, note string) (int64, error) {
 	err := recordAISpend(ctx, m.s.pool, aiChoice{Provider: c.Provider, IntegrationID: c.IntegrationID, Model: c.Model, Price: c.Price, Task: c.Task},
-		ws, nil, nil, nil, u, ref, note)
+		ws, nil, nil, u, ref, note)
 	if err != nil {
 		return 0, err
 	}
@@ -522,7 +522,7 @@ func (s *Server) createAICohort(w http.ResponseWriter, r *http.Request) {
 			}
 			brand = b
 		}
-		brand, err := brandWrite(ctx, tx, a, nil, brand)
+		brand, err := brandWrite(ctx, tx, a, brand)
 		if err != nil {
 			return err
 		}
@@ -573,7 +573,7 @@ func (s *Server) updateAICohort(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if !a.writes(nil, c.BrandID) {
+	if !a.writes(c.BrandID) {
 		writeError(w, r, http.StatusForbidden, "forbidden", string(errSharedRecord))
 		return
 	}
@@ -588,7 +588,7 @@ func (s *Server) updateAICohort(w http.ResponseWriter, r *http.Request) {
 			if err != nil {
 				return err
 			}
-			if b, err = brandWrite(ctx, tx, a, nil, b); err != nil {
+			if b, err = brandWrite(ctx, tx, a, b); err != nil {
 				return err
 			}
 			brand = b
@@ -652,7 +652,7 @@ func (s *Server) deleteAICohort(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if !a.writes(nil, c.BrandID) {
+	if !a.writes(c.BrandID) {
 		writeError(w, r, http.StatusForbidden, "forbidden", string(errSharedRecord))
 		return
 	}
@@ -732,7 +732,7 @@ func (s *Server) addAIPrompts(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if !a.writes(nil, c.BrandID) {
+	if !a.writes(c.BrandID) {
 		writeError(w, r, http.StatusForbidden, "forbidden", string(errSharedRecord))
 		return
 	}
@@ -807,7 +807,7 @@ func (s *Server) aiPromptFor(w http.ResponseWriter, r *http.Request, a *access) 
 	if !ok {
 		return nil, nil, false
 	}
-	if !a.writes(nil, c.BrandID) {
+	if !a.writes(c.BrandID) {
 		writeError(w, r, http.StatusForbidden, "forbidden", string(errSharedRecord))
 		return nil, nil, false
 	}
@@ -960,7 +960,7 @@ func (s *Server) startAIRun(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if !a.writes(nil, c.BrandID) {
+	if !a.writes(c.BrandID) {
 		writeError(w, r, http.StatusForbidden, "forbidden", string(errSharedRecord))
 		return
 	}
@@ -1065,7 +1065,7 @@ func (s *Server) stopAIRun(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if !a.writes(nil, run.BrandID) {
+	if !a.writes(run.BrandID) {
 		writeError(w, r, http.StatusForbidden, "forbidden", string(errSharedRecord))
 		return
 	}

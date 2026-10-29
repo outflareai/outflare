@@ -107,7 +107,6 @@ type Params struct {
 type Run struct {
 	ID           string             `json:"id"`
 	ListID       *string            `json:"list_id"`
-	ProjectID    *string            `json:"project_id"`
 	Kind         string             `json:"kind"`
 	Status       string             `json:"status"`
 	Params       Params             `json:"params"`
@@ -128,14 +127,14 @@ type Run struct {
 }
 
 // RunCols are the columns ScanRun reads, in order.
-const RunCols = `id, list_id, project_id, kind, status, params, found, total_matches, added, enriched, skipped,
+const RunCols = `id, list_id, kind, status, params, found, total_matches, added, enriched, skipped,
 	credits::float8, credits_by, sample, stop_reason, error, requested_by, created_at, started_at, finished_at`
 
 // ScanRun reads a run selected with RunCols.
 func ScanRun(row pgx.Row) (Run, error) {
 	var r Run
 	var params, skipped, by, sample []byte
-	err := row.Scan(&r.ID, &r.ListID, &r.ProjectID, &r.Kind, &r.Status, &params, &r.Found, &r.TotalMatches, &r.Added,
+	err := row.Scan(&r.ID, &r.ListID, &r.Kind, &r.Status, &params, &r.Found, &r.TotalMatches, &r.Added,
 		&r.Enriched, &skipped, &r.Credits, &by, &sample, &r.StopReason, &r.Error, &r.RequestedBy, &r.CreatedAt, &r.StartedAt, &r.FinishedAt)
 	if err != nil {
 		return r, err
@@ -216,8 +215,8 @@ func CleanFilter(f c.PeopleFilter) (c.PeopleFilter, error) {
 
 // MergeICP lays a list's filters over its ideal customer profile: a
 // dimension the list sets replaces the profile's.
-func MergeICP(project, list c.PeopleFilter) c.PeopleFilter {
-	out := project
+func MergeICP(profile, list c.PeopleFilter) c.PeopleFilter {
+	out := profile
 	pick := func(dst *[]string, v []string) {
 		if len(v) > 0 {
 			*dst = v
@@ -251,45 +250,45 @@ func parseRange(r string) (lo, hi int, ok bool) {
 }
 
 // ParamsForList builds a run's params from the list's settings and its
-// ideal customer profile (its project's ICP when it has none).
-func ParamsForList(ctx context.Context, q c.Querier, ws, listID string) (Params, *string, error) {
+// ideal customer profile.
+func ParamsForList(ctx context.Context, q c.Querier, ws, listID string) (Params, error) {
 	var p Params
-	var projectID, search *string
+	var search *string
 	var filters, icp []byte
 	var cap *float64
 	err := q.QueryRow(ctx, `
-		SELECT l.project_id, l.search_integration_id, l.filters, COALESCE(icp.filters, pr.icp, '{}'),
+		SELECT l.search_integration_id, l.filters, COALESCE(icp.filters, '{}'),
 		       l.enrich_integration_ids::text[], l.max_leads, l.credit_cap::float8, l.verify, l.verified_emails_only,
 		       l.skip_contacted_days, l.skip_in_sequences, l.min_score
-		FROM lead_lists l LEFT JOIN projects pr ON pr.id = l.project_id
+		FROM lead_lists l
 		LEFT JOIN ideal_customer_profiles icp ON icp.id = l.profile_id AND icp.workspace_id = l.workspace_id
 		WHERE l.workspace_id = $1 AND l.id = $2`, ws, listID).
-		Scan(&projectID, &search, &filters, &icp, &p.EnrichIntegrationIDs, &p.MaxLeads, &cap, &p.Verify,
+		Scan(&search, &filters, &icp, &p.EnrichIntegrationIDs, &p.MaxLeads, &cap, &p.Verify,
 			&p.VerifiedEmailsOnly, &p.SkipContactedDays, &p.SkipInSequences, &p.MinScore)
 	if err != nil {
-		return p, nil, err
+		return p, err
 	}
 	if search != nil {
 		p.SearchIntegrationID = *search
 	}
 	p.CreditCap = cap
 	_ = json.Unmarshal(filters, &p.Filters)
-	var proj c.PeopleFilter
-	_ = json.Unmarshal(icp, &proj)
-	p.ICP = MergeICP(proj, p.Filters)
-	return p, projectID, nil
+	var profile c.PeopleFilter
+	_ = json.Unmarshal(icp, &profile)
+	p.ICP = MergeICP(profile, p.Filters)
+	return p, nil
 }
 
 // Enqueue records a run and queues its job in the caller's transaction.
-func Enqueue(ctx context.Context, tx pgx.Tx, ws string, listID, projectID *string, kind string, p Params, actorID string) (Run, error) {
+func Enqueue(ctx context.Context, tx pgx.Tx, ws string, listID *string, kind string, p Params, actorID string) (Run, error) {
 	params, _ := json.Marshal(p)
 	var actor *string
 	if actorID != "" {
 		actor = &actorID
 	}
 	run, err := ScanRun(tx.QueryRow(ctx, `
-		INSERT INTO list_runs (workspace_id, list_id, project_id, kind, params, requested_by)
-		VALUES ($1, $2, $3, $4, $5, $6) RETURNING `+RunCols, ws, listID, projectID, kind, params, actor))
+		INSERT INTO list_runs (workspace_id, list_id, kind, params, requested_by)
+		VALUES ($1, $2, $3, $4, $5) RETURNING `+RunCols, ws, listID, kind, params, actor))
 	if err != nil {
 		var pgErr interface{ SQLState() string }
 		if errors.As(err, &pgErr) && pgErr.SQLState() == "23505" {
@@ -374,14 +373,14 @@ func (s *Service) RefreshDue(ctx context.Context) error {
 				WHERE id = $1 AND NOT $2`, d.id, d.retry); err != nil {
 				return err
 			}
-			p, project, err := ParamsForList(ctx, tx, d.ws, d.id)
+			p, err := ParamsForList(ctx, tx, d.ws, d.id)
 			if err != nil {
 				return err
 			}
 			if p.SearchIntegrationID == "" {
 				return nil
 			}
-			_, err = Enqueue(ctx, tx, d.ws, &d.id, project, KindRefresh, p, "")
+			_, err = Enqueue(ctx, tx, d.ws, &d.id, KindRefresh, p, "")
 			if errors.Is(err, ErrBusy) {
 				return nil // the next refresh will pick up what this one would have
 			}

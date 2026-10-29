@@ -24,7 +24,6 @@ type Match struct {
 	Attribution string
 	LeadID      *string
 	SequenceID  *string
-	ProjectID   *string
 	InboundID   *string
 }
 
@@ -138,9 +137,9 @@ func Attribute(ctx context.Context, q jobs.Querier, ws string, emails []string, 
 	return m, nil
 }
 
-// fillFromLead sets the sequence, project and reply for m.LeadID.
+// fillFromLead sets the sequence and reply for m.LeadID.
 func fillFromLead(ctx context.Context, q jobs.Querier, ws string, m *Match, at time.Time) error {
-	var seq, inbound, project *string
+	var seq, inbound *string
 	err := q.QueryRow(ctx, `
 		SELECT
 			(SELECT sequence_id FROM messages WHERE workspace_id = $1 AND lead_id = $2 AND status = 'sent' AND sent_at <= $3
@@ -159,13 +158,7 @@ func fillFromLead(ctx context.Context, q jobs.Querier, ws string, m *Match, at t
 			return err
 		}
 	}
-	if seq != nil {
-		if err := q.QueryRow(ctx, `SELECT project_id FROM sequences WHERE id = $1 AND workspace_id = $2`, *seq, ws).Scan(&project); err != nil &&
-			!errors.Is(err, pgx.ErrNoRows) {
-			return err
-		}
-	}
-	m.SequenceID, m.InboundID, m.ProjectID = seq, inbound, project
+	m.SequenceID, m.InboundID = seq, inbound
 	return nil
 }
 

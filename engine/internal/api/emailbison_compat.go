@@ -118,7 +118,7 @@ func (s *Server) ebRoute(w http.ResponseWriter, r *http.Request, a *access, meth
 		writeJSON(w, http.StatusOK, map[string]any{"data": []any{}})
 	case is(http.MethodPost, "tags"):
 		// Tags are accepted and not kept: Outflare groups mailboxes by
-		// project and team instead.
+		// brand and team instead.
 		name, _ := body["name"].(string)
 		writeJSON(w, http.StatusOK, map[string]any{"data": map[string]any{"id": 1, "name": name}})
 	case is(http.MethodPost, "tags", "attach-to-sender-emails"), is(http.MethodPost, "tags", "remove-from-sender-emails"):

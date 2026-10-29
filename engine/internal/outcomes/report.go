@@ -12,10 +12,9 @@ import (
 // Report groupings.
 const (
 	GroupNone     = "none"
-	GroupProject  = "project"
 	GroupSequence = "sequence"
-	// A row's brand is its sequence's, else its project's; spend tied only
-	// to a mailbox or domain takes theirs.
+	// A row's brand is its sequence's; spend without a sequence takes its
+	// own brand, else its mailbox's or domain's.
 	GroupBrand = "brand"
 )
 
@@ -23,7 +22,6 @@ const (
 type ReportFilter struct {
 	From, To   time.Time // [From, To)
 	GroupBy    string
-	ProjectID  string
 	SequenceID string
 	MissionID  string
 	// Brand is a brand's id, "none" for what no brand owns, or "" for all.
@@ -36,7 +34,7 @@ type ReportFilter struct {
 	Currency string
 }
 
-// Row is one line of a report: a project, a sequence, or the whole
+// Row is one line of a report: a sequence, a brand, or the whole
 // workspace. Key is empty for outcomes and spend that belong to no group.
 type Row struct {
 	Key  string `json:"key"`
@@ -120,15 +118,15 @@ type acc struct {
 	cat                                  map[string]float64
 }
 
-type sendKey struct{ seq, project, mailbox, domain string }
+type sendKey struct{ seq, mailbox, domain string }
 
 // Summary builds a cost-per-outcome report.
 func Summary(ctx context.Context, q Querier, ws string, f ReportFilter) (Report, error) {
 	if f.GroupBy == "" {
 		f.GroupBy = GroupNone
 	}
-	if f.GroupBy != GroupNone && f.GroupBy != GroupProject && f.GroupBy != GroupSequence && f.GroupBy != GroupBrand {
-		return Report{}, invalid("group_by must be none, project, sequence or brand")
+	if f.GroupBy != GroupNone && f.GroupBy != GroupSequence && f.GroupBy != GroupBrand {
+		return Report{}, invalid("group_by must be none, sequence or brand")
 	}
 	if f.Currency == "" {
 		f.Currency = "USD"
@@ -175,17 +173,18 @@ func Summary(ctx context.Context, q Querier, ws string, f ReportFilter) (Report,
 		}
 		return b == f.Brand
 	}
-	key := func(seq, project *string) string {
+	// key is the row a sequence's outcome goes to. brand is the brand of
+	// spend that has no sequence, or nil.
+	key := func(seq, brand *string) string {
 		switch f.GroupBy {
 		case GroupBrand:
-			return brands.of(seq, project)
+			if seq == nil && brand != nil {
+				return *brand
+			}
+			return brands.of(seq)
 		case GroupSequence:
 			if seq != nil {
 				return *seq
-			}
-		case GroupProject:
-			if project != nil {
-				return *project
 			}
 		case GroupNone:
 			return "all"
@@ -204,28 +203,28 @@ func Summary(ctx context.Context, q Querier, ws string, f ReportFilter) (Report,
 	sends := map[sendKey]int{}
 	if withSends {
 		rs, err := q.Query(ctx, `
-			SELECT m.sequence_id::text, s.project_id::text, m.mailbox_id::text, lower(split_part(m.from_email, '@', 2)), count(*)
-			FROM messages m LEFT JOIN sequences s ON s.id = m.sequence_id
+			SELECT m.sequence_id::text, m.mailbox_id::text, lower(split_part(m.from_email, '@', 2)), count(*)
+			FROM messages m
 			WHERE m.workspace_id = $1 AND m.status = 'sent' AND m.sent_at >= $2 AND m.sent_at < $3
-			  AND ($4 = '' OR s.project_id::text = $4) AND ($5 = '' OR m.sequence_id::text = $5)
-			GROUP BY 1, 2, 3, 4`, ws, f.From, f.To, f.ProjectID, f.SequenceID)
+			  AND ($4 = '' OR m.sequence_id::text = $4)
+			GROUP BY 1, 2, 3`, ws, f.From, f.To, f.SequenceID)
 		if err != nil {
 			return rep, err
 		}
 		for rs.Next() {
-			var seq, project, mailbox *string
+			var seq, mailbox *string
 			var domain string
 			var n int
-			if err := rs.Scan(&seq, &project, &mailbox, &domain, &n); err != nil {
+			if err := rs.Scan(&seq, &mailbox, &domain, &n); err != nil {
 				rs.Close()
 				return rep, err
 			}
-			if !keep(brands.of(seq, project)) {
+			if !keep(brands.of(seq)) {
 				continue
 			}
-			sk := sendKey{seq: deref(seq), project: deref(project), mailbox: deref(mailbox), domain: domain}
+			sk := sendKey{seq: deref(seq), mailbox: deref(mailbox), domain: domain}
 			sends[sk] += n
-			get(key(seq, project)).Sent += n
+			get(key(seq, nil)).Sent += n
 		}
 		rs.Close()
 		if err := rs.Err(); err != nil {
@@ -233,25 +232,25 @@ func Summary(ctx context.Context, q Querier, ws string, f ReportFilter) (Report,
 		}
 
 		rs, err = q.Query(ctx, `
-			SELECT i.sequence_id::text, s.project_id::text, count(*)
-			FROM inbound_messages i LEFT JOIN sequences s ON s.id = i.sequence_id
+			SELECT i.sequence_id::text, count(*)
+			FROM inbound_messages i
 			WHERE i.workspace_id = $1 AND i.kind = 'reply' AND i.received_at >= $2 AND i.received_at < $3
-			  AND ($4 = '' OR s.project_id::text = $4) AND ($5 = '' OR i.sequence_id::text = $5)
-			GROUP BY 1, 2`, ws, f.From, f.To, f.ProjectID, f.SequenceID)
+			  AND ($4 = '' OR i.sequence_id::text = $4)
+			GROUP BY 1`, ws, f.From, f.To, f.SequenceID)
 		if err != nil {
 			return rep, err
 		}
 		for rs.Next() {
-			var seq, project *string
+			var seq *string
 			var n int
-			if err := rs.Scan(&seq, &project, &n); err != nil {
+			if err := rs.Scan(&seq, &n); err != nil {
 				rs.Close()
 				return rep, err
 			}
-			if !keep(brands.of(seq, project)) {
+			if !keep(brands.of(seq)) {
 				continue
 			}
-			get(key(seq, project)).Replies += n
+			get(key(seq, nil)).Replies += n
 		}
 		rs.Close()
 		if err := rs.Err(); err != nil {
@@ -261,20 +260,20 @@ func Summary(ctx context.Context, q Querier, ws string, f ReportFilter) (Report,
 
 	// Meetings booked in the period.
 	rs, err := q.Query(ctx, `
-		SELECT sequence_id::text, project_id::text, attribution, status, COALESCE(qualified, false), count(*)
+		SELECT sequence_id::text, attribution, status, COALESCE(qualified, false), count(*)
 		FROM meetings
 		WHERE workspace_id = $1 AND booked_at >= $2 AND booked_at < $3 AND status <> 'canceled'
-		  AND ($4 = '' OR project_id::text = $4) AND ($5 = '' OR sequence_id::text = $5) AND ($6 = '' OR mission_id::text = $6)
-		GROUP BY 1, 2, 3, 4, 5`, ws, f.From, f.To, f.ProjectID, f.SequenceID, f.MissionID)
+		  AND ($4 = '' OR sequence_id::text = $4) AND ($5 = '' OR mission_id::text = $5)
+		GROUP BY 1, 2, 3, 4`, ws, f.From, f.To, f.SequenceID, f.MissionID)
 	if err != nil {
 		return rep, err
 	}
 	for rs.Next() {
-		var seq, project *string
+		var seq *string
 		var attribution, status string
 		var qualified bool
 		var n int
-		if err := rs.Scan(&seq, &project, &attribution, &status, &qualified, &n); err != nil {
+		if err := rs.Scan(&seq, &attribution, &status, &qualified, &n); err != nil {
 			rs.Close()
 			return rep, err
 		}
@@ -284,10 +283,10 @@ func Summary(ctx context.Context, q Querier, ws string, f ReportFilter) (Report,
 			}
 			continue
 		}
-		if !keep(brands.of(seq, project)) {
+		if !keep(brands.of(seq)) {
 			continue
 		}
-		a := get(key(seq, project))
+		a := get(key(seq, nil))
 		a.Meetings += n
 		switch status {
 		case MeetingHeld:
@@ -307,24 +306,23 @@ func Summary(ctx context.Context, q Querier, ws string, f ReportFilter) (Report,
 	// Links that went live in the period, by the sequence that pitched
 	// them.
 	rs, err = q.Query(ctx, `
-		SELECT k.sequence_id::text, s.project_id::text, count(DISTINCT x.id)
+		SELECT k.sequence_id::text, count(DISTINCT x.id)
 		FROM link_prospects x JOIN link_pitches k ON k.prospect_id = x.id AND k.status = 'enrolled'
-		JOIN sequences s ON s.id = k.sequence_id
-		WHERE x.workspace_id = $1 AND x.stage = 'live' AND x.live_at >= $2 AND x.live_at < $3 AND $6 = ''
-		  AND ($4 = '' OR s.project_id::text = $4) AND ($5 = '' OR k.sequence_id::text = $5)
-		GROUP BY 1, 2`, ws, f.From, f.To, f.ProjectID, f.SequenceID, f.MissionID)
+		WHERE x.workspace_id = $1 AND x.stage = 'live' AND x.live_at >= $2 AND x.live_at < $3 AND $5 = ''
+		  AND ($4 = '' OR k.sequence_id::text = $4)
+		GROUP BY 1`, ws, f.From, f.To, f.SequenceID, f.MissionID)
 	if err != nil {
 		return rep, err
 	}
 	for rs.Next() {
-		var seq, project *string
+		var seq *string
 		var n int
-		if err := rs.Scan(&seq, &project, &n); err != nil {
+		if err := rs.Scan(&seq, &n); err != nil {
 			rs.Close()
 			return rep, err
 		}
-		if keep(brands.of(seq, project)) {
-			get(key(seq, project)).LiveLinks += n
+		if keep(brands.of(seq)) {
+			get(key(seq, nil)).LiveLinks += n
 		}
 	}
 	rs.Close()
@@ -334,27 +332,27 @@ func Summary(ctx context.Context, q Querier, ws string, f ReportFilter) (Report,
 
 	// Deals opened in the period.
 	rs, err = q.Query(ctx, `
-		SELECT sequence_id::text, project_id::text, state, currency, count(*), COALESCE(sum(amount_cents), 0)
+		SELECT sequence_id::text, state, currency, count(*), COALESCE(sum(amount_cents), 0)
 		FROM deals
 		WHERE workspace_id = $1 AND opened_at >= $2 AND opened_at < $3 AND attribution <> 'none'
-		  AND ($4 = '' OR project_id::text = $4) AND ($5 = '' OR sequence_id::text = $5) AND ($6 = '' OR mission_id::text = $6)
-		GROUP BY 1, 2, 3, 4`, ws, f.From, f.To, f.ProjectID, f.SequenceID, f.MissionID)
+		  AND ($4 = '' OR sequence_id::text = $4) AND ($5 = '' OR mission_id::text = $5)
+		GROUP BY 1, 2, 3`, ws, f.From, f.To, f.SequenceID, f.MissionID)
 	if err != nil {
 		return rep, err
 	}
 	for rs.Next() {
-		var seq, project *string
+		var seq *string
 		var state, currency string
 		var n int
 		var amount int64
-		if err := rs.Scan(&seq, &project, &state, &currency, &n, &amount); err != nil {
+		if err := rs.Scan(&seq, &state, &currency, &n, &amount); err != nil {
 			rs.Close()
 			return rep, err
 		}
-		if !keep(brands.of(seq, project)) {
+		if !keep(brands.of(seq)) {
 			continue
 		}
-		a := get(key(seq, project))
+		a := get(key(seq, nil))
 		a.Deals += n
 		if state == DealWon {
 			a.Won += n
@@ -380,22 +378,21 @@ func Summary(ctx context.Context, q Querier, ws string, f ReportFilter) (Report,
 	// Spend: one-off entries, then recurring costs spread over the days of
 	// the period they were active.
 	type charge struct {
-		seq, project, mailbox, domain *string
-		cents                         float64
-		estimated, recurring          bool
-		category                      string
+		seq, brand, mailbox, domain *string
+		cents                       float64
+		estimated, recurring        bool
+		category                    string
 	}
 	var charges []charge
 	unpriced := map[[2]string]float64{}
 	rs, err = q.Query(ctx, `
-		SELECT e.sequence_id::text, COALESCE(e.project_id, s.project_id)::text, e.mailbox_id::text, NULLIF(e.domain, ''),
+		SELECT e.sequence_id::text, e.brand_id::text, e.mailbox_id::text, NULLIF(e.domain, ''),
 			e.category, e.amount_cents, e.units::float8, e.currency, lower(e.provider), e.unit_name, r.unit_price_micros, r.currency
 		FROM spend_entries e
-		LEFT JOIN sequences s ON s.id = e.sequence_id
 		LEFT JOIN spend_rates r ON r.workspace_id = e.workspace_id AND r.provider = lower(e.provider) AND r.unit_name = e.unit_name
 		WHERE e.workspace_id = $1 AND e.occurred_at >= $2 AND e.occurred_at < $3
-		  AND ($4 = '' OR COALESCE(e.project_id, s.project_id)::text = $4) AND ($5 = '' OR e.sequence_id::text = $5)
-		  AND ($6 = '' OR e.mission_id::text = $6)`, ws, f.From, f.To, f.ProjectID, f.SequenceID, f.MissionID)
+		  AND ($4 = '' OR e.sequence_id::text = $4)
+		  AND ($5 = '' OR e.mission_id::text = $5)`, ws, f.From, f.To, f.SequenceID, f.MissionID)
 	if err != nil {
 		return rep, err
 	}
@@ -406,7 +403,7 @@ func Summary(ctx context.Context, q Querier, ws string, f ReportFilter) (Report,
 		var currency, provider, unit string
 		var micros *int64
 		var rateCurrency *string
-		if err := rs.Scan(&c.seq, &c.project, &c.mailbox, &c.domain, &c.category, &amount, &units, &currency, &provider, &unit,
+		if err := rs.Scan(&c.seq, &c.brand, &c.mailbox, &c.domain, &c.category, &amount, &units, &currency, &provider, &unit,
 			&micros, &rateCurrency); err != nil {
 			rs.Close()
 			return rep, err
@@ -426,7 +423,7 @@ func Summary(ctx context.Context, q Querier, ws string, f ReportFilter) (Report,
 			unpriced[[2]string{provider, unit}] += deref64(units)
 			continue
 		}
-		if !keep(brands.ofCharge(c.seq, c.project, c.mailbox, c.domain)) {
+		if !keep(brands.ofCharge(c.seq, c.brand, c.mailbox, c.domain)) {
 			continue
 		}
 		charges = append(charges, c)
@@ -437,12 +434,12 @@ func Summary(ctx context.Context, q Querier, ws string, f ReportFilter) (Report,
 	}
 	if f.MissionID == "" {
 		rs, err = q.Query(ctx, `
-			SELECT r.sequence_id::text, COALESCE(r.project_id, s.project_id)::text, r.category, r.amount_cents, r.currency, r.every,
+			SELECT r.sequence_id::text, r.brand_id::text, r.category, r.amount_cents, r.currency, r.every,
 				r.starts_on, r.ends_on
-			FROM spend_recurring r LEFT JOIN sequences s ON s.id = r.sequence_id
+			FROM spend_recurring r
 			WHERE r.workspace_id = $1 AND r.starts_on < $3::timestamptz::date + 1 AND (r.ends_on IS NULL OR r.ends_on >= $2::timestamptz::date)
-			  AND ($4 = '' OR COALESCE(r.project_id, s.project_id)::text = $4) AND ($5 = '' OR r.sequence_id::text = $5)`,
-			ws, f.From, f.To, f.ProjectID, f.SequenceID)
+			  AND ($4 = '' OR r.sequence_id::text = $4)`,
+			ws, f.From, f.To, f.SequenceID)
 		if err != nil {
 			return rep, err
 		}
@@ -450,7 +447,7 @@ func Summary(ctx context.Context, q Querier, ws string, f ReportFilter) (Report,
 			var c charge
 			var r Recurring
 			var ends *time.Time
-			if err := rs.Scan(&c.seq, &c.project, &c.category, &r.AmountCents, &r.Currency, &r.Every, &r.StartsOn.Time, &ends); err != nil {
+			if err := rs.Scan(&c.seq, &c.brand, &c.category, &r.AmountCents, &r.Currency, &r.Every, &r.StartsOn.Time, &ends); err != nil {
 				rs.Close()
 				return rep, err
 			}
@@ -462,7 +459,7 @@ func Summary(ctx context.Context, q Querier, ws string, f ReportFilter) (Report,
 				rep.OtherCurrencies[r.Currency] += int64(math.Round(r.Daily() * days))
 				continue
 			}
-			if !keep(brands.of(c.seq, c.project)) {
+			if !keep(brands.ofCharge(c.seq, c.brand, nil, nil)) {
 				continue
 			}
 			c.cents, c.recurring = r.Daily()*days, true
@@ -479,7 +476,7 @@ func Summary(ctx context.Context, q Querier, ws string, f ReportFilter) (Report,
 	byMailbox := map[string]map[string]float64{}
 	byDomain := map[string]map[string]float64{}
 	for sk, n := range sends {
-		k := key(ptr(sk.seq), ptr(sk.project))
+		k := key(ptr(sk.seq), nil)
 		total[k] += float64(n)
 		if sk.mailbox != "" {
 			if byMailbox[sk.mailbox] == nil {
@@ -525,7 +522,7 @@ func Summary(ctx context.Context, q Querier, ws string, f ReportFilter) (Report,
 		return true
 	}
 	for _, c := range charges {
-		if k := key(c.seq, c.project); k != "" {
+		if k := key(c.seq, c.brand); k != "" {
 			add(k, c.cents, c, false)
 			continue
 		}
@@ -551,8 +548,6 @@ func Summary(ctx context.Context, q Querier, ws string, f ReportFilter) (Report,
 		}
 		table := "sequences"
 		switch f.GroupBy {
-		case GroupProject:
-			table = "projects"
 		case GroupBrand:
 			table = "brands"
 		}
@@ -657,9 +652,9 @@ func Summary(ctx context.Context, q Querier, ws string, f ReportFilter) (Report,
 	return rep, nil
 }
 
-// brandMaps holds the brand of each sequence, project, mailbox and domain
-// that has one.
-type brandMaps struct{ seq, project, mailbox, domain map[string]string }
+// brandMaps holds the brand of each sequence, mailbox and domain that has
+// one.
+type brandMaps struct{ seq, mailbox, domain map[string]string }
 
 func loadBrandMaps(ctx context.Context, q Querier, ws string) (brandMaps, error) {
 	m := brandMaps{}
@@ -683,9 +678,6 @@ func loadBrandMaps(ctx context.Context, q Querier, ws string) (brandMaps, error)
 	if m.seq, err = load(`SELECT id::text, brand_id::text FROM sequences WHERE workspace_id = $1 AND brand_id IS NOT NULL`); err != nil {
 		return m, err
 	}
-	if m.project, err = load(`SELECT id::text, brand_id::text FROM projects WHERE workspace_id = $1 AND brand_id IS NOT NULL`); err != nil {
-		return m, err
-	}
 	if m.mailbox, err = load(`SELECT id::text, brand_id::text FROM mailboxes WHERE workspace_id = $1 AND brand_id IS NOT NULL`); err != nil {
 		return m, err
 	}
@@ -693,23 +685,22 @@ func loadBrandMaps(ctx context.Context, q Querier, ws string) (brandMaps, error)
 	return m, err
 }
 
-// of is the brand of a sequence, or of a project when there is no
-// sequence; "" for shared.
-func (m brandMaps) of(seq, project *string) string {
+// of is the brand of a sequence; "" for shared or none.
+func (m brandMaps) of(seq *string) string {
 	if seq != nil {
 		return m.seq[*seq]
-	}
-	if project != nil {
-		return m.project[*project]
 	}
 	return ""
 }
 
-// ofCharge is the brand of spend: its sequence's or project's, else its
+// ofCharge is the brand of spend: its sequence's, else its own, else its
 // mailbox's or domain's.
-func (m brandMaps) ofCharge(seq, project, mailbox, domain *string) string {
-	if seq != nil || project != nil {
-		return m.of(seq, project)
+func (m brandMaps) ofCharge(seq, brand, mailbox, domain *string) string {
+	if seq != nil {
+		return m.of(seq)
+	}
+	if brand != nil {
+		return *brand
 	}
 	if mailbox != nil {
 		return m.mailbox[*mailbox]

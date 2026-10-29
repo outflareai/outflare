@@ -81,6 +81,7 @@ type partnerView struct {
 	UpdatedAt      time.Time    `json:"updated_at"`
 	landing        string
 	payoutSealed   []byte
+	brandID        *string
 	campaignSlug   string
 	campaignCode   string
 	campaignSrc    string
@@ -90,7 +91,7 @@ type partnerView struct {
 // partnerSelect reads memberships with their record, program, campaign
 // and totals. Cash totals count cash, fees and adjustments.
 const partnerSelect = `
-	SELECT m.id::text, m.program_id::text, p.slug, m.record_id::text, COALESCE(r.name, ''),
+	SELECT m.id::text, m.program_id::text, p.slug, p.brand_id::text, m.record_id::text, COALESCE(r.name, ''),
 	       COALESCE((SELECT i.value FROM record_identities i WHERE i.record_id = m.record_id AND i.namespace = 'email' AND i.valid_to IS NULL
 	                 ORDER BY i.verified DESC, i.valid_from LIMIT 1), ''),
 	       m.code, m.status, m.group_id::text, m.campaign_id::text, m.payout_method, m.postback_url, m.note, m.source, p.currency, p.landing_url,
@@ -121,7 +122,7 @@ const partnerSelect = `
 func scanPartner(row pgx.Row) (partnerView, error) {
 	var v partnerView
 	st := &v.Stats
-	err := row.Scan(&v.ID, &v.ProgramID, &v.Program, &v.RecordID, &v.Name, &v.Email, &v.Code, &v.Status, &v.GroupID, &v.CampaignID,
+	err := row.Scan(&v.ID, &v.ProgramID, &v.Program, &v.brandID, &v.RecordID, &v.Name, &v.Email, &v.Code, &v.Status, &v.GroupID, &v.CampaignID,
 		&v.payoutSealed, &v.PostbackURL, &v.Note, &v.Source, &v.Currency, &v.landing, &v.campaignSlug, &v.campaignCode, &v.campaignSrc, &v.campaignMedium,
 		&v.PromoCodes, &st.Clicks, &st.Referrals, &st.Customers, &st.SalesCents, &st.PendingCents, &st.ApprovedCents, &st.PaidCents,
 		&st.BalanceCents, &st.PendingActions, &v.CreatedAt, &v.UpdatedAt)
@@ -189,6 +190,13 @@ func (s *Server) loadPartner(ctx context.Context, ws, id string) (partnerView, e
 
 func (s *Server) findPartner(w http.ResponseWriter, r *http.Request, ws, id string) (*partnerView, bool) {
 	v, err := s.loadPartner(r.Context(), ws, id)
+	if err == nil {
+		err = partnerBrandAccess(r, accessFrom(r.Context()), v.brandID)
+	}
+	if errors.As(err, new(errDenied)) {
+		writeError(w, r, http.StatusForbidden, "forbidden", err.Error())
+		return nil, false
+	}
 	if errors.Is(err, errNotFound) {
 		writeError(w, r, http.StatusNotFound, "not_found", "partner not found")
 		return nil, false
@@ -839,4 +847,46 @@ func addQuery(link, k, v string) string {
 	}
 	u.RawQuery += url.QueryEscape(k) + "=" + url.QueryEscape(v)
 	return u.String()
+}
+
+// getPartnerProgramStats totals a program across all its partners, so the
+// program's figures don't depend on how many partners a page holds.
+func (s *Server) getPartnerProgramStats(w http.ResponseWriter, r *http.Request) {
+	a := accessFrom(r.Context())
+	prog, ok := s.findPartnerProgram(w, r, a.WorkspaceID, r.PathValue("id"))
+	if !ok {
+		return
+	}
+	var v struct {
+		Partners map[string]int `json:"partners"`
+		partnerStats
+	}
+	var active, pending, suspended, rejected int
+	st := &v.partnerStats
+	err := s.pool.QueryRow(r.Context(), `
+		WITH m AS (SELECT id, status FROM partner_memberships WHERE workspace_id = $1 AND program_id = $2),
+		     w AS (SELECT w.* FROM partner_rewards w JOIN m ON m.id = w.membership_id WHERE w.workspace_id = $1)
+		SELECT (SELECT count(*) FILTER (WHERE status = 'active') FROM m)::int,
+		       (SELECT count(*) FILTER (WHERE status = 'pending') FROM m)::int,
+		       (SELECT count(*) FILTER (WHERE status = 'suspended') FROM m)::int,
+		       (SELECT count(*) FILTER (WHERE status = 'rejected') FROM m)::int,
+		       (SELECT count(*) FROM partner_clicks k JOIN m ON m.id = k.membership_id WHERE k.workspace_id = $1)::int,
+		       (SELECT count(*) FROM partner_referrals f JOIN m ON m.id = f.membership_id WHERE f.workspace_id = $1)::int,
+		       (SELECT count(*) FROM partner_referrals f JOIN m ON m.id = f.membership_id WHERE f.workspace_id = $1 AND f.first_sale_at IS NOT NULL)::int,
+		       COALESCE((SELECT sum(CASE WHEN v.type = 'sale' THEN v.amount_cents ELSE -v.amount_cents END) FROM partner_conversions v
+		                 JOIN partner_referrals f ON f.id = v.referral_id JOIN m ON m.id = f.membership_id
+		                 WHERE v.workspace_id = $1 AND v.type IN ('sale', 'refund')), 0)::bigint,
+		       COALESCE((SELECT sum(amount_cents) FILTER (WHERE status = 'pending') FROM w WHERE side = 'partner' AND kind <> 'action'), 0)::bigint,
+		       COALESCE((SELECT sum(amount_cents) FILTER (WHERE status = 'approved') FROM w WHERE side = 'partner' AND kind <> 'action'), 0)::bigint,
+		       COALESCE((SELECT sum(amount_cents) FILTER (WHERE status = 'paid') FROM w WHERE side = 'partner' AND kind <> 'action'), 0)::bigint,
+		       COALESCE((SELECT sum(amount_cents) FILTER (WHERE status = 'approved' AND payout_id IS NULL) FROM w WHERE side = 'partner' AND kind <> 'action'), 0)::bigint,
+		       (SELECT count(*) FROM w WHERE kind = 'action' AND status = 'approved')::int`, a.WorkspaceID, prog.ID).
+		Scan(&active, &pending, &suspended, &rejected, &st.Clicks, &st.Referrals, &st.Customers, &st.SalesCents, &st.PendingCents,
+			&st.ApprovedCents, &st.PaidCents, &st.BalanceCents, &st.PendingActions)
+	if err != nil {
+		s.internal(w, r, err)
+		return
+	}
+	v.Partners = map[string]int{"total": active + pending + suspended + rejected, "active": active, "pending": pending, "suspended": suspended, "rejected": rejected}
+	writeJSON(w, http.StatusOK, v)
 }

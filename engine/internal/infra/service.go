@@ -151,20 +151,20 @@ func (s *Service) Tick(ctx context.Context) error {
 // plan is a plan as the jobs need it.
 type plan struct {
 	ID, WorkspaceID, Status, Supplier, Provider string
-	ProjectID, IntegrationID, OrderRef          *string
+	BrandID, IntegrationID, OrderRef            *string
 	OrderStarted, ApprovedAt                    *time.Time
 	WarmupDays, MailboxDailyLimit               int
 }
 
 func loadPlan(ctx context.Context, q jobs.Querier, id string, lock bool) (*plan, error) {
 	var p plan
-	sql := `SELECT id::text, workspace_id::text, status, supplier, provider, project_id::text, supplier_integration_id::text,
+	sql := `SELECT id::text, workspace_id::text, status, supplier, provider, brand_id::text, supplier_integration_id::text,
 	               order_ref, order_started_at, approved_at, warmup_days, mailbox_daily_limit
 	        FROM infra_plans WHERE id = $1`
 	if lock {
 		sql += " FOR UPDATE"
 	}
-	err := q.QueryRow(ctx, sql, id).Scan(&p.ID, &p.WorkspaceID, &p.Status, &p.Supplier, &p.Provider, &p.ProjectID, &p.IntegrationID,
+	err := q.QueryRow(ctx, sql, id).Scan(&p.ID, &p.WorkspaceID, &p.Status, &p.Supplier, &p.Provider, &p.BrandID, &p.IntegrationID,
 		&p.OrderRef, &p.OrderStarted, &p.ApprovedAt, &p.WarmupDays, &p.MailboxDailyLimit)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil
@@ -523,8 +523,8 @@ func (s *Service) build(ctx context.Context, tx pgx.Tx, p *plan) error {
 				if err := mailbox.EnsureDomain(ctx, tx, p.WorkspaceID, it.Domain, "plan"); err != nil {
 					return err
 				}
-				if _, err := tx.Exec(ctx, `UPDATE sending_domains SET project_id = COALESCE(project_id, $3) WHERE workspace_id = $1 AND domain = $2`,
-					p.WorkspaceID, it.Domain, p.ProjectID); err != nil {
+				if _, err := tx.Exec(ctx, `UPDATE sending_domains SET brand_id = COALESCE(brand_id, $3) WHERE workspace_id = $1 AND domain = $2`,
+					p.WorkspaceID, it.Domain, p.BrandID); err != nil {
 					return err
 				}
 			}
@@ -593,7 +593,7 @@ func (s *Service) build(ctx context.Context, tx pgx.Tx, p *plan) error {
 		if _, err := tx.Exec(ctx, `
 			UPDATE mailboxes SET
 				infra_plan_id = $2,
-				project_id = COALESCE(project_id, $3),
+				brand_id = COALESCE(brand_id, $3),
 				auto_rest = true,
 				lifecycle_stage = CASE WHEN $4 THEN 'warming' ELSE lifecycle_stage END,
 				stage_reason = CASE WHEN $4 THEN 'Warming up for ' || $5::int || ' days.' ELSE stage_reason END,
@@ -601,7 +601,7 @@ func (s *Service) build(ctx context.Context, tx pgx.Tx, p *plan) error {
 				stage_changed_at = CASE WHEN $4 THEN now() ELSE stage_changed_at END,
 				daily_limit = CASE WHEN $4 THEN $6 ELSE daily_limit END,
 				updated_at = now()
-			WHERE id = $1`, id, p.ID, p.ProjectID, fresh, p.WarmupDays, p.MailboxDailyLimit); err != nil {
+			WHERE id = $1`, id, p.ID, p.BrandID, fresh, p.WarmupDays, p.MailboxDailyLimit); err != nil {
 			return err
 		}
 		if _, err := tx.Exec(ctx, `

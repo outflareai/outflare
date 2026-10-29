@@ -39,7 +39,7 @@ Builds from source send nothing unless they set a stats server: official release
     "active_sequences": "2-5",
     "sent_24h": "251-500",
     "replies_24h": "6-10",
-    "projects": "1",
+    "brands": "1",
     "missions": "0",
     "api_tokens": "2-5",
     "active_users_7d": "1"
@@ -60,7 +60,7 @@ Builds from source send nothing unless they set a stats server: official release
 
 ## What is never sent
 
-Names, email addresses, domains, the server's URL or hostname, lead or company data, email subjects or bodies, sequence or project names, credentials, API tokens, connector account details, and anything you type. The collector does not store the IP address the report came from; it may derive a country from it before discarding it.
+Names, email addresses, domains, the server's URL or hostname, lead or company data, email subjects or bodies, sequence or brand names, credentials, API tokens, connector account details, and anything you type. The collector does not store the IP address the report came from; it may derive a country from it before discarding it.
 
 ## What comes back
 

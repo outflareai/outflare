@@ -125,23 +125,10 @@ func TestCompanySteps(t *testing.T) {
 		time.Sleep(20 * time.Millisecond)
 	}
 
-	if l := links["northpeak.example"]; l.record != have["northpeak.example"] || !l.existed {
-		t.Fatalf("known company: %+v", l)
-	}
-	if stops["globex.example"] != OptedOut || stops["initech.example"] != Bounced {
-		t.Fatalf("stops: %v", stops)
-	}
-	if l := links["umbrella.example"]; l.record == "" || l.existed || !slices.Equal(l.warnings, []string{"suppressed_domain:customer"}) {
-		t.Fatalf("customer: %+v", l)
-	}
-	hooli := links["hooli.example"]
-	var origin, via, name string
-	if err := pool.QueryRow(ctx, `SELECT origin, acquired_via, name FROM records WHERE id = $1 AND workspace_id = $2`, hooli.record, ws).Scan(&origin, &via, &name); err != nil ||
-		origin != "prospect" || via != "lead_finder" || name != "Co hooli.example" || len(hooli.warnings) != 0 {
-		t.Fatalf("new company: %s %s %s %+v %v", origin, via, name, hooli, err)
-	}
-	// The links above are written before each item is marked done, so the
-	// counts can lag them for a moment.
+	// Linked runs inside each step's transaction, before it commits, so a
+	// link can be seen here before its record is. The runner writes the
+	// stage counts only after a step returns (and so has committed): wait
+	// for them before reading the records.
 	for {
 		v, err := pipeline.View(ctx, pool, ws, run)
 		if err != nil {
@@ -158,5 +145,21 @@ func TestCompanySteps(t *testing.T) {
 			t.Fatalf("stages: %+v", v.Stages)
 		}
 		time.Sleep(20 * time.Millisecond)
+	}
+
+	if l := links["northpeak.example"]; l.record != have["northpeak.example"] || !l.existed {
+		t.Fatalf("known company: %+v", l)
+	}
+	if stops["globex.example"] != OptedOut || stops["initech.example"] != Bounced {
+		t.Fatalf("stops: %v", stops)
+	}
+	if l := links["umbrella.example"]; l.record == "" || l.existed || !slices.Equal(l.warnings, []string{"suppressed_domain:customer"}) {
+		t.Fatalf("customer: %+v", l)
+	}
+	hooli := links["hooli.example"]
+	var origin, via, name string
+	if err := pool.QueryRow(ctx, `SELECT origin, acquired_via, name FROM records WHERE id = $1 AND workspace_id = $2`, hooli.record, ws).Scan(&origin, &via, &name); err != nil ||
+		origin != "prospect" || via != "lead_finder" || name != "Co hooli.example" || len(hooli.warnings) != 0 {
+		t.Fatalf("new company: %s %s %s %+v %v", origin, via, name, hooli, err)
 	}
 }

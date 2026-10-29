@@ -30,6 +30,9 @@ type Service struct {
 	// Fields writes record fields for set_field and tag steps (the API
 	// server). Without it those steps fail.
 	Fields FieldWriter
+	// Deals moves deals for move_deal steps (the API server). Without it
+	// those steps fail.
+	Deals DealMover
 }
 
 // Register adds the job handlers to q.
@@ -194,47 +197,12 @@ func Enroll(ctx context.Context, tx pgx.Tx, ws, journeyID, recordID string, even
 	if j.status != "active" {
 		return "", "the journey is not active", nil
 	}
-	var brand *string
-	var attrs []byte
-	err = tx.QueryRow(ctx, `SELECT brand_id, attributes FROM records WHERE workspace_id = $1 AND id = $2 AND record_type = 'person' AND merged_into IS NULL AND archived_at IS NULL`,
-		ws, recordID).Scan(&brand, &attrs)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return "", "not a person on a customer record", nil
-	}
-	if err != nil {
-		return "", "", err
-	}
-	if j.brandID != nil && (brand == nil || *brand != *j.brandID) {
-		return "", "not in the journey's brand", nil
-	}
 	if context == nil {
 		context = map[string]any{}
 	}
-	var attributes map[string]any
-	_ = json.Unmarshal(attrs, &attributes)
-	// Someone who already meets the exit criteria never starts.
-	if len(j.exitConditions) > 0 && Holds(attributes, context, j.exitConditions, "any") {
-		return "", "already meets the journey's exit criteria", nil
-	}
-	if !manual && len(j.filter) > 0 {
-		ok, err := holds(ctx, tx, subject{ws: ws, recordID: recordID, attributes: attributes, context: context, entered: time.Now()}, j.filter, "all")
-		if err != nil {
-			return "", "", err
-		}
-		if !ok {
-			return "", "does not meet the journey's conditions", nil
-		}
-	}
-	var before, now bool
-	if err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM journey_runs WHERE journey_id = $1 AND record_id = $2),
-		EXISTS (SELECT 1 FROM journey_runs WHERE journey_id = $1 AND record_id = $2 AND status = 'active')`, journeyID, recordID).Scan(&before, &now); err != nil {
-		return "", "", err
-	}
-	switch {
-	case now:
-		return "", "already in the journey", nil
-	case before && j.entry == "once":
-		return "", "already went through the journey, which people go through once", nil
+	why, err := refusal(ctx, tx, ws, j, recordID, context, manual)
+	if err != nil || why != "" {
+		return "", why, err
 	}
 	first := ""
 	if len(j.steps) > 0 {
@@ -260,6 +228,54 @@ func Enroll(ctx context.Context, tx pgx.Tx, ws, journeyID, recordID string, even
 		return id, "", nil // the caller records who added them
 	}
 	return id, "", record(ctx, tx, ws, "journey_run.entered", journeyID, map[string]any{"via": "event"})
+}
+
+const notPerson = "not a person on a customer record"
+
+// refusal is why a person can't start a run of j now, or "": they are not
+// a person in its brand, already meet its exit criteria, don't meet its
+// filter (unless manual), or its entry rule says no.
+func refusal(ctx context.Context, tx pgx.Tx, ws string, j *journey, recordID string, context map[string]any, manual bool) (string, error) {
+	var brand *string
+	var attrs []byte
+	err := tx.QueryRow(ctx, `SELECT brand_id, attributes FROM records WHERE workspace_id = $1 AND id = $2 AND record_type = 'person' AND merged_into IS NULL AND archived_at IS NULL`,
+		ws, recordID).Scan(&brand, &attrs)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return notPerson, nil
+	}
+	if err != nil {
+		return "", err
+	}
+	if j.brandID != nil && (brand == nil || *brand != *j.brandID) {
+		return "not in the journey's brand", nil
+	}
+	var attributes map[string]any
+	_ = json.Unmarshal(attrs, &attributes)
+	// Someone who already meets the exit criteria never starts.
+	if len(j.exitConditions) > 0 && Holds(attributes, context, j.exitConditions, "any") {
+		return "already meets the journey's exit criteria", nil
+	}
+	if !manual && len(j.filter) > 0 {
+		ok, err := holds(ctx, tx, subject{ws: ws, recordID: recordID, attributes: attributes, context: context, entered: time.Now()}, j.filter, "all")
+		if err != nil {
+			return "", err
+		}
+		if !ok {
+			return "does not meet the journey's conditions", nil
+		}
+	}
+	var before, now bool
+	if err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM journey_runs WHERE journey_id = $1 AND record_id = $2),
+		EXISTS (SELECT 1 FROM journey_runs WHERE journey_id = $1 AND record_id = $2 AND status = 'active')`, j.id, recordID).Scan(&before, &now); err != nil {
+		return "", err
+	}
+	switch {
+	case now:
+		return "already in the journey", nil
+	case before && j.entry == "once":
+		return "already went through the journey, which people go through once", nil
+	}
+	return "", nil
 }
 
 // Resume moves on the active runs of a journey that was paused.
@@ -378,91 +394,115 @@ func (s *Service) advance(ctx context.Context, ws, runID string) (bool, error) {
 				return s.finish(ctx, tx, ws, r, "exited", "exit_condition")
 			}
 		}
-		var next, outcome, detail string
-		var emailID *string
-		switch st.Kind {
-		case KindWait:
-			if r.nextAt == nil {
-				at := time.Now().Add(time.Duration(st.WaitSeconds) * time.Second)
-				if _, err := tx.Exec(ctx, `UPDATE journey_runs SET next_at = $2, updated_at = now() WHERE id = $1`, r.id, at); err != nil {
-					return err
-				}
-				if err := logStep(ctx, tx, ws, r, st, "waiting", nil, "until "+at.UTC().Format(time.RFC3339)); err != nil {
-					return err
-				}
-				_, err := jobs.Enqueue(ctx, tx, jobs.NewJob{Kind: JobRun, WorkspaceID: &ws, Payload: map[string]string{"run_id": r.id}, RunAt: at,
-					IdempotencyKey: "journey-run:" + r.id + ":" + strconv.Itoa(r.taken+1)})
+		if st.Kind == KindWait && r.nextAt == nil {
+			at := time.Now().Add(time.Duration(st.WaitSeconds) * time.Second)
+			if _, err := tx.Exec(ctx, `UPDATE journey_runs SET next_at = $2, updated_at = now() WHERE id = $1`, r.id, at); err != nil {
 				return err
 			}
-			next, outcome = st.Next, "waited"
-		case KindBranch:
-			attrs, err := attributes(ctx, tx, ws, r.recordID)
-			if err != nil {
+			if err := logStep(ctx, tx, ws, r, st, "waiting", nil, "until "+at.UTC().Format(time.RFC3339)); err != nil {
 				return err
 			}
-			yes, err := holds(ctx, tx, subject{ws: ws, runID: r.id, recordID: r.recordID, attributes: attrs, context: r.context, entered: r.entered}, st.Conditions, st.Match)
-			if err != nil {
-				return err
-			}
-			next, outcome = st.Else, "no"
-			if yes {
-				next, outcome = st.Then, "yes"
-			}
-		case KindEmail:
-			id, why, failed, err := s.email(ctx, tx, ws, j, r, st)
-			if err != nil {
-				return err
-			}
-			if failed != "" {
-				if err := logStep(ctx, tx, ws, r, st, "failed", nil, failed); err != nil {
-					return err
-				}
-				return s.finish(ctx, tx, ws, r, "failed", "email_failed")
-			}
-			next, outcome, detail, emailID = st.Next, "sent", why, id
-			if id == nil {
-				outcome = "skipped"
-			}
-		case KindExit:
-			if err := logStep(ctx, tx, ws, r, st, "exited", nil, ""); err != nil {
-				return err
-			}
-			return s.finish(ctx, tx, ws, r, "exited", "exit_step")
-		default:
-			a := action(st.Kind)
-			if a == nil {
-				return s.finish(ctx, tx, ws, r, "failed", "unknown_step")
-			}
-			var err error
-			outcome, detail, err = a.run(ctx, &act{s: s, tx: tx, ws: ws, j: j, r: r, st: st})
-			if err != nil {
-				return err
-			}
-			next = st.Next
-			if outcome == "failed" {
-				switch st.OnError {
-				case "", "stop":
-					if err := logStep(ctx, tx, ws, r, st, "failed", nil, detail); err != nil {
-						return err
-					}
-					return s.finish(ctx, tx, ws, r, "failed", "action_failed")
-				case "continue":
-				default:
-					next = st.OnError
-				}
-			}
+			_, err := jobs.Enqueue(ctx, tx, jobs.NewJob{Kind: JobRun, WorkspaceID: &ws, Payload: map[string]string{"run_id": r.id}, RunAt: at,
+				IdempotencyKey: "journey-run:" + r.id + ":" + strconv.Itoa(r.taken+1)})
+			return err
 		}
-		if err := logStep(ctx, tx, ws, r, st, outcome, emailID, detail); err != nil {
+		t, err := s.take(ctx, tx, ws, j, r, st, nil)
+		if err != nil {
+			return err
+		}
+		if t.end != "" {
+			if t.outcome != "" {
+				if err := logStep(ctx, tx, ws, r, st, t.outcome, nil, t.detail); err != nil {
+					return err
+				}
+			}
+			return s.finish(ctx, tx, ws, r, t.end, t.reason)
+		}
+		if err := logStep(ctx, tx, ws, r, st, t.outcome, t.emailID, t.detail); err != nil {
 			return err
 		}
 		if _, err := tx.Exec(ctx, `UPDATE journey_runs SET step = NULLIF($2, ''), next_at = NULL, steps_taken = steps_taken + 1, updated_at = now() WHERE id = $1`,
-			r.id, next); err != nil {
+			r.id, t.next); err != nil {
 			return err
 		}
 		more = true
 		return nil
 	})
 	return more, err
+}
+
+// taken is what one step did: where the run goes next, or how it ends.
+type taken struct {
+	next, outcome, detail string
+	emailID               *string
+	// end and reason are set when the run ends at this step: its status
+	// and why.
+	end, reason string
+}
+
+// take does one step of a run. A test run (t set) goes through the same
+// code in a transaction that is rolled back: a wait passes at once, an
+// email is composed but not queued, and a branch goes the way t says.
+func (s *Service) take(ctx context.Context, tx pgx.Tx, ws string, j *journey, r run, st *Step, t *trial) (taken, error) {
+	switch st.Kind {
+	case KindWait:
+		return taken{next: st.Next, outcome: "waited"}, nil
+	case KindBranch:
+		attrs, err := attributes(ctx, tx, ws, r.recordID)
+		if err != nil {
+			return taken{}, err
+		}
+		yes, err := holds(ctx, tx, subject{ws: ws, runID: r.id, recordID: r.recordID, attributes: attrs, context: r.context, entered: r.entered}, st.Conditions, st.Match)
+		if err != nil {
+			return taken{}, err
+		}
+		if t != nil {
+			t.data = yes
+			switch t.paths[st.ID] {
+			case "yes":
+				yes = true
+			case "no":
+				yes = false
+			}
+		}
+		if yes {
+			return taken{next: st.Then, outcome: "yes"}, nil
+		}
+		return taken{next: st.Else, outcome: "no"}, nil
+	case KindEmail:
+		id, why, failed, err := s.email(ctx, tx, ws, j, r, st, t)
+		if err != nil {
+			return taken{}, err
+		}
+		if failed != "" {
+			return taken{outcome: "failed", detail: failed, end: "failed", reason: "email_failed"}, nil
+		}
+		if why != "" {
+			return taken{next: st.Next, outcome: "skipped", detail: why}, nil
+		}
+		return taken{next: st.Next, outcome: "sent", emailID: id}, nil
+	case KindExit:
+		return taken{outcome: "exited", end: "exited", reason: "exit_step"}, nil
+	}
+	a := action(st.Kind)
+	if a == nil {
+		return taken{end: "failed", reason: "unknown_step"}, nil
+	}
+	outcome, detail, err := a.run(ctx, &act{s: s, tx: tx, ws: ws, j: j, r: r, st: st})
+	if err != nil {
+		return taken{}, err
+	}
+	next := st.Next
+	if outcome == "failed" {
+		switch st.OnError {
+		case "", "stop":
+			return taken{outcome: "failed", detail: detail, end: "failed", reason: "action_failed"}, nil
+		case "continue":
+		default:
+			next = st.OnError
+		}
+	}
+	return taken{next: next, outcome: outcome, detail: detail}, nil
 }
 
 func attributes(ctx context.Context, q jobs.Querier, ws, recordID string) (map[string]any, error) {
@@ -495,8 +535,8 @@ func (s *Service) finish(ctx context.Context, tx pgx.Tx, ws string, r run, statu
 
 // email sends an email step's template to the person, and reports the
 // email's id, or why they were skipped (nil id), or why the step cannot
-// work for anyone (failed).
-func (s *Service) email(ctx context.Context, tx pgx.Tx, ws string, j *journey, r run, st *Step) (*string, string, string, error) {
+// work for anyone (failed). A test run (t set) only composes it.
+func (s *Service) email(ctx context.Context, tx pgx.Tx, ws string, j *journey, r run, st *Step, t *trial) (*string, string, string, error) {
 	var templateID string
 	err := tx.QueryRow(ctx, `SELECT id::text FROM email_templates WHERE workspace_id = $1 AND (id::text = $2 OR handle = $2)`, ws, st.Template).Scan(&templateID)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -536,6 +576,10 @@ func (s *Service) email(ctx context.Context, tx pgx.Tx, ws string, j *journey, r
 	why, err := emails.SkipReason(ctx, tx, ws, r.recordID, e.TopicID)
 	if err != nil || why != "" {
 		return nil, why, "", err
+	}
+	if t != nil {
+		t.subject = e.Subject
+		return nil, "", "", nil
 	}
 	id, err := s.Emails.Queue(ctx, tx, emails.System, e)
 	if err != nil {

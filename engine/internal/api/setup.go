@@ -506,7 +506,7 @@ func (s *Server) updateBrandSetup(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if !a.writes(nil, &b.ID) {
+	if !a.writes(&b.ID) {
 		writeError(w, r, http.StatusForbidden, "forbidden", string(errSharedRecord))
 		return
 	}
@@ -656,7 +656,7 @@ func (s *Server) setupBrandWrite(w http.ResponseWriter, r *http.Request) (*acces
 	if !ok {
 		return nil, nil, false
 	}
-	if !a.writes(nil, &b.ID) {
+	if !a.writes(&b.ID) {
 		writeError(w, r, http.StatusForbidden, "forbidden", string(errSharedRecord))
 		return nil, nil, false
 	}

@@ -25,7 +25,7 @@ const (
 	CapRevealPerson  = "data.reveal_person"  // implements PersonRevealer
 )
 
-// Filter names a PeopleSearcher may support. They match the project's ICP
+// Filter names a PeopleSearcher may support. They match the customer profile's
 // keys, plus a few that only make sense for one list.
 const (
 	FilterTitles           = "titles"

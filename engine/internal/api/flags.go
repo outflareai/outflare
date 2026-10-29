@@ -171,7 +171,7 @@ func (s *Server) oneFlag(w http.ResponseWriter, r *http.Request) (flagView, bool
 		s.internal(w, r, err)
 		return flagView{}, false
 	}
-	if len(list) == 1 && a.sees(nil, list[0].BrandID) {
+	if len(list) == 1 && a.sees(list[0].BrandID) {
 		return list[0], true
 	}
 	writeError(w, r, http.StatusNotFound, "not_found", "flag not found: use its id or key")
@@ -216,7 +216,7 @@ func (s *Server) applyFlagInput(ctx context.Context, a *access, f *flagView, in 
 			return err
 		}
 	}
-	if !a.writes(nil, f.BrandID) {
+	if !a.writes(f.BrandID) {
 		return errDenied("you are limited to some brands: give the flag one of your brands")
 	}
 	if in.Status != nil {
@@ -326,7 +326,7 @@ func (s *Server) updateFlag(w http.ResponseWriter, r *http.Request) {
 	if !decode(w, r, &in) {
 		return
 	}
-	if !a.writes(nil, cur.BrandID) {
+	if !a.writes(cur.BrandID) {
 		writeError(w, r, http.StatusForbidden, "forbidden", brandLimitedMessage)
 		return
 	}
@@ -366,7 +366,7 @@ func (s *Server) archiveFlag(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if !a.writes(nil, cur.BrandID) {
+	if !a.writes(cur.BrandID) {
 		writeError(w, r, http.StatusForbidden, "forbidden", brandLimitedMessage)
 		return
 	}
@@ -623,7 +623,7 @@ func (s *Server) evaluateFlags(w http.ResponseWriter, r *http.Request) {
 	v := flags.Visitor{Subject: subject, SignedIn: strings.TrimSpace(in.UserID) != "", URL: clip(in.URL, 2000), Referrer: clip(in.Referrer, 2000),
 		Language: clip(in.Language, 35), Device: device, Properties: props}
 	ans := decideFlags(list, v, func(f liveFlag) bool {
-		return a.sees(nil, f.brandID) && (len(in.Keys) == 0 || slices.Contains(in.Keys, f.Key))
+		return a.sees(f.brandID) && (len(in.Keys) == 0 || slices.Contains(in.Keys, f.Key))
 	}, nil, true)
 	outcome = "ok"
 	writeJSON(w, http.StatusOK, ans)

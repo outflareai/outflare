@@ -21,8 +21,10 @@ import (
 	"golang.org/x/net/publicsuffix"
 
 	"github.com/outflareai/outflare/engine/internal/adtrack"
+	"github.com/outflareai/outflare/engine/internal/attribution"
 	"github.com/outflareai/outflare/engine/internal/auth"
 	"github.com/outflareai/outflare/engine/internal/metrics"
+	"github.com/outflareai/outflare/engine/internal/utm"
 	"github.com/outflareai/outflare/engine/internal/visitors"
 )
 
@@ -890,9 +892,12 @@ func siteMessageOf(raw json.RawMessage, ua string, excluded []string) (eventMess
 	}
 	// The ad the tracking template named, with the network's own ids. Only
 	// page views carry it: a track event's ad is the site's own property.
+	adKept, adSkipped := 0, 0
 	if kind == "page" {
 		in, _ := props["ad"].(map[string]any)
-		if ad, _ := adtrack.CleanAd(in); len(ad) > 0 {
+		ad, skipped := adtrack.CleanAd(in)
+		adKept, adSkipped = len(ad), skipped
+		if len(ad) > 0 {
 			props["ad"] = ad
 		} else {
 			delete(props, "ad")
@@ -920,6 +925,9 @@ func siteMessageOf(raw json.RawMessage, ua string, excluded []string) (eventMess
 		cleanPage(page, excluded)
 	}
 	pick("campaign", siteCampaign, 500)
+	if kind == "page" {
+		siteAdArrival(ctxOut, props, adKept, adSkipped)
+	}
 	for _, f := range []string{"locale", "timezone"} {
 		if v, ok := ctxIn[f].(string); ok && v != "" {
 			ctxOut[f] = cutUTF8(v, 100)
@@ -1068,4 +1076,22 @@ func (s *Server) removeSiteProxySecret(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// siteAdArrival counts how well a landing page from a paid ad was tracked
+// (tracking health): with the network's click id, only the template's ad
+// ids, or neither, and the template macros the network left unfilled.
+func siteAdArrival(ctx, props map[string]any, adKept, adSkipped int) {
+	camp, _ := ctx["campaign"].(map[string]any)
+	medium, _ := camp["medium"].(string)
+	if !attribution.PaidMedium(strings.ToLower(strings.TrimSpace(medium))) {
+		return
+	}
+	source, _ := camp["source"].(string)
+	ids, _ := props["click_ids"].(map[string]any)
+	network, outcome := adtrack.Arrival(ids, adKept, utm.Source(source))
+	metrics.PaidArrival(network, outcome)
+	if adSkipped > 0 {
+		metrics.AdMacrosUnfilled(network, adSkipped)
+	}
 }

@@ -26,7 +26,7 @@ const (
 	// siteScriptVersion is the version /site.js sends (VERSION in site.js);
 	// siteScriptMinVersion is the oldest the server still takes as is.
 	// Copies from before the script sent a version count as "1".
-	siteScriptVersion    = 5
+	siteScriptVersion    = 6
 	siteScriptMinVersion = 1
 
 	// A site key whose site sent visits but none for this long is silent.
@@ -373,7 +373,7 @@ func (s *Server) getInstallHealth(w http.ResponseWriter, r *http.Request) {
 	brand := ""
 	if ref := r.URL.Query().Get("brand"); ref != "" {
 		id, err := s.brandIDFor(r.Context(), a.WorkspaceID, ref)
-		if err == nil && !a.sees(nil, &id) {
+		if err == nil && !a.sees(&id) {
 			err = errNotFound
 		}
 		if err != nil {

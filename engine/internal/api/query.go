@@ -74,7 +74,7 @@ var queryTables = []queryTable{
 	{"consents", auth.ScopeCustomersRead, "Every consent grant and withdrawal; the latest per record, channel, topic and purpose is current."},
 	{"subscriptions", auth.ScopeCustomersRead, "Payment subscriptions from Stripe and other payment connections; monthly_minor is MRR in minor units."},
 	{"brands", auth.ScopeWorkspaceRead, "The workspace's brands."},
-	{"projects", auth.ScopeProjectsRead, "Projects and their offers."},
+	{"projects", auth.ScopeProjectsRead, "Former projects (removed), kept until a later release drops them."},
 	{"leads", auth.ScopeLeadsRead, "Leads for outreach; hidden from callers kept to some brands."},
 	{"sequences", auth.ScopeSequencesRead, "Outreach sequences."},
 	{"enrollments", auth.ScopeSequencesRead, "Leads in sequences and where each is."},
@@ -142,6 +142,10 @@ func (s *Server) listQueryTables(w http.ResponseWriter, r *http.Request) {
 	}
 	out := make([]queryTableView, 0, len(queryTables))
 	for _, t := range queryTables {
+		// A view a newer version dropped (after a rollback) is left out.
+		if cols[t.Name] == nil {
+			continue
+		}
 		out = append(out, queryTableView{Name: t.Name, Description: t.Description, Scope: t.Scope, Available: queryReadable(a, t), Columns: cols[t.Name]})
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"data": out})

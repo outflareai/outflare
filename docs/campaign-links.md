@@ -59,6 +59,33 @@ https://northpeak.example/pricing?plan=pro&utm_source=linkedin&utm_medium=cpc&ut
 Making the same link twice returns the one you already have. Pages must be
 `http` or `https` web addresses.
 
+## Redirect links
+
+By default a link goes straight to the page, and the website tracking
+snippet reads the tags there. Where the snippet can't run, or a long tagged
+address doesn't fit (a bio link, a partner's page, a QR code, a podcast
+note), give the link a **redirect link** as well: a short address that
+counts each click, then sends the person on to the tagged page.
+
+```
+https://links.northpeak.example/l/k7m2pq9x
+```
+
+- Ask for one per link with `"redirect": true`, or turn on
+  `redirect_links` on the campaign so every new link gets one. Asking again
+  for a link made without one adds it.
+- The redirect link uses the workspace's tracking domain when it has one,
+  and this server's address otherwise.
+- The person lands on the tagged page with `ofclk`, the click's key, added,
+  so the snippet still sees the campaign.
+- Clicks from link scanners and previews (Slack, mail security filters)
+  are kept but not counted. Each link and campaign shows its `clicks`.
+- No address or browser details are stored with a click: only when it
+  happened, and whether it looked automated.
+- A redirect link keeps working when its campaign is archived, since it
+  may be printed. Turning `redirect_links` off doesn't remove the ones
+  already made.
+
 ## Campaigns modules make for you
 
 Some modules tag their own links, so you don't make those campaigns by
@@ -108,6 +135,7 @@ traffic their code didn't bring, or lose imported partner links.
 | `POST /v1/workspaces/{ws}/tracking-campaigns` | `analytics.manage` |
 | `GET`, `PATCH /v1/workspaces/{ws}/tracking-campaigns/{id}` (id, slug or code) | `analytics.read`, `analytics.manage` |
 | `GET`, `POST /v1/workspaces/{ws}/tracking-campaigns/{id}/links` | `analytics.read`, `analytics.manage` |
+| `GET /l/{code}` (a redirect link) | Public |
 
 Owners, admins and operators have `analytics.manage`; viewers can read.
 
@@ -123,4 +151,4 @@ The MCP tools are `get_tracking_taxonomy`, `list_tracking_campaigns`,
 
 Each change is an audit action (and a product event): `tracking_campaign.created`,
 `tracking_campaign.updated`, `tracking_campaign.archived`,
-`tracking_campaign.restored` and `tracking_link.created`.
+`tracking_campaign.restored`, `tracking_link.created` and `tracking_link.redirect_added`.

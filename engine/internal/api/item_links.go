@@ -27,7 +27,6 @@ type linkKind struct {
 
 var linkKinds = map[string]linkKind{
 	"sequence":   {scope: auth.ScopeSequencesRead, table: "sequences", name: "name"},
-	"project":    {scope: auth.ScopeProjectsRead, table: "projects", name: "name"},
 	"list":       {scope: auth.ScopeLeadsRead, table: "lead_lists", name: "name"},
 	"mission":    {scope: auth.ScopeMissionsRead, table: "missions", name: "name"},
 	"server":     {scope: auth.ScopeMailboxesRead, table: "sending_servers", name: "COALESCE(NULLIF(name, ''), host)"},
@@ -37,7 +36,7 @@ var linkKinds = map[string]linkKind{
 	"webhook":    {scope: auth.ScopeWebhooksRead, table: "webhook_endpoints", name: "COALESCE(NULLIF(description, ''), substring(url from '://([^/:?#]+)'), url)"},
 }
 
-const linkKindNames = "sequence, project, list, mission, server, plan, connection, token or webhook"
+const linkKindNames = "sequence, list, mission, server, plan, connection, token or webhook"
 
 // itemSlugFrom makes the slug for an item named name: lowercase letters,
 // digits and dashes, at most 60 characters, never a UUID or "new" (which
@@ -171,15 +170,15 @@ func (s *Server) resolveItem(ctx context.Context, ws, kind string, k linkKind, r
 // its brands' or a shared one, for the kinds that have brands.
 func (s *Server) linkBrand(ctx context.Context, a *access, table, id string) error {
 	switch table {
-	case "sequences", "projects", "lead_lists", "missions":
+	case "sequences", "lead_lists", "missions":
 	default:
 		return errForbidden
 	}
-	var project, brand *string
-	if err := s.pool.QueryRow(ctx, `SELECT `+map[bool]string{true: "id::text", false: "project_id::text"}[table == "projects"]+`, brand_id::text FROM `+table+` WHERE id = $1`, id).Scan(&project, &brand); err != nil {
+	var brand *string
+	if err := s.pool.QueryRow(ctx, `SELECT brand_id::text FROM `+table+` WHERE id = $1`, id).Scan(&brand); err != nil {
 		return err
 	}
-	if !a.sees(project, brand) {
+	if !a.sees(brand) {
 		return errNotFound
 	}
 	return nil

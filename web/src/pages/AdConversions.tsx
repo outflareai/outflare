@@ -13,7 +13,7 @@ import { ago } from "../format";
 type Field = AdConnection["setup_needed"][number];
 
 // The platforms that can take conversions today.
-const senders: Record<string, string> = { google_ads: "Google Ads", meta_ads: "Meta Ads", microsoft_ads: "Microsoft Advertising", reddit_ads: "Reddit Ads", tiktok_ads: "TikTok Ads", snapchat_ads: "Snapchat Ads" };
+const senders: Record<string, string> = { google_ads: "Google Ads", meta_ads: "Meta Ads", microsoft_ads: "Microsoft Advertising", reddit_ads: "Reddit Ads", tiktok_ads: "TikTok Ads", snapchat_ads: "Snapchat Ads", taboola_ads: "Taboola Ads", pinterest_ads: "Pinterest Ads" };
 
 const statusTone = { sent: "green", skipped: "grey", failed: "red", queued: "amber" } as const;
 

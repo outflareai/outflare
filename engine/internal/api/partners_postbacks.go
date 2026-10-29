@@ -239,8 +239,8 @@ func (s *Server) postbackSends(ctx context.Context, ws, membership string) ([]pa
 }
 
 func (s *Server) routesPartnerPostbacks(mux *http.ServeMux) {
-	mux.HandleFunc("GET /v1/workspaces/{ws}/partners/{id}/postbacks", s.inWorkspace(auth.ScopePartnersRead, s.listPartnerPostbacks))
-	mux.HandleFunc("GET /v1/workspaces/{ws}/partner-payouts/export", s.inWorkspace(auth.ScopePartnersManage, s.exportPartnerPayouts))
+	mux.HandleFunc("GET /v1/workspaces/{ws}/partners/{id}/postbacks", s.inBrand(auth.ScopePartnersRead, s.listPartnerPostbacks))
+	mux.HandleFunc("GET /v1/workspaces/{ws}/partner-payouts/export", s.inBrand(auth.ScopePartnersManage, s.exportPartnerPayouts))
 	mux.HandleFunc("GET /p/{program}/api/postbacks", s.inPortal(s.portalPostbacks))
 }
 

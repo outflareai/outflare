@@ -19,7 +19,7 @@ import (
 	"github.com/outflareai/outflare/engine/internal/missions"
 )
 
-// Missions: a goal an agent works toward inside a project. The agent acts
+// Missions: a goal an agent works toward for a brand. The agent acts
 // with its ordinary API calls plus the Outflare-Mission header; missionGate
 // decides, per call, whether it runs, waits for a person or is a dry run.
 
@@ -69,8 +69,6 @@ type missionLimits struct {
 type missionView struct {
 	ID           string            `json:"id"`
 	Name         string            `json:"name"`
-	ProjectID    *string           `json:"project_id"`
-	ProjectName  *string           `json:"project_name"`
 	BrandID      *string           `json:"brand_id"`
 	Goal         missionGoal       `json:"goal"`
 	Instructions string            `json:"instructions"`
@@ -122,7 +120,7 @@ type missionTurns struct {
 	Error   string `json:"error"`
 }
 
-const missionColumns = `m.id, m.name, m.project_id::text, p.name, m.brand_id::text, m.goal, m.goal_metric, m.goal_target, m.instructions,
+const missionColumns = `m.id, m.name, m.brand_id::text, m.goal, m.goal_metric, m.goal_target, m.instructions,
 	m.plan, m.plan_updated_at, m.mode, m.status, m.status_reason, m.token_id::text, t.name, t.actor_id::text,
 	m.max_sends, m.max_spend_cents, m.ends_at, m.brief_version, m.approved_by::text, ap.display_name, m.approved_at,
 	m.started_at, m.ended_at, m.report, m.created_by::text, cr.display_name, COALESCE(cr.type = 'api_token', false),
@@ -133,14 +131,13 @@ const missionColumns = `m.id, m.name, m.project_id::text, p.name, m.brand_id::te
 	m.runner, m.turns, m.last_turn_at, m.next_turn_at, m.turn_summary, m.turn_error, m.playbook_id, m.playbook_version`
 
 const missionFrom = `FROM missions m
-	LEFT JOIN projects p ON p.id = m.project_id
 	LEFT JOIN api_tokens t ON t.id = m.token_id
 	LEFT JOIN actors ap ON ap.id = m.approved_by
 	LEFT JOIN actors cr ON cr.id = m.created_by`
 
 func scanMission(row pgx.Row) (missionView, error) {
 	var v missionView
-	err := row.Scan(&v.ID, &v.Name, &v.ProjectID, &v.ProjectName, &v.BrandID, &v.Goal.Text, &v.Goal.Metric, &v.Goal.Target, &v.Instructions,
+	err := row.Scan(&v.ID, &v.Name, &v.BrandID, &v.Goal.Text, &v.Goal.Metric, &v.Goal.Target, &v.Instructions,
 		&v.Plan, &v.PlanUpdated, &v.Mode, &v.Status, &v.StatusReason, &v.TokenID, &v.TokenName, &v.tokenActorID,
 		&v.Limits.MaxSends, &v.Limits.MaxSpendCents, &v.Limits.EndsAt, &v.BriefVersion, &v.ApprovedBy, &v.ApprovedByName, &v.ApprovedAt,
 		&v.StartedAt, &v.EndedAt, &v.Report, &v.CreatedBy, &v.CreatedByName, &v.creatorIsToken,
@@ -251,14 +248,6 @@ func (s *Server) listMissions(w http.ResponseWriter, r *http.Request) {
 		args = append(args, strings.Split(st, ","))
 		where = append(where, "m.status = ANY($"+strconv.Itoa(len(args))+")")
 	}
-	if p := q.Get("project_id"); p != "" {
-		if !validUUID(p) {
-			writeJSON(w, http.StatusOK, map[string]any{"data": []missionView{}})
-			return
-		}
-		args = append(args, p)
-		where = append(where, "m.project_id = $"+strconv.Itoa(len(args)))
-	}
 	brand, ok := s.brandFilter(w, r)
 	if !ok {
 		return
@@ -297,22 +286,8 @@ func (s *Server) listMissions(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"data": list})
 }
 
-type missionBrief struct {
-	ProjectID string         `json:"project_id"`
-	Name      string         `json:"name"`
-	Offer     string         `json:"offer"`
-	Audience  string         `json:"audience"`
-	Market    string         `json:"market"`
-	Brief     string         `json:"brief"`
-	ICP       map[string]any `json:"icp"`
-	Version   int            `json:"version"`
-	UpdatedAt time.Time      `json:"updated_at"`
-	// The brief changed since the mission was approved.
-	Changed bool `json:"changed_since_approval"`
-}
-
 // getMission is what an agent reads when it checks in: the mission, the
-// brief it works from, what it may do and the latest notes from people.
+// context it works from, what it may do and the latest notes from people.
 func (s *Server) getMission(w http.ResponseWriter, r *http.Request) {
 	a := accessFrom(r.Context())
 	ctx := r.Context()
@@ -324,22 +299,8 @@ func (s *Server) getMission(w http.ResponseWriter, r *http.Request) {
 	if s.missionError(w, r, err) {
 		return
 	}
-	var brief *missionBrief
-	if v.ProjectID != nil {
-		b := missionBrief{ProjectID: *v.ProjectID}
-		err := s.pool.QueryRow(ctx, `SELECT name, offer, audience, market, brief, icp, brief_version, brief_updated_at FROM projects WHERE id = $1`, *v.ProjectID).
-			Scan(&b.Name, &b.Offer, &b.Audience, &b.Market, &b.Brief, &b.ICP, &b.Version, &b.UpdatedAt)
-		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
-			s.internal(w, r, err)
-			return
-		}
-		if err == nil {
-			b.Changed = v.BriefVersion != nil && *v.BriefVersion != b.Version
-			brief = &b
-		}
-	}
-	// What Outflare knows about the company, so the agent never asks the
-	// person again: the company context and pinned memories.
+	// What Outflare knows about the company and the mission's brand, so the
+	// agent never asks the person again: their context and pinned memories.
 	company, err := s.loadContext(ctx, a.WorkspaceID)
 	if err != nil {
 		s.internal(w, r, err)
@@ -361,10 +322,21 @@ func (s *Server) getMission(w http.ResponseWriter, r *http.Request) {
 		s.internal(w, r, err)
 		return
 	}
+	var brand *brandContextView
+	md := contextMarkdown(company, memories)
+	if v.BrandID != nil {
+		b, err := s.loadBrandContext(ctx, a.WorkspaceID, *v.BrandID)
+		if err != nil {
+			s.internal(w, r, err)
+			return
+		}
+		brand = &b
+		md += brandMarkdown(brand)
+	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"mission": v,
-		"brief":   brief,
-		"company": map[string]any{"context": company, "memories": memories, "markdown": contextMarkdown(company, memories)},
+		"brand":   brand,
+		"company": map[string]any{"context": company, "memories": memories, "markdown": md},
 		"updates": updates,
 		// Connectors the agent asked a person to set up, still open.
 		"open_connect_requests": requests,
@@ -391,7 +363,8 @@ func writesHelp(policy string) string {
 // ---- Creating and changing ----
 
 type missionInput struct {
-	Name          *string          `json:"name"`
+	Name *string `json:"name"`
+	// Ignored: projects were removed. Accepted so older clients still work.
 	ProjectID     optional[string] `json:"project_id"`
 	Goal          *string          `json:"goal"`
 	GoalMetric    optional[string] `json:"goal_metric"`
@@ -453,45 +426,21 @@ func (in *missionInput) validate() error {
 		}
 		in.endsAt = &t
 	}
-	for _, id := range []optional[string]{in.ProjectID, in.TokenID} {
-		if id.Value != nil && !validUUID(*id.Value) {
-			return errInvalid("project_id and token_id must be ids from this workspace")
-		}
+	if id := in.TokenID.Value; id != nil && !validUUID(*id) {
+		return errInvalid("token_id must be an id from this workspace")
 	}
 	return nil
 }
 
-// checkRefs confirms the project and token belong to the workspace, and
-// applies the rules for tokens: a token scoped to a project creates
-// missions only in it, and a token can bind a mission only to itself.
+// checkMissionRefs confirms the token belongs to the workspace, and that a
+// token binds a mission only to itself.
 func (s *Server) checkMissionRefs(ctx context.Context, tx pgx.Tx, a *access, in *missionInput, creating bool) error {
 	if a.TokenID != "" {
-		var tokenProject *string
-		if err := tx.QueryRow(ctx, `SELECT project_id::text FROM api_tokens WHERE id = $1`, a.TokenID).Scan(&tokenProject); err != nil {
-			return err
-		}
-		if tokenProject != nil {
-			if creating && !in.ProjectID.Set {
-				in.ProjectID = optional[string]{Set: true, Value: tokenProject}
-			}
-			if in.ProjectID.Set && (in.ProjectID.Value == nil || *in.ProjectID.Value != *tokenProject) {
-				return errDenied("this token works in one project, so its missions must be in that project")
-			}
-		}
 		if creating && !in.TokenID.Set {
 			in.TokenID = optional[string]{Set: true, Value: &a.TokenID}
 		}
 		if in.TokenID.Set && (in.TokenID.Value == nil || *in.TokenID.Value != a.TokenID) {
 			return errDenied("a token can only run missions itself; a person can assign another token")
-		}
-	}
-	if p := in.ProjectID.Value; p != nil {
-		var ok bool
-		if err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM projects WHERE id = $1 AND workspace_id = $2)`, *p, a.WorkspaceID).Scan(&ok); err != nil {
-			return err
-		}
-		if !ok {
-			return errInvalid("project not found")
 		}
 	}
 	if t := in.TokenID.Value; t != nil {
@@ -548,12 +497,12 @@ func (s *Server) insertMission(ctx context.Context, tx pgx.Tx, a *access, in *mi
 			plan = *in.Plan
 		}
 		if err := tx.QueryRow(ctx, `
-			INSERT INTO missions (workspace_id, project_id, name, goal, goal_metric, goal_target, instructions, plan, plan_updated_at,
+			INSERT INTO missions (workspace_id, name, goal, goal_metric, goal_target, instructions, plan, plan_updated_at,
 			                      mode, token_id, max_sends, max_spend_cents, ends_at, created_by, playbook_id, playbook_version)
-			VALUES ($1, $2, $3, COALESCE($4, ''), $5, $6, COALESCE($7, ''), $8, CASE WHEN $8 <> '' THEN now() END,
-			        COALESCE($9, 'dry_run'), $10, $11, $12, $13, $14, $15, $16)
+			VALUES ($1, $2, COALESCE($3, ''), $4, $5, COALESCE($6, ''), $7, CASE WHEN $7 <> '' THEN now() END,
+			        COALESCE($8, 'dry_run'), $9, $10, $11, $12, $13, $14, $15)
 			RETURNING id`,
-			a.WorkspaceID, in.ProjectID.Value, *in.Name, in.Goal, in.GoalMetric.Value, in.GoalTarget.Value, in.Instructions, plan,
+			a.WorkspaceID, *in.Name, in.Goal, in.GoalMetric.Value, in.GoalTarget.Value, in.Instructions, plan,
 			in.Mode, in.TokenID.Value, in.MaxSends.Value, in.MaxSpendCents.Value, in.endsAt, a.ActorID, in.playbookID, in.playbookVersion).Scan(&id); err != nil {
 			return "", err
 		}
@@ -594,9 +543,9 @@ func (s *Server) updateMission(w http.ResponseWriter, r *http.Request) {
 			return errMissionState("the mission is over and can no longer change")
 		}
 		// Once approved, what the agent may do changes only with approval.
-		guarded := in.Mode != nil || in.TokenID.Set || in.MaxSends.Set || in.MaxSpendCents.Set || in.EndsAt.Set || in.ProjectID.Set
+		guarded := in.Mode != nil || in.TokenID.Set || in.MaxSends.Set || in.MaxSpendCents.Set || in.EndsAt.Set
 		if guarded && (status == missions.StatusRunning || status == missions.StatusPaused) && !a.has(auth.ScopeMissionsApprove) {
-			return errDenied("changing the mode, limits, token or project of an approved mission needs missions.approve")
+			return errDenied("changing the mode, limits or token of an approved mission needs missions.approve")
 		}
 		if guarded && a.has(auth.ScopeMissionsApprove) && (status == missions.StatusRunning || status == missions.StatusPaused) {
 			if err := s.notOwnMission(ctx, tx, a, id); err != nil {
@@ -631,9 +580,6 @@ func (s *Server) updateMission(w http.ResponseWriter, r *http.Request) {
 		}
 		if in.Mode != nil {
 			set("mode", *in.Mode)
-		}
-		if in.ProjectID.Set {
-			set("project_id", in.ProjectID.Value)
 		}
 		if in.TokenID.Set {
 			set("token_id", in.TokenID.Value)
@@ -821,8 +767,7 @@ func (s *Server) approveMission(w http.ResponseWriter, r *http.Request) {
 				return "", err
 			}
 			if _, err := tx.Exec(ctx, `
-				UPDATE missions m SET mode = COALESCE($2, m.mode), approved_by = $3, approved_at = now(), started_at = COALESCE(m.started_at, now()),
-					brief_version = (SELECT brief_version FROM projects WHERE id = m.project_id)
+				UPDATE missions m SET mode = COALESCE($2, m.mode), approved_by = $3, approved_at = now(), started_at = COALESCE(m.started_at, now())
 				WHERE m.id = $1`, id, req.Mode, a.ActorID); err != nil {
 				return "", err
 			}

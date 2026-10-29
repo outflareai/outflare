@@ -242,4 +242,28 @@ export function registerABTestTools(
     },
     ({ test }) => call(() => gtm.POST("/v1/workspaces/{ws}/ab-tests/{test}/duplicate", { params: { path: { ...path(), test } } })),
   );
+
+  server.registerTool(
+    "get_ab_test_checklist",
+    {
+      title: "Check an A/B test before it starts",
+      description:
+        "What would stop a test measuring anything useful: the flag, another running test of it, whether pages showed its versions lately, whether visitors reach the goal, how long it will take, and guardrails. ready is false while any check fails.",
+      inputSchema: { test: testRef },
+      annotations: read,
+    },
+    ({ test }) => call(() => gtm.GET("/v1/workspaces/{ws}/ab-tests/{test}/checklist", { params: { path: { ...path(), test } } })),
+  );
+
+  server.registerTool(
+    "ship_ab_test",
+    {
+      title: "Ship a version of an A/B test",
+      description:
+        "Show the chosen version to everyone: its flag gives it all the traffic at full rollout, and a running test ends with it as the decision. Confirm with the person first: visitors see the change at once.",
+      inputSchema: { test: testRef, variant: z.string().min(1).describe("The version to ship, usually the winner from get_ab_test_results.") },
+      annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: false },
+    },
+    ({ test, variant }) => call(() => gtm.POST("/v1/workspaces/{ws}/ab-tests/{test}/ship", { params: { path: { ...path(), test } }, body: { variant } })),
+  );
 }

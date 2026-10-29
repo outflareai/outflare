@@ -383,9 +383,12 @@ check them next to see which pages are still up and who to ask.
 A pitch goes out through one of your own Outflare sequences (`POST
 /link-prospects/{id}/pitches` with `sequence_id`, MCP `start_link_pitch`), to
 one of the prospect's contacts (`record_id`, by default the surest with an
-email address). Make a sequence for link pitches and put
-`{{custom.opener}}` in its first step: the workspace's AI (the tool "Link
-pitches" on the AI usage page, with its own limit) writes that opener for
+email address). The sequence's first step uses `{{custom.opener}}`. The
+**starter sequence** has one ready (`POST /link-building/sequences`, MCP
+`create_link_sequence`, or "Create the starter sequence" on the page): a
+draft whose first email is the opener, with one follow-up five days later
+in the same thread. Edit it like any sequence. The workspace's AI (the tool
+"Link pitches" on the AI usage page, with its own limit) writes the opener for
 each page, from what the page check found: its topic, its author, a broken
 link it has, and your page to offer. It never offers payment, and the page
 is read as data, never as instructions. `GET /link-building/sequences` lists
@@ -397,7 +400,10 @@ your sequences with `uses_opener`.
   approval off per sequence (`PATCH /link-building/sequences/{id}` with
   `approve_pitches: false`, or in the settings) and pitches through it go
   out as soon as their opener is written. A pitch without AI waits for a
-  person to write the opener.
+  person to write the opener. Pitches waiting show as a count on Link building
+  in the sidebar and on the Pitches tab, in the workspace stats
+  (`link_pitches_waiting`) and as a `link_pitches_waiting` item in the
+  workspace status, so agents see them too.
 - **Sending.** Approving makes the contact a lead from their person record,
   puts the opener on it (`custom.opener`, plus `custom.link_page`) and
   enrolls it in the sequence, whose own checks apply to every send: the

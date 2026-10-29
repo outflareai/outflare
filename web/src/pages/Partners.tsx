@@ -6,13 +6,14 @@
 
 import { useCallback, useEffect, useState, type FormEvent, type ReactNode } from "react";
 import { appPath } from "@/lib/paths";
-import type { Partner, PartnerAsset, PartnerConversion, PartnerImport, PartnerPayout, PartnerProgram, PartnerReward, PartnerRuleInput } from "@outflare/sdk";
+import type { Partner, PartnerAsset, PartnerStats, PartnerConversion, PartnerImport, PartnerPayout, PartnerProgram, PartnerReferral, PartnerReward, PartnerRuleInput } from "@outflare/sdk";
 import { api, errorMessage } from "../api";
 import { useBrand } from "@/lib/brand";
 import { Badge, Button, CopyButton, Empty, ErrorText, field, Input, Loading, Menu, PageHeader, Stat, Stats, ask, toast } from "../ui";
 import { ago, plural } from "../format";
 import { DataTable, type ColumnDef } from "@/components/data-table";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { PartnerInstall } from "./PartnerInstall";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 
@@ -111,19 +112,83 @@ function ruleText(r: PartnerProgram["rules"][number], currency: string): string 
 }
 
 function rulesSummary(p: PartnerProgram): string {
-  if (p.rules.length === 0) return "Track only";
-  return p.rules.map((r) => ruleText(r, p.currency)).join(" + ");
+  const all = p.rules.filter((r) => !r.partner_id);
+  const own = new Set(p.rules.filter((r) => r.partner_id).map((r) => r.partner_id)).size;
+  const text = all.length === 0 ? "Track only" : all.map((r) => ruleText(r, p.currency)).join(" + ");
+  return own > 0 ? `${text}; ${plural(own, "partner has", "partners have")} their own rate` : text;
 }
 
-function PartnerList({ ws, program, canManage }: { ws: string; program: PartnerProgram; canManage: boolean }) {
-  const [list, setList] = useState<Partner[] | null>(null);
-  const [adding, setAdding] = useState(false);
+// toRuleInput is a saved rule as PUT .../rules takes it back.
+function toRuleInput(r: PartnerProgram["rules"][number]): PartnerRuleInput {
+  return {
+    trigger: r.trigger, side: r.side, kind: r.kind, recurrence: r.recurrence, months: r.months ?? undefined, min_sales: r.min_sales,
+    action: r.action, action_data: r.action_data, group_id: r.group_id, partner_id: r.partner_id, product_ids: r.product_ids,
+    percent_bp: r.percent_bp ?? undefined, amount_cents: r.amount_cents ?? undefined,
+  };
+}
+
+// ownRate is a partner's own cash rule for sales, if they have one.
+function ownRate(rules: PartnerProgram["rules"], partner: string) {
+  return rules.find((r) => r.partner_id === partner && r.side === "partner" && r.trigger === "sale" && (r.kind === "percent" || r.kind === "fixed"));
+}
+
+// A program's totals across all its partners.
+type PartnerProgramStats = PartnerStats & { partners: { total: number; active: number; pending: number; suspended: number; rejected: number } };
+
+// A page of a list, newest first, and the cursor to the next.
+type Page<T> = { list: T[]; next: string | null; error?: string };
+
+// usePages loads a list a page at a time: reload starts again, more adds
+// the next page. get must be stable (useCallback).
+function usePages<T>(get: (before?: string) => Promise<Page<T>>) {
+  const [list, setList] = useState<T[] | null>(null);
+  const [next, setNext] = useState<string | null>(null);
   const [error, setError] = useState("");
-  const load = useCallback(async () => {
-    const { data, error } = await api.GET("/v1/workspaces/{ws}/partners", { params: { path: { ws }, query: { program: program.id, limit: 500 } } });
-    if (error) setError(errorMessage(error));
-    setList(data?.data ?? []);
+  const reload = useCallback(async () => {
+    const r = await get();
+    setList(r.list);
+    setNext(r.next);
+    setError(r.error ?? "");
+  }, [get]);
+  const more = useCallback(async () => {
+    if (!next) return;
+    const r = await get(next);
+    setList((l) => [...(l ?? []), ...r.list]);
+    setNext(r.next);
+    setError(r.error ?? "");
+  }, [get, next]);
+  return { list, next, error, reload, more };
+}
+
+function LoadMore({ next, onMore, shown }: { next: string | null; onMore: () => Promise<void>; shown: number }) {
+  const [busy, setBusy] = useState(false);
+  if (!next) return null;
+  return (
+    <div className="flex items-center justify-center gap-3 text-[12px] text-muted-foreground">
+      <span>Showing the newest {shown}. Search and sorting cover these.</span>
+      <Button variant="ghost" disabled={busy} onClick={async () => { setBusy(true); await onMore(); setBusy(false); }}>{busy ? "Loading…" : "Load more"}</Button>
+    </div>
+  );
+}
+
+const pageSize = 100;
+
+function PartnerList({ ws, program, canManage }: { ws: string; program: PartnerProgram; canManage: boolean }) {
+  const [rules, setRules] = useState(program.rules);
+  const [adding, setAdding] = useState(false);
+  const [totals, setTotals] = useState<PartnerProgramStats | null>(null);
+  useEffect(() => setRules(program.rules), [program.rules]);
+  const get = useCallback(async (before?: string): Promise<Page<Partner>> => {
+    const { data, error } = await api.GET("/v1/workspaces/{ws}/partners", { params: { path: { ws }, query: { program: program.id, limit: pageSize, ...(before ? { before } : {}) } } });
+    return { list: data?.data ?? [], next: data?.next_before ?? null, error: error ? errorMessage(error) : "" };
   }, [ws, program.id]);
+  const { list, next, error, reload, more } = usePages(get);
+  // The tiles count every partner, not just the loaded page.
+  const load = useCallback(async () => {
+    await reload();
+    const { data } = await api.GET("/v1/workspaces/{ws}/partner-programs/{id}/stats", { params: { path: { ws, id: program.id } } });
+    setTotals(data ?? null);
+  }, [reload, ws, program.id]);
   useEffect(() => {
     load();
   }, [load]);
@@ -189,6 +254,29 @@ function PartnerList({ ws, program, canManage }: { ws: string; program: PartnerP
     load();
   }
 
+  // rate gives a partner their own share of each sale, which replaces the
+  // program's cash rate for them (their group's and tiers too).
+  async function rate(p: Partner) {
+    const cur = await api.GET("/v1/workspaces/{ws}/partner-programs/{id}", { params: { path: { ws, id: program.id } } });
+    if (cur.error || !cur.data) return toast(errorMessage(cur.error), "error");
+    const mine = ownRate(cur.data.rules, p.id);
+    const r = await ask({
+      title: `Commission for ${p.name || p.code}`,
+      body: `Their own share of each sale, instead of the program's (${rulesSummary({ ...cur.data, rules: cur.data.rules.filter((x) => !x.partner_id) })}). Leave it empty to go back to the program's rate.`,
+      input: { label: "Percent of each sale", type: "number", value: mine?.kind === "percent" ? String((mine.percent_bp ?? 0) / 100) : "", placeholder: "30", optional: true },
+      choices: [{ label: "Cancel", value: "cancel", variant: "ghost" }, { label: "Save", value: "ok" }],
+    });
+    if (r?.choice !== "ok") return;
+    const pct = r.value.trim() === "" ? null : Number(r.value);
+    if (pct !== null && !(pct > 0 && pct <= 100)) return toast("Enter a percent from 0.01 to 100.", "error");
+    const next = cur.data.rules.filter((x) => x !== mine).map(toRuleInput);
+    if (pct !== null) next.push({ trigger: "sale", side: "partner", kind: "percent", percent_bp: Math.round(pct * 100), recurrence: "every", partner_id: p.id });
+    const { data, error } = await api.PUT("/v1/workspaces/{ws}/partner-programs/{id}/rules", { params: { path: { ws, id: program.id } }, body: { rules: next } });
+    if (error || !data) return toast(errorMessage(error), "error");
+    setRules(data.rules);
+    toast(pct === null ? `${p.name || p.code} is back on the program's rate.` : `${p.name || p.code} earns ${pct}% of each sale from now on. Rewards already earned keep their amounts.`);
+  }
+
   async function viewAs(p: Partner) {
     const { data, error } = await api.POST("/v1/workspaces/{ws}/partners/{id}/impersonate", { params: { path: { ws, id: p.id } } });
     if (error || !data) return toast(errorMessage(error), "error");
@@ -202,7 +290,7 @@ function PartnerList({ ws, program, canManage }: { ws: string; program: PartnerP
       cell: ({ row: { original: p } }) => (
         <span className="block min-w-0">
           <span className="block truncate font-medium">{p.name || p.email || p.code}</span>
-          <span className="block truncate font-mono text-[12px] text-muted-foreground">{p.code}{p.promo_codes.length > 0 && ` · ${p.promo_codes.map((c) => c.code + (c.status === "failed" ? " (not made in billing)" : c.status === "pending" ? " (making…)" : "")).join(", ")}`}</span>
+          <span className="block truncate font-mono text-[12px] text-muted-foreground">{p.code}{ownRate(rules, p.id) && ` · own rate ${ruleText(ownRate(rules, p.id)!, c)}`}{p.promo_codes.length > 0 && ` · ${p.promo_codes.map((c) => c.code + (c.status === "failed" ? " (not made in billing)" : c.status === "pending" ? " (making…)" : "")).join(", ")}`}</span>
         </span>
       ),
     },
@@ -226,6 +314,7 @@ function PartnerList({ ws, program, canManage }: { ws: string; program: PartnerP
               { label: "Add promo code", onClick: () => addCode(p) },
               { label: "Log a fee", onClick: () => ledger(p, "fees") },
               { label: "Correct balance", onClick: () => ledger(p, "adjustments") },
+              { label: "Commission rate", onClick: () => rate(p) },
               { label: "Postback URL", onClick: () => postback(p) },
               { label: "View as partner", onClick: () => viewAs(p) },
             ]} />
@@ -236,16 +325,17 @@ function PartnerList({ ws, program, canManage }: { ws: string; program: PartnerP
   ];
 
   if (!list) return <Loading />;
-  const total = (k: keyof Partner["stats"]) => list.reduce((n, p) => n + p.stats[k], 0);
   return (
     <div className="space-y-4">
       <ErrorText>{error}</ErrorText>
-      <Stats>
-        <Stat label="Partners" value={list.filter((p) => p.status === "active").length} sub={list.some((p) => p.status === "pending") ? `${list.filter((p) => p.status === "pending").length} waiting for approval` : undefined} />
-        <Stat label="Referred customers" value={total("customers")} sub={plural(total("clicks"), "click")} />
-        <Stat label="Referred sales" value={money(total("sales_cents"), c)} />
-        <Stat label="Due to partners" value={money(total("balance_cents"), c)} sub={`${money(total("pending_cents"), c)} on hold`} />
-      </Stats>
+      {totals && (
+        <Stats>
+          <Stat label="Partners" value={totals.partners.active} sub={totals.partners.pending ? `${totals.partners.pending} waiting for approval` : undefined} />
+          <Stat label="Referred customers" value={totals.customers} sub={plural(totals.clicks, "click")} />
+          <Stat label="Referred sales" value={money(totals.sales_cents, c)} />
+          <Stat label="Due to partners" value={money(totals.balance_cents, c)} sub={`${money(totals.pending_cents, c)} on hold`} />
+        </Stats>
+      )}
       {list.length === 0 ? (
         <Empty title="No partners yet" action={canManage && <Button onClick={() => setAdding(true)}>Add partner</Button>}>
           Add someone by email, or a customer record you already have. Each partner gets a ref code, a short link and a tagged campaign link.
@@ -266,6 +356,7 @@ function PartnerList({ ws, program, canManage }: { ws: string; program: PartnerP
           )}
         />
       )}
+      <LoadMore next={next} onMore={more} shown={list.length} />
       {adding && <AddPartner ws={ws} program={program} onClose={() => setAdding(false)} onSaved={() => { setAdding(false); load(); }} />}
     </div>
   );
@@ -326,10 +417,14 @@ function AddPartner({ ws, program, onClose, onSaved }: { ws: string; program: Pa
 }
 
 function Conversions({ ws, program }: { ws: string; program: PartnerProgram }) {
-  const [list, setList] = useState<PartnerConversion[] | null>(null);
-  useEffect(() => {
-    api.GET("/v1/workspaces/{ws}/partner-conversions", { params: { path: { ws }, query: { program: program.id, limit: 500 } } }).then(({ data }) => setList(data?.data ?? []));
+  const get = useCallback(async (before?: string): Promise<Page<PartnerConversion>> => {
+    const { data, error } = await api.GET("/v1/workspaces/{ws}/partner-conversions", { params: { path: { ws }, query: { program: program.id, limit: pageSize, ...(before ? { before } : {}) } } });
+    return { list: data?.data ?? [], next: data?.next_before ?? null, error: error ? errorMessage(error) : "" };
   }, [ws, program.id]);
+  const { list, next, error, reload, more } = usePages(get);
+  useEffect(() => {
+    reload();
+  }, [reload]);
   if (!list) return <Loading />;
   if (list.length === 0) {
     return (
@@ -346,16 +441,28 @@ function Conversions({ ws, program }: { ws: string; program: PartnerProgram }) {
     { id: "source", header: "From", accessorFn: (v) => v.source },
     { id: "when", header: "When", accessorFn: (v) => v.occurred_at, cell: ({ row: { original: v } }) => ago(v.occurred_at) },
   ];
-  return <DataTable columns={columns} data={list} rowId={(v) => v.id} searchPlaceholder="Search conversions" empty="No conversions match." />;
+  return (
+    <div className="space-y-3">
+      <ErrorText>{error}</ErrorText>
+      <DataTable columns={columns} data={list} rowId={(v) => v.id} searchPlaceholder="Search conversions" empty="No conversions match." />
+      <LoadMore next={next} onMore={more} shown={list.length} />
+    </div>
+  );
 }
 
 function Rewards({ ws, program, canManage }: { ws: string; program: PartnerProgram; canManage: boolean }) {
-  const [list, setList] = useState<PartnerReward[] | null>(null);
   const [status, setStatus] = useState<PartnerReward["status"] | "">("");
-  const load = useCallback(async () => {
-    const { data } = await api.GET("/v1/workspaces/{ws}/partner-rewards", { params: { path: { ws }, query: { program: program.id, limit: 500, ...(status ? { status } : {}) } } });
-    setList(data?.data ?? []);
+  const [picked, setPicked] = useState<Set<string>>(new Set());
+  const [busy, setBusy] = useState(false);
+  const get = useCallback(async (before?: string): Promise<Page<PartnerReward>> => {
+    const { data, error } = await api.GET("/v1/workspaces/{ws}/partner-rewards", { params: { path: { ws }, query: { program: program.id, limit: pageSize, ...(status ? { status } : {}), ...(before ? { before } : {}) } } });
+    return { list: data?.data ?? [], next: data?.next_before ?? null, error: error ? errorMessage(error) : "" };
   }, [ws, program.id, status]);
+  const { list, next, error: listError, reload, more } = usePages(get);
+  const load = useCallback(async () => {
+    await reload();
+    setPicked(new Set());
+  }, [reload]);
   useEffect(() => {
     load();
   }, [load]);
@@ -373,8 +480,56 @@ function Rewards({ ws, program, canManage }: { ws: string; program: PartnerProgr
     toast(what === "approve" ? "Approved." : "Rejected.");
     load();
   }
+  // many approves or rejects the picked rewards, or every pending one in
+  // the program when none are picked, a thousand at a time.
+  async function many(what: "approve" | "reject") {
+    const ids = [...picked];
+    const which = ids.length > 0 ? plural(ids.length, "reward") : "every pending reward in this program";
+    const r = await ask({
+      title: what === "approve" ? `Approve ${which}?` : `Reject ${which}?`,
+      body: what === "approve" ? "Cash counts toward the next payouts and is logged as a cost; actions are sent to your system." : "Say why; the partners can see it.",
+      ...(what === "reject" ? { input: { label: "Reason", maxLength: 2000, optional: true } } : {}),
+      choices: [{ label: "Cancel", value: "cancel", variant: "ghost" }, { label: what === "approve" ? "Approve" : "Reject", value: "ok", variant: what === "approve" ? undefined : "danger-solid" }],
+    });
+    if (r?.choice !== "ok") return;
+    setBusy(true);
+    let done = 0, skipped = 0;
+    for (;;) {
+      const { data, error } = await api.POST("/v1/workspaces/{ws}/partner-rewards/bulk", {
+        params: { path: { ws } },
+        body: { action: what, ...(ids.length > 0 ? { ids } : { program: program.id }), ...(what === "reject" && r.value.trim() ? { note: r.value.trim() } : {}) },
+      });
+      if (error || !data) {
+        setBusy(false);
+        return toast(errorMessage(error), "error");
+      }
+      done += data.done;
+      skipped += data.skipped.length;
+      if (!data.more || data.done === 0) break;
+    }
+    setBusy(false);
+    toast(`${what === "approve" ? "Approved" : "Rejected"} ${plural(done, "reward")}${skipped ? `; ${skipped} weren't pending` : ""}.`);
+    load();
+  }
+  const toggle = (id: string) => setPicked((cur) => {
+    const next = new Set(cur);
+    if (!next.delete(id)) next.add(id);
+    return next;
+  });
+
   if (!list) return <Loading />;
+  const pending = list.filter((w) => w.status === "pending");
   const columns: ColumnDef<PartnerReward>[] = [
+    ...(canManage ? [{
+      id: "pick", enableSorting: false,
+      header: () => pending.length > 0 && (
+        <input type="checkbox" aria-label="Pick every pending reward" checked={picked.size > 0 && picked.size === pending.length}
+          onChange={(e) => setPicked(e.target.checked ? new Set(pending.map((w) => w.id)) : new Set())} />
+      ),
+      cell: ({ row: { original: w } }: { row: { original: PartnerReward } }) => w.status === "pending" && (
+        <input type="checkbox" aria-label="Pick this reward" checked={picked.has(w.id)} onChange={() => toggle(w.id)} />
+      ),
+    } as ColumnDef<PartnerReward>] : []),
     { id: "kind", header: "Reward", accessorFn: (w) => w.kind, cell: ({ row: { original: w } }) => (w.action ? `${w.action}${w.side === "referred" ? " (friend)" : ""}` : w.kind) },
     { id: "amount", header: "Amount", accessorFn: (w) => w.amount_cents, cell: ({ row: { original: w } }) => (w.kind === "action" ? "" : money(w.amount_cents, w.currency)) },
     { id: "status", header: "Status", accessorFn: (w) => w.status, cell: ({ row: { original: w } }) => <Badge tone={rewardTone[w.status]}>{w.status}</Badge> },
@@ -389,31 +544,40 @@ function Rewards({ ws, program, canManage }: { ws: string; program: PartnerProgr
     } as ColumnDef<PartnerReward>] : []),
   ];
   return (
-    <DataTable
-      columns={columns}
-      data={list}
-      rowId={(w) => w.id}
-      searchPlaceholder="Search rewards"
-      toolbar={
-        <select aria-label="Status" className={field} value={status} onChange={(e) => setStatus(e.target.value as PartnerReward["status"] | "")}>
-          <option value="">Every status</option>
-          {(["pending", "approved", "paid", "fulfilled", "rejected"] as const).map((s) => <option key={s} value={s}>{s}</option>)}
-        </select>
-      }
-      empty="No rewards yet. They appear when a referred customer signs up or buys."
-    />
+    <div className="space-y-3">
+      <ErrorText>{listError}</ErrorText>
+      <DataTable
+        columns={columns}
+        data={list}
+        rowId={(w) => w.id}
+        searchPlaceholder="Search rewards"
+        toolbar={
+          <span className="flex flex-wrap items-center gap-2">
+            <select aria-label="Status" className={field} value={status} onChange={(e) => setStatus(e.target.value as PartnerReward["status"] | "")}>
+              <option value="">Every status</option>
+              {(["pending", "approved", "paid", "fulfilled", "rejected"] as const).map((s) => <option key={s} value={s}>{s}</option>)}
+            </select>
+            {canManage && (picked.size > 0 || pending.length > 0) && (
+              <>
+                <Button variant="ghost" disabled={busy} onClick={() => many("approve")}>{picked.size > 0 ? `Approve ${picked.size}` : "Approve all pending"}</Button>
+                <Button variant="ghost" disabled={busy} onClick={() => many("reject")}>{picked.size > 0 ? `Reject ${picked.size}` : "Reject all pending"}</Button>
+              </>
+            )}
+          </span>
+        }
+        empty="No rewards yet. They appear when a referred customer signs up or buys."
+      />
+      <LoadMore next={next} onMore={more} shown={list.length} />
+    </div>
   );
 }
 
 function Payouts({ ws, program, canManage }: { ws: string; program: PartnerProgram; canManage: boolean }) {
-  const [list, setList] = useState<PartnerPayout[] | null>(null);
-  const [partners, setPartners] = useState<Record<string, string>>({});
-  const load = useCallback(async () => {
-    const { data } = await api.GET("/v1/workspaces/{ws}/partner-payouts", { params: { path: { ws }, query: { limit: 500 } } });
-    setList((data?.data ?? []).filter((o) => o.program_id === program.id));
-    const p = await api.GET("/v1/workspaces/{ws}/partners", { params: { path: { ws }, query: { program: program.id, limit: 500 } } });
-    setPartners(Object.fromEntries((p.data?.data ?? []).map((x) => [x.id, x.name || x.email || x.code])));
+  const get = useCallback(async (before?: string): Promise<Page<PartnerPayout>> => {
+    const { data, error } = await api.GET("/v1/workspaces/{ws}/partner-payouts", { params: { path: { ws }, query: { program: program.id, limit: pageSize, ...(before ? { before } : {}) } } });
+    return { list: data?.data ?? [], next: data?.next_before ?? null, error: error ? errorMessage(error) : "" };
   }, [ws, program.id]);
+  const { list, next, error: listError, reload: load, more } = usePages(get);
   useEffect(() => {
     load();
   }, [load]);
@@ -454,7 +618,7 @@ function Payouts({ ws, program, canManage }: { ws: string; program: PartnerProgr
   }
   if (!list) return <Loading />;
   const columns: ColumnDef<PartnerPayout>[] = [
-    { id: "partner", header: "Partner", accessorFn: (o) => partners[o.partner_id] ?? "" },
+    { id: "partner", header: "Partner", accessorFn: (o) => o.partner_name },
     { id: "amount", header: "Amount", accessorFn: (o) => o.amount_cents, cell: ({ row: { original: o } }) => money(o.amount_cents, o.currency) },
     { id: "status", header: "Status", accessorFn: (o) => o.status, cell: ({ row: { original: o } }) => <Badge tone={o.status === "paid" ? "green" : o.status === "due" ? "amber" : "grey"}>{o.status}</Badge> },
     { id: "reference", header: "Reference", accessorFn: (o) => o.reference, cell: ({ getValue }) => <span className="font-mono text-[12px]">{getValue() as string}</span> },
@@ -482,6 +646,8 @@ function Payouts({ ws, program, canManage }: { ws: string; program: PartnerProgr
         )}
         empty="No payouts yet."
       />
+      <ErrorText>{listError}</ErrorText>
+      <LoadMore next={next} onMore={more} shown={list.length} />
     </div>
   );
 }
@@ -546,8 +712,10 @@ function NewProgram({ ws, onClose, onSaved }: { ws: string; onClose: () => void;
 
 type RuleRow = PartnerRuleInput & { amount: string };
 
+// toRows is the rules the settings edit: partners' own rates are set from
+// the partner's menu and kept as they are.
 function toRows(p: PartnerProgram): RuleRow[] {
-  return p.rules.map((r) => ({
+  return p.rules.filter((r) => !r.partner_id).map((r) => ({
     trigger: r.trigger, side: r.side, kind: r.kind, recurrence: r.recurrence, months: r.months ?? undefined, min_sales: r.min_sales,
     action: r.action, action_data: r.action_data, group_id: r.group_id, product_ids: r.product_ids,
     amount: r.kind === "percent" ? String((r.percent_bp ?? 0) / 100) : r.kind === "fixed" ? String((r.amount_cents ?? 0) / 100) : "",
@@ -579,12 +747,12 @@ function ProgramSettings({ ws, program: p, canManage, onClose }: { ws: string; p
       setBusy(false);
       return setError(errorMessage(error));
     }
-    const body = rules.map(({ amount, ...r }) => ({
+    const body = [...rules.map(({ amount, ...r }) => ({
       ...r,
       percent_bp: r.kind === "percent" ? Math.round(Number(amount) * 100) : undefined,
       amount_cents: r.kind === "fixed" ? Math.round(Number(amount) * 100) : undefined,
       months: r.recurrence === "months" ? r.months ?? 12 : undefined,
-    }));
+    })), ...p.rules.filter((r) => r.partner_id).map(toRuleInput)];
     const res = await api.PUT("/v1/workspaces/{ws}/partner-programs/{id}/rules", { params: { path: { ws, id: p.id } }, body: { rules: body } });
     setBusy(false);
     if (res.error) return setError(errorMessage(res.error));
@@ -635,7 +803,7 @@ function ProgramSettings({ ws, program: p, canManage, onClose }: { ws: string; p
           </fieldset>
           <div className="space-y-2">
             <h3 className="text-[13px] font-medium">Rewards</h3>
-            <p className="text-[12px] text-muted-foreground">Rules stack. Among cash rules, only the best one a partner qualifies for counts. No rules means track only. An action is something your own system does, sent by the partner_reward.approved webhook.</p>
+            <p className="text-[12px] text-muted-foreground">Every action rule a sale matches pays, but only one cash rule (percent or fixed) does, whatever the order here: a partner's own rate, then their group's, then the highest tier, then the narrower sale (first sale, then first months, then every sale), then the one paying more. So 10% on the first sale with 2% on every sale pays 10% once, then 2%. No rules means track only. An action is something your own system does, sent by the partner_reward.approved webhook.</p>
             {rules.map((r, i) => (
               <div key={i} className="grid grid-cols-2 gap-2 rounded-md border p-2 sm:grid-cols-4">
                 <input aria-label="When" list="partner-triggers" className={field} value={r.trigger} disabled={!canManage} onChange={(e) => set(i, { trigger: e.target.value.trim() })} />
@@ -652,8 +820,12 @@ function ProgramSettings({ ws, program: p, canManage, onClose }: { ws: string; p
                 <select aria-label="Which sales" className={field} value={r.recurrence ?? "every"} disabled={!canManage || r.trigger !== "sale"} onChange={(e) => set(i, { recurrence: e.target.value as RuleRow["recurrence"] })}>
                   <option value="every">Every sale</option>
                   <option value="first">First sale</option>
-                  <option value="months">First 12 months</option>
+                  <option value="months">First months</option>
                 </select>
+                {r.trigger === "sale" && r.recurrence === "months" && (
+                  <input aria-label="Months" className={field} type="number" min={1} max={120} value={r.months ?? 12} disabled={!canManage}
+                    onChange={(e) => set(i, { months: e.target.value === "" ? undefined : Number(e.target.value) })} placeholder="12" />
+                )}
                 {r.kind === "action" && (
                   <select aria-label="Who" className={field} value={r.side ?? "partner"} disabled={!canManage} onChange={(e) => set(i, { side: e.target.value as RuleRow["side"] })}>
                     <option value="partner">For the partner</option>
@@ -686,6 +858,7 @@ function ProgramSettings({ ws, program: p, canManage, onClose }: { ws: string; p
             </div>
           )}
         </form>
+        <PartnerInstall ws={ws} program={p} />
         <PortalSection ws={ws} program={p} canManage={canManage} />
         <ImportSection ws={ws} program={p} canManage={canManage} />
       </SheetContent>
@@ -702,27 +875,44 @@ const importReasons: Record<string, string> = {
   extra_link: "a partner's second link (their code is the first)",
   code_changed: "the code was taken or not allowed, so the partner got a new one",
   partner_missing: "its partner didn't come over",
+  partner_unavailable: "a partner other objects name, but Tolt couldn't give them either",
   customer_missing: "its customer didn't come over",
   promo_code_invalid: "a promo code with characters not allowed here",
   promo_code_taken: "a promo code another partner has here",
   already_referred: "another partner already has this customer here",
   status_conflict: "rejected in Tolt after it was approved here",
+  unreadable: "Tolt's answer couldn't be read, so this kind didn't come over; the others did",
 };
+
+type ImportSource = { id: string; name: string; currency: string; status: string };
 
 // ImportSection brings a Tolt program in, as often as needed until the
 // switch-over day.
 function ImportSection({ ws, program: p, canManage }: { ws: string; program: PartnerProgram; canManage: boolean }) {
   const [runs, setRuns] = useState<PartnerImport[]>([]);
   const [source, setSource] = useState("");
+  // The programs in the Tolt account, or null when they couldn't be listed
+  // (then the id is typed).
+  const [sources, setSources] = useState<ImportSource[] | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<ReactNode>("");
   const load = useCallback(async () => {
     const { data } = await api.GET("/v1/workspaces/{ws}/partner-programs/{id}/imports", { params: { path: { ws, id: p.id } } });
     setRuns(data?.data ?? []);
+    return data?.data ?? [];
   }, [ws, p.id]);
   useEffect(() => {
-    load();
-  }, [load]);
+    (async () => {
+      const past = await load();
+      if (!canManage) return;
+      const { data } = await api.GET("/v1/workspaces/{ws}/partner-programs/{id}/import-sources", { params: { path: { ws, id: p.id } } });
+      if (!data) return;
+      setSources(data.data);
+      // The program the last run read, else the one an import would take.
+      const last = past.find((r) => r.source_program)?.source_program;
+      setSource(data.data.some((s) => s.id === last) ? last! : data.suggested);
+    })();
+  }, [load, canManage, ws, p.id]);
   const running = runs.some((r) => r.status === "queued" || r.status === "running");
   useEffect(() => {
     if (!running) return;
@@ -753,8 +943,22 @@ function ImportSection({ ws, program: p, canManage }: { ws: string; program: Par
       <p className="text-[12px] text-muted-foreground">Brings partners with their link codes (so their links keep working), payout details, promo codes, referred customers, transactions and commissions, paid ones as paid payouts. Run it as often as you like until you switch: each run adds only what's new and brings over status changes. Keep auto-approve off until then, so Tolt's own decisions come over.</p>
       {canManage && (
         <div className="flex flex-wrap items-end gap-2">
-          <Input label="Tolt program id" value={source} onChange={(e) => setSource(e.target.value)} placeholder="Only if your account has more than one" maxLength={200} />
-          <Button type="button" onClick={start} disabled={busy || running}>{running ? "Importing…" : runs.length ? "Run again" : "Import"}</Button>
+          {sources && sources.length > 1 ? (
+            <label className="grid gap-1 text-[12px]">
+              Tolt program
+              <select className={field} value={source} onChange={(e) => setSource(e.target.value)}>
+                {!source && <option value="">Choose a program</option>}
+                {sources.map((s) => (
+                  <option key={s.id} value={s.id}>{s.name || s.id}{s.status === "inactive" ? " (inactive)" : ""}{s.currency ? `, ${s.currency}` : ""}</option>
+                ))}
+              </select>
+            </label>
+          ) : sources?.length === 1 ? (
+            <p className="text-[12px] text-muted-foreground">From your Tolt program {sources[0].name || sources[0].id}.</p>
+          ) : (
+            <Input label="Tolt program id" value={source} onChange={(e) => setSource(e.target.value)} placeholder="Only if your account has more than one" maxLength={200} />
+          )}
+          <Button type="button" onClick={start} disabled={busy || running || (!!sources && sources.length > 1 && !source)}>{running ? "Importing…" : runs.length ? "Run again" : "Import"}</Button>
         </div>
       )}
       <ErrorText>{error}</ErrorText>
@@ -772,7 +976,12 @@ function ImportSection({ ws, program: p, canManage }: { ws: string; program: Par
             <details>
               <summary className="cursor-pointer">{plural(r.summary.issues.length + r.summary.more_issues, "thing", "things")} to check</summary>
               <ul className="mt-1 list-disc pl-5">
-                {r.summary.issues.map((i) => <li key={i.kind + i.external_id + i.reason}>{i.kind.replace("_", " ")} <code>{i.external_id}</code>: {importReasons[i.reason] ?? i.reason}</li>)}
+                {r.summary.issues.map((i) => (
+                  <li key={i.kind + i.external_id + i.reason}>
+                    {i.kind.replace("_", " ")} {i.external_id && <code>{i.external_id}</code>}: {importReasons[i.reason] ?? i.reason}
+                    {i.message && <span className="block text-muted-foreground">{i.message}</span>}
+                  </li>
+                ))}
               </ul>
             </details>
           )}
@@ -872,6 +1081,52 @@ function PortalSection({ ws, program: p, canManage }: { ws: string; program: Par
         )}
         {canManage && <Button type="button" variant="ghost" onClick={addAsset}>Add an asset</Button>}
       </div>
+    </div>
+  );
+}
+
+// RecordPartners shows a customer record's place in partner programs: the
+// programs they are a partner in and the partner who referred them. It
+// shows nothing when there is neither, or the viewer can't read partners.
+export function RecordPartners({ ws, record, go }: { ws: string; record: string; go?: () => void }) {
+  const [own, setOwn] = useState<Partner[] | null>(null);
+  const [by, setBy] = useState<{ ref: PartnerReferral; partner: Partner | null }[]>([]);
+
+  useEffect(() => {
+    let live = true;
+    (async () => {
+      const [mine, refs] = await Promise.all([
+        api.GET("/v1/workspaces/{ws}/partners", { params: { path: { ws }, query: { record_id: record } } }),
+        api.GET("/v1/workspaces/{ws}/partner-referrals", { params: { path: { ws }, query: { record_id: record } } }),
+      ]);
+      const list = refs.data?.data ?? [];
+      const partners = await Promise.all(list.map((ref) =>
+        api.GET("/v1/workspaces/{ws}/partners/{id}", { params: { path: { ws, id: ref.partner_id } } }).then(({ data }) => ({ ref, partner: data ?? null })),
+      ));
+      if (!live) return;
+      setOwn(mine.data?.data ?? []);
+      setBy(partners);
+    })();
+    return () => { live = false; };
+  }, [ws, record]);
+
+  if (own === null || (own.length === 0 && by.length === 0)) return null;
+  return (
+    <div className="space-y-2">
+      <div className="font-medium">Partners</div>
+      {own.map((p) => (
+        <div key={p.id} className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-0.5">
+          <span className="min-w-0">Partner in <span className="font-medium">{p.program}</span> as <span className="font-mono">{p.code}</span> <Badge tone={partnerTone[p.status]}>{p.status}</Badge></span>
+          <span className="shrink-0 text-muted-foreground">{money(p.stats.sales_cents, p.currency)} sales · {money(p.stats.balance_cents, p.currency)} due</span>
+        </div>
+      ))}
+      {by.map(({ ref, partner }) => (
+        <div key={ref.id} className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-0.5">
+          <span className="min-w-0">Referred by {partner ? <><span className="font-mono">{partner.code}</span> ({partner.name || partner.email || "partner"}) in <span className="font-medium">{partner.program}</span></> : "a partner"}</span>
+          <span className="shrink-0 text-muted-foreground">{ref.status}, {ago(ref.created_at)}</span>
+        </div>
+      ))}
+      {go && <Button variant="ghost" onClick={go}>Open partners</Button>}
     </div>
   );
 }

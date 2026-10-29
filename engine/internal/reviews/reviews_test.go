@@ -132,7 +132,8 @@ func TestParseCapterraPageData(t *testing.T) {
 }
 
 func TestPlatformRules(t *testing.T) {
-	if !RenderJS(G2) || !RenderJS(Google) || RenderJS(Trustpilot) || NewestFirst(Capterra) || !NewestFirst(Trustpilot) {
+	if !RenderJS(G2) || !RenderJS(Google) || !RenderJS(Trustpilot) || !RenderJS(Capterra) || RenderJS("other") ||
+		NewestFirst(Capterra) || !NewestFirst(Trustpilot) {
 		t.Fatal("platform reading rules")
 	}
 }

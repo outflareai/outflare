@@ -132,7 +132,7 @@ func (s *Server) listSocialAccounts(w http.ResponseWriter, r *http.Request) {
 func (s *Server) findSocialAccount(w http.ResponseWriter, r *http.Request, a *access, id string) (*socialAccountView, bool) {
 	if validUUID(id) {
 		v, err := scanSocialAccount(s.pool.QueryRow(r.Context(), socialAccountSelect+` AND a.id = $2`, a.WorkspaceID, id))
-		if err == nil && a.sees(nil, v.BrandID) {
+		if err == nil && a.sees(v.BrandID) {
 			return &v, true
 		}
 		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
@@ -166,7 +166,7 @@ func (s *Server) updateSocialAccount(w http.ResponseWriter, r *http.Request) {
 	if !decode(w, r, &req) {
 		return
 	}
-	if !a.writes(nil, cur.BrandID) {
+	if !a.writes(cur.BrandID) {
 		writeError(w, r, http.StatusForbidden, "forbidden", string(errSharedRecord))
 		return
 	}
@@ -187,7 +187,7 @@ func (s *Server) updateSocialAccount(w http.ResponseWriter, r *http.Request) {
 			}
 			brand = &id
 		}
-		if !a.writes(nil, brand) {
+		if !a.writes(brand) {
 			writeError(w, r, http.StatusBadRequest, "invalid_request", "brand_id: you can only put accounts on your own brands")
 			return
 		}
@@ -287,7 +287,7 @@ func (s *Server) syncSocialAccountNow(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if !a.writes(nil, cur.BrandID) {
+	if !a.writes(cur.BrandID) {
 		writeError(w, r, http.StatusForbidden, "forbidden", string(errSharedRecord))
 		return
 	}

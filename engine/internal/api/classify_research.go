@@ -41,7 +41,7 @@ func (m aiModels) ForTask(ctx context.Context, ws, task string, cents int64) (re
 // Spent books a research call on the workspace's own provider bill.
 func (m aiModels) Spent(ctx context.Context, ws string, c research.Choice, u llm.Usage, ref, note string) error {
 	return recordAISpend(ctx, m.s.pool, aiChoice{Provider: c.Provider, IntegrationID: c.IntegrationID,
-		Model: c.Model, Price: c.Price, Task: c.Task}, ws, nil, nil, nil, u, ref, note)
+		Model: c.Model, Price: c.Price, Task: c.Task}, ws, nil, nil, u, ref, note)
 }
 
 // withResearch adds the workspace's own research to a result: a verdict it

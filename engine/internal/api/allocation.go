@@ -613,22 +613,19 @@ func (s *Server) assignMailboxes(w http.ResponseWriter, r *http.Request) {
 // not apply to people, but locks and in-flight follow-ups do.
 func (s *Server) assignOne(ctx context.Context, tx pgx.Tx, a *access, id, seq, seqName, seqTeam string) (mailboxResult, error) {
 	res := mailboxResult{MailboxID: id}
-	var lockKind, lockSeq, lockTeam, curSeq, curState, notReady, otherProject, otherBrand *string
+	var lockKind, lockSeq, lockTeam, curSeq, curState, notReady, otherBrand *string
 	var version *int
 	err := tx.QueryRow(ctx, `
 		SELECT l.kind, l.sequence_id::text, l.team_id::text, x.sequence_id::text, x.state, x.version,
 		       CASE WHEN m.status <> 'active' THEN 'the mailbox is ' || m.status END,
-		       -- A project's mailbox serves only that project's sequences.
-		       (SELECT p.name FROM projects p WHERE p.id = m.project_id
-		        AND m.project_id IS DISTINCT FROM (SELECT project_id FROM sequences WHERE id = $3)),
-		       -- And a brand's mailbox only that brand's.
+		       -- A brand's mailbox serves only that brand's sequences.
 		       (SELECT b.name FROM brands b WHERE b.id = m.brand_id
 		        AND m.brand_id IS DISTINCT FROM (SELECT brand_id FROM sequences WHERE id = $3))
 		FROM mailboxes m
 		LEFT JOIN mailbox_locks l ON l.mailbox_id = m.id AND (l.until IS NULL OR l.until > now())
 		LEFT JOIN mailbox_assignments x ON x.mailbox_id = m.id
 		WHERE m.id = $1 AND m.workspace_id = $2 FOR UPDATE OF m`, id, a.WorkspaceID, seq).
-		Scan(&lockKind, &lockSeq, &lockTeam, &curSeq, &curState, &version, &notReady, &otherProject, &otherBrand)
+		Scan(&lockKind, &lockSeq, &lockTeam, &curSeq, &curState, &version, &notReady, &otherBrand)
 	if errors.Is(err, pgx.ErrNoRows) {
 		res.Result, res.Message = "refused", "mailbox not found"
 		return res, nil
@@ -637,9 +634,6 @@ func (s *Server) assignOne(ctx context.Context, tx pgx.Tx, a *access, id, seq, s
 		return res, err
 	}
 	switch {
-	case otherProject != nil:
-		res.Result, res.Message = "refused", "It belongs to the project "+*otherProject+". Move it to this sequence's project, or make it shared, first."
-		return res, nil
 	case otherBrand != nil:
 		res.Result, res.Message = "refused", "It belongs to the brand "+*otherBrand+". Move it to this sequence's brand, or make it shared, first."
 		return res, nil

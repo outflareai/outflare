@@ -54,11 +54,11 @@ func (c *Caller) Has(scope string) bool { return c.a.has(scope) }
 
 // Sees reports whether the caller may see something of a brand (nil for
 // shared).
-func (c *Caller) Sees(brand *string) bool { return c.a.sees(nil, brand) }
+func (c *Caller) Sees(brand *string) bool { return c.a.sees(brand) }
 
 // Writes reports whether the caller may change something of a brand (nil
 // for shared). A brand-limited caller only reads shared things.
-func (c *Caller) Writes(brand *string) bool { return c.a.writes(nil, brand) }
+func (c *Caller) Writes(brand *string) bool { return c.a.writes(brand) }
 
 // Record writes an audit event for the caller in tx, which is also the
 // product event of the same name once the request succeeds.

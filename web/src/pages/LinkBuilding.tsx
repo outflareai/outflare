@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import type { LinkBuildingSettings, LinkPitch, LinkProspect, LinkRead, LinkResultRow, SEOSite } from "@outflare/sdk";
+import type { LinkBuildingSettings, LinkPitch, LinkProspect, LinkRead, LinkResultRow, LinkSequence, SEOSite } from "@outflare/sdk";
 import { useBrand } from "@/lib/brand";
 import { DataTable } from "@/components/data-table";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -20,10 +20,11 @@ import type { Tab } from "../App";
 // sequence skips approval. Replies and a daily check of the page move the
 // prospect on to a live link.
 
-type Props = { ws: string; canManage: boolean; go: (tab: Tab, item?: string) => void };
+// waiting is the count of pitches waiting for approval (from the workspace
+// stats); onWaiting updates it when the Pitches tab knows better.
+type Props = { ws: string; canManage: boolean; go: (tab: Tab, item?: string) => void; waiting?: number; onWaiting?: (n: number) => void };
 type Tone = keyof typeof tones;
 type Section = "prospects" | "pitches" | "results" | "dead" | "top" | "settings";
-type LinkSequence = { sequence_id: string; name: string; status: string; brand_id: string | null; approve_pitches: boolean; uses_opener: boolean; pitches: number };
 type Stage = LinkProspect["stage"];
 type Method = LinkProspect["method"];
 type Show = "open" | "outreach" | "live" | "ended" | "excluded";
@@ -93,7 +94,7 @@ const path = (u: string) => {
   }
 };
 
-export function LinkBuilding({ ws, canManage, go }: Props) {
+export function LinkBuilding({ ws, canManage, go, waiting = 0, onWaiting }: Props) {
   const [sites, setSites] = useState<SEOSite[] | null>(null);
   const [site, setSite] = useState("");
   const [section, setSection] = useState<Section>("prospects");
@@ -144,7 +145,10 @@ export function LinkBuilding({ ws, canManage, go }: Props) {
       <Tabs value={section} onValueChange={(v) => setSection(v as Section)} className="max-w-full overflow-x-auto">
         <TabsList className="h-8">
           <TabsTrigger value="prospects" className="px-3 text-[12px]">Prospects</TabsTrigger>
-          <TabsTrigger value="pitches" className="px-3 text-[12px]">Pitches</TabsTrigger>
+          <TabsTrigger value="pitches" className="gap-1.5 px-3 text-[12px]">
+            Pitches
+            {waiting > 0 && <span className="rounded bg-brand-strong px-1 font-mono text-[10px] leading-4 text-white dark:bg-brand dark:text-neutral-950" aria-label={`${waiting} waiting for approval`}>{waiting}</span>}
+          </TabsTrigger>
           <TabsTrigger value="results" className="px-3 text-[12px]">Results</TabsTrigger>
           <TabsTrigger value="dead" className="px-3 text-[12px]">Competitors' dead pages</TabsTrigger>
           <TabsTrigger value="top" className="px-3 text-[12px]">Most linked pages</TabsTrigger>
@@ -152,7 +156,7 @@ export function LinkBuilding({ ws, canManage, go }: Props) {
         </TabsList>
       </Tabs>
       {section === "prospects" && <Prospects ws={ws} site={current} canManage={canManage} brand={brand} />}
-      {section === "pitches" && <Pitches ws={ws} canManage={canManage} brand={brand} />}
+      {section === "pitches" && <Pitches ws={ws} canManage={canManage} brand={brand} onWaiting={onWaiting} />}
       {section === "results" && <Results ws={ws} site={current} brand={brand} />}
       {section === "dead" && <DeadPages ws={ws} site={current} canManage={canManage} brand={brand} go={go} />}
       {section === "top" && <TopPages ws={ws} site={current} canManage={canManage} />}
@@ -513,6 +517,20 @@ function ProspectSheet({ ws, prospect: p, canManage, onClose, onChanged }: { ws:
 }
 
 // PitchSection starts a pitch of a prospect to pitch, or shows its latest.
+// createStarter makes the starter sequence for link pitches: a draft whose
+// first step is the AI's opener, with a follow-up. It answers the sequence,
+// or null when it failed (with the error set).
+async function createStarter(ws: string, setError: (e: string) => void): Promise<LinkSequence | null> {
+  const { data, error } = await api.POST("/v1/workspaces/{ws}/link-building/sequences", { params: { path: { ws } }, body: {} });
+  if (error || !data) {
+    setError(errorMessage(error));
+    return null;
+  }
+  setError("");
+  toast(`Created ${data.name}: a draft with the opener in its first email and one follow-up. Review it under Sequences.`);
+  return data;
+}
+
 function PitchSection({ ws, prospect: p, canManage, onChanged }: { ws: string; prospect: LinkProspect; canManage: boolean; onChanged: () => void }) {
   const [pitches, setPitches] = useState<LinkPitch[] | null>(null);
   const [seqs, setSeqs] = useState<LinkSequence[] | null>(null);
@@ -545,8 +563,17 @@ function PitchSection({ ws, prospect: p, canManage, onChanged }: { ws: string; p
     toast(s?.approve_pitches === false ? "Writing the opener. It goes out once written." : "Writing the opener. Approve it under Pitches.");
     onChanged();
   };
+  const starter = async () => {
+    setBusy(true);
+    const q = await createStarter(ws, setError);
+    setBusy(false);
+    if (!q) return;
+    setSeqs((l) => [...(l ?? []), q]);
+    setSeq(q.sequence_id);
+  };
   const latest = pitches?.[0];
   const open = latest && (latest.status === "writing" || latest.status === "draft");
+  const noOpener = !!seqs && !seqs.some((x) => x.uses_opener);
   const chosen = seqs?.find((x) => x.sequence_id === seq);
   return (
     <section className="space-y-1.5">
@@ -565,7 +592,10 @@ function PitchSection({ ws, prospect: p, canManage, onChanged }: { ws: string; p
         ) : !seqs ? (
           <Loading />
         ) : seqs.length === 0 ? (
-          <p className="text-muted-foreground">Make a sequence for link pitches first, with {"{{custom.opener}}"} in its first step.</p>
+          <div className="space-y-2">
+            <p className="text-muted-foreground">Pitches go out through a sequence. Start with ours: the AI's opener in the first email, and one follow-up.</p>
+            <Button disabled={busy} onClick={starter}>Create the starter sequence</Button>
+          </div>
         ) : (
           <div className="space-y-2">
             <div className="flex flex-wrap gap-2">
@@ -576,7 +606,12 @@ function PitchSection({ ws, prospect: p, canManage, onChanged }: { ws: string; p
                 {seqs.map((x) => <option key={x.sequence_id} value={x.sequence_id}>{x.name}</option>)}
               </select>
             </div>
-            {chosen && !chosen.uses_opener && <p className="text-[12px] text-amber-600 dark:text-amber-400">This sequence doesn't use {"{{custom.opener}}"}, so the AI's opener won't be in the email.</p>}
+            {chosen && !chosen.uses_opener && (
+              <p className="text-[12px] text-amber-600 dark:text-amber-400">
+                This sequence doesn't use {"{{custom.opener}}"}, so the AI's opener won't be in the email.
+                {noOpener && <> <button type="button" className="underline underline-offset-2" disabled={busy} onClick={starter}>Create the starter sequence</button> instead.</>}
+              </p>
+            )}
             <p className="text-[12px] text-muted-foreground">Your AI writes an opener for this page{chosen?.approve_pitches === false ? "; it goes out as soon as it's written." : " for you to approve."} It never offers payment for a link.</p>
             <Button disabled={busy || !seq} onClick={start}>Write a pitch</Button>
           </div>
@@ -586,7 +621,7 @@ function PitchSection({ ws, prospect: p, canManage, onChanged }: { ws: string; p
   );
 }
 
-function Pitches({ ws, canManage, brand }: { ws: string; canManage: boolean; brand: { brand?: string } }) {
+function Pitches({ ws, canManage, brand, onWaiting }: { ws: string; canManage: boolean; brand: { brand?: string }; onWaiting?: (n: number) => void }) {
   const [status, setStatus] = useState<PitchStatus | "">("draft");
   const [list, setList] = useState<LinkPitch[] | null>(null);
   const [edits, setEdits] = useState<Record<string, string>>({});
@@ -598,6 +633,7 @@ function Pitches({ ws, canManage, brand }: { ws: string; canManage: boolean; bra
     api.GET("/v1/workspaces/{ws}/link-pitches", { params: { path: { ws }, query: { ...brand, ...(status ? { status } : {}), limit: 200 } } }).then(({ data, error }) => {
       if (error || !data) return setError(errorMessage(error));
       setList(data.data);
+      if (status === "draft" && data.next_offset === null) onWaiting?.(data.data.length);
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ws, status, reload, brand.brand]);
@@ -936,6 +972,13 @@ function PitchSequences({ ws, canManage, brand, go }: { ws: string; canManage: b
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ws, brand.brand]);
+  const [busy, setBusy] = useState(false);
+  const starter = async () => {
+    setBusy(true);
+    const q = await createStarter(ws, setError);
+    setBusy(false);
+    if (q) setList((l) => [...(l ?? []), q]);
+  };
   const toggle = async (q: LinkSequence, on: boolean) => {
     if (!on && !(await confirmAction(`Send ${q.name}'s pitches without approval?`, "Each pitch goes out as soon as your AI writes its opener, without a person reading it first.", "Send without approval"))) return;
     const { error } = await api.PATCH("/v1/workspaces/{ws}/link-building/sequences/{sequence}", { params: { path: { ws, sequence: q.sequence_id } }, body: { approve_pitches: on } });
@@ -965,6 +1008,12 @@ function PitchSequences({ ws, canManage, brand, go }: { ws: string; canManage: b
             </li>
           ))}
         </ul>
+      )}
+      {list && canManage && !list.some((q) => q.uses_opener) && (
+        <div className="flex flex-wrap items-center gap-2 text-[12px]">
+          <span className="text-muted-foreground">None of your sequences uses the AI's opener yet.</span>
+          <Button type="button" variant="ghost" disabled={busy} onClick={starter}>Create the starter sequence</Button>
+        </div>
       )}
     </section>
   );

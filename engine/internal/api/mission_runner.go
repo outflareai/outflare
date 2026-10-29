@@ -234,7 +234,7 @@ func (s *Server) runTurn(ctx context.Context, id, ws string, lease time.Time) er
 
 	// What the turn cost, on the workspace's own bill with the provider, even when it failed.
 	mission := id
-	if err := recordAISpend(ctx, s.pool, ai, ws, &mission, nil, nil, res.Usage, fmt.Sprintf("mission-turn:%s:%d", id, turns+1),
+	if err := recordAISpend(ctx, s.pool, ai, ws, &mission, nil, res.Usage, fmt.Sprintf("mission-turn:%s:%d", id, turns+1),
 		fmt.Sprintf("Outflare's agent, %s %d", map[bool]string{false: "turn", true: "check-in, turn"}[routine], turns+1)); err != nil {
 		s.log.Error("mission turn spend", "mission", id, "err", err)
 	}
@@ -338,10 +338,10 @@ func (s *Server) turnTrigger(ctx context.Context, id, ws string, turns int, last
 
 func (s *Server) tokenPrincipal(ctx context.Context, tokenID string) (*principal, error) {
 	p := &principal{ActorType: "api_token"}
-	err := s.pool.QueryRow(ctx, `SELECT id, actor_id, workspace_id, scopes, project_id::text FROM api_tokens
+	err := s.pool.QueryRow(ctx, `SELECT id, actor_id, workspace_id, scopes FROM api_tokens
 		WHERE id = $1 AND revoked_at IS NULL AND (expires_at IS NULL OR expires_at > now())
 		  AND NOT EXISTS (SELECT 1 FROM users u WHERE u.id = api_tokens.created_by AND u.disabled_at IS NOT NULL)`, tokenID).
-		Scan(&p.TokenID, &p.ActorID, &p.TokenWorkspaceID, &p.TokenScopes, &p.TokenProjectID)
+		Scan(&p.TokenID, &p.ActorID, &p.TokenWorkspaceID, &p.TokenScopes)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, errors.New("its token was revoked or expired")
 	}

@@ -8,6 +8,7 @@ import { api, errorMessage } from "../api";
 import { Badge, Button, Card, CopyButton, ErrorText, Input, Loading, PageHeader, Stat, Stats, toast } from "../ui";
 import { ago, plural } from "../format";
 import { SiteKeysCard } from "./SiteKeys";
+import { RecordPartners } from "./Partners";
 import type { Tab } from "../App";
 
 // Visitors: the companies and people on the workspace's website, scored for
@@ -284,6 +285,7 @@ function VisitorSheet({ ws, v, canManage, onClose, onChanged, go }: {
               )}
             </div>
           )}
+          {v.kind === "person" && v.record_id && <RecordPartners ws={ws} record={v.record_id} go={() => go("partners")} />}
           {fromLookup && (
             <div className="space-y-2 rounded-md border p-3">
               <div className="text-muted-foreground">

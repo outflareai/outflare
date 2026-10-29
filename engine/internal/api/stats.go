@@ -42,6 +42,9 @@ type statsView struct {
 	ActiveSequences   int `json:"active_sequences"`
 	ActiveEnrollments int `json:"active_enrollments"`
 	Leads             int `json:"leads"`
+	// LinkPitchesWaiting are draft link pitches: waiting for a person to
+	// approve them, or to write the opener when there is no AI.
+	LinkPitchesWaiting int `json:"link_pitches_waiting"`
 }
 
 // stats is the workspace overview: one round trip for the home screen and
@@ -90,10 +93,11 @@ func (s *Server) stats(w http.ResponseWriter, r *http.Request) {
 			(SELECT count(DISTINCT lead_id) FROM messages g WHERE workspace_id = $1 AND status = 'sent' AND lead_id IS NOT NULL AND created_at > now() - interval '7 days'`+viaMailbox("g")+`),
 			(SELECT count(DISTINCT lead_id) FROM inbound_messages i WHERE workspace_id = $1 AND kind = 'reply' AND lead_id IS NOT NULL AND received_at > now() - interval '7 days'`+viaMailbox("i")+`),
 			(SELECT count(*) FILTER (WHERE landed = 'inbox')::float / NULLIF(count(*), 0) FROM warmup_messages wm
-				WHERE workspace_id = $1 AND landed IS NOT NULL AND created_at > now() - interval '7 days'`+viaWarmup(brand, mb)+`)`, args...,
+				WHERE workspace_id = $1 AND landed IS NOT NULL AND created_at > now() - interval '7 days'`+viaWarmup(brand, mb)+`),
+			(SELECT count(*) FROM link_pitches k WHERE workspace_id = $1 AND status = 'draft'`+viaSequence("k")+`)`, args...,
 	).Scan(&m.Total, &m.Active, &m.Error, &m.Paused, &m.Verifying, &m.DailyCapacity,
 		&v.Sent24h, &v.Sent7d, &v.Replies7d, &v.Bounces7d, &v.UnreadReplies, &v.ActiveSequences, &v.ActiveEnrollments, &v.Leads,
-		&m.Warming, &v.ContactedLeads7d, &v.RepliedLeads7d, &v.WarmupInboxRate)
+		&m.Warming, &v.ContactedLeads7d, &v.RepliedLeads7d, &v.WarmupInboxRate, &v.LinkPitchesWaiting)
 	if err != nil {
 		s.internal(w, r, err)
 		return

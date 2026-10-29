@@ -120,6 +120,12 @@ type OAuth struct {
 	// envelope (TikTok's Marketing API). The token has no expiry; the
 	// advertiser accounts it was granted come back with it.
 	AppIDAuthCode bool `json:"-"`
+	// KeepClientID stores the app's client id beside the tokens as
+	// client_id, refreshed with them, for APIs that want it on every call
+	// next to the workspace's token (Amazon Ads'
+	// Amazon-Advertising-API-ClientId header). It is the app's public id,
+	// not a secret, and only names the app the workspace signed in through.
+	KeepClientID bool `json:"-"`
 }
 
 // Definition is a connector's catalog entry.
@@ -276,11 +282,20 @@ func (c *Client) Base(id, def string) string {
 
 // Do runs req with a timeout.
 func (c *Client) Do(req *http.Request) (*http.Response, error) {
+	return c.DoWithin(req, 0)
+}
+
+// DoWithin runs req and waits up to wait for the whole answer, for a call
+// the service itself takes long to answer (a page read in a browser). Zero
+// keeps the client's own timeout, or 45 seconds.
+func (c *Client) DoWithin(req *http.Request, wait time.Duration) (*http.Response, error) {
 	h := http.DefaultClient
 	if c != nil && c.HTTP != nil {
 		h = c.HTTP
 	}
-	if h.Timeout == 0 {
+	if wait > 0 {
+		h = &http.Client{Timeout: wait, Transport: h.Transport, CheckRedirect: h.CheckRedirect, Jar: h.Jar}
+	} else if h.Timeout == 0 {
 		h = &http.Client{Timeout: 45 * time.Second, Transport: h.Transport}
 	}
 	if req.Header.Get("User-Agent") == "" {

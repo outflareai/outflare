@@ -25,9 +25,11 @@ var Metrics = []string{"meetings", "replies", "sends", "leads", "revenue_attribu
 // Snapshot is what the planner knows about the workspace. Callers fill it
 // from the database; nothing secret goes in it.
 type Snapshot struct {
-	Today     time.Time  `json:"today"`
-	Workspace string     `json:"workspace"`
-	Project   *Project   `json:"project,omitempty"`
+	Today     time.Time `json:"today"`
+	Workspace string    `json:"workspace"`
+	// What the company told Outflare about itself and its brands:
+	// offers, audiences, markets, voice and rules, in Markdown.
+	Context   string     `json:"context,omitempty"`
 	Mailboxes Mailboxes  `json:"mailboxes"`
 	Leads     Leads      `json:"leads"`
 	Sequences []Sequence `json:"sequences"`
@@ -35,13 +37,6 @@ type Snapshot struct {
 	Connected []string `json:"connected"`
 	// Every connector the engine knows, connected or not.
 	Catalog []CatalogItem `json:"catalog"`
-}
-
-// Project is the project the mission runs in, with its brief.
-type Project struct {
-	ID    string          `json:"id"`
-	Name  string          `json:"name"`
-	Brief json.RawMessage `json:"brief,omitempty"`
 }
 
 // Mailboxes summarises sending capacity.
@@ -255,7 +250,7 @@ func Schema() map[string]any {
 
 const systemPrompt = `You plan outbound go-to-market missions for Outflare, a control plane that runs cold email: mailboxes, leads, sequences, an inbox, and connectors to outside tools.
 
-A person has typed a goal. Turn it into a mission draft that a person will review and approve before anything runs. The workspace JSON tells you what exists today: the project brief, sending mailboxes and their daily capacity, leads, campaigns, which connectors are connected, and the catalog of connectors that could be connected.
+A person has typed a goal. Turn it into a mission draft that a person will review and approve before anything runs. The workspace JSON tells you what exists today: what the company context says about its offer and audience, sending mailboxes and their daily capacity, leads, campaigns, which connectors are connected, and the catalog of connectors that could be connected.
 
 How to draft:
 - name: short, like "Fintech CFOs, Australia".

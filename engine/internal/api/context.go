@@ -24,12 +24,12 @@ import (
 
 func (s *Server) routesContext(mux *http.ServeMux) {
 	read, manage := auth.ScopeWorkspaceRead, auth.ScopeContextManage
-	mux.HandleFunc("GET /v1/workspaces/{ws}/context", s.inProject(read, s.getContext))
+	mux.HandleFunc("GET /v1/workspaces/{ws}/context", s.inBrand(read, s.getContext))
 	mux.HandleFunc("PATCH /v1/workspaces/{ws}/context", s.inWorkspace(manage, s.updateContext))
-	mux.HandleFunc("GET /v1/workspaces/{ws}/memories", s.inProject(read, s.listMemories))
-	mux.HandleFunc("POST /v1/workspaces/{ws}/memories", s.inProject(manage, s.createMemory))
-	mux.HandleFunc("PATCH /v1/workspaces/{ws}/memories/{id}", s.inProject(manage, s.updateMemory))
-	mux.HandleFunc("DELETE /v1/workspaces/{ws}/memories/{id}", s.inProject(manage, s.deleteMemory))
+	mux.HandleFunc("GET /v1/workspaces/{ws}/memories", s.inBrand(read, s.listMemories))
+	mux.HandleFunc("POST /v1/workspaces/{ws}/memories", s.inBrand(manage, s.createMemory))
+	mux.HandleFunc("PATCH /v1/workspaces/{ws}/memories/{id}", s.inBrand(manage, s.updateMemory))
+	mux.HandleFunc("DELETE /v1/workspaces/{ws}/memories/{id}", s.inBrand(manage, s.deleteMemory))
 }
 
 // contextFields are the company context's text fields, in the order they
@@ -154,16 +154,6 @@ func contextMarkdown(v contextView, memories []memoryView) string {
 	return b.String()
 }
 
-type contextProject struct {
-	ID           string  `json:"id"`
-	Name         string  `json:"name"`
-	Status       string  `json:"status"`
-	BrandID      *string `json:"brand_id"`
-	BriefVersion int     `json:"brief_version"`
-	// Whether the project has any brief written.
-	HasBrief bool `json:"has_brief"`
-}
-
 // contextBrand is one line about a brand, so an agent knows which brands
 // exist and can ask which one the work is for.
 type contextBrand struct {
@@ -216,10 +206,9 @@ func brandMarkdown(b *brandContextView) string {
 }
 
 // getContext is what an agent reads at the start of every conversation:
-// the company context, pinned and recent memories, and the projects whose
-// briefs hold each motion's offer and audience. With ?brand= it adds that
-// brand's context and keeps memories and projects to the company's and the
-// brand's. A project token reads its project's brand.
+// the company context, pinned and recent memories, and the brands. With
+// ?brand= it adds that brand's context and keeps memories to the company's
+// and the brand's.
 func (s *Server) getContext(w http.ResponseWriter, r *http.Request) {
 	a := accessFrom(r.Context())
 	ctx := r.Context()
@@ -234,7 +223,7 @@ func (s *Server) getContext(w http.ResponseWriter, r *http.Request) {
 			s.internal(w, r, err)
 			return
 		}
-		if !a.sees(nil, &id) {
+		if !a.sees(&id) {
 			writeError(w, r, http.StatusNotFound, "not_found", "brand not found: brand is a brand's id or handle")
 			return
 		}
@@ -243,20 +232,6 @@ func (s *Server) getContext(w http.ResponseWriter, r *http.Request) {
 	// Someone kept to one brand reads that brand's context.
 	if brandID == "" && len(a.Brands) == 1 {
 		brandID = a.Brands[0]
-	}
-	if a.ProjectID != nil {
-		var own *string
-		if err := s.pool.QueryRow(ctx, `SELECT brand_id::text FROM projects WHERE id = $1`, *a.ProjectID).Scan(&own); err != nil {
-			s.internal(w, r, err)
-			return
-		}
-		if brandID != "" && (own == nil || *own != brandID) {
-			writeError(w, r, http.StatusNotFound, "not_found", "brand not found")
-			return
-		}
-		if own != nil {
-			brandID = *own
-		}
 	}
 	v, err := s.loadContext(ctx, a.WorkspaceID)
 	if err != nil {
@@ -284,29 +259,11 @@ func (s *Server) getContext(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	rows, err := s.pool.Query(ctx, `
-		SELECT id, name, status, brand_id::text, brief_version, (offer <> '' OR audience <> '' OR market <> '' OR brief <> '' OR icp <> '{}')
-		FROM projects WHERE workspace_id = $1 AND status <> 'archived' AND ($2::uuid IS NULL OR id = $2)
-		  AND ($3 = '' OR brand_id IS NULL OR brand_id::text = $3)
-		  AND ($4::uuid[] IS NULL OR brand_id IS NULL OR brand_id = ANY($4))
-		ORDER BY lower(name)`, a.WorkspaceID, a.ProjectID, brandID, a.Brands)
-	if err != nil {
-		s.internal(w, r, err)
-		return
-	}
-	projects, err := pgx.CollectRows(rows, pgx.RowToStructByPos[contextProject])
-	if err != nil {
-		s.internal(w, r, err)
-		return
-	}
-	if projects == nil {
-		projects = []contextProject{}
-	}
-	rows, err = s.pool.Query(ctx, `
 		SELECT b.id, b.handle, b.name, b.website, b.platforms, COALESCE(split_part(trim(c.about), E'\n', 1), '')
 		FROM brands b LEFT JOIN brand_context c ON c.brand_id = b.id
-		WHERE b.workspace_id = $1 AND b.status = 'active' AND ($2::uuid IS NULL OR b.id = $3::uuid)
-		  AND ($4::uuid[] IS NULL OR b.id = ANY($4))
-		ORDER BY lower(b.name)`, a.WorkspaceID, a.ProjectID, nilIfEmpty(brandID), a.Brands)
+		WHERE b.workspace_id = $1 AND b.status = 'active'
+		  AND ($2::uuid[] IS NULL OR b.id = ANY($2))
+		ORDER BY lower(b.name)`, a.WorkspaceID, a.Brands)
 	if err != nil {
 		s.internal(w, r, err)
 		return
@@ -344,7 +301,6 @@ func (s *Server) getContext(w http.ResponseWriter, r *http.Request) {
 		"brands":       brands,
 		"memories":     mems,
 		"memory_count": total,
-		"projects":     projects,
 		"markdown":     md,
 	})
 }
@@ -491,11 +447,10 @@ var memoryKinds = []string{"preference", "decision", "fact", "feedback"}
 const maxMemories = 1000
 
 type memoryView struct {
-	ID        string  `json:"id"`
-	Kind      string  `json:"kind"`
-	Text      string  `json:"text"`
-	ProjectID *string `json:"project_id"`
-	// The brand it is true for; null with no project_id: the whole company.
+	ID   string `json:"id"`
+	Kind string `json:"kind"`
+	Text string `json:"text"`
+	// The brand it is true for; null: the whole company.
 	BrandID     *string   `json:"brand_id"`
 	Pinned      bool      `json:"pinned"`
 	CreatedBy   *string   `json:"created_by"`
@@ -506,7 +461,7 @@ type memoryView struct {
 }
 
 type memoryFilter struct {
-	q, kind, project string
+	q, kind string
 	// brand: a brandFilter value. layer: a brand id whose memories are read
 	// with the company's (those with no brand).
 	brand         brandSel
@@ -517,7 +472,7 @@ type memoryFilter struct {
 }
 
 // loadMemories lists memories, pinned first, then the most recently
-// changed. A project token sees the workspace's and its own project's.
+// changed.
 func (s *Server) loadMemories(ctx context.Context, a *access, f memoryFilter) ([]memoryView, int, error) {
 	var id *string
 	if f.id != "" {
@@ -525,29 +480,27 @@ func (s *Server) loadMemories(ctx context.Context, a *access, f memoryFilter) ([
 	}
 	q := strings.TrimSpace(f.q)
 	rows, err := s.pool.Query(ctx, `
-		SELECT m.id, m.kind, m.text, m.project_id, m.brand_id, m.pinned, ac.display_name, m.created_by, m.mission_id,
+		SELECT m.id, m.kind, m.text, m.brand_id, m.pinned, ac.display_name, m.created_by, m.mission_id,
 		       m.created_at, m.updated_at, count(*) OVER ()::int
 		FROM memories m LEFT JOIN actors ac ON ac.id = m.created_by
 		WHERE m.workspace_id = $1
-		  AND ($2::uuid IS NULL OR m.project_id IS NULL OR m.project_id = $2)
-		  AND ($3 = '' OR m.text ILIKE '%' || $3 || '%')
-		  AND ($4 = '' OR m.kind = $4)
-		  AND ($5 = '' OR ($5 = 'none' AND m.project_id IS NULL) OR m.project_id::text = $5)
-		  AND ($6::boolean IS NULL OR m.pinned = $6)
-		  AND ($7::uuid IS NULL OR m.id = $7)
-		  AND ($10 = '' OR ($10 = 'none' AND m.brand_id IS NULL) OR m.brand_id::text = $10)
-		  AND ($11 = '' OR m.brand_id IS NULL OR m.brand_id::text = $11)
-		  AND ($12::uuid[] IS NULL OR m.brand_id IS NULL OR m.brand_id = ANY($12))
+		  AND ($2 = '' OR m.text ILIKE '%' || $2 || '%')
+		  AND ($3 = '' OR m.kind = $3)
+		  AND ($4::boolean IS NULL OR m.pinned = $4)
+		  AND ($5::uuid IS NULL OR m.id = $5)
+		  AND ($8 = '' OR ($8 = 'none' AND m.brand_id IS NULL) OR m.brand_id::text = $8)
+		  AND ($9 = '' OR m.brand_id IS NULL OR m.brand_id::text = $9)
+		  AND ($10::uuid[] IS NULL OR m.brand_id IS NULL OR m.brand_id = ANY($10))
 		ORDER BY m.pinned DESC, m.updated_at DESC, m.id
-		LIMIT $8 OFFSET $9`,
-		a.WorkspaceID, a.ProjectID, likeEscape(q), f.kind, f.project, f.pinned, id, f.limit, f.offset, f.brand.id, f.layer, a.Brands)
+		LIMIT $6 OFFSET $7`,
+		a.WorkspaceID, likeEscape(q), f.kind, f.pinned, id, f.limit, f.offset, f.brand.id, f.layer, a.Brands)
 	if err != nil {
 		return nil, 0, err
 	}
 	total := 0
 	list, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (memoryView, error) {
 		var m memoryView
-		err := row.Scan(&m.ID, &m.Kind, &m.Text, &m.ProjectID, &m.BrandID, &m.Pinned, &m.CreatedBy, &m.CreatedByID, &m.MissionID,
+		err := row.Scan(&m.ID, &m.Kind, &m.Text, &m.BrandID, &m.Pinned, &m.CreatedBy, &m.CreatedByID, &m.MissionID,
 			&m.CreatedAt, &m.UpdatedAt, &total)
 		return m, err
 	})
@@ -565,13 +518,9 @@ func likeEscape(s string) string {
 func (s *Server) listMemories(w http.ResponseWriter, r *http.Request) {
 	a := accessFrom(r.Context())
 	qs := r.URL.Query()
-	f := memoryFilter{q: qs.Get("q"), kind: qs.Get("kind"), project: qs.Get("project_id"), limit: 50}
+	f := memoryFilter{q: qs.Get("q"), kind: qs.Get("kind"), limit: 50}
 	if f.kind != "" && !slices.Contains(memoryKinds, f.kind) {
 		writeError(w, r, http.StatusBadRequest, "invalid_request", "kind is preference, decision, fact or feedback")
-		return
-	}
-	if f.project != "" && f.project != "none" && !validUUID(f.project) {
-		writeError(w, r, http.StatusBadRequest, "invalid_request", "project_id is a project's id, or none for workspace-wide memories")
 		return
 	}
 	brand, ok := s.brandFilter(w, r)
@@ -611,11 +560,11 @@ func (s *Server) listMemories(w http.ResponseWriter, r *http.Request) {
 }
 
 type memoryInput struct {
-	Kind      *string          `json:"kind"`
-	Text      *string          `json:"text"`
+	Kind *string `json:"kind"`
+	Text *string `json:"text"`
+	// Ignored: projects were removed. Accepted so older clients still work.
 	ProjectID optional[string] `json:"project_id"`
-	// A brand's id or handle. Ignored when project_id is set: a project's
-	// memories have the project's brand.
+	// A brand's id or handle.
 	BrandID optional[string] `json:"brand_id"`
 	Pinned  *bool            `json:"pinned"`
 }
@@ -629,9 +578,6 @@ func (in *memoryInput) validate() string {
 		if *in.Text == "" || len(*in.Text) > 500 {
 			return "text must be 1 to 500 characters: one lasting fact, preference or decision, not a transcript"
 		}
-	}
-	if v := in.ProjectID.Value; v != nil && !validUUID(*v) {
-		return "project_id is a project's id, or null for the whole workspace"
 	}
 	return ""
 }
@@ -668,14 +614,6 @@ func (s *Server) createMemory(w http.ResponseWriter, r *http.Request) {
 	if req.Kind != nil {
 		kind = *req.Kind
 	}
-	project := req.ProjectID.Value
-	if a.ProjectID != nil {
-		if project != nil && *project != *a.ProjectID {
-			writeError(w, r, http.StatusNotFound, "not_found", "project not found")
-			return
-		}
-		project = a.ProjectID
-	}
 	ctx := r.Context()
 	mission, err := s.missionFrom(ctx, r, a.WorkspaceID)
 	if err != nil {
@@ -688,13 +626,8 @@ func (s *Server) createMemory(w http.ResponseWriter, r *http.Request) {
 	}
 	var id string
 	err = pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
-		if err := checkProjectRef(ctx, tx, a.WorkspaceID, project); err != nil {
+		if brand, err = brandWrite(ctx, tx, a, brand); err != nil {
 			return err
-		}
-		if a.ProjectID == nil {
-			if brand, err = brandWrite(ctx, tx, a, project, brand); err != nil {
-				return err
-			}
 		}
 		var n int
 		if err := tx.QueryRow(ctx, `SELECT count(*) FROM memories WHERE workspace_id = $1`, a.WorkspaceID).Scan(&n); err != nil {
@@ -705,9 +638,8 @@ func (s *Server) createMemory(w http.ResponseWriter, r *http.Request) {
 		}
 		// Saving the same thing twice keeps one memory.
 		err := tx.QueryRow(ctx, `
-			SELECT id FROM memories WHERE workspace_id = $1 AND lower(text) = lower($2) AND project_id IS NOT DISTINCT FROM $3::uuid
-			AND ($3::uuid IS NOT NULL OR brand_id IS NOT DISTINCT FROM $4::uuid)`,
-			a.WorkspaceID, *req.Text, project, brand).Scan(&id)
+			SELECT id FROM memories WHERE workspace_id = $1 AND lower(text) = lower($2) AND brand_id IS NOT DISTINCT FROM $3::uuid`,
+			a.WorkspaceID, *req.Text, brand).Scan(&id)
 		if err == nil {
 			_, err = tx.Exec(ctx, `UPDATE memories SET kind = $2, pinned = pinned OR COALESCE($3, false), updated_at = now() WHERE id = $1`, id, kind, req.Pinned)
 			return err
@@ -716,13 +648,13 @@ func (s *Server) createMemory(w http.ResponseWriter, r *http.Request) {
 			return err
 		}
 		err = tx.QueryRow(ctx, `
-			INSERT INTO memories (workspace_id, project_id, kind, text, pinned, created_by, mission_id, brand_id)
-			VALUES ($1, $2, $3, $4, COALESCE($5, false), $6, $7, $8) RETURNING id`,
-			a.WorkspaceID, project, kind, *req.Text, req.Pinned, a.ActorID, mission, brand).Scan(&id)
+			INSERT INTO memories (workspace_id, kind, text, pinned, created_by, mission_id, brand_id)
+			VALUES ($1, $2, $3, COALESCE($4, false), $5, $6, $7) RETURNING id`,
+			a.WorkspaceID, kind, *req.Text, req.Pinned, a.ActorID, mission, brand).Scan(&id)
 		if err != nil {
 			return err
 		}
-		return record(ctx, tx, &a.principal, a.WorkspaceID, "memory.created", "memory", id, map[string]any{"kind": kind, "text": *req.Text, "project_id": project, "brand_id": brand, "mission_id": mission})
+		return record(ctx, tx, &a.principal, a.WorkspaceID, "memory.created", "memory", id, map[string]any{"kind": kind, "text": *req.Text, "brand_id": brand, "mission_id": mission})
 	})
 	if s.allocError(w, r, err) {
 		return
@@ -744,23 +676,23 @@ func (s *Server) writeMemory(w http.ResponseWriter, r *http.Request, a *access, 
 }
 
 // memoryFor checks the caller may change the memory: it is the
-// workspace's, and a project token's own project's or workspace-wide.
+// workspace's and in the caller's brands.
 func memoryFor(ctx context.Context, tx pgx.Tx, a *access, id string) error {
 	if !validUUID(id) {
 		return errNotFound
 	}
-	var project, brand *string
-	err := tx.QueryRow(ctx, `SELECT project_id, brand_id::text FROM memories WHERE id = $1 AND workspace_id = $2 FOR UPDATE`, id, a.WorkspaceID).Scan(&project, &brand)
+	var brand *string
+	err := tx.QueryRow(ctx, `SELECT brand_id::text FROM memories WHERE id = $1 AND workspace_id = $2 FOR UPDATE`, id, a.WorkspaceID).Scan(&brand)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return errNotFound
 	}
 	if err != nil {
 		return err
 	}
-	if !a.sees(project, brand) {
+	if !a.sees(brand) {
 		return errNotFound
 	}
-	if !a.writes(project, brand) {
+	if !a.writes(brand) {
 		return errSharedRecord
 	}
 	return nil
@@ -777,10 +709,6 @@ func (s *Server) updateMemory(w http.ResponseWriter, r *http.Request) {
 		writeError(w, r, http.StatusBadRequest, "invalid_request", msg)
 		return
 	}
-	if (req.ProjectID.Set || req.BrandID.Set) && a.ProjectID != nil {
-		writeError(w, r, http.StatusBadRequest, "invalid_request", "a project token cannot move memories between projects or brands")
-		return
-	}
 	ctx := r.Context()
 	brand, err := s.brandRef(ctx, a.WorkspaceID, req.BrandID.Value)
 	if s.allocError(w, r, err) {
@@ -790,30 +718,19 @@ func (s *Server) updateMemory(w http.ResponseWriter, r *http.Request) {
 		if err := memoryFor(ctx, tx, a, id); err != nil {
 			return err
 		}
-		if req.ProjectID.Set {
-			if err := checkProjectRef(ctx, tx, a.WorkspaceID, req.ProjectID.Value); err != nil {
-				return err
-			}
-		}
 		// A move must land in one of a brand-limited caller's brands.
-		if a.Brands != nil && req.ProjectID.Set && req.ProjectID.Value != nil {
-			if _, err := brandWrite(ctx, tx, a, req.ProjectID.Value, nil); err != nil {
-				return err
-			}
-		}
 		if a.Brands != nil && req.BrandID.Set {
 			if brand == nil {
 				return errInvalid("you can only keep memories in your brands")
 			}
-			if _, err := brandWrite(ctx, tx, a, nil, brand); err != nil {
+			if _, err := brandWrite(ctx, tx, a, brand); err != nil {
 				return err
 			}
 		}
 		_, err := tx.Exec(ctx, `
 			UPDATE memories SET kind = COALESCE($2, kind), text = COALESCE($3, text), pinned = COALESCE($4, pinned),
-				project_id = CASE WHEN $5 THEN $6::uuid ELSE project_id END,
-				brand_id = CASE WHEN $7 THEN $8::uuid ELSE brand_id END, updated_at = now()
-			WHERE id = $1`, id, req.Kind, req.Text, req.Pinned, req.ProjectID.Set, req.ProjectID.Value, req.BrandID.Set, brand)
+				brand_id = CASE WHEN $5 THEN $6::uuid ELSE brand_id END, updated_at = now()
+			WHERE id = $1`, id, req.Kind, req.Text, req.Pinned, req.BrandID.Set, brand)
 		if err != nil {
 			return err
 		}
@@ -826,9 +743,6 @@ func (s *Server) updateMemory(w http.ResponseWriter, r *http.Request) {
 		}
 		if req.Pinned != nil {
 			data["pinned"] = *req.Pinned
-		}
-		if req.ProjectID.Set {
-			data["project_id"] = req.ProjectID.Value
 		}
 		if req.BrandID.Set {
 			data["brand_id"] = brand

@@ -63,7 +63,8 @@ every conversion again in the background.
 ## Your own models
 
 The five models are a starting point. A workspace can make its own from any
-of them (**Analytics → Channels** lists them in the model switch;
+of them (**Analytics → Channels → Attribution models**, where the model
+switch lists them too;
 `POST /v1/workspaces/{ws}/attribution/models` or MCP
 `create_attribution_model`, scope `analytics.manage`), changing:
 

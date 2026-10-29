@@ -61,7 +61,6 @@ type requestLog struct {
 	ActorType   string
 	TokenID     string
 	BrandID     string
-	ProjectID   string
 	At          time.Time
 }
 
@@ -132,7 +131,7 @@ func (lw *logWriter) flush(ctx context.Context) error {
 
 func (s *Server) insertLogs(ctx context.Context, rows []requestLog) error {
 	n := len(rows)
-	cols := make([][]string, 19)
+	cols := make([][]string, 18)
 	for i := range cols {
 		cols[i] = make([]string, n)
 	}
@@ -142,7 +141,7 @@ func (s *Server) insertLogs(ctx context.Context, rows []requestLog) error {
 	ats := make([]time.Time, n)
 	for i, e := range rows {
 		for j, v := range []string{e.WorkspaceID, e.RequestID, e.Method, e.Route, e.Operation, e.Path, e.ErrorCode, e.Surface,
-			e.Client, e.MCPTool, e.Agent, e.UserAgent, e.MissionID, e.ActorID, e.ActorType, e.TokenID, e.BrandID, e.ProjectID, e.ErrorParam} {
+			e.Client, e.MCPTool, e.Agent, e.UserAgent, e.MissionID, e.ActorID, e.ActorType, e.TokenID, e.BrandID, e.ErrorParam} {
 			cols[j][i] = v
 		}
 		b, _ := json.Marshal(e.QueryKeys)
@@ -151,19 +150,19 @@ func (s *Server) insertLogs(ctx context.Context, rows []requestLog) error {
 	}
 	_, err := s.pool.Exec(ctx, `
 		INSERT INTO request_logs (workspace_id, request_id, method, route, operation, path, error_code, surface, client, mcp_tool,
-			agent, user_agent, mission_id, actor_id, actor_type, token_id, brand_id, project_id, error_param, query_keys, status, duration_ms, created_at)
+			agent, user_agent, mission_id, actor_id, actor_type, token_id, brand_id, error_param, query_keys, status, duration_ms, created_at)
 		SELECT t.ws::uuid, t.rid, t.m, t.route, t.op, t.path, t.ec, t.sf, t.cl, t.tool, t.ag, t.ua,
 			NULLIF(t.mission, '')::uuid, NULLIF(t.actor, '')::uuid, t.at, NULLIF(t.tok, '')::uuid,
-			NULLIF(t.brand, '')::uuid, NULLIF(t.proj, '')::uuid, t.ep,
+			NULLIF(t.brand, '')::uuid, t.ep,
 			ARRAY(SELECT jsonb_array_elements_text(t.qk::jsonb)), t.st, t.dur, t.ts
 		FROM unnest($1::text[], $2::text[], $3::text[], $4::text[], $5::text[], $6::text[], $7::text[], $8::text[], $9::text[],
 			$10::text[], $11::text[], $12::text[], $13::text[], $14::text[], $15::text[], $16::text[], $17::text[], $18::text[],
-			$19::text[], $20::text[], $21::int[], $22::bigint[], $23::timestamptz[])
-			WITH ORDINALITY AS t(ws, rid, m, route, op, path, ec, sf, cl, tool, ag, ua, mission, actor, at, tok, brand, proj, ep, qk, st, dur, ts, n)
+			$19::text[], $20::int[], $21::bigint[], $22::timestamptz[])
+			WITH ORDINALITY AS t(ws, rid, m, route, op, path, ec, sf, cl, tool, ag, ua, mission, actor, at, tok, brand, ep, qk, st, dur, ts, n)
 		WHERE EXISTS (SELECT 1 FROM workspaces w WHERE w.id = t.ws::uuid)
 		ORDER BY t.n`,
 		cols[0], cols[1], cols[2], cols[3], cols[4], cols[5], cols[6], cols[7], cols[8], cols[9], cols[10], cols[11],
-		cols[12], cols[13], cols[14], cols[15], cols[16], cols[17], cols[18], qk, statuses, durations, ats)
+		cols[12], cols[13], cols[14], cols[15], cols[16], cols[17], qk, statuses, durations, ats)
 	return err
 }
 
@@ -190,28 +189,16 @@ func (s *Server) PruneRequestLogs(ctx context.Context, keep time.Duration) (int6
 	}
 }
 
-// noteBrand and noteProject say which brand and project a request was
-// about, for its log row. The first one noted wins.
+// noteBrand says which brand a request was about, for its log row. The
+// first one noted wins.
 func noteBrand(ctx context.Context, id string) {
 	if i := reqInfoFrom(ctx); i != nil && i.brandID == "" && validUUID(id) {
 		i.brandID = id
 	}
 }
 
-func noteProject(ctx context.Context, id string, brand *string) {
-	if i := reqInfoFrom(ctx); i != nil && i.projectID == "" && validUUID(id) {
-		i.projectID = id
-		if brand != nil {
-			noteBrand(ctx, *brand)
-		}
-	}
-}
-
-// noteAccessScope notes the brand or project a caller is bound to.
+// noteAccessScope notes the brand a caller is bound to.
 func noteAccessScope(r *http.Request, a *access) {
-	if a.ProjectID != nil {
-		noteProject(r.Context(), *a.ProjectID, nil)
-	}
 	if len(a.Brands) == 1 {
 		noteBrand(r.Context(), a.Brands[0])
 	}
@@ -257,12 +244,11 @@ type logView struct {
 	ActorName  *string   `json:"actor_name"`
 	TokenID    *string   `json:"token_id"`
 	BrandID    *string   `json:"brand_id"`
-	ProjectID  *string   `json:"project_id"`
 }
 
 const logCols = `l.id, l.request_id, l.created_at, l.method, l.route, l.operation, l.path, l.query_keys, l.status, l.duration_ms,
 	NULLIF(l.error_code, ''), NULLIF(l.error_param, ''), l.surface, NULLIF(l.client, ''), NULLIF(l.mcp_tool, ''), NULLIF(l.agent, ''), NULLIF(l.user_agent, ''),
-	l.mission_id::text, l.actor_id::text, NULLIF(l.actor_type, ''), a.display_name, l.token_id::text, l.brand_id::text, l.project_id::text`
+	l.mission_id::text, l.actor_id::text, NULLIF(l.actor_type, ''), a.display_name, l.token_id::text, l.brand_id::text`
 
 const logFrom = ` FROM request_logs l LEFT JOIN actors a ON a.id = l.actor_id`
 
@@ -271,7 +257,7 @@ func scanLog(row pgx.Row) (logView, error) {
 	var id int64
 	err := row.Scan(&id, &v.RequestID, &v.CreatedAt, &v.Method, &v.Route, &v.Operation, &v.Path, &v.QueryKeys, &v.Status, &v.DurationMS,
 		&v.ErrorCode, &v.ErrorParam, &v.Surface, &v.Client, &v.MCPTool, &v.Agent, &v.UserAgent, &v.MissionID, &v.ActorID, &v.ActorType, &v.ActorName,
-		&v.TokenID, &v.BrandID, &v.ProjectID)
+		&v.TokenID, &v.BrandID)
 	v.ID = "log_" + strconv.FormatInt(id, 10)
 	v.Level = logLevel(v.Status)
 	return v, err
@@ -366,7 +352,7 @@ func (s *Server) logFilter(w http.ResponseWriter, r *http.Request) (string, []an
 	if v := q.Get("request_id"); v != "" {
 		where += " AND l.request_id = " + arg(v)
 	}
-	for _, p := range []struct{ name, col string }{{"actor_id", "actor_id"}, {"token_id", "token_id"}, {"mission_id", "mission_id"}, {"project_id", "project_id"}} {
+	for _, p := range []struct{ name, col string }{{"actor_id", "actor_id"}, {"token_id", "token_id"}, {"mission_id", "mission_id"}} {
 		if v := q.Get(p.name); v != "" {
 			if !validUUID(v) {
 				return bad(p.name + " is an id")
@@ -606,7 +592,7 @@ func (s *Server) exportLogs(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Disposition", `attachment; filename="`+name+`.csv"`)
 	cw := csv.NewWriter(w)
 	cw.Write([]string{"id", "time", "level", "method", "path", "operation", "status", "duration_ms", "error_code", "error_param", "surface", "client", //nolint:errcheck
-		"mcp_tool", "agent", "actor_type", "actor", "token_id", "mission_id", "brand_id", "project_id", "request_id", "query_keys"})
+		"mcp_tool", "agent", "actor_type", "actor", "token_id", "mission_id", "brand_id", "request_id", "query_keys"})
 	str := func(p *string) string {
 		if p == nil {
 			return ""
@@ -616,7 +602,7 @@ func (s *Server) exportLogs(w http.ResponseWriter, r *http.Request) {
 	for _, v := range list {
 		row := []string{v.ID, v.CreatedAt.UTC().Format(time.RFC3339Nano), v.Level, v.Method, v.Path, v.Operation, strconv.Itoa(v.Status),
 			strconv.Itoa(v.DurationMS), str(v.ErrorCode), str(v.ErrorParam), v.Surface, str(v.Client), str(v.MCPTool), str(v.Agent), str(v.ActorType),
-			str(v.ActorName), str(v.TokenID), str(v.MissionID), str(v.BrandID), str(v.ProjectID), v.RequestID, strings.Join(v.QueryKeys, " ")}
+			str(v.ActorName), str(v.TokenID), str(v.MissionID), str(v.BrandID), v.RequestID, strings.Join(v.QueryKeys, " ")}
 		for i, c := range row {
 			row[i] = csvSafe(c)
 		}

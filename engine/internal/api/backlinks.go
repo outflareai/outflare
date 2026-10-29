@@ -707,7 +707,7 @@ func (s *Server) reviewBacklink(w http.ResponseWriter, r *http.Request) {
 		s.internal(w, r, err)
 		return
 	}
-	if !a.writes(nil, b.BrandID) {
+	if !a.writes(b.BrandID) {
 		writeError(w, r, http.StatusForbidden, "forbidden", string(errSharedRecord))
 		return
 	}

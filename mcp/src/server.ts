@@ -99,8 +99,6 @@ export function nextStep(code: string, message = ""): string | undefined {
       return "Pass next_cursor from the previous answer unchanged, or leave cursor out for the first page.";
     case "conflict":
       return "Read the item again and retry with its current state.";
-    case "brief_changed":
-      return "Someone edited the brief: call get_project_brief again and reapply your change to the new version.";
     case "context_changed":
       return "Someone edited the company context: call get_context again and reapply your change to the new version.";
     case "rate_limited":
@@ -175,7 +173,6 @@ const sends = { readOnlyHint: false, destructiveHint: false, openWorldHint: true
 
 const settings = {
   name: z.string().max(200).optional(),
-  project_id: id.nullable().optional().describe("Deprecated: projects are being removed; leave it out. A project token's sequences always go to its project."),
   pool_id: id.nullable().optional().describe("Restrict mailbox allocation to this pool. Null allows any mailbox."),
   timezone: z.string().optional().describe("IANA time zone for the sending window, e.g. Australia/Sydney."),
   send_days: z.array(z.number().int().min(1).max(7)).optional().describe("ISO weekdays, 1 (Monday) to 7 (Sunday)."),
@@ -203,31 +200,7 @@ const profileFilters = z
   .nullable()
   .optional()
   .describe("Filters in the same vocabulary as lead searches. Replaces all of them; null clears them.");
-const brief = {
-  offer: z.string().max(4000).optional().describe("What is sold, in a sentence or two."),
-  audience: z.string().max(4000).optional().describe("Who buys it, in words: the ideal customer."),
-  market: z.string().max(4000).optional().describe("Where, and in which language."),
-  brief: z.string().max(100000).optional().describe("Everything else, in Markdown: messaging, proof points, objections, words to avoid."),
-  icp: z
-    .object({ titles: icpList, seniorities: icpList, industries: icpList, employee_ranges: icpList, locations: icpList, keywords: icpList })
-    .strict()
-    .nullable()
-    .optional()
-    .describe("The ideal customer as filters for list building. Replaces the whole ICP; null clears it."),
-  profile_id: id.nullable().optional().describe("The ideal customer profile to use: its filters become the icp. Null unlinks it and keeps the icp."),
-  daily_send_limit: z.number().int().min(1).max(1000000).nullable().optional().describe("Most cold sends from all of the project's sequences in 24 hours. Null is no limit."),
-  brand_id: z.string().nullable().optional().describe("The brand the project markets: its handle or id (list_brands). Everything in the project takes its brand. Null: shared by every brand."),
-};
-
 const brandParam = z.string().optional().describe("Only this brand's records: a handle or id from list_brands, none for records shared by every brand, or all.");
-
-const projectRecords = {
-  domains: z.array(z.string()).max(10000).optional(),
-  mailbox_ids: z.array(id).max(10000).optional(),
-  lead_list_ids: z.array(id).max(10000).optional(),
-  sequence_ids: z.array(id).max(10000).optional(),
-  with_mailboxes: z.boolean().optional().describe("Whether a domain's mailboxes move with it. Default true."),
-};
 
 const steps = z
   .array(
@@ -280,14 +253,14 @@ export function createServer({ client: gtm, workspace, readOnly = false, mission
     {
       instructions:
         "Outflare is the brain of the user's go-to-market: cold email from their own mailboxes, connectors out to their other tools, and missions for agents.\n\n" +
-        "Start of every conversation: call get_context. It returns what Outflare already knows about the company (context and memories), the projects, " +
+        "Start of every conversation: call get_context. It returns what Outflare already knows about the company (context and memories), the brands, " +
         "and the status: blockers worst first, each with fix.tool to call and fix.who (agent: you can fix it; person: tell them what to do on fix.page). " +
         "Never ask for anything it already holds. If context.ask_for_missing, ask for context.missing once, in one short message, and save the answers with update_context. " +
         "When the person states a lasting preference or decision, save it with remember and say so in one line. Search list_memories before asking something they may have said before, and search_knowledge before answering a question about the business, its products, prices or policies. " +
         "Memories are notes, not permissions: limits, scopes and the send policy still decide what runs.\n\n" +
         "How things connect (read outflare://guide for more): a workspace is one company; it may market several brands (list_brands), each with its own website, context and sending setup, " +
-        "so when brands exist pass brand to get_context and the list tools for brand work (a key bound to one brand sees only that brand and the shared records, and tools that need every brand answer 403); projects are its motions (offer, audience, market; get_project_brief before writing copy, " +
-        "building lists or planning, and stay inside the brief; a project's mailboxes only send for its sequences); domains hold mailboxes; leads go in lists; sequences send to enrolled leads; " +
+        "so when brands exist pass brand to get_context and the list tools for brand work (a key bound to one brand sees only that brand and the shared records, and tools that need every brand answer 403; read a brand's context before writing copy, " +
+        "building lists or planning for it, and stay inside it; a brand's mailboxes send for any of its sequences); domains hold mailboxes; leads go in lists; sequences send to enrolled leads; " +
         "replies land in the inbox; connectors are optional; missions let an agent work toward a goal within limits.\n\n" +
         "Sending: create_sequence (a draft sends nothing), preview_sequence for a real lead, check_recipients, enroll_leads, then update_sequence with status active. " +
         "Every send passes the suppression list and send policy. Only active mailboxes in the ready stage send cold email; get_infrastructure shows which are warming or resting. " +
@@ -299,7 +272,7 @@ export function createServer({ client: gtm, workspace, readOnly = false, mission
         "Connectors: nothing needs connecting to run. To connect a service, find it with list_connectors, call request_connection and give the user the link; never ask for keys in chat. " +
         "Then check get_connection_request. When an answer lists gaps, offer the fix it names. Connected EmailBison, Instantly and Smartlead accounts sync every 5 minutes; " +
         "a new account's first plan needs review_platform_plan.\n\n" +
-        "Missions: create_mission (or plan_mission), use_mission, get_mission for the brief, company context and limits, submit_mission_plan, act, post_mission_update, complete_mission. " +
+        "Missions: create_mission (or plan_mission), use_mission, get_mission for the brand and company context and limits, submit_mission_plan, act, post_mission_update, complete_mission. " +
         "A write answered with mission_action is a dry run or waits for a person: poll get_mission_action, never approve it yourself. If a tool is missing, request_connector.\n\n" +
         "Errors: a failed call says the code and a Next step line; follow it. forbidden means you aren't allowed: give the person the link in the message and say which permission to turn on; do not retry.",
     },
@@ -329,21 +302,10 @@ export function createServer({ client: gtm, workspace, readOnly = false, mission
   // Reading.
 
   server.registerTool(
-    "list_projects",
-    {
-      title: "List projects",
-      description: "Projects in the workspace: one go-to-market motion each, with its brief, status, daily send limit, what it owns and its sends in the last 24 hours.",
-      inputSchema: { status: z.enum(["active", "paused", "archived", "all"]).optional().describe("Default: every project but archived ones."), brand: brandParam },
-      annotations: read,
-    },
-    (q) => call(() => gtm.GET("/v1/workspaces/{ws}/projects", { params: { path, query: withBrand(q) } })),
-  );
-
-  server.registerTool(
     "list_ideal_customer_profiles",
     {
       title: "List ideal customer profiles",
-      description: "Who the workspace sells to: each profile's description, filters, brand and the projects that use it. Active ones unless status says otherwise.",
+      description: "Who the workspace sells to: each profile's description, filters and brand. Active ones unless status says otherwise.",
       inputSchema: { status: z.enum(["active", "archived", "all"]).optional(), brand: z.string().optional().describe("A brand's id or handle, none or all.") },
       annotations: read,
     },
@@ -354,24 +316,11 @@ export function createServer({ client: gtm, workspace, readOnly = false, mission
     "get_ideal_customer_profile",
     {
       title: "Get an ideal customer profile",
-      description: "One profile with its description, filters, version and the projects that use it.",
+      description: "One profile with its description, filters and version.",
       inputSchema: { profile_id: id },
       annotations: read,
     },
     ({ profile_id }) => call(() => gtm.GET("/v1/workspaces/{ws}/ideal-customer-profiles/{id}", { params: { path: { ws, id: profile_id } } })),
-  );
-
-  server.registerTool(
-    "get_project_brief",
-    {
-      title: "Read a project's brief",
-      description:
-        "The offer, audience, market, ideal customer filters and written brief of a project, plus all of it as one Markdown document. " +
-        "Read it before writing copy, building a list or planning a campaign. Keep version to notice later edits.",
-      inputSchema: { project_id: id },
-      annotations: read,
-    },
-    ({ project_id }) => call(() => gtm.GET("/v1/workspaces/{ws}/projects/{id}/brief", { params: { path: { ws, id: project_id } } })),
   );
 
   server.registerTool(
@@ -395,7 +344,6 @@ export function createServer({ client: gtm, workspace, readOnly = false, mission
         pool_id: id.optional(),
         domain: z.string().optional(),
         server_id: id.optional().describe("Only mailboxes that sign in to this sending server."),
-        project_id: z.string().optional().describe("A project's id, or none for shared mailboxes."),
         brand: brandParam,
       },
       annotations: read,
@@ -407,7 +355,7 @@ export function createServer({ client: gtm, workspace, readOnly = false, mission
     "get_mailbox",
     {
       title: "Read a mailbox",
-      description: "One mailbox: status and last error, daily limit and minimum gap, pool, project, lifecycle stage, warm-up settings and sender. Credentials are never returned.",
+      description: "One mailbox: status and last error, daily limit and minimum gap, pool, brand, lifecycle stage, warm-up settings and sender. Credentials are never returned.",
       inputSchema: { mailbox_id: id },
       annotations: read,
     },
@@ -421,7 +369,7 @@ export function createServer({ client: gtm, workspace, readOnly = false, mission
       description:
         "Every sending domain with its health (healthy, warning, critical, pending), the issues to fix (SPF, DKIM, DMARC, MX, blocklists, bounce rate), " +
         "status (active or paused), daily cap, mailbox counts and sends, replies and bounces for 24 hours and 7 days.",
-      inputSchema: { project_id: z.string().optional().describe("A project's id, or none for shared domains."), brand: brandParam },
+      inputSchema: { brand: brandParam },
       annotations: read,
     },
     (q) => call(() => gtm.GET("/v1/workspaces/{ws}/sending-domains", { params: { path, query: withBrand(q) } })),
@@ -512,7 +460,6 @@ export function createServer({ client: gtm, workspace, readOnly = false, mission
       title: "List lead lists",
       description: "Lead lists with their sizes, search settings and latest build or refresh.",
       inputSchema: {
-        project_id: z.string().optional().describe("A project's id, or none for lists shared by the whole workspace."),
         kind: z.enum(["manual", "search"]).optional(),
         brand: brandParam,
       },
@@ -732,7 +679,7 @@ export function createServer({ client: gtm, workspace, readOnly = false, mission
     {
       title: "List sequences",
       description: "Sequences that are not archived, newest first, with steps and enrollment counts.",
-      inputSchema: { project_id: z.string().optional().describe("A project's id, or none for shared sequences."), brand: brandParam },
+      inputSchema: { brand: brandParam },
       annotations: read,
     },
     (q) => call(() => gtm.GET("/v1/workspaces/{ws}/sequences", { params: { path, query: withBrand(q) } })),
@@ -816,7 +763,6 @@ export function createServer({ client: gtm, workspace, readOnly = false, mission
         mailbox_id: id.optional(),
         lead_id: id.optional(),
         sequence_id: id.optional(),
-        project_id: id.optional(),
         q: z.string().optional().describe("Search sender, subject and text."),
         brand: brandParam.describe("Only mail to this brand's mailboxes: a handle or id from list_brands, none for shared mailboxes, or all."),
         limit: limit(200),
@@ -920,7 +866,7 @@ export function createServer({ client: gtm, workspace, readOnly = false, mission
     {
       title: "List missions",
       description: "Missions in the workspace with goal, progress, mode, limits and how many writes wait for approval.",
-      inputSchema: { status: z.string().optional().describe("Comma-separated: draft, pending_approval, running, paused, completed, stopped, failed."), project_id: id.optional(), brand: brandParam },
+      inputSchema: { status: z.string().optional().describe("Comma-separated: draft, pending_approval, running, paused, completed, stopped, failed."), brand: brandParam },
       annotations: read,
     },
     (q) => call(() => gtm.GET("/v1/workspaces/{ws}/missions", { params: { path, query: withBrand(q) } })),
@@ -931,7 +877,7 @@ export function createServer({ client: gtm, workspace, readOnly = false, mission
     {
       title: "Check in on a mission",
       description:
-        "Read this before acting and after any pause: the mission, the project brief it works from (and whether it changed since approval), " +
+        "Read this before acting and after any pause: the mission, its brand's context, " +
         "what writes do right now, limits, progress toward the goal, open connect requests and the latest notes and instructions from people.",
       inputSchema: { mission_id: id.optional().describe("Defaults to the mission set with use_mission.") },
       annotations: read,
@@ -1669,12 +1615,11 @@ export function createServer({ client: gtm, workspace, readOnly = false, mission
     {
       title: "Cost per meeting report",
       description:
-        "Sends, replies, meetings, deals and spend over a period, for the workspace or per project, sequence or brand, with cost per reply, meeting, held meeting and deal. " +
+        "Sends, replies, meetings, deals and spend over a period, for the workspace or per sequence or brand, with cost per reply, meeting, held meeting and deal. " +
         "Read notes for caveats (unpriced usage, shared costs, meetings not tied to outreach). Money is in cents.",
       inputSchema: {
         ...periodInput,
-        group_by: z.enum(["none", "project", "sequence", "brand"]).optional(),
-        project_id: id.optional(),
+        group_by: z.enum(["none", "sequence", "brand"]).optional(),
         sequence_id: id.optional(),
         mission_id: id.optional().describe("Only meetings, deals and spend recorded for this mission."),
         brand: brandParam,
@@ -1689,10 +1634,9 @@ export function createServer({ client: gtm, workspace, readOnly = false, mission
     "list_meetings",
     {
       title: "List meetings with leads",
-      description: "Meetings synced from calendars, booking tools and the CRM, or logged by hand, with the lead, sequence and project each is tied to. Newest first; page with cursor=next_cursor.",
+      description: "Meetings synced from calendars, booking tools and the CRM, or logged by hand, with the lead and sequence each is tied to. Newest first; page with cursor=next_cursor.",
       inputSchema: {
         ...periodInput,
-        project_id: id.optional(),
         sequence_id: id.optional(),
         mission_id: id.optional(),
         status: z.enum(["booked", "held", "no_show", "canceled"]).optional(),
@@ -1713,7 +1657,6 @@ export function createServer({ client: gtm, workspace, readOnly = false, mission
       description: "Deals read from the CRM (or logged by hand), with stage, state, amount in cents and the lead and sequence each came from.",
       inputSchema: {
         ...periodInput,
-        project_id: id.optional(),
         sequence_id: id.optional(),
         mission_id: id.optional(),
         state: z.enum(["open", "won", "lost"]).optional(),
@@ -1734,7 +1677,6 @@ export function createServer({ client: gtm, workspace, readOnly = false, mission
       description: "One-off charges (data credits, verification, domains), newest first. The ledger records cost only; providers are paid directly.",
       inputSchema: {
         ...periodInput,
-        project_id: id.optional(),
         sequence_id: id.optional(),
         mission_id: id.optional(),
         category: z.enum(["data", "verification", "mailboxes", "domains", "sending", "software", "people", "ads", "other"]).optional(),
@@ -1771,7 +1713,7 @@ export function createServer({ client: gtm, workspace, readOnly = false, mission
 
   const planFields = {
     name: z.string().max(200).optional(),
-    project_id: id.nullable().optional().describe("The project the domains and mailboxes are for."),
+    brand_id: id.nullable().optional().describe("The brand the domains and mailboxes are for (list_brands). Null: shared by every brand."),
     supplier: z.string().optional().describe('"manual" (the user buys; the plan waits for them) or a supplier connector such as "cheapinboxes". See suppliers in get_infrastructure.'),
     supplier_integration_id: id.nullable().optional().describe("The connected supplier account to buy with."),
     provider: z.enum(["google", "microsoft"]).optional(),
@@ -1904,7 +1846,6 @@ export function createServer({ client: gtm, workspace, readOnly = false, mission
         mcp_tool: z.string().optional(),
         request_id: z.string().optional(),
         mission_id: id.optional(),
-        project_id: id.optional(),
         brand: z.string().optional(),
         q: z.string().max(200).optional(),
         since: z.string().optional().describe("A timestamp or how long ago: 15m, 24h, 7d"),
@@ -2222,6 +2163,7 @@ export function createServer({ client: gtm, workspace, readOnly = false, mission
         slug: z.string().max(80).optional().describe("utm_campaign: lowercase letters, digits and hyphens. From the name when left out."),
         brand: z.string().optional().describe("A brand's id or handle."),
         landing_url: z.string().max(2000).optional().describe("The page links go to by default."),
+        redirect_links: z.boolean().optional().describe("Give new links a short redirect link that counts clicks, for places the tracking snippet can't run. Off by default."),
       },
       annotations: write,
     },
@@ -2239,6 +2181,7 @@ export function createServer({ client: gtm, workspace, readOnly = false, mission
         brand: z.string().nullable().optional().describe("A brand's id or handle; null or empty for none."),
         landing_url: z.string().max(2000).optional(),
         status: z.enum(["active", "archived"]).optional(),
+        redirect_links: z.boolean().optional().describe("Give new links a short redirect link. Links made before keep what they have."),
       },
       annotations: write,
     },
@@ -2249,7 +2192,7 @@ export function createServer({ client: gtm, workspace, readOnly = false, mission
     "list_tracking_links",
     {
       title: "List a campaign's links",
-      description: "Every link made in a campaign, with the tagged address to share.",
+      description: "Every link made in a campaign, with the tagged address to share, its redirect link if it has one and the redirect link's clicks.",
       inputSchema: { campaign: campaignRef },
       annotations: read,
     },
@@ -2262,12 +2205,13 @@ export function createServer({ client: gtm, workspace, readOnly = false, mission
       title: "Make a campaign link",
       description:
         "Tags a page with the campaign's UTM tags, the content and term given, and its ofc code, and returns tagged_url to share. The same page, content and term give back the same link. " +
-        "Links go straight to the page with no redirect; the website tracking snippet reads the tags there.",
+        "Links go straight to the page by default; the website tracking snippet reads the tags there. With redirect (or the campaign's redirect_links), it also returns redirect_url, a short link that counts each click first, for bio links, partner pages and QR codes.",
       inputSchema: {
         campaign: campaignRef,
         url: z.string().max(2000).optional().describe("The page, such as https://example.com/pricing. The campaign's landing page when left out."),
         content: z.string().max(80).optional().describe("utm_content: which ad, button or post, such as hero-cta."),
         term: z.string().max(80).optional().describe("utm_term: the keyword, for search ads."),
+        redirect: z.boolean().optional().describe("Also make a short redirect link that counts clicks. The campaign's redirect_links when left out."),
       },
       annotations: { ...write, idempotentHint: true },
     },
@@ -2506,7 +2450,7 @@ export function createServer({ client: gtm, workspace, readOnly = false, mission
     (query) => call(() => gtm.GET("/v1/workspaces/{ws}/attribution/conversions", { params: { path, query } })),
   );
 
-  const adConnector = z.enum(["google_ads", "meta_ads", "microsoft_ads", "reddit_ads", "x_ads", "linkedin_ads", "tiktok_ads", "snapchat_ads"]).optional();
+  const adConnector = z.enum(["google_ads", "meta_ads", "microsoft_ads", "reddit_ads", "x_ads", "linkedin_ads", "tiktok_ads", "snapchat_ads", "taboola_ads", "outbrain_ads", "apple_ads", "amazon_ads", "pinterest_ads"]).optional();
   const adDay = z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional();
 
   server.registerTool(
@@ -2514,7 +2458,7 @@ export function createServer({ client: gtm, workspace, readOnly = false, mission
     {
       title: "List connected ad platforms",
       description:
-        "Each connected ad platform (Google Ads, Meta Ads, Microsoft Ads, Reddit Ads, X Ads, LinkedIn Ads, TikTok Ads, Snapchat Ads), its accounts and sync status, and setup_needed when it still waits for a field such as a developer token. " +
+        "Each connected ad platform (Google Ads, Meta Ads, Microsoft Ads, Reddit Ads, X Ads, LinkedIn Ads, TikTok Ads, Snapchat Ads, Taboola Ads, Outbrain Ads, Apple Ads, Amazon Ads, Pinterest Ads), its accounts and sync status, and setup_needed when it still waits for a field such as a developer token. " +
         "A person adds that field in Integrations; agents never handle keys.",
       inputSchema: {},
       annotations: read,
@@ -4486,6 +4430,156 @@ export function createServer({ client: gtm, workspace, readOnly = false, mission
   );
 
   server.registerTool(
+    "list_pr_experts",
+    {
+      title: "List PR experts",
+      description: "The people each brand quotes in its stories (person records), with their title and topics; the brand's default expert first.",
+      inputSchema: { brand: z.string().max(100).optional().describe("A brand's id or handle.") },
+      annotations: read,
+    },
+    (query) => call(() => gtm.GET("/v1/workspaces/{ws}/pr-experts", { params: { path: { ws }, query } })),
+  );
+
+  server.registerTool(
+    "create_pr_expert",
+    {
+      title: "Add a PR expert",
+      description:
+        "Adds a person a brand quotes: an existing person record (record_id), or one found or added by email and name. " +
+        "The brand's first expert is its default; is_default makes this one the default. Only add real people who agreed to be quoted.",
+      inputSchema: {
+        brand_id: z.string().max(100).describe("A brand's id or handle."),
+        record_id: id.optional(),
+        email: z.string().max(320).optional(),
+        name: z.string().max(200).optional(),
+        title: z.string().max(200).optional().describe("How to introduce them, such as CEO."),
+        topics: z.array(z.string().max(100)).max(30).optional(),
+        is_default: z.boolean().optional(),
+      },
+      annotations: write,
+    },
+    (body) => call(() => gtm.POST("/v1/workspaces/{ws}/pr-experts", { params: { path: { ws } }, body })),
+  );
+
+  const storyKind = z.enum(["data", "reactive", "comment"]);
+
+  server.registerTool(
+    "list_stories",
+    {
+      title: "List stories",
+      description: "Digital PR stories, last changed first: ideas, drafts and approved releases. Archived ones only when status asks. get_story for one story's facts and quotes.",
+      inputSchema: {
+        status: z.string().max(50).optional().describe("idea, draft, approved or archived; several separated by commas."),
+        brand: z.string().max(100).optional().describe("A brand's id or handle."),
+        limit: z.number().int().min(1).max(200).optional(),
+        cursor: z.string().optional().describe("next_cursor from the previous page."),
+      },
+      annotations: read,
+    },
+    (query) => call(() => gtm.GET("/v1/workspaces/{ws}/stories", { params: { path: { ws }, query } })),
+  );
+
+  server.registerTool(
+    "get_story",
+    {
+      title: "Get a story",
+      description: "One story with its release, facts (with sources), quotes (with approval) and last check.",
+      inputSchema: { story_id: id },
+      annotations: read,
+    },
+    ({ story_id }) => call(() => gtm.GET("/v1/workspaces/{ws}/stories/{story}", { params: { path: { ws, story: story_id } } })),
+  );
+
+  server.registerTool(
+    "create_story",
+    {
+      title: "Start a story",
+      description:
+        "Starts a digital PR story for a brand: an idea, or a draft when you give a release (Markdown). kind is data (a finding from numbers), " +
+        "reactive (comment on a news article, article_id) or comment (an expert's view). Never invent numbers or quotes: add each number as a fact " +
+        "with its source (add_story_fact) and each quote as a draft for the expert to approve (add_story_quote). A person approves the release in Outflare.",
+      inputSchema: {
+        brand_id: z.string().max(100).describe("A brand's id or handle."),
+        title: z.string().min(1).max(300).describe("The headline."),
+        kind: storyKind.optional(),
+        summary: z.string().max(2000).optional(),
+        release: z.string().max(20000).optional(),
+        article_id: id.optional().describe("The news article a reactive story answers."),
+        embargo_until: z.string().optional().describe("Not before this time, like 2026-11-05T09:00:00Z."),
+      },
+      annotations: write,
+    },
+    (body) => call(() => gtm.POST("/v1/workspaces/{ws}/stories", { params: { path: { ws } }, body })),
+  );
+
+  server.registerTool(
+    "update_story",
+    {
+      title: "Change a story",
+      description:
+        "Changes a story's headline, kind, summary, release, article or embargo, or moves it between idea, draft and archived. " +
+        "Changing an approved story's headline, kind, release or embargo sends it back to draft for a person to approve again.",
+      inputSchema: {
+        story_id: id,
+        title: z.string().min(1).max(300).optional(),
+        kind: storyKind.optional(),
+        summary: z.string().max(2000).optional(),
+        release: z.string().max(20000).optional(),
+        article_id: z.string().optional(),
+        embargo_until: z.string().nullable().optional(),
+        status: z.enum(["idea", "draft", "archived"]).optional(),
+      },
+      annotations: { ...write, idempotentHint: true },
+    },
+    ({ story_id, ...body }) => call(() => gtm.PATCH("/v1/workspaces/{ws}/stories/{story}", { params: { path: { ws, story: story_id } }, body })),
+  );
+
+  server.registerTool(
+    "add_story_fact",
+    {
+      title: "Add a fact to a story",
+      description:
+        "A fact the story states and where it comes from (source_url, source_note or both). Every number in the release must appear in one of the story's facts. " +
+        "Figures from the brand's own data are aggregates only, never about a person.",
+      inputSchema: {
+        story_id: id,
+        statement: z.string().min(1).max(1000),
+        source_kind: z.enum(["own_data", "public_data", "news", "brand_fact", "other"]),
+        source_url: z.string().max(2048).optional(),
+        source_note: z.string().max(1000).optional().describe("How to find it again, such as a saved query's name."),
+      },
+      annotations: write,
+    },
+    ({ story_id, ...body }) => call(() => gtm.POST("/v1/workspaces/{ws}/stories/{story}/facts", { params: { path: { ws, story: story_id } }, body })),
+  );
+
+  server.registerTool(
+    "add_story_quote",
+    {
+      title: "Draft a quote for a story",
+      description:
+        "Drafts a quote by one of the brand's experts (the default when expert_id is left out). It is a draft until a person records that the expert approved these exact words; " +
+        "only approved quotes may appear in the release.",
+      inputSchema: { story_id: id, body: z.string().min(1).max(2000), expert_id: id.optional() },
+      annotations: write,
+    },
+    ({ story_id, ...body }) => call(() => gtm.POST("/v1/workspaces/{ws}/stories/{story}/quotes", { params: { path: { ws, story: story_id } }, body })),
+  );
+
+  server.registerTool(
+    "check_story",
+    {
+      title: "Check a story's release",
+      description:
+        "Checks the release before a person approves it. Errors: no release, a number in no fact (unsourced_number), a fact without a source, " +
+        "a quoted passage that isn't an approved quote. Warnings: hype phrases, finance or health claims. Fix the errors, then tell the person it is ready to approve in Outflare.",
+      inputSchema: { story_id: id },
+      annotations: { ...read, readOnlyHint: false, idempotentHint: true },
+    },
+    ({ story_id }) => call(() => gtm.POST("/v1/workspaces/{ws}/stories/{story}/check", { params: { path: { ws, story: story_id } } })),
+  );
+
+  server.registerTool(
     "list_journalists",
     {
       title: "List journalists",
@@ -4604,6 +4698,19 @@ export function createServer({ client: gtm, workspace, readOnly = false, mission
       annotations: read,
     },
     (query) => call(() => gtm.GET("/v1/workspaces/{ws}/link-building/sequences", { params: { path: { ws }, query } })),
+  );
+
+  server.registerTool(
+    "create_link_sequence",
+    {
+      title: "Create the starter sequence for link pitches",
+      description:
+        "Creates a draft sequence ready for link pitches: a first email with {{custom.opener}} (the opener the workspace's AI writes for each page) and one follow-up five days later, " +
+        "with approval of each pitch on. Use it when list_link_sequences has no sequence with uses_opener. It sends nothing until a pitch through it is approved.",
+      inputSchema: { name: z.string().max(200).optional().describe("Default: Link pitches.") },
+      annotations: write,
+    },
+    (body) => call(() => gtm.POST("/v1/workspaces/{ws}/link-building/sequences", { params: { path: { ws } }, body })),
   );
 
   server.registerTool(
@@ -5603,7 +5710,6 @@ export function createServer({ client: gtm, workspace, readOnly = false, mission
   const listSettings = {
     name: z.string().min(1).max(100).optional(),
     description: z.string().max(2000).optional(),
-    project_id: id.nullable().optional().describe("Deprecated: projects are being removed; leave it out. A project token's lists always go to its project."),
     profile_id: id.nullable().optional().describe("The ideal customer profile leads are scored against (see list_ideal_customer_profiles). Null scores against the search alone."),
     search_integration_id: id.nullable().optional().describe("The connected data provider that searches (see list_data_providers). Null makes a manual list."),
     filters: peopleFilter.optional().describe("The search. Fields are ANDed; values within a field are ORed. Replaces the whole filter."),
@@ -5740,42 +5846,12 @@ export function createServer({ client: gtm, workspace, readOnly = false, mission
   );
 
   server.registerTool(
-    "create_project",
-    {
-      title: "Create a project",
-      description: "Starts a new motion: an offer sold to one ideal customer in one market. Fill in the brief now or later with update_project.",
-      inputSchema: { name: z.string().min(1).max(100), ...brief },
-      annotations: write,
-    },
-    (body) => call(() => gtm.POST("/v1/workspaces/{ws}/projects", { params: { path }, body })),
-  );
-
-  server.registerTool(
-    "update_project",
-    {
-      title: "Edit a project",
-      description:
-        "Changes a project's name, brief, status or daily send limit. Pass the brief_version you read: if someone edited the brief since, " +
-        "this fails with brief_changed and you should read the brief again. status paused stops every send from its sequences.",
-      inputSchema: {
-        project_id: id,
-        name: z.string().min(1).max(100).optional(),
-        status: z.enum(["active", "paused", "archived"]).optional(),
-        brief_version: z.number().int().optional(),
-        ...brief,
-      },
-      annotations: write,
-    },
-    ({ project_id, ...body }) => call(() => gtm.PATCH("/v1/workspaces/{ws}/projects/{id}", { params: { path: { ws, id: project_id } }, body })),
-  );
-
-  server.registerTool(
     "create_ideal_customer_profile",
     {
       title: "Create an ideal customer profile",
       description:
         "Who the workspace sells to, kept once: a description in words plus filters in the same vocabulary as lead searches. " +
-        "Projects, lead list fit scores and the lead finder read it. Link it to a project with update_project's profile_id.",
+        "Lead list fit scores and the lead finder read it. Link it to a lead list with profile_id.",
       inputSchema: {
         name: z.string().min(1).max(100),
         description: z.string().max(4000).optional().describe("Who they are and why they buy, in words."),
@@ -5791,7 +5867,7 @@ export function createServer({ client: gtm, workspace, readOnly = false, mission
     "update_ideal_customer_profile",
     {
       title: "Edit an ideal customer profile",
-      description: "Changes a profile's name, description, filters or brand, or archives or restores it. New filters are copied to every project that uses it.",
+      description: "Changes a profile's name, description, filters or brand, or archives or restores it.",
       inputSchema: {
         profile_id: id,
         name: z.string().min(1).max(100).optional(),
@@ -5803,30 +5879,6 @@ export function createServer({ client: gtm, workspace, readOnly = false, mission
       annotations: write,
     },
     ({ profile_id, ...body }) => call(() => gtm.PATCH("/v1/workspaces/{ws}/ideal-customer-profiles/{id}", { params: { path: { ws, id: profile_id } }, body })),
-  );
-
-  server.registerTool(
-    "add_to_project",
-    {
-      title: "Move records into a project",
-      description:
-        "Moves domains (with their mailboxes), mailboxes, lead lists or sequences into a project, from wherever they are. " +
-        "A project's mailboxes then only send for that project's sequences.",
-      inputSchema: { project_id: id, ...projectRecords },
-      annotations: write,
-    },
-    ({ project_id, ...body }) => call(() => gtm.POST("/v1/workspaces/{ws}/projects/{id}/add", { params: { path: { ws, id: project_id } }, body })),
-  );
-
-  server.registerTool(
-    "remove_from_project",
-    {
-      title: "Make a project's records shared",
-      description: "Takes domains, mailboxes, lead lists or sequences out of a project so the whole workspace shares them again.",
-      inputSchema: { project_id: id, ...projectRecords },
-      annotations: write,
-    },
-    ({ project_id, ...body }) => call(() => gtm.POST("/v1/workspaces/{ws}/projects/{id}/remove", { params: { path: { ws, id: project_id } }, body })),
   );
 
   server.registerTool(
@@ -6490,7 +6542,7 @@ export function createServer({ client: gtm, workspace, readOnly = false, mission
     {
       title: "Get the reply rules",
       description:
-        "What Outflare does once a reply has a label it is sure of: snooze a not_now until its date or restart the sequence, move the next email past an out_of_office, add the person a referral or wrong_person names. Returns the defaults, the actions each label can take, and the sets saved for the workspace, a project or a sequence (the most specific wins, label by label).",
+        "What Outflare does once a reply has a label it is sure of: snooze a not_now until its date or restart the sequence, move the next email past an out_of_office, add the person a referral or wrong_person names. Returns the defaults, the actions each label can take, and the sets saved for the workspace or a sequence (the sequence's wins, label by label).",
       annotations: read,
     },
     () => call(() => gtm.GET("/v1/workspaces/{ws}/reply-rules", { params: { path } })),
@@ -6516,9 +6568,8 @@ export function createServer({ client: gtm, workspace, readOnly = false, mission
     {
       title: "Save reply rules",
       description:
-        "Replaces the rules for the workspace (no ids), a project (project_id) or a sequence (sequence_id). Labels left out follow the next set up; empty rules remove the set. Every action can be undone.",
+        "Replaces the rules for the workspace (no id) or a sequence (sequence_id). Labels left out follow the next set up; empty rules remove the set. Every action can be undone.",
       inputSchema: {
-        project_id: id.optional(),
         sequence_id: id.optional(),
         rules: z.record(
           z.enum(["not_now", "out_of_office", "referral", "wrong_person", "interested", "meeting_booked", "question", "objection", "not_interested", "unsubscribe", "complaint"]),
@@ -6658,11 +6709,10 @@ export function createServer({ client: gtm, workspace, readOnly = false, mission
   // Missions.
 
   const missionFields = {
-    project_id: id.nullable().optional().describe("The project whose brief the mission works from."),
     goal: z.string().max(50000).optional().describe('The goal in words, e.g. "Book 10 meetings with fintech CFOs in Australia".'),
     goal_metric: z.enum(["meetings", "replies", "sends", "leads", "revenue_attributed", "revenue_deals", "revenue_referred"]).nullable().optional().describe("Tracked number; set with goal_target. Revenue goals are whole US dollars: revenue_attributed is payments credited to the mission's sequences, revenue_deals is won deals tagged with the mission, revenue_referred is sales partners referred since it started."),
     goal_target: z.number().int().min(1).nullable().optional(),
-    instructions: z.string().max(50000).optional().describe("Guidance on top of the project brief, Markdown."),
+    instructions: z.string().max(50000).optional().describe("Guidance on top of the company and brand context, Markdown."),
     plan: z.string().max(50000).optional().describe("Your plan, Markdown. A person reads it before approving."),
     mode: z.enum(["dry_run", "approve_writes", "autonomous"]).optional().describe("Proposed mode; the approver decides."),
     max_sends: z.number().int().min(1).nullable().optional().describe("Most emails all of the mission's sequences may send."),
@@ -6691,7 +6741,7 @@ export function createServer({ client: gtm, workspace, readOnly = false, mission
         "Turn a goal in plain words into a draft mission with Outflare's planner (the workspace's AI model from get_ai_settings, with its own key): steps, instructions, limits sized to the mailboxes, " +
         "connect requests for missing tools and questions for the person. The draft waits for a person to approve it. " +
         "Use this when the person wants Outflare to plan; to plan yourself, use create_mission and submit_mission_plan.",
-      inputSchema: { goal: z.string().min(1).max(2000), project_id: id.optional() },
+      inputSchema: { goal: z.string().min(1).max(2000) },
       annotations: write,
     },
     (body) => call(() => gtm.POST("/v1/workspaces/{ws}/missions/plan", { params: { path }, body })),
@@ -6732,7 +6782,6 @@ export function createServer({ client: gtm, workspace, readOnly = false, mission
         playbook_id: z.string().min(1).max(60),
         inputs: z.record(z.string(), z.string().max(500)).optional().describe("Values for the playbook's inputs, by name (get_playbook lists them)."),
         mode: z.enum(["dry_run", "approve_writes", "autonomous"]).optional(),
-        project_id: id.optional(),
         apply_kit: z.boolean().optional().describe("Also set up the playbook's setup kit (its pipeline, fields and email drafts). Check preview_kit first."),
       },
       annotations: write,
@@ -7486,7 +7535,7 @@ export function createServer({ client: gtm, workspace, readOnly = false, mission
     {
       title: "Log a meeting",
       description:
-        "Records a meeting no connected calendar sees. Give lead_id or attendee_email; it is credited to the sequence that last emailed the lead unless sequence_id or project_id is given.",
+        "Records a meeting no connected calendar sees. Give lead_id or attendee_email; it is credited to the sequence that last emailed the lead unless sequence_id is given.",
       inputSchema: {
         lead_id: id.optional(),
         attendee_email: z.string().optional(),
@@ -7498,7 +7547,6 @@ export function createServer({ client: gtm, workspace, readOnly = false, mission
         status: z.enum(["booked", "held", "no_show", "canceled"]).optional(),
         qualified: z.boolean().optional(),
         sequence_id: id.optional(),
-        project_id: id.optional(),
         mission_id: id.optional(),
         notes: z.string().max(10000).optional(),
       },
@@ -7511,14 +7559,13 @@ export function createServer({ client: gtm, workspace, readOnly = false, mission
     "update_meeting",
     {
       title: "Update a meeting",
-      description: "Mark held, no_show or qualified, or fix which sequence or project it counts for (that pins it against syncs). unattributed: not from outreach.",
+      description: "Mark held, no_show or qualified, or fix which sequence it counts for (that pins it against syncs). unattributed: not from outreach.",
       inputSchema: {
         meeting_id: id,
         status: z.enum(["booked", "held", "no_show", "canceled"]).optional(),
         qualified: z.boolean().optional(),
         notes: z.string().optional(),
         sequence_id: id.optional(),
-        project_id: id.optional(),
         mission_id: z.string().optional(),
         unattributed: z.boolean().optional(),
       },
@@ -7544,7 +7591,6 @@ export function createServer({ client: gtm, workspace, readOnly = false, mission
         opened_at: z.string().datetime().optional(),
         closed_at: z.string().datetime().optional(),
         sequence_id: id.optional(),
-        project_id: id.optional(),
         mission_id: id.optional(),
       },
       annotations: write,
@@ -7556,7 +7602,7 @@ export function createServer({ client: gtm, workspace, readOnly = false, mission
     "update_deal",
     {
       title: "Update a deal",
-      description: "Change a hand-logged deal, or the sequence or project any deal counts for. Deals from a CRM only take attribution changes; edit them in the CRM.",
+      description: "Change a hand-logged deal, or the sequence any deal counts for. Deals from a CRM only take attribution changes; edit them in the CRM.",
       inputSchema: {
         deal_id: id,
         name: z.string().optional(),
@@ -7564,7 +7610,6 @@ export function createServer({ client: gtm, workspace, readOnly = false, mission
         state: z.enum(["open", "won", "lost"]).optional(),
         amount_cents: z.number().int().min(0).optional(),
         sequence_id: id.optional(),
-        project_id: id.optional(),
         mission_id: z.string().optional(),
         unattributed: z.boolean().optional(),
       },
@@ -7579,7 +7624,7 @@ export function createServer({ client: gtm, workspace, readOnly = false, mission
       title: "Record spend",
       description:
         "Adds a charge to the ledger: amount_cents when the money is known, or units with unit_name (e.g. 500 credit) to be priced by the workspace's rates. " +
-        "Pass a ref (e.g. apollo:run:123) so a retry never double counts. Tag sequence_id, project_id or mission_id when the spend was for one.",
+        "Pass a ref (e.g. apollo:run:123) so a retry never double counts. Tag sequence_id or mission_id when the spend was for one.",
       inputSchema: {
         category,
         provider: z.string().max(200).optional(),
@@ -7589,7 +7634,6 @@ export function createServer({ client: gtm, workspace, readOnly = false, mission
         currency: z.string().length(3).optional(),
         occurred_at: z.string().datetime().optional(),
         sequence_id: id.optional(),
-        project_id: id.optional(),
         mission_id: id.optional(),
         mailbox_id: id.optional(),
         domain: z.string().optional(),
@@ -7627,7 +7671,6 @@ export function createServer({ client: gtm, workspace, readOnly = false, mission
         currency: z.string().length(3).optional(),
         starts_on: z.string().optional().describe("YYYY-MM-DD, default today."),
         ends_on: z.string().nullable().optional(),
-        project_id: id.nullable().optional(),
         sequence_id: id.nullable().optional(),
         note: z.string().optional(),
       },
@@ -7653,7 +7696,7 @@ export function createServer({ client: gtm, workspace, readOnly = false, mission
     {
       title: "Draft an infrastructure plan",
       description:
-        "Draft a plan for sending domains and mailboxes, e.g. 10 domains x 3 mailboxes for a project by a date. A draft buys nothing. " +
+        "Draft a plan for sending domains and mailboxes, e.g. 10 domains x 3 mailboxes for a brand by a date. A draft buys nothing. " +
         "With a supplier, prices arrive in the background: call get_infra_plan until quote.status is ready. Then show the user the plan, price and warnings, " +
         "and approve only if they agree (approve_infra_plan).",
       inputSchema: { ...planFields, name: z.string().max(200), domain_count: z.number().int().min(1).max(200) },
@@ -8119,6 +8162,10 @@ export function createServer({ client: gtm, workspace, readOnly = false, mission
             "suppress",
             "unsubscribe_topic",
             "alert",
+            "transactional_email",
+            "set_consent",
+            "assign_owner",
+            "move_deal",
           ]),
           name: z.string().optional(),
           template: z.string().optional().describe("email: a lifecycle template's handle."),
@@ -8143,6 +8190,14 @@ export function createServer({ client: gtm, workspace, readOnly = false, mission
           title: z.string().optional(),
           text: z.string().optional(),
           to: z.enum(["owner", "admins"]).optional(),
+          consent: z.enum(["granted", "withdrawn"]).optional().describe("set_consent: for topic, or all marketing email when topic is empty."),
+          owner_id: z.string().optional().describe("assign_owner: a member's user id (list_members)."),
+          members: z.array(z.string()).min(2).max(50).optional().describe("assign_owner: members to spread people between evenly."),
+          replace_owner: z.boolean().optional().describe("assign_owner: change an owner already set."),
+          deal: z
+            .object({ type: z.string(), field: z.string(), stage: z.string(), closed: z.array(z.string()).optional() })
+            .optional()
+            .describe("move_deal: the deal record type, its stage field, the stage, and the closed stages."),
           on_error: z.string().optional().describe("Action steps: stop (default), continue, or a step id."),
         }),
       )
@@ -8266,6 +8321,24 @@ export function createServer({ client: gtm, workspace, readOnly = false, mission
       annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: false },
     },
     ({ journey }) => call(() => gtm.DELETE("/v1/workspaces/{ws}/journeys/{id}/draft", { params: { path: { ws, id: journey } } })),
+  );
+
+  server.registerTool(
+    "test_journey",
+    {
+      title: "Test a journey with one person",
+      description:
+        "Take one person through a journey (its live version, or its draft) and see, step by step, what would happen: which way each branch goes, the subject of each email or why they'd be skipped, and what each action would do. Nothing is sent, written or recorded, and waits pass at once. refusal says why they wouldn't start a run now. A branch on something they may still do follows the data as it is now (can_change); paths sends a branch the other way.",
+      inputSchema: {
+        journey: z.string().describe("The journey's id."),
+        record_id: z.string().describe("The person to test with (a customer record id)."),
+        version: z.enum(["live", "draft"]).optional().describe("Which version to test (default live)."),
+        event: z.record(z.string(), z.unknown()).optional().describe("The properties of the event that starts the run; left out, the person's latest trigger event."),
+        paths: z.record(z.string(), z.enum(["yes", "no"])).optional().describe("Branch step ids to send down yes or no whatever the data says."),
+      },
+      annotations: read,
+    },
+    ({ journey, ...body }) => call(() => gtm.POST("/v1/workspaces/{ws}/journeys/{id}/test", { params: { path: { ws, id: journey } }, body })),
   );
 
   server.registerTool(

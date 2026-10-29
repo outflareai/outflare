@@ -20,10 +20,10 @@ import (
 
 func (s *Server) routesMailboxes(mux *http.ServeMux) {
 	read, manage := auth.ScopeMailboxesRead, auth.ScopeMailboxesManage
-	mux.HandleFunc("GET /v1/workspaces/{ws}/mailboxes", s.inProject(read, s.listMailboxes))
+	mux.HandleFunc("GET /v1/workspaces/{ws}/mailboxes", s.inBrand(read, s.listMailboxes))
 	mux.HandleFunc("POST /v1/workspaces/{ws}/mailboxes", s.inWorkspace(manage, s.replans(s.createMailbox)))
 	mux.HandleFunc("POST /v1/workspaces/{ws}/mailboxes/import", s.inWorkspace(manage, s.replans(s.importMailboxes)))
-	mux.HandleFunc("GET /v1/workspaces/{ws}/mailboxes/{id}", s.inProject(read, s.getMailbox))
+	mux.HandleFunc("GET /v1/workspaces/{ws}/mailboxes/{id}", s.inBrand(read, s.getMailbox))
 	mux.HandleFunc("PATCH /v1/workspaces/{ws}/mailboxes/{id}", s.inWorkspace(manage, s.replans(s.updateMailbox)))
 	mux.HandleFunc("DELETE /v1/workspaces/{ws}/mailboxes/{id}", s.inWorkspace(manage, s.replans(s.deleteMailbox)))
 	mux.HandleFunc("POST /v1/workspaces/{ws}/mailboxes/{id}/verify", s.inWorkspace(manage, s.replans(s.verifyMailbox)))
@@ -57,7 +57,6 @@ type mailboxView struct {
 	LastSyncedAt   *time.Time `json:"last_synced_at"`
 	SyncError      *string    `json:"sync_error"`
 	Source         string     `json:"source"`
-	ProjectID      *string    `json:"project_id"`
 	BrandID        *string    `json:"brand_id"`
 	PoolID         *string    `json:"pool_id"`
 	PoolName       *string    `json:"pool_name"`
@@ -193,7 +192,7 @@ func scanMailbox(r pgx.CollectableRow) (mailboxView, error) {
 	err := r.Scan(&m.ID, &m.Email, &m.Domain, &m.DisplayName, &m.Provider, &m.AuthMethod,
 		&m.SMTPHost, &m.SMTPPort, &m.SMTPUsername, &m.IMAPHost, &m.IMAPPort, &m.IMAPUsername,
 		&m.Status, &m.StatusReason, &m.DailyLimit, &m.MinGapSeconds, &m.SMTPOK, &m.IMAPOK, &m.LastVerifiedAt, &m.LastSyncedAt, &m.SyncError,
-		&m.Source, &m.ProjectID, &m.BrandID, &m.PoolID, &m.PoolName, &m.ServerID, &m.ServerHost,
+		&m.Source, &m.BrandID, &m.PoolID, &m.PoolName, &m.ServerID, &m.ServerHost,
 		&w.Enabled, &w.DailyTarget, &w.ReplyRate, &w.StartedAt, &w.Sent7d, &w.Inbox7d, &w.Spam7d, &w.Missing7d, &w.Failed7d, &w.LastError,
 		&wp.id, &wp.name, &wp.enabled, &wp.score, &wp.observed,
 		&m.CreatedAt, &m.UpdatedAt,
@@ -234,7 +233,7 @@ const mailboxSelect = `
 	SELECT m.id, m.email, m.domain, m.display_name, m.provider, m.auth_method,
 	       m.smtp_host, m.smtp_port, m.smtp_username, m.imap_host, m.imap_port, m.imap_username,
 	       m.status, m.status_reason, m.daily_limit, m.min_gap_seconds, m.smtp_ok, m.imap_ok, m.last_verified_at, m.last_synced_at, m.sync_error,
-	       m.source, m.project_id::text, m.brand_id::text, m.pool_id, p.name, m.server_id, sv.host,
+	       m.source, m.brand_id::text, m.pool_id, p.name, m.server_id, sv.host,
 	       m.warmup_enabled, m.warmup_daily_target, m.warmup_reply_rate, m.warmup_started_at,
 	       COALESCE(w.sent, 0), COALESCE(w.inbox, 0), COALESCE(w.spam, 0), COALESCE(w.missing, 0),
 	       COALESCE(w.failed, 0), w.last_error,
@@ -301,16 +300,6 @@ func (s *Server) listMailboxes(w http.ResponseWriter, r *http.Request) {
 		args = append(args, v)
 		sql += ` AND m.server_id = $` + strconv.Itoa(len(args))
 	}
-	project, ok := projectFilter(w, r)
-	if !ok {
-		return
-	}
-	if project == "none" {
-		sql += ` AND m.project_id IS NULL`
-	} else if project != "" {
-		args = append(args, project)
-		sql += ` AND m.project_id = $` + strconv.Itoa(len(args))
-	}
 	brand, ok := s.brandFilter(w, r)
 	if !ok {
 		return
@@ -348,7 +337,7 @@ func (s *Server) findMailbox(w http.ResponseWriter, r *http.Request, ws, id stri
 		return nil, false
 	}
 	m, err := pgx.CollectExactlyOneRow(rows, scanMailbox)
-	if err == nil && !accessFrom(r.Context()).sees(m.ProjectID, m.BrandID) {
+	if err == nil && !accessFrom(r.Context()).sees(m.BrandID) {
 		err = pgx.ErrNoRows
 	}
 	if errors.Is(err, pgx.ErrNoRows) {

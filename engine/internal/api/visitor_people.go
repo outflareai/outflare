@@ -219,7 +219,7 @@ func (s *Server) reviewRecord(w http.ResponseWriter, r *http.Request) {
 	var view recordView
 	err := pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
 		v, err := lockRecord(ctx, tx, a, id)
-		if err == nil && (!a.writes(nil, v.BrandID) || v.MergedInto != nil) {
+		if err == nil && (!a.writes(v.BrandID) || v.MergedInto != nil) {
 			err = errNotFound
 		}
 		if err != nil {

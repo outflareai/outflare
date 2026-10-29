@@ -13,12 +13,13 @@ import (
 )
 
 // A workspace's tracking domain (links.acme-com.example) points at this server so
-// click, open and unsubscribe links carry the customer's own domain. On
-// that host the server answers only those links (and partner short links): the rest of the app,
-// sign-in above all, never appears under a customer's domain.
+// click, open, unsubscribe and campaign redirect links carry the customer's own
+// domain. On that host the server answers only those links (and partner short
+// links): the rest of the app, sign-in above all, never appears under a
+// customer's domain.
 
 // trackingPaths are what a tracking domain serves.
-var trackingPaths = []string{"/c/", "/o/", "/u/", "/r/"}
+var trackingPaths = []string{"/c/", "/o/", "/u/", "/r/", "/l/"}
 
 const (
 	trackingHostTTL = time.Minute

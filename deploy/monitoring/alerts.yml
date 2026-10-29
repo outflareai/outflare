@@ -72,6 +72,26 @@ groups:
         annotations:
           summary: "Over 2% of consent banner requests fail: sites can't load their banner's settings, or visitors' choices aren't being kept as consents. Look for errors on GET and POST /v1/site/consent in the logs (usually the database)."
 
+      - alert: OutflareAdMacrosUnfilled
+        expr: sum by (network) (increase(outflare_ad_tracking_unfilled_macros_total[1h])) > 20
+        for: 1h
+        labels: { severity: info }
+        annotations:
+          summary: "Ads on {{ $labels.network }} keep arriving with tracking template macros the network didn't fill in, so their ad ids are lost. The macro in engine/internal/adtrack for that network is likely wrong: check it against the network's own docs (Ad tracking health row)."
+
+      - alert: OutflarePaidArrivalsWithoutIds
+        expr: (sum by (network) (increase(outflare_ad_tracking_arrivals_total{outcome="none"}[6h])) / clamp_min(sum by (network) (increase(outflare_ad_tracking_arrivals_total[6h])), 1)) > 0.8 and sum by (network) (increase(outflare_ad_tracking_arrivals_total[6h])) > 50
+        for: 1h
+        labels: { severity: info }
+        annotations:
+          summary: "Over 80% of paid landings from {{ $labels.network }} in 6 hours carry no click id or ad ids: those ads have no tracking template, or the network strips it. Credit falls back to UTM tags. Check the Ad tracking health row; workspaces add templates under Paid ads → Tracking templates."
+      - alert: OutflareRedirectClicksFailing
+        expr: sum(rate(outflare_redirect_clicks_total{outcome="error"}[5m])) / clamp_min(sum(rate(outflare_redirect_clicks_total[5m])), 1e-9) > 0.05
+        for: 10m
+        labels: { severity: warning }
+        annotations:
+          summary: "Over 5% of clicks on campaign redirect links can't be stored, so campaigns undercount clicks (people still reach the page). Look for tracking_link.click_failed in the logs (usually the database) and check the Redirect links row."
+
       - alert: OutflareConsentBannerSlow
         expr: histogram_quantile(0.95, sum by (le) (rate(outflare_site_consent_request_seconds_bucket[5m]))) > 0.5
         for: 15m
@@ -404,6 +424,14 @@ groups:
         labels: { severity: info }
         annotations:
           summary: "Several partner imports from Tolt failed in the last hour; check partner_import.failed events for their error codes and the engine log for 'partner import'. A change in Tolt's API shows as many at once."
+
+      - alert: OutflarePartnerImportKindsUnreadable
+        # A kind Tolt answers with something the import can't read is left
+        # out; the same kind in several imports means Tolt changed a list.
+        expr: sum by (kind) (increase(outflare_partners_import_objects_total{result="unreadable"}[6h])) > 2
+        labels: { severity: warning }
+        annotations:
+          summary: "Partner imports could not read the same kind from Tolt several times in 6 hours; check partner_import.kind_skipped events and the engine log ('tolt answer') for the status, content type and keys Tolt sent."
 
       - alert: OutflareReviewPagesNotRead
         # Pages are read once a day; two days without a read means the

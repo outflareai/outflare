@@ -341,7 +341,7 @@ func (s *Server) addVisitorCompany(w http.ResponseWriter, r *http.Request) {
 		if n == 0 {
 			return errNoVisitorCompany
 		}
-		if !a.writes(nil, brand) {
+		if !a.writes(brand) {
 			brand = nil
 		}
 		acct, err := crmCompany(ctx, tx, a.WorkspaceID, domain)

@@ -49,7 +49,7 @@ func TestCompanyContextAndMemories(t *testing.T) {
 	}
 
 	// Memories: saved once even when repeated, pinned first, searchable.
-	pid := owner.must(201, "POST", base+"/projects", map[string]any{"name": "Fintech"})["id"].(string)
+	bid := owner.must(201, "POST", base+"/brands", map[string]any{"name": "Fintech"})["id"].(string)
 	owner.must(400, "POST", base+"/memories", map[string]any{"kind": "fact"})
 	owner.must(400, "POST", base+"/memories", map[string]any{"text": "x", "kind": "secret"})
 	owner.must(400, "POST", base+"/memories", map[string]any{"text": strings.Repeat("x", 501)})
@@ -58,8 +58,8 @@ func TestCompanyContextAndMemories(t *testing.T) {
 	if again["id"] != m1["id"] || again["pinned"] != true {
 		t.Fatalf("duplicate saved twice: %v %v", m1, again)
 	}
-	owner.must(201, "POST", base+"/memories", map[string]any{"text": "Only Series A and later", "kind": "decision", "project_id": pid})
-	owner.must(400, "POST", base+"/memories", map[string]any{"text": "Elsewhere", "project_id": "00000000-0000-0000-0000-000000000000"})
+	owner.must(201, "POST", base+"/memories", map[string]any{"text": "Only Series A and later", "kind": "decision", "brand_id": "fintech"})
+	owner.must(400, "POST", base+"/memories", map[string]any{"text": "Elsewhere", "brand_id": "00000000-0000-0000-0000-000000000000"})
 	list := owner.must(200, "GET", base+"/memories", nil)
 	if list["total"] != 2.0 || list["data"].([]any)[0].(map[string]any)["id"] != m1["id"] {
 		t.Fatalf("list: %v", list)
@@ -67,7 +67,7 @@ func TestCompanyContextAndMemories(t *testing.T) {
 	if n := owner.must(200, "GET", base+"/memories?q=series", nil)["total"]; n != 1.0 {
 		t.Fatalf("search: %v", n)
 	}
-	if n := owner.must(200, "GET", base+"/memories?project_id=none", nil)["total"]; n != 1.0 {
+	if n := owner.must(200, "GET", base+"/memories?brand=none", nil)["total"]; n != 1.0 {
 		t.Fatalf("workspace-wide: %v", n)
 	}
 	page := owner.must(200, "GET", base+"/memories?limit=1", nil)
@@ -76,7 +76,7 @@ func TestCompanyContextAndMemories(t *testing.T) {
 	}
 	owner.must(400, "GET", base+"/memories?kind=secret", nil)
 	c = owner.must(200, "GET", base+"/context", nil)
-	if c["memory_count"] != 2.0 || !strings.Contains(c["markdown"].(string), "(preference) Never mention pricing") || len(c["projects"].([]any)) != 1 {
+	if c["memory_count"] != 1.0 || !strings.Contains(c["markdown"].(string), "(preference) Never mention pricing") || c["projects"] != nil {
 		t.Fatalf("context with memories: %v", c)
 	}
 
@@ -85,24 +85,25 @@ func TestCompanyContextAndMemories(t *testing.T) {
 		t.Fatal("edit")
 	}
 
-	// A token without context.manage reads but cannot write; a project
-	// token sees workspace-wide memories and its own project's.
+	// A token without context.manage reads but cannot write; a brand
+	// token sees workspace-wide memories and its own brand's.
 	reader := &client{t: t, h: h, bearer: owner.must(201, "POST", base+"/api-tokens", map[string]any{"name": "r", "scopes": []string{"workspace.read"}})["token"].(string)}
 	reader.must(200, "GET", base+"/context", nil)
 	reader.must(403, "POST", base+"/memories", map[string]any{"text": "Nope"})
 	reader.must(403, "PATCH", base+"/context", map[string]any{"company": "Nope"})
-	other := owner.must(201, "POST", base+"/projects", map[string]any{"name": "Agencies"})["id"].(string)
-	owner.must(201, "POST", base+"/memories", map[string]any{"text": "Agencies hate long emails", "project_id": other})
-	ptok := owner.must(201, "POST", base+"/api-tokens", map[string]any{"name": "p", "scopes": []string{"workspace.read", "context.manage"}, "project_id": pid})
-	agent := &client{t: t, h: h, bearer: ptok["token"].(string)}
+	owner.must(201, "POST", base+"/brands", map[string]any{"name": "Agencies"})
+	owner.must(201, "POST", base+"/memories", map[string]any{"text": "Agencies hate long emails", "brand_id": "agencies"})
+	owner.must(400, "POST", base+"/api-tokens", map[string]any{"name": "p", "scopes": []string{"workspace.read"}, "project_id": bid})
+	btok := owner.must(201, "POST", base+"/api-tokens", map[string]any{"name": "b", "scopes": []string{"workspace.read", "context.manage"}, "brand": "fintech"})
+	agent := &client{t: t, h: h, bearer: btok["token"].(string)}
 	if n := agent.must(200, "GET", base+"/memories", nil)["total"]; n != 2.0 {
-		t.Fatalf("project token sees %v memories", n)
+		t.Fatalf("brand token sees %v memories", n)
 	}
 	mine := agent.must(201, "POST", base+"/memories", map[string]any{"text": "CFOs reply on Tuesdays"})
-	if mine["project_id"] != pid {
-		t.Fatalf("project token saved outside its project: %v", mine)
+	if mine["brand_id"] != bid || mine["project_id"] != nil {
+		t.Fatalf("brand token saved outside its brand: %v", mine)
 	}
-	agent.must(404, "DELETE", base+"/memories/"+id, nil)
+	agent.must(403, "DELETE", base+"/memories/"+id, nil)
 	agent.must(403, "PATCH", base+"/context", map[string]any{"company": "Mine"})
 
 	owner.must(204, "DELETE", base+"/memories/"+id, nil)

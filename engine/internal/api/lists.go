@@ -19,24 +19,23 @@ import (
 )
 
 // Lead lists: manual lists filled by import or the API, and lists built
-// from a search at a connected data provider. Project tokens see only their
-// project's lists.
+// from a search at a connected data provider.
 func (s *Server) routesLists(mux *http.ServeMux) {
 	read, manage := auth.ScopeLeadsRead, auth.ScopeLeadsManage
-	mux.HandleFunc("GET /v1/workspaces/{ws}/lead-lists", s.inProject(read, s.listLeadLists))
-	mux.HandleFunc("POST /v1/workspaces/{ws}/lead-lists", s.inProject(manage, s.createLeadList))
-	mux.HandleFunc("POST /v1/workspaces/{ws}/lead-lists/preview", s.inProject(manage, s.previewLeadList))
-	mux.HandleFunc("GET /v1/workspaces/{ws}/lead-lists/{id}", s.inProject(read, s.getLeadList))
-	mux.HandleFunc("PATCH /v1/workspaces/{ws}/lead-lists/{id}", s.inProject(manage, s.updateLeadList))
-	mux.HandleFunc("DELETE /v1/workspaces/{ws}/lead-lists/{id}", s.inProject(manage, s.deleteLeadList))
-	mux.HandleFunc("GET /v1/workspaces/{ws}/lead-lists/{id}/members", s.inProject(read, s.listLeadListMembers))
-	mux.HandleFunc("POST /v1/workspaces/{ws}/lead-lists/{id}/leads", s.inProject(manage, s.addToLeadList))
-	mux.HandleFunc("DELETE /v1/workspaces/{ws}/lead-lists/{id}/leads/{lead}", s.inProject(manage, s.removeFromLeadList))
-	mux.HandleFunc("POST /v1/workspaces/{ws}/lead-lists/{id}/runs", s.inProject(manage, s.startListRun))
-	mux.HandleFunc("GET /v1/workspaces/{ws}/lead-lists/{id}/runs", s.inProject(read, s.listListRuns))
-	mux.HandleFunc("GET /v1/workspaces/{ws}/list-runs/{run}", s.inProject(read, s.getListRun))
-	mux.HandleFunc("POST /v1/workspaces/{ws}/list-runs/{run}/cancel", s.inProject(manage, s.cancelListRun))
-	mux.HandleFunc("GET /v1/workspaces/{ws}/data-providers", s.inProject(read, s.listDataProviders))
+	mux.HandleFunc("GET /v1/workspaces/{ws}/lead-lists", s.inBrand(read, s.listLeadLists))
+	mux.HandleFunc("POST /v1/workspaces/{ws}/lead-lists", s.inBrand(manage, s.createLeadList))
+	mux.HandleFunc("POST /v1/workspaces/{ws}/lead-lists/preview", s.inBrand(manage, s.previewLeadList))
+	mux.HandleFunc("GET /v1/workspaces/{ws}/lead-lists/{id}", s.inBrand(read, s.getLeadList))
+	mux.HandleFunc("PATCH /v1/workspaces/{ws}/lead-lists/{id}", s.inBrand(manage, s.updateLeadList))
+	mux.HandleFunc("DELETE /v1/workspaces/{ws}/lead-lists/{id}", s.inBrand(manage, s.deleteLeadList))
+	mux.HandleFunc("GET /v1/workspaces/{ws}/lead-lists/{id}/members", s.inBrand(read, s.listLeadListMembers))
+	mux.HandleFunc("POST /v1/workspaces/{ws}/lead-lists/{id}/leads", s.inBrand(manage, s.addToLeadList))
+	mux.HandleFunc("DELETE /v1/workspaces/{ws}/lead-lists/{id}/leads/{lead}", s.inBrand(manage, s.removeFromLeadList))
+	mux.HandleFunc("POST /v1/workspaces/{ws}/lead-lists/{id}/runs", s.inBrand(manage, s.startListRun))
+	mux.HandleFunc("GET /v1/workspaces/{ws}/lead-lists/{id}/runs", s.inBrand(read, s.listListRuns))
+	mux.HandleFunc("GET /v1/workspaces/{ws}/list-runs/{run}", s.inBrand(read, s.getListRun))
+	mux.HandleFunc("POST /v1/workspaces/{ws}/list-runs/{run}/cancel", s.inBrand(manage, s.cancelListRun))
+	mux.HandleFunc("GET /v1/workspaces/{ws}/data-providers", s.inBrand(read, s.listDataProviders))
 	mux.HandleFunc("GET /v1/workspaces/{ws}/leads/{id}/sources", s.inWorkspace(read, s.listLeadSources))
 }
 
@@ -44,7 +43,6 @@ type listView struct {
 	ID                   string                  `json:"id"`
 	Name                 string                  `json:"name"`
 	Description          string                  `json:"description"`
-	ProjectID            *string                 `json:"project_id"`
 	BrandID              *string                 `json:"brand_id"`
 	ProfileID            *string                 `json:"profile_id"`
 	Kind                 string                  `json:"kind"`
@@ -67,7 +65,7 @@ type listView struct {
 }
 
 const listSelect = `
-	SELECT l.id, l.name, l.description, l.project_id, l.brand_id, l.profile_id, l.kind,
+	SELECT l.id, l.name, l.description, l.brand_id, l.profile_id, l.kind,
 	       (SELECT count(*)::int FROM lead_list_members m WHERE m.list_id = l.id),
 	       l.search_integration_id, l.filters, l.enrich_integration_ids::text[], l.max_leads, l.credit_cap::float8,
 	       l.verify, l.verified_emails_only, l.skip_contacted_days, l.skip_in_sequences, l.min_score,
@@ -87,7 +85,7 @@ func (s *Server) loadLists(ctx context.Context, where string, args ...any) ([]li
 		var v listView
 		var filters []byte
 		var lastRun *string
-		if err := rows.Scan(&v.ID, &v.Name, &v.Description, &v.ProjectID, &v.BrandID, &v.ProfileID, &v.Kind, &v.Leads, &v.SearchIntegrationID, &filters,
+		if err := rows.Scan(&v.ID, &v.Name, &v.Description, &v.BrandID, &v.ProfileID, &v.Kind, &v.Leads, &v.SearchIntegrationID, &filters,
 			&v.EnrichIntegrationIDs, &v.MaxLeads, &v.CreditCap, &v.Verify, &v.VerifiedEmailsOnly, &v.SkipContactedDays,
 			&v.SkipInSequences, &v.MinScore, &v.RefreshEveryDays, &v.NextRefreshAt, &v.CreatedAt, &v.UpdatedAt, &lastRun); err != nil {
 			rows.Close()
@@ -133,13 +131,8 @@ func (s *Server) loadLists(ctx context.Context, where string, args ...any) ([]li
 }
 
 // listScope returns the SQL condition limiting lists (alias l) or their
-// runs (alias r) to the caller's project, for a project token, or to its
-// brands' and the shared ones, for a brand-limited caller.
+// runs (alias r) to a brand-limited caller's brands and the shared ones.
 func listScope(a *access, alias string, args *[]any) string {
-	if a.ProjectID != nil {
-		*args = append(*args, *a.ProjectID)
-		return ` AND ` + alias + `.project_id = $` + strconv.Itoa(len(*args))
-	}
 	if a.Brands == nil {
 		return ""
 	}
@@ -152,20 +145,8 @@ func listScope(a *access, alias string, args *[]any) string {
 
 func (s *Server) listLeadLists(w http.ResponseWriter, r *http.Request) {
 	a := accessFrom(r.Context())
-	project, ok := projectFilter(w, r)
-	if !ok {
-		return
-	}
 	where := ` WHERE l.workspace_id = $1`
 	args := []any{a.WorkspaceID}
-	switch project {
-	case "":
-	case "none":
-		where += ` AND l.project_id IS NULL`
-	default:
-		args = append(args, project)
-		where += ` AND l.project_id = $2`
-	}
 	brand, ok := s.brandFilter(w, r)
 	if !ok {
 		return
@@ -209,7 +190,7 @@ func (s *Server) findList(w http.ResponseWriter, r *http.Request, a *access, id 
 // changeList loads one list the caller may change, or writes a 404 or 403.
 func (s *Server) changeList(w http.ResponseWriter, r *http.Request, a *access, id string) (*listView, bool) {
 	v, ok := s.findList(w, r, a, id)
-	if ok && !a.writes(v.ProjectID, v.BrandID) {
+	if ok && !a.writes(v.BrandID) {
 		writeError(w, r, http.StatusForbidden, "forbidden", string(errSharedRecord))
 		return nil, false
 	}
@@ -226,8 +207,9 @@ func (s *Server) getLeadList(w http.ResponseWriter, r *http.Request) {
 // listInput is a list's settings, for create and update. Absent fields
 // keep their value on update.
 type listInput struct {
-	Name                 *string                  `json:"name"`
-	Description          *string                  `json:"description"`
+	Name        *string `json:"name"`
+	Description *string `json:"description"`
+	// Ignored: projects were removed. Accepted so older clients still work.
 	ProjectID            optional[string]         `json:"project_id"`
 	ProfileID            optional[string]         `json:"profile_id"`
 	SearchIntegrationID  optional[string]         `json:"search_integration_id"`
@@ -259,35 +241,6 @@ func (s *Server) applyList(ctx context.Context, a *access, in *listInput, v *lis
 			return errInvalid("description must be at most 2000 characters")
 		}
 		v.Description = strings.TrimSpace(*in.Description)
-	}
-	if in.ProjectID.Set {
-		if a.ProjectID != nil {
-			return errInvalid("a project token cannot move lists between projects")
-		}
-		if p := in.ProjectID.Value; p != nil {
-			var ok bool
-			if !validUUID(*p) {
-				return errInvalid("project_id is not a project in this workspace")
-			}
-			if err := s.pool.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM projects WHERE workspace_id = $1 AND id = $2)`, a.WorkspaceID, *p).Scan(&ok); err != nil {
-				return err
-			}
-			if !ok {
-				return errInvalid("project_id is not a project in this workspace")
-			}
-		}
-		if a.Brands != nil {
-			if in.ProjectID.Value == nil {
-				return errInvalid("you can only keep lists in your brands' projects")
-			}
-			if _, err := brandWrite(ctx, s.pool, a, in.ProjectID.Value, nil); err != nil {
-				return err
-			}
-		}
-		v.ProjectID = in.ProjectID.Value
-	}
-	if a.ProjectID != nil {
-		v.ProjectID = a.ProjectID
 	}
 	if in.ProfileID.Set {
 		if p := in.ProfileID.Value; p != nil {
@@ -454,27 +407,24 @@ func (s *Server) createLeadList(w http.ResponseWriter, r *http.Request) {
 	}
 	var run *lists.Run
 	err := pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
-		var brand *string
-		if a.ProjectID == nil {
-			var err error
-			if brand, err = brandWrite(ctx, tx, a, v.ProjectID, nil); err != nil {
-				return err
-			}
+		brand, berr := brandWrite(ctx, tx, a, nil)
+		if berr != nil {
+			return berr
 		}
 		filters, _ := json.Marshal(v.Filters)
 		if err := tx.QueryRow(ctx, `
-			INSERT INTO lead_lists (workspace_id, name, description, project_id, kind, search_integration_id, filters,
+			INSERT INTO lead_lists (workspace_id, name, description, kind, search_integration_id, filters,
 				enrich_integration_ids, max_leads, credit_cap, verify, verified_emails_only, skip_contacted_days,
 				skip_in_sequences, min_score, refresh_every_days, next_refresh_at, created_by, brand_id, profile_id)
-			VALUES ($1, $2, $3, $4, $5, $6, $7, $8::uuid[], $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20)
+			VALUES ($1, $2, $3, $4, $5, $6, $7::uuid[], $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)
 			RETURNING id`,
-			a.WorkspaceID, v.Name, v.Description, v.ProjectID, v.Kind, v.SearchIntegrationID, filters, v.EnrichIntegrationIDs,
+			a.WorkspaceID, v.Name, v.Description, v.Kind, v.SearchIntegrationID, filters, v.EnrichIntegrationIDs,
 			v.MaxLeads, v.CreditCap, v.Verify, v.VerifiedEmailsOnly, v.SkipContactedDays, v.SkipInSequences, v.MinScore,
 			v.RefreshEveryDays, v.NextRefreshAt, nullIfEmpty(a.ActorID), brand, v.ProfileID).Scan(&v.ID); err != nil {
 			return err
 		}
 		if err := record(ctx, tx, &a.principal, a.WorkspaceID, "lead_list.created", "lead_list", v.ID,
-			map[string]any{"name": v.Name, "kind": v.Kind, "project_id": v.ProjectID}); err != nil {
+			map[string]any{"name": v.Name, "kind": v.Kind, "project_id": nil}); err != nil {
 			return err
 		}
 		if !in.Build {
@@ -547,12 +497,12 @@ func (s *Server) updateLeadList(w http.ResponseWriter, r *http.Request) {
 	err := pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
 		filters, _ := json.Marshal(v.Filters)
 		if _, err := tx.Exec(ctx, `
-			UPDATE lead_lists SET name = $3, description = $4, project_id = $5, kind = $6, search_integration_id = $7,
-				filters = $8, enrich_integration_ids = $9::uuid[], max_leads = $10, credit_cap = $11, verify = $12,
-				verified_emails_only = $13, skip_contacted_days = $14, skip_in_sequences = $15, min_score = $16,
-				refresh_every_days = $17, next_refresh_at = $18, profile_id = $19, updated_at = now()
+			UPDATE lead_lists SET name = $3, description = $4, kind = $5, search_integration_id = $6,
+				filters = $7, enrich_integration_ids = $8::uuid[], max_leads = $9, credit_cap = $10, verify = $11,
+				verified_emails_only = $12, skip_contacted_days = $13, skip_in_sequences = $14, min_score = $15,
+				refresh_every_days = $16, next_refresh_at = $17, profile_id = $18, updated_at = now()
 			WHERE workspace_id = $1 AND id = $2`,
-			a.WorkspaceID, v.ID, v.Name, v.Description, v.ProjectID, v.Kind, v.SearchIntegrationID, filters, v.EnrichIntegrationIDs,
+			a.WorkspaceID, v.ID, v.Name, v.Description, v.Kind, v.SearchIntegrationID, filters, v.EnrichIntegrationIDs,
 			v.MaxLeads, v.CreditCap, v.Verify, v.VerifiedEmailsOnly, v.SkipContactedDays, v.SkipInSequences, v.MinScore,
 			v.RefreshEveryDays, v.NextRefreshAt, v.ProfileID); err != nil {
 			return err
@@ -772,7 +722,7 @@ func (s *Server) queueListRun(ctx context.Context, tx pgx.Tx, a *access, listID,
 	if s.lists == nil {
 		return nil, errInvalid("list building is not set up on this server")
 	}
-	p, project, err := lists.ParamsForList(ctx, tx, a.WorkspaceID, listID)
+	p, err := lists.ParamsForList(ctx, tx, a.WorkspaceID, listID)
 	if err != nil {
 		return nil, err
 	}
@@ -805,7 +755,7 @@ func (s *Server) queueListRun(ctx context.Context, tx pgx.Tx, a *access, listID,
 	default:
 		return nil, errInvalid("kind is build, refresh or enrich")
 	}
-	run, err := lists.Enqueue(ctx, tx, a.WorkspaceID, &listID, project, kind, p, a.ActorID)
+	run, err := lists.Enqueue(ctx, tx, a.WorkspaceID, &listID, kind, p, a.ActorID)
 	if err != nil {
 		return nil, err
 	}
@@ -943,17 +893,15 @@ func (s *Server) previewLeadList(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		SearchIntegrationID string                  `json:"search_integration_id"`
 		Filters             connectors.PeopleFilter `json:"filters"`
-		ProjectID           *string                 `json:"project_id"`
-		ProfileID           *string                 `json:"profile_id"`
+		// Ignored: projects were removed.
+		ProjectID *string `json:"project_id"`
+		ProfileID *string `json:"profile_id"`
 	}
 	if !decode(w, r, &req) {
 		return
 	}
 	ctx := r.Context()
 	in := listInput{SearchIntegrationID: optional[string]{Set: true, Value: &req.SearchIntegrationID}, Filters: &req.Filters}
-	if req.ProjectID != nil && a.ProjectID == nil {
-		in.ProjectID = optional[string]{Set: true, Value: req.ProjectID}
-	}
 	if req.ProfileID != nil {
 		in.ProfileID = optional[string]{Set: true, Value: req.ProfileID}
 	}
@@ -971,10 +919,9 @@ func (s *Server) previewLeadList(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var icp connectors.PeopleFilter
-	if v.ProfileID != nil || v.ProjectID != nil {
+	if v.ProfileID != nil {
 		var raw []byte
-		if err := s.pool.QueryRow(ctx, `SELECT COALESCE((SELECT filters FROM ideal_customer_profiles WHERE id = $1), (SELECT icp FROM projects WHERE id = $2), '{}')`,
-			v.ProfileID, v.ProjectID).Scan(&raw); err == nil {
+		if err := s.pool.QueryRow(ctx, `SELECT filters FROM ideal_customer_profiles WHERE id = $1`, *v.ProfileID).Scan(&raw); err == nil {
 			_ = json.Unmarshal(raw, &icp)
 		}
 	}
@@ -982,7 +929,7 @@ func (s *Server) previewLeadList(w http.ResponseWriter, r *http.Request) {
 	var run lists.Run
 	err := pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
 		var err error
-		run, err = lists.Enqueue(ctx, tx, a.WorkspaceID, nil, v.ProjectID, lists.KindPreview, p, a.ActorID)
+		run, err = lists.Enqueue(ctx, tx, a.WorkspaceID, nil, lists.KindPreview, p, a.ActorID)
 		return err
 	})
 	if err != nil {

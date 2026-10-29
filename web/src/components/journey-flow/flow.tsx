@@ -13,6 +13,7 @@ import "@xyflow/react/dist/base.css";
 import { CircleAlert, Clock, GitBranch, LogOut, Mail, Minus, Plus, Puzzle, TriangleAlert, Zap, type LucideIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { errorLink, kindOf, linkOf, outputLabel, outputs, type Problem, type Slot, type Step, type StepKind } from "./model";
+import type { TestMark, TestMarks } from "./test-mode";
 
 const W = 260;
 const H = { trigger: 128, step: 88, end: 30 };
@@ -40,15 +41,20 @@ type FlowProps = {
   onOpenTrigger: () => void;
   // When set, the flow can be edited: a "+" on each link adds a step there.
   onAdd?: (slot: Slot) => void;
+  // A test run: its path lights up and everything else fades.
+  test?: TestMarks | null;
 };
 
-type TriggerData = { content: ReactNode; open: () => void };
-type StepData = { step: Step; kindLabel: string; card: StepCard; selected: boolean; open: () => void };
+type TriggerData = { content: ReactNode; open: () => void; lit?: boolean };
+type StepData = { step: Step; kindLabel: string; card: StepCard; selected: boolean; open: () => void; mark?: TestMark; dim?: boolean };
 type EndData = { add?: () => void };
-type SlotData = { label: string; add?: () => void; first?: boolean; error?: boolean };
+type SlotData = { label: string; add?: () => void; first?: boolean; error?: boolean; lit?: boolean; dim?: boolean };
 
 function layout(props: FlowProps): { nodes: Node[]; edges: Edge<SlotData>[]; width: number; height: number } {
-  const { steps, kinds, onAdd } = props;
+  const { steps, kinds, test } = props;
+  // Testing shows the flow as it is: no "+" to add steps.
+  const onAdd = test ? undefined : props.onAdd;
+  const way = (from: string, field: string) => (test ? { lit: test.links.has(`${from}>${field}`), dim: !test.links.has(`${from}>${field}`) } : {});
   const g = new dagre.graphlib.Graph();
   g.setGraph({ rankdir: "TB", nodesep: 36, ranksep: 56, marginx: 16, marginy: 16 });
   g.setDefaultEdgeLabel(() => ({}));
@@ -63,10 +69,10 @@ function layout(props: FlowProps): { nodes: Node[]; edges: Edge<SlotData>[]; wid
   };
   const link = (from: string, to: string, slot: Slot, label: string) => {
     g.setEdge(from, to);
-    edges.push({ id: `${from}>${slot.field}>${to}`, source: from, target: to, type: "slot", data: { label, add: onAdd ? () => onAdd(slot) : undefined, first: to === "end:start" && !!onAdd } });
+    edges.push({ id: `${from}>${slot.field}>${to}`, source: from, target: to, type: "slot", data: { label, add: onAdd ? () => onAdd(slot) : undefined, first: to === "end:start" && !!onAdd, ...way(from, slot.field) } });
   };
   g.setNode("trigger", { width: W + 40, height: H.trigger });
-  nodes.push({ id: "trigger", type: "trigger", position: { x: 0, y: 0 }, data: { content: props.trigger, open: props.onOpenTrigger } satisfies TriggerData });
+  nodes.push({ id: "trigger", type: "trigger", position: { x: 0, y: 0 }, data: { content: props.trigger, open: props.onOpenTrigger, lit: !!test } satisfies TriggerData });
   // An empty journey shows one big button for its first step.
   const first: Slot = { from: null, field: "next" };
   link("trigger", steps.length ? steps[0].id : end("start", onAdd && (() => onAdd(first))), first, "");
@@ -74,7 +80,8 @@ function layout(props: FlowProps): { nodes: Node[]; edges: Edge<SlotData>[]; wid
     g.setNode(s.id, { width: W, height: H.step });
     nodes.push({
       id: s.id, type: "step", position: { x: 0, y: 0 },
-      data: { step: s, kindLabel: kindOf(kinds, s.kind)?.label ?? s.kind, card: props.card(s), selected: props.selected === s.id, open: () => props.onOpen(s.id) } satisfies StepData,
+      data: { step: s, kindLabel: kindOf(kinds, s.kind)?.label ?? s.kind, card: props.card(s), selected: props.selected === s.id, open: () => props.onOpen(s.id),
+        mark: test?.steps.get(s.id), dim: !!test && !test.steps.has(s.id) } satisfies StepData,
     });
   }
   for (const s of steps) {
@@ -86,7 +93,7 @@ function layout(props: FlowProps): { nodes: Node[]; edges: Edge<SlotData>[]; wid
     const err = errorLink(kinds, s);
     if (err && ids.has(err)) {
       g.setEdge(s.id, err);
-      edges.push({ id: `${s.id}>error>${err}`, source: s.id, target: err, type: "slot", data: { label: "On error", error: true } });
+      edges.push({ id: `${s.id}>error>${err}`, source: s.id, target: err, type: "slot", data: { label: "On error", error: true, ...way(s.id, "error") } });
     }
   }
   dagre.layout(g);
@@ -131,7 +138,8 @@ function TriggerNode({ data }: NodeProps<Node<TriggerData>>) {
     <div className="h-full w-full">
       {/* A div, not a button: the card holds links of its own (its rule). */}
       <div role="button" tabIndex={0} onClick={data.open} onKeyDown={(e) => (e.key === "Enter" || e.key === " ") && e.target === e.currentTarget && (e.preventDefault(), data.open())}
-        className="flex h-full w-full cursor-pointer flex-col gap-1 overflow-hidden rounded-lg border-2 border-primary/50 bg-card p-3 text-left text-[12px] shadow-sm hover:border-primary">
+        className={cn("flex h-full w-full cursor-pointer flex-col gap-1 overflow-hidden rounded-lg border-2 border-primary/50 bg-card p-3 text-left text-[12px] shadow-sm hover:border-primary",
+          data.lit && "border-violet-500/70 hover:border-violet-500")}>
         <span className="flex items-center gap-1.5 text-[11px] font-medium tracking-wide text-muted-foreground uppercase"><Zap className="size-3.5" />Trigger</span>
         {data.content}
       </div>
@@ -141,7 +149,7 @@ function TriggerNode({ data }: NodeProps<Node<TriggerData>>) {
 }
 
 function StepNode({ data }: NodeProps<Node<StepData>>) {
-  const { step, card } = data;
+  const { step, card, mark } = data;
   const Icon = iconFor(step.kind);
   const errors = card.problems.filter((p) => p.level === "error");
   const warnings = card.problems.filter((p) => p.level === "warning");
@@ -152,20 +160,26 @@ function StepNode({ data }: NodeProps<Node<StepData>>) {
         className={cn(
           "flex h-full w-full flex-col gap-0.5 overflow-hidden rounded-lg border bg-card px-3 py-2 text-left shadow-sm transition-colors hover:border-ring",
           data.selected && "border-ring ring-2 ring-ring/40",
+          mark && "border-violet-500 ring-2 ring-violet-500/30",
+          data.dim && "opacity-40",
           errors.length > 0 && "border-red-500/70 dark:border-red-500/60",
           !errors.length && warnings.length > 0 && "border-amber-500/70",
         )}>
         <span className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
           <Icon className="size-3.5 shrink-0" />
           <span className="truncate">{data.kindLabel}</span>
-          {card.here > 0 && <span className="ml-auto shrink-0 rounded-full bg-blue-500/15 px-1.5 text-[11px] font-medium text-blue-700 dark:text-blue-300" title="On this step now">{card.here} here</span>}
+          {mark && <span className="ml-auto flex size-4 shrink-0 items-center justify-center rounded-full bg-violet-600 text-[10px] font-semibold text-white tabular-nums" title={`Step ${mark.n} of the test`}>{mark.n}</span>}
+          {!mark && !data.dim && card.here > 0 && <span className="ml-auto shrink-0 rounded-full bg-blue-500/15 px-1.5 text-[11px] font-medium text-blue-700 dark:text-blue-300" title="On this step now">{card.here} here</span>}
           {errors.length > 0 ? (
-            <CircleAlert className={cn("size-3.5 shrink-0 text-red-600 dark:text-red-400", !card.here && "ml-auto")} aria-label={`${errors.length} problem${errors.length === 1 ? "" : "s"}`} />
-          ) : warnings.length > 0 && <TriangleAlert className={cn("size-3.5 shrink-0 text-amber-600 dark:text-amber-400", !card.here && "ml-auto")} aria-label="A warning" />}
+            <CircleAlert className={cn("size-3.5 shrink-0 text-red-600 dark:text-red-400", !card.here && !mark && "ml-auto")} aria-label={`${errors.length} problem${errors.length === 1 ? "" : "s"}`} />
+          ) : warnings.length > 0 && <TriangleAlert className={cn("size-3.5 shrink-0 text-amber-600 dark:text-amber-400", !card.here && !mark && "ml-auto")} aria-label="A warning" />}
         </span>
         <span className="truncate text-[13px] font-medium">{card.label}</span>
-        {card.detail && <span className="truncate text-[12px] text-muted-foreground">{card.detail}</span>}
-        {card.numbers.length > 0 && (
+        {/* Under test, the card says what the step would do instead. */}
+        {card.detail && !mark && <span className="truncate text-[12px] text-muted-foreground">{card.detail}</span>}
+        {mark ? (
+          <span className={cn("mt-auto truncate text-[11px] font-medium text-violet-700 dark:text-violet-300", mark.tone === "red" && "text-red-600 dark:text-red-400", mark.tone === "amber" && "text-amber-700 dark:text-amber-400")} title={mark.text}>{mark.text}</span>
+        ) : !data.dim && card.numbers.length > 0 && (
           <span className="mt-auto truncate text-[11px] text-muted-foreground tabular-nums">
             {card.numbers.map((n, i) => (
               <span key={i} className={cn(n.tone === "red" && "text-red-600 dark:text-red-400", n.tone === "amber" && "text-amber-700 dark:text-amber-400")}>{i > 0 && " · "}{n.text}</span>
@@ -204,10 +218,10 @@ function SlotEdge({ id, sourceX, sourceY, targetX, targetY, sourcePosition, targ
   const [path, x, y] = getSmoothStepPath({ sourceX, sourceY, targetX, targetY, sourcePosition, targetPosition, borderRadius: 10, offset: 18 });
   return (
     <>
-      <BaseEdge id={id} path={path} style={data?.error ? { strokeDasharray: "5 4", stroke: "#dc2626" } : undefined} />
+      <BaseEdge id={id} path={path} style={{ ...(data?.error ? { strokeDasharray: "5 4", stroke: "#dc2626" } : {}), ...(data?.lit ? { stroke: "#7c3aed", strokeWidth: 2.5 } : {}), ...(data?.dim ? { opacity: 0.3 } : {}) }} />
       <EdgeLabelRenderer>
         <div className="nodrag nopan pointer-events-auto absolute flex items-center gap-1" style={{ transform: `translate(-50%, -50%) translate(${x}px, ${y}px)` }}>
-          {data?.label && <span className="rounded bg-muted px-1.5 text-[11px] font-medium text-muted-foreground">{data.label}</span>}
+          {data?.label && <span className={cn("rounded bg-muted px-1.5 text-[11px] font-medium text-muted-foreground", data.lit && "bg-violet-600 text-white", data.dim && "opacity-40")}>{data.label}</span>}
           {data?.add && edgeHasRoom(data) && (
             <button type="button" onClick={data.add} aria-label={data.label ? `Add a step on ${data.label}` : "Add a step here"}
               className="flex size-5 items-center justify-center rounded-full border bg-background text-muted-foreground shadow-xs hover:border-ring hover:text-foreground">
@@ -271,7 +285,7 @@ export function Flow(props: FlowProps) {
           {props.steps.length > 6 && (
             <MiniMap pannable zoomable position="bottom-left" className="!m-2 hidden !rounded-md !border !bg-background sm:block" style={{ width: 140, height: 100 }}
               maskColor="color-mix(in oklch, var(--muted) 70%, transparent)"
-              nodeColor={(n) => n.type === "step" ? ((n.data as StepData).card.problems.some((p) => p.level === "error") ? "#dc2626" : (n.data as StepData).card.here ? "#2a78d6" : "#a1a1aa") : n.type === "trigger" ? "#71717a" : "transparent"} />
+              nodeColor={(n) => n.type === "step" ? ((n.data as StepData).mark ? "#7c3aed" : (n.data as StepData).card.problems.some((p) => p.level === "error") ? "#dc2626" : (n.data as StepData).card.here ? "#2a78d6" : "#a1a1aa") : n.type === "trigger" ? "#71717a" : "transparent"} />
           )}
         </ReactFlow>
       </ReactFlowProvider>

@@ -26,6 +26,8 @@ func (s *Server) routesTracking(mux *http.ServeMux) {
 	mux.HandleFunc("DELETE /v1/workspaces/{ws}/tracking-domains/{id}", s.inWorkspace(manage, s.removeTrackingDomain))
 	// Click links in emails. Public: the link id is the authority.
 	mux.HandleFunc("GET /c/{id}", s.click)
+	// Campaign redirect links. Public: the code is the authority.
+	mux.HandleFunc("GET /l/{code}", s.redirect)
 }
 
 // trackingDomainView is a tracking domain with its one-click DNS: the

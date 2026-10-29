@@ -43,7 +43,7 @@ func (c *runner) logs(ctx context.Context, args []string) int {
 		}
 	}
 	filter := url.Values{}
-	for _, k := range []string{"level", "status", "surface", "method", "operation", "error-code", "mcp-tool", "request-id", "mission-id", "project-id", "brand", "q", "since"} {
+	for _, k := range []string{"level", "status", "surface", "method", "operation", "error-code", "mcp-tool", "request-id", "mission-id", "brand", "q", "since"} {
 		if v := fl.take(k); v != "" {
 			filter.Set(strings.ReplaceAll(k, "-", "_"), v)
 		}
@@ -184,7 +184,6 @@ Flags:
   --mcp-tool NAME    calls an MCP tool made
   --request-id ID    one call
   --mission-id ID    calls made in a mission
-  --project-id ID    calls about a project
   --brand HANDLE     calls about a brand
   --q TEXT           text in the path, operation, error code or request id
   --since 1h         only calls since then (15m, 24h, 7d or a timestamp)

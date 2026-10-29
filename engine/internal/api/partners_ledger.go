@@ -225,6 +225,13 @@ func (s *Server) rewardChange(w http.ResponseWriter, r *http.Request, change fun
 		if err != nil {
 			return err
 		}
+		brand, err := partnerProgramBrand(ctx, tx, a.WorkspaceID, v.ProgramID)
+		if err != nil {
+			return err
+		}
+		if err := partnerBrandAccess(r, a, brand); err != nil {
+			return err
+		}
 		if err := change(ctx, tx, a, v); err != nil {
 			return err
 		}
@@ -367,6 +374,7 @@ func (s *Server) addLedgerEntry(w http.ResponseWriter, r *http.Request, kind str
 type partnerPayoutView struct {
 	ID          string     `json:"id"`
 	PartnerID   string     `json:"partner_id"`
+	PartnerName string     `json:"partner_name"`
 	ProgramID   string     `json:"program_id"`
 	AmountCents int64      `json:"amount_cents"`
 	Currency    string     `json:"currency"`
@@ -378,14 +386,15 @@ type partnerPayoutView struct {
 	CreatedAt   time.Time  `json:"created_at"`
 }
 
-const partnerPayoutSelect = `SELECT o.id::text, o.membership_id::text, m.program_id::text, o.amount_cents, o.currency, o.status, o.note, o.reference,
+const partnerPayoutSelect = `SELECT o.id::text, o.membership_id::text, COALESCE(NULLIF(r.name, ''), m.code), m.program_id::text, o.amount_cents, o.currency, o.status, o.note, o.reference,
 	(SELECT count(*) FROM partner_rewards w WHERE w.payout_id = o.id)::int, o.paid_at, o.created_at
-	FROM partner_payouts o JOIN partner_memberships m ON m.id = o.membership_id JOIN partner_programs p ON p.id = m.program_id`
+	FROM partner_payouts o JOIN partner_memberships m ON m.id = o.membership_id JOIN partner_programs p ON p.id = m.program_id
+	LEFT JOIN records r ON r.id = m.record_id`
 
 func (s *Server) listPartnerPayouts(w http.ResponseWriter, r *http.Request) {
 	a := accessFrom(r.Context())
 	q := r.URL.Query()
-	status, partner := q.Get("status"), q.Get("partner_id")
+	status, partner, program := q.Get("status"), q.Get("partner_id"), strings.ToLower(q.Get("program"))
 	if status != "" && !slices.Contains([]string{"due", "paid", "canceled"}, status) {
 		writeError(w, r, http.StatusBadRequest, "invalid_request", "status is due, paid or canceled")
 		return
@@ -406,9 +415,10 @@ func (s *Server) listPartnerPayouts(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	args := []any{a.WorkspaceID, status, partner, before, limit + 1}
+	args := []any{a.WorkspaceID, status, partner, before, limit + 1, program}
 	rows, err := s.pool.Query(r.Context(), partnerPayoutSelect+` WHERE o.workspace_id = $1 AND ($2 = '' OR o.status = $2)
-		AND ($3 = '' OR o.membership_id::text = $3) AND ($4::timestamptz IS NULL OR o.created_at < $4)`+sel.sql("p.brand_id", &args)+` ORDER BY o.created_at DESC LIMIT $5`,
+		AND ($3 = '' OR o.membership_id::text = $3) AND ($4::timestamptz IS NULL OR o.created_at < $4)
+		AND ($6 = '' OR p.id::text = $6 OR p.slug = $6)`+sel.sql("p.brand_id", &args)+` ORDER BY o.created_at DESC LIMIT $5`,
 		args...)
 	if err != nil {
 		s.internal(w, r, err)
@@ -455,7 +465,8 @@ func (s *Server) createPartnerPayouts(w http.ResponseWriter, r *http.Request) {
 			FROM partner_rewards w JOIN partner_memberships m ON m.id = w.membership_id JOIN partner_programs p ON p.id = m.program_id
 			WHERE w.workspace_id = $1 AND w.status = 'approved' AND w.payout_id IS NULL AND w.side = 'partner' AND w.kind <> 'action'
 			  AND ($2 = '' OR m.id::text = $2) AND ($3 = '' OR p.id::text = lower($3) OR p.slug = lower($3))
-			GROUP BY m.id, p.id ORDER BY m.id`, a.WorkspaceID, in.PartnerID, in.Program)
+			  AND ($4::uuid[] IS NULL OR p.brand_id = ANY($4))
+			GROUP BY m.id, p.id ORDER BY m.id`, a.WorkspaceID, in.PartnerID, in.Program, a.Brands)
 		if err != nil {
 			return err
 		}
@@ -539,6 +550,13 @@ func (s *Server) payoutChange(w http.ResponseWriter, r *http.Request, change fun
 			return errNotFound
 		}
 		if err != nil {
+			return err
+		}
+		brand, err := partnerProgramBrand(ctx, tx, a.WorkspaceID, v.ProgramID)
+		if err != nil {
+			return err
+		}
+		if err := partnerBrandAccess(r, a, brand); err != nil {
 			return err
 		}
 		if v.Status != "due" {

@@ -88,6 +88,8 @@ var Cookies = []Cookie{
 	{"_fbp", "fbp", "meta"},
 	{"_fbc", "fbc", "meta"},
 	{"_gcl_aw", "gcl_aw", "google"},
+	{"_ttp", "ttp", "tiktok"},
+	{"_scid", "scid", "snapchat"},
 }
 
 // IsCookie reports whether key is a Cookies key.
@@ -110,8 +112,9 @@ var AdParams = []struct{ Param, Key string }{
 }
 
 // unfilled matches a macro the network left as it was: {campaignid},
-// {{ad.id}}, __CID__ or [section_id].
-var unfilled = regexp.MustCompile(`\{[^}]*\}|^__[A-Z0-9_]+__$|^\[[a-z_]+\]$`)
+// {{ad.id}}, __CID__, [section_id], or LinkedIn's CAMPAIGN_ID typed in
+// as text instead of chosen as a dynamic value.
+var unfilled = regexp.MustCompile(`\{[^}]*\}|^__[A-Z0-9_]+__$|^\[[a-z_]+\]$|^(ACCOUNT|CAMPAIGN_GROUP|CAMPAIGN|CREATIVE)_(ID|NAME)$`)
 
 // CleanAd keeps the known ad keys with filled-in values, each up to 200
 // characters, and reports how many were left unfilled by the network.
@@ -173,36 +176,53 @@ var Networks = []Network{
 	{ID: "meta", Label: "Meta Ads", Connector: "meta_ads", Field: "URL parameters (ad)",
 		Macros: Macros{CampaignID: "{{campaign.id}}", CampaignName: "{{campaign.name}}", AdSetID: "{{adset.id}}", AdID: "{{ad.id}}", AdName: "{{ad.name}}", Placement: "{{placement}}"},
 		Note:   "Meta adds fbclid itself. With consent, site.js also reads the Meta pixel's _fbp and _fbc cookies."},
+	// Microsoft's help ("What tracking or URL parameters can I use?") and
+	// its URL tracking guide give {CampaignId}, {Campaign}, {AdGroupId} and
+	// {AdId}. {Network} is from Adobe's Microsoft docs only; the unfilled
+	// macros alert shows it if Microsoft doesn't fill it in.
 	{ID: "microsoft", Label: "Microsoft Advertising", Connector: "microsoft_ads", Field: "Final URL suffix (account, campaign or ad group)",
 		Macros: Macros{CampaignID: "{CampaignId}", CampaignName: "{Campaign}", AdSetID: "{AdGroupId}", AdID: "{AdId}", Placement: "{Network}", Keyword: "{keyword}"},
 		Note:   "Keep auto-tagging of the click id on: Microsoft adds msclkid itself."},
-	{ID: "linkedin", Label: "LinkedIn Ads", Connector: "linkedin_ads", Field: "URL parameters (campaign, under dynamic UTMs)",
-		Macros: Macros{CampaignID: "{{CAMPAIGN_ID}}", CampaignName: "{{CAMPAIGN_NAME}}", AdID: "{{CREATIVE_ID}}"},
-		Note:   "LinkedIn adds li_fat_id when the Insight Tag's enhanced conversion tracking is on."},
+	// LinkedIn's dynamic UTM tracking (Microsoft Learn, LinkedIn Marketing
+	// API) sets each parameter on the campaign to a dynamic value named
+	// CAMPAIGN_ID, CAMPAIGN_NAME, CREATIVE_ID and so on, without braces.
+	{ID: "linkedin", Label: "LinkedIn Ads", Connector: "linkedin_ads", Field: "URL parameters (campaign): add each parameter with the dynamic value named after its =",
+		Macros: Macros{CampaignID: "CAMPAIGN_ID", CampaignName: "CAMPAIGN_NAME", AdID: "CREATIVE_ID"},
+		Note:   "Choose CAMPAIGN_ID, CAMPAIGN_NAME and CREATIVE_ID as dynamic values rather than typing them. LinkedIn adds li_fat_id when the Insight Tag's enhanced conversion tracking is on."},
+	// Reddit's help lists these macros for app install measurement; whether
+	// a website ad's URL fills them isn't confirmed in its docs. The
+	// unfilled macros alert shows it if not.
 	{ID: "reddit", Label: "Reddit Ads", Connector: "reddit_ads", Field: "URL parameters (ad)",
 		Macros: Macros{CampaignID: "{{CAMPAIGN_ID}}", CampaignName: "{{CAMPAIGN_NAME}}", AdSetID: "{{ADGROUP_ID}}", AdID: "{{AD_ID}}", AdName: "{{AD_NAME}}"},
 		Note:   "Reddit adds rdt_cid itself. It doesn't let you change an ad's URL parameters once the ad is live."},
 	{ID: "x", Label: "X Ads", Connector: "x_ads", Field: "Website URL (ad)",
 		Note: "X adds twclid itself and has no macros for its ids, so add a campaign name to each ad's link."},
-	{ID: "tiktok", Label: "TikTok Ads", Field: "URL parameters (ad, under tracking)",
+	{ID: "tiktok", Label: "TikTok Ads", Connector: "tiktok_ads", Field: "URL parameters (ad, under tracking)",
 		Macros: Macros{CampaignID: "__CAMPAIGN_ID__", CampaignName: "__CAMPAIGN_NAME__", AdSetID: "__AID__", AdID: "__CID__", AdName: "__CID_NAME__", Placement: "__PLACEMENT__"},
 		Note:   "TikTok adds ttclid itself."},
-	{ID: "snapchat", Label: "Snapchat Ads", Field: "URL parameters (ad)",
+	{ID: "snapchat", Label: "Snapchat Ads", Connector: "snapchat_ads", Field: "URL parameters (ad)",
 		Macros: Macros{CampaignID: "{{campaign.id}}", CampaignName: "{{campaign.name}}", AdSetID: "{{adSet.id}}", AdID: "{{ad.id}}"},
 		Note:   "Snapchat adds ScCid itself."},
-	{ID: "pinterest", Label: "Pinterest Ads", Field: "Destination URL (ad)",
+	{ID: "pinterest", Label: "Pinterest Ads", Connector: "pinterest_ads", Field: "Destination URL (ad)",
 		Macros: Macros{CampaignID: "{campaignid}", AdSetID: "{adgroupid}", AdID: "{adid}", Keyword: "{keyword}"},
 		Note:   "Pinterest adds epik itself."},
-	{ID: "taboola", Label: "Taboola", Field: "Tracking code (campaign)",
-		Macros: Macros{CampaignID: "{campaign_id}", CampaignName: "{campaign_name}", AdID: "{campaign_item_id}", Placement: "{site_id}", ClickID: "{click_id}"},
-		Note:   "Paste it without a leading ? or &: Taboola adds one."},
-	{ID: "outbrain", Label: "Outbrain", Field: "Tracking code (campaign)",
-		Macros: Macros{CampaignID: "{{campaign_id}}", AdID: "{{ad_id}}", Placement: "{{section_id}}", ClickID: "{{ob_click_id}}"}},
-	{ID: "quora", Label: "Quora Ads", Field: "URL (ad)",
-		Note: "Quora adds qclid itself and has no macros for its ids, so add a campaign name to each ad's link."},
-	{ID: "apple_search_ads", Label: "Apple Search Ads",
-		Note: "Apple Search Ads run in the App Store and send people to your app, not your website. Installs are measured in the app, through Apple's AdServices framework."},
-	{ID: "amazon_ads", Label: "Amazon Ads", Field: "Click-through URL (ad)",
+	// Taboola's "Creating and Adding URL Parameters for Tracking" lists the
+	// macros; its S2S guide says it appends tblci={click_id} to every ad
+	// URL itself, so the template doesn't repeat it.
+	{ID: "taboola", Label: "Taboola", Connector: "taboola_ads", Field: "Tracking code (campaign)",
+		Macros: Macros{CampaignID: "{campaign_id}", CampaignName: "{campaign_name}", AdID: "{campaign_item_id}", Placement: "{site_id}"},
+		Note:   "Paste it without a leading ? or &: Taboola adds one, and adds tblci itself. Replace the default utm_source=taboola&utm_medium=referral."},
+	// Outbrain's "How do I add UTM tracking to my campaign?" lists every
+	// macro usable in the tracking code, ob_click_id included.
+	{ID: "outbrain", Label: "Outbrain", Connector: "outbrain_ads", Field: "Tracking (campaign)",
+		Macros: Macros{CampaignID: "{{campaign_id}}", CampaignName: "{{campaign_name}}", AdID: "{{ad_id}}", AdName: "{{ad_name}}", Placement: "{{section_id}}", ClickID: "{{ob_click_id}}"}},
+	// Quora's "UTM Parameters" article lists its six dynamic variables.
+	{ID: "quora", Label: "Quora Ads", Field: "Landing page url (ad), after /?",
+		Macros: Macros{CampaignID: "{{campaign.id}}", CampaignName: "{{campaign.name}}", AdSetID: "{{adset.id}}", AdID: "{{ad.id}}", AdName: "{{ad.name}}"},
+		Note:   "Save the ad before checking the preview: {{ad.id}} and {{ad.name}} fill in only once it exists. Quora's click id (qclid) is kept on its side, so it may not reach your page."},
+	{ID: "apple_search_ads", Label: "Apple Ads", Connector: "apple_ads",
+		Note: "Apple Ads (formerly Apple Search Ads) run in the App Store and send people to your app, not your website. Installs are measured in the app, through Apple's AdServices framework."},
+	{ID: "amazon_ads", Label: "Amazon Ads", Connector: "amazon_ads", Field: "Click-through URL (ad)",
 		Note: "Most Amazon ads send people to your Amazon listing. For ads that link to your own site, Amazon has no macros for its ids, so add a campaign name to each ad's link."},
 }
 
@@ -257,4 +277,44 @@ func (n Network) Template() string {
 		add(p, m.ClickID)
 	}
 	return strings.Join(parts, "&")
+}
+
+// Arrival outcomes for a paid landing page, from best to worst: a click id
+// (the network's own proof of the click), only the template's ad ids, or
+// neither, which means the ad's link has no tracking template and the
+// visit can be credited only by its UTM tags.
+const (
+	ArrivalClickID = "click_id"
+	ArrivalAdIDs   = "ad_ids"
+	ArrivalNone    = "none"
+)
+
+// Arrival says how well a paid landing page was tracked, and on which
+// network (a Networks id, or "other"). ids are the page's click ids, ad
+// how many of the template's ad ids it kept, and source its cleaned
+// utm_source.
+func Arrival(ids map[string]any, ad int, source string) (network, outcome string) {
+	network = "other"
+	if _, ok := NetworkOf(source); ok {
+		network = source
+	}
+	for _, c := range ClickIDs {
+		if network == "other" && c.Source == source {
+			if _, ok := NetworkOf(c.Network); ok {
+				network = c.Network
+			}
+		}
+	}
+	for _, c := range ClickIDs {
+		if v, _ := ids[c.Param].(string); v != "" {
+			if _, ok := NetworkOf(c.Network); ok {
+				network = c.Network
+			}
+			return network, ArrivalClickID
+		}
+	}
+	if ad > 0 {
+		return network, ArrivalAdIDs
+	}
+	return network, ArrivalNone
 }

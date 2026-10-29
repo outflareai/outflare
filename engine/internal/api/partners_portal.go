@@ -193,12 +193,12 @@ func (s *Server) routesPartnerPortal(mux *http.ServeMux) {
 	s.routesPartnerPostbacks(mux)
 	s.routesPartnerImports(mux)
 	read, manage := auth.ScopePartnersRead, auth.ScopePartnersManage
-	mux.HandleFunc("PUT /v1/workspaces/{ws}/partner-programs/{id}/portal", s.inWorkspace(manage, s.setPartnerPortal))
-	mux.HandleFunc("GET /v1/workspaces/{ws}/partner-programs/{id}/assets", s.inWorkspace(read, s.listPartnerAssets))
-	mux.HandleFunc("POST /v1/workspaces/{ws}/partner-programs/{id}/assets", s.inWorkspace(manage, s.createPartnerAsset))
-	mux.HandleFunc("DELETE /v1/workspaces/{ws}/partner-programs/{id}/assets/{asset}", s.inWorkspace(manage, s.deletePartnerAsset))
-	mux.HandleFunc("POST /v1/workspaces/{ws}/partners/{id}/impersonate", s.inWorkspace(manage, s.impersonatePartner))
-	mux.HandleFunc("POST /v1/workspaces/{ws}/partner-programs/{id}/widget-sessions", s.inWorkspace(auth.ScopePartnersConversions, s.createWidgetSession))
+	mux.HandleFunc("PUT /v1/workspaces/{ws}/partner-programs/{id}/portal", s.inBrand(manage, s.setPartnerPortal))
+	mux.HandleFunc("GET /v1/workspaces/{ws}/partner-programs/{id}/assets", s.inBrand(read, s.listPartnerAssets))
+	mux.HandleFunc("POST /v1/workspaces/{ws}/partner-programs/{id}/assets", s.inBrand(manage, s.createPartnerAsset))
+	mux.HandleFunc("DELETE /v1/workspaces/{ws}/partner-programs/{id}/assets/{asset}", s.inBrand(manage, s.deletePartnerAsset))
+	mux.HandleFunc("POST /v1/workspaces/{ws}/partners/{id}/impersonate", s.inBrand(manage, s.impersonatePartner))
+	mux.HandleFunc("POST /v1/workspaces/{ws}/partner-programs/{id}/widget-sessions", s.inBrand(auth.ScopePartnersConversions, s.createWidgetSession))
 
 	// The portal itself. Public: the session cookie names the partner.
 	mux.HandleFunc("GET /p/{program}/{$}", s.portalPage)

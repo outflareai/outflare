@@ -420,11 +420,11 @@ func (s *Server) createSEOSite(w http.ResponseWriter, r *http.Request) {
 			if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 				return err
 			}
-			if brand != nil && !a.writes(nil, brand) {
+			if brand != nil && !a.writes(brand) {
 				brand = nil
 			}
 		}
-		brand, err := brandWrite(ctx, tx, a, nil, brand)
+		brand, err := brandWrite(ctx, tx, a, brand)
 		if err != nil {
 			return err
 		}
@@ -488,7 +488,7 @@ func (s *Server) updateSEOSite(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if !a.writes(nil, site.BrandID) {
+	if !a.writes(site.BrandID) {
 		writeError(w, r, http.StatusForbidden, "forbidden", string(errSharedRecord))
 		return
 	}
@@ -517,7 +517,7 @@ func (s *Server) updateSEOSite(w http.ResponseWriter, r *http.Request) {
 			if err != nil {
 				return err
 			}
-			if b, err = brandWrite(ctx, tx, a, nil, b); err != nil {
+			if b, err = brandWrite(ctx, tx, a, b); err != nil {
 				return err
 			}
 			brand = b
@@ -592,7 +592,7 @@ func (s *Server) deleteSEOSite(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if !a.writes(nil, site.BrandID) {
+	if !a.writes(site.BrandID) {
 		writeError(w, r, http.StatusForbidden, "forbidden", string(errSharedRecord))
 		return
 	}
@@ -625,7 +625,7 @@ func (s *Server) addSEOSiteDNS(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if !a.writes(nil, site.BrandID) {
+	if !a.writes(site.BrandID) {
 		writeError(w, r, http.StatusForbidden, "forbidden", string(errSharedRecord))
 		return
 	}
@@ -638,7 +638,7 @@ func (s *Server) verifySEOSite(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if !a.writes(nil, site.BrandID) {
+	if !a.writes(site.BrandID) {
 		writeError(w, r, http.StatusForbidden, "forbidden", string(errSharedRecord))
 		return
 	}
@@ -693,7 +693,7 @@ func (s *Server) startCrawl(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if !a.writes(nil, site.BrandID) {
+	if !a.writes(site.BrandID) {
 		writeError(w, r, http.StatusForbidden, "forbidden", string(errSharedRecord))
 		return
 	}
@@ -736,7 +736,7 @@ func (s *Server) crawlFor(w http.ResponseWriter, r *http.Request, a *access) (*c
 		var brand *string
 		err := scanCrawlRun(s.pool.QueryRow(r.Context(), `SELECT `+crawlRunCols+`, s.brand_id::text
 			FROM crawl_runs r JOIN seo_sites s ON s.id = r.site_id WHERE r.id = $1 AND r.workspace_id = $2`, id, a.WorkspaceID), &v, &brand)
-		if err == nil && a.sees(nil, brand) {
+		if err == nil && a.sees(brand) {
 			return &v, brand, true
 		}
 		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
@@ -809,7 +809,7 @@ func (s *Server) stopCrawl(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if !a.writes(nil, brand) {
+	if !a.writes(brand) {
 		writeError(w, r, http.StatusForbidden, "forbidden", string(errSharedRecord))
 		return
 	}

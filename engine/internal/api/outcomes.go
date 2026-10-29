@@ -19,7 +19,7 @@ import (
 )
 
 // Outcomes: meetings and deals that outreach produced, what it cost, and
-// cost per reply, meeting and deal by project or sequence.
+// cost per reply, meeting and deal by sequence or brand.
 
 func (s *Server) routesOutcomes(mux *http.ServeMux) {
 	read, manage := auth.ScopeOutcomesRead, auth.ScopeOutcomesManage
@@ -173,7 +173,7 @@ func (s *Server) reportFilter(r *http.Request) (outcomes.ReportFilter, error) {
 		return outcomes.ReportFilter{}, err
 	}
 	f := outcomes.ReportFilter{From: from, To: to, GroupBy: r.URL.Query().Get("group_by"), Currency: r.URL.Query().Get("currency")}
-	for name, dst := range map[string]*string{"project_id": &f.ProjectID, "sequence_id": &f.SequenceID, "mission_id": &f.MissionID} {
+	for name, dst := range map[string]*string{"sequence_id": &f.SequenceID, "mission_id": &f.MissionID} {
 		if *dst, err = idParam(r, name); err != nil {
 			return f, err
 		}
@@ -213,7 +213,7 @@ func (s *Server) listMeetings(w http.ResponseWriter, r *http.Request) {
 		}
 		f.From, f.To = &from, &to
 	}
-	for name, dst := range map[string]*string{"project_id": &f.ProjectID, "sequence_id": &f.SequenceID, "mission_id": &f.MissionID} {
+	for name, dst := range map[string]*string{"sequence_id": &f.SequenceID, "mission_id": &f.MissionID} {
 		if *dst, err = idParam(r, name); s.badQuery(w, r, err) {
 			return
 		}
@@ -297,7 +297,7 @@ func (s *Server) updateMeeting(w http.ResponseWriter, r *http.Request) {
 			return err
 		}
 		return record(r.Context(), tx, &a.principal, a.WorkspaceID, "meeting.updated", "meeting", m.ID,
-			map[string]any{"status": m.Status, "sequence_id": m.SequenceID, "project_id": m.ProjectID, "attribution": m.Attribution})
+			map[string]any{"status": m.Status, "sequence_id": m.SequenceID, "project_id": nil, "attribution": m.Attribution})
 	})
 	if s.outcomeError(w, r, err, "meeting") {
 		return
@@ -338,7 +338,7 @@ func (s *Server) listDeals(w http.ResponseWriter, r *http.Request) {
 		}
 		f.From, f.To = &from, &to
 	}
-	for name, dst := range map[string]*string{"project_id": &f.ProjectID, "sequence_id": &f.SequenceID, "mission_id": &f.MissionID} {
+	for name, dst := range map[string]*string{"sequence_id": &f.SequenceID, "mission_id": &f.MissionID} {
 		if *dst, err = idParam(r, name); s.badQuery(w, r, err) {
 			return
 		}
@@ -422,7 +422,7 @@ func (s *Server) updateDeal(w http.ResponseWriter, r *http.Request) {
 			return err
 		}
 		return record(r.Context(), tx, &a.principal, a.WorkspaceID, "deal.updated", "deal", d.ID,
-			map[string]any{"state": d.State, "amount_cents": d.AmountCents, "sequence_id": d.SequenceID, "project_id": d.ProjectID})
+			map[string]any{"state": d.State, "amount_cents": d.AmountCents, "sequence_id": d.SequenceID, "project_id": nil})
 	})
 	if s.outcomeError(w, r, err, "deal") {
 		return
@@ -462,7 +462,7 @@ func (s *Server) spendFilter(r *http.Request) (outcomes.SpendFilter, error) {
 		}
 		f.From, f.To = &from, &to
 	}
-	for name, dst := range map[string]*string{"project_id": &f.ProjectID, "sequence_id": &f.SequenceID, "mission_id": &f.MissionID} {
+	for name, dst := range map[string]*string{"sequence_id": &f.SequenceID, "mission_id": &f.MissionID} {
 		if *dst, err = idParam(r, name); err != nil {
 			return f, err
 		}
@@ -509,6 +509,7 @@ func (s *Server) getSpend(w http.ResponseWriter, r *http.Request) {
 }
 
 type spendInput struct {
+	// Ignored: projects were removed. Accepted so older clients still work.
 	ProjectID     *string    `json:"project_id"`
 	SequenceID    *string    `json:"sequence_id"`
 	MissionID     *string    `json:"mission_id"`
@@ -532,13 +533,13 @@ func (s *Server) createSpend(w http.ResponseWriter, r *http.Request) {
 	if !decode(w, r, &req) {
 		return
 	}
-	for _, id := range []*string{req.ProjectID, req.SequenceID, req.MissionID, req.MailboxID, req.IntegrationID} {
+	for _, id := range []*string{req.SequenceID, req.MissionID, req.MailboxID, req.IntegrationID} {
 		if id != nil && !validUUID(*id) {
-			writeError(w, r, http.StatusBadRequest, "invalid_request", "project_id, sequence_id, mission_id, mailbox_id and integration_id must be ids")
+			writeError(w, r, http.StatusBadRequest, "invalid_request", "sequence_id, mission_id, mailbox_id and integration_id must be ids")
 			return
 		}
 	}
-	e := outcomes.Entry{WorkspaceID: a.WorkspaceID, ProjectID: req.ProjectID, SequenceID: req.SequenceID, MissionID: req.MissionID,
+	e := outcomes.Entry{WorkspaceID: a.WorkspaceID, SequenceID: req.SequenceID, MissionID: req.MissionID,
 		MailboxID: req.MailboxID, Domain: req.Domain, Category: req.Category, Provider: req.Provider, IntegrationID: req.IntegrationID,
 		Units: req.Units, UnitName: req.UnitName, AmountCents: req.AmountCents, Currency: req.Currency, Ref: req.Ref, Note: req.Note,
 		Source: outcomes.SourceManual, ActorID: &a.ActorID}
@@ -814,7 +815,7 @@ func (s *Server) outcomesExport(w http.ResponseWriter, r *http.Request) {
 	switch dataset {
 	case "meetings":
 		header = []string{"id", "starts_at", "booked_at", "status", "qualified", "attendee_email", "lead_id", "sequence_id", "sequence_name",
-			"project_id", "project_name", "attribution", "source", "title"}
+			"attribution", "source", "title"}
 		var before *time.Time
 		for len(objects) < maxRows {
 			page, err := outcomes.ListMeetings(ctx, s.pool, a.WorkspaceID, outcomes.MeetingFilter{From: &from, To: &to, Limit: 500, Before: before})
@@ -829,7 +830,7 @@ func (s *Server) outcomesExport(w http.ResponseWriter, r *http.Request) {
 				}
 				objects = append(objects, m)
 				rows = append(rows, []string{m.ID, tm(&m.StartsAt), tm(&m.BookedAt), m.Status, q, m.AttendeeEmail, str(m.LeadID), str(m.SequenceID),
-					str(m.SequenceName), str(m.ProjectID), str(m.ProjectName), m.Attribution, m.Source, m.Title})
+					str(m.SequenceName), m.Attribution, m.Source, m.Title})
 			}
 			if len(page) < 500 {
 				break
@@ -838,7 +839,7 @@ func (s *Server) outcomesExport(w http.ResponseWriter, r *http.Request) {
 		}
 	case "deals":
 		header = []string{"id", "opened_at", "closed_at", "name", "stage", "state", "amount_cents", "currency", "lead_id", "sequence_id",
-			"sequence_name", "project_id", "project_name", "attribution", "source"}
+			"sequence_name", "attribution", "source"}
 		var before *time.Time
 		for len(objects) < maxRows {
 			page, err := outcomes.ListDeals(ctx, s.pool, a.WorkspaceID, outcomes.DealFilter{From: &from, To: &to, Limit: 500, Before: before})
@@ -849,7 +850,7 @@ func (s *Server) outcomesExport(w http.ResponseWriter, r *http.Request) {
 			for _, d := range page {
 				objects = append(objects, d)
 				rows = append(rows, []string{d.ID, tm(&d.OpenedAt), tm(d.ClosedAt), d.Name, d.Stage, d.State, num(d.AmountCents), d.Currency,
-					str(d.LeadID), str(d.SequenceID), str(d.SequenceName), str(d.ProjectID), str(d.ProjectName), d.Attribution, d.Source})
+					str(d.LeadID), str(d.SequenceID), str(d.SequenceName), d.Attribution, d.Source})
 			}
 			if len(page) < 500 {
 				break
@@ -857,7 +858,7 @@ func (s *Server) outcomesExport(w http.ResponseWriter, r *http.Request) {
 			before = &page[len(page)-1].OpenedAt
 		}
 	case "spend":
-		header = []string{"id", "occurred_at", "category", "provider", "amount_cents", "currency", "units", "unit_name", "project_id",
+		header = []string{"id", "occurred_at", "category", "provider", "amount_cents", "currency", "units", "unit_name",
 			"sequence_id", "mission_id", "mailbox_id", "domain", "source", "ref", "note"}
 		var before *time.Time
 		for len(objects) < maxRows {
@@ -873,7 +874,7 @@ func (s *Server) outcomesExport(w http.ResponseWriter, r *http.Request) {
 				}
 				objects = append(objects, e)
 				rows = append(rows, []string{e.ID, tm(&e.OccurredAt), e.Category, e.Provider, num(e.AmountCents), e.Currency, units, e.UnitName,
-					str(e.ProjectID), str(e.SequenceID), str(e.MissionID), str(e.MailboxID), e.Domain, e.Source, str(e.Ref), e.Note})
+					str(e.SequenceID), str(e.MissionID), str(e.MailboxID), e.Domain, e.Source, str(e.Ref), e.Note})
 			}
 			if len(page) < 1000 {
 				break

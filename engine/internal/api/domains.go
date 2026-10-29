@@ -21,10 +21,10 @@ var errConflict = errors.New("conflict")
 
 func (s *Server) routesDomains(mux *http.ServeMux) {
 	read, manage := auth.ScopeMailboxesRead, auth.ScopeMailboxesManage
-	mux.HandleFunc("GET /v1/workspaces/{ws}/sending-domains", s.inProject(read, s.listDomains))
+	mux.HandleFunc("GET /v1/workspaces/{ws}/sending-domains", s.inBrand(read, s.listDomains))
 	mux.HandleFunc("POST /v1/workspaces/{ws}/sending-domains", s.inWorkspace(manage, s.addDomain))
 	mux.HandleFunc("POST /v1/workspaces/{ws}/sending-domains/check", s.inWorkspace(manage, s.checkAllDomains))
-	mux.HandleFunc("GET /v1/workspaces/{ws}/sending-domains/{domain}", s.inProject(read, s.getDomain))
+	mux.HandleFunc("GET /v1/workspaces/{ws}/sending-domains/{domain}", s.inBrand(read, s.getDomain))
 	mux.HandleFunc("PATCH /v1/workspaces/{ws}/sending-domains/{domain}", s.inWorkspace(manage, s.updateDomain))
 	mux.HandleFunc("DELETE /v1/workspaces/{ws}/sending-domains/{domain}", s.inWorkspace(manage, s.deleteDomain))
 	mux.HandleFunc("POST /v1/workspaces/{ws}/sending-domains/{domain}/check", s.inWorkspace(manage, s.checkDomain))
@@ -45,7 +45,6 @@ type domainView struct {
 	Status        string              `json:"status"`
 	DailyLimit    *int                `json:"daily_limit"`
 	Notes         string              `json:"notes"`
-	ProjectID     *string             `json:"project_id"`
 	BrandID       *string             `json:"brand_id"`
 	Source        string              `json:"source"`
 	Health        string              `json:"health"`
@@ -139,7 +138,7 @@ const domainSelect = `
 		WHERE m.workspace_id = $1 AND ($2::text IS NULL OR m.domain = $2)
 		GROUP BY m.domain
 	)
-	SELECT d.domain, d.status, d.daily_limit, d.notes, d.project_id::text, d.brand_id::text, d.source, d.mx_provider, mb.host, d.mx_hosts,
+	SELECT d.domain, d.status, d.daily_limit, d.notes, d.brand_id::text, d.source, d.mx_provider, mb.host, d.mx_hosts,
 	       d.spf, d.spf_record, d.dkim, d.dkim_selector, d.dmarc, d.dmarc_record, d.dmarc_policy, d.blocklists,
 	       d.checked_at, d.created_at, d.updated_at,
 	       COALESCE(mb.total, 0), COALESCE(mb.active, 0), COALESCE(mb.error, 0), COALESCE(mb.paused, 0),
@@ -163,7 +162,7 @@ func (s *Server) queryDomains(ctx context.Context, ws string, domain *string) ([
 		var v domainView
 		var lists []byte
 		c := &v.MailboxCounts
-		err := r.Scan(&v.Domain, &v.Status, &v.DailyLimit, &v.Notes, &v.ProjectID, &v.BrandID, &v.Source, &v.MXProvider, &v.MailHost, &v.MXHosts,
+		err := r.Scan(&v.Domain, &v.Status, &v.DailyLimit, &v.Notes, &v.BrandID, &v.Source, &v.MXProvider, &v.MailHost, &v.MXHosts,
 			&v.SPF, &v.SPFRecord, &v.DKIM, &v.DKIMSelector, &v.DMARC, &v.DMARCRecord, &v.DMARCPolicy, &lists,
 			&v.CheckedAt, &v.CreatedAt, &v.UpdatedAt,
 			&v.Mailboxes, &c.Active, &c.Error, &c.Paused, &c.Verifying, &v.DailyCapacity,
@@ -208,10 +207,6 @@ func (s *Server) queryDomains(ctx context.Context, ws string, domain *string) ([
 
 func (s *Server) listDomains(w http.ResponseWriter, r *http.Request) {
 	a := accessFrom(r.Context())
-	project, ok := projectFilter(w, r)
-	if !ok {
-		return
-	}
 	brand, ok := s.brandFilter(w, r)
 	if !ok {
 		return
@@ -220,14 +215,6 @@ func (s *Server) listDomains(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		s.internal(w, r, err)
 		return
-	}
-	if project != "" {
-		list = slices.DeleteFunc(list, func(d domainView) bool {
-			if project == "none" {
-				return d.ProjectID != nil
-			}
-			return d.ProjectID == nil || *d.ProjectID != project
-		})
 	}
 	list = slices.DeleteFunc(list, func(d domainView) bool { return !brand.matches(d.BrandID) })
 	writeJSON(w, http.StatusOK, map[string]any{"data": list})
@@ -298,7 +285,7 @@ func (s *Server) findDomain(w http.ResponseWriter, r *http.Request, ws, domain s
 		s.internal(w, r, err)
 		return nil, false
 	}
-	if len(list) == 0 || !accessFrom(r.Context()).sees(list[0].ProjectID, list[0].BrandID) {
+	if len(list) == 0 || !accessFrom(r.Context()).sees(list[0].BrandID) {
 		writeError(w, r, http.StatusNotFound, "not_found", "domain not found")
 		return nil, false
 	}

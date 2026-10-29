@@ -1,5 +1,5 @@
 id: link-competitor-dead-pages
-version: 1
+version: 2
 title: Take the links to your competitors' dead pages
 summary: When a competitor deletes a page that others link to, show those sites what it said and offer your page instead.
 description: |
@@ -37,8 +37,8 @@ steps:
     tools: [addLinkProspects]
   - say: Check each new prospect's page with OutflareBot (free apart from the AI read) for whether it is up, already links, its broken links, what it is about and who to contact.
     tools: [checkLinkProspects, listLinkProspects]
-  - say: Pick a sequence for the pitches whose first step uses {{custom.opener}}, or draft one (held, nothing sends) if none does.
-    tools: [listLinkSequences, createSequence, previewSequence]
+  - say: Pick a sequence for the pitches whose first step uses {{custom.opener}}, or create the starter sequence (a draft with the opener and one follow-up) if none does.
+    tools: [listLinkSequences, createLinkSequence, previewSequence]
   - say: Start a pitch for each prospect worth asking, to its best contact. The workspace's AI writes an opener about their page, and each pitch waits for a person to approve it.
     tools: [startLinkPitch, listLinkPitches]
   - say: Report what was pitched and, later, what replied, agreed and went live.

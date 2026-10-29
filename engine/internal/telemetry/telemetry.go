@@ -106,7 +106,7 @@ type Counts struct {
 	ActiveSequences string `json:"active_sequences"`
 	Sent24h         string `json:"sent_24h"`
 	Replies24h      string `json:"replies_24h"`
-	Projects        string `json:"projects"`
+	Brands          string `json:"brands"`
 	Missions        string `json:"missions"`
 	APITokens       string `json:"api_tokens"`
 	ActiveUsers7d   string `json:"active_users_7d"`
@@ -220,7 +220,7 @@ func (r *Reporter) Preview(ctx context.Context) (Report, error) {
 			(SELECT count(*) FROM sequences WHERE status = 'active'),
 			(SELECT count(*) FROM messages WHERE status = 'sent' AND created_at > now() - interval '24 hours'),
 			(SELECT count(*) FROM inbound_messages WHERE kind = 'reply' AND received_at > now() - interval '24 hours'),
-			(SELECT count(*) FROM projects),
+			(SELECT count(*) FROM brands),
 			(SELECT count(*) FROM missions),
 			(SELECT count(*) FROM api_tokens WHERE revoked_at IS NULL),
 			(SELECT count(DISTINCT user_id) FROM sessions WHERE last_seen_at > now() - interval '7 days')`,
@@ -232,7 +232,7 @@ func (r *Reporter) Preview(ctx context.Context) (Report, error) {
 	rep.AgeDays = Bucket(int64(time.Since(created).Hours() / 24))
 	c := &rep.Counts
 	for i, dst := range []*string{&c.Users, &c.Workspaces, &c.Mailboxes, &c.ActiveMailboxes, &c.Leads, &c.ActiveSequences,
-		&c.Sent24h, &c.Replies24h, &c.Projects, &c.Missions, &c.APITokens, &c.ActiveUsers7d} {
+		&c.Sent24h, &c.Replies24h, &c.Brands, &c.Missions, &c.APITokens, &c.ActiveUsers7d} {
 		*dst = Bucket(n[i])
 	}
 	// Connector ids only (e.g. "hubspot"), like a plugin directory's active

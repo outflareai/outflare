@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState, type FormEvent, type ReactNode } from "react";
-import type { AnalyticsSiteBrand, Brand, BrandContext, BrandLinkSuggestion, Project, SendingDomain } from "@outflare/sdk";
+import type { AnalyticsSiteBrand, Brand, BrandContext, BrandLinkSuggestion, SendingDomain } from "@outflare/sdk";
 import { api, errorMessage } from "../api";
 import { Badge, Button, Card, Empty, ErrorText, field, Input, Loading, Menu, PageHeader, toast } from "../ui";
 import { DataTable } from "@/components/data-table";
@@ -16,7 +16,7 @@ import { NotInABrand } from "@/components/unassigned";
 // Brands: the businesses one company markets from a single workspace, such
 // as Geonode and Repocket. Connectors, people, tokens and leads stay shared,
 // so nothing is reconnected or re-invited; each brand has its own context,
-// memories, projects and sending setup, and the sidebar narrows every page
+// memories, lists, sequences and sending setup, and the sidebar narrows every page
 // to one brand.
 
 const platformNames: Record<Brand["platforms"][number], string> = {
@@ -429,30 +429,26 @@ function BrandContextCard({ ws, brand: b, canEdit }: { ws: string; brand: Brand;
 }
 
 // Members moves sending domains in and out of the brand; a domain brings its
-// mailboxes. Until projects are removed, a project still moves everything
-// in it, so the ones left are listed too.
+// mailboxes.
 function Members({ ws, brand: b, canEdit, onChanged }: { ws: string; brand: Brand; canEdit: boolean; onChanged: () => void }) {
   const { byId } = useBrand(ws);
-  const [projects, setProjects] = useState<Project[] | null>(null);
   const [domains, setDomains] = useState<SendingDomain[] | null>(null);
   const [busy, setBusy] = useState("");
 
   const load = useCallback(async () => {
     // Every brand's, to move them in and out of this one.
     const all = { params: { path: { ws }, query: { brand: "all" } } };
-    const [p, d] = await Promise.all([api.GET("/v1/workspaces/{ws}/projects", all), api.GET("/v1/workspaces/{ws}/sending-domains", all)]);
-    if (p.data) setProjects(p.data.data);
+    const d = await api.GET("/v1/workspaces/{ws}/sending-domains", all);
     if (d.data) setDomains(d.data.data);
   }, [ws]);
   useEffect(() => void load(), [load]);
 
-  async function move(key: string, on: boolean, body: { project_ids?: string[]; domains?: string[] }) {
+  async function move(key: string, on: boolean, body: { domains?: string[] }) {
     setBusy(key);
     const call = on ? "/v1/workspaces/{ws}/brands/{brand}/add" : "/v1/workspaces/{ws}/brands/{brand}/remove";
     const { data, error } = await api.POST(call, { params: { path: { ws, brand: b.id } }, body });
     setBusy("");
     if (error || !data || !("moved" in data)) return toast(errorMessage(error), "error");
-    if (data.moved.in_project > 0) toast("That domain is in a project, so it follows the project's brand. Move the project above instead.", "error");
     load();
     onChanged();
   }
@@ -473,22 +469,11 @@ function Members({ ws, brand: b, canEdit, onChanged }: { ws: string; brand: Bran
   );
 
   return (
-    <Card title={`What belongs to ${b.name}`} description="Turn on what is this brand's. Everything else is shared by every brand. A brand's mailboxes only send for its own sequences.">
-      {!projects || !domains ? (
+    <Card title={`What belongs to ${b.name}`} description="Turn on what is this brand's. Everything else is shared by every brand. A brand's mailboxes send for any of its sequences.">
+      {!domains ? (
         <Loading />
       ) : (
         <div className="space-y-5">
-          {projects.length > 0 && (
-            <section>
-              <h3 className="mb-2 text-[13px] font-medium">Projects <span className="font-normal text-muted-foreground">(being removed; each moves with its lists, sequences and domains)</span></h3>
-              <ul className="divide-y divide-border rounded-lg border">
-                {projects.map((p) => {
-                  const other = where(p.brand_id);
-                  return row(`p:${p.id}`, p.name, other ? `In ${other}` : p.brand_id ? undefined : "Shared", p.brand_id === b.id, undefined, (on) => move(`p:${p.id}`, on, { project_ids: [p.id] }));
-                })}
-              </ul>
-            </section>
-          )}
           <section>
             <h3 className="mb-2 text-[13px] font-medium">Sending domains <span className="font-normal text-muted-foreground">(with their mailboxes)</span></h3>
             {domains.length === 0 ? (
@@ -497,13 +482,12 @@ function Members({ ws, brand: b, canEdit, onChanged }: { ws: string; brand: Bran
               <ul className="divide-y divide-border rounded-lg border">
                 {domains.map((d) => {
                   const other = where(d.brand_id);
-                  const inProject = d.project_id ? projects.find((p) => p.id === d.project_id)?.name ?? "a project" : undefined;
                   return row(
                     `d:${d.domain}`,
                     <span className="font-mono">{d.domain}</span>,
                     other ? `In ${other}` : d.brand_id ? `${plural(d.mailboxes, "mailbox", "mailboxes")}` : "Shared",
                     d.brand_id === b.id,
-                    inProject ? `Follows ${inProject}` : undefined,
+                    undefined,
                     (on) => move(`d:${d.domain}`, on, { domains: [d.domain] }),
                   );
                 })}

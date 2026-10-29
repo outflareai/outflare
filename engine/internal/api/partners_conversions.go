@@ -630,7 +630,7 @@ func (c *conversionRun) leadOrSale(ctx context.Context) error {
 		trigger = in.EventName
 	}
 	earned := partners.Rewards(rules, partners.Conversion{Trigger: trigger, AmountCents: amount, ProductID: in.ProductID,
-		GroupID: m.groupID, PriorSales: prior, FirstSaleAt: f.firstSaleAt, At: in.at})
+		PartnerID: m.id, GroupID: m.groupID, PriorSales: prior, FirstSaleAt: f.firstSaleAt, At: in.at})
 	hold := in.at.AddDate(0, 0, m.holdDays)
 	for _, e := range earned {
 		recipient := m.recordID

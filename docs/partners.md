@@ -22,7 +22,8 @@ Outflare never holds or sends money. It works out what each partner is owed, and
   - a short link
   - a campaign link
   - any number of promo codes
-- **The referred customer** is a customer record too. Referral, conversion and reward rows point at records, so merging two people moves them.
+- **The referred customer** is a customer record too. Referral, conversion and reward rows point at records, so merging two people moves them. A person's record page (People), and their panel in Visitors and Leads, show the programs they are a partner in and who referred them; through the API, filter `GET .../partners` and `GET .../partner-referrals` by `record_id`.
+- **People and tokens limited to some brands** work in their brands' programs: their partners, rewards and payouts. They can read programs shared by every brand but not change them, and another brand's programs answer 404. Reporting conversions (`partners.conversions`) needs a token for every brand, because a conversion can credit any program's partner.
 
 ## Links
 
@@ -32,6 +33,8 @@ Outflare never holds or sends money. It works out what each partner is owed, and
   - `?to=/blog/post` (or a full address on the same site) lands on another page. Other sites are ignored, so the link can't be used as an open redirect.
   - When the partner or program isn't active, the link still lands, untagged and uncounted.
 - **The campaign link** is the landing page with the tags already on it and no redirect. The website snippet reads the tags on arrival.
+
+The program's settings (Install) give the website snippet ready to paste as an HTML tag, a Next.js `<Script>` or a Google Tag Manager Custom HTML tag, with your site key filled in, and the calls your backend makes (API, Node.js or the postback URL).
 
 Either way, the visit is stored with its `ref` ([website tracking](website-tracking.md)). A visit only *proposes* a partner. The partner is credited (*bound*) only when your backend reports a sign-up or sale for that person.
 
@@ -144,9 +147,11 @@ Each rule also has:
 - a `side`: `partner`, or `referred` for two-sided rewards (always an action)
 - for sales, a `recurrence`: the customer's `first` sale, `every` sale, or sales in their first `months`
 - optional `product_ids`
-- optionally a group, or a tier (`min_sales`: once the partner has made that many sales)
+- optionally a group, or one partner (`partner_id`: their own rate), or a tier (`min_sales`: once the partner has made that many sales)
 
-Only the best cash rule counts for a conversion: a group's own rule beats one for everyone, then the highest tier reached. Tiers and group rates therefore replace the base rate instead of adding to it.
+Action rules all pay, but only one cash rule (percent or fixed) pays per conversion, whatever order the rules are in. The one that pays is, in this order: a partner's own rule over their group's over one for everyone; then the highest tier reached; then the narrower sale (first sale, then first months, then every sale); then a rule for named products over one for all; then the one paying more. So with 10% on the first sale and 2% on every sale, the first sale pays 10% and later ones 2%. Tiers, group rates and partners' own rates replace the base rate instead of adding to it.
+
+To give one affiliate a better deal, open their menu and choose Commission rate (a percent of each sale), or add a rule with their `partner_id` through `PUT .../rules`. Rewards already earned keep their amounts.
 
 A program with no rules tracks only. For influencers on a fixed fee, log each fee on the partner (`POST .../partners/{id}/fees`). It is approved at once and counted as a cost, so cost per sale and ROAS work.
 
@@ -154,7 +159,7 @@ A program with no rules tracks only. For influencers on a fixed fee, log each fe
 
 Rewards are an append-only ledger: an amount never changes once written.
 
-- **Hold.** A new reward waits for the program's hold (`hold_days`), then is approved: on its own when `auto_approve` is on (checked every minute), otherwise by a person. A person can also approve or reject one before the hold ends.
+- **Hold.** A new reward waits for the program's hold (`hold_days`), then is approved: on its own when `auto_approve` is on (checked every minute), otherwise by a person. A person can also approve or reject one before the hold ends, or many at once: pick them on Rewards, or use Approve all pending (`POST .../partner-rewards/bulk` with `ids`, or a `program` or `partner_id`, up to 1,000 a call). Each is recorded as if done alone, with its webhook.
 - **Cost.** Approved cash and fees for partners become spend entries on the `affiliates` channel, so the CMO view counts them as cost.
 - **Refunds.** A refund rejects the sale's rewards still on hold. Approved or paid cash gets a negative `adjustment` entry, pro rata for a partial refund, which the next payout nets. An approved or fulfilled action gets a reversal entry (`partner_reward.reversed`) naming the action, so your system can take back what it gave.
 - **Adjustments.** `POST .../partners/{id}/adjustments` corrects a balance either way, with a note saying why.
@@ -225,7 +230,7 @@ The widget shows the program's title and welcome, the customer's link and promo 
 
 ## Importing from Tolt
 
-Bring a Tolt program in with your own Tolt API key (Connectors → Tolt): partners with their link codes, so their links keep working, payout details, promo codes, referred customers, transactions and commissions, paid ones as paid payouts. Run it as often as you like until the day you switch; each run adds only what's new. See [moving from Tolt](partners-tolt-migration.md).
+Bring a Tolt program in with your own Tolt API key (Connectors → Tolt): partners of every status with their link codes, so their links keep working, promo codes, referred customers, transactions and commissions, paid ones as paid payouts. Run it as often as you like until the day you switch; each run adds only what's new. See [moving from Tolt](partners-tolt-migration.md).
 
 ## Missions
 
@@ -250,11 +255,12 @@ Operators get all three. Viewers get `partners.read`.
 | Call | Scope |
 | --- | --- |
 | `GET`/`POST /v1/workspaces/{ws}/partner-programs`, `GET`/`PATCH .../partner-programs/{id}` | read / manage |
+| `GET .../partner-programs/{id}/stats`: the program's totals across all its partners (partners by status, clicks, customers, sales, rewards on hold, due and paid) | read |
 | `PUT .../partner-programs/{id}/rules`, `POST .../groups`, `DELETE .../groups/{group}`, `POST .../postback` | manage |
 | `GET`/`POST .../partners`, `GET`/`PATCH .../partners/{id}`, `POST`/`DELETE .../promo-codes`, `POST .../fees`, `POST .../adjustments` | read / manage |
 | `POST .../partner-conversions`, `POST .../partner-programs/{id}/widget-sessions` | conversions |
-| `GET .../partner-conversions`, `GET .../partner-referrals`, `GET .../partner-rewards`, `GET .../partner-payouts` | read |
-| `POST .../partner-rewards/{id}/approve`, `.../reject` | manage |
+| `GET .../partner-conversions`, `GET .../partner-referrals`, `GET .../partner-rewards`, `GET .../partner-payouts` (newest first, 100 a page by default, up to 500; `before` is the last page's `next_before`; payouts filter by `program` too) | read |
+| `POST .../partner-rewards/{id}/approve`, `.../reject`, `POST .../partner-rewards/bulk` | manage |
 | `POST .../partner-rewards/{id}/fulfil` | conversions |
 | `POST .../partner-payouts`, `.../{id}/paid`, `.../{id}/cancel` | manage |
 | `GET .../partners/{id}/postbacks` / `GET .../partner-payouts/export` | read / manage |

@@ -118,10 +118,11 @@ func TestItemLinks(t *testing.T) {
 	}
 
 	owner.must(404, "GET", base+"/links/sequence/nothing-here", nil)
-	owner.must(404, "GET", base+"/links/project/"+a, nil) // not a project
+	owner.must(404, "GET", base+"/links/list/"+a, nil) // not a list
 	owner.must(400, "GET", base+"/links/widget/"+a, nil)
-	proj := owner.must(201, "POST", base+"/projects", map[string]any{"name": "New"})["id"].(string)
-	if got := owner.must(200, "GET", base+"/links/project/"+proj, nil)["slug"]; got != "new-project" {
+	owner.must(400, "GET", base+"/links/project/"+a, nil) // projects were removed
+	seq := owner.must(201, "POST", base+"/sequences", map[string]any{"name": "New"})["id"].(string)
+	if got := owner.must(200, "GET", base+"/links/sequence/"+seq, nil)["slug"]; got != "new-sequence" {
 		t.Fatalf("reserved item slug: %v", got)
 	}
 

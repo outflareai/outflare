@@ -263,6 +263,9 @@ with the rule's dry run. On a phone the flow is read-only.
     - `set_field` sets, clears or increments a field (`field`, `change`, `value`). `value` can copy one with `{{event.x}}` or `{{person.x}}`. It never overwrites a value a person set by hand, unless `overwrite_manual` is on; the step is then `skipped`.
     - `add_tag` and `remove_tag` put a tag on the person or take it off.
     - `add_to_list` and `remove_from_list` move them in or out of a static list ([lists.md](lists.md#static-lists)).
+    - `set_consent` records that they agreed to (`granted`) or declined (`withdrawn`) an email `topic`, or all marketing email when it's empty. The run is the evidence. Use it when they opted in somewhere Outflare doesn't see, such as a checkbox your app reports in an event.
+    - `assign_owner` makes a member their owner. With `owner_id` it's one member. With `members` it's whichever of them owns the fewest active records now, so people are spread evenly. Someone who already has an owner keeps them, unless `replace_owner` is on.
+    - `move_deal` moves their newest open deal forward to `deal.stage`, or opens a deal there when they have none. It follows the same rules as reply rules: only forward, never over a stage a person set, never out of a `deal.closed` stage. `deal.type` and `deal.field` are the deal record type and its status field, such as `deal` and `stage`.
   - **Other campaigns.**
     - `enter_journey` starts another journey.
     - `exit_journey` ends their run in another journey (`scope` `journey`) or in every other journey (`others`).
@@ -270,6 +273,7 @@ with the rule's dry run. On a phone the flow is read-only.
     - `stop_sequences` stops their cold email: in one sequence, in every sequence (`all`, the default), or for everyone at their company (`company`).
     - `suppress` adds their addresses, or their work domain, to the suppression list.
     - `unsubscribe_topic` withdraws their consent to a topic, or to all marketing email.
+  - **Messaging.** `transactional_email` sends a published transactional `template`, such as an account notice. Marketing consent, topics and the frequency cap don't apply to it, but the suppression list and the policy check do. Use the `email` step for marketing.
   - **Notify.** `alert` raises an alert (`title`, `text`) to the record's `owner` or to the owners and admins. It is emailed or sent to Slack as alert settings say.
 
   Each action is done, `skipped` with why, or `failed`. A failed step does what its `on_error` says: `stop` (the default) fails the run, `continue` goes on to `next`, and a step id goes there. `GET .../journeys/step-kinds` (MCP `list_journey_step_kinds`) lists every kind with its settings as JSON Schema and the fields that name the next step. The flow builder's step picker reads it.
@@ -296,6 +300,18 @@ with the rule's dry run. On a phone the flow is read-only.
   A paused journey can still be changed directly (`PATCH`), which moves
   everyone in it onto the change. Pausing holds every run where it is;
   activating again moves them on. Archiving ends its runs.
+- **Testing it.** **Test** takes one person through the journey (the live
+  version, or the draft you're editing, as last saved) and lights up the
+  path they would take: which way each check goes, the subject of each
+  email they would get or why they'd be skipped, and what each action
+  would do (`POST .../journeys/{id}/test`, MCP `test_journey`). Nothing is
+  sent, written or recorded: the steps run as in a real run, in a
+  transaction that is thrown away. Waits pass at once. The event that
+  starts the run is their latest trigger event (or one you give). A check
+  on something they may still do, such as an event or opening an email,
+  goes the way their data says now ("for now"); **Try Yes** or **Try No**
+  sends it the other way. It also says when they wouldn't start a run now,
+  such as being in the journey already, and shows the path anyway.
 - **Results.** A journey shows how many people entered, are in it,
   completed, exited and failed, and per step how many were sent, skipped,
   waited, or went yes or no, and how many are on it now (`at_step`). `GET .../journeys/{id}/runs` lists the people

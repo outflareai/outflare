@@ -48,7 +48,7 @@ func (s *Server) draftReviewReply(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if !a.writes(nil, v.BrandID) {
+	if !a.writes(v.BrandID) {
 		writeError(w, r, http.StatusForbidden, "forbidden", string(errSharedRecord))
 		return
 	}
@@ -248,7 +248,7 @@ func (s *Server) DraftReviewReply(ctx context.Context, ws, id string, last bool)
 	})
 	if resp.Usage.InputTokens > 0 || resp.Usage.OutputTokens > 0 {
 		c := aiChoice{Provider: choice.Provider, IntegrationID: choice.IntegrationID, Model: choice.Model, Price: choice.Price, Task: reviewReplyTask}
-		if err := recordAISpend(ctx, s.pool, c, ws, nil, nil, nil, resp.Usage, "review_draft:"+id, "Answer to a "+reviews.Names[x.platform]+" review"); err != nil {
+		if err := recordAISpend(ctx, s.pool, c, ws, nil, nil, resp.Usage, "review_draft:"+id, "Answer to a "+reviews.Names[x.platform]+" review"); err != nil {
 			s.log.Error("recording review draft spend", "workspace_id", ws, "error", err)
 		}
 	}

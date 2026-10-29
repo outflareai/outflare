@@ -201,7 +201,7 @@ func (s *Server) seoSiteSubject(w http.ResponseWriter, r *http.Request) (*access
 	if !ok {
 		return nil, dnsSubject{}, false
 	}
-	if !a.writes(nil, site.BrandID) {
+	if !a.writes(site.BrandID) {
 		writeError(w, r, http.StatusForbidden, "forbidden", string(errSharedRecord))
 		return nil, dnsSubject{}, false
 	}

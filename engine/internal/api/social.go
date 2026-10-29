@@ -274,7 +274,7 @@ func (s *Server) listSocialWatches(w http.ResponseWriter, r *http.Request) {
 func (s *Server) findSocialWatch(w http.ResponseWriter, r *http.Request, a *access, id string) (*socialWatchView, bool) {
 	if validUUID(id) {
 		v, err := scanSocialWatch(s.pool.QueryRow(r.Context(), socialWatchSelect+` AND w.id = $2`, a.WorkspaceID, id))
-		if err == nil && a.sees(nil, v.BrandID) {
+		if err == nil && a.sees(v.BrandID) {
 			return &v, true
 		}
 		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
@@ -357,7 +357,7 @@ func (s *Server) applySocialWatch(ctx context.Context, a *access, f socialWatchF
 			v.BrandID = &id
 		}
 	}
-	if !a.writes(nil, v.BrandID) {
+	if !a.writes(v.BrandID) {
 		return errInvalid("brand_id: you can only add watches to your own brands")
 	}
 	var err error
@@ -562,7 +562,7 @@ func (s *Server) updateSocialWatch(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if !a.writes(nil, cur.BrandID) {
+	if !a.writes(cur.BrandID) {
 		writeError(w, r, http.StatusForbidden, "forbidden", string(errSharedRecord))
 		return
 	}
@@ -622,7 +622,7 @@ func (s *Server) deleteSocialWatch(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if !a.writes(nil, cur.BrandID) {
+	if !a.writes(cur.BrandID) {
 		writeError(w, r, http.StatusForbidden, "forbidden", string(errSharedRecord))
 		return
 	}
@@ -650,7 +650,7 @@ func (s *Server) checkSocialWatch(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if !a.writes(nil, cur.BrandID) {
+	if !a.writes(cur.BrandID) {
 		writeError(w, r, http.StatusForbidden, "forbidden", string(errSharedRecord))
 		return
 	}
@@ -808,7 +808,7 @@ func (s *Server) listSocialItems(w http.ResponseWriter, r *http.Request) {
 func (s *Server) findSocialItem(w http.ResponseWriter, r *http.Request, a *access, id string) (*socialItemView, bool) {
 	if validUUID(id) {
 		v, err := scanSocialItem(s.pool.QueryRow(r.Context(), socialItemSelect+` AND i.id = $2`, a.WorkspaceID, id))
-		if err == nil && a.sees(nil, v.BrandID) {
+		if err == nil && a.sees(v.BrandID) {
 			return &v, true
 		}
 		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
@@ -834,7 +834,7 @@ func (s *Server) updateSocialItem(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if !a.writes(nil, cur.BrandID) {
+	if !a.writes(cur.BrandID) {
 		writeError(w, r, http.StatusForbidden, "forbidden", string(errSharedRecord))
 		return
 	}
@@ -1083,7 +1083,7 @@ func (s *Server) listSocialActions(w http.ResponseWriter, r *http.Request) {
 func (s *Server) findSocialAction(w http.ResponseWriter, r *http.Request, a *access, id string) (*socialActionView, bool) {
 	if validUUID(id) {
 		v, err := scanSocialAction(s.pool.QueryRow(r.Context(), socialActionSelect+` AND x.id = $2`, a.WorkspaceID, id))
-		if err == nil && a.sees(nil, v.BrandID) {
+		if err == nil && a.sees(v.BrandID) {
 			res, err := s.socialResults(r.Context(), a.WorkspaceID, []string{v.ID}, true)
 			if err != nil {
 				s.internal(w, r, err)
@@ -1231,7 +1231,7 @@ func (s *Server) createSocialAction(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if !a.writes(nil, it.BrandID) {
+	if !a.writes(it.BrandID) {
 		writeError(w, r, http.StatusForbidden, "forbidden", string(errSharedRecord))
 		return
 	}
@@ -1273,7 +1273,7 @@ func (s *Server) draftSocialReply(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if !a.writes(nil, it.BrandID) {
+	if !a.writes(it.BrandID) {
 		writeError(w, r, http.StatusForbidden, "forbidden", string(errSharedRecord))
 		return
 	}
@@ -1345,7 +1345,7 @@ func (s *Server) updateSocialAction(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if !a.writes(nil, cur.BrandID) {
+	if !a.writes(cur.BrandID) {
 		writeError(w, r, http.StatusForbidden, "forbidden", string(errSharedRecord))
 		return
 	}
@@ -1405,7 +1405,7 @@ func (s *Server) approveSocialAction(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if !a.writes(nil, cur.BrandID) {
+	if !a.writes(cur.BrandID) {
 		writeError(w, r, http.StatusForbidden, "forbidden", string(errSharedRecord))
 		return
 	}
@@ -1504,7 +1504,7 @@ func (s *Server) rejectSocialAction(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if !a.writes(nil, cur.BrandID) {
+	if !a.writes(cur.BrandID) {
 		writeError(w, r, http.StatusForbidden, "forbidden", string(errSharedRecord))
 		return
 	}

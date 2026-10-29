@@ -62,7 +62,7 @@ func (m Model) Definition() c.Definition {
 	d := c.Definition{
 		ID: m.P.ID, Name: m.P.Name, Category: c.CategoryModel,
 		Summary: "Plan and run missions from a goal you type, with your own " + m.P.Name + " API key. " + i.summary,
-		Description: "Outflare sends the model the goal, the project brief and a summary of the workspace (mailbox capacity, lead counts, campaigns, connectors) to plan, and the mission's progress and API answers while Outflare's agent runs it. " +
+		Description: "Outflare sends the model the goal, the company context and a summary of the workspace (mailbox capacity, lead counts, campaigns, connectors) to plan, and the mission's progress and API answers while Outflare's agent runs it. " +
 			"Your key is encrypted, only ever sent to " + m.P.Name + "'s own API, and never shown again, logged or given to the model. Usage is billed to your " + m.P.Name + " account; set a monthly limit under Settings → AI model.",
 		Website: i.website, DocsURL: i.docs, KeyURL: m.P.KeyURL, Auth: c.AuthAPIKey, Tags: i.tags,
 		Fields:       []c.Field{{Name: "api_key", Label: "API key", Secret: true, Placeholder: placeholder(m.P), Help: i.keyHint}},

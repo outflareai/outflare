@@ -230,11 +230,11 @@ func (s *Server) importLeads(w http.ResponseWriter, r *http.Request) {
 				var cur *string
 				err := tx.QueryRow(ctx, `SELECT brand_id::text FROM lead_lists WHERE workspace_id = $1 AND lower(name) = lower($2)`, a.WorkspaceID, listName).Scan(&cur)
 				switch {
-				case err == nil && !a.writes(nil, cur):
+				case err == nil && !a.writes(cur):
 					return errInvalid("a list with that name belongs to another brand, or to every brand; pick another name")
 				case err == nil:
 				case errors.Is(err, pgx.ErrNoRows):
-					if brand, err = brandWrite(ctx, tx, a, nil, nil); err != nil {
+					if brand, err = brandWrite(ctx, tx, a, nil); err != nil {
 						return err
 					}
 				default:
@@ -334,7 +334,7 @@ func (s *Server) upsertLead(w http.ResponseWriter, r *http.Request) {
 		if req.ListID != nil {
 			var brand *string
 			err := tx.QueryRow(ctx, `SELECT brand_id::text FROM lead_lists WHERE id = $1 AND workspace_id = $2`, *req.ListID, a.WorkspaceID).Scan(&brand)
-			if errors.Is(err, pgx.ErrNoRows) || (err == nil && !a.writes(nil, brand)) {
+			if errors.Is(err, pgx.ErrNoRows) || (err == nil && !a.writes(brand)) {
 				return errInvalid("list not found")
 			}
 			if err != nil {
@@ -731,7 +731,7 @@ func (s *Server) checkRecipients(w http.ResponseWriter, r *http.Request) {
 	}
 	if b := strings.TrimSpace(req.Brand); b != "" {
 		brand, err := s.brandIDFor(ctx, a.WorkspaceID, strings.ToLower(b))
-		if err == nil && !a.sees(nil, &brand) {
+		if err == nil && !a.sees(&brand) {
 			err = errNotFound
 		}
 		if errors.Is(err, errNotFound) {

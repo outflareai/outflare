@@ -364,12 +364,12 @@ func (s *Server) checkAIBudget(ctx context.Context, ws string, c aiChoice, estim
 // Every call also goes in the AI usage log (ai_calls) with its tool, model
 // and tokens, even one too cheap to reach a cent, and a call that takes
 // the month past 80% or all of a limit warns the workspace's admins.
-func recordAISpend(ctx context.Context, q jobs.Querier, c aiChoice, ws string, missionID, projectID *string, actorID *string, u llm.Usage, ref, note string) error {
+func recordAISpend(ctx context.Context, q jobs.Querier, c aiChoice, ws string, missionID, actorID *string, u llm.Usage, ref, note string) error {
 	cents := c.Price.Cents(u)
 	if u.InputTokens == 0 && u.OutputTokens == 0 && u.CacheRead == 0 && u.CacheWrite == 0 && cents <= 0 {
 		return nil
 	}
-	fresh, err := recordAICall(ctx, q, c, ws, missionID, projectID, actorID, u, cents, ref)
+	fresh, err := recordAICall(ctx, q, c, ws, missionID, actorID, u, cents, ref)
 	if err != nil || cents <= 0 {
 		return err
 	}
@@ -377,7 +377,7 @@ func recordAISpend(ctx context.Context, q jobs.Querier, c aiChoice, ws string, m
 		ctx = missions.WithID(ctx, *missionID)
 	}
 	if _, _, err := outcomes.Record(ctx, q, outcomes.Entry{
-		WorkspaceID: ws, ProjectID: projectID, MissionID: missionID,
+		WorkspaceID: ws, MissionID: missionID,
 		Category: outcomes.CategorySoftware, Provider: c.Provider.Vendor, IntegrationID: &c.IntegrationID,
 		AmountCents: &cents, Currency: "USD", OccurredAt: time.Now(), Source: "auto", Ref: &ref,
 		Note: note + " (" + u.Model + ")", ActorID: actorID,

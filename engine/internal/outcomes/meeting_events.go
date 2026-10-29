@@ -65,7 +65,7 @@ func MeetingEvents(ctx context.Context, pool *pgxpool.Pool, limit int) (int, err
 	err := pgx.BeginFunc(ctx, pool, func(tx pgx.Tx) error {
 		rows, err := tx.Query(ctx, `
 			SELECT id::text, workspace_id::text, record_id::text, status, event_status, source, attribution, booked_at, starts_at, ends_at,
-				updated_at, sequence_id::text, project_id::text, mission_id::text
+				updated_at, sequence_id::text, mission_id::text
 			FROM meetings WHERE record_id IS NOT NULL AND event_status IS DISTINCT FROM status
 			ORDER BY id LIMIT $1 FOR UPDATE SKIP LOCKED`, limit)
 		if err != nil {
@@ -76,13 +76,13 @@ func MeetingEvents(ctx context.Context, pool *pgxpool.Pool, limit int) (int, err
 			last                                        *string
 			booked, starts, updated                     time.Time
 			ends                                        *time.Time
-			sequence, project, mission                  *string
+			sequence, mission                           *string
 		}
 		var list []meeting
 		for rows.Next() {
 			var m meeting
 			if err := rows.Scan(&m.id, &m.ws, &m.record, &m.status, &m.last, &m.source, &m.attribution, &m.booked, &m.starts, &m.ends,
-				&m.updated, &m.sequence, &m.project, &m.mission); err != nil {
+				&m.updated, &m.sequence, &m.mission); err != nil {
 				rows.Close()
 				return err
 			}
@@ -96,7 +96,7 @@ func MeetingEvents(ctx context.Context, pool *pgxpool.Pool, limit int) (int, err
 		for _, m := range list {
 			props := map[string]any{"meeting_id": m.id, "source": m.source, "attribution": m.attribution,
 				"starts_at": m.starts.UTC().Format(time.RFC3339)}
-			for k, v := range map[string]*string{"sequence_id": m.sequence, "project_id": m.project, "mission_id": m.mission} {
+			for k, v := range map[string]*string{"sequence_id": m.sequence, "mission_id": m.mission} {
 				if v != nil {
 					props[k] = *v
 				}

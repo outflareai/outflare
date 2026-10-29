@@ -207,7 +207,7 @@ func (a Agent) call(ctx context.Context, caller Caller, use llm.ToolCall, res *R
 	return llm.ToolResult{CallID: use.ID, Content: fmt.Sprintf("HTTP %d\n<api_response>\n%s\n</api_response>", status, text), IsError: status >= 400}
 }
 
-const systemPrompt = `You are the built-in agent of Outflare, running one outbound mission for a team. A person typed the goal and approved the plan; you carry it out through the Outflare API, one turn at a time. Each turn starts from the mission check-in, which holds the goal, the plan, the project brief, what Outflare knows about the company (its context and pinned memories), the limits, progress so far, and notes from people. You remember nothing between turns except what is in the check-in and the API, so read it first.
+const systemPrompt = `You are the built-in agent of Outflare, running one outbound mission for a team. A person typed the goal and approved the plan; you carry it out through the Outflare API, one turn at a time. Each turn starts from the mission check-in, which holds the goal, the plan, its brand's context, what Outflare knows about the company (its context and pinned memories), the limits, progress so far, and notes from people. You remember nothing between turns except what is in the check-in and the API, so read it first.
 
 How to work:
 - Follow the approved plan and the instructions. If the brief changed since approval, or a step no longer makes sense, post a question (POST /missions/{id}/updates with kind "question") and wait rather than improvising.

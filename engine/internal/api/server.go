@@ -366,7 +366,7 @@ func NewServer(pool *pgxpool.Pool, log *slog.Logger, opts Options) *Server {
 		menuLinks:        opts.MenuLinks,
 		aiTools:          opts.AITools,
 		middleware:       opts.Middleware,
-		capabilities:     append([]string{"mailboxes", "domains", "leads", "suppression", "sequences", "inbox", "oauth", "warmup", "infrastructure", "allocation", "platforms", "connectors", "verification", "classification", "mailbox_suppliers", "mailbox_health", "imports", "reports", "outcomes", "projects", "tracking", "missions", "lists", "webhooks", "emails"}, opts.Capabilities...),
+		capabilities:     append([]string{"mailboxes", "domains", "leads", "suppression", "sequences", "inbox", "oauth", "warmup", "infrastructure", "allocation", "platforms", "connectors", "verification", "classification", "mailbox_suppliers", "mailbox_health", "imports", "reports", "outcomes", "tracking", "missions", "lists", "webhooks", "emails"}, opts.Capabilities...),
 		alloc:            alloc,
 		platforms:        opts.Platforms,
 		outcomes:         opts.Outcomes,
@@ -419,7 +419,6 @@ func (s *Server) buildHandler() http.Handler {
 	s.routesWebhooks(mux)
 	s.routesJobs(mux)
 	s.routesLogs(mux)
-	s.routesProjects(mux)
 	s.routesBrands(mux)
 	s.routesCatalog(mux)
 	s.routesRecords(mux)
@@ -475,6 +474,7 @@ func (s *Server) buildHandler() http.Handler {
 	s.routesCompetitors(mux)
 	s.routesLinkProspects(mux)
 	s.routesNews(mux)
+	s.routesStories(mux)
 	s.routesLinkReads(mux)
 	s.routesLinkPitches(mux)
 	s.routesSearchResults(mux)

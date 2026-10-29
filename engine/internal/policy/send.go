@@ -96,8 +96,6 @@ const (
 	NoMailbox       = "no_mailbox_allocated"
 	SenderGone      = "sender_mailbox_gone"
 	TokenBudget     = "token_daily_budget"
-	ProjectPaused   = "project_paused"
-	ProjectLimit    = "project_daily_limit"
 	// The sequence was started in an agent mission that is paused, or
 	// whose send limit is used up.
 	MissionPaused = "mission_paused"

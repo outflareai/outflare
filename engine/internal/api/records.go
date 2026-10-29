@@ -181,7 +181,7 @@ func loadRecord(ctx context.Context, q pgx.Tx, a *access, id string) (recordView
 		return recordView{}, errNotFound
 	}
 	v, err := scanRecord(q.QueryRow(ctx, `SELECT `+recordColumns+` FROM records r WHERE r.id = $1 AND r.workspace_id = $2`, id, a.WorkspaceID))
-	if errors.Is(err, pgx.ErrNoRows) || (err == nil && !a.sees(nil, v.BrandID)) {
+	if errors.Is(err, pgx.ErrNoRows) || (err == nil && !a.sees(v.BrandID)) {
 		return v, errNotFound
 	}
 	if err != nil {
@@ -198,13 +198,13 @@ func lockRecord(ctx context.Context, tx pgx.Tx, a *access, id string) (recordVie
 		return recordView{}, errNotFound
 	}
 	v, err := scanRecord(tx.QueryRow(ctx, `SELECT `+recordColumns+` FROM records r WHERE r.id = $1 AND r.workspace_id = $2 FOR UPDATE`, id, a.WorkspaceID))
-	if errors.Is(err, pgx.ErrNoRows) || (err == nil && !a.sees(nil, v.BrandID)) {
+	if errors.Is(err, pgx.ErrNoRows) || (err == nil && !a.sees(v.BrandID)) {
 		return v, errNotFound
 	}
 	if err != nil {
 		return v, err
 	}
-	if !a.writes(nil, v.BrandID) {
+	if !a.writes(v.BrandID) {
 		return v, errSharedRecord
 	}
 	if v.MergedInto != nil {
@@ -213,8 +213,13 @@ func lockRecord(ctx context.Context, tx pgx.Tx, a *access, id string) (recordVie
 	return v, nil
 }
 
+// readTx runs f in a read-only transaction that sees one snapshot for all
+// its queries (repeatable read), so a response built from several queries
+// never mixes states, such as a finished scan with none of its findings
+// because they committed between two queries. Read-only repeatable read
+// transactions never fail to serialize in Postgres.
 func (s *Server) readTx(ctx context.Context, f func(pgx.Tx) error) error {
-	return pgx.BeginTxFunc(ctx, s.pool, pgx.TxOptions{AccessMode: pgx.ReadOnly}, f)
+	return pgx.BeginTxFunc(ctx, s.pool, pgx.TxOptions{AccessMode: pgx.ReadOnly, IsoLevel: pgx.RepeatableRead}, f)
 }
 
 // ---- Values ----
@@ -740,7 +745,7 @@ func claimFree(ctx context.Context, tx pgx.Tx, a *access, id, namespace, value s
 		return err
 	}
 	msg := "another record already has this verified " + namespace
-	if a.sees(nil, brand) {
+	if a.sees(brand) {
 		msg += ": " + owner
 	}
 	return recordConflict{"identity_taken", msg}
@@ -851,7 +856,7 @@ func (s *Server) recordBrand(ctx context.Context, a *access, raw json.RawMessage
 		return nil, errInvalid("brand_id is a brand's id or handle, or null")
 	}
 	id, err := s.brandIDFor(ctx, a.WorkspaceID, ref)
-	if errors.Is(err, errNotFound) || (err == nil && !a.sees(nil, &id)) {
+	if errors.Is(err, errNotFound) || (err == nil && !a.sees(&id)) {
 		return nil, errInvalid("brand_id is not a brand in this workspace")
 	}
 	return &id, err
@@ -891,7 +896,7 @@ func (s *Server) createRecord(w http.ResponseWriter, r *http.Request) {
 	}
 	brand, err := s.recordBrand(ctx, a, req.BrandID)
 	if err == nil {
-		brand, err = brandWrite(ctx, s.pool, a, nil, brand)
+		brand, err = brandWrite(ctx, s.pool, a, brand)
 	}
 	if s.allocError(w, r, err) {
 		return
@@ -993,7 +998,7 @@ func (s *Server) updateRecord(w http.ResponseWriter, r *http.Request) {
 		if brand, err = s.recordBrand(ctx, a, req.BrandID); s.allocError(w, r, err) {
 			return
 		}
-		if !a.writes(nil, brand) {
+		if !a.writes(brand) {
 			writeError(w, r, http.StatusForbidden, "forbidden", "you are limited to some brands: brand_id must be one of them")
 			return
 		}
@@ -1514,7 +1519,7 @@ func loadRelationships(ctx context.Context, tx pgx.Tx, a *access, id string, end
 	}
 	out := []relationshipView{}
 	for _, v := range list {
-		if a.sees(nil, v.brand) {
+		if a.sees(v.brand) {
 			out = append(out, v.relationshipView)
 		}
 	}

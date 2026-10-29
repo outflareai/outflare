@@ -1,6 +1,7 @@
 package api_test
 
 import (
+	"context"
 	"strconv"
 	"testing"
 
@@ -79,5 +80,60 @@ func TestDeleteRecord(t *testing.T) {
 
 	if len(named(got(), "record.deleted")) != 2 {
 		t.Fatal("no record.deleted events")
+	}
+}
+
+// Erasing a partner keeps what they earned and were paid, on an archived
+// record with no name or identities, and erasing a customer they referred
+// keeps the partner's reward.
+func TestDeleteRecordKeepsPartnerLedger(t *testing.T) {
+	e := freshEnv(t)
+	owner, ws := setupOwner(t, e.h)
+	base := "/v1/workspaces/" + ws
+	ctx := context.Background()
+
+	owner.must(201, "POST", base+"/partner-programs", map[string]any{"name": "Affiliates", "kind": "affiliate", "landing_url": "https://northpeak.example/"})
+	ana := owner.must(201, "POST", base+"/partners", map[string]any{"program": "affiliates", "email": "ana@example.com", "name": "Ana Lima", "code": "ana",
+		"payout_method": "PayPal: ana@example.com", "note": "Met at a conference"})
+	member, anaRec := ana["id"].(string), ana["record_id"].(string)
+	sale := owner.must(201, "POST", base+"/partner-conversions", map[string]any{"type": "sale", "customer_id": "u-1", "email": "bo@example.com",
+		"ref": "ana", "amount_cents": 10000, "external_id": "ch_1"})
+	rewards := sale["rewards"].([]any)
+	if sale["credited"] != true || len(rewards) != 1 {
+		t.Fatalf("sale = %v", sale)
+	}
+	reward := rewards[0].(map[string]any)["id"].(string)
+	owner.must(200, "POST", base+"/partner-rewards/"+reward+"/approve", map[string]any{})
+
+	owner.must(200, "DELETE", base+"/records/"+anaRec+"?suppress=true", nil)
+	owner.must(404, "GET", base+"/records/"+anaRec, nil)
+	var standIn, name string
+	var archived bool
+	var identities, kept int
+	if err := e.pool.QueryRow(ctx, `SELECT m.record_id::text, r.name, r.archived_at IS NOT NULL,
+			(SELECT count(*) FROM record_identities i WHERE i.record_id = r.id),
+			(SELECT count(*) FROM partner_rewards w WHERE w.id = $2 AND w.recipient_id = r.id)
+		FROM partner_memberships m JOIN records r ON r.id = m.record_id WHERE m.id = $1`, member, reward).
+		Scan(&standIn, &name, &archived, &identities, &kept); err != nil {
+		t.Fatalf("membership after erasing the partner: %v", err)
+	}
+	if standIn == anaRec || name != "Erased partner" || !archived || identities != 0 || kept != 1 {
+		t.Fatalf("stand-in %s %q archived=%v identities=%d reward kept=%d", standIn, name, archived, identities, kept)
+	}
+
+	if p := owner.must(200, "GET", base+"/partners/"+member, nil); p["name"] != "Erased partner" || p["email"] != "" || p["status"] != "suspended" || p["payout_method"] != "" || p["note"] != "" {
+		t.Fatalf("partner after erasing = %v", p)
+	}
+	owner.must(200, "GET", base+"/partners", nil)
+	owner.must(200, "GET", base+"/partner-rewards", nil)
+
+	// The customer they referred is erased; the partner's reward stays.
+	var bo string
+	if err := e.pool.QueryRow(ctx, `SELECT record_id::text FROM partner_referrals WHERE workspace_id = $1`, ws).Scan(&bo); err != nil {
+		t.Fatalf("referred customer: %v", err)
+	}
+	owner.must(200, "DELETE", base+"/records/"+bo, nil)
+	if err := e.pool.QueryRow(ctx, `SELECT count(*) FROM partner_rewards WHERE id = $1`, reward).Scan(&kept); err != nil || kept != 1 {
+		t.Fatalf("reward after erasing the customer: %d, %v", kept, err)
 	}
 }

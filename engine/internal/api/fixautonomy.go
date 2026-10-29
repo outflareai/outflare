@@ -47,7 +47,7 @@ func (s *Server) autonomySite(w http.ResponseWriter, r *http.Request, a *access,
 	if !ok {
 		return "", false
 	}
-	if write && !a.writes(nil, site.BrandID) {
+	if write && !a.writes(site.BrandID) {
 		writeError(w, r, http.StatusForbidden, "forbidden", string(errSharedRecord))
 		return "", false
 	}
@@ -191,7 +191,7 @@ func (s *Server) startFix(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if !a.writes(nil, fix.BrandID) {
+	if !a.writes(fix.BrandID) {
 		writeError(w, r, http.StatusForbidden, "forbidden", string(errSharedRecord))
 		return
 	}

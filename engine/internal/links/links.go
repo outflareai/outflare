@@ -2,7 +2,7 @@
 // Instantly, Apollo) to Outflare sequences.
 //
 // The sequence is the logical campaign: it carries the team, priority,
-// daily target and project that mailbox allocation works from. A link says
+// daily target and brand that mailbox allocation works from. A link says
 // which platform campaign it runs as. Importers and the platform sync both
 // call Upsert, so a campaign is linked once however it arrives.
 package links

@@ -187,11 +187,6 @@ type enrollment struct {
 	// that actor is an API token with one.
 	CreatedBy   *string
 	TokenBudget *int
-	// The sequence's project, when it has one: its status and its cap on
-	// sends from all of its sequences together.
-	ProjectID     *string
-	ProjectStatus *string
-	ProjectLimit  *int
 	// The agent mission that started the sequence, if any.
 	MissionID *string
 	// The sequence's brand, and the workspace's cross-brand window in days
@@ -241,16 +236,15 @@ func (e *Engine) prepare(ctx context.Context, tx pgx.Tx, enrollmentID string, sk
 		SELECT en.id, en.workspace_id, en.sequence_id, en.lead_id, en.mailbox_id, en.status, en.next_step,
 		       en.thread_subject, en.last_message_id, en.references_ids, en.handoff,
 		       s.status, s.timezone, s.send_days, s.send_start, s.send_end, s.daily_new_limit, s.daily_send_limit,
-		       s.created_by, t.daily_send_budget, s.project_id, p.status, p.daily_send_limit, s.mission_id,
+		       s.created_by, t.daily_send_budget, s.mission_id,
 		       s.brand_id::text, w.cross_brand_days
 		FROM enrollments en JOIN sequences s ON s.id = en.sequence_id JOIN workspaces w ON w.id = en.workspace_id
 		LEFT JOIN api_tokens t ON t.actor_id = s.created_by
-		LEFT JOIN projects p ON p.id = s.project_id
 		WHERE en.id = $1 FOR UPDATE OF en`, enrollmentID,
 	).Scan(&en.ID, &en.WorkspaceID, &en.SequenceID, &en.LeadID, &en.MailboxID, &en.Status, &en.NextStep,
 		&en.ThreadSubject, &en.LastMessageID, &en.References, &en.Handoff,
 		&en.SeqStatus, &en.Timezone, &en.SendDays, &en.SendStart, &en.SendEnd, &en.DailyNewLimit, &en.DailySendLimit,
-		&en.CreatedBy, &en.TokenBudget, &en.ProjectID, &en.ProjectStatus, &en.ProjectLimit, &en.MissionID,
+		&en.CreatedBy, &en.TokenBudget, &en.MissionID,
 		&en.BrandID, &en.CrossBrandDays)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, en, nil
@@ -270,11 +264,6 @@ func (e *Engine) prepare(ctx context.Context, tx pgx.Tx, enrollmentID string, sk
 	if en.SeqStatus != "active" {
 		// Paused: the tick skips it until the sequence is active again.
 		return defer_(now, "")
-	}
-	if en.ProjectStatus != nil && *en.ProjectStatus != "active" {
-		// The project's switch is over all of its sequences; check again
-		// shortly rather than lose the place in the schedule.
-		return defer_(now.Add(15*time.Minute), policy.ProjectPaused)
 	}
 
 	var stepSubject, stepBody string
@@ -426,25 +415,6 @@ func (e *Engine) prepare(ctx context.Context, tx pgx.Tx, enrollmentID string, sk
 		}
 		if sent >= *en.TokenBudget {
 			return defer_(now.Add(time.Hour), policy.TokenBudget)
-		}
-	}
-
-	// 3c. Project budget: the project's sequences together send at most
-	// its daily limit.
-	if en.ProjectLimit != nil {
-		// Serialise sends of one project so two jobs cannot both see room.
-		if _, err := tx.Exec(ctx, `SELECT 1 FROM projects WHERE id = $1 FOR NO KEY UPDATE`, *en.ProjectID); err != nil {
-			return nil, en, err
-		}
-		var sent int
-		if err := tx.QueryRow(ctx, `
-			SELECT count(*) FROM messages g JOIN sequences q ON q.id = g.sequence_id
-			WHERE q.project_id = $1 AND g.status IN ('sending', 'sent', 'unknown') AND g.created_at > $2::timestamptz - interval '24 hours'`,
-			*en.ProjectID, now).Scan(&sent); err != nil {
-			return nil, en, err
-		}
-		if sent >= *en.ProjectLimit {
-			return defer_(now.Add(time.Hour), policy.ProjectLimit)
 		}
 	}
 

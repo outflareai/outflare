@@ -39,8 +39,7 @@ type reqInfo struct {
 	workspaceID string
 	injected    bool   // an approved mission action, run inside the server
 	path        string // the URL path, which says how someone signed in or up
-	brandID     string // the brand and project the request was about, for its log row
-	projectID   string
+	brandID     string // the brand the request was about, for its log row
 }
 
 type ctxReqInfoKey struct{}
@@ -179,7 +178,7 @@ func (s *Server) logRequests(pattern func(*http.Request) string, next http.Handl
 				Status: rec.status, DurationMS: dur, ErrorCode: code, ErrorParam: param, Surface: e.Surface,
 				Client: clean(r.Header.Get(clientHeader)), MCPTool: clean(r.Header.Get(toolHeader)), Agent: clean(r.Header.Get(agentHeader)),
 				UserAgent: r.UserAgent()[:min(len(r.UserAgent()), 200)], MissionID: missionIDOf(r), ActorID: e.ActorID, ActorType: e.ActorType,
-				TokenID: tokenIDOf(info.p), BrandID: info.brandID, ProjectID: info.projectID, At: start,
+				TokenID: tokenIDOf(info.p), BrandID: info.brandID, At: start,
 			})
 		}
 
@@ -210,9 +209,6 @@ func (s *Server) logRequests(pattern func(*http.Request) string, next http.Handl
 		}
 		if m := missionIDOf(r); m != "" {
 			e.Props["mission_id"] = m
-		}
-		if p := info.p; p != nil && p.TokenProjectID != nil {
-			e.Props["project_token"] = true
 		}
 		if p := info.p; p != nil && p.ViewerID != "" {
 			e.Props["support_view"] = true

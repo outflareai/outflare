@@ -15,9 +15,9 @@ Each step is one pull request.
 11. Warm-up: switched on and off in a connected sequencer (EmailBison, Instantly, Smartlead), with its warm-up score per mailbox. Outflare sends no warm-up mail itself
 12. Mailbox allocation: teams and senders, one sequence per mailbox, automatic or suggested assignment with reasons and undo, priorities, locks, drains that keep follow-ups on their mailbox, and agent limits on API tokens
 13. Outside platforms: EmailBison, Smartlead and Instantly campaigns in the same allocation, on the shared connectors framework and Apollo watched read-only (done)
-14. Projects: one motion per project (offer, ideal customer, market) with a versioned brief agents read, owning domains, mailboxes, lists and sequences, a project pause and daily limit in the policy check, and project-scoped API tokens
-15. Outcomes and cost: meetings from Google Calendar, Outlook, Calendly, Cal.com and HubSpot, deals from HubSpot, a spend ledger tagged by project and actor, cost per meeting by project and sequence, warehouse export
-16. Agent missions: goals agents run inside a project with a brief, dry runs, plan approval, held writes, send and spend limits, connect requests and a log of every call
+14. Projects: one motion per project with a versioned brief (shipped, then removed in favour of brands and sequences; see ADR 12)
+15. Outcomes and cost: meetings from Google Calendar, Outlook, Calendly, Cal.com and HubSpot, deals from HubSpot, a spend ledger tagged by sequence, brand and actor, cost per meeting by sequence and brand, warehouse export
+16. Agent missions: goals agents run with the company and brand context, dry runs, plan approval, held writes, send and spend limits, connect requests and a log of every call
 17. Lead lists from data providers: searches at the customer's own Apollo or People Data Labs account, an email waterfall with a cache and credit caps, ICP fit scores, workspace-wide dedupe, verification and scheduled refreshes; signal connectors next
 18. Goal to mission: type a goal and your AI model (Claude, OpenAI, Gemini or Mistral) drafts the mission with your own key; Outflare's built-in agent runs it in turns through the same gate
 19. Usage stats and update checks: an anonymous daily report from self-hosted servers (opt out on first run, in Settings or with `OUTFLARE_TELEMETRY=off`), update and security notices in Settings → This server, and the collector and installs dashboard in Cloud

@@ -1,6 +1,6 @@
 // What Outflare remembers about the business, and what is stopping it.
 // get_context is the first call of every conversation: the company context,
-// pinned memories, projects and blockers in one answer, so the person never
+// pinned memories, brands and blockers in one answer, so the person never
 // repeats themselves and the agent knows where things stand. Memories are
 // short lasting facts, never transcripts; the client keeps the chat.
 
@@ -24,10 +24,10 @@ export const GUIDE = `# Outflare, in one page
 Outflare is the brain of a company's go-to-market. It sends cold email from the company's own mailboxes, connects out to every other tool (data, verification, CRMs, calendars, analytics, SEO, mailbox suppliers) and lets agents run all of it within limits people set.
 
 ## How things connect
-- Workspace: one company. Everything below belongs to exactly one workspace. Members are people with a role (owner, admin, operator, viewer); API tokens are machines with scopes, optionally held to one project.
+- Workspace: one company. Everything below belongs to exactly one workspace. Members are people with a role (owner, admin, operator, viewer); API tokens are machines with scopes, optionally held to one brand.
 - Company context and memories: what Outflare knows about the business (get_context). Read them before writing anything; save what the person tells you with update_context and remember.
-- Brands: a company can market several brands, each with its own website (list_brands). Connectors, members, tokens and leads are shared; each brand has its own context, memories, projects, domains and mailboxes. Pass brand to get_context to read the company's context with that brand's on top; a brand's mailboxes only send for its sequences. Records without a brand are shared.
-- Project: one motion, an offer sold to one ideal customer in one market. Its brief (get_project_brief) holds offer, audience, market and ICP filters. Domains, mailboxes, lead lists and sequences can belong to a project; the rest is shared.
+- Brands: a company can market several brands, each with its own website (list_brands). Connectors, members, tokens and leads are shared; each brand has its own context, memories, lists, sequences, domains and mailboxes. Pass brand to get_context to read the company's context with that brand's on top; a brand's mailboxes send for any of its sequences. Records without a brand are shared.
+- Ideal customer profiles: who the company sells to, in words and as list-building filters (list_ideal_customer_profiles); a brand's offer and audience go in its context.
 - Sending: domains hold mailboxes; mailboxes may sign in through a sending server. A mailbox sends cold email only when active and in the ready stage (new ones warm up first). Domain health (SPF, DKIM, DMARC, blocklists, bounces) decides whether mail lands.
 - Leads and lists: leads are people; lead lists group them, and can be built from a data connector. The suppression list is never emailed.
 - Sequences: steps of email. Enroll leads, then activate the sequence; mailboxes are allocated to it automatically. Replies land in the inbox.
@@ -58,11 +58,11 @@ export function registerContextTools(
       title: "Start here: what Outflare knows and what is blocked",
       description:
         "Call this first in every conversation. Returns the company context (company, website, about, goals, voice, rules, notes), " +
-        "pinned and recent memories, the projects and whether each has a brief, the workspace status: a one-line summary, the set-up checklist " +
+        "pinned and recent memories, the brands, the workspace status: a one-line summary, the set-up checklist " +
         "and blockers with the tool that fixes each, and onboarding (see get_onboarding). If context.ask_for_missing is true, ask the person for context.missing in one short message " +
         "(or offer to read their website) and save the answers with update_context. Never ask for anything already here. " +
         "If brands lists several, the company markets several brands: pass brand (a handle) to add that brand's context and memories, which win over the company's where set " +
-        "(rules add up). A project token always gets its project's brand.",
+        "(rules add up).",
       inputSchema: { brand: z.string().optional().describe("A brand's handle or id from brands, or all.") },
       annotations: read,
     },
@@ -76,7 +76,7 @@ export function registerContextTools(
       const data = {
         ...(ctx.structuredContent ?? {}),
         status: status.isError ? { error: (status.content[0] as { text: string }).text } : status.structuredContent,
-        // Project tokens can't read it; then it is simply left out.
+        // Tokens without the scope can't read it; then it is simply left out.
         ...(onboarding.isError ? {} : { onboarding: onboarding.structuredContent }),
       };
       return { content: [{ type: "text", text: JSON.stringify(data) }], structuredContent: data };
@@ -140,7 +140,6 @@ export function registerContextTools(
       inputSchema: {
         q: z.string().max(200).optional().describe("Words the memory contains."),
         kind: kind.optional(),
-        project_id: z.string().optional().describe("A project's id, or none for workspace-wide memories."),
         brand: z.string().optional().describe("A brand's handle or id, or none for memories true for the whole company."),
         pinned: z.boolean().optional(),
         limit: z.number().int().min(1).max(200).optional(),
@@ -154,7 +153,7 @@ export function registerContextTools(
   server.registerResource(
     "guide",
     "outflare://guide",
-    { title: "Outflare guide", description: "What Outflare is, how workspaces, projects, mailboxes, sequences, connectors and missions connect, and where to look when something is wrong.", mimeType: "text/markdown" },
+    { title: "Outflare guide", description: "What Outflare is, how workspaces, brands, mailboxes, sequences, connectors and missions connect, and where to look when something is wrong.", mimeType: "text/markdown" },
     async (uri) => ({ contents: [{ uri: uri.href, mimeType: "text/markdown", text: GUIDE }] }),
   );
 
@@ -198,7 +197,7 @@ export function registerContextTools(
               `2. ${website ? `Read ${website} if you can browse, and draft` : "For"} what is missing (company, what we do, goals, voice), ` +
               "ask me in ONE short message, with your draft for me to confirm or correct. Rules and notes are optional.\n" +
               "3. Save the answers with update_context. Save any lasting preference I mention with remember.\n" +
-              "4. If there are no projects, suggest one (offer, audience, market) and create it with create_project when I agree.\n" +
+              "4. If we sell to a clear kind of customer, suggest an ideal customer profile and create it with create_ideal_customer_profile when I agree.\n" +
               "5. Read status.setup and the blockers, and tell me the next one or two steps in plain words, with the dashboard page for anything only I can do.\n" +
               "Keep each message short. Never ask me for API keys.",
           },
@@ -242,7 +241,7 @@ export function registerContextTools(
       description:
         "Save the company context: who they are, what they do, goals, voice and rules. Send only the fields to change, in the person's own words where possible; " +
         "every agent and teammate reads it from then on. Pass the version you read to avoid overwriting someone's edit (409 context_changed means read again). " +
-        "Offer, audience, market and ICP belong on a project (update_project), not here. onboarding_dismissed true stops asking for missing fields.",
+        "A brand's offer and audience belong in its context (update_brand_context); ideal customers in create_ideal_customer_profile. onboarding_dismissed true stops asking for missing fields.",
       inputSchema: {
         company: z.string().max(200).optional(),
         website: z.string().max(253).optional(),
@@ -276,8 +275,7 @@ export function registerContextTools(
       inputSchema: {
         text: z.string().min(1).max(500),
         kind: kind.optional().describe("preference (how they like things), decision (what was decided), fact (about the business), feedback (what worked or didn't). Default fact."),
-        project_id: id.nullable().optional().describe("The project it is about; leave out for the whole workspace."),
-        brand_id: z.string().nullable().optional().describe("The brand it is true for (a handle or id), when it is not true for every brand. Leave out with project_id."),
+        brand_id: z.string().nullable().optional().describe("The brand it is true for (a handle or id), when it is not true for every brand."),
         pinned: z.boolean().optional(),
       },
       annotations: { ...write, idempotentHint: true },
@@ -289,13 +287,12 @@ export function registerContextTools(
     "update_memory",
     {
       title: "Correct a memory",
-      description: "Change a memory's text or kind, pin or unpin it, or move it to a project or brand (null for the whole workspace). For when the person corrects you.",
+      description: "Change a memory's text or kind, pin or unpin it, or move it to a brand (null for the whole workspace). For when the person corrects you.",
       inputSchema: {
         memory_id: id,
         text: z.string().min(1).max(500).optional(),
         kind: kind.optional(),
         pinned: z.boolean().optional(),
-        project_id: id.nullable().optional(),
         brand_id: z.string().nullable().optional().describe("A brand's handle or id; null for the whole company."),
       },
       annotations: { ...write, idempotentHint: true },

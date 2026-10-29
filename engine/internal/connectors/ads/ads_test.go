@@ -51,7 +51,8 @@ func fake(t *testing.T, routes map[string]any) (*c.Client, *[]seen, string) {
 	t.Cleanup(srv.Close)
 	cl := &c.Client{BaseURLs: map[string]string{}}
 	for _, id := range []string{"google_ads", "meta_ads", "microsoft_ads.customer", "microsoft_ads.campaign", "microsoft_ads.reporting",
-		"reddit_ads", "reddit_ads.conversions", "x_ads", "linkedin_ads", "tiktok_ads", "snapchat_ads", "snapchat_ads.conversions"} {
+		"reddit_ads", "reddit_ads.conversions", "x_ads", "linkedin_ads", "tiktok_ads", "snapchat_ads", "snapchat_ads.conversions",
+		"taboola_ads", "taboola_ads.conversions", "outbrain_ads", "apple_ads", "apple_ads.token", "amazon_ads.na", "amazon_ads.token", "pinterest_ads"} {
 		cl.BaseURLs[id] = srv.URL
 	}
 	return cl, &reqs, srv.URL
@@ -75,8 +76,8 @@ func TestDefinitions(t *testing.T) {
 			t.Errorf("%s offers OAuth without a consent screen", d.ID)
 		}
 	}
-	if len(ids) != 8 {
-		t.Fatalf("want eight ad platforms, got %d", len(ids))
+	if len(ids) != 13 {
+		t.Fatalf("want thirteen ad platforms, got %d", len(ids))
 	}
 }
 
@@ -675,5 +676,86 @@ func TestSnapchatAdsConversions(t *testing.T) {
 	}
 	if got := (*reqs)[len(*reqs)-1].header.Get("Authorization"); got != "Bearer ct" {
 		t.Fatalf("conversions token not used: %q", got)
+	}
+}
+
+func TestPinterestAds(t *testing.T) {
+	cl, reqs, _ := fake(t, map[string]any{
+		"GET /user_account": map[string]any{"username": "northpeak"},
+		"GET /ad_accounts": func(r *http.Request) any {
+			if r.URL.Query().Get("bookmark") == "" {
+				return map[string]any{"items": []any{map[string]any{"id": "549", "name": "Northpeak", "currency": "usd"}}, "bookmark": "b2"}
+			}
+			return map[string]any{"items": []any{map[string]any{"id": "550", "name": "Acme", "currency": "gbp"}}, "bookmark": nil}
+		},
+		"GET /ad_accounts/549/campaigns": map[string]any{"items": []any{
+			map[string]any{"id": "626", "name": "Boards", "status": "ACTIVE", "objective_type": "CONSIDERATION", "daily_spend_cap": 15_000_000},
+			map[string]any{"id": "627", "name": "Old", "status": "ARCHIVED"},
+		}},
+		"GET /ad_accounts/549/campaigns/analytics": []any{
+			map[string]any{"CAMPAIGN_ID": 626, "DATE": "2026-10-01", "SPEND_IN_MICRO_DOLLAR": 7_250_000, "IMPRESSION_1": 900, "CLICKTHROUGH_1": 30, "TOTAL_CONVERSIONS": 4},
+			map[string]any{"CAMPAIGN_ID": "627", "DATE": "2026-10-01", "SPEND_IN_MICRO_DOLLAR": 0, "IMPRESSION_1": 0, "CLICKTHROUGH_1": 0},
+		},
+	})
+	pn := PinterestAds{}
+	creds := c.Creds{"access_token": "tok"}
+	if a, err := pn.Test(ctx, cl, creds); err != nil || a.Name != "northpeak" || a.Details["accounts"] != "2" {
+		t.Fatalf("test %+v %v", a, err)
+	}
+	accts, err := pn.AdAccounts(ctx, cl, creds)
+	if err != nil || len(accts) != 2 || accts[0].Currency != "USD" || accts[1].ID != "550" {
+		t.Fatalf("accounts %+v %v", accts, err)
+	}
+	camps, err := pn.AdCampaigns(ctx, cl, creds, accts[0])
+	if err != nil || len(camps) != 2 || camps[0].Status != c.AdActive || *camps[0].DailyBudgetMicros != 15_000_000 || camps[1].Status != c.AdRemoved {
+		t.Fatalf("campaigns %+v %v", camps, err)
+	}
+	n := len(*reqs)
+	days, err := pn.AdDays(ctx, cl, creds, accts[0], "2026-07-01", "2026-10-01")
+	if err != nil || len(days) != 2 || days[0].CampaignID != "626" || days[0].CampaignName != "Boards" || days[0].SpendMicros != 7_250_000 || *days[0].Conversions != 4 {
+		t.Fatalf("days %+v %v", days, err)
+	}
+	// 93 days are two analytics calls (after the campaign list).
+	var calls []seen
+	for _, r := range (*reqs)[n:] {
+		if strings.HasSuffix(r.path, "/analytics") {
+			calls = append(calls, r)
+		}
+	}
+	if len(calls) != 2 || !strings.Contains(calls[0].query, "end_date=2026-09-28") || !strings.Contains(calls[1].query, "start_date=2026-09-29") || !strings.Contains(calls[0].query, "campaign_ids=626%2C627") {
+		t.Fatalf("analytics calls %+v", calls)
+	}
+}
+
+func TestPinterestAdsConversions(t *testing.T) {
+	cl, reqs, _ := fake(t, map[string]any{
+		"POST /ad_accounts/549/events": map[string]any{"num_events_received": 2, "num_events_processed": 1, "events": []any{
+			map[string]any{"status": "processed"}, map[string]any{"status": "failed", "error_message": "event_time too old"}}},
+	})
+	pn, acct := PinterestAds{}, c.AdAccount{ID: "549"}
+	if _, err := pn.ConversionTargets(ctx, cl, c.Creds{"access_token": "tok"}, acct); c.KindOf(err) != c.ErrAuth {
+		t.Fatalf("without a conversion token: %v", err)
+	}
+	creds := c.Creds{"access_token": "tok", "conversions_token": "ct"}
+	ts, err := pn.ConversionTargets(ctx, cl, creds, acct)
+	if err != nil || len(ts) != 1 {
+		t.Fatalf("targets %+v %v", ts, err)
+	}
+	cv := conv(0, map[string]string{"epik": "ep1"})
+	cv.EventType = "checkout"
+	cv2 := conv(1, nil)
+	empty := c.AdConversion{EventID: "msg-3", Index: 2, ClickIDs: map[string]string{"gclid": "g"}}
+	res, err := pn.SendConversions(ctx, cl, creds, acct, ts[0], []c.AdConversion{cv, cv2, empty})
+	if err != nil || !res[0].OK || res[1].OK || res[1].Reason != "event_time too old" || !res[2].Skipped {
+		t.Fatalf("send %+v %v", res, err)
+	}
+	last := (*reqs)[len(*reqs)-1]
+	for _, want := range []string{`"event_name":"checkout"`, `"click_id":"ep1"`, `"action_source":"web"`, `"value":"12.5"`, `"ph":["` + c.HashID("15550100") + `"]`} {
+		if !strings.Contains(last.body, want) {
+			t.Fatalf("event body lacks %s: %s", want, last.body)
+		}
+	}
+	if last.header.Get("Authorization") != "Bearer ct" {
+		t.Fatalf("sends with the conversion token: %v", last.header)
 	}
 }

@@ -368,10 +368,10 @@ func (s *Syncer) push(ctx context.Context, o *connectors.Opened, w CRMWriter) er
 	var list []PushMeeting
 	for rows.Next() {
 		var p PushMeeting
-		err := rows.Scan(&p.ID, &p.ProjectID, &p.SequenceID, &p.MissionID, &p.LeadID, &p.InboundID, &p.Source, &p.IntegrationID,
+		err := rows.Scan(&p.ID, &p.SequenceID, &p.MissionID, &p.LeadID, &p.InboundID, &p.Source, &p.IntegrationID,
 			&p.ExternalID, &p.Title, &p.StartsAt, &p.EndsAt, &p.BookedAt, &p.Status, &p.AttendeeEmail, &p.AttendeeName,
 			&p.OrganizerEmail, &p.Attribution, &p.AttributionPinned, &p.Qualified, &p.Notes, &p.CreatedBy, &p.CreatedAt,
-			&p.UpdatedAt, &p.LeadEmail, &p.SequenceName, &p.ProjectName, &p.LeadFirstName, &p.LeadLastName, &p.LeadCompany)
+			&p.UpdatedAt, &p.LeadEmail, &p.SequenceName, &p.LeadFirstName, &p.LeadLastName, &p.LeadCompany)
 		if err != nil {
 			rows.Close()
 			return err

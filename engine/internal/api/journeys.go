@@ -36,6 +36,7 @@ func (s *Server) routesJourneys(mux *http.ServeMux) {
 	mux.HandleFunc("PATCH /v1/workspaces/{ws}/journeys/{id}/draft", s.inWorkspace(manage, s.updateJourneyDraft))
 	mux.HandleFunc("DELETE /v1/workspaces/{ws}/journeys/{id}/draft", s.inWorkspace(manage, s.discardJourneyDraft))
 	mux.HandleFunc("POST /v1/workspaces/{ws}/journeys/{id}/publish", s.inWorkspace(manage, s.publishJourney))
+	mux.HandleFunc("POST /v1/workspaces/{ws}/journeys/{id}/test", s.inWorkspace(read, s.testJourney))
 	mux.HandleFunc("GET /v1/workspaces/{ws}/journeys/{id}/runs", s.inWorkspace(read, s.listJourneyRuns))
 	mux.HandleFunc("POST /v1/workspaces/{ws}/journeys/{id}/runs", s.inWorkspace(send, s.addJourneyRun))
 	mux.HandleFunc("GET /v1/workspaces/{ws}/journeys/{id}/runs/{run}", s.inWorkspace(read, s.getJourneyRun))
@@ -340,6 +341,9 @@ func (s *Server) applyJourney(r *http.Request, ws string, f journeyFields, v *jo
 			return errInvalid(msg)
 		}
 		if err := s.checkJourneyTemplates(r, ws, *f.Steps, false); err != nil {
+			return err
+		}
+		if err := s.checkJourneyActionRefs(r.Context(), ws, *f.Steps, false); err != nil {
 			return err
 		}
 		v.Steps = *f.Steps
@@ -849,5 +853,5 @@ func (s *Server) checkJourneyRefs(r *http.Request, ws string, steps []journeys.S
 			return errInvalid("step " + st.ID + ": " + ref + " is not " + what + " in this workspace")
 		}
 	}
-	return nil
+	return s.checkJourneyActionRefs(r.Context(), ws, steps, true)
 }

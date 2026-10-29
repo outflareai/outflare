@@ -8,6 +8,8 @@ A conversion is whatever a workspace counts as one: a sign-up, a payment, a book
 
 Nothing here is particular to a kind of business. Presets are starting points a workspace copies and changes.
 
+In the web app they live under **Analytics → Channels → Conversions**: add a preset, define a conversion with its conditions, value and ad network names, edit or archive one. The API and MCP do the same.
+
 ## A definition
 
 | Field | What it is |

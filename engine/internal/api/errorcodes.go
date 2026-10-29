@@ -46,7 +46,6 @@ var errorCodes = []errorCode{
 	{"passkey_expired", []int{400}, "The passkey ceremony took too long. Start again.", false},
 	{"passkey_rejected", []int{400, 401}, "The passkey was not accepted.", false},
 	{"too_many_passkeys", []int{409}, "The account already has the most passkeys allowed.", false},
-	{"project_has_tokens", []int{409}, "The project still has API tokens. Revoke them first.", false},
 	{"support_view_read_only", []int{403}, "You are viewing this account as staff (support access), which is read-only. End the view with DELETE /v1/me/support-view to make changes as yourself.", false},
 	{"support_view_hidden", []int{403}, "Hidden while staff view this account (support access): inbox and email content never show in a view.", false},
 	{"managed", []int{409}, "Usage stats are set by the server (an environment variable or the build), not here.", false},
@@ -70,6 +69,7 @@ var errorCodes = []errorCode{
 	{"connector_quota", []int{429}, "The connected service's quota or rate limit is used up.", true},
 	{"connector_unavailable", []int{502}, "The connected service could not be reached or failed.", true},
 	{"usage_limit_reached", []int{409}, "A paid connection reached a daily or monthly usage limit set on its page under Connectors. The message says which; raise the limit or wait for the next day or month.", false},
+	{"check_failed", []int{409}, "A story's release didn't pass the check before approval: a number without a sourced fact, a quote its expert hasn't approved, or no release. The story's last_check lists each problem.", false},
 	{"connector_needed", []int{409}, "This needs a connector that is not connected yet. The message names it.", false},
 	{"already_connected", []int{409}, "The connector is already connected in this workspace. Use the connection instead of asking for it again.", false},
 	{"use_oauth", []int{400}, "This connector connects through its sign-in page, not a key.", false},
@@ -109,7 +109,6 @@ var errorCodes = []errorCode{
 	{"mission_paused", []int{409}, "The mission is paused, so calls inside it are refused.", false},
 	{"mission_ended", []int{409}, "The mission is finished or stopped.", false},
 	{"mission_state", []int{409}, "The mission is not in a state that allows this.", false},
-	{"brief_changed", []int{409}, "The brief changed since you loaded it. Reload it and apply your edit again.", false},
 	{"context_changed", []int{409}, "The company context changed since you loaded it. Reload it and apply your edit again.", false},
 	{"plan_failed", []int{502}, "The AI model could not draft a plan. Reword the goal, or retry.", true},
 

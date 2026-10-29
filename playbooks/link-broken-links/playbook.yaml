@@ -1,5 +1,5 @@
 id: link-broken-links
-version: 1
+version: 2
 title: Replace broken links on pages about your topic
 summary: Search for pages on your topic, find the links on them that are dead, and offer your page as the replacement.
 description: |
@@ -43,8 +43,8 @@ steps:
     tools: [checkLinkProspects, listLinkProspects]
   - say: Keep the pages with a broken link your page can replace, say which one in the prospect's note, and set the page to offer. Delete the rest.
     tools: [getLinkProspect, updateLinkProspect, deleteLinkProspect]
-  - say: Pick a sequence for the pitches whose first step uses {{custom.opener}}, or draft one (held, nothing sends) if none does.
-    tools: [listLinkSequences, createSequence, previewSequence]
+  - say: Pick a sequence for the pitches whose first step uses {{custom.opener}}, or create the starter sequence (a draft with the opener and one follow-up) if none does.
+    tools: [listLinkSequences, createLinkSequence, previewSequence]
   - say: Start a pitch for each prospect worth asking, to its best contact. The workspace's AI writes an opener about their page, and each pitch waits for a person to approve it.
     tools: [startLinkPitch, listLinkPitches]
   - say: Report what was pitched and, later, what replied, agreed and went live.

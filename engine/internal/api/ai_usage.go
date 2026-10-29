@@ -118,7 +118,7 @@ func (s *Server) aiToolName(task string) string {
 
 // recordAICall writes a call to the usage log and its metrics. It reports
 // false, writing nothing, when the ref was logged before (a retried job).
-func recordAICall(ctx context.Context, q jobs.Querier, c aiChoice, ws string, missionID, projectID, actorID *string, u llm.Usage, cents int64, ref string) (bool, error) {
+func recordAICall(ctx context.Context, q jobs.Querier, c aiChoice, ws string, missionID, actorID *string, u llm.Usage, cents int64, ref string) (bool, error) {
 	task := aiCallTask(c.Task)
 	var refArg *string
 	if ref != "" {
@@ -137,12 +137,12 @@ func recordAICall(ctx context.Context, q jobs.Querier, c aiChoice, ws string, mi
 	}
 	var id int64
 	err := q.QueryRow(ctx, `
-		INSERT INTO ai_calls (workspace_id, task, provider, model, integration_id, mission_id, project_id, actor_id,
+		INSERT INTO ai_calls (workspace_id, task, provider, model, integration_id, mission_id, actor_id,
 			input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, web_searches, cost_cents, cost_reported, ref)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
 		ON CONFLICT (workspace_id, ref) WHERE ref IS NOT NULL DO NOTHING
 		RETURNING id`,
-		ws, task, c.Provider.ID, model, integration, missionID, projectID, actorID,
+		ws, task, c.Provider.ID, model, integration, missionID, actorID,
 		u.InputTokens, u.OutputTokens, u.CacheRead, u.CacheWrite, u.WebSearches, max(cents, 0), u.CostUSD > 0, refArg).Scan(&id)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return false, nil

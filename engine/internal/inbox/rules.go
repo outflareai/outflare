@@ -23,7 +23,7 @@ import (
 // Reply rules say what Outflare does once a reply has a label it is sure
 // of: snooze a "not now" until the date it gives, move a sequence past an
 // out-of-office, add the person a referral names. A workspace has one set,
-// and a project or a sequence can override it label by label. Every
+// and a sequence can override it label by label. Every
 // action can be undone, and a reply's text only ever picks a label, never
 // an action, so a crafted reply cannot make Outflare do anything a person
 // did not set up.
@@ -192,17 +192,16 @@ type RuleQuerier interface {
 }
 
 // EffectiveRules are the rules for a reply to a sequence (none for a reply
-// outside one): the defaults, then the workspace's set, the sequence's
-// project's and the sequence's own, each winning label by label.
+// outside one): the defaults, then the workspace's set and the sequence's
+// own, each winning label by label.
 func EffectiveRules(ctx context.Context, q RuleQuerier, ws string, sequenceID *string) (RuleSet, error) {
 	rows, err := q.Query(ctx, `
 		SELECT r.rules FROM reply_rules r
 		LEFT JOIN sequences s ON s.id = $2::uuid AND s.workspace_id = r.workspace_id
 		WHERE r.workspace_id = $1 AND (
-			(r.project_id IS NULL AND r.sequence_id IS NULL) OR
-			(r.project_id IS NOT NULL AND r.project_id = s.project_id) OR
+			r.sequence_id IS NULL OR
 			(r.sequence_id IS NOT NULL AND r.sequence_id = s.id))
-		ORDER BY (r.sequence_id IS NOT NULL), (r.project_id IS NOT NULL)`, ws, sequenceID)
+		ORDER BY (r.sequence_id IS NOT NULL)`, ws, sequenceID)
 	if err != nil {
 		return nil, err
 	}

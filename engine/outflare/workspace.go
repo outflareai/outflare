@@ -14,6 +14,7 @@ import (
 	"github.com/outflareai/outflare/engine/internal/api"
 	"github.com/outflareai/outflare/engine/internal/audit"
 	"github.com/outflareai/outflare/engine/internal/auth"
+	"github.com/outflareai/outflare/engine/internal/classify"
 	"github.com/outflareai/outflare/engine/internal/connectors"
 	"github.com/outflareai/outflare/engine/internal/customers"
 	"github.com/outflareai/outflare/engine/internal/llm"
@@ -237,6 +238,48 @@ func (c *Connection) Fetch(ctx context.Context, url string, renderJS bool, ref s
 		err = serr
 	}
 	return p, err
+}
+
+// People search: the workspace's own people-data account (Apollo, PDL)
+// finds people at companies. Outflare keeps no contact database of its own.
+const CapSearchPeople = connectors.CapSearchPeople
+
+type (
+	PeopleFilter = connectors.PeopleFilter
+	FoundPerson  = connectors.Person
+	PeoplePage   = connectors.SearchPage
+)
+
+// SearchPeople returns the first page (up to size people) of a people
+// search on the connection, and books the credits it cost against ref.
+func (c *Connection) SearchPeople(ctx context.Context, f PeopleFilter, size int, ref string) (PeoplePage, error) {
+	s, ok := c.o.Connector.(connectors.PeopleSearcher)
+	if !ok {
+		return PeoplePage{}, ErrNotConnected
+	}
+	if err := usagelimits.Check(ctx, c.h.Pool, c.WorkspaceID, c.ID, "credit", 0); err != nil {
+		return PeoplePage{}, err
+	}
+	page, err := s.SearchPeople(ctx, c.o.Client, c.o.Creds, f, "", size)
+	if page.Credits > 0 {
+		id, credits := c.ID, page.Credits
+		e := outcomes.Entry{WorkspaceID: c.WorkspaceID, Category: outcomes.CategoryData, Provider: c.Connector,
+			IntegrationID: &id, OccurredAt: time.Now(), Source: outcomes.SourceAuto, Note: "People search", Units: &credits, UnitName: "credit"}
+		if ref != "" {
+			e.Ref = &ref
+		}
+		if _, _, serr := outcomes.Record(ctx, c.h.Pool, e); serr != nil && err == nil {
+			err = serr
+		}
+	}
+	return page, err
+}
+
+// RoleAddress reports whether an address is a role or shared inbox, such
+// as info@, contact@ or sales@, rather than one person's.
+func RoleAddress(email string) bool {
+	local, _, ok := strings.Cut(strings.TrimSpace(email), "@")
+	return ok && classify.RoleLocal(local)
 }
 
 // withinLimits refuses a call once the connection reached a usage limit

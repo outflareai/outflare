@@ -218,9 +218,13 @@ func Tag(destination string, t Tags) (string, error) {
 }
 
 // NewCode makes a campaign's ofc: ten random lowercase letters and digits.
-func NewCode() string {
+func NewCode() string { return NewShortCode(10) }
+
+// NewShortCode is a random code of n lowercase letters and digits, without
+// the ones people confuse (l, o, 0, 1).
+func NewShortCode(n int) string {
 	const abc = "abcdefghijkmnpqrstuvwxyz23456789"
-	b := make([]byte, 10)
+	b := make([]byte, n)
 	if _, err := rand.Read(b); err != nil {
 		panic(err)
 	}

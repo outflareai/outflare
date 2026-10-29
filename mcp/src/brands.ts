@@ -1,7 +1,7 @@
 // Brands: the businesses one company markets, each with its own website,
 // such as Geonode and Repocket. Connectors, members, tokens and leads are
-// the workspace's and shared; a brand owns its context, memories, projects
-// and sending setup. get_context with a brand layers its context on the
+// the workspace's and shared; a brand owns its context, memories, lists,
+// sequences and sending setup. get_context with a brand layers its context on the
 // company's.
 
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
@@ -31,7 +31,6 @@ const links = z
   .describe("Where else the brand lives: app store listings, socials, docs. Replaces the brand's links.");
 
 const records = {
-  project_ids: z.array(id).max(10000).optional().describe("A project brings everything in it."),
   domains: z.array(z.string()).max(10000).optional(),
   mailbox_ids: z.array(id).max(10000).optional(),
   lead_list_ids: z.array(id).max(10000).optional(),
@@ -50,7 +49,7 @@ export function registerBrandTools(server: McpServer, gtm: MissionClient, worksp
       title: "List brands",
       description:
         "The businesses this company markets, each with its own website (such as Geonode and Repocket), with their domains, platforms and what each owns. " +
-        "Empty for a company with one brand. When there are several, work out which brand a task is for (from its project or sequence, or ask) " +
+        "Empty for a company with one brand. When there are several, work out which brand a task is for (from its sequence or list, or ask) " +
         "and pass brand to get_context and the list tools.",
       inputSchema: { status: z.enum(["active", "archived", "all"]).optional().describe("Default: active brands.") },
       annotations: read,
@@ -104,7 +103,7 @@ export function registerBrandTools(server: McpServer, gtm: MissionClient, worksp
       title: "Add a brand",
       description:
         "Adds a brand to the workspace: a business with its own website. Connectors, members and tokens are shared, so nothing needs reconnecting. " +
-        "Then save what you know about it with update_brand_context (offer to read its website) and move its projects or domains in with add_to_brand.",
+        "Then save what you know about it with update_brand_context (offer to read its website) and move its domains and sequences in with add_to_brand.",
       inputSchema: {
         name: z.string().min(1).max(100),
         website: z.string().max(253).optional().describe("Its main site, such as repocket.com."),
@@ -218,8 +217,8 @@ export function registerBrandTools(server: McpServer, gtm: MissionClient, worksp
     {
       title: "Move records into a brand",
       description:
-        "Moves projects (with everything in them), domains (with their mailboxes), mailboxes, lead lists, sequences or missions into a brand. " +
-        "A record inside a project keeps the project's brand (counted in in_project): move the project instead. A brand's mailboxes then only send for that brand's sequences.",
+        "Moves domains (with their mailboxes), mailboxes, lead lists, sequences or missions into a brand. " +
+        "A brand's mailboxes then send for any of that brand's sequences.",
       inputSchema: { brand: brandRef, ...records },
       annotations: write,
     },
@@ -241,7 +240,7 @@ export function registerBrandTools(server: McpServer, gtm: MissionClient, worksp
     "remove_from_brand",
     {
       title: "Make a brand's records shared",
-      description: "Takes projects, domains, mailboxes, lead lists, sequences or missions out of a brand so every brand shares them again.",
+      description: "Takes domains, mailboxes, lead lists, sequences or missions out of a brand so every brand shares them again.",
       inputSchema: { brand: brandRef, ...records },
       annotations: write,
     },

@@ -77,12 +77,12 @@ func AttributeDeal(ctx context.Context, tx pgx.Tx, ws, id string) error {
 		ORDER BY booked_at DESC LIMIT 1`, ws, *m.LeadID, at).Scan(&meeting); err != nil && !errors.Is(err, pgx.ErrNoRows) {
 		return err
 	}
-	if _, err := tx.Exec(ctx, `UPDATE deals SET lead_id = $3, sequence_id = $4, project_id = $5, meeting_id = COALESCE(meeting_id, $6),
-		attribution = $7, updated_at = now() WHERE workspace_id = $1 AND id = $2`,
-		ws, id, m.LeadID, m.SequenceID, m.ProjectID, meeting, m.Attribution); err != nil {
+	if _, err := tx.Exec(ctx, `UPDATE deals SET lead_id = $3, sequence_id = $4, meeting_id = COALESCE(meeting_id, $5),
+		attribution = $6, updated_at = now() WHERE workspace_id = $1 AND id = $2`,
+		ws, id, m.LeadID, m.SequenceID, meeting, m.Attribution); err != nil {
 		return err
 	}
 	return audit.Record(ctx, tx, audit.Event{WorkspaceID: ws, ActorType: "system", Action: "deal.attributed", TargetType: "deal", TargetID: id,
-		Data:  map[string]any{"attribution": m.Attribution, "sequence_id": m.SequenceID, "project_id": m.ProjectID, "meeting_id": meeting},
+		Data:  map[string]any{"attribution": m.Attribution, "sequence_id": m.SequenceID, "meeting_id": meeting},
 		Props: map[string]any{"attribution": m.Attribution, "meeting": meeting != nil}})
 }

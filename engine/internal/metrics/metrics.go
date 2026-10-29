@@ -78,6 +78,19 @@ var (
 		Namespace: namespace, Subsystem: "ingest", Name: "events_total",
 		Help: "Browser events the collector received, by outcome (accepted, rejected for their shape, capped by the daily limits).",
 	}, []string{"outcome"})
+	// Tracking health: how well landing pages from paid ads are tracked.
+	paidArrivals = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Namespace: namespace, Subsystem: "ad_tracking", Name: "arrivals_total",
+		Help: "Landing pages from paid ads (a paid utm_medium) by network and outcome: click_id (the network's own click id), ad_ids (only the tracking template's ad ids) or none (no tracking template on the ad).",
+	}, []string{"network", "outcome"})
+	adMacrosUnfilled = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Namespace: namespace, Subsystem: "ad_tracking", Name: "unfilled_macros_total",
+		Help: "Tracking template values that arrived as the macro itself ({{ad.id}}, __CID__): the network didn't fill them in, so the template or its macro is wrong for that network.",
+	}, []string{"network"})
+	redirectClicks = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Namespace: namespace, Subsystem: "redirect", Name: "clicks_total",
+		Help: "Clicks on campaign redirect links (/l/{code}), by outcome (counted, bot for a link scanner or preview, unknown for a code that isn't a link, error when the click couldn't be stored but the person was still sent on).",
+	}, []string{"outcome"})
 	inboxEvents = prometheus.NewCounterVec(prometheus.CounterOpts{
 		Namespace: namespace, Subsystem: "inbox", Name: "events_total",
 		Help: "Browser events workers took from the inbox, by outcome (stored, rejected, failed).",
@@ -374,7 +387,7 @@ var (
 var own = []prometheus.Collector{
 	httpRequests, httpDuration, httpInFlight, httpRateLimited,
 	jobsDone, jobDuration, jobWait, jobsActive, jobsReaped, workers,
-	siteEvents, inboxEvents, inboxBatch,
+	siteEvents, inboxEvents, inboxBatch, redirectClicks, paidArrivals, adMacrosUnfilled,
 	flagRequests, flagDuration, flagCache, abResults, abResultsDuration,
 	consentRequests, consentDuration, consentChoices,
 	cookieScans, cookieScanPages, cookieScanFound, cookieScanDuration, cookieReports, cookieNew,
@@ -467,6 +480,19 @@ func SiteEventsReceived(accepted, rejected int) {
 	siteEvents.WithLabelValues("accepted").Add(float64(accepted))
 	siteEvents.WithLabelValues("rejected").Add(float64(rejected))
 }
+
+// PaidArrival counts one landing page from a paid ad by network and how
+// it was tracked (click_id, ad_ids or none).
+func PaidArrival(network, outcome string) { paidArrivals.WithLabelValues(network, outcome).Inc() }
+
+// AdMacrosUnfilled counts template values a network left as the macro.
+func AdMacrosUnfilled(network string, n int) {
+	adMacrosUnfilled.WithLabelValues(network).Add(float64(n))
+}
+
+// RedirectClick counts one click on a campaign redirect link by outcome:
+// counted, bot, unknown or error.
+func RedirectClick(outcome string) { redirectClicks.WithLabelValues(outcome).Inc() }
 
 // SiteEventsCapped counts browser events turned away by a daily limit.
 func SiteEventsCapped(n int) { siteEvents.WithLabelValues("capped").Add(float64(n)) }

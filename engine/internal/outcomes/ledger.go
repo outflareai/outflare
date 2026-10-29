@@ -12,7 +12,6 @@ import (
 // SpendFilter narrows ListSpend.
 type SpendFilter struct {
 	From, To   *time.Time
-	ProjectID  string
 	SequenceID string
 	MissionID  string
 	Category   string
@@ -30,14 +29,13 @@ func ListSpend(ctx context.Context, q Querier, ws string, f SpendFilter) ([]Entr
 		WHERE workspace_id = $1
 		  AND ($2::timestamptz IS NULL OR occurred_at >= $2)
 		  AND ($3::timestamptz IS NULL OR occurred_at < $3)
-		  AND ($4 = '' OR project_id::text = $4)
-		  AND ($5 = '' OR sequence_id::text = $5)
-		  AND ($6 = '' OR mission_id::text = $6)
-		  AND ($7 = '' OR category = $7)
-		  AND ($8 = '' OR lower(provider) = lower($8))
-		  AND ($9::timestamptz IS NULL OR occurred_at < $9)
-		ORDER BY occurred_at DESC, id LIMIT $10`,
-		ws, f.From, f.To, f.ProjectID, f.SequenceID, f.MissionID, f.Category, f.Provider, f.Before, f.Limit)
+		  AND ($4 = '' OR sequence_id::text = $4)
+		  AND ($5 = '' OR mission_id::text = $5)
+		  AND ($6 = '' OR category = $6)
+		  AND ($7 = '' OR lower(provider) = lower($7))
+		  AND ($8::timestamptz IS NULL OR occurred_at < $8)
+		ORDER BY occurred_at DESC, id LIMIT $9`,
+		ws, f.From, f.To, f.SequenceID, f.MissionID, f.Category, f.Provider, f.Before, f.Limit)
 	if err != nil {
 		return nil, err
 	}
@@ -76,8 +74,9 @@ func DeleteSpend(ctx context.Context, tx pgx.Tx, ws, id string) error {
 
 // Recurring is a cost that repeats every month or year.
 type Recurring struct {
-	ID          string    `json:"id"`
-	ProjectID   *string   `json:"project_id"`
+	ID string `json:"id"`
+	// Ignored: projects were removed. Accepted so older clients still work.
+	ProjectID   *string   `json:"project_id,omitempty"`
 	SequenceID  *string   `json:"sequence_id"`
 	Category    string    `json:"category"`
 	Provider    string    `json:"provider"`
@@ -117,12 +116,12 @@ func (r Recurring) Daily() float64 {
 	return float64(r.AmountCents) * 12 / 365
 }
 
-const recurringCols = `id, project_id, sequence_id, category, provider, name, amount_cents, currency, every, starts_on, ends_on, note, created_at, updated_at`
+const recurringCols = `id, sequence_id, category, provider, name, amount_cents, currency, every, starts_on, ends_on, note, created_at, updated_at`
 
 func scanRecurring(row pgx.Row) (Recurring, error) {
 	var r Recurring
 	var ends *time.Time
-	err := row.Scan(&r.ID, &r.ProjectID, &r.SequenceID, &r.Category, &r.Provider, &r.Name, &r.AmountCents, &r.Currency, &r.Every,
+	err := row.Scan(&r.ID, &r.SequenceID, &r.Category, &r.Provider, &r.Name, &r.AmountCents, &r.Currency, &r.Every,
 		&r.StartsOn.Time, &ends, &r.Note, &r.CreatedAt, &r.UpdatedAt)
 	if ends != nil {
 		r.EndsOn = &Date{*ends}
@@ -184,14 +183,14 @@ func (r *Recurring) normalize() error {
 	return nil
 }
 
-func checkRefs(ctx context.Context, q Querier, ws string, project, sequence *string) error {
+func checkRefs(ctx context.Context, q Querier, ws string, sequence *string) error {
 	var ok bool
-	if err := q.QueryRow(ctx, `SELECT ($2::uuid IS NULL OR EXISTS (SELECT 1 FROM projects WHERE workspace_id = $1 AND id = $2))
-		AND ($3::uuid IS NULL OR EXISTS (SELECT 1 FROM sequences WHERE workspace_id = $1 AND id = $3))`, ws, project, sequence).Scan(&ok); err != nil {
+	if err := q.QueryRow(ctx, `SELECT $2::uuid IS NULL OR EXISTS (SELECT 1 FROM sequences WHERE workspace_id = $1 AND id = $2)`,
+		ws, sequence).Scan(&ok); err != nil {
 		return err
 	}
 	if !ok {
-		return invalid("the project or sequence is not in this workspace")
+		return invalid("the sequence is not in this workspace")
 	}
 	return nil
 }
@@ -201,7 +200,7 @@ func CreateRecurring(ctx context.Context, tx pgx.Tx, ws, actorID string, r Recur
 	if err := r.normalize(); err != nil {
 		return r, err
 	}
-	if err := checkRefs(ctx, tx, ws, r.ProjectID, r.SequenceID); err != nil {
+	if err := checkRefs(ctx, tx, ws, r.SequenceID); err != nil {
 		return r, err
 	}
 	var actor *string
@@ -213,10 +212,10 @@ func CreateRecurring(ctx context.Context, tx pgx.Tx, ws, actorID string, r Recur
 		ends = &r.EndsOn.Time
 	}
 	return scanRecurring(tx.QueryRow(ctx, `
-		INSERT INTO spend_recurring (workspace_id, project_id, sequence_id, category, provider, name, amount_cents, currency, every,
+		INSERT INTO spend_recurring (workspace_id, sequence_id, category, provider, name, amount_cents, currency, every,
 			starts_on, ends_on, note, created_by)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13) RETURNING `+recurringCols,
-		ws, r.ProjectID, r.SequenceID, r.Category, r.Provider, r.Name, r.AmountCents, r.Currency, r.Every, r.StartsOn.Time, ends, r.Note, actor))
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12) RETURNING `+recurringCols,
+		ws, r.SequenceID, r.Category, r.Provider, r.Name, r.AmountCents, r.Currency, r.Every, r.StartsOn.Time, ends, r.Note, actor))
 }
 
 // UpdateRecurring replaces a recurring cost's fields. To stop a cost,
@@ -225,7 +224,7 @@ func UpdateRecurring(ctx context.Context, tx pgx.Tx, ws, id string, r Recurring)
 	if err := r.normalize(); err != nil {
 		return r, err
 	}
-	if err := checkRefs(ctx, tx, ws, r.ProjectID, r.SequenceID); err != nil {
+	if err := checkRefs(ctx, tx, ws, r.SequenceID); err != nil {
 		return r, err
 	}
 	var ends *time.Time
@@ -233,10 +232,10 @@ func UpdateRecurring(ctx context.Context, tx pgx.Tx, ws, id string, r Recurring)
 		ends = &r.EndsOn.Time
 	}
 	out, err := scanRecurring(tx.QueryRow(ctx, `
-		UPDATE spend_recurring SET project_id = $3, sequence_id = $4, category = $5, provider = $6, name = $7, amount_cents = $8,
-			currency = $9, every = $10, starts_on = $11, ends_on = $12, note = $13, updated_at = now()
+		UPDATE spend_recurring SET sequence_id = $3, category = $4, provider = $5, name = $6, amount_cents = $7,
+			currency = $8, every = $9, starts_on = $10, ends_on = $11, note = $12, updated_at = now()
 		WHERE workspace_id = $1 AND id = $2 RETURNING `+recurringCols,
-		ws, id, r.ProjectID, r.SequenceID, r.Category, r.Provider, r.Name, r.AmountCents, r.Currency, r.Every, r.StartsOn.Time, ends, r.Note))
+		ws, id, r.SequenceID, r.Category, r.Provider, r.Name, r.AmountCents, r.Currency, r.Every, r.StartsOn.Time, ends, r.Note))
 	if errors.Is(err, pgx.ErrNoRows) {
 		return out, ErrNotFound
 	}

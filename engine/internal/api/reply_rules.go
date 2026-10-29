@@ -13,7 +13,7 @@ import (
 )
 
 // Reply rules: what happens when a reply gets a label, for the workspace
-// and, label by label, for a project or a sequence.
+// and, label by label, for a sequence.
 func (s *Server) routesReplyRules(mux *http.ServeMux) {
 	read, manage := auth.ScopeInboxRead, auth.ScopeInboxManage
 	mux.HandleFunc("GET /v1/workspaces/{ws}/reply-rules", s.inWorkspace(read, s.getReplyRules))
@@ -23,7 +23,6 @@ func (s *Server) routesReplyRules(mux *http.ServeMux) {
 
 type replyRuleSet struct {
 	ID         string        `json:"id"`
-	ProjectID  *string       `json:"project_id"`
 	SequenceID *string       `json:"sequence_id"`
 	Rules      inbox.RuleSet `json:"rules"`
 	UpdatedAt  time.Time     `json:"updated_at"`
@@ -32,8 +31,8 @@ type replyRuleSet struct {
 func (s *Server) getReplyRules(w http.ResponseWriter, r *http.Request) {
 	a := accessFrom(r.Context())
 	rows, err := s.pool.Query(r.Context(), `
-		SELECT id::text, project_id::text, sequence_id::text, rules, updated_at FROM reply_rules
-		WHERE workspace_id = $1 ORDER BY (sequence_id IS NOT NULL), (project_id IS NOT NULL), updated_at`, a.WorkspaceID)
+		SELECT id::text, sequence_id::text, rules, updated_at FROM reply_rules
+		WHERE workspace_id = $1 ORDER BY (sequence_id IS NOT NULL), updated_at`, a.WorkspaceID)
 	if err != nil {
 		s.internal(w, r, err)
 		return
@@ -41,7 +40,7 @@ func (s *Server) getReplyRules(w http.ResponseWriter, r *http.Request) {
 	sets, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (replyRuleSet, error) {
 		var v replyRuleSet
 		var raw []byte
-		if err := row.Scan(&v.ID, &v.ProjectID, &v.SequenceID, &raw, &v.UpdatedAt); err != nil {
+		if err := row.Scan(&v.ID, &v.SequenceID, &raw, &v.UpdatedAt); err != nil {
 			return v, err
 		}
 		return v, json.Unmarshal(raw, &v.Rules)
@@ -60,6 +59,8 @@ func (s *Server) getReplyRules(w http.ResponseWriter, r *http.Request) {
 func (s *Server) setReplyRules(w http.ResponseWriter, r *http.Request) {
 	a := accessFrom(r.Context())
 	var req struct {
+		// Refused: projects were removed. Ignoring it would change the
+		// workspace's rules instead.
 		ProjectID  *string       `json:"project_id"`
 		SequenceID *string       `json:"sequence_id"`
 		Rules      inbox.RuleSet `json:"rules"`
@@ -67,8 +68,8 @@ func (s *Server) setReplyRules(w http.ResponseWriter, r *http.Request) {
 	if !decode(w, r, &req) {
 		return
 	}
-	if req.ProjectID != nil && req.SequenceID != nil {
-		writeError(w, r, http.StatusBadRequest, "invalid_request", "send project_id or sequence_id, not both")
+	if req.ProjectID != nil {
+		writeError(w, r, http.StatusBadRequest, "invalid_request", "project_id: projects were removed; set rules for the workspace or for a sequence (sequence_id)")
 		return
 	}
 	if req.Rules == nil {
@@ -77,22 +78,16 @@ func (s *Server) setReplyRules(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	var out *replyRuleSet
 	err := pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
-		for _, ref := range []struct {
-			id    *string
-			table string
-		}{{req.ProjectID, "projects"}, {req.SequenceID, "sequences"}} {
-			if ref.id == nil {
-				continue
-			}
+		if id := req.SequenceID; id != nil {
 			var ok bool
-			if validUUID(*ref.id) {
-				if err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM `+ref.table+` WHERE id = $1 AND workspace_id = $2)`,
-					*ref.id, a.WorkspaceID).Scan(&ok); err != nil {
+			if validUUID(*id) {
+				if err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM sequences WHERE id = $1 AND workspace_id = $2)`,
+					*id, a.WorkspaceID).Scan(&ok); err != nil {
 					return err
 				}
 			}
 			if !ok {
-				return errInvalid(map[string]string{"projects": "project_id", "sequences": "sequence_id"}[ref.table] + " is not in this workspace")
+				return errInvalid("sequence_id is not in this workspace")
 			}
 		}
 		if err := inbox.CheckRules(ctx, tx, a.WorkspaceID, req.Rules); err != nil {
@@ -109,11 +104,11 @@ func (s *Server) setReplyRules(w http.ResponseWriter, r *http.Request) {
 		for l := range req.Rules {
 			labels = append(labels, l)
 		}
-		data := map[string]any{"project_id": req.ProjectID, "sequence_id": req.SequenceID, "labels": labels}
-		match := `workspace_id = $1 AND project_id IS NOT DISTINCT FROM $2::uuid AND sequence_id IS NOT DISTINCT FROM $3::uuid`
+		data := map[string]any{"sequence_id": req.SequenceID, "labels": labels}
+		match := `workspace_id = $1 AND sequence_id IS NOT DISTINCT FROM $2::uuid`
 		// An empty set clears an override, so it follows the next set up.
 		if len(req.Rules) == 0 {
-			tag, err := tx.Exec(ctx, `DELETE FROM reply_rules WHERE `+match, a.WorkspaceID, req.ProjectID, req.SequenceID)
+			tag, err := tx.Exec(ctx, `DELETE FROM reply_rules WHERE `+match, a.WorkspaceID, req.SequenceID)
 			if err != nil || tag.RowsAffected() == 0 {
 				return err
 			}
@@ -127,12 +122,12 @@ func (s *Server) setReplyRules(w http.ResponseWriter, r *http.Request) {
 		if a.ActorID != "" {
 			actor = &a.ActorID
 		}
-		v := replyRuleSet{ProjectID: req.ProjectID, SequenceID: req.SequenceID, Rules: req.Rules}
-		err = tx.QueryRow(ctx, `UPDATE reply_rules SET rules = $4, updated_by = $5, updated_at = now() WHERE `+match+` RETURNING id::text, updated_at`,
-			a.WorkspaceID, req.ProjectID, req.SequenceID, raw, actor).Scan(&v.ID, &v.UpdatedAt)
+		v := replyRuleSet{SequenceID: req.SequenceID, Rules: req.Rules}
+		err = tx.QueryRow(ctx, `UPDATE reply_rules SET rules = $3, updated_by = $4, updated_at = now() WHERE `+match+` RETURNING id::text, updated_at`,
+			a.WorkspaceID, req.SequenceID, raw, actor).Scan(&v.ID, &v.UpdatedAt)
 		if errors.Is(err, pgx.ErrNoRows) {
-			err = tx.QueryRow(ctx, `INSERT INTO reply_rules (workspace_id, project_id, sequence_id, rules, updated_by) VALUES ($1, $2, $3, $4, $5)
-				RETURNING id::text, updated_at`, a.WorkspaceID, req.ProjectID, req.SequenceID, raw, actor).Scan(&v.ID, &v.UpdatedAt)
+			err = tx.QueryRow(ctx, `INSERT INTO reply_rules (workspace_id, sequence_id, rules, updated_by) VALUES ($1, $2, $3, $4)
+				RETURNING id::text, updated_at`, a.WorkspaceID, req.SequenceID, raw, actor).Scan(&v.ID, &v.UpdatedAt)
 		}
 		if err != nil {
 			return err

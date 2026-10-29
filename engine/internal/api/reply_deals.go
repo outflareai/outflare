@@ -147,7 +147,7 @@ func (s *Server) replyDealJob(ctx context.Context, job jobs.Job) error {
 			return nil
 		}
 		a := &access{principal: principal{ActorType: "system"}, WorkspaceID: ws}
-		res, err := moveReplyDeal(ctx, tx, c, shape, a, *d, *recordID)
+		res, err := moveReplyDeal(ctx, tx, c, shape, a, *d, *recordID, "reply_rule")
 		if err != nil || res == nil {
 			return err
 		}
@@ -172,8 +172,8 @@ type dealMove struct {
 // moveReplyDeal finds the reply's deal (the newest one not in a closed
 // stage that points at the person or one of their companies) and moves it
 // forward to the rule's stage, or opens a new deal there. It returns nil
-// when nothing changed.
-func moveReplyDeal(ctx context.Context, tx pgx.Tx, c *catalog, shape dealShape, a *access, d inbox.DealRule, personID string) (*dealMove, error) {
+// when nothing changed. via says what moved it (reply_rule, journey).
+func moveReplyDeal(ctx context.Context, tx pgx.Tx, c *catalog, shape dealShape, a *access, d inbox.DealRule, personID, via string) (*dealMove, error) {
 	person, err := lockRecord(ctx, tx, a, personID)
 	if errors.Is(err, errNotFound) {
 		return nil, nil
@@ -249,7 +249,7 @@ func moveReplyDeal(ctx context.Context, tx pgx.Tx, c *catalog, shape dealShape, 
 			return nil, err
 		}
 		if err := record(ctx, tx, &a.principal, a.WorkspaceID, "record.updated", "record", rec.ID,
-			map[string]any{"type": rec.Type, "via": "reply_rule"}); err != nil {
+			map[string]any{"type": rec.Type, "via": via}); err != nil {
 			return nil, err
 		}
 		return &dealMove{dealID: rec.ID, from: f.stage}, nil
@@ -282,7 +282,7 @@ func moveReplyDeal(ctx context.Context, tx pgx.Tx, c *catalog, shape dealShape, 
 	}
 	var id string
 	if err := tx.QueryRow(ctx, `INSERT INTO records (workspace_id, record_type, brand_id, name, origin, acquired_via)
-		VALUES ($1, $2, $3, $4, 'first_party', 'reply_rule') RETURNING id::text`, a.WorkspaceID, shape.t.Key, person.BrandID, name).Scan(&id); err != nil {
+		VALUES ($1, $2, $3, $4, 'first_party', $5) RETURNING id::text`, a.WorkspaceID, shape.t.Key, person.BrandID, name, via).Scan(&id); err != nil {
 		return nil, err
 	}
 	rec := recordView{ID: id, Attributes: map[string]any{}, AttributeSources: map[string]string{}}
@@ -294,7 +294,7 @@ func moveReplyDeal(ctx context.Context, tx pgx.Tx, c *catalog, shape dealShape, 
 		return nil, err
 	}
 	if err := record(ctx, tx, &a.principal, a.WorkspaceID, "record.created", "record", id,
-		map[string]any{"type": shape.t.Key, "origin": "first_party", "via": "reply_rule", "identities": 0}); err != nil {
+		map[string]any{"type": shape.t.Key, "origin": "first_party", "via": via, "identities": 0}); err != nil {
 		return nil, err
 	}
 	return &dealMove{dealID: id, created: true}, nil

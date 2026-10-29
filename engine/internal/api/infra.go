@@ -35,8 +35,11 @@ func (s *Server) routesInfra(mux *http.ServeMux) {
 // planInput is what a person or agent sets on a plan. Unset fields keep
 // their value (or default, on create).
 type planInput struct {
-	Name                  *string          `json:"name"`
-	ProjectID             optional[string] `json:"project_id"`
+	Name *string `json:"name"`
+	// Ignored: projects were removed. Accepted so older clients still work.
+	ProjectID optional[string] `json:"project_id"`
+	// The brand the domains and mailboxes are for; null for every brand.
+	BrandID               optional[string] `json:"brand_id"`
 	Supplier              *string          `json:"supplier"`
 	SupplierIntegrationID optional[string] `json:"supplier_integration_id"`
 	Provider              *string          `json:"provider"`
@@ -56,7 +59,7 @@ type planInput struct {
 // planFields is a plan's settings, as stored.
 type planFields struct {
 	Name                  string          `json:"name"`
-	ProjectID             *string         `json:"project_id"`
+	BrandID               *string         `json:"brand_id"`
 	Supplier              string          `json:"supplier"`
 	SupplierIntegrationID *string         `json:"supplier_integration_id"`
 	Provider              string          `json:"provider"`
@@ -82,8 +85,8 @@ func (in *planInput) apply(f *planFields) string {
 	if in.Name != nil {
 		f.Name = strings.TrimSpace(*in.Name)
 	}
-	if in.ProjectID.Set {
-		f.ProjectID = in.ProjectID.Value
+	if in.BrandID.Set {
+		f.BrandID = in.BrandID.Value
 	}
 	if in.Supplier != nil {
 		f.Supplier = *in.Supplier
@@ -136,8 +139,8 @@ func (in *planInput) apply(f *planFields) string {
 	switch {
 	case f.Name == "" || len(f.Name) > 200:
 		return "name is required, at most 200 characters"
-	case f.ProjectID != nil && !validUUID(*f.ProjectID):
-		return "project not found"
+	case f.BrandID != nil && !validUUID(*f.BrandID):
+		return "brand not found"
 	case !slices.Contains(infra.Suppliers(), f.Supplier):
 		return "supplier must be one of " + strings.Join(infra.Suppliers(), ", ")
 	case f.SupplierIntegrationID != nil && !validUUID(*f.SupplierIntegrationID):
@@ -240,7 +243,7 @@ type planView struct {
 }
 
 const planSelect = `
-	SELECT id::text, status, name, project_id::text, supplier, supplier_integration_id::text, provider, domain_count,
+	SELECT id::text, status, name, brand_id::text, supplier, supplier_integration_id::text, provider, domain_count,
 	       mailboxes_per_domain, brand, personas, to_char(ready_by, 'YYYY-MM-DD'), warmup_days, mailbox_daily_limit,
 	       rest_below, retire_after_days, notes, quote, order_ref, created_by::text, approved_by::text, approved_at,
 	       completed_at, created_at, updated_at
@@ -255,7 +258,7 @@ func (s *Server) queryPlans(ctx context.Context, q pgx.Tx, ws string, id *string
 	plans, err := pgx.CollectRows(rows, func(r pgx.CollectableRow) (planView, error) {
 		var v planView
 		var personas []byte
-		err := r.Scan(&v.ID, &v.Status, &v.Name, &v.ProjectID, &v.Supplier, &v.SupplierIntegrationID, &v.Provider, &v.DomainCount,
+		err := r.Scan(&v.ID, &v.Status, &v.Name, &v.BrandID, &v.Supplier, &v.SupplierIntegrationID, &v.Provider, &v.DomainCount,
 			&v.MailboxesPerDomain, &v.Brand, &personas, &v.ReadyBy, &v.WarmupDays, &v.MailboxDailyLimit,
 			&v.RestBelow, &v.RetireAfterDays, &v.Notes, &v.Quote, &v.OrderRef, &v.CreatedBy, &v.ApprovedBy, &v.ApprovedAt,
 			&v.CompletedAt, &v.CreatedAt, &v.UpdatedAt)
@@ -377,10 +380,8 @@ func (s *Server) listPlans(w http.ResponseWriter, r *http.Request) {
 	var list []planView
 	err := pgx.BeginFunc(r.Context(), s.pool, func(tx pgx.Tx) error {
 		var err error
-		if list, err = s.queryPlans(r.Context(), tx, a.WorkspaceID, nil, false); err != nil {
-			return err
-		}
-		list, err = plansFor(r.Context(), tx, a.WorkspaceID, list, sel)
+		list, err = s.queryPlans(r.Context(), tx, a.WorkspaceID, nil, false)
+		list = plansFor(list, sel)
 		return err
 	})
 	if err != nil {
@@ -393,36 +394,12 @@ func (s *Server) listPlans(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"data": list})
 }
 
-// plansFor keeps the plans that pass a brand filter: a plan belongs to its
-// project's brand, and one with no project (or a project with no brand)
-// to no brand.
-func plansFor(ctx context.Context, q pgx.Tx, ws string, plans []planView, sel brandSel) ([]planView, error) {
+// plansFor keeps the plans that pass a brand filter.
+func plansFor(plans []planView, sel brandSel) []planView {
 	if sel.all() {
-		return plans, nil
+		return plans
 	}
-	brands := map[string]*string{}
-	rows, err := q.Query(ctx, `SELECT id::text, brand_id::text FROM projects WHERE workspace_id = $1`, ws)
-	if err != nil {
-		return nil, err
-	}
-	for rows.Next() {
-		var id string
-		var b *string
-		if err := rows.Scan(&id, &b); err != nil {
-			return nil, err
-		}
-		brands[id] = b
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return slices.DeleteFunc(plans, func(p planView) bool {
-		var b *string
-		if p.ProjectID != nil {
-			b = brands[*p.ProjectID]
-		}
-		return !sel.matches(b)
-	}), nil
+	return slices.DeleteFunc(plans, func(p planView) bool { return !sel.matches(p.BrandID) })
 }
 
 func (s *Server) getPlan(w http.ResponseWriter, r *http.Request) {
@@ -541,7 +518,7 @@ func (s *Server) createPlan(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	var id string
 	err := pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
-		if err := checkProject(ctx, tx, a.WorkspaceID, f.ProjectID); err != nil {
+		if err := checkBrand(ctx, tx, a.WorkspaceID, f.BrandID); err != nil {
 			return err
 		}
 		personas, _ := json.Marshal(f.Personas)
@@ -550,12 +527,12 @@ func (s *Server) createPlan(w http.ResponseWriter, r *http.Request) {
 			quote = `{"status": "pending"}`
 		}
 		err := tx.QueryRow(ctx, `
-			INSERT INTO infra_plans (workspace_id, name, project_id, supplier, supplier_integration_id, provider, domain_count,
+			INSERT INTO infra_plans (workspace_id, name, brand_id, supplier, supplier_integration_id, provider, domain_count,
 				mailboxes_per_domain, brand, personas, ready_by, warmup_days, mailbox_daily_limit, rest_below, retire_after_days,
 				notes, quote, created_by)
 			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11::date, $12, $13, $14, $15, $16, $17, $18)
 			RETURNING id::text`,
-			a.WorkspaceID, f.Name, f.ProjectID, f.Supplier, f.SupplierIntegrationID, f.Provider, f.DomainCount,
+			a.WorkspaceID, f.Name, f.BrandID, f.Supplier, f.SupplierIntegrationID, f.Provider, f.DomainCount,
 			f.MailboxesPerDomain, f.Brand, personas, f.ReadyBy, f.WarmupDays, f.MailboxDailyLimit, f.RestBelow, f.RetireAfterDays,
 			f.Notes, quote, a.ActorID).Scan(&id)
 		if err != nil {
@@ -573,7 +550,7 @@ func (s *Server) createPlan(w http.ResponseWriter, r *http.Request) {
 			map[string]any{"name": f.Name, "domains": f.DomainCount, "mailboxes_per_domain": f.MailboxesPerDomain, "supplier": f.Supplier})
 	})
 	if errors.Is(err, errNotFound) {
-		writeError(w, r, http.StatusBadRequest, "invalid_request", "project not found")
+		writeError(w, r, http.StatusBadRequest, "invalid_request", "brand not found")
 		return
 	}
 	if err != nil {
@@ -585,12 +562,12 @@ func (s *Server) createPlan(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func checkProject(ctx context.Context, tx pgx.Tx, ws string, id *string) error {
+func checkBrand(ctx context.Context, tx pgx.Tx, ws string, id *string) error {
 	if id == nil {
 		return nil
 	}
 	var ok bool
-	if err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM projects WHERE workspace_id = $1 AND id = $2)`, ws, *id).Scan(&ok); err != nil {
+	if err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM brands WHERE workspace_id = $1 AND id = $2)`, ws, *id).Scan(&ok); err != nil {
 		return err
 	}
 	if !ok {
@@ -641,7 +618,7 @@ func (s *Server) updatePlan(w http.ResponseWriter, r *http.Request) {
 		if status != infra.PlanDraft {
 			return errNotDraft
 		}
-		if err := checkProject(ctx, tx, a.WorkspaceID, f.ProjectID); err != nil {
+		if err := checkBrand(ctx, tx, a.WorkspaceID, f.BrandID); err != nil {
 			return err
 		}
 		personas, _ := json.Marshal(f.Personas)
@@ -650,11 +627,11 @@ func (s *Server) updatePlan(w http.ResponseWriter, r *http.Request) {
 			quote = `{"status": "pending"}`
 		}
 		if _, err := tx.Exec(ctx, `
-			UPDATE infra_plans SET name = $2, project_id = $3, supplier = $4, supplier_integration_id = $5, provider = $6,
+			UPDATE infra_plans SET name = $2, brand_id = $3, supplier = $4, supplier_integration_id = $5, provider = $6,
 				domain_count = $7, mailboxes_per_domain = $8, brand = $9, personas = $10, ready_by = $11::date, warmup_days = $12,
 				mailbox_daily_limit = $13, rest_below = $14, retire_after_days = $15, notes = $16, quote = $17, updated_at = now()
 			WHERE id = $1`,
-			id, f.Name, f.ProjectID, f.Supplier, f.SupplierIntegrationID, f.Provider, f.DomainCount, f.MailboxesPerDomain,
+			id, f.Name, f.BrandID, f.Supplier, f.SupplierIntegrationID, f.Provider, f.DomainCount, f.MailboxesPerDomain,
 			f.Brand, personas, f.ReadyBy, f.WarmupDays, f.MailboxDailyLimit, f.RestBelow, f.RetireAfterDays, f.Notes, quote); err != nil {
 			return err
 		}
@@ -673,7 +650,7 @@ func (s *Server) updatePlan(w http.ResponseWriter, r *http.Request) {
 		writeError(w, r, http.StatusConflict, "conflict", "only a draft plan can be changed; this one is "+cur.Status)
 		return
 	case errors.Is(err, errNotFound):
-		writeError(w, r, http.StatusBadRequest, "invalid_request", "project not found")
+		writeError(w, r, http.StatusBadRequest, "invalid_request", "brand not found")
 		return
 	case err != nil:
 		s.internal(w, r, err)
@@ -1074,10 +1051,8 @@ func (s *Server) infraOverview(w http.ResponseWriter, r *http.Request) {
 		if list, err = pgx.CollectRows(rows, pgx.RowToStructByPos[stageMailbox]); err != nil {
 			return err
 		}
-		if plans, err = s.queryPlans(ctx, tx, a.WorkspaceID, nil, false); err != nil {
-			return err
-		}
-		plans, err = plansFor(ctx, tx, a.WorkspaceID, plans, sel)
+		plans, err = s.queryPlans(ctx, tx, a.WorkspaceID, nil, false)
+		plans = plansFor(plans, sel)
 		return err
 	})
 	if err != nil {

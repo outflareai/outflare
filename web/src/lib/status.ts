@@ -48,7 +48,7 @@ export const connection = {
   paused: { label: "Paused", tone: "grey" },
 } satisfies Record<string, State>;
 
-// Sequences, projects and missions share these.
+// Sequences and missions share these.
 export const runStatus = {
   draft: { label: "Draft", tone: "grey" },
   active: { label: "Sending", tone: "green" },

@@ -6,7 +6,7 @@
 // read-only: Edit makes a draft version and Publish swaps it in.
 
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from "react";
-import { Check, CircleAlert, Redo2, Undo2 } from "lucide-react";
+import { Check, CircleAlert, FlaskConical, Redo2, Undo2 } from "lucide-react";
 import type { EmailTemplate, Journey, JourneyRun, JourneyVersion, Rule, RuleSimulation } from "@outflare/sdk";
 import { api, errorMessage } from "../api";
 import { useBrand } from "@/lib/brand";
@@ -24,6 +24,7 @@ import {
 } from "@/components/journey-flow/model";
 import { StepPicker, useStepKinds } from "@/components/journey-flow/step-picker";
 import { EventInput, StepPanel, TriggerPanel, useFlowCatalog, type TriggerFields } from "@/components/journey-flow/step-panel";
+import { TestPanel, type TestMarks } from "@/components/journey-flow/test-mode";
 import type { Go } from "./Lifecycle";
 
 type Status = Journey["status"];
@@ -342,6 +343,9 @@ function JourneyDetail({ ws, id, canManage, back, go }: { ws: string; id: string
   const [renaming, setRenaming] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  // Test mode: a person's path through the flow, without doing anything.
+  const [testing, setTesting] = useState(false);
+  const [marks, setMarks] = useState<TestMarks | null>(null);
   // Changes save themselves a moment after the last edit, as in other flow
   // builders; undo and redo walk back through this session's edits.
   const [saving, setSaving] = useState<"saved" | "saving" | "failed">("saved");
@@ -422,6 +426,7 @@ function JourneyDetail({ ws, id, canManage, back, go }: { ws: string; id: string
 
   const errors = errorCount(probs);
   const live = j.status === "active" || j.status === "paused";
+  const testVersion = live && draft ? "draft" as const : "live" as const;
   const change = (w: Work) => {
     if (work) past.current = [...past.current.slice(-49), work];
     future.current = [];
@@ -555,8 +560,13 @@ function JourneyDetail({ ws, id, canManage, back, go }: { ws: string; id: string
         back={{ label: "Journeys", onClick: back }}
         title={<span className="flex flex-wrap items-center gap-2">{j.name} <StatusBadge j={j} />{live && <Badge tone="grey">v{j.version}</Badge>}</span>}
         description={j.description || undefined}
-        action={canManage && j.status !== "archived" && (
+        action={j.status !== "archived" && (
           <div className="flex flex-wrap gap-2">
+            {!testing && !viewing && <Button variant="ghost" onClick={() => {
+              track("ui.journey_test_opened", { version: testVersion, status: j.status });
+              setTesting(true);
+            }}><FlaskConical className="size-4" />Test</Button>}
+            {canManage && <>
             {editable && <SaveState state={dirty && saving === "saved" ? "pending" : saving} error={saveError} retry={() => saveRef.current()}
               undo={past.current.length > 0 ? () => undoRef.current(false) : undefined} redo={future.current.length > 0 ? () => undoRef.current(true) : undefined} />}
             {live && !draft && !mobile && <Button variant="ghost" onClick={edit} disabled={busy}>Edit</Button>}
@@ -569,6 +579,7 @@ function JourneyDetail({ ws, id, canManage, back, go }: { ws: string; id: string
               { label: "Name and description", onClick: () => setRenaming(true) },
               (j.status !== "draft" || j.stats.entered > 0) && { label: "Archive", onClick: () => act("archive"), danger: true },
             ]} />
+            </>}
           </div>
         )}
       />
@@ -580,12 +591,21 @@ function JourneyDetail({ ws, id, canManage, back, go }: { ws: string; id: string
         <Stat label="Failed" value={s.failed} tone={s.failed ? "red" : undefined} />
       </Stats>
       {banner}
+      {testing && !viewing && (
+        <TestPanel ws={ws} journey={id} version={testVersion} kinds={kinds} templates={templates} steps={shown.steps}
+          note={j.status === "draft" ? "Tests the journey as last saved." : draft ? "Tests the draft as last saved." : "Tests the live version."}
+          triggerEvent={shown.trigger.kind === "event" ? shown.trigger.event : null}
+          saved={(draft && live ? draft.updated_at : j.updated_at) ?? ""}
+          onResult={setMarks} onOpen={(sid) => setPanel({ step: sid })}
+          onClose={() => { setTesting(false); setMarks(null); }} />
+      )}
       {mobile && canManage && (work || live) && <p className="text-[13px] text-muted-foreground">Open this journey on a wider screen to change it.</p>}
       <Flow
         steps={shown.steps} kinds={kinds}
         trigger={<TriggerCard t={shown.trigger} rule={rule} sim={sim} go={go} />}
         card={(x) => stepCard(x, j, kinds, templates, shown.steps, probs.get(x.id) ?? [])}
         selected={open?.id}
+        test={testing && !viewing ? marks : null}
         onOpen={(sid) => {
           track("ui.journey_step_opened", { kind: shown.steps.find((x) => x.id === sid)?.kind, editable });
           setPanel({ step: sid });

@@ -184,7 +184,7 @@ func (s *Server) listReviewPages(w http.ResponseWriter, r *http.Request) {
 func (s *Server) findReviewPage(w http.ResponseWriter, r *http.Request, a *access, id string) (*reviewPageView, bool) {
 	if validUUID(id) {
 		v, err := scanReviewPage(s.pool.QueryRow(r.Context(), reviewPageSelect+` AND p.id = $2`, a.WorkspaceID, id))
-		if err == nil && a.sees(nil, v.BrandID) {
+		if err == nil && a.sees(v.BrandID) {
 			list := []reviewPageView{v}
 			if err := s.withScores(r.Context(), a.WorkspaceID, list); err != nil {
 				s.internal(w, r, err)
@@ -215,7 +215,7 @@ func (s *Server) updateReviewPage(w http.ResponseWriter, r *http.Request) {
 	if !decode(w, r, &req) {
 		return
 	}
-	if !a.writes(nil, cur.BrandID) {
+	if !a.writes(cur.BrandID) {
 		writeError(w, r, http.StatusForbidden, "forbidden", string(errSharedRecord))
 		return
 	}
@@ -291,7 +291,7 @@ func (s *Server) readReviewPageNow(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if !a.writes(nil, cur.BrandID) {
+	if !a.writes(cur.BrandID) {
 		writeError(w, r, http.StatusForbidden, "forbidden", string(errSharedRecord))
 		return
 	}
@@ -542,7 +542,7 @@ func (s *Server) listReviews(w http.ResponseWriter, r *http.Request) {
 func (s *Server) findReview(w http.ResponseWriter, r *http.Request, a *access, id string) (*reviewView, bool) {
 	if validUUID(id) {
 		v, err := scanReview(s.pool.QueryRow(r.Context(), reviewSelect+` AND r.id = $2`, a.WorkspaceID, id))
-		if err == nil && a.sees(nil, v.BrandID) {
+		if err == nil && a.sees(v.BrandID) {
 			return &v, true
 		}
 		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
@@ -576,7 +576,7 @@ func (s *Server) markReviewReplied(w http.ResponseWriter, r *http.Request) {
 	if r.ContentLength != 0 && !decode(w, r, &req) {
 		return
 	}
-	if !a.writes(nil, v.BrandID) {
+	if !a.writes(v.BrandID) {
 		writeError(w, r, http.StatusForbidden, "forbidden", string(errSharedRecord))
 		return
 	}
@@ -840,7 +840,7 @@ func (s *Server) putReviewGuide(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if !a.writes(nil, &b.ID) {
+	if !a.writes(&b.ID) {
 		writeError(w, r, http.StatusForbidden, "forbidden", string(errSharedRecord))
 		return
 	}

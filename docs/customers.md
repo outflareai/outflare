@@ -60,7 +60,7 @@ A meeting tied to a person is also an event on their timeline, so a booked or he
 | `meeting.no_show` | The same, for a no-show |
 | `meeting.canceled` | When it was canceled |
 
-Each has `meeting_id`, `source`, `attribution`, `starts_at` and, when the meeting has them, `sequence_id`, `project_id` and `mission_id`, with source `meetings`. They are recorded within a minute of the change, or of the meeting being tied to the person, and each only once. Meetings from before this were recorded too, with the times they happened.
+Each has `meeting_id`, `source`, `attribution`, `starts_at` and, when the meeting has them, `sequence_id`, `project_id` (always null since projects were removed) and `mission_id`, with source `meetings`. They are recorded within a minute of the change, or of the meeting being tied to the person, and each only once. Meetings from before this were recorded too, with the times they happened.
 
 ## Identities
 
@@ -85,7 +85,7 @@ Every deal is one record of the `deal` type, whether it was made in the CRM, by 
 - **Fields.** Every workspace starts with Attio's shape, so a deal type brought over from Attio already fits: `stage` (a status field on the `deal_stage` list: lead, qualified, meeting, proposal, negotiation, won, lost), `value` (currency), `close_date`, `associated_people` and `associated_company`. A workspace that made its own `deal` type keeps it, with any of these fields it lacked added, and `won` and `lost` added to its stages.
 - **Won and lost** close a deal: outcomes count it as won or lost, and its close date is the day it closed. Any other stage is open.
 - **People and company.** A deal logged for a lead gets the lead's person, and their company when the deal has none.
-- **Outreach.** A deal made in the CRM is tied to the outreach that reached its first person, as a synced deal is: their lead's sequence, project and latest meeting before the deal opened (the `deals.attribute` job, `deal.attributed` event).
+- **Outreach.** A deal made in the CRM is tied to the outreach that reached its first person, as a synced deal is: their lead's sequence and latest meeting before the deal opened (the `deals.attribute` job, `deal.attributed` event).
 - **HubSpot.** HubSpot stays the source of truth for a synced deal: its next sync of that deal writes its name, stage, value and close date again. A HubSpot stage the CRM has no match for keeps the record's open stage.
 - **Archiving** a deal record takes it out of outcomes and reports; deleting a deal through `DELETE .../deals/{id}` archives its record. A deal from HubSpot stays in outcomes until HubSpot closes or removes it.
 - **Timelines.** A deal is on the timelines of its people and company, and its own timeline shows it and its changes.

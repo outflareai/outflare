@@ -174,7 +174,7 @@ func (s *Server) fixFor(ctx context.Context, w http.ResponseWriter, r *http.Requ
 		v, err := scanFix(s.pool.QueryRow(ctx, `SELECT `+fixCols+`
 			FROM fixes f LEFT JOIN actors a ON a.id = f.assignee_id
 			WHERE f.id = $1 AND f.workspace_id = $2`, id, a.WorkspaceID))
-		if err == nil && a.sees(nil, v.BrandID) {
+		if err == nil && a.sees(v.BrandID) {
 			return &v, true
 		}
 		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
@@ -208,7 +208,7 @@ func (s *Server) updateFix(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if !a.writes(nil, fix.BrandID) {
+	if !a.writes(fix.BrandID) {
 		writeError(w, r, http.StatusForbidden, "forbidden", string(errSharedRecord))
 		return
 	}

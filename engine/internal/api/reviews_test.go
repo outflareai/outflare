@@ -342,9 +342,9 @@ func TestReviewsFindReadScoreAndDraft(t *testing.T) {
 	}
 }
 
-// A page behind a bot check is read again in a browser at once, and later
-// reads start that way; a page that keeps failing waits longer each time,
-// says why, and can be read again on demand.
+// Pages behind a bot check are read in a browser from the start, each sent
+// once; a page that keeps failing waits longer each time, says why, and can
+// be read again on demand.
 func TestReviewPageReadRetries(t *testing.T) {
 	got := track.Capture(t)
 	e := freshEnv(t)
@@ -379,10 +379,15 @@ func TestReviewPageReadRetries(t *testing.T) {
 	if g2p == nil || blocked == nil || gone == nil || capterra == nil {
 		t.Fatalf("pages: %v", pages)
 	}
-	// G2 is read in a browser from the start: it shows anything else a bot check.
+	// G2 and Capterra are read in a browser from the start: they show
+	// anything else a bot check. Each page is sent to Geonode once.
+	sent := map[string]int{}
 	for _, u := range site.fetches {
-		if strings.HasPrefix(u, "https://www.g2.com/") && !slices.Contains(site.rendered, u) {
-			t.Fatalf("g2 read without a browser: %v", site.fetches)
+		if !slices.Contains(site.rendered, u) {
+			t.Fatalf("read without a browser: %v", site.fetches)
+		}
+		if sent[u]++; sent[u] > 1 {
+			t.Fatalf("%s sent twice: %v", u, site.fetches)
 		}
 	}
 	if g2p["last_error"] != nil || g2p["score"] == nil || g2p["failures"] != 0.0 || g2p["last_read_at"] == nil {
@@ -393,8 +398,8 @@ func TestReviewPageReadRetries(t *testing.T) {
 	if !render {
 		t.Fatal("the g2 page should be read in a browser from now on")
 	}
-	// Capterra showed a bot check, then its reviews in a browser, read from
-	// the page's own data with their dates and the vendor's reply.
+	// Capterra showed its reviews in a browser, read from the page's own
+	// data with their dates and the vendor's reply.
 	if capterra["last_error"] != nil || capterra["score"] != 4.5 || capterra["review_count"] != 98.0 {
 		t.Fatalf("capterra page: %v", capterra)
 	}
@@ -413,15 +418,10 @@ func TestReviewPageReadRetries(t *testing.T) {
 		time.Until(next) < 10*time.Minute || time.Until(next) > 20*time.Minute {
 		t.Fatalf("blocked page: %v", blocked)
 	}
-	// A missing page isn't read in a browser and waits a day: a person fixes it.
+	// A missing page waits a day: a person fixes it.
 	next, _ = time.Parse(time.RFC3339Nano, gone["next_read_at"].(string))
 	if gone["last_error_code"] != "page_not_found" || time.Until(next) < 23*time.Hour {
 		t.Fatalf("missing page: %v", gone)
-	}
-	for _, u := range site.rendered {
-		if strings.Contains(u, "/p/404/") {
-			t.Fatalf("a missing page was read again in a browser: %v", site.rendered)
-		}
 	}
 
 	// Each failure waits longer (2 hours after the third), still the same
@@ -465,7 +465,7 @@ func TestReviewPageReadRetries(t *testing.T) {
 			codes["requested"]++
 		}
 	}
-	if codes["blocked"] != 3 || codes["page_not_found"] != 1 || codes["requested"] != 2 || retried != 1 {
+	if codes["blocked"] != 3 || codes["page_not_found"] != 1 || codes["requested"] != 2 || retried != 0 {
 		t.Fatalf("events: %v, rendered retries %d", codes, retried)
 	}
 }

@@ -575,7 +575,7 @@ func (s *Server) decideDuplicate(w http.ResponseWriter, r *http.Request) {
 			if err != nil {
 				return err
 			}
-			if !a.writes(nil, v.BrandID) {
+			if !a.writes(v.BrandID) {
 				return errSharedRecord
 			}
 		}

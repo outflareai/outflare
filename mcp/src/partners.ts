@@ -17,6 +17,7 @@ const write = { readOnlyHint: false, destructiveHint: false, openWorldHint: fals
 
 const rule = z.object({
   group_id: z.string().uuid().nullable().optional().describe("Only partners in this group."),
+  partner_id: z.string().uuid().nullable().optional().describe("Only this partner (from list_partners): their own rate, which beats their group's and the program's. Not with group_id."),
   trigger: z.string().max(80).describe("signup, sale, or a custom conversion's event_name such as trial_started."),
   side: z.enum(["partner", "referred"]).optional().describe("referred: the customer they brought (two-sided rewards), always an action."),
   kind: z.enum(["percent", "fixed", "action"]),
@@ -66,6 +67,17 @@ export function registerPartnerTools(server: McpServer, gtm: MissionClient, work
       annotations: read,
     },
     (query) => call(() => gtm.GET("/v1/workspaces/{ws}/partner-programs", { params: { path: path(), query } })),
+  );
+
+  server.registerTool(
+    "get_partner_program_stats",
+    {
+      title: "Get a partner program's totals",
+      description: "Partners by status, and clicks, referred customers, sales, rewards on hold, due and paid across all of the program's partners.",
+      inputSchema: { program },
+      annotations: read,
+    },
+    ({ program }) => call(() => gtm.GET("/v1/workspaces/{ws}/partner-programs/{id}/stats", { params: { path: { ws: workspace(), id: program } } })),
   );
 
   server.registerTool(
@@ -155,7 +167,7 @@ export function registerPartnerTools(server: McpServer, gtm: MissionClient, work
     {
       title: "List partner payouts",
       description: "Payouts newest first: due ones are waiting to be paid from the workspace's own account.",
-      inputSchema: { status: z.enum(["due", "paid", "canceled"]).optional(), partner_id: id.optional(), ...page },
+      inputSchema: { status: z.enum(["due", "paid", "canceled"]).optional(), partner_id: id.optional(), program: z.string().optional(), ...page },
       annotations: read,
     },
     (query) => call(() => gtm.GET("/v1/workspaces/{ws}/partner-payouts", { params: { path: path(), query } })),
@@ -206,6 +218,20 @@ export function registerPartnerTools(server: McpServer, gtm: MissionClient, work
   if (readOnly) return;
 
   server.registerTool(
+    "list_partner_import_sources",
+    {
+      title: "List the Tolt programs an import can read",
+      description:
+        "Reads the programs in the workspace's connected Tolt account (id, name, currency, active or inactive), to pass one as " +
+        "start_partner_import's source_program. suggested is the one an import takes when none is named. Needs partners.manage; changes nothing.",
+      inputSchema: { program, integration_id: id.optional() },
+      annotations: read,
+    },
+    ({ program, integration_id }) =>
+      call(() => gtm.GET("/v1/workspaces/{ws}/partner-programs/{id}/import-sources", { params: { path: { ws: workspace(), id: program }, query: { integration_id } } })),
+  );
+
+  server.registerTool(
     "start_partner_import",
     {
       title: "Import a partner program from Tolt",
@@ -213,7 +239,7 @@ export function registerPartnerTools(server: McpServer, gtm: MissionClient, work
         "Brings the workspace's Tolt program into this one, with its own Tolt connection: partners with their link codes, payout details, " +
         "promo codes, referred customers, transactions and commissions, paid ones as paid payouts. Safe to run again until switch-over day: " +
         "each run adds only what is new and brings over status changes. Sends no reward webhooks. Poll get_partner_import for the result. " +
-        "source_program is the Tolt program id, needed only when the account has more than one.",
+        "source_program is the Tolt program id (list_partner_import_sources), needed only when the account has more than one active program.",
       inputSchema: { program, source_program: z.string().max(200).optional(), integration_id: id.optional() },
       annotations: write,
     },
@@ -251,8 +277,10 @@ export function registerPartnerTools(server: McpServer, gtm: MissionClient, work
     {
       title: "Replace a program's reward rules",
       description:
-        "Rules stack: each rule a conversion matches gives a reward, except that only the best cash rule counts (a group's own, then the " +
-        "highest tier reached). [] makes the program track only. Rewards already earned keep their amounts.",
+        "Each action rule a conversion matches gives a reward, but only one cash rule pays, whatever the order: a partner's own rate, then " +
+        "their group's, then the highest tier reached, then the narrower recurrence (first sale, then months, then every sale), then " +
+        "product-specific, then the higher payout. Send every rule: this replaces them all, so read the program first. [] makes the program " +
+        "track only. Rewards already earned keep their amounts.",
       inputSchema: { program, rules: z.array(rule).max(50) },
       annotations: write,
     },
@@ -401,6 +429,26 @@ export function registerPartnerTools(server: McpServer, gtm: MissionClient, work
       annotations: write,
     },
     ({ reward_id, note }) => call(() => gtm.POST("/v1/workspaces/{ws}/partner-rewards/{id}/reject", { params: { path: { ws: workspace(), id: reward_id } }, body: { note } })),
+  );
+
+  server.registerTool(
+    "bulk_partner_rewards",
+    {
+      title: "Approve or reject many held partner rewards",
+      description:
+        "Approve or reject pending rewards: those in ids, or every pending one of a program or partner (optionally one kind). Each is " +
+        "recorded as if done alone. Up to 1,000 a call; more: true means call again. skipped lists any that weren't pending or visible, with why.",
+      inputSchema: {
+        action: z.enum(["approve", "reject"]),
+        ids: z.array(z.string()).max(1000).optional().describe("Reward ids, from list_partner_rewards."),
+        program: z.string().optional().describe("A program's id or slug: all its pending rewards."),
+        partner_id: id.optional().describe("A partner: all their pending rewards."),
+        kind: z.enum(["cash", "fee", "action", "adjustment"]).optional(),
+        note: z.string().max(2000).optional().describe("Reject only: why, for the partner."),
+      },
+      annotations: write,
+    },
+    (body) => call(() => gtm.POST("/v1/workspaces/{ws}/partner-rewards/bulk", { params: { path: { ws: workspace() } }, body })),
   );
 
   server.registerTool(

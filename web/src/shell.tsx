@@ -446,6 +446,9 @@ type SidebarProps = {
   tab: Tab;
   onTab: (t: Tab) => void;
   unread: number;
+  // counts are badges on pages inside modules, such as pitches waiting on
+  // Link building.
+  counts?: Partial<Record<Tab, number>>;
   theme: Theme;
   onTheme: () => void;
   onSearch: () => void;
@@ -511,6 +514,7 @@ export function Sidebar(p: SidebarProps) {
                   >
                     <Icon name={m.icon} className={cn("size-4", inside && "text-brand-strong dark:text-brand")} />
                     <span className="flex-1 font-medium">{m.label}</span>
+                    {!expanded && <CountBadge n={m.tabs.reduce((n, t) => n + (p.counts?.[t] ?? 0), 0)} />}
                     <Icon name="chevron" className={cn("size-3.5 text-muted-foreground transition-transform duration-200", expanded && "rotate-90")} />
                   </SidebarMenuButton>
                   {/* Opens and closes with a short slide; closed pages can't be tabbed to. */}
@@ -522,7 +526,8 @@ export function Sidebar(p: SidebarProps) {
                             <SidebarMenuSubButton asChild isActive={p.tab === t}>
                               <button onClick={() => { p.onTab(t); close(); }} aria-current={p.tab === t ? "page" : undefined} className="group/nav h-9 w-full flex-1 text-[13px] md:h-7">
                                 <span className="flex-1 text-left">{tabNames[t]}</span>
-                                {shortcuts[t] && <span className="hidden font-mono text-[10px] text-muted-foreground md:group-hover/nav:inline">G {shortcuts[t]!.toUpperCase()}</span>}
+                                <CountBadge n={p.counts?.[t] ?? 0} />
+                                {shortcuts[t] && !p.counts?.[t] && <span className="hidden font-mono text-[10px] text-muted-foreground md:group-hover/nav:inline">G {shortcuts[t]!.toUpperCase()}</span>}
                               </button>
                             </SidebarMenuSubButton>
                             <PinButton tab={t} from="sidebar" className="ml-0.5 group-hover/menu-sub-item:opacity-100" />
@@ -587,6 +592,17 @@ function ConnectAIPrompt({ ws, active, onOpen }: { ws: string; active: boolean; 
 }
 
 // One page in the sidebar: 28px rows on a desktop, 40px in the phone sheet.
+// CountBadge is a small count next to a page or module, such as link
+// pitches waiting for approval; nothing when there are none.
+function CountBadge({ n }: { n: number }) {
+  if (n <= 0) return null;
+  return (
+    <span className="rounded bg-brand-strong px-1.5 font-mono text-[11px] leading-[18px] text-white dark:bg-brand dark:text-neutral-950" aria-label={`${n} waiting`}>
+      {n}
+    </span>
+  );
+}
+
 function NavItem({ tab, label = tabNames[tab], icon = tab as IconName, active, unread = 0, pin, onClick }: { tab: Tab; label?: string; icon?: IconName; active: boolean; unread?: number; pin?: "pinned" | "sidebar"; onClick: () => void }) {
   return (
     <SidebarMenuItem className={cn(pin && "flex items-center")}>

@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	c "github.com/outflareai/outflare/engine/internal/connectors"
 )
@@ -55,11 +56,22 @@ func (g Geonode) Test(ctx context.Context, cl *c.Client, creds c.Creds) (c.Accou
 	return c.Account{Name: "Geonode Scraper API", Details: map[string]string{"concurrency": strconv.Itoa(resp.Limit)}}, nil
 }
 
+// geonodePageWait is how long Geonode may take to read one page. Pages read
+// in a browser behind a bot check (Trustpilot, Capterra) take 25 seconds or
+// more; Geonode asked for 60. Outflare waits a little longer than Geonode,
+// so Geonode's own answer, read or failed, always arrives, and a page is
+// never sent again because Outflare gave up first.
+const (
+	geonodePageWait = 60 * time.Second
+	geonodeHTTPWait = geonodePageWait + 15*time.Second
+)
+
 // FetchPage reads one page with POST /v1/extract, waiting for the answer.
 func (g Geonode) FetchPage(ctx context.Context, cl *c.Client, creds c.Creds, url string, renderJS bool) (c.FetchedPage, error) {
-	status, raw, err := g.post(ctx, cl, creds, "/v1/extract", map[string]any{
-		"url": url, "formats": []string{"html"}, "processing_mode": "sync", "render_js": renderJS, "timeout": 40000,
-	})
+	status, raw, err := g.postWithin(ctx, cl, creds, "/v1/extract", map[string]any{
+		"url": url, "formats": []string{"html"}, "processing_mode": "sync", "render_js": renderJS,
+		"timeout": geonodePageWait.Milliseconds(),
+	}, geonodeHTTPWait)
 	if err != nil {
 		return c.FetchedPage{}, err
 	}
@@ -312,6 +324,12 @@ func geonodeKind(code string) string {
 
 // post sends a JSON request and returns the status and body, up to 16 MB.
 func (g Geonode) post(ctx context.Context, cl *c.Client, creds c.Creds, path string, payload map[string]any) (int, []byte, error) {
+	return g.postWithin(ctx, cl, creds, path, payload, 0)
+}
+
+// postWithin is post, waiting up to wait for the answer (zero: the
+// client's own timeout).
+func (g Geonode) postWithin(ctx context.Context, cl *c.Client, creds c.Creds, path string, payload map[string]any, wait time.Duration) (int, []byte, error) {
 	body, _ := json.Marshal(payload)
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, cl.Base("geonode", geonodeAPI)+path, strings.NewReader(string(body)))
 	if err != nil {
@@ -322,7 +340,7 @@ func (g Geonode) post(ctx context.Context, cl *c.Client, creds c.Creds, path str
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "application/json")
-	resp, err := cl.Do(req)
+	resp, err := cl.DoWithin(req, wait)
 	if err != nil {
 		return 0, nil, c.Errf(c.ErrUnavailable, "could not reach Geonode: %v", err)
 	}

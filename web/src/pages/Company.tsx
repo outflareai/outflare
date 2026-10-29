@@ -51,7 +51,6 @@ export function Company({ ws, canManage }: { ws: string; canManage: boolean }) {
   }, [loadMemories]);
 
   if (!data) return <Loading />;
-  const projects = new Map(data.projects.map((p) => [p.id, p.name]));
 
   async function addMemory() {
     const r = await ask({
@@ -127,7 +126,6 @@ export function Company({ ws, canManage }: { ws: string; canManage: boolean }) {
                       <Badge tone={kindTone[m.kind]}>{kindLabel[m.kind]}</Badge>
                       {m.pinned && <Badge tone="blue">Pinned</Badge>}
                       <BrandBadge id={m.brand_id} />
-                      {m.project_id && <span>{projects.get(m.project_id) ?? "A project"}</span>}
                       <span>
                         {m.created_by ? `${m.created_by}, ` : ""}
                         {ago(m.updated_at)}

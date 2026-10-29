@@ -30,7 +30,6 @@ const (
 // Meeting is a meeting with a lead.
 type Meeting struct {
 	ID                string     `json:"id"`
-	ProjectID         *string    `json:"project_id"`
 	SequenceID        *string    `json:"sequence_id"`
 	MissionID         *string    `json:"mission_id"`
 	LeadID            *string    `json:"lead_id"`
@@ -56,28 +55,26 @@ type Meeting struct {
 	// Joined for display.
 	LeadEmail    *string `json:"lead_email"`
 	SequenceName *string `json:"sequence_name"`
-	ProjectName  *string `json:"project_name"`
 }
 
 // ErrNotFound means no such row in the workspace.
 var ErrNotFound = errors.New("not found")
 
-const meetingCols = `m.id, m.project_id, m.sequence_id, m.mission_id, m.lead_id, m.inbound_id, m.source, m.integration_id, m.external_id,
+const meetingCols = `m.id, m.sequence_id, m.mission_id, m.lead_id, m.inbound_id, m.source, m.integration_id, m.external_id,
 	m.title, m.starts_at, m.ends_at, m.booked_at, m.status, m.attendee_email, m.attendee_name, m.organizer_email,
 	m.attribution, m.attribution_pinned, m.qualified, m.notes, m.created_by, m.created_at, m.updated_at,
-	l.email, s.name, p.name`
+	l.email, s.name`
 
 const meetingFrom = ` FROM meetings m
 	LEFT JOIN leads l ON l.id = m.lead_id
-	LEFT JOIN sequences s ON s.id = m.sequence_id
-	LEFT JOIN projects p ON p.id = m.project_id`
+	LEFT JOIN sequences s ON s.id = m.sequence_id`
 
 func scanMeeting(row pgx.Row) (Meeting, error) {
 	var m Meeting
-	err := row.Scan(&m.ID, &m.ProjectID, &m.SequenceID, &m.MissionID, &m.LeadID, &m.InboundID, &m.Source, &m.IntegrationID,
+	err := row.Scan(&m.ID, &m.SequenceID, &m.MissionID, &m.LeadID, &m.InboundID, &m.Source, &m.IntegrationID,
 		&m.ExternalID, &m.Title, &m.StartsAt, &m.EndsAt, &m.BookedAt, &m.Status, &m.AttendeeEmail, &m.AttendeeName,
 		&m.OrganizerEmail, &m.Attribution, &m.AttributionPinned, &m.Qualified, &m.Notes, &m.CreatedBy, &m.CreatedAt,
-		&m.UpdatedAt, &m.LeadEmail, &m.SequenceName, &m.ProjectName)
+		&m.UpdatedAt, &m.LeadEmail, &m.SequenceName)
 	return m, err
 }
 
@@ -90,14 +87,13 @@ type Querier interface {
 // MeetingFilter narrows ListMeetings.
 type MeetingFilter struct {
 	From, To   *time.Time // on starts_at
-	ProjectID  string
 	SequenceID string
 	MissionID  string
 	Status     string
 	// Attributed: only meetings tied to outreach.
 	Attributed bool
 	// Brand is a brand's id, "none" for rows no brand owns, or "" for
-	// all; a row's brand is its sequence's, else its project's.
+	// all; a row's brand is its sequence's.
 	Brand  string
 	Limit  int
 	Before *time.Time // cursor: starts_at of the last row seen
@@ -112,16 +108,14 @@ func ListMeetings(ctx context.Context, q Querier, ws string, f MeetingFilter) ([
 		WHERE m.workspace_id = $1
 		  AND ($2::timestamptz IS NULL OR m.starts_at >= $2)
 		  AND ($3::timestamptz IS NULL OR m.starts_at < $3)
-		  AND ($4 = '' OR m.project_id::text = $4)
-		  AND ($5 = '' OR m.sequence_id::text = $5)
-		  AND ($6 = '' OR m.mission_id::text = $6)
-		  AND ($7 = '' OR m.status = $7)
-		  AND (NOT $8 OR m.attribution <> 'none')
-		  AND ($9::timestamptz IS NULL OR m.starts_at < $9)
-		  AND ($11 = '' OR COALESCE((SELECT q.brand_id FROM sequences q WHERE q.id = m.sequence_id),
-		       (SELECT p.brand_id FROM projects p WHERE p.id = m.project_id))::text IS NOT DISTINCT FROM NULLIF($11, 'none'))
-		ORDER BY m.starts_at DESC, m.id LIMIT $10`,
-		ws, f.From, f.To, f.ProjectID, f.SequenceID, f.MissionID, f.Status, f.Attributed, f.Before, f.Limit, f.Brand)
+		  AND ($4 = '' OR m.sequence_id::text = $4)
+		  AND ($5 = '' OR m.mission_id::text = $5)
+		  AND ($6 = '' OR m.status = $6)
+		  AND (NOT $7 OR m.attribution <> 'none')
+		  AND ($8::timestamptz IS NULL OR m.starts_at < $8)
+		  AND ($10 = '' OR (SELECT q.brand_id FROM sequences q WHERE q.id = m.sequence_id)::text IS NOT DISTINCT FROM NULLIF($10, 'none'))
+		ORDER BY m.starts_at DESC, m.id LIMIT $9`,
+		ws, f.From, f.To, f.SequenceID, f.MissionID, f.Status, f.Attributed, f.Before, f.Limit, f.Brand)
 	if err != nil {
 		return nil, err
 	}
@@ -152,20 +146,21 @@ func validMeetingStatus(s string) bool {
 
 // NewMeeting is a meeting logged by a person or an agent.
 type NewMeeting struct {
-	LeadID        *string    `json:"lead_id"`
-	AttendeeEmail string     `json:"attendee_email"`
-	AttendeeName  string     `json:"attendee_name"`
-	SequenceID    *string    `json:"sequence_id"`
-	ProjectID     *string    `json:"project_id"`
-	MissionID     *string    `json:"mission_id"`
-	Title         string     `json:"title"`
-	StartsAt      time.Time  `json:"starts_at"`
-	EndsAt        *time.Time `json:"ends_at"`
-	BookedAt      *time.Time `json:"booked_at"`
-	Status        string     `json:"status"`
-	Qualified     *bool      `json:"qualified"`
-	Notes         string     `json:"notes"`
-	ExternalID    *string    `json:"external_id"`
+	LeadID        *string `json:"lead_id"`
+	AttendeeEmail string  `json:"attendee_email"`
+	AttendeeName  string  `json:"attendee_name"`
+	SequenceID    *string `json:"sequence_id"`
+	// Ignored: projects were removed. Accepted so older clients still work.
+	ProjectID  *string    `json:"project_id"`
+	MissionID  *string    `json:"mission_id"`
+	Title      string     `json:"title"`
+	StartsAt   time.Time  `json:"starts_at"`
+	EndsAt     *time.Time `json:"ends_at"`
+	BookedAt   *time.Time `json:"booked_at"`
+	Status     string     `json:"status"`
+	Qualified  *bool      `json:"qualified"`
+	Notes      string     `json:"notes"`
+	ExternalID *string    `json:"external_id"`
 }
 
 // CreateMeeting logs a meeting. Give a lead, or an attendee email that is
@@ -220,27 +215,14 @@ func CreateMeeting(ctx context.Context, tx pgx.Tx, ws, source, actorID string, n
 	}
 	pinned := false
 	if n.SequenceID != nil {
-		var project *string
-		if err := tx.QueryRow(ctx, `SELECT project_id FROM sequences WHERE workspace_id = $1 AND id = $2`, ws, *n.SequenceID).Scan(&project); err != nil {
-			if errors.Is(err, pgx.ErrNoRows) {
-				return Meeting{}, invalid("sequence_id is not a sequence in this workspace")
-			}
-			return Meeting{}, err
-		}
-		m.SequenceID, m.ProjectID, m.Attribution, pinned = n.SequenceID, project, AttrManual, true
-	}
-	if n.ProjectID != nil {
 		var ok bool
-		if err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM projects WHERE workspace_id = $1 AND id = $2)`, ws, *n.ProjectID).Scan(&ok); err != nil {
+		if err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM sequences WHERE workspace_id = $1 AND id = $2)`, ws, *n.SequenceID).Scan(&ok); err != nil {
 			return Meeting{}, err
 		}
 		if !ok {
-			return Meeting{}, invalid("project_id is not a project in this workspace")
+			return Meeting{}, invalid("sequence_id is not a sequence in this workspace")
 		}
-		m.ProjectID, pinned = n.ProjectID, true
-		if m.Attribution == AttrNone {
-			m.Attribution = AttrManual
-		}
+		m.SequenceID, m.Attribution, pinned = n.SequenceID, AttrManual, true
 	}
 	var actor *string
 	if actorID != "" {
@@ -248,11 +230,11 @@ func CreateMeeting(ctx context.Context, tx pgx.Tx, ws, source, actorID string, n
 	}
 	var id string
 	err = tx.QueryRow(ctx, `
-		INSERT INTO meetings (workspace_id, project_id, sequence_id, mission_id, lead_id, inbound_id, source, external_id, title,
+		INSERT INTO meetings (workspace_id, sequence_id, mission_id, lead_id, inbound_id, source, external_id, title,
 			starts_at, ends_at, booked_at, status, attendee_email, attendee_name, attribution, attribution_pinned, qualified, notes, created_by)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)
 		RETURNING id`,
-		ws, m.ProjectID, m.SequenceID, n.MissionID, m.LeadID, m.InboundID, source, n.ExternalID, n.Title,
+		ws, m.SequenceID, n.MissionID, m.LeadID, m.InboundID, source, n.ExternalID, n.Title,
 		n.StartsAt, n.EndsAt, booked, n.Status, n.AttendeeEmail, n.AttendeeName, m.Attribution, pinned, n.Qualified, n.Notes, actor).Scan(&id)
 	if err != nil {
 		if isUniqueViolation(err) {
@@ -264,7 +246,7 @@ func CreateMeeting(ctx context.Context, tx pgx.Tx, ws, source, actorID string, n
 }
 
 // MeetingPatch changes a meeting. Nil fields are left alone. Setting
-// SequenceID or ProjectID pins the attribution so sync never moves it.
+// SequenceID pins the attribution so sync never moves it.
 type MeetingPatch struct {
 	Status     *string    `json:"status"`
 	Qualified  *bool      `json:"qualified"`
@@ -272,9 +254,10 @@ type MeetingPatch struct {
 	Title      *string    `json:"title"`
 	StartsAt   *time.Time `json:"starts_at"`
 	SequenceID *string    `json:"sequence_id"`
-	ProjectID  *string    `json:"project_id"`
-	MissionID  *string    `json:"mission_id"`
-	// Unattributed true clears the sequence and project and pins that.
+	// Ignored: projects were removed. Accepted so older clients still work.
+	ProjectID *string `json:"project_id"`
+	MissionID *string `json:"mission_id"`
+	// Unattributed true clears the sequence and pins that.
 	Unattributed bool `json:"unattributed"`
 }
 
@@ -309,36 +292,23 @@ func UpdateMeeting(ctx context.Context, tx pgx.Tx, ws, id string, p MeetingPatch
 		}
 	}
 	if p.Unattributed {
-		cur.SequenceID, cur.ProjectID, cur.Attribution, cur.AttributionPinned = nil, nil, AttrNone, true
+		cur.SequenceID, cur.Attribution, cur.AttributionPinned = nil, AttrNone, true
 	}
 	if p.SequenceID != nil {
-		var project *string
-		if err := tx.QueryRow(ctx, `SELECT project_id FROM sequences WHERE workspace_id = $1 AND id = $2`, ws, *p.SequenceID).Scan(&project); err != nil {
-			if errors.Is(err, pgx.ErrNoRows) {
-				return cur, invalid("sequence_id is not a sequence in this workspace")
-			}
-			return cur, err
-		}
-		cur.SequenceID, cur.ProjectID, cur.Attribution, cur.AttributionPinned = p.SequenceID, project, AttrManual, true
-	}
-	if p.ProjectID != nil {
 		var ok bool
-		if err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM projects WHERE workspace_id = $1 AND id = $2)`, ws, *p.ProjectID).Scan(&ok); err != nil {
+		if err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM sequences WHERE workspace_id = $1 AND id = $2)`, ws, *p.SequenceID).Scan(&ok); err != nil {
 			return cur, err
 		}
 		if !ok {
-			return cur, invalid("project_id is not a project in this workspace")
+			return cur, invalid("sequence_id is not a sequence in this workspace")
 		}
-		cur.ProjectID, cur.AttributionPinned = p.ProjectID, true
-		if cur.Attribution == AttrNone {
-			cur.Attribution = AttrManual
-		}
+		cur.SequenceID, cur.Attribution, cur.AttributionPinned = p.SequenceID, AttrManual, true
 	}
 	_, err = tx.Exec(ctx, `UPDATE meetings SET status = $3, qualified = $4, notes = $5, title = $6, starts_at = $7, mission_id = $8,
-		sequence_id = $9, project_id = $10, attribution = $11, attribution_pinned = $12, updated_at = now()
+		sequence_id = $9, attribution = $10, attribution_pinned = $11, updated_at = now()
 		WHERE workspace_id = $1 AND id = $2`,
 		ws, id, cur.Status, cur.Qualified, cur.Notes, cur.Title, cur.StartsAt, cur.MissionID,
-		cur.SequenceID, cur.ProjectID, cur.Attribution, cur.AttributionPinned)
+		cur.SequenceID, cur.Attribution, cur.AttributionPinned)
 	if err != nil {
 		return cur, err
 	}
@@ -461,10 +431,10 @@ func UpsertSynced(ctx context.Context, tx pgx.Tx, ws, source, integrationID stri
 	}
 	if existing == "" {
 		_, err = tx.Exec(ctx, `
-			INSERT INTO meetings (workspace_id, project_id, sequence_id, lead_id, inbound_id, source, integration_id, external_id,
+			INSERT INTO meetings (workspace_id, sequence_id, lead_id, inbound_id, source, integration_id, external_id,
 				title, starts_at, ends_at, booked_at, status, attendee_email, attendee_name, organizer_email, attribution)
-			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)`,
-			ws, m.ProjectID, m.SequenceID, m.LeadID, m.InboundID, source, ptr(integrationID), sm.ExternalID,
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)`,
+			ws, m.SequenceID, m.LeadID, m.InboundID, source, ptr(integrationID), sm.ExternalID,
 			truncate(sm.Title, 500), sm.StartsAt, sm.EndsAt, booked, status, attendee, truncate(names[attendee], 200),
 			strings.ToLower(sm.OrganizerEmail), m.Attribution)
 		return err == nil, err
@@ -477,17 +447,16 @@ func UpsertSynced(ctx context.Context, tx pgx.Tx, ws, source, integrationID stri
 	// clears a canceled status, but held and no-show stay as a person set them.
 	_, err = tx.Exec(ctx, `
 		UPDATE meetings SET title = $3, starts_at = $4, ends_at = $5,
-			status = CASE WHEN $6 THEN 'canceled' WHEN $13 <> '' THEN $13 WHEN status = 'canceled' THEN 'booked' ELSE status END,
+			status = CASE WHEN $6 THEN 'canceled' WHEN $12 <> '' THEN $12 WHEN status = 'canceled' THEN 'booked' ELSE status END,
 			organizer_email = $7,
 			lead_id = CASE WHEN attribution_pinned THEN lead_id ELSE COALESCE($8, lead_id) END,
 			sequence_id = CASE WHEN attribution_pinned THEN sequence_id ELSE COALESCE($9, sequence_id) END,
-			project_id = CASE WHEN attribution_pinned THEN project_id ELSE COALESCE($10, project_id) END,
-			inbound_id = COALESCE(inbound_id, $11),
-			attribution = CASE WHEN attribution_pinned OR $12 = 'none' THEN attribution ELSE $12 END,
+			inbound_id = COALESCE(inbound_id, $10),
+			attribution = CASE WHEN attribution_pinned OR $11 = 'none' THEN attribution ELSE $11 END,
 			updated_at = now()
 		WHERE workspace_id = $1 AND id = $2`,
 		ws, existing, truncate(sm.Title, 500), sm.StartsAt, sm.EndsAt, sm.Canceled, strings.ToLower(sm.OrganizerEmail),
-		m.LeadID, m.SequenceID, m.ProjectID, m.InboundID, m.Attribution, reported)
+		m.LeadID, m.SequenceID, m.InboundID, m.Attribution, reported)
 	return err == nil, err
 }
 

@@ -9,6 +9,7 @@ import { DataTable, type ColumnDef } from "@/components/data-table";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { api, errorMessage } from "../api";
 import { Button, Card, ErrorText, field, Loading, PageHeader, Stat, Stats, toast } from "../ui";
+import { AttributionModels, ConversionDefinitions } from "./AttributionSetup";
 import type { Tab } from "../App";
 
 type Props = { ws: string; canManage: boolean; go: (tab: Tab, item?: string) => void };
@@ -196,6 +197,8 @@ export function Channels({ ws, canManage, go }: Props) {
           </Card>
         </>
       )}
+      <AttributionModels ws={ws} canManage={canManage} defaultModel={settings?.model} onChanged={load} />
+      <ConversionDefinitions ws={ws} canManage={canManage} onChanged={load} />
       <Drilldown ws={ws} row={open} query={{ ...range(), ...(brandKey ? { brand: brandKey } : {}), model: shown }} onClose={() => setOpen(null)} />
     </div>
   );

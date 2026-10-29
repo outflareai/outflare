@@ -36,6 +36,8 @@ func TestReplyRules(t *testing.T) {
 	owner.must(400, "PUT", base+"/reply-rules", map[string]any{"rules": map[string]any{"not_now": map[string]any{"action": "delete_everything"}}})
 	owner.must(400, "PUT", base+"/reply-rules", map[string]any{"rules": map[string]any{"interested": map[string]any{"action": "snooze"}}})
 	owner.must(400, "PUT", base+"/reply-rules", map[string]any{"rules": map[string]any{"referral": map[string]any{"action": "add_and_enroll"}}})
+	// Projects were removed: a project's rules are refused, not widened to the workspace.
+	owner.must(400, "PUT", base+"/reply-rules", map[string]any{"project_id": "00000000-0000-0000-0000-000000000000", "rules": map[string]any{"not_now": map[string]any{"action": "nothing"}}})
 	owner.must(200, "PUT", base+"/reply-rules", map[string]any{"rules": map[string]any{"referral": map[string]any{"action": "add"}}})
 	// The sequence restarts its not-now leads after 30 days instead.
 	owner.must(200, "PUT", base+"/reply-rules", map[string]any{"sequence_id": seq, "rules": map[string]any{"not_now": map[string]any{"action": "restart", "days": 30}}})

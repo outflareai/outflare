@@ -71,7 +71,7 @@
   if (!script) return;
   var key = script.getAttribute("data-key") || "";
   // Sent with every batch, so Outflare can tell a site running an old copy.
-  var VERSION = "5";
+  var VERSION = "6";
   // Events go where the script came from: a path the site forwards keeps
   // its prefix.
   var src = new URL(script.src, location.href);
@@ -86,7 +86,7 @@
   // pixels set, read only with marketing consent.
   var clickIDs = ["gclid", "gbraid", "wbraid", "dclid", "fbclid", "msclkid", "li_fat_id", "rdt_cid", "twclid", "ttclid", "ScCid", "epik", "tblci", "ob_click_id", "qclid", "irclickid"];
   var adParams = ["campaign", "adset", "ad", "placement"];
-  var adCookies = { _fbp: "fbp", _fbc: "fbc", _gcl_aw: "gcl_aw" };
+  var adCookies = { _fbp: "fbp", _fbc: "fbc", _gcl_aw: "gcl_aw", _ttp: "ttp", _scid: "scid" };
 
   function needsConsent() {
     if (mode === "required") return true;

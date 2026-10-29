@@ -220,7 +220,7 @@ func (s *Server) listSocialPublications(w http.ResponseWriter, r *http.Request) 
 func (s *Server) findSocialPublication(w http.ResponseWriter, r *http.Request, a *access, id string) (*socialPublicationView, bool) {
 	if validUUID(id) {
 		v, err := s.scanSocialPublication(s.pool.QueryRow(r.Context(), socialPublicationSelect+` AND p.id = $2`, a.WorkspaceID, id))
-		if err == nil && a.sees(nil, v.BrandID) {
+		if err == nil && a.sees(v.BrandID) {
 			return &v, true
 		}
 		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
@@ -254,7 +254,7 @@ func (s *Server) publishingAccount(w http.ResponseWriter, r *http.Request, a *ac
 		return nil, false
 	}
 	switch {
-	case !a.writes(nil, acct.BrandID):
+	case !a.writes(acct.BrandID):
 		writeError(w, r, http.StatusForbidden, "forbidden", string(errSharedRecord))
 		return nil, false
 	case socialMaxLengths[acct.Channel] == 0:
@@ -469,7 +469,7 @@ func (s *Server) updateSocialPublication(w http.ResponseWriter, r *http.Request)
 	if !decode(w, r, &req) {
 		return
 	}
-	if !a.writes(nil, cur.BrandID) {
+	if !a.writes(cur.BrandID) {
 		writeError(w, r, http.StatusForbidden, "forbidden", string(errSharedRecord))
 		return
 	}
@@ -538,7 +538,7 @@ func (s *Server) cancelSocialPublication(w http.ResponseWriter, r *http.Request)
 	if !ok {
 		return
 	}
-	if !a.writes(nil, cur.BrandID) {
+	if !a.writes(cur.BrandID) {
 		writeError(w, r, http.StatusForbidden, "forbidden", string(errSharedRecord))
 		return
 	}
@@ -599,7 +599,7 @@ func (s *Server) approveSocialPublication(w http.ResponseWriter, r *http.Request
 	if !ok {
 		return
 	}
-	if !a.writes(nil, cur.BrandID) {
+	if !a.writes(cur.BrandID) {
 		writeError(w, r, http.StatusForbidden, "forbidden", string(errSharedRecord))
 		return
 	}
@@ -679,7 +679,7 @@ func (s *Server) draftSocialPublication(w http.ResponseWriter, r *http.Request) 
 	if r.ContentLength != 0 && !decode(w, r, &req) {
 		return
 	}
-	if !a.writes(nil, cur.BrandID) {
+	if !a.writes(cur.BrandID) {
 		writeError(w, r, http.StatusForbidden, "forbidden", string(errSharedRecord))
 		return
 	}
@@ -811,7 +811,7 @@ func (s *Server) listSocialSeries(w http.ResponseWriter, r *http.Request) {
 func (s *Server) findSocialSeries(w http.ResponseWriter, r *http.Request, a *access, id string) (*socialSeriesView, bool) {
 	if validUUID(id) {
 		v, err := scanSocialSeries(s.pool.QueryRow(r.Context(), socialSeriesSelect+` AND x.id = $2`, a.WorkspaceID, id))
-		if err == nil && a.sees(nil, v.BrandID) {
+		if err == nil && a.sees(v.BrandID) {
 			return &v, true
 		}
 		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
@@ -909,7 +909,7 @@ func (s *Server) updateSocialSeries(w http.ResponseWriter, r *http.Request) {
 	if !decode(w, r, &req) {
 		return
 	}
-	if !a.writes(nil, cur.BrandID) {
+	if !a.writes(cur.BrandID) {
 		writeError(w, r, http.StatusForbidden, "forbidden", string(errSharedRecord))
 		return
 	}
@@ -979,7 +979,7 @@ func (s *Server) approveSocialSeries(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if !a.writes(nil, cur.BrandID) {
+	if !a.writes(cur.BrandID) {
 		writeError(w, r, http.StatusForbidden, "forbidden", string(errSharedRecord))
 		return
 	}
@@ -1031,7 +1031,7 @@ func (s *Server) addSocialSeriesPost(w http.ResponseWriter, r *http.Request) {
 	if !decode(w, r, &req) {
 		return
 	}
-	if !a.writes(nil, cur.BrandID) {
+	if !a.writes(cur.BrandID) {
 		writeError(w, r, http.StatusForbidden, "forbidden", string(errSharedRecord))
 		return
 	}

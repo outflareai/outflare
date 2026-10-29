@@ -76,9 +76,14 @@ func TestTemplates(t *testing.T) {
 	if got := meta.Template(); got != want {
 		t.Errorf("meta template\n got %s\nwant %s", got, want)
 	}
+	// Taboola adds tblci itself; Outbrain needs its click id asked for.
 	taboola, _ := NetworkOf("taboola")
-	if !strings.HasSuffix(taboola.Template(), "&tblci={click_id}") {
-		t.Errorf("taboola template doesn't ask for its click id: %s", taboola.Template())
+	if strings.Contains(taboola.Template(), "tblci") {
+		t.Errorf("taboola template repeats the click id Taboola adds: %s", taboola.Template())
+	}
+	outbrain, _ := NetworkOf("outbrain")
+	if !strings.HasSuffix(outbrain.Template(), "&ob_click_id={{ob_click_id}}") {
+		t.Errorf("outbrain template doesn't ask for its click id: %s", outbrain.Template())
 	}
 }
 
@@ -94,7 +99,30 @@ func TestCleanAd(t *testing.T) {
 	if skipped != 2 {
 		t.Errorf("skipped = %d, want 2", skipped)
 	}
+	// LinkedIn's value names typed as text arrive as themselves.
+	if got, skipped := CleanAd(map[string]any{"campaign": "CAMPAIGN_ID", "ad": "CREATIVE_ID", "adset": "SPRING_SALE"}); skipped != 2 || got["adset"] != "SPRING_SALE" {
+		t.Errorf("LinkedIn names: %v, skipped %d", got, skipped)
+	}
 	if got, _ := CleanAd(map[string]any{"ad": strings.Repeat("9", 300)}); len(got["ad"]) != 200 {
 		t.Errorf("long ad id not cut: %d", len(got["ad"]))
+	}
+}
+
+func TestArrival(t *testing.T) {
+	for _, c := range []struct {
+		ids              map[string]any
+		ad               int
+		source, net, out string
+	}{
+		{map[string]any{"gclid": "g-1"}, 0, "google", "google", ArrivalClickID},
+		// The click id names the network even when utm_source is a typo.
+		{map[string]any{"ttclid": "t-1"}, 2, "tiktokk", "tiktok", ArrivalClickID},
+		{nil, 3, "linkedin", "linkedin", ArrivalAdIDs},
+		{map[string]any{"fbp": "fb.1.2.3"}, 0, "facebook", "meta", ArrivalNone},
+		{nil, 0, "a-partner", "other", ArrivalNone},
+	} {
+		if net, out := Arrival(c.ids, c.ad, c.source); net != c.net || out != c.out {
+			t.Errorf("Arrival(%v, %d, %q) = %s %s, want %s %s", c.ids, c.ad, c.source, net, out, c.net, c.out)
+		}
 	}
 }

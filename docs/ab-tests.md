@@ -44,6 +44,18 @@ A goal's `metric` says what is measured for each visitor, and the versions are c
 - **`cap`**: for `count` and `value`, the most one visitor can add, so a few huge orders can't swing the result. Each visitor's running total is capped.
 - A value below zero counts as zero, and a property that isn't a number counts as a hit worth nothing.
 
+## Before you start
+
+A draft's **Before you start** checklist (`GET .../ab-tests/{id}/checklist`, MCP `get_ab_test_checklist`) says what would stop the test measuring anything useful:
+
+- the flag: archived, one version or a missing control can't start; a flag that's off is turned on when the test starts;
+- another running test of the same flag, which must end first;
+- whether pages showed the flag's versions in the last 7 days, so visitors will join;
+- whether visitors reach the first goal, and how long the test is likely to take;
+- guardrails, if there are none.
+
+`ready` is false while anything fails; warnings still let it start.
+
 ## How long it will take
 
 Before starting, the planner (in the new-test form and a draft test, `POST /v1/workspaces/{ws}/ab-tests/plan`, MCP `plan_ab_test`) reads the last 28 days of page views, on the page the test changes if you give one, and the goal's rate among those visitors (or, for a count or value goal, the mean per visitor and how much it varies). With the flag's rollout and split, it shows how many visitors each version needs, and how many weeks that is, if the change truly moves the goal by +5%, +10%, +25% or +50%. It also gives the smallest change findable in 4 and in 8 weeks, and warns when the smallest change worth finding won't be safe to stop within 8 weeks. Small sites can only find big changes: at 2,000 visitors a week per version and a 4% sign-up rate, +25% takes about four weeks and +10% over half a year. Revenue varies more from visitor to visitor than a yes or no, so a revenue goal usually needs more visitors than the conversion behind it. With more than one version against the control, each version needs more visitors, since the results are corrected for the extra chances of a false winner (below).
@@ -83,6 +95,10 @@ For each goal and each version against the control:
 - **Sample ratio check**: if the split between versions is far from the flag's weights (a chance under 0.001 of happening by luck), something is losing or double-counting visitors, such as a redirect, a cache or bots. The results then shouldn't be trusted, and there is no winner.
 
 The **winner** is a version at least 95% likely to beat the control with a p-value under 0.05 on the first goal; or the control, when every other version is at most 5% likely to beat it with the same proof; otherwise none yet. The maths is exact, with no sampling, so every reload gives the same numbers. A simulation in the engine's tests (identical versions, results checked every day, stopping at the first winner, at 1–5% base rates and 200–5,000 visitors a day) finds false winners well under 5% of the time; so does one for revenue per visitor (few buyers, skewed amounts, one to three versions against the control).
+
+## Shipping the winner
+
+**Ship** a version (`POST .../ab-tests/{id}/ship` with `{"variant": "faster"}`, MCP `ship_ab_test`) to show it to everyone: the flag gives it all the traffic (weight 100, the others 0) at full rollout, and a running test ends with it as the decision, keeping its results. You can also ship the version you chose after a test ended. Nothing ships on its own: a person, or an agent they asked, decides.
 
 ## Guardrails
 

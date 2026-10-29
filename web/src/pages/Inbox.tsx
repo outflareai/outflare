@@ -609,7 +609,7 @@ function RulesDialog({ ws, onClose }: { ws: string; onClose: () => void }) {
       api.GET("/v1/workspaces/{ws}/catalog", { params: { path: { ws } } }),
     ]).then(([r, q, c]) => {
       if (r.error) return setError(errorMessage(r.error));
-      const own = r.data.data.find((s) => !s.project_id && !s.sequence_id);
+      const own = r.data.data.find((s) => !s.sequence_id);
       const set = { ...(r.data.defaults as Record<string, ReplyRule>), ...((own?.rules ?? {}) as Record<string, ReplyRule>) };
       setRules(set);
       setOverrides(r.data.data.length - (own ? 1 : 0));

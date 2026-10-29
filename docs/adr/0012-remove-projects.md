@@ -1,6 +1,6 @@
 # 12. Remove projects
 
-Status: Proposed (28 October 2026). Changes [ADR 9 (brands)](0009-brands.md), which put projects inside brands.
+Status: Accepted (28 October 2026). Step 1 shipped; step 2 is in progress. Changes [ADR 9 (brands)](0009-brands.md), which put projects inside brands.
 
 ## Decision
 
@@ -26,5 +26,5 @@ Outflare drops projects. The model is **workspace → brand → sequences**, as 
 Expand-only migrations ([migrations](../migrations.md)), so each release runs beside the one before.
 
 1. **Keep behaviour, hide projects** (migration 0266). Copies briefs, pauses the sequences of paused or archived projects (and sets those projects active, so the sequence is the only switch), splits the daily cap, links lists to profiles. The project's own cap stays until step 2, so a rollback still keeps to it. The web app stops showing projects, except to move a project's records between brands, which still go together.
-2. **Remove from the API, MCP and SDK.** A catch-up migration copies briefs changed since step 1 (`brief_copied_version`), makes project tokens workspace tokens, turns project reply rules into sequence rules, and detaches records from projects, so a project's mailboxes serve every sequence in their brand. The project endpoints and `x-outflare-access: project_tokens` go; code stops reading `projects` and every `project_id` column. `project.*` webhook events stay in the catalog but are no longer sent.
+2. **Remove from the API, MCP and SDK** (migration 0270). A catch-up migration copies briefs changed since step 1 (`brief_copied_version`), makes project tokens workspace tokens (each change is a `token.updated` audit event with `reason: projects_removed`), turns project reply rules into sequence rules, gives infrastructure plans a `brand_id` and costs their project's brand, and detaches records from projects, so a project's mailboxes serve every sequence in their brand. The project endpoints, MCP tools and `x-outflare-access: project_tokens` go; code stops reading `projects` and every `project_id` column. `project_id` on a write is accepted and ignored, so older clients keep working, except where ignoring it would widen access or change what a rule covers: a new API token or a reply rule set with `project_id` is refused with 400. Outcome reports group by `sequence` or `brand`. The `projects.read`/`projects.manage` scope names stay, now covering customer profiles and moving records between brands, because tokens hold them. `project.*` webhook events stay in the catalog but are no longer sent.
 3. **Drop.** A release after nothing deployed reads them, a later migration drops `projects`, the `project_id` columns, their triggers and `query.projects`.

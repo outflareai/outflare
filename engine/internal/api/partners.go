@@ -34,37 +34,39 @@ const (
 
 func (s *Server) routesPartners(mux *http.ServeMux) {
 	read, manage, conv := auth.ScopePartnersRead, auth.ScopePartnersManage, auth.ScopePartnersConversions
-	mux.HandleFunc("GET /v1/workspaces/{ws}/partner-programs", s.inWorkspace(read, s.listPartnerPrograms))
-	mux.HandleFunc("POST /v1/workspaces/{ws}/partner-programs", s.inWorkspace(manage, s.createPartnerProgram))
-	mux.HandleFunc("GET /v1/workspaces/{ws}/partner-programs/{id}", s.inWorkspace(read, s.getPartnerProgram))
-	mux.HandleFunc("PATCH /v1/workspaces/{ws}/partner-programs/{id}", s.inWorkspace(manage, s.updatePartnerProgram))
-	mux.HandleFunc("PUT /v1/workspaces/{ws}/partner-programs/{id}/rules", s.inWorkspace(manage, s.setPartnerRules))
-	mux.HandleFunc("POST /v1/workspaces/{ws}/partner-programs/{id}/groups", s.inWorkspace(manage, s.createPartnerGroup))
-	mux.HandleFunc("DELETE /v1/workspaces/{ws}/partner-programs/{id}/groups/{group}", s.inWorkspace(manage, s.deletePartnerGroup))
-	mux.HandleFunc("POST /v1/workspaces/{ws}/partner-programs/{id}/postback", s.inWorkspace(manage, s.rotatePartnerPostback))
+	mux.HandleFunc("GET /v1/workspaces/{ws}/partner-programs", s.inBrand(read, s.listPartnerPrograms))
+	mux.HandleFunc("POST /v1/workspaces/{ws}/partner-programs", s.inBrand(manage, s.createPartnerProgram))
+	mux.HandleFunc("GET /v1/workspaces/{ws}/partner-programs/{id}", s.inBrand(read, s.getPartnerProgram))
+	mux.HandleFunc("GET /v1/workspaces/{ws}/partner-programs/{id}/stats", s.inBrand(read, s.getPartnerProgramStats))
+	mux.HandleFunc("PATCH /v1/workspaces/{ws}/partner-programs/{id}", s.inBrand(manage, s.updatePartnerProgram))
+	mux.HandleFunc("PUT /v1/workspaces/{ws}/partner-programs/{id}/rules", s.inBrand(manage, s.setPartnerRules))
+	mux.HandleFunc("POST /v1/workspaces/{ws}/partner-programs/{id}/groups", s.inBrand(manage, s.createPartnerGroup))
+	mux.HandleFunc("DELETE /v1/workspaces/{ws}/partner-programs/{id}/groups/{group}", s.inBrand(manage, s.deletePartnerGroup))
+	mux.HandleFunc("POST /v1/workspaces/{ws}/partner-programs/{id}/postback", s.inBrand(manage, s.rotatePartnerPostback))
 
-	mux.HandleFunc("GET /v1/workspaces/{ws}/partners", s.inWorkspace(read, s.listPartners))
-	mux.HandleFunc("POST /v1/workspaces/{ws}/partners", s.inWorkspace(manage, s.createPartner))
-	mux.HandleFunc("GET /v1/workspaces/{ws}/partners/{id}", s.inWorkspace(read, s.getPartner))
-	mux.HandleFunc("PATCH /v1/workspaces/{ws}/partners/{id}", s.inWorkspace(manage, s.updatePartner))
-	mux.HandleFunc("POST /v1/workspaces/{ws}/partners/{id}/promo-codes", s.inWorkspace(manage, s.addPartnerPromoCode))
-	mux.HandleFunc("DELETE /v1/workspaces/{ws}/partners/{id}/promo-codes/{code}", s.inWorkspace(manage, s.removePartnerPromoCode))
-	mux.HandleFunc("POST /v1/workspaces/{ws}/partners/{id}/fees", s.inWorkspace(manage, s.addPartnerFee))
-	mux.HandleFunc("POST /v1/workspaces/{ws}/partners/{id}/adjustments", s.inWorkspace(manage, s.addPartnerAdjustment))
+	mux.HandleFunc("GET /v1/workspaces/{ws}/partners", s.inBrand(read, s.listPartners))
+	mux.HandleFunc("POST /v1/workspaces/{ws}/partners", s.inBrand(manage, s.createPartner))
+	mux.HandleFunc("GET /v1/workspaces/{ws}/partners/{id}", s.inBrand(read, s.getPartner))
+	mux.HandleFunc("PATCH /v1/workspaces/{ws}/partners/{id}", s.inBrand(manage, s.updatePartner))
+	mux.HandleFunc("POST /v1/workspaces/{ws}/partners/{id}/promo-codes", s.inBrand(manage, s.addPartnerPromoCode))
+	mux.HandleFunc("DELETE /v1/workspaces/{ws}/partners/{id}/promo-codes/{code}", s.inBrand(manage, s.removePartnerPromoCode))
+	mux.HandleFunc("POST /v1/workspaces/{ws}/partners/{id}/fees", s.inBrand(manage, s.addPartnerFee))
+	mux.HandleFunc("POST /v1/workspaces/{ws}/partners/{id}/adjustments", s.inBrand(manage, s.addPartnerAdjustment))
 
 	mux.HandleFunc("POST /v1/workspaces/{ws}/partner-conversions", s.inWorkspace(conv, s.createPartnerConversion))
-	mux.HandleFunc("GET /v1/workspaces/{ws}/partner-conversions", s.inWorkspace(read, s.listPartnerConversions))
-	mux.HandleFunc("GET /v1/workspaces/{ws}/partner-referrals", s.inWorkspace(read, s.listPartnerReferrals))
+	mux.HandleFunc("GET /v1/workspaces/{ws}/partner-conversions", s.inBrand(read, s.listPartnerConversions))
+	mux.HandleFunc("GET /v1/workspaces/{ws}/partner-referrals", s.inBrand(read, s.listPartnerReferrals))
 
-	mux.HandleFunc("GET /v1/workspaces/{ws}/partner-rewards", s.inWorkspace(read, s.listPartnerRewards))
-	mux.HandleFunc("POST /v1/workspaces/{ws}/partner-rewards/{id}/approve", s.inWorkspace(manage, s.approvePartnerReward))
-	mux.HandleFunc("POST /v1/workspaces/{ws}/partner-rewards/{id}/reject", s.inWorkspace(manage, s.rejectPartnerReward))
-	mux.HandleFunc("POST /v1/workspaces/{ws}/partner-rewards/{id}/fulfil", s.inWorkspace(conv, s.fulfilPartnerReward))
+	mux.HandleFunc("GET /v1/workspaces/{ws}/partner-rewards", s.inBrand(read, s.listPartnerRewards))
+	mux.HandleFunc("POST /v1/workspaces/{ws}/partner-rewards/bulk", s.inBrand(manage, s.bulkPartnerRewards))
+	mux.HandleFunc("POST /v1/workspaces/{ws}/partner-rewards/{id}/approve", s.inBrand(manage, s.approvePartnerReward))
+	mux.HandleFunc("POST /v1/workspaces/{ws}/partner-rewards/{id}/reject", s.inBrand(manage, s.rejectPartnerReward))
+	mux.HandleFunc("POST /v1/workspaces/{ws}/partner-rewards/{id}/fulfil", s.inBrand(conv, s.fulfilPartnerReward))
 
-	mux.HandleFunc("GET /v1/workspaces/{ws}/partner-payouts", s.inWorkspace(read, s.listPartnerPayouts))
-	mux.HandleFunc("POST /v1/workspaces/{ws}/partner-payouts", s.inWorkspace(manage, s.createPartnerPayouts))
-	mux.HandleFunc("POST /v1/workspaces/{ws}/partner-payouts/{id}/paid", s.inWorkspace(manage, s.markPartnerPayoutPaid))
-	mux.HandleFunc("POST /v1/workspaces/{ws}/partner-payouts/{id}/cancel", s.inWorkspace(manage, s.cancelPartnerPayout))
+	mux.HandleFunc("GET /v1/workspaces/{ws}/partner-payouts", s.inBrand(read, s.listPartnerPayouts))
+	mux.HandleFunc("POST /v1/workspaces/{ws}/partner-payouts", s.inBrand(manage, s.createPartnerPayouts))
+	mux.HandleFunc("POST /v1/workspaces/{ws}/partner-payouts/{id}/paid", s.inBrand(manage, s.markPartnerPayoutPaid))
+	mux.HandleFunc("POST /v1/workspaces/{ws}/partner-payouts/{id}/cancel", s.inBrand(manage, s.cancelPartnerPayout))
 
 	// Public. A postback's secret names its program; a short link's code
 	// (with the host or workspace) names its partner.
@@ -156,14 +158,14 @@ type partnerQuerier interface {
 
 // partnerRules loads a program's rules in order.
 func partnerRules(ctx context.Context, q partnerQuerier, ws, program string) ([]partners.Rule, error) {
-	rows, err := q.Query(ctx, `SELECT id::text, group_id::text, trigger, side, kind, percent_bp, amount_cents, action, action_data,
+	rows, err := q.Query(ctx, `SELECT id::text, group_id::text, membership_id::text, trigger, side, kind, percent_bp, amount_cents, action, action_data,
 		recurrence, months, min_sales, product_ids FROM partner_reward_rules WHERE workspace_id = $1 AND program_id = $2 ORDER BY created_at, id`, ws, program)
 	if err != nil {
 		return nil, err
 	}
 	return pgx.CollectRows(rows, func(row pgx.CollectableRow) (partners.Rule, error) {
 		var r partners.Rule
-		err := row.Scan(&r.ID, &r.GroupID, &r.Trigger, &r.Side, &r.Kind, &r.PercentBP, &r.AmountCents, &r.Action, &r.ActionData,
+		err := row.Scan(&r.ID, &r.GroupID, &r.PartnerID, &r.Trigger, &r.Side, &r.Kind, &r.PercentBP, &r.AmountCents, &r.Action, &r.ActionData,
 			&r.Recurrence, &r.Months, &r.MinSales, &r.ProductIDs)
 		return r, err
 	})
@@ -174,8 +176,15 @@ func (s *Server) findPartnerProgram(w http.ResponseWriter, r *http.Request, ws, 
 	ctx := r.Context()
 	ref = strings.ToLower(strings.TrimSpace(ref))
 	v, err := scanPartnerProgram(s.pool.QueryRow(ctx, partnerProgramSelect+` AND (p.id::text = $2 OR p.slug = $2)`, ws, ref))
-	if errors.Is(err, pgx.ErrNoRows) {
+	if err == nil {
+		err = partnerBrandAccess(r, accessFrom(ctx), v.BrandID)
+	}
+	if errors.Is(err, pgx.ErrNoRows) || errors.Is(err, errNotFound) {
 		writeError(w, r, http.StatusNotFound, "not_found", "partner program not found")
+		return nil, false
+	}
+	if errors.As(err, new(errDenied)) {
+		writeError(w, r, http.StatusForbidden, "forbidden", err.Error())
 		return nil, false
 	}
 	if err == nil {
@@ -376,6 +385,9 @@ func (s *Server) createPartnerProgram(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	brand, err := s.campaignBrand(r, a.WorkspaceID, in.Brand)
+	if err == nil {
+		err = checkPartnerBrandWrite(a, brand)
+	}
 	if s.allocError(w, r, err) {
 		return
 	}
@@ -429,7 +441,7 @@ func (s *Server) createPartnerProgram(w http.ResponseWriter, r *http.Request) {
 		}
 		rules := p.Rules
 		if in.Rules != nil {
-			if rules, err = checkPartnerRules(*in.Rules, nil); err != nil {
+			if rules, err = checkPartnerRules(*in.Rules, nil, nil); err != nil {
 				return err
 			}
 		}
@@ -499,7 +511,11 @@ func (s *Server) updatePartnerProgram(w http.ResponseWriter, r *http.Request) {
 	}
 	brand := cur.BrandID
 	if in.Brand != nil {
-		if brand, err = s.campaignBrand(r, a.WorkspaceID, in.Brand); s.allocError(w, r, err) {
+		brand, err = s.campaignBrand(r, a.WorkspaceID, in.Brand)
+		if err == nil {
+			err = checkPartnerBrandWrite(a, brand)
+		}
+		if s.allocError(w, r, err) {
 			return
 		}
 	}
@@ -549,6 +565,7 @@ func coalesce(p *string, def string) string {
 // partnerRuleIn is a reward rule as callers send it.
 type partnerRuleIn struct {
 	Group       *string        `json:"group_id"`
+	Partner     *string        `json:"partner_id"`
 	Trigger     string         `json:"trigger"`
 	Side        string         `json:"side"`
 	Kind        string         `json:"kind"`
@@ -569,8 +586,9 @@ var (
 	conversionEventRE = regexp.MustCompile(`^[a-z0-9][a-z0-9_.]{0,79}$`)
 )
 
-// checkPartnerRules validates rules; groups are the program's group ids.
-func checkPartnerRules(in []partnerRuleIn, groups []string) ([]partners.Rule, error) {
+// checkPartnerRules validates rules; groups are the program's group ids,
+// and members the ids of its partners that rules name.
+func checkPartnerRules(in []partnerRuleIn, groups, members []string) ([]partners.Rule, error) {
 	if len(in) > maxPartnerRules {
 		return nil, errInvalid("a program can have at most 50 reward rules")
 	}
@@ -615,6 +633,10 @@ func checkPartnerRules(in []partnerRuleIn, groups []string) ([]partners.Rule, er
 			return nil, bad("at most 50 product_ids")
 		case r.Group != nil && !slices.Contains(groups, *r.Group):
 			return nil, bad("group_id is not a group of this program")
+		case r.Partner != nil && !slices.Contains(members, *r.Partner):
+			return nil, bad("partner_id is not a partner in this program")
+		case r.Partner != nil && r.Group != nil:
+			return nil, bad("a rule is for one partner (partner_id) or a group (group_id), not both")
 		}
 		if r.Trigger != "sale" {
 			r.Recurrence, r.Months = "every", nil
@@ -637,11 +659,29 @@ func checkPartnerRules(in []partnerRuleIn, groups []string) ([]partners.Rule, er
 		if r.ProductIDs == nil {
 			r.ProductIDs = []string{}
 		}
-		out = append(out, partners.Rule{GroupID: r.Group, Trigger: r.Trigger, Side: r.Side, Kind: r.Kind, PercentBP: r.PercentBP,
+		out = append(out, partners.Rule{GroupID: r.Group, PartnerID: r.Partner, Trigger: r.Trigger, Side: r.Side, Kind: r.Kind, PercentBP: r.PercentBP,
 			AmountCents: r.AmountCents, Action: r.Action, ActionData: r.ActionData, Recurrence: r.Recurrence, Months: r.Months,
 			MinSales: r.MinSales, ProductIDs: r.ProductIDs})
 	}
 	return out, nil
+}
+
+// ruleMembers is which of the partners rules name are in the program.
+func (s *Server) ruleMembers(ctx context.Context, program string, in []partnerRuleIn) ([]string, error) {
+	ids := []string{}
+	for _, r := range in {
+		if r.Partner != nil && validUUID(*r.Partner) {
+			ids = append(ids, *r.Partner)
+		}
+	}
+	if len(ids) == 0 {
+		return nil, nil
+	}
+	rows, err := s.pool.Query(ctx, `SELECT id::text FROM partner_memberships WHERE program_id = $1 AND id = ANY($2::uuid[])`, program, ids)
+	if err != nil {
+		return nil, err
+	}
+	return pgx.CollectRows(rows, pgx.RowTo[string])
 }
 
 func insertPartnerRules(ctx context.Context, tx pgx.Tx, ws, program string, rules []partners.Rule) error {
@@ -649,10 +689,10 @@ func insertPartnerRules(ctx context.Context, tx pgx.Tx, ws, program string, rule
 		data, _ := json.Marshal(r.ActionData)
 		// created_at orders them, so each is a microsecond after the last.
 		if _, err := tx.Exec(ctx, `INSERT INTO partner_reward_rules (workspace_id, program_id, group_id, trigger, side, kind, percent_bp,
-			amount_cents, action, action_data, recurrence, months, min_sales, product_ids, created_at)
-			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, now() + make_interval(secs => $15::float8 / 1000000))`,
+			amount_cents, action, action_data, recurrence, months, min_sales, product_ids, created_at, membership_id)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, now() + make_interval(secs => $15::float8 / 1000000), $16)`,
 			ws, program, r.GroupID, r.Trigger, r.Side, r.Kind, r.PercentBP, r.AmountCents, r.Action, string(data), r.Recurrence,
-			r.Months, r.MinSales, r.ProductIDs, i); err != nil {
+			r.Months, r.MinSales, r.ProductIDs, i, r.PartnerID); err != nil {
 			return err
 		}
 	}
@@ -681,7 +721,12 @@ func (s *Server) setPartnerRules(w http.ResponseWriter, r *http.Request) {
 	for _, g := range cur.Groups {
 		groups = append(groups, g.ID)
 	}
-	rules, err := checkPartnerRules(*in.Rules, groups)
+	members, err := s.ruleMembers(r.Context(), cur.ID, *in.Rules)
+	if err != nil {
+		s.internal(w, r, err)
+		return
+	}
+	rules, err := checkPartnerRules(*in.Rules, groups, members)
 	if s.allocError(w, r, err) {
 		return
 	}

@@ -1,6 +1,8 @@
 package partners
 
 import (
+	"fmt"
+	"slices"
 	"testing"
 	"time"
 )
@@ -13,7 +15,12 @@ func TestRewards(t *testing.T) {
 	lead := Rule{ID: "lead", Trigger: "signup", Side: "partner", Kind: "fixed", AmountCents: ptr(int64(500))}
 	credit := Rule{ID: "credit", Trigger: "sale", Side: "referred", Kind: "action", Action: "grant_credit", Recurrence: "first"}
 	year := Rule{ID: "year", Trigger: "sale", Side: "partner", Kind: "fixed", AmountCents: ptr(int64(1000)), Recurrence: "months", Months: ptr(12), ProductIDs: []string{"pro"}}
+	ana := "ana"
+	own := Rule{ID: "own", PartnerID: &ana, Trigger: "sale", Side: "partner", Kind: "percent", PercentBP: ptr(3500), Recurrence: "every"}
+	firstTen := Rule{ID: "first10", Trigger: "sale", Side: "partner", Kind: "percent", PercentBP: ptr(1000), Recurrence: "first"}
+	everyTwo := Rule{ID: "every2", Trigger: "sale", Side: "partner", Kind: "percent", PercentBP: ptr(200), Recurrence: "every"}
 	rules := []Rule{base, tier, group, lead, credit}
+	withOwn := []Rule{base, tier, group, own, lead, credit}
 	now := time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC)
 	earlier := now.AddDate(0, -2, 0)
 
@@ -34,6 +41,10 @@ func TestRewards(t *testing.T) {
 		"later sale: no second action":                    {rules, Conversion{Trigger: "sale", AmountCents: 10000, FirstSaleAt: &earlier, At: now}, []string{"base"}, 2000},
 		"tier replaces the base rate":                     {rules, Conversion{Trigger: "sale", AmountCents: 10000, PriorSales: 10, FirstSaleAt: &earlier, At: now}, []string{"tier"}, 3000},
 		"a group's own rate beats a tier":                 {rules, Conversion{Trigger: "sale", AmountCents: 10000, PriorSales: 10, GroupID: &gold, FirstSaleAt: &earlier, At: now}, []string{"group"}, 2500},
+		"a partner's own rate beats their group's":        {withOwn, Conversion{Trigger: "sale", AmountCents: 10000, PriorSales: 10, PartnerID: "ana", GroupID: &gold, FirstSaleAt: &earlier, At: now}, []string{"own"}, 3500},
+		"another partner's rate isn't theirs":             {withOwn, Conversion{Trigger: "sale", AmountCents: 10000, PartnerID: "bo", FirstSaleAt: &earlier, At: now}, []string{"base"}, 2000},
+		"10% first sale beats 2% every sale":              {[]Rule{everyTwo, firstTen}, Conversion{Trigger: "sale", AmountCents: 10000, At: now}, []string{"first10"}, 1000},
+		"then 2% on later sales":                          {[]Rule{everyTwo, firstTen}, Conversion{Trigger: "sale", AmountCents: 10000, FirstSaleAt: &earlier, At: now}, []string{"every2"}, 200},
 		"lead":                                            {rules, Conversion{Trigger: "signup", At: now}, []string{"lead"}, 500},
 		"in the first months, for the product":            {[]Rule{year}, Conversion{Trigger: "sale", ProductID: "pro", FirstSaleAt: &earlier, At: now}, []string{"year"}, 1000},
 		"after the months":                                {[]Rule{year}, Conversion{Trigger: "sale", ProductID: "pro", FirstSaleAt: ptr(now.AddDate(-1, 0, 0)), At: now}, []string{}, 0},
@@ -41,6 +52,12 @@ func TestRewards(t *testing.T) {
 		"track only":                                      {nil, Conversion{Trigger: "sale", AmountCents: 10000, At: now}, []string{}, 0},
 	}
 	for name, tc := range cases {
+		// The rules' order never changes what is paid.
+		rev := slices.Clone(tc.rules)
+		slices.Reverse(rev)
+		if a, b := Rewards(tc.rules, tc.c), Rewards(rev, tc.c); !sameEarned(a, b) {
+			t.Errorf("%s: %v reversed pays %v", name, ids(a), ids(b))
+		}
 		got := Rewards(tc.rules, tc.c)
 		var cash int64
 		for _, e := range got {
@@ -99,4 +116,18 @@ func TestShare(t *testing.T) {
 	if Share(2000, 5000, 10000) != 1000 || Share(2000, 10000, 10000) != 2000 || Share(2000, 0, 0) != 2000 || Percent(999, 2000) != 200 {
 		t.Error("share or percent rounding is off")
 	}
+}
+
+// sameEarned reports whether two reward lists pay the same rules the same
+// amounts, in any order.
+func sameEarned(a, b []Earned) bool {
+	key := func(es []Earned) []string {
+		out := []string{}
+		for _, e := range es {
+			out = append(out, fmt.Sprintf("%s:%d", e.Rule.ID, e.AmountCents))
+		}
+		slices.Sort(out)
+		return out
+	}
+	return slices.Equal(key(a), key(b))
 }

@@ -17,7 +17,7 @@ func TestRequestLogs(t *testing.T) {
 	owner.must(201, "POST", base+"/leads", map[string]any{"email": "ada@example.com"})
 	owner.must(200, "GET", base+"/leads?q=ada@example.com", nil)
 	owner.must(404, "GET", base+"/leads/00000000-0000-0000-0000-000000000000", nil)
-	owner.must(200, "GET", base+"/projects?brand=repocket", nil)
+	owner.must(200, "GET", base+"/sequences?brand=repocket", nil)
 
 	// An agent through MCP.
 	agent := agentToken(t, owner, base, "Agent", "leads.read", "audit.read")
@@ -159,9 +159,9 @@ func TestRequestLogs(t *testing.T) {
 	}
 
 	// A brand token sees only calls about its brand.
-	tok := owner.must(201, "POST", base+"/api-tokens", map[string]any{"name": "Repocket agent", "scopes": []string{"audit.read", "projects.read"}, "brand": "repocket"})
+	tok := owner.must(201, "POST", base+"/api-tokens", map[string]any{"name": "Repocket agent", "scopes": []string{"audit.read", "sequences.read"}, "brand": "repocket"})
 	rpAgent := &client{t: t, h: e.h, bearer: tok["token"].(string)}
-	rpAgent.must(200, "GET", base+"/projects", nil)
+	rpAgent.must(200, "GET", base+"/sequences", nil)
 	seen := rpAgent.must(200, "GET", base+"/logs", nil)["data"].([]any)
 	if len(seen) != 2 {
 		t.Fatalf("brand token sees: %v", seen)

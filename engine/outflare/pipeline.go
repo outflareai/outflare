@@ -4,6 +4,8 @@ import (
 	"context"
 
 	"github.com/outflareai/outflare/engine/internal/companysteps"
+	"github.com/outflareai/outflare/engine/internal/emailfind"
+	"github.com/outflareai/outflare/engine/internal/peoplesteps"
 	"github.com/outflareai/outflare/engine/internal/pipeline"
 )
 
@@ -68,6 +70,63 @@ const (
 // it in Setup; it panics on a Config missing Via or a callback.
 func (p *Pipeline) RegisterCompanySteps(c CompanySteps) {
 	for _, s := range companysteps.Stages(p.h.Pool, c) {
+		p.Register(s)
+	}
+}
+
+// PeopleSteps is a feature's use of the engine's shared steps for people
+// (docs/pipeline.md, "Shared steps for people"): find_email,
+// contact_check and add_person, and enroll when the feature names a
+// campaign, for items that are each one person.
+type (
+	PeopleSteps = peoplesteps.Config
+	Contact     = peoplesteps.Contact
+	EmailCode   = emailfind.Code
+	// EmailFinder is what PeopleSteps.Finder replaces the engine's email
+	// finder with, in tests.
+	EmailFinder        = peoplesteps.Finder
+	EmailFindRequest   = emailfind.FindRequest
+	EmailVerifyRequest = emailfind.VerifyRequest
+	EmailFindResult    = emailfind.FindResult
+	EmailItemResult    = emailfind.ItemResult
+)
+
+// What the email finder says about one address (EmailItemResult.Code).
+const (
+	EmailFound         = emailfind.CodeFound
+	EmailVerified      = emailfind.CodeVerified
+	EmailRisky         = emailfind.CodeRisky
+	EmailNotFound      = emailfind.CodeNotFound
+	EmailUndeliverable = emailfind.CodeUndeliverable
+	EmailPending       = emailfind.CodePending
+	EmailRetry         = emailfind.CodeRetry
+	EmailStop          = emailfind.CodeStop
+)
+
+// The shared people steps, in order: send an item to StepFindEmail.
+const (
+	StepFindEmail    = peoplesteps.FindEmail
+	StepContactCheck = peoplesteps.ContactCheck
+	StepAddPerson    = peoplesteps.AddPerson
+	StepEnroll       = peoplesteps.Enroll
+)
+
+// Codes the enroll step skips or pauses with.
+const (
+	EnrollInAnotherCampaign   = peoplesteps.InAnotherCampaign
+	EnrollCampaignUnavailable = peoplesteps.CampaignUnavailable
+	EnrollCampaignReady       = peoplesteps.CampaignReady
+)
+
+// RegisterPeopleSteps adds the shared people steps to c.Pipeline. Call it
+// in Setup; it panics on a Config missing Via or a callback, or when the
+// engine has no email finder.
+func (p *Pipeline) RegisterPeopleSteps(c PeopleSteps) {
+	var finder peoplesteps.Finder
+	if p.h.emailFinder != nil {
+		finder = p.h.emailFinder
+	}
+	for _, s := range peoplesteps.Stages(p.h.Pool, finder, c) {
 		p.Register(s)
 	}
 }

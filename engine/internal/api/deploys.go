@@ -180,7 +180,7 @@ func (s *Server) deployTargetFor(w http.ResponseWriter, r *http.Request, a *acce
 	id := r.PathValue("target")
 	if validUUID(id) {
 		v, err := s.loadDeployTarget(r.Context(), a.WorkspaceID, id)
-		if err == nil && a.sees(nil, v.BrandID) {
+		if err == nil && a.sees(v.BrandID) {
 			return &v, true
 		}
 		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
@@ -205,10 +205,10 @@ func (s *Server) siteBrand(ctx context.Context, a *access, site string) (*string
 	}
 	var brand *string
 	err := s.pool.QueryRow(ctx, `SELECT brand_id::text FROM seo_sites WHERE id = $1 AND workspace_id = $2`, site, a.WorkspaceID).Scan(&brand)
-	if errors.Is(err, pgx.ErrNoRows) || (err == nil && !a.sees(nil, brand)) {
+	if errors.Is(err, pgx.ErrNoRows) || (err == nil && !a.sees(brand)) {
 		return nil, errInvalid("site_id is an SEO site in this workspace; GET .../seo-sites lists them")
 	}
-	if err == nil && !a.writes(nil, brand) {
+	if err == nil && !a.writes(brand) {
 		return nil, errSharedRecord
 	}
 	return brand, err
@@ -226,7 +226,7 @@ func (s *Server) matchSite(ctx context.Context, a *access, domains []string) (*s
 	var id, brand *string
 	err := s.pool.QueryRow(ctx, `SELECT id::text, brand_id::text FROM seo_sites WHERE workspace_id = $1 AND regexp_replace(host, '^www\.', '') = ANY($2)
 		ORDER BY created_at LIMIT 1`, a.WorkspaceID, hosts).Scan(&id, &brand)
-	if errors.Is(err, pgx.ErrNoRows) || (err == nil && !a.writes(nil, brand)) {
+	if errors.Is(err, pgx.ErrNoRows) || (err == nil && !a.writes(brand)) {
 		return nil, nil, nil
 	}
 	return id, brand, err
@@ -275,7 +275,7 @@ func (s *Server) createDeployTarget(w http.ResponseWriter, r *http.Request) {
 		s.internal(w, r, err)
 		return
 	}
-	if !a.writes(nil, brand) {
+	if !a.writes(brand) {
 		writeError(w, r, http.StatusForbidden, "forbidden", string(errSharedRecord))
 		return
 	}
@@ -326,7 +326,7 @@ func (s *Server) updateDeployTarget(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if !a.writes(nil, t.BrandID) {
+	if !a.writes(t.BrandID) {
 		writeError(w, r, http.StatusForbidden, "forbidden", string(errSharedRecord))
 		return
 	}
@@ -373,7 +373,7 @@ func (s *Server) deleteDeployTarget(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if !a.writes(nil, t.BrandID) {
+	if !a.writes(t.BrandID) {
 		writeError(w, r, http.StatusForbidden, "forbidden", string(errSharedRecord))
 		return
 	}
@@ -397,7 +397,7 @@ func (s *Server) checkDeployTarget(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if !a.writes(nil, t.BrandID) {
+	if !a.writes(t.BrandID) {
 		writeError(w, r, http.StatusForbidden, "forbidden", string(errSharedRecord))
 		return
 	}

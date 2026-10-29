@@ -212,7 +212,7 @@ func (s *Server) createAIFact(w http.ResponseWriter, r *http.Request) {
 			}
 			brand = b
 		}
-		brand, err := brandWrite(ctx, tx, a, nil, brand)
+		brand, err := brandWrite(ctx, tx, a, brand)
 		if err != nil {
 			return err
 		}
@@ -265,7 +265,7 @@ func (s *Server) updateAIFact(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if !a.writes(nil, f.BrandID) {
+	if !a.writes(f.BrandID) {
 		writeError(w, r, http.StatusForbidden, "forbidden", string(errSharedRecord))
 		return
 	}
@@ -316,7 +316,7 @@ func (s *Server) deleteAIFact(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if !a.writes(nil, f.BrandID) {
+	if !a.writes(f.BrandID) {
 		writeError(w, r, http.StatusForbidden, "forbidden", string(errSharedRecord))
 		return
 	}

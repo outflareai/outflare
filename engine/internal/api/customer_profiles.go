@@ -2,7 +2,6 @@ package api
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"net/http"
 	"slices"
@@ -14,11 +13,9 @@ import (
 	"github.com/outflareai/outflare/engine/internal/auth"
 )
 
-// Ideal customer profiles: who the workspace sells to, kept once. Projects,
-// lead lists and their fit scores, the lead finder and visitor scoring read
-// the same profile. A project links one with profile_id, and its icp is
-// kept equal to the profile's filters, so a change made on either side
-// shows on both.
+// Ideal customer profiles: who the workspace sells to, kept once. Lead
+// lists and their fit scores, the lead finder and visitor scoring read the
+// same profile.
 
 const maxProfiles = 500
 
@@ -38,22 +35,19 @@ type customerProfileView struct {
 	Filters     map[string][]string `json:"filters"`
 	Status      string              `json:"status"`
 	Version     int                 `json:"version"`
-	// The projects that use it.
-	ProjectIDs []string  `json:"project_ids"`
-	CreatedAt  time.Time `json:"created_at"`
-	UpdatedAt  time.Time `json:"updated_at"`
+	CreatedAt   time.Time           `json:"created_at"`
+	UpdatedAt   time.Time           `json:"updated_at"`
 }
 
 const customerProfileSelect = `
 	SELECT c.id::text, c.name, c.brand_id::text, c.description, c.filters, c.status, c.version,
-	       COALESCE((SELECT array_agg(p.id::text ORDER BY lower(p.name)) FROM projects p WHERE p.profile_id = c.id), '{}'),
 	       c.created_at, c.updated_at
 	FROM ideal_customer_profiles c
 	WHERE c.workspace_id = $1`
 
 func scanCustomerProfile(row pgx.Row) (customerProfileView, error) {
 	var v customerProfileView
-	err := row.Scan(&v.ID, &v.Name, &v.BrandID, &v.Description, &v.Filters, &v.Status, &v.Version, &v.ProjectIDs, &v.CreatedAt, &v.UpdatedAt)
+	err := row.Scan(&v.ID, &v.Name, &v.BrandID, &v.Description, &v.Filters, &v.Status, &v.Version, &v.CreatedAt, &v.UpdatedAt)
 	v.Filters = normalICP(v.Filters)
 	return v, err
 }
@@ -100,7 +94,7 @@ func (s *Server) customerProfileFor(ctx context.Context, q pgx.Tx, a *access, id
 		row = s.pool.QueryRow(ctx, customerProfileSelect+` AND c.id = $2`, a.WorkspaceID, id)
 	}
 	v, err := scanCustomerProfile(row)
-	if errors.Is(err, pgx.ErrNoRows) || (err == nil && !a.sees(nil, v.BrandID)) {
+	if errors.Is(err, pgx.ErrNoRows) || (err == nil && !a.sees(v.BrandID)) {
 		return customerProfileView{}, errNotFound
 	}
 	return v, err
@@ -190,12 +184,6 @@ func cleanICP(in *map[string][]string, field string) (map[string][]string, error
 	return clean, nil
 }
 
-func sameICP(a, b map[string][]string) bool {
-	x, _ := json.Marshal(normalICP(a))
-	y, _ := json.Marshal(normalICP(b))
-	return string(x) == string(y)
-}
-
 func (s *Server) createCustomerProfile(w http.ResponseWriter, r *http.Request) {
 	a := accessFrom(r.Context())
 	var in customerProfileInput
@@ -225,7 +213,7 @@ func (s *Server) createCustomerProfile(w http.ResponseWriter, r *http.Request) {
 	var id string
 	err = pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
 		var err error
-		if brand, err = brandWrite(ctx, tx, a, nil, brand); err != nil {
+		if brand, err = brandWrite(ctx, tx, a, brand); err != nil {
 			return err
 		}
 		var n int
@@ -289,7 +277,7 @@ func (s *Server) updateCustomerProfile(w http.ResponseWriter, r *http.Request) {
 	if s.profileError(w, r, err) {
 		return
 	}
-	if !a.writes(nil, cur.BrandID) {
+	if !a.writes(cur.BrandID) {
 		s.allocError(w, r, errSharedRecord)
 		return
 	}
@@ -298,24 +286,13 @@ func (s *Server) updateCustomerProfile(w http.ResponseWriter, r *http.Request) {
 		if brand, err = s.brandRef(ctx, a.WorkspaceID, in.BrandID.Value); s.allocError(w, r, err) {
 			return
 		}
-		if a.Brands != nil && (brand == nil || !a.writes(nil, brand)) {
+		if a.Brands != nil && (brand == nil || !a.writes(brand)) {
 			s.allocError(w, r, errInvalid("you can only move profiles between your own brands"))
 			return
 		}
 	}
 	err = pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
-		if brand != nil && (cur.BrandID == nil || *brand != *cur.BrandID) {
-			// Its projects must belong to the new brand, or be shared.
-			var other bool
-			if err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM projects WHERE profile_id = $1 AND brand_id IS DISTINCT FROM $2 AND brand_id IS NOT NULL)`,
-				cur.ID, *brand).Scan(&other); err != nil {
-				return err
-			}
-			if other {
-				return errInvalid("projects of another brand use this profile; give them their own profile first")
-			}
-		}
-		// New filters bump the version in syncProfileFilters.
+		// New filters bump the version in setProfileFilters.
 		changed := in.Description != nil && *in.Description != cur.Description
 		if _, err := tx.Exec(ctx, `
 			UPDATE ideal_customer_profiles SET name = COALESCE($3, name), description = COALESCE($4, description),
@@ -329,7 +306,7 @@ func (s *Server) updateCustomerProfile(w http.ResponseWriter, r *http.Request) {
 			return err
 		}
 		if in.Filters.Set {
-			if err := syncProfileFilters(ctx, tx, a, cur.ID, *in.Filters.Value, ""); err != nil {
+			if err := setProfileFilters(ctx, tx, a, cur.ID, *in.Filters.Value); err != nil {
 				return err
 			}
 		}
@@ -354,95 +331,12 @@ func (s *Server) updateCustomerProfile(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, v)
 }
 
-// syncProfileFilters sets a profile's filters and copies them to every
-// project that uses it, except skipProject (the one being saved, which
-// writes its own). A project whose icp changes gets a new brief version,
-// so agents see their brief moved.
-func syncProfileFilters(ctx context.Context, tx pgx.Tx, a *access, profileID string, filters map[string][]string, skipProject string) error {
-	if _, err := tx.Exec(ctx, `
+// setProfileFilters sets a profile's filters, bumping its version when
+// they change.
+func setProfileFilters(ctx context.Context, tx pgx.Tx, a *access, profileID string, filters map[string][]string) error {
+	_, err := tx.Exec(ctx, `
 		UPDATE ideal_customer_profiles SET filters = $3,
 			version = version + CASE WHEN filters = $3::jsonb THEN 0 ELSE 1 END, updated_at = now()
-		WHERE workspace_id = $1 AND id = $2`, a.WorkspaceID, profileID, filters); err != nil {
-		return err
-	}
-	_, err := tx.Exec(ctx, `
-		UPDATE projects SET icp = $3, brief_version = brief_version + 1, brief_updated_at = now(),
-			brief_updated_by = $4, updated_at = now()
-		WHERE workspace_id = $1 AND profile_id = $2 AND id::text <> $5 AND icp <> $3::jsonb`,
-		a.WorkspaceID, profileID, filters, nullIfEmpty(a.ActorID), skipProject)
+		WHERE workspace_id = $1 AND id = $2`, a.WorkspaceID, profileID, filters)
 	return err
-}
-
-// projectProfile links a project to its profile as it is saved. With
-// profileSet the caller chose a profile (or none); its filters become the
-// project's icp unless icp was given too, which then updates the profile.
-// Otherwise an icp change goes to the profile already linked, or makes the
-// project a profile of its own. It returns the icp to store, nil to leave
-// it as it is.
-func projectProfile(ctx context.Context, tx pgx.Tx, a *access, projectID, projectName string, projectBrand *string,
-	profileSet bool, profileID *string, icp *map[string][]string, current *string) (link *string, store *map[string][]string, err error) {
-	link = current
-	if profileSet {
-		link = profileID
-	}
-	if link == nil {
-		if profileSet || icp == nil || len(*icp) == 0 {
-			return nil, icp, nil
-		}
-		// A project with an ICP gets a profile of its own, named after it.
-		// A profile someone made by hand may have its name already.
-		var name string
-		for _, n := range []string{projectName, truncate(projectName, 88) + " (project)"} {
-			var taken bool
-			if err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM ideal_customer_profiles WHERE workspace_id = $1 AND lower(name) = lower($2))`,
-				a.WorkspaceID, n).Scan(&taken); err != nil {
-				return nil, nil, err
-			}
-			if !taken {
-				name = n
-				break
-			}
-		}
-		if name == "" {
-			return nil, icp, nil
-		}
-		id, err := insertCustomerProfile(ctx, tx, a, projectBrand, name, "", *icp)
-		if err != nil {
-			return nil, nil, err
-		}
-		if err := record(ctx, tx, &a.principal, a.WorkspaceID, "ideal_customer_profile.created", "ideal_customer_profile", id,
-			map[string]any{"brand_id": projectBrand, "filters": filterCounts(*icp), "via": "project", "project_id": projectID}); err != nil {
-			return nil, nil, err
-		}
-		return &id, icp, nil
-	}
-	var brand *string
-	var filters map[string][]string
-	err = tx.QueryRow(ctx, `SELECT brand_id::text, filters FROM ideal_customer_profiles WHERE workspace_id = $1 AND id = $2 FOR UPDATE`,
-		a.WorkspaceID, *link).Scan(&brand, &filters)
-	if errors.Is(err, pgx.ErrNoRows) || (err == nil && !a.sees(nil, brand)) {
-		return nil, nil, errInvalid("ideal customer profile not found")
-	}
-	if err != nil {
-		return nil, nil, err
-	}
-	if brand != nil && (projectBrand == nil || *projectBrand != *brand) {
-		return nil, nil, errInvalid("the profile belongs to another brand; use one of this project's brand or a shared one")
-	}
-	if icp == nil {
-		return link, &filters, nil
-	}
-	if !sameICP(*icp, filters) {
-		if !a.writes(nil, brand) {
-			return nil, nil, errSharedRecord
-		}
-		if err := syncProfileFilters(ctx, tx, a, *link, *icp, projectID); err != nil {
-			return nil, nil, err
-		}
-		if err := record(ctx, tx, &a.principal, a.WorkspaceID, "ideal_customer_profile.updated", "ideal_customer_profile", *link,
-			map[string]any{"filters": filterCounts(*icp), "via": "project", "project_id": projectID}); err != nil {
-			return nil, nil, err
-		}
-	}
-	return link, icp, nil
 }

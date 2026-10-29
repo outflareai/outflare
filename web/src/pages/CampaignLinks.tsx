@@ -1,7 +1,9 @@
 // Campaign links: the workspace's one tagging scheme. A campaign fixes the
 // tags every link in it carries (channel, source, medium, utm_campaign and
 // the short ofc code), and a link is one page in it. Links go straight to
-// the page; the website tracking snippet reads the tags there.
+// the page; the website tracking snippet reads the tags there. A link can
+// also have a short redirect link that counts clicks, for places the
+// snippet can't run (bio links, partner pages, QR codes).
 
 import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
 import type { Brand, TrackingCampaign, TrackingChannel, TrackingChannelID, TrackingLink } from "@outflare/sdk";
@@ -10,6 +12,7 @@ import { Badge, Button, CopyButton, Empty, ErrorText, field, Input, Loading, Men
 import { ago, plural } from "../format";
 import { DataTable, type ColumnDef } from "@/components/data-table";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 
 type Props = { ws: string; canManage: boolean };
@@ -133,6 +136,7 @@ function NewCampaign({ ws, channels, brands, onClose, onSaved }: { ws: string; c
   const [source, setSource] = useState("");
   const [brand, setBrand] = useState("");
   const [landing, setLanding] = useState("");
+  const [redirects, setRedirects] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const ch = channels.find((c) => c.id === channel);
@@ -143,7 +147,7 @@ function NewCampaign({ ws, channels, brands, onClose, onSaved }: { ws: string; c
     setBusy(true);
     const { data, error } = await api.POST("/v1/workspaces/{ws}/tracking-campaigns", {
       params: { path: { ws } },
-      body: { name: name.trim(), channel, source: source.trim() || undefined, brand: brand || undefined, landing_url: landing.trim() || undefined },
+      body: { name: name.trim(), channel, source: source.trim() || undefined, brand: brand || undefined, landing_url: landing.trim() || undefined, redirect_links: redirects || undefined },
     });
     setBusy(false);
     if (error || !data) return setError(errorMessage(error));
@@ -180,6 +184,13 @@ function NewCampaign({ ws, channels, brands, onClose, onSaved }: { ws: string; c
           )}
           <Input label="Landing page" type="url" value={landing} onChange={(e) => setLanding(e.target.value)} placeholder="https://example.com/pricing" maxLength={2000}
             hint="Where links go unless you pick another page. Optional." />
+          <label className="flex items-start gap-2 text-[13px]">
+            <Checkbox checked={redirects} onCheckedChange={(v) => setRedirects(v === true)} className="mt-0.5" />
+            <span>
+              Give every link a short redirect link
+              <span className="block text-[12px] text-muted-foreground">It counts clicks before sending people on. For bio links, partner pages and QR codes, where the tracking snippet can't run.</span>
+            </span>
+          </label>
           {name.trim() && ch && (
             <p className="rounded-md bg-muted px-2.5 py-2 font-mono text-[12px] break-all text-muted-foreground">
               utm_source={(source.trim() || ch.sources[0] || "").toLowerCase()}&utm_medium={ch.medium}&utm_campaign={slug}&ofc=…
@@ -201,6 +212,7 @@ function CampaignSheet({ ws, campaign: c, channelLabel, canManage, onClose }: { 
   const [url, setUrl] = useState(c.landing_url);
   const [content, setContent] = useState("");
   const [term, setTerm] = useState("");
+  const [redirect, setRedirect] = useState(c.redirect_links);
   const [made, setMade] = useState<TrackingLink | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -218,7 +230,7 @@ function CampaignSheet({ ws, campaign: c, channelLabel, canManage, onClose }: { 
     setError("");
     const { data, error } = await api.POST("/v1/workspaces/{ws}/tracking-campaigns/{id}/links", {
       params: { path: { ws, id: c.id } },
-      body: { url: url.trim() || undefined, content: content.trim() || undefined, term: term.trim() || undefined },
+      body: { url: url.trim() || undefined, content: content.trim() || undefined, term: term.trim() || undefined, redirect },
     });
     setBusy(false);
     if (error || !data) return setError(errorMessage(error));
@@ -254,12 +266,25 @@ function CampaignSheet({ ws, campaign: c, channelLabel, canManage, onClose }: { 
                 <Input label="Content" value={content} onChange={(e) => setContent(e.target.value)} placeholder="hero-cta" maxLength={80} hint="Which ad, button or post. Optional." />
                 <Input label="Term" value={term} onChange={(e) => setTerm(e.target.value)} placeholder="residential proxies" maxLength={80} hint="The keyword, for search ads. Optional." />
               </div>
+              <label className="flex items-start gap-2 text-[13px]">
+                <Checkbox checked={redirect} onCheckedChange={(v) => setRedirect(v === true)} className="mt-0.5" />
+                <span>
+                  Short redirect link
+                  <span className="block text-[12px] text-muted-foreground">Counts clicks first. For places the tracking snippet can't run.</span>
+                </span>
+              </label>
               <ErrorText>{error}</ErrorText>
               <Button disabled={busy}>Make link</Button>
               {made && (
                 <div className="space-y-2 rounded-md border p-3">
                   <p className="font-mono text-[12px] break-all">{made.tagged_url}</p>
                   <CopyButton text={made.tagged_url} label="Copy link" />
+                  {made.redirect_url && (
+                    <>
+                      <p className="font-mono text-[12px] break-all">{made.redirect_url}</p>
+                      <CopyButton text={made.redirect_url} label="Copy redirect link" />
+                    </>
+                  )}
                 </div>
               )}
             </form>
@@ -274,8 +299,11 @@ function CampaignSheet({ ws, campaign: c, channelLabel, canManage, onClose }: { 
                   <li key={l.id} className="flex min-w-0 items-center gap-3 px-3 py-2">
                     <span className="min-w-0 flex-1">
                       <span className="block truncate text-[13px]">{l.url}</span>
-                      <span className="block truncate text-[12px] text-muted-foreground">{[l.content, l.term].filter(Boolean).join(" · ") || "No content or term"} · {ago(l.created_at)}</span>
+                      <span className="block truncate text-[12px] text-muted-foreground">
+                        {[l.content, l.term].filter(Boolean).join(" · ") || "No content or term"} · {l.redirect_url ? `${plural(l.clicks, "click")} · ` : ""}{ago(l.created_at)}
+                      </span>
                     </span>
+                    {l.redirect_url && <CopyButton text={l.redirect_url} label="Redirect" />}
                     <CopyButton text={l.tagged_url} />
                   </li>
                 ))}

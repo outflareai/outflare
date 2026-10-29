@@ -47,7 +47,6 @@ const (
 type Entry struct {
 	ID            string    `json:"id"`
 	WorkspaceID   string    `json:"-"`
-	ProjectID     *string   `json:"project_id"`
 	SequenceID    *string   `json:"sequence_id"`
 	MissionID     *string   `json:"mission_id"`
 	MailboxID     *string   `json:"mailbox_id"`
@@ -150,12 +149,12 @@ func (e *Entry) normalize() error {
 	return nil
 }
 
-const entryCols = `id, project_id, sequence_id, mission_id, mailbox_id, domain, category, provider, integration_id,
+const entryCols = `id, sequence_id, mission_id, mailbox_id, domain, category, provider, integration_id,
 	units::float8, unit_name, amount_cents, currency, occurred_at, source, ref, note, actor_id, created_at`
 
 func scanEntry(row pgx.Row, ws string) (Entry, error) {
 	e := Entry{WorkspaceID: ws}
-	err := row.Scan(&e.ID, &e.ProjectID, &e.SequenceID, &e.MissionID, &e.MailboxID, &e.Domain, &e.Category, &e.Provider,
+	err := row.Scan(&e.ID, &e.SequenceID, &e.MissionID, &e.MailboxID, &e.Domain, &e.Category, &e.Provider,
 		&e.IntegrationID, &e.Units, &e.UnitName, &e.AmountCents, &e.Currency, &e.OccurredAt, &e.Source, &e.Ref, &e.Note,
 		&e.ActorID, &e.CreatedAt)
 	return e, err
@@ -164,9 +163,6 @@ func scanEntry(row pgx.Row, ws string) (Entry, error) {
 // Record adds a charge to the ledger and returns it. With a Ref already in
 // the ledger it changes nothing and returns the existing entry, so callers
 // can record from a retried job without double counting.
-//
-// When ProjectID is empty it is filled from the sequence, mailbox or
-// domain, in that order.
 //
 // Pass the transaction that made the change that cost money, so the charge
 // commits or rolls back with it. A charge to a connection is counted
@@ -179,20 +175,15 @@ func Record(ctx context.Context, q jobs.Querier, e Entry) (Entry, bool, error) {
 		return Entry{}, false, err
 	}
 	created, err := scanEntry(q.QueryRow(ctx, `
-		INSERT INTO spend_entries (workspace_id, project_id, sequence_id, mission_id, mailbox_id, domain, category, provider,
+		INSERT INTO spend_entries (workspace_id, sequence_id, mission_id, mailbox_id, domain, category, provider,
 			integration_id, units, unit_name, amount_cents, currency, occurred_at, source, ref, note, actor_id)
-		SELECT $1, COALESCE($2::uuid,
-				(SELECT project_id FROM sequences WHERE id = $3 AND workspace_id = $1),
-				(SELECT project_id FROM mailboxes WHERE id = $5 AND workspace_id = $1),
-				(SELECT project_id FROM sending_domains WHERE domain = $6 AND workspace_id = $1)),
-			$3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18
-		WHERE ($2::uuid IS NULL OR EXISTS (SELECT 1 FROM projects WHERE id = $2 AND workspace_id = $1))
-		  AND ($3::uuid IS NULL OR EXISTS (SELECT 1 FROM sequences WHERE id = $3 AND workspace_id = $1))
-		  AND ($5::uuid IS NULL OR EXISTS (SELECT 1 FROM mailboxes WHERE id = $5 AND workspace_id = $1))
-		  AND ($9::uuid IS NULL OR EXISTS (SELECT 1 FROM integrations WHERE id = $9 AND workspace_id = $1))
+		SELECT $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17
+		WHERE ($2::uuid IS NULL OR EXISTS (SELECT 1 FROM sequences WHERE id = $2 AND workspace_id = $1))
+		  AND ($4::uuid IS NULL OR EXISTS (SELECT 1 FROM mailboxes WHERE id = $4 AND workspace_id = $1))
+		  AND ($8::uuid IS NULL OR EXISTS (SELECT 1 FROM integrations WHERE id = $8 AND workspace_id = $1))
 		ON CONFLICT (workspace_id, ref) WHERE ref IS NOT NULL DO NOTHING
 		RETURNING `+entryCols,
-		e.WorkspaceID, e.ProjectID, e.SequenceID, e.MissionID, e.MailboxID, e.Domain, e.Category, e.Provider,
+		e.WorkspaceID, e.SequenceID, e.MissionID, e.MailboxID, e.Domain, e.Category, e.Provider,
 		e.IntegrationID, e.Units, e.UnitName, e.AmountCents, e.Currency, e.OccurredAt, e.Source, e.Ref, e.Note, e.ActorID), e.WorkspaceID)
 	if err == nil {
 		// A connection's charge counts toward its usage limits, which
@@ -217,7 +208,7 @@ func Record(ctx context.Context, q jobs.Querier, e Entry) (Entry, bool, error) {
 			return Entry{}, false, err
 		}
 	}
-	return Entry{}, false, invalid("the project, sequence, mailbox or integration is not in this workspace")
+	return Entry{}, false, invalid("the sequence, mailbox or integration is not in this workspace")
 }
 
 func isUniqueViolation(err error) bool {

@@ -134,7 +134,7 @@ func (s *Server) listABAIRuns(w http.ResponseWriter, r *http.Request) {
 	}
 	out := list[:0]
 	for _, v := range list {
-		if a.sees(nil, v.BrandID) {
+		if a.sees(v.BrandID) {
 			out = append(out, v)
 		}
 	}
@@ -149,7 +149,7 @@ func (s *Server) getABAIRun(w http.ResponseWriter, r *http.Request) {
 			s.internal(w, r, err)
 			return
 		}
-		if len(list) == 1 && a.sees(nil, list[0].BrandID) {
+		if len(list) == 1 && a.sees(list[0].BrandID) {
 			writeJSON(w, http.StatusOK, list[0])
 			return
 		}
@@ -244,7 +244,7 @@ func (s *Server) suggestABTests(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	if !a.writes(nil, in.BrandID) {
+	if !a.writes(in.BrandID) {
 		writeError(w, r, http.StatusForbidden, "forbidden", "you are limited to some brands: pick one of your brands")
 		return
 	}
@@ -270,11 +270,11 @@ func (s *Server) writeABVersions(w http.ResponseWriter, r *http.Request) {
 	if s.abWriteError(w, r, err) {
 		return
 	}
-	if !a.sees(nil, f.BrandID) {
+	if !a.sees(f.BrandID) {
 		writeError(w, r, http.StatusNotFound, "not_found", "flag not found: use its id or key")
 		return
 	}
-	if !a.writes(nil, f.BrandID) {
+	if !a.writes(f.BrandID) {
 		writeError(w, r, http.StatusForbidden, "forbidden", brandLimitedMessage)
 		return
 	}
@@ -465,7 +465,7 @@ func (s *Server) RunABTestAI(ctx context.Context, ws, id string, last bool) erro
 	resp, err := ai.Model.Chat(ctx, llm.Request{System: system, Messages: []llm.Message{{Role: "user", Text: prompt}}, JSONSchema: schema, MaxTokens: 3000})
 	name := ai.Provider.Name
 	label := map[string]string{"suggest": "suggested A/B tests", "versions": "wrote A/B test versions", "summary": "summarised an A/B test"}[run.kind]
-	if serr := recordAISpend(ctx, s.pool, ai, ws, nil, nil, run.actorID, resp.Usage, "ab_test_ai:"+id, name+" "+label); serr != nil {
+	if serr := recordAISpend(ctx, s.pool, ai, ws, nil, run.actorID, resp.Usage, "ab_test_ai:"+id, name+" "+label); serr != nil {
 		s.log.Error("ab test ai spend", "run_id", id, "err", serr)
 	}
 	if err == nil && resp.Stop == llm.StopRefusal {

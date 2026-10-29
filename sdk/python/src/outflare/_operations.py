@@ -341,7 +341,7 @@ class Operations(_Mixin):
 
         Scope: leads.manage. Ids of leads outside the workspace are ignored.
 
-        Needs: the leads.manage scope, project tokens allowed.
+        Needs: the leads.manage scope.
         POST /v1/workspaces/{ws}/lead-lists/{id}/leads
         """
         return self._call(
@@ -814,6 +814,71 @@ class Operations(_Mixin):
             idempotency_key=idempotency_key,
         )
 
+    def add_story_fact(
+        self,
+        story: str,
+        *,
+        ws: str | None = None,
+        source_kind: Literal["own_data", "public_data", "news", "brand_fact", "other"],
+        source_note: str | None = None,
+        source_url: str | None = None,
+        statement: str,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Add a fact to a story.
+
+        Scope: seo.manage. A fact the story states and where it comes from
+        (`source_url`, `source_note` or both). Every number in the release
+        must appear in one of the story's facts. Figures from the brand's
+        own data are aggregates only, never about a person. A story has at
+        most 100 facts.
+
+        Needs: the seo.manage scope.
+        POST /v1/workspaces/{ws}/stories/{story}/facts
+        """
+        return self._call(
+            "POST",
+            "/v1/workspaces/{ws}/stories/{story}/facts",
+            path={"story": story, "ws": ws},
+            body={
+                "source_kind": source_kind,
+                "source_note": source_note,
+                "source_url": source_url,
+                "statement": statement,
+            },
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
+    def add_story_quote(
+        self,
+        story: str,
+        *,
+        ws: str | None = None,
+        body: str,
+        expert_id: str | None = None,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Add a quote to a story.
+
+        Scope: seo.manage. A quote by one of the brand's experts (the
+        default when `expert_id` is left out), as a draft. Only a quote the
+        expert approved may appear in the release.
+
+        Needs: the seo.manage scope.
+        POST /v1/workspaces/{ws}/stories/{story}/quotes
+        """
+        return self._call(
+            "POST",
+            "/v1/workspaces/{ws}/stories/{story}/quotes",
+            path={"story": story, "ws": ws},
+            body={"body": body, "expert_id": expert_id},
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
     def add_suppressions(
         self,
         *,
@@ -862,15 +927,14 @@ class Operations(_Mixin):
         extra_body: dict[str, Any] | None = None,
         idempotency_key: str | None = None,
     ) -> Any:
-        """Move projects, domains, mailboxes, lists, sequences or missions into a brand.
+        """Move domains, mailboxes, lists, sequences or missions into a brand.
 
         Scope: projects.manage, plus mailboxes.manage for domains and
         mailboxes, leads.manage for lists, sequences.manage for sequences
         and missions.run for missions. Records in another brand move to
-        this one. A project brings everything in it; a record in a project
-        keeps the project's brand (counted in `in_project`). A domain brings
+        this one. A domain brings
         its mailboxes unless `with_mailboxes` is false. A brand's mailboxes
-        only send for that brand's sequences.
+        send for any of that brand's sequences.
 
         Needs: the projects.manage scope.
         POST /v1/workspaces/{ws}/brands/{brand}/add
@@ -885,47 +949,6 @@ class Operations(_Mixin):
                 "mailbox_ids": mailbox_ids,
                 "mission_ids": mission_ids,
                 "project_ids": project_ids,
-                "sequence_ids": sequence_ids,
-                "with_mailboxes": with_mailboxes,
-            },
-            extra_body=extra_body,
-            idempotency_key=idempotency_key,
-        )
-
-    def add_to_project(
-        self,
-        id: str,
-        *,
-        ws: str | None = None,
-        domains: list[str] | None = None,
-        lead_list_ids: list[str] | None = None,
-        mailbox_ids: list[str] | None = None,
-        sequence_ids: list[str] | None = None,
-        with_mailboxes: bool | None = None,
-        extra_body: dict[str, Any] | None = None,
-        idempotency_key: str | None = None,
-    ) -> Any:
-        """Move domains, mailboxes, lists or sequences into a project.
-
-        Scope: projects.manage, plus mailboxes.manage for domains and
-        mailboxes, leads.manage for lists and sequences.manage for
-        sequences. Not available to project tokens. Records in another
-        project move to this one. A domain brings its mailboxes unless
-        `with_mailboxes` is false. A project's mailboxes only send for that
-        project's sequences, so moving one can take it off a sequence (it
-        finishes follow-ups first).
-
-        Needs: the projects.manage scope.
-        POST /v1/workspaces/{ws}/projects/{id}/add
-        """
-        return self._call(
-            "POST",
-            "/v1/workspaces/{ws}/projects/{id}/add",
-            path={"id": id, "ws": ws},
-            body={
-                "domains": domains,
-                "lead_list_ids": lead_list_ids,
-                "mailbox_ids": mailbox_ids,
                 "sequence_ids": sequence_ids,
                 "with_mailboxes": with_mailboxes,
             },
@@ -1166,8 +1189,7 @@ class Operations(_Mixin):
         """Approve and start a mission.
 
         Scope: missions.approve. A person, or an approver token that is not
-        the mission's own. Records the project brief version it was
-        approved against.
+        the mission's own.
 
         `runner: builtin` hands the mission to Outflare's own agent, which
         runs it in turns with the workspace's AI model (`GET /ai-settings`).
@@ -1325,6 +1347,30 @@ class Operations(_Mixin):
             "POST",
             "/v1/workspaces/{ws}/social/series/{id}/approve",
             path={"id": id, "ws": ws},
+            idempotency_key=idempotency_key,
+        )
+
+    def approve_story(
+        self,
+        story: str,
+        *,
+        ws: str | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Approve a story's release.
+
+        Scope: seo.manage. Checks the release and, when it passes, marks
+        the story approved: it may be pitched. Only a person can approve
+        (403 for tokens and agents); 409 `check_failed` when the check
+        finds errors, kept on the story as `last_check`.
+
+        Needs: the seo.manage scope.
+        POST /v1/workspaces/{ws}/stories/{story}/approve
+        """
+        return self._call(
+            "POST",
+            "/v1/workspaces/{ws}/stories/{story}/approve",
+            path={"story": story, "ws": ws},
             idempotency_key=idempotency_key,
         )
 
@@ -1517,6 +1563,46 @@ class Operations(_Mixin):
             query={"pool": pool},
         )
 
+    def bulk_partner_rewards(
+        self,
+        *,
+        ws: str | None = None,
+        action: Literal["approve", "reject"],
+        ids: list[str] | None = None,
+        kind: Literal["cash", "fee", "action", "adjustment"] | None = None,
+        note: str | None = None,
+        partner_id: str | None = None,
+        program: str | None = None,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Approve or reject many held rewards.
+
+        Scope: partners.manage. Approves or rejects pending rewards: those in ids, or every pending one of a program
+        (program) or partner (partner_id), optionally of one kind. Each is recorded as if done alone
+        (partner_reward.approved or .rejected, with their webhooks). Up to 1,000 a call: more says there are others,
+        so call again. Rewards that aren't pending, that you can't see, or that are in a program shared by every brand
+        while you are limited to some are listed in skipped with why.
+
+        Needs: the partners.manage scope.
+        POST /v1/workspaces/{ws}/partner-rewards/bulk
+        """
+        return self._call(
+            "POST",
+            "/v1/workspaces/{ws}/partner-rewards/bulk",
+            path={"ws": ws},
+            body={
+                "action": action,
+                "ids": ids,
+                "kind": kind,
+                "note": note,
+                "partner_id": partner_id,
+                "program": program,
+            },
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
     def cancel_connect_request(
         self,
         id: str,
@@ -1614,7 +1700,7 @@ class Operations(_Mixin):
 
         Scope: leads.manage
 
-        Needs: the leads.manage scope, project tokens allowed.
+        Needs: the leads.manage scope.
         POST /v1/workspaces/{ws}/list-runs/{run}/cancel
         """
         return self._call(
@@ -2008,6 +2094,32 @@ class Operations(_Mixin):
             "POST",
             "/v1/workspaces/{ws}/social/watches/{id}/check",
             path={"id": id, "ws": ws},
+            idempotency_key=idempotency_key,
+        )
+
+    def check_story(
+        self,
+        story: str,
+        *,
+        ws: str | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Check a story's release.
+
+        Scope: seo.read. Checks the release and keeps the result on the
+        story (`last_check`). Errors stop approval: no release, a number
+        that appears in no fact, a fact without a source, a quoted passage
+        that isn't an approved quote. Warnings are for the person
+        approving: hype that journalists skip, and finance or health claims
+        that need a second look. Costs nothing.
+
+        Needs: the seo.read scope.
+        POST /v1/workspaces/{ws}/stories/{story}/check
+        """
+        return self._call(
+            "POST",
+            "/v1/workspaces/{ws}/stories/{story}/check",
+            path={"story": story, "ws": ws},
             idempotency_key=idempotency_key,
         )
 
@@ -2446,7 +2558,7 @@ class Operations(_Mixin):
     ) -> Any:
         """Add a brand.
 
-        Scope: context.manage. Names and handles are unique in the workspace. Then write its context with PATCH /brands/{brand}/context and move its projects and domains in with POST /brands/{brand}/add.
+        Scope: context.manage. Names and handles are unique in the workspace. Then write its context with PATCH /brands/{brand}/context and move its domains and sequences in with POST /brands/{brand}/add.
 
         Needs: the context.manage scope.
         POST /v1/workspaces/{ws}/brands
@@ -2572,7 +2684,7 @@ class Operations(_Mixin):
     ) -> Any:
         """Create an ideal customer profile.
 
-        Scope: projects.manage. Link it to projects with their `profile_id`. At most 500 per workspace.
+        Scope: projects.manage. Link it to lead lists with their `profile_id`. At most 500 per workspace.
 
         Needs: the projects.manage scope.
         POST /v1/workspaces/{ws}/ideal-customer-profiles
@@ -3093,6 +3205,7 @@ class Operations(_Mixin):
         *,
         ws: str | None = None,
         brand: str | None = None,
+        brand_id: str | None = None,
         domain_count: int | None = None,
         domains: list[str] | None = None,
         mailbox_daily_limit: int | None = None,
@@ -3114,8 +3227,8 @@ class Operations(_Mixin):
         """Draft a plan for domains and mailboxes.
 
         Scope: infrastructure.manage. "10 domains and 30 mailboxes for this
-        project by the 14th" is `domain_count: 10, mailboxes_per_domain: 3,
-        ready_by: "2026-11-14", project_id`. Domain names come from `brand`
+        brand by the 14th" is `domain_count: 10, mailboxes_per_domain: 3,
+        ready_by: "2026-11-14", brand_id`. Domain names come from `brand`
         unless you list them in `domains`; listing a domain the workspace
         already has adds mailboxes to it instead of buying it. Mailbox names
         come from `personas`. A plan with a supplier is priced in the
@@ -3131,6 +3244,7 @@ class Operations(_Mixin):
             path={"ws": ws},
             body={
                 "brand": brand,
+                "brand_id": brand_id,
                 "domain_count": domain_count,
                 "domains": domains,
                 "mailbox_daily_limit": mailbox_daily_limit,
@@ -3391,9 +3505,9 @@ class Operations(_Mixin):
     ) -> Any:
         """Create a lead list, optionally built from a data provider search.
 
-        Scope: leads.manage. A list with search_integration_id and filters is a search list that can be built and refreshed from that provider. Set build to true to queue the first build in the same call. A project token's lists always belong to its project.
+        Scope: leads.manage. A list with search_integration_id and filters is a search list that can be built and refreshed from that provider. Set build to true to queue the first build in the same call.
 
-        Needs: the leads.manage scope, project tokens allowed.
+        Needs: the leads.manage scope.
         POST /v1/workspaces/{ws}/lead-lists
         """
         return self._call(
@@ -3418,6 +3532,36 @@ class Operations(_Mixin):
                 "verify": verify,
                 "build": build,
             },
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
+    def create_link_sequence(
+        self,
+        *,
+        ws: str | None = None,
+        name: str | None = None,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Create the starter sequence for link pitches.
+
+        Scope: sequences.manage. Creates a draft sequence ready for link
+        pitches: a first email with `{{custom.opener}}` (the opener the
+        workspace's AI writes for each page) and one follow-up five days
+        later in the same thread, from the sender's first name. Each pitch
+        waits for approval. Edit its steps, mailboxes and sending window
+        like any sequence; it sends nothing until a pitch through it is
+        approved. `name` defaults to "Link pitches".
+
+        Needs: the sequences.manage scope.
+        POST /v1/workspaces/{ws}/link-building/sequences
+        """
+        return self._call(
+            "POST",
+            "/v1/workspaces/{ws}/link-building/sequences",
+            path={"ws": ws},
+            body={"name": name},
             extra_body=extra_body,
             idempotency_key=idempotency_key,
         )
@@ -3471,8 +3615,8 @@ class Operations(_Mixin):
 
         Scope: outcomes.manage. For meetings no connected calendar sees. Give
         lead_id or attendee_email; the meeting is tied to the sequence that
-        last emailed that lead, unless sequence_id or project_id is given
-        (which pins it). Status defaults to held for a meeting more than an
+        last emailed that lead, unless sequence_id is given (which pins
+        it). Status defaults to held for a meeting more than an
         hour in the past, otherwise booked.
 
         Needs: the outcomes.manage scope.
@@ -3519,10 +3663,10 @@ class Operations(_Mixin):
         Scope: context.manage. Save one lasting fact, preference or decision
         in a sentence, such as "Never mention pricing in a first email".
         Never a transcript. Saving the same text again keeps one memory. A
-        call made inside a mission records the mission. A project token
-        saves into its own project. A workspace keeps at most 1000.
+        call made inside a mission records the mission. A workspace keeps at
+        most 1000.
 
-        Needs: the context.manage scope, project tokens allowed.
+        Needs: the context.manage scope.
         POST /v1/workspaces/{ws}/memories
         """
         return self._call(
@@ -3558,7 +3702,6 @@ class Operations(_Mixin):
         Scope: missions.run. Starts as a draft: writes made in it are dry
         runs until a person approves it. A mission created with an API token
         is run by that token; a person can assign any token with token_id.
-        A token bound to a project creates missions only in that project.
 
         Needs: the missions.run scope.
         POST /v1/workspaces/{ws}/missions
@@ -3993,47 +4136,42 @@ class Operations(_Mixin):
             idempotency_key=idempotency_key,
         )
 
-    def create_project(
+    def create_pr_expert(
         self,
         *,
         ws: str | None = None,
-        audience: str | None = None,
-        brand_id: str | None = None,
-        brief: str | None = None,
-        brief_version: int | None = None,
-        daily_send_limit: int | None = None,
-        icp: Any | None = None,
-        market: str | None = None,
+        brand_id: str,
+        email: str | None = None,
+        is_default: bool | None = None,
         name: str | None = None,
-        offer: str | None = None,
-        profile_id: str | None = None,
-        status: Literal["active", "paused", "archived"] | None = None,
+        record_id: str | None = None,
+        title: str | None = None,
+        topics: list[str] | None = None,
         extra_body: dict[str, Any] | None = None,
         idempotency_key: str | None = None,
     ) -> Any:
-        """Create a project.
+        """Add a PR expert.
 
-        Scope: projects.manage, not available to project tokens. Names are unique in the workspace, ignoring case.
+        Scope: seo.manage. Adds a person a brand quotes: an existing person
+        record (`record_id`), or one found or added by `email` and `name`.
+        The brand's first expert is its default; `is_default` makes this
+        one the default instead. A brand has at most 50.
 
-        Needs: the projects.manage scope.
-        POST /v1/workspaces/{ws}/projects
+        Needs: the seo.manage scope.
+        POST /v1/workspaces/{ws}/pr-experts
         """
         return self._call(
             "POST",
-            "/v1/workspaces/{ws}/projects",
+            "/v1/workspaces/{ws}/pr-experts",
             path={"ws": ws},
             body={
-                "audience": audience,
                 "brand_id": brand_id,
-                "brief": brief,
-                "brief_version": brief_version,
-                "daily_send_limit": daily_send_limit,
-                "icp": icp,
-                "market": market,
+                "email": email,
+                "is_default": is_default,
                 "name": name,
-                "offer": offer,
-                "profile_id": profile_id,
-                "status": status,
+                "record_id": record_id,
+                "title": title,
+                "topics": topics,
             },
             extra_body=extra_body,
             idempotency_key=idempotency_key,
@@ -4357,9 +4495,8 @@ class Operations(_Mixin):
         nothing until its status is set to `active`. Defaults: UTC,
         Monday to Friday, 09:00 to 17:00, no daily cap on new leads, stop on
         reply.
-        A project token's sequences always belong to its project.
 
-        Needs: the sequences.manage scope, project tokens allowed.
+        Needs: the sequences.manage scope.
         POST /v1/workspaces/{ws}/sequences
         """
         return self._call(
@@ -4649,6 +4786,48 @@ class Operations(_Mixin):
             idempotency_key=idempotency_key,
         )
 
+    def create_story(
+        self,
+        *,
+        ws: str | None = None,
+        article_id: str | None = None,
+        brand_id: str,
+        embargo_until: str | None = None,
+        kind: Literal["data", "reactive", "comment"] | None = None,
+        release: str | None = None,
+        source: str | None = None,
+        summary: str | None = None,
+        title: str,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Start a story.
+
+        Scope: seo.manage. A story starts as an `idea`, or a `draft` when
+        it has a release. Add the facts behind its numbers and its
+        expert's quotes, check it, and a person approves it.
+
+        Needs: the seo.manage scope.
+        POST /v1/workspaces/{ws}/stories
+        """
+        return self._call(
+            "POST",
+            "/v1/workspaces/{ws}/stories",
+            path={"ws": ws},
+            body={
+                "article_id": article_id,
+                "brand_id": brand_id,
+                "embargo_until": embargo_until,
+                "kind": kind,
+                "release": release,
+                "source": source,
+                "summary": summary,
+                "title": title,
+            },
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
     def create_team(
         self,
         *,
@@ -4683,6 +4862,7 @@ class Operations(_Mixin):
         channel: str | None = None,
         landing_url: str | None = None,
         name: str | None = None,
+        redirect_links: bool | None = None,
         slug: str | None = None,
         source: str | None = None,
         status: Literal["active", "archived"] | None = None,
@@ -4707,6 +4887,7 @@ class Operations(_Mixin):
                 "channel": channel,
                 "landing_url": landing_url,
                 "name": name,
+                "redirect_links": redirect_links,
                 "slug": slug,
                 "source": source,
                 "status": status,
@@ -4720,6 +4901,7 @@ class Operations(_Mixin):
         id: str,
         *,
         ws: str | None = None,
+        redirect: bool | None = None,
         term: str | None = None,
         url: str | None = None,
         extra_body: dict[str, Any] | None = None,
@@ -4729,8 +4911,10 @@ class Operations(_Mixin):
 
         Scope: analytics.manage. Tags a page with the campaign's utm_source, utm_medium and utm_campaign, the content and
         term given, and its ofc code. Tags the page already had are replaced; other parameters stay. The same page,
-        content and term give back the link already made (200). Links go straight to the page, with no redirect: the
-        website tracking snippet reads the tags there.
+        content and term give back the link already made (200). Links go straight to the page by default: the website
+        tracking snippet reads the tags there. With `redirect` (or the campaign's `redirect_links`), the link also gets a
+        short redirect link that counts each click first, for places the snippet can't run; asking again for a link
+        made without one adds it.
 
         Needs: the analytics.manage scope.
         POST /v1/workspaces/{ws}/tracking-campaigns/{id}/links
@@ -4739,7 +4923,7 @@ class Operations(_Mixin):
             "POST",
             "/v1/workspaces/{ws}/tracking-campaigns/{id}/links",
             path={"id": id, "ws": ws},
-            body={"term": term, "url": url},
+            body={"redirect": redirect, "term": term, "url": url},
             extra_body=extra_body,
             idempotency_key=idempotency_key,
         )
@@ -5196,7 +5380,7 @@ class Operations(_Mixin):
 
         Scope: leads.manage
 
-        Needs: the leads.manage scope, project tokens allowed.
+        Needs: the leads.manage scope.
         DELETE /v1/workspaces/{ws}/lead-lists/{id}
         """
         return self._call(
@@ -5301,7 +5485,7 @@ class Operations(_Mixin):
 
         Scope: context.manage. For a memory that is wrong or out of date.
 
-        Needs: the context.manage scope, project tokens allowed.
+        Needs: the context.manage scope.
         DELETE /v1/workspaces/{ws}/memories/{id}
         """
         return self._call(
@@ -5419,27 +5603,24 @@ class Operations(_Mixin):
             idempotency_key=idempotency_key,
         )
 
-    def delete_project(
+    def delete_pr_expert(
         self,
-        id: str,
+        expert: str,
         *,
         ws: str | None = None,
         idempotency_key: str | None = None,
     ) -> Any:
-        """Delete a project.
+        """Remove a PR expert.
 
-        Scope: projects.manage, not available to project tokens. Its domains,
-        mailboxes, lists and sequences stay and become shared by the
-        workspace. Fails with 409 `project_has_tokens` while the project has
-        live API tokens; revoke them first, or archive the project instead.
+        Scope: seo.manage. Their quotes go too, and an approved story that used one goes back to draft. Their person record stays.
 
-        Needs: the projects.manage scope.
-        DELETE /v1/workspaces/{ws}/projects/{id}
+        Needs: the seo.manage scope.
+        DELETE /v1/workspaces/{ws}/pr-experts/{expert}
         """
         return self._call(
             "DELETE",
-            "/v1/workspaces/{ws}/projects/{id}",
-            path={"id": id, "ws": ws},
+            "/v1/workspaces/{ws}/pr-experts/{expert}",
+            path={"expert": expert, "ws": ws},
             idempotency_key=idempotency_key,
         )
 
@@ -5458,8 +5639,10 @@ class Operations(_Mixin):
         and keep its history, archive it instead (PATCH with archived: true). Goes with it: the records merged into
         it, its identities, links, field history and consents and, for a person, everything about them: their
         leads (also any lead with one of their emails), the cold email sent to them and their replies, meetings,
-        lifecycle email sent to them alone, product events, website visits and journey runs. Deals, payments and
-        opt-outs stay, unlinked; a company's people stay, unlinked from it. erased counts the rows removed, by
+        lifecycle email sent to them alone, product events, website visits, journey runs, partner referrals and
+        partner portal sign-ins. Deals, payments and opt-outs stay, unlinked; a partner's memberships, rewards and
+        payouts stay on a new archived record named "Erased partner" with no name or identities, suspended and
+        without payout details or notes, so commission totals still add up; a company's people stay, unlinked from it. erased counts the rows removed, by
         table. A deal is deleted with DELETE .../deals/{deal}.
 
         Needs: the customers.manage scope.
@@ -5612,7 +5795,7 @@ class Operations(_Mixin):
 
         Scope: sequences.manage. Sent messages are kept in the message log.
 
-        Needs: the sequences.manage scope, project tokens allowed.
+        Needs: the sequences.manage scope.
         DELETE /v1/workspaces/{ws}/sequences/{id}
         """
         return self._call(
@@ -5705,6 +5888,49 @@ class Operations(_Mixin):
             "/v1/workspaces/{ws}/spend-rates",
             path={"ws": ws},
             query={"provider": provider, "unit_name": unit_name},
+            idempotency_key=idempotency_key,
+        )
+
+    def delete_story(
+        self,
+        story: str,
+        *,
+        ws: str | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Delete a story.
+
+        Scope: seo.manage. With its facts and quotes. To keep it, archive it instead.
+
+        Needs: the seo.manage scope.
+        DELETE /v1/workspaces/{ws}/stories/{story}
+        """
+        return self._call(
+            "DELETE",
+            "/v1/workspaces/{ws}/stories/{story}",
+            path={"story": story, "ws": ws},
+            idempotency_key=idempotency_key,
+        )
+
+    def delete_story_fact(
+        self,
+        story: str,
+        fact: str,
+        *,
+        ws: str | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Remove a fact from a story.
+
+        Scope: seo.manage. An approved story goes back to draft.
+
+        Needs: the seo.manage scope.
+        DELETE /v1/workspaces/{ws}/stories/{story}/facts/{fact}
+        """
+        return self._call(
+            "DELETE",
+            "/v1/workspaces/{ws}/stories/{story}/facts/{fact}",
+            path={"story": story, "fact": fact, "ws": ws},
             idempotency_key=idempotency_key,
         )
 
@@ -6192,10 +6418,8 @@ class Operations(_Mixin):
         leads are skipped, and so are leads active in another sequence
         unless `skip_active_elsewhere` is false. Adding a lead twice does
         nothing.
-        A project token can only use `list_id` for one of its project's
-        lists, and `lead_ids` reach only leads on its project's lists.
 
-        Needs: the sequences.manage scope, project tokens allowed.
+        Needs: the sequences.manage scope.
         POST /v1/workspaces/{ws}/sequences/{id}/enrollments
         """
         return self._call(
@@ -6288,7 +6512,6 @@ class Operations(_Mixin):
         actor_id: str | None = None,
         token_id: str | None = None,
         mission_id: str | None = None,
-        project_id: str | None = None,
         brand: str | None = None,
         q: str | None = None,
         since: str | None = None,
@@ -6318,7 +6541,6 @@ class Operations(_Mixin):
                 "actor_id": actor_id,
                 "token_id": token_id,
                 "mission_id": mission_id,
-                "project_id": project_id,
                 "brand": brand,
                 "q": q,
                 "since": since,
@@ -6334,7 +6556,7 @@ class Operations(_Mixin):
         format: Literal["csv", "ndjson"] | None = None,
         from_: str | None = None,
         to: str | None = None,
-        group_by: Literal["none", "project", "sequence", "brand"] | None = None,
+        group_by: Literal["none", "sequence", "brand"] | None = None,
         brand: str | None = None,
         currency: str | None = None,
     ) -> Any:
@@ -6386,6 +6608,24 @@ class Operations(_Mixin):
             "/v1/workspaces/{ws}/partner-payouts/export",
             path={"ws": ws},
             query={"brand": brand, "status": status, "program": program},
+        )
+
+    def follow_redirect_link(
+        self,
+        code: str,
+    ) -> Any:
+        """Follow a campaign's redirect link.
+
+        Counts the click (flagging link scanners and previews) and sends the
+        person to the link's tagged page, with `ofclk`, the click's key,
+        added. A link whose campaign is archived still works.
+
+        GET /l/{code}
+        """
+        return self._call(
+            "GET",
+            "/l/{code}",
+            path={"code": code},
         )
 
     def freeze_ab_test(
@@ -6502,6 +6742,28 @@ class Operations(_Mixin):
             "/v1/workspaces/{ws}/ab-tests/{test}/breakdown",
             path={"test": test, "ws": ws},
             query={"by": by},
+        )
+
+    def get_ab_test_checklist(
+        self,
+        test: str,
+        *,
+        ws: str | None = None,
+    ) -> Any:
+        """Check an A/B test before it starts.
+
+        Scope: analytics.read. What would stop the test measuring anything useful: the flag (fail when archived, has one
+        version or lost the control; warn when off), another running test of the flag (fail), whether pages showed its
+        versions in the last 7 days, whether visitors reach the first goal, how long it is likely to take, and
+        guardrails. ready is false while any check fails.
+
+        Needs: the analytics.read scope.
+        GET /v1/workspaces/{ws}/ab-tests/{test}/checklist
+        """
+        return self._call(
+            "GET",
+            "/v1/workspaces/{ws}/ab-tests/{test}/checklist",
+            path={"test": test, "ws": ws},
         )
 
     def get_ab_test_results(
@@ -7378,13 +7640,11 @@ class Operations(_Mixin):
         Scope: workspace.read. What an agent reads at the start of every
         conversation, so the person never has to repeat themselves: the
         company context (who they are, goals, voice, rules), pinned and
-        recent memories, and the projects whose briefs hold each motion's
-        offer and audience. `context.missing` lists the onboarding fields
+        recent memories, and the brands' summaries. `context.missing` lists the onboarding fields
         still empty; when `context.ask_for_missing` is true, ask the person
-        for them once and save the answers with PATCH. A project token sees
-        workspace-wide memories and its own project's.
+        for them once and save the answers with PATCH.
 
-        Needs: the workspace.read scope, project tokens allowed.
+        Needs: the workspace.read scope.
         GET /v1/workspaces/{ws}/context
         """
         return self._call(
@@ -8237,7 +8497,7 @@ class Operations(_Mixin):
     ) -> Any:
         """Find an item by the slug in its web app URL.
 
-        Scope: workspace.read, plus the item's own read scope (sequences.read, projects.read, leads.read for lists,
+        Scope: workspace.read, plus the item's own read scope (sequences.read, leads.read for lists,
         missions.read, mailboxes.read for servers, infrastructure.read for plans, integrations.read for connections,
         tokens.manage for API tokens, webhooks.read for webhook endpoints). The web app names items by a slug made from
         their name (https://app.outflare.ai/acme/sequences/q3-founders); a connection's slug comes from its connector
@@ -8395,7 +8655,7 @@ class Operations(_Mixin):
 
         Scope: leads.read
 
-        Needs: the leads.read scope, project tokens allowed.
+        Needs: the leads.read scope.
         GET /v1/workspaces/{ws}/lead-lists/{id}
         """
         return self._call(
@@ -8511,7 +8771,7 @@ class Operations(_Mixin):
 
         Scope: leads.read
 
-        Needs: the leads.read scope, project tokens allowed.
+        Needs: the leads.read scope.
         GET /v1/workspaces/{ws}/list-runs/{run}
         """
         return self._call(
@@ -8554,7 +8814,6 @@ class Operations(_Mixin):
         actor_id: str | None = None,
         token_id: str | None = None,
         mission_id: str | None = None,
-        project_id: str | None = None,
         brand: str | None = None,
         q: str | None = None,
         since: str | None = None,
@@ -8585,7 +8844,6 @@ class Operations(_Mixin):
                 "actor_id": actor_id,
                 "token_id": token_id,
                 "mission_id": mission_id,
-                "project_id": project_id,
                 "brand": brand,
                 "q": q,
                 "since": since,
@@ -8603,7 +8861,7 @@ class Operations(_Mixin):
 
         Scope: mailboxes.read
 
-        Needs: the mailboxes.read scope, project tokens allowed.
+        Needs: the mailboxes.read scope.
         GET /v1/workspaces/{ws}/mailboxes/{id}
         """
         return self._call(
@@ -8671,8 +8929,8 @@ class Operations(_Mixin):
         """Check in on a mission.
 
         Scope: missions.read. What an agent reads before it acts: the
-        mission, the project brief (and whether it changed since approval),
-        what Outflare knows about the company (context and pinned memories),
+        mission, its brand's context when it has a brand, what Outflare
+        knows about the company (context and pinned memories),
         limits, progress, open connect requests and the latest notes.
 
         Needs: the missions.read scope.
@@ -8821,6 +9079,25 @@ class Operations(_Mixin):
             path={"id": id, "ws": ws},
         )
 
+    def get_partner_program_stats(
+        self,
+        id: str,
+        *,
+        ws: str | None = None,
+    ) -> Any:
+        """A program's totals.
+
+        Scope: partners.read. The program's figures across all its partners: partners by status, and the sum of every partner's stats.
+
+        Needs: the partners.read scope.
+        GET /v1/workspaces/{ws}/partner-programs/{id}/stats
+        """
+        return self._call(
+            "GET",
+            "/v1/workspaces/{ws}/partner-programs/{id}/stats",
+            path={"id": id, "ws": ws},
+        )
+
     def get_payment_sync(
         self,
         id: str,
@@ -8873,47 +9150,6 @@ class Operations(_Mixin):
             "GET",
             "/v1/playbooks/{id}",
             path={"id": id},
-        )
-
-    def get_project(
-        self,
-        id: str,
-        *,
-        ws: str | None = None,
-    ) -> Any:
-        """Get a project.
-
-        Scope: projects.read.
-
-        Needs: the projects.read scope, project tokens allowed.
-        GET /v1/workspaces/{ws}/projects/{id}
-        """
-        return self._call(
-            "GET",
-            "/v1/workspaces/{ws}/projects/{id}",
-            path={"id": id, "ws": ws},
-        )
-
-    def get_project_brief(
-        self,
-        id: str,
-        *,
-        ws: str | None = None,
-    ) -> Any:
-        """Read a project's brief.
-
-        Scope: projects.read. What an agent should read before writing copy,
-        building a list or planning a campaign for the project: the
-        structured fields plus the whole brief as one Markdown document.
-        Keep `version` and compare it later to know the brief moved.
-
-        Needs: the projects.read scope, project tokens allowed.
-        GET /v1/workspaces/{ws}/projects/{id}/brief
-        """
-        return self._call(
-            "GET",
-            "/v1/workspaces/{ws}/projects/{id}/brief",
-            path={"id": id, "ws": ws},
         )
 
     def get_rank_history(
@@ -9065,9 +9301,8 @@ class Operations(_Mixin):
         Scope inbox.read. What Outflare does when a reply gets a label it is
         sure of (rules, a person, or the AI at 80% or more): the defaults,
         the actions each label can take, and the sets saved for the
-        workspace, a project or a sequence. For a reply, the sequence's set
-        wins over its project's, which wins over the workspace's, label by
-        label; labels no set names follow the defaults.
+        workspace or a sequence. For a reply, the sequence's set wins over
+        the workspace's, label by label; labels no set names follow the defaults.
 
         Needs: the inbox.read scope.
         GET /v1/workspaces/{ws}/reply-rules
@@ -9197,7 +9432,7 @@ class Operations(_Mixin):
 
         Scope: mailboxes.read. List the domain's mailboxes with `GET /mailboxes?domain=`.
 
-        Needs: the mailboxes.read scope, project tokens allowed.
+        Needs: the mailboxes.read scope.
         GET /v1/workspaces/{ws}/sending-domains/{domain}
         """
         return self._call(
@@ -9436,7 +9671,7 @@ class Operations(_Mixin):
 
         Scope: sequences.read
 
-        Needs: the sequences.read scope, project tokens allowed.
+        Needs: the sequences.read scope.
         GET /v1/workspaces/{ws}/sequences/{id}
         """
         return self._call(
@@ -10039,6 +10274,25 @@ class Operations(_Mixin):
             "/v1/workspaces/{ws}/status",
             path={"ws": ws},
             query={"brand": brand},
+        )
+
+    def get_story(
+        self,
+        story: str,
+        *,
+        ws: str | None = None,
+    ) -> Any:
+        """Get a story.
+
+        Scope: seo.read. With its facts and quotes.
+
+        Needs: the seo.read scope.
+        GET /v1/workspaces/{ws}/stories/{story}
+        """
+        return self._call(
+            "GET",
+            "/v1/workspaces/{ws}/stories/{story}",
+            path={"story": story, "ws": ws},
         )
 
     def get_supplier_sync(
@@ -11375,8 +11629,8 @@ class Operations(_Mixin):
         Scope: workspace.read. The businesses this company markets, each
         with its own website, such as Geonode and Repocket. Connectors,
         members, tokens, leads and suppressions are the workspace's and
-        shared by every brand; a brand owns its context, memories, projects
-        and sending setup. A workspace with no brands works as one brand.
+        shared by every brand; a brand owns its context, memories, lists,
+        sequences and sending setup. A workspace with no brands works as one brand.
 
         Needs: the workspace.read scope.
         GET /v1/workspaces/{ws}/brands
@@ -11757,7 +12011,7 @@ class Operations(_Mixin):
         """List ideal customer profiles.
 
         Scope: projects.read. Who the workspace sells to: each profile is a description in words plus filters in the
-        same vocabulary as lead searches. Projects, lead list fit scores and the lead finder read them. Active ones by
+        same vocabulary as lead searches. Lead lists, lead list fit scores and the lead finder read them. Active ones by
         default, by name.
 
         Needs: the projects.read scope.
@@ -11779,7 +12033,7 @@ class Operations(_Mixin):
 
         Scope: leads.read. Every data connector, available or planned, with the workspace's connected accounts for each and the filters its search understands. Connect one with POST /integrations.
 
-        Needs: the leads.read scope, project tokens allowed.
+        Needs: the leads.read scope.
         GET /v1/workspaces/{ws}/data-providers
         """
         return self._call(
@@ -11834,7 +12088,6 @@ class Operations(_Mixin):
         brand: str | None = None,
         from_: str | None = None,
         to: str | None = None,
-        project_id: str | None = None,
         sequence_id: str | None = None,
         mission_id: str | None = None,
         state: Literal["open", "won", "lost"] | None = None,
@@ -11859,7 +12112,6 @@ class Operations(_Mixin):
                 "brand": brand,
                 "from": from_,
                 "to": to,
-                "project_id": project_id,
                 "sequence_id": sequence_id,
                 "mission_id": mission_id,
                 "state": state,
@@ -12251,7 +12503,7 @@ class Operations(_Mixin):
 
         Scope: sequences.read
 
-        Needs: the sequences.read scope, project tokens allowed.
+        Needs: the sequences.read scope.
         GET /v1/workspaces/{ws}/sequences/{id}/enrollments
         """
         return self._call(
@@ -12521,7 +12773,6 @@ class Operations(_Mixin):
         group: str | None = None,
         source: str | None = None,
         needs_review: bool | None = None,
-        project_id: str | None = None,
         min_confidence: float | None = None,
         assigned_to: str | None = None,
         tag: str | None = None,
@@ -12557,7 +12808,6 @@ class Operations(_Mixin):
                 "group": group,
                 "source": source,
                 "needs_review": needs_review,
-                "project_id": project_id,
                 "min_confidence": min_confidence,
                 "assigned_to": assigned_to,
                 "tag": tag,
@@ -13024,7 +13274,7 @@ class Operations(_Mixin):
 
         Scope: leads.read. Sorted by score, best first, unless sort says otherwise.
 
-        Needs: the leads.read scope, project tokens allowed.
+        Needs: the leads.read scope.
         GET /v1/workspaces/{ws}/lead-lists/{id}/members
         """
         return self._call(
@@ -13047,21 +13297,20 @@ class Operations(_Mixin):
         *,
         ws: str | None = None,
         brand: str | None = None,
-        project_id: str | None = None,
         kind: Literal["manual", "search"] | None = None,
     ) -> Any:
         """List lead lists, with each list's latest run.
 
-        Scope: leads.read. A project token sees only its project's lists.
+        Scope: leads.read.
 
-        Needs: the leads.read scope, project tokens allowed.
+        Needs: the leads.read scope.
         GET /v1/workspaces/{ws}/lead-lists
         """
         return self._call(
             "GET",
             "/v1/workspaces/{ws}/lead-lists",
             path={"ws": ws},
-            query={"brand": brand, "project_id": project_id, "kind": kind},
+            query={"brand": brand, "kind": kind},
         )
 
     def list_lead_sources(
@@ -13269,7 +13518,7 @@ class Operations(_Mixin):
 
         Scope: leads.read
 
-        Needs: the leads.read scope, project tokens allowed.
+        Needs: the leads.read scope.
         GET /v1/workspaces/{ws}/lead-lists/{id}/runs
         """
         return self._call(
@@ -13293,7 +13542,6 @@ class Operations(_Mixin):
         actor_id: str | None = None,
         token_id: str | None = None,
         mission_id: str | None = None,
-        project_id: str | None = None,
         brand: str | None = None,
         q: str | None = None,
         since: str | None = None,
@@ -13332,7 +13580,6 @@ class Operations(_Mixin):
                 "actor_id": actor_id,
                 "token_id": token_id,
                 "mission_id": mission_id,
-                "project_id": project_id,
                 "brand": brand,
                 "q": q,
                 "since": since,
@@ -13373,13 +13620,12 @@ class Operations(_Mixin):
         pool_id: str | None = None,
         domain: str | None = None,
         server_id: str | None = None,
-        project_id: str | None = None,
     ) -> Any:
         """List mailboxes.
 
         Scope: mailboxes.read. Credentials are never returned.
 
-        Needs: the mailboxes.read scope, project tokens allowed.
+        Needs: the mailboxes.read scope.
         GET /v1/workspaces/{ws}/mailboxes
         """
         return self._call(
@@ -13393,7 +13639,6 @@ class Operations(_Mixin):
                 "pool_id": pool_id,
                 "domain": domain,
                 "server_id": server_id,
-                "project_id": project_id,
             },
         )
 
@@ -13404,7 +13649,6 @@ class Operations(_Mixin):
         brand: str | None = None,
         from_: str | None = None,
         to: str | None = None,
-        project_id: str | None = None,
         sequence_id: str | None = None,
         mission_id: str | None = None,
         status: Literal["booked", "held", "no_show", "canceled"] | None = None,
@@ -13429,7 +13673,6 @@ class Operations(_Mixin):
                 "brand": brand,
                 "from": from_,
                 "to": to,
-                "project_id": project_id,
                 "sequence_id": sequence_id,
                 "mission_id": mission_id,
                 "status": status,
@@ -13466,7 +13709,6 @@ class Operations(_Mixin):
         brand: str | None = None,
         q: str | None = None,
         kind: Literal["preference", "decision", "fact", "feedback"] | None = None,
-        project_id: str | None = None,
         pinned: bool | None = None,
         limit: int | None = None,
         offset: int | None = None,
@@ -13480,7 +13722,7 @@ class Operations(_Mixin):
         recently changed. Search with `q` before asking the person
         something they may have said before.
 
-        Needs: the workspace.read scope, project tokens allowed.
+        Needs: the workspace.read scope.
         GET /v1/workspaces/{ws}/memories
         """
         return self._call(
@@ -13491,7 +13733,6 @@ class Operations(_Mixin):
                 "brand": brand,
                 "q": q,
                 "kind": kind,
-                "project_id": project_id,
                 "pinned": pinned,
                 "limit": limit,
                 "offset": offset,
@@ -13624,7 +13865,6 @@ class Operations(_Mixin):
         ws: str | None = None,
         brand: str | None = None,
         status: str | None = None,
-        project_id: str | None = None,
     ) -> Any:
         """List missions.
 
@@ -13637,7 +13877,7 @@ class Operations(_Mixin):
             "GET",
             "/v1/workspaces/{ws}/missions",
             path={"ws": ws},
-            query={"brand": brand, "status": status, "project_id": project_id},
+            query={"brand": brand, "status": status},
         )
 
     def list_news_articles(
@@ -13833,6 +14073,30 @@ class Operations(_Mixin):
             },
         )
 
+    def list_partner_import_sources(
+        self,
+        id: str,
+        *,
+        ws: str | None = None,
+        integration_id: str | None = None,
+    ) -> Any:
+        """List the programs an import can read.
+
+        Scope: partners.manage. Reads the programs in the connected partner platform account (Tolt, with your own API
+        key), to pick one for startPartnerImport's source_program. suggested is the program an import takes when none
+        is named: the only one, or the only active one; empty when you must choose. 409 connector_needed when Tolt isn't
+        connected. Nothing is changed on the platform.
+
+        Needs: the partners.manage scope.
+        GET /v1/workspaces/{ws}/partner-programs/{id}/import-sources
+        """
+        return self._call(
+            "GET",
+            "/v1/workspaces/{ws}/partner-programs/{id}/import-sources",
+            path={"id": id, "ws": ws},
+            query={"integration_id": integration_id},
+        )
+
     def list_partner_imports(
         self,
         id: str,
@@ -13859,6 +14123,7 @@ class Operations(_Mixin):
         brand: str | None = None,
         status: Literal["due", "paid", "canceled"] | None = None,
         partner_id: str | None = None,
+        program: str | None = None,
         limit: int | None = None,
         before: str | None = None,
         cursor: str | None = None,
@@ -13879,6 +14144,7 @@ class Operations(_Mixin):
                 "brand": brand,
                 "status": status,
                 "partner_id": partner_id,
+                "program": program,
                 "limit": limit,
                 "before": before,
                 "cursor": cursor,
@@ -14117,28 +14383,24 @@ class Operations(_Mixin):
             path={"ws": ws},
         )
 
-    def list_projects(
+    def list_pr_experts(
         self,
         *,
         ws: str | None = None,
         brand: str | None = None,
-        status: Literal["active", "paused", "archived", "all"] | None = None,
     ) -> Any:
-        """List projects.
+        """List PR experts.
 
-        Scope: projects.read. A project is one go-to-market motion: an offer
-        sold to one ideal customer in one market. It holds the brief people
-        and agents work from and owns domains, mailboxes, lead lists and
-        sequences. A project token sees only its own project.
+        Scope: seo.read. The people each brand quotes in its stories, the default first.
 
-        Needs: the projects.read scope, project tokens allowed.
-        GET /v1/workspaces/{ws}/projects
+        Needs: the seo.read scope.
+        GET /v1/workspaces/{ws}/pr-experts
         """
         return self._call(
             "GET",
-            "/v1/workspaces/{ws}/projects",
+            "/v1/workspaces/{ws}/pr-experts",
             path={"ws": ws},
-            query={"brand": brand, "status": status},
+            query={"brand": brand},
         )
 
     def list_query_tables(
@@ -14569,7 +14831,6 @@ class Operations(_Mixin):
         *,
         ws: str | None = None,
         brand: str | None = None,
-        project_id: str | None = None,
     ) -> Any:
         """List sending domains with health, settings and sending stats.
 
@@ -14578,14 +14839,14 @@ class Operations(_Mixin):
         and blocklist results, the issues to fix, its settings, mailbox
         counts and sends, replies and bounces over rolling windows.
 
-        Needs: the mailboxes.read scope, project tokens allowed.
+        Needs: the mailboxes.read scope.
         GET /v1/workspaces/{ws}/sending-domains
         """
         return self._call(
             "GET",
             "/v1/workspaces/{ws}/sending-domains",
             path={"ws": ws},
-            query={"brand": brand, "project_id": project_id},
+            query={"brand": brand},
         )
 
     def list_sending_servers(
@@ -14762,20 +15023,19 @@ class Operations(_Mixin):
         *,
         ws: str | None = None,
         brand: str | None = None,
-        project_id: str | None = None,
     ) -> Any:
         """List sequences (archived ones are left out).
 
         Scope: sequences.read
 
-        Needs: the sequences.read scope, project tokens allowed.
+        Needs: the sequences.read scope.
         GET /v1/workspaces/{ws}/sequences
         """
         return self._call(
             "GET",
             "/v1/workspaces/{ws}/sequences",
             path={"ws": ws},
-            query={"brand": brand, "project_id": project_id},
+            query={"brand": brand},
         )
 
     def list_site_cookies(
@@ -15109,7 +15369,6 @@ class Operations(_Mixin):
         ws: str | None = None,
         from_: str | None = None,
         to: str | None = None,
-        project_id: str | None = None,
         sequence_id: str | None = None,
         mission_id: str | None = None,
         category: str | None = None,
@@ -15133,7 +15392,6 @@ class Operations(_Mixin):
             query={
                 "from": from_,
                 "to": to,
-                "project_id": project_id,
                 "sequence_id": sequence_id,
                 "mission_id": mission_id,
                 "category": category,
@@ -15161,6 +15419,38 @@ class Operations(_Mixin):
             "GET",
             "/v1/workspaces/{ws}/spend-rates",
             path={"ws": ws},
+        )
+
+    def list_stories(
+        self,
+        *,
+        ws: str | None = None,
+        brand: str | None = None,
+        status: str | None = None,
+        limit: int | None = None,
+        offset: int | None = None,
+        fields: list[str] | None = None,
+        cursor: str | None = None,
+    ) -> Any:
+        """List stories.
+
+        Scope: seo.read. Digital PR stories, last changed first, without their facts and quotes (get one story for those). Leaves out archived ones unless `status` asks for them.
+
+        Needs: the seo.read scope.
+        GET /v1/workspaces/{ws}/stories
+        """
+        return self._call(
+            "GET",
+            "/v1/workspaces/{ws}/stories",
+            path={"ws": ws},
+            query={
+                "brand": brand,
+                "status": status,
+                "limit": limit,
+                "offset": offset,
+                "fields": fields,
+                "cursor": cursor,
+            },
         )
 
     def list_supplier_mailboxes(
@@ -15830,9 +16120,8 @@ class Operations(_Mixin):
         ws: str | None = None,
         from_: str | None = None,
         to: str | None = None,
-        group_by: Literal["none", "project", "sequence", "brand"] | None = None,
+        group_by: Literal["none", "sequence", "brand"] | None = None,
         brand: str | None = None,
-        project_id: str | None = None,
         sequence_id: str | None = None,
         mission_id: str | None = None,
         currency: str | None = None,
@@ -15840,14 +16129,14 @@ class Operations(_Mixin):
         """Cost per reply, meeting and deal.
 
         Scope: outcomes.read. Sends, replies, meetings, deals and spend over a
-        period, for the workspace or per project or sequence, with cost per
+        period, for the workspace or per sequence or brand, with cost per
         reply, per meeting, per held meeting and per deal. Spend tied to a
-        sequence, project, mailbox or domain is charged to it directly; the
+        sequence, brand, mailbox or domain is charged to it directly; the
         rest is shared out by each row's share of emails sent. Usage recorded
         only as units (credits) is priced with the workspace's spend rates and
         reported as estimated; usage with no rate is listed under `unpriced`.
         Nothing is converted between currencies. group_by=brand compares
-        brands (a row's brand is its sequence's or project's), and brand keeps
+        brands (a row's brand is its sequence's), and brand keeps
         the report to one brand.
 
         Needs: the outcomes.read scope.
@@ -15862,7 +16151,6 @@ class Operations(_Mixin):
                 "to": to,
                 "group_by": group_by,
                 "brand": brand,
-                "project_id": project_id,
                 "sequence_id": sequence_id,
                 "mission_id": mission_id,
                 "currency": currency,
@@ -16079,7 +16367,7 @@ class Operations(_Mixin):
         one the call fails with 409 `connector_needed`; with a provider but
         no model or price chosen, 409 `ai_model_needed`; past the
         workspace's monthly AI limit, 409 `ai_budget_reached`. The model is
-        sent the goal, the project brief and a summary of the workspace,
+        sent the goal, the company context and a summary of the workspace,
         never lead lists, email addresses or keys.
 
         Needs: the missions.run scope.
@@ -16229,6 +16517,7 @@ class Operations(_Mixin):
         *,
         ws: str | None = None,
         brand: str | None = None,
+        brand_id: str | None = None,
         domain_count: int | None = None,
         domains: list[str] | None = None,
         mailbox_daily_limit: int | None = None,
@@ -16262,6 +16551,7 @@ class Operations(_Mixin):
             path={"ws": ws},
             body={
                 "brand": brand,
+                "brand_id": brand_id,
                 "domain_count": domain_count,
                 "domains": domains,
                 "mailbox_daily_limit": mailbox_daily_limit,
@@ -16321,7 +16611,7 @@ class Operations(_Mixin):
 
         Scope: leads.manage. Queues a run that fetches one page (10 people) from the provider and saves nothing. Poll GET /list-runs/{run} for the sample and the total number of matches. No emails are revealed; some providers (People Data Labs) charge for search results.
 
-        Needs: the leads.manage scope, project tokens allowed.
+        Needs: the leads.manage scope.
         POST /v1/workspaces/{ws}/lead-lists/preview
         """
         return self._call(
@@ -16353,7 +16643,7 @@ class Operations(_Mixin):
         send, and any variables the lead is missing (a missing variable
         blocks the real send).
 
-        Needs: the sequences.read scope, project tokens allowed.
+        Needs: the sequences.read scope.
         POST /v1/workspaces/{ws}/sequences/{id}/preview
         """
         return self._call(
@@ -16831,8 +17121,7 @@ class Operations(_Mixin):
         units with a unit_name (e.g. 1200 credit) to have reports price it
         with the workspace's rates. With a ref already in the ledger nothing
         is added and the existing entry comes back with 200, so retries never
-        double count. project_id is filled from the sequence, mailbox or
-        domain when left out.
+        double count.
 
         Needs: the outcomes.manage scope.
         POST /v1/workspaces/{ws}/spend
@@ -17112,41 +17401,6 @@ class Operations(_Mixin):
             idempotency_key=idempotency_key,
         )
 
-    def remove_from_project(
-        self,
-        id: str,
-        *,
-        ws: str | None = None,
-        domains: list[str] | None = None,
-        lead_list_ids: list[str] | None = None,
-        mailbox_ids: list[str] | None = None,
-        sequence_ids: list[str] | None = None,
-        with_mailboxes: bool | None = None,
-        extra_body: dict[str, Any] | None = None,
-        idempotency_key: str | None = None,
-    ) -> Any:
-        """Make a project's domains, mailboxes, lists or sequences shared again.
-
-        Scope: projects.manage, plus read access to each kind of record moved (as addToProject). Only records in this project change.
-
-        Needs: the projects.manage scope.
-        POST /v1/workspaces/{ws}/projects/{id}/remove
-        """
-        return self._call(
-            "POST",
-            "/v1/workspaces/{ws}/projects/{id}/remove",
-            path={"id": id, "ws": ws},
-            body={
-                "domains": domains,
-                "lead_list_ids": lead_list_ids,
-                "mailbox_ids": mailbox_ids,
-                "sequence_ids": sequence_ids,
-                "with_mailboxes": with_mailboxes,
-            },
-            extra_body=extra_body,
-            idempotency_key=idempotency_key,
-        )
-
     def remove_lead_from_list(
         self,
         id: str,
@@ -17159,7 +17413,7 @@ class Operations(_Mixin):
 
         Scope: leads.manage
 
-        Needs: the leads.manage scope, project tokens allowed.
+        Needs: the leads.manage scope.
         DELETE /v1/workspaces/{ws}/lead-lists/{id}/leads/{lead}
         """
         return self._call(
@@ -17337,7 +17591,7 @@ class Operations(_Mixin):
         `delay_days` is the wait after the previous step (at least 1 after
         the first). Enrollments carry on from their current position.
 
-        Needs: the sequences.manage scope, project tokens allowed.
+        Needs: the sequences.manage scope.
         PUT /v1/workspaces/{ws}/sequences/{id}/steps
         """
         return self._call(
@@ -18746,9 +19000,11 @@ class Operations(_Mixin):
     ) -> Any:
         """Replace a partner program's reward rules.
 
-        Scope: partners.manage. Rules stack: every rule a conversion matches gives a reward, except that only the best
-        cash rule (percent or fixed) for the partner counts: a group's own rule beats one for everyone, then the highest
-        tier (min_sales) reached. [] makes the program track only. Rewards already in the ledger keep what they earned.
+        Scope: partners.manage. Every action rule a conversion matches gives a reward, but only one cash rule (percent
+        or fixed) pays, whatever the rules' order: a partner's own rule (partner_id) beats their group's, which beats one
+        for everyone; then the highest tier (min_sales) reached; then the narrower recurrence (first, then months, then
+        every); then a rule for named product_ids; then the one paying more. [] makes the program track only. Rewards
+        already in the ledger keep what they earned.
 
         Needs: the partners.manage scope.
         PUT /v1/workspaces/{ws}/partner-programs/{id}/rules
@@ -18772,10 +19028,11 @@ class Operations(_Mixin):
         extra_body: dict[str, Any] | None = None,
         idempotency_key: str | None = None,
     ) -> Any:
-        """Save the reply rules for the workspace, a project or a sequence.
+        """Save the reply rules for the workspace or a sequence.
 
-        Scope inbox.manage. Replaces the set for the workspace (no ids), a
-        project (project_id) or a sequence (sequence_id). Labels left out
+        Scope inbox.manage. Replaces the set for the workspace (no id) or a
+        sequence (sequence_id). A project_id is refused with 400: projects
+        were removed. Labels left out
         follow the next set up; an empty rules object removes the set and
         answers {"cleared": true}. Every action can be undone: a snoozed
         reply can be woken, a restarted or enrolled lead stopped.
@@ -18932,6 +19189,33 @@ class Operations(_Mixin):
                 "telemetry": telemetry,
                 "workspace_name": workspace_name,
             },
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
+    def ship_ab_test(
+        self,
+        test: str,
+        *,
+        ws: str | None = None,
+        variant: str,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Ship a version of an A/B test.
+
+        Scope: analytics.manage. Shows the chosen version to everyone: the flag gives it all the traffic (weight 100,
+        the others 0) at full rollout and is turned on. A running test ends with it as the decision, keeping its
+        results; a finished test's decision changes. 409 for a draft.
+
+        Needs: the analytics.manage scope.
+        POST /v1/workspaces/{ws}/ab-tests/{test}/ship
+        """
+        return self._call(
+            "POST",
+            "/v1/workspaces/{ws}/ab-tests/{test}/ship",
+            path={"test": test, "ws": ws},
+            body={"variant": variant},
             extra_body=extra_body,
             idempotency_key=idempotency_key,
         )
@@ -19323,7 +19607,7 @@ class Operations(_Mixin):
 
         Scope: leads.manage. Spends provider credits. build and refresh search the provider, find missing emails through the waterfall and add new leads; enrich fills in missing fields on the list's leads. One run at a time per list (409 while one is queued or running). max_leads and credit_cap override the list's limits for this run only.
 
-        Needs: the leads.manage scope, project tokens allowed.
+        Needs: the leads.manage scope.
         POST /v1/workspaces/{ws}/lead-lists/{id}/runs
         """
         return self._call(
@@ -19354,7 +19638,8 @@ class Operations(_Mixin):
         Run it as often as you like until switch-over day: every object is matched by its id there, so a run adds only
         what is new and brings over status changes. Importing sends no reward webhooks and imported sales are not
         customer events. One import runs at a time per program (409 conflict); 409 connector_needed when Tolt isn't
-        connected. With no source_program, the account's only program is used.
+        connected. With no source_program, the account's only program is used, or its only active one
+        (listPartnerImportSources lists them).
 
         Needs: the partners.manage scope.
         POST /v1/workspaces/{ws}/partner-programs/{id}/imports
@@ -19517,7 +19802,7 @@ class Operations(_Mixin):
 
         Scope: sequences.manage
 
-        Needs: the sequences.manage scope, project tokens allowed.
+        Needs: the sequences.manage scope.
         POST /v1/workspaces/{ws}/sequences/{id}/enrollments/{eid}/stop
         """
         return self._call(
@@ -19908,6 +20193,40 @@ class Operations(_Mixin):
             "POST",
             "/v1/workspaces/{ws}/integrations/{id}/test",
             path={"id": id, "ws": ws},
+            idempotency_key=idempotency_key,
+        )
+
+    def test_journey(
+        self,
+        id: str,
+        *,
+        ws: str | None = None,
+        event: dict[str, Any] | None = None,
+        paths: dict[str, Any] | None = None,
+        record_id: str,
+        version: Literal["live", "draft"] | None = None,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Test a journey with one person.
+
+        Scope: emails.read. Takes one person through the journey's live version (or its draft) and says, step by step,
+        what would happen to them: which way each branch goes, the subject of each email they would get or why they
+        would be skipped, and what each action would do. Nothing is sent, written or recorded: the steps run in a
+        transaction that is rolled back. A wait passes at once. The event that starts the run is the one given, or the
+        person's latest trigger event. A branch on something they may still do (an event, an opened or clicked email)
+        follows the data as it is now; set paths to see the other way. refusal says why they wouldn't start a run now
+        (the test goes through the steps anyway).
+
+        Needs: the emails.read scope.
+        POST /v1/workspaces/{ws}/journeys/{id}/test
+        """
+        return self._call(
+            "POST",
+            "/v1/workspaces/{ws}/journeys/{id}/test",
+            path={"id": id, "ws": ws},
+            body={"event": event, "paths": paths, "record_id": record_id, "version": version},
+            extra_body=extra_body,
             idempotency_key=idempotency_key,
         )
 
@@ -20908,12 +21227,13 @@ class Operations(_Mixin):
     ) -> Any:
         """Edit the company context.
 
-        Scope: context.manage, not available to project tokens. Send only
+        Scope: context.manage. Send only
         the fields to change; a real change bumps `version`. Send the
         `version` you read to avoid overwriting someone else's edit: if the
         context changed since, the update fails with 409 `context_changed`.
-        Offer, audience, market and ideal customer belong on projects, not
-        here.
+        A brand's offer and audience belong in its own context
+        (PATCH /brands/{brand}/context); ideal customers in customer
+        profiles.
 
         Needs: the context.manage scope.
         PATCH /v1/workspaces/{ws}/context
@@ -21029,8 +21349,7 @@ class Operations(_Mixin):
     ) -> Any:
         """Edit, archive or restore an ideal customer profile.
 
-        Scope: projects.manage. New filters are copied to every project that uses the profile, and bump those
-        projects' `brief_version`. A change to description or filters bumps the profile's `version`.
+        Scope: projects.manage. A change to description or filters bumps the profile's `version`.
 
         Needs: the projects.manage scope.
         PATCH /v1/workspaces/{ws}/ideal-customer-profiles/{id}
@@ -21631,6 +21950,7 @@ class Operations(_Mixin):
         *,
         ws: str | None = None,
         brand: str | None = None,
+        brand_id: str | None = None,
         domain_count: int | None = None,
         domains: list[str] | None = None,
         mailbox_daily_limit: int | None = None,
@@ -21664,6 +21984,7 @@ class Operations(_Mixin):
             path={"id": id, "ws": ws},
             body={
                 "brand": brand,
+                "brand_id": brand_id,
                 "domain_count": domain_count,
                 "domains": domains,
                 "mailbox_daily_limit": mailbox_daily_limit,
@@ -21950,7 +22271,7 @@ class Operations(_Mixin):
 
         Scope: leads.manage. Absent fields keep their value; filters are replaced as a whole.
 
-        Needs: the leads.manage scope, project tokens allowed.
+        Needs: the leads.manage scope.
         PATCH /v1/workspaces/{ws}/lead-lists/{id}
         """
         return self._call(
@@ -22132,8 +22453,8 @@ class Operations(_Mixin):
     ) -> Any:
         """Mark a meeting held, no-show or qualified, or fix its attribution.
 
-        Scope: outcomes.manage. Setting sequence_id, project_id or
-        unattributed pins the attribution so syncs never move it. A status a
+        Scope: outcomes.manage. Setting sequence_id or unattributed
+        pins the attribution so syncs never move it. A status a
         person sets (held, no_show) is kept by syncs, unless the source
         cancels the meeting.
 
@@ -22207,9 +22528,9 @@ class Operations(_Mixin):
     ) -> Any:
         """Change a memory.
 
-        Scope: context.manage. Correct its text, change its kind, pin it, or move it to a project (null for the whole workspace).
+        Scope: context.manage. Correct its text, change its kind, pin it, or move it to a brand (brand_id, null for the whole workspace).
 
-        Needs: the context.manage scope, project tokens allowed.
+        Needs: the context.manage scope.
         PATCH /v1/workspaces/{ws}/memories/{id}
         """
         return self._call(
@@ -22244,7 +22565,7 @@ class Operations(_Mixin):
         """Change a mission.
 
         Scope: missions.run. Once a mission is approved, changing its mode,
-        limits, token or project also needs missions.approve, and an agent
+        limits or token also needs missions.approve, and an agent
         cannot change its own. An ended mission cannot change.
 
         Needs: the missions.run scope.
@@ -22526,54 +22847,29 @@ class Operations(_Mixin):
             idempotency_key=idempotency_key,
         )
 
-    def update_project(
+    def update_pr_expert(
         self,
-        id: str,
+        expert: str,
         *,
         ws: str | None = None,
-        audience: str | None = None,
-        brand_id: str | None = None,
-        brief: str | None = None,
-        brief_version: int | None = None,
-        daily_send_limit: int | None = None,
-        icp: Any | None = None,
-        market: str | None = None,
-        name: str | None = None,
-        offer: str | None = None,
-        profile_id: str | None = None,
-        status: Literal["active", "paused", "archived"] | None = None,
+        is_default: bool | None = None,
+        title: str | None = None,
+        topics: list[str] | None = None,
         extra_body: dict[str, Any] | None = None,
         idempotency_key: str | None = None,
     ) -> Any:
-        """Edit a project's brief, status or daily send limit.
+        """Change a PR expert.
 
-        Scope: projects.manage. A change to offer, audience, market, brief or
-        icp bumps `brief_version`. Send the `brief_version` you read to make
-        sure you are not overwriting someone else's edit: if the brief has
-        changed since, the update fails with 409 `brief_changed`. `status:
-        paused` holds every send from the project's sequences; `archived`
-        also hides it from the default list.
+        Scope: seo.manage. `is_default: true` makes them the brand's default expert.
 
-        Needs: the projects.manage scope, project tokens allowed.
-        PATCH /v1/workspaces/{ws}/projects/{id}
+        Needs: the seo.manage scope.
+        PATCH /v1/workspaces/{ws}/pr-experts/{expert}
         """
         return self._call(
             "PATCH",
-            "/v1/workspaces/{ws}/projects/{id}",
-            path={"id": id, "ws": ws},
-            body={
-                "audience": audience,
-                "brand_id": brand_id,
-                "brief": brief,
-                "brief_version": brief_version,
-                "daily_send_limit": daily_send_limit,
-                "icp": icp,
-                "market": market,
-                "name": name,
-                "offer": offer,
-                "profile_id": profile_id,
-                "status": status,
-            },
+            "/v1/workspaces/{ws}/pr-experts/{expert}",
+            path={"expert": expert, "ws": ws},
+            body={"is_default": is_default, "title": title, "topics": topics},
             extra_body=extra_body,
             idempotency_key=idempotency_key,
         )
@@ -23067,7 +23363,7 @@ class Operations(_Mixin):
         mailboxes with leads mid-sequence and frees the rest; activating
         again carries on.
 
-        Needs: the sequences.manage scope, project tokens allowed.
+        Needs: the sequences.manage scope.
         PATCH /v1/workspaces/{ws}/sequences/{id}
         """
         return self._call(
@@ -23422,6 +23718,81 @@ class Operations(_Mixin):
             idempotency_key=idempotency_key,
         )
 
+    def update_story(
+        self,
+        story: str,
+        *,
+        ws: str | None = None,
+        article_id: str | None = None,
+        embargo_until: str | None = None,
+        kind: Literal["data", "reactive", "comment"] | None = None,
+        release: str | None = None,
+        status: Literal["idea", "draft", "archived"] | None = None,
+        summary: str | None = None,
+        title: str | None = None,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Change a story.
+
+        Scope: seo.manage. Changing an approved story's headline, kind,
+        release or embargo moves it back to `draft`. `status` moves it
+        between `idea`, `draft` and `archived`; approving is
+        `POST .../approve`.
+
+        Needs: the seo.manage scope.
+        PATCH /v1/workspaces/{ws}/stories/{story}
+        """
+        return self._call(
+            "PATCH",
+            "/v1/workspaces/{ws}/stories/{story}",
+            path={"story": story, "ws": ws},
+            body={
+                "article_id": article_id,
+                "embargo_until": embargo_until,
+                "kind": kind,
+                "release": release,
+                "status": status,
+                "summary": summary,
+                "title": title,
+            },
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
+    def update_story_quote(
+        self,
+        story: str,
+        quote: str,
+        *,
+        ws: str | None = None,
+        approval_note: str | None = None,
+        body: str | None = None,
+        status: Literal["draft", "approved", "withdrawn"] | None = None,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Change a quote, or record its approval.
+
+        Scope: seo.manage. New words (`body`) make the quote a draft again,
+        and an approved story that used it goes back to draft. `status:
+        approved` records that the expert agreed to these exact words,
+        with `approval_note` saying how; only a person can record it (403
+        for tokens and agents). Changing the words and approving them are
+        two calls.
+
+        Needs: the seo.manage scope.
+        PATCH /v1/workspaces/{ws}/stories/{story}/quotes/{quote}
+        """
+        return self._call(
+            "PATCH",
+            "/v1/workspaces/{ws}/stories/{story}/quotes/{quote}",
+            path={"story": story, "quote": quote, "ws": ws},
+            body={"approval_note": approval_note, "body": body, "status": status},
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
     def update_supplier_sync(
         self,
         id: str,
@@ -23540,6 +23911,7 @@ class Operations(_Mixin):
         channel: str | None = None,
         landing_url: str | None = None,
         name: str | None = None,
+        redirect_links: bool | None = None,
         slug: str | None = None,
         source: str | None = None,
         status: Literal["active", "archived"] | None = None,
@@ -23562,6 +23934,7 @@ class Operations(_Mixin):
                 "channel": channel,
                 "landing_url": landing_url,
                 "name": name,
+                "redirect_links": redirect_links,
                 "slug": slug,
                 "source": source,
                 "status": status,
@@ -23911,7 +24284,7 @@ class Operations(_Mixin):
     ) -> Any:
         """Who the caller is.
 
-        Any session or token. For an API token: its workspace, project, scopes and expiry, so a client
+        Any session or token. For an API token: its workspace, brand, scopes and expiry, so a client
         holding only a token can find everything else. For a signed-in person: the user (GET /v1/me lists their
         workspaces).
 

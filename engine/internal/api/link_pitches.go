@@ -31,6 +31,7 @@ func (s *Server) routesLinkPitches(mux *http.ServeMux) {
 	mux.HandleFunc("POST /v1/workspaces/{ws}/link-pitches/{pitch}/approve", s.inBrand(manage, s.approveLinkPitch))
 	mux.HandleFunc("POST /v1/workspaces/{ws}/link-pitches/{pitch}/reject", s.inBrand(manage, s.rejectLinkPitch))
 	mux.HandleFunc("GET /v1/workspaces/{ws}/link-building/sequences", s.inBrand(read, s.listLinkSequences))
+	mux.HandleFunc("POST /v1/workspaces/{ws}/link-building/sequences", s.inBrand(manage, s.createLinkSequence))
 	mux.HandleFunc("PATCH /v1/workspaces/{ws}/link-building/sequences/{sequence}", s.inBrand(manage, s.updateLinkSequence))
 	mux.HandleFunc("GET /v1/workspaces/{ws}/link-prospects/results", s.inBrand(auth.ScopeSEORead, s.linkResults))
 }
@@ -152,7 +153,7 @@ func (s *Server) startLinkPitch(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	var seqBrand *string
 	err := s.pool.QueryRow(ctx, `SELECT brand_id::text FROM sequences WHERE id = $1 AND workspace_id = $2`, in.SequenceID, a.WorkspaceID).Scan(&seqBrand)
-	if errors.Is(err, pgx.ErrNoRows) || (err == nil && !a.sees(nil, seqBrand)) {
+	if errors.Is(err, pgx.ErrNoRows) || (err == nil && !a.sees(seqBrand)) {
 		writeError(w, r, http.StatusNotFound, "not_found", "sequence not found")
 		return
 	}
@@ -160,7 +161,7 @@ func (s *Server) startLinkPitch(w http.ResponseWriter, r *http.Request) {
 		s.internal(w, r, err)
 		return
 	}
-	if !a.writes(nil, p.BrandID) {
+	if !a.writes(p.BrandID) {
 		writeError(w, r, http.StatusForbidden, "forbidden", string(errSharedRecord))
 		return
 	}
@@ -258,7 +259,7 @@ func (s *Server) writablePitch(w http.ResponseWriter, r *http.Request, a *access
 	if !ok {
 		return nil, false
 	}
-	if !a.writes(nil, p.BrandID) {
+	if !a.writes(p.BrandID) {
 		writeError(w, r, http.StatusForbidden, "forbidden", string(errSharedRecord))
 		return nil, false
 	}
@@ -398,6 +399,54 @@ func (s *Server) listLinkSequences(w http.ResponseWriter, r *http.Request) {
 }
 
 // updateLinkSequence turns approval of a sequence's link pitches on or off.
+// starterSteps are the starter sequence for link pitches: the opener the
+// workspace's AI wrote for the page, then one short follow-up in the same
+// thread. People edit them like any sequence.
+var starterSteps = []stepInput{
+	{Subject: "A page for your readers", Body: "Hi {{first_name|there}},\n\n{{custom.opener}}\n\nWould it be a useful addition to your page? Happy to send anything that helps.\n\n{{sender_first_name}}"},
+	{DelayDays: 5, Body: "Hi {{first_name|there}}, just checking this reached you. If it isn't a fit, no problem at all, and I won't write again.\n\n{{sender_first_name}}"},
+}
+
+// createLinkSequence makes the starter sequence for link pitches: a draft,
+// with approval of each pitch on, ready to pitch through.
+func (s *Server) createLinkSequence(w http.ResponseWriter, r *http.Request) {
+	a := accessFrom(r.Context())
+	var in struct {
+		Name string `json:"name"`
+	}
+	if r.ContentLength != 0 && !decode(w, r, &in) {
+		return
+	}
+	name := strings.TrimSpace(in.Name)
+	if name == "" {
+		name = "Link pitches"
+	}
+	if len(name) > 200 {
+		writeError(w, r, http.StatusBadRequest, "invalid_request", "name is at most 200 characters")
+		return
+	}
+	ctx := r.Context()
+	var id string
+	err := pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
+		var err error
+		if id, err = s.insertSequence(ctx, tx, a, &sequenceSettings{Name: &name}, starterSteps); err != nil {
+			return err
+		}
+		return recordWithProps(ctx, tx, &a.principal, a.WorkspaceID, "sequence.created", "sequence", id,
+			map[string]any{"name": name, "starter": "link_pitches"}, map[string]any{"starter": "link_pitches"})
+	})
+	if s.seqError(w, r, err) {
+		return
+	}
+	v := linkSequenceView{SequenceID: id, Name: name, ApprovePitches: true, UsesOpener: true}
+	if err := s.pool.QueryRow(ctx, `SELECT status, brand_id::text FROM sequences WHERE id = $1 AND workspace_id = $2`, id, a.WorkspaceID).
+		Scan(&v.Status, &v.BrandID); err != nil {
+		s.internal(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusCreated, v)
+}
+
 func (s *Server) updateLinkSequence(w http.ResponseWriter, r *http.Request) {
 	a := accessFrom(r.Context())
 	var in struct {
@@ -414,7 +463,7 @@ func (s *Server) updateLinkSequence(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	var brand *string
 	err := s.pool.QueryRow(ctx, `SELECT brand_id::text FROM sequences WHERE id = $1 AND workspace_id = $2`, id, a.WorkspaceID).Scan(&brand)
-	if !validUUID(id) || errors.Is(err, pgx.ErrNoRows) || (err == nil && !a.sees(nil, brand)) {
+	if !validUUID(id) || errors.Is(err, pgx.ErrNoRows) || (err == nil && !a.sees(brand)) {
 		writeError(w, r, http.StatusNotFound, "not_found", "sequence not found")
 		return
 	}
@@ -422,7 +471,7 @@ func (s *Server) updateLinkSequence(w http.ResponseWriter, r *http.Request) {
 		s.internal(w, r, err)
 		return
 	}
-	if !a.writes(nil, brand) {
+	if !a.writes(brand) {
 		writeError(w, r, http.StatusForbidden, "forbidden", string(errSharedRecord))
 		return
 	}

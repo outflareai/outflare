@@ -246,7 +246,7 @@ func (s *Server) addCompetitor(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	site := sites[0]
-	if !a.writes(nil, site.BrandID) {
+	if !a.writes(site.BrandID) {
 		writeError(w, r, http.StatusForbidden, "forbidden", string(errSharedRecord))
 		return
 	}
@@ -328,7 +328,7 @@ func (s *Server) updateCompetitor(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if !a.writes(nil, c.BrandID) {
+	if !a.writes(c.BrandID) {
 		writeError(w, r, http.StatusForbidden, "forbidden", string(errSharedRecord))
 		return
 	}
@@ -375,7 +375,7 @@ func (s *Server) removeCompetitor(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if !a.writes(nil, c.BrandID) {
+	if !a.writes(c.BrandID) {
 		writeError(w, r, http.StatusForbidden, "forbidden", string(errSharedRecord))
 		return
 	}
@@ -400,7 +400,7 @@ func (s *Server) checkCompetitor(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if !a.writes(nil, c.BrandID) {
+	if !a.writes(c.BrandID) {
 		writeError(w, r, http.StatusForbidden, "forbidden", string(errSharedRecord))
 		return
 	}

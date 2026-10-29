@@ -23,8 +23,8 @@ import (
 // Brands: the businesses one company markets, each with its own website,
 // such as Geonode, Repocket and each of its games. Connectors, members,
 // tokens, leads and suppressions stay with the workspace; a brand owns its
-// context, memories, projects and sending setup. Records without a brand are
-// shared by every brand, and a record in a project has the project's brand.
+// context, memories and sending setup. Records without a brand are shared by
+// every brand.
 
 func (s *Server) routesBrands(mux *http.ServeMux) {
 	read, manage := auth.ScopeWorkspaceRead, auth.ScopeContextManage
@@ -96,7 +96,6 @@ func validLinks(in []brandLink) ([]brandLink, error) {
 }
 
 type brandCounts struct {
-	Projects        int `json:"projects"`
 	Domains         int `json:"domains"`
 	Mailboxes       int `json:"mailboxes"`
 	LeadLists       int `json:"lead_lists"`
@@ -135,7 +134,6 @@ func (s *Server) loadBrands(ctx context.Context, ws string, id *string, status s
 		SELECT b.id, b.name, b.handle, b.website, b.domains, b.platforms, b.links, b.status, NULLIF(b.business_model, ''), b.revenue_models,
 		       b.logo_url, b.colors,
 		       COALESCE((SELECT version FROM brand_context WHERE brand_id = b.id), 1),
-		       (SELECT count(*) FROM projects WHERE brand_id = b.id AND status <> 'archived')::int,
 		       (SELECT count(*) FROM sending_domains WHERE brand_id = b.id)::int,
 		       (SELECT count(*) FROM mailboxes WHERE brand_id = b.id)::int,
 		       (SELECT count(*) FROM lead_lists WHERE brand_id = b.id)::int,
@@ -152,7 +150,7 @@ func (s *Server) loadBrands(ctx context.Context, ws string, id *string, status s
 	return pgx.CollectRows(rows, func(row pgx.CollectableRow) (brandRecord, error) {
 		var v brandRecord
 		err := row.Scan(&v.ID, &v.Name, &v.Handle, &v.Website, &v.Domains, &v.Platforms, &v.Links, &v.Status, &v.BusinessModel, &v.RevenueModels, &v.LogoURL, &v.Colors, &v.ContextVersion,
-			&v.Counts.Projects, &v.Counts.Domains, &v.Counts.Mailboxes, &v.Counts.LeadLists, &v.Counts.Sequences,
+			&v.Counts.Domains, &v.Counts.Mailboxes, &v.Counts.LeadLists, &v.Counts.Sequences,
 			&v.Counts.ActiveSequences, &v.CreatedAt, &v.UpdatedAt)
 		return v, err
 	})
@@ -173,7 +171,7 @@ func (s *Server) brandIDFor(ctx context.Context, ws, ref string) (string, error)
 // brandFor loads the {brand} path value's brand, or writes a 404.
 func (s *Server) brandFor(w http.ResponseWriter, r *http.Request, a *access) (*brandRecord, bool) {
 	id, err := s.brandIDFor(r.Context(), a.WorkspaceID, r.PathValue("brand"))
-	if err == nil && !a.sees(nil, &id) {
+	if err == nil && !a.sees(&id) {
 		err = errNotFound
 	}
 	if err == nil {
@@ -218,7 +216,7 @@ func (s *Server) brandFilter(w http.ResponseWriter, r *http.Request) (brandSel, 
 		return sel, true
 	}
 	id, err := s.brandIDFor(r.Context(), a.WorkspaceID, b)
-	if err == nil && !a.sees(nil, &id) {
+	if err == nil && !a.sees(&id) {
 		err = errNotFound
 	}
 	if errors.Is(err, errNotFound) {
@@ -279,7 +277,7 @@ func (s *Server) listBrands(w http.ResponseWriter, r *http.Request) {
 		s.internal(w, r, err)
 		return
 	}
-	list = slices.DeleteFunc(list, func(b brandRecord) bool { return !a.sees(nil, &b.ID) })
+	list = slices.DeleteFunc(list, func(b brandRecord) bool { return !a.sees(&b.ID) })
 	if list == nil {
 		list = []brandRecord{}
 	}
@@ -841,6 +839,7 @@ func (s *Server) updateBrandContext(w http.ResponseWriter, r *http.Request) {
 
 // brandMembers names records to move into or out of a brand.
 type brandMembers struct {
+	// Ignored: projects were removed. Accepted so older clients still work.
 	ProjectIDs  []string `json:"project_ids"`
 	Domains     []string `json:"domains"`
 	MailboxIDs  []string `json:"mailbox_ids"`
@@ -852,21 +851,17 @@ type brandMembers struct {
 }
 
 type brandMoved struct {
-	Projects  int `json:"projects"`
 	Domains   int `json:"domains"`
 	Mailboxes int `json:"mailboxes"`
 	LeadLists int `json:"lead_lists"`
 	Sequences int `json:"sequences"`
 	Missions  int `json:"missions"`
-	// Named records left as they were because they are in a project: they
-	// take the project's brand, so move the project instead.
-	InProject int `json:"in_project"`
 }
 
 func (m *brandMembers) check(a *access) error {
-	n := len(m.ProjectIDs) + len(m.Domains) + len(m.MailboxIDs) + len(m.LeadListIDs) + len(m.SequenceIDs) + len(m.MissionIDs)
+	n := len(m.Domains) + len(m.MailboxIDs) + len(m.LeadListIDs) + len(m.SequenceIDs) + len(m.MissionIDs)
 	if n == 0 {
-		return errInvalid("name at least one of project_ids, domains, mailbox_ids, lead_list_ids, sequence_ids or mission_ids")
+		return errInvalid("name at least one of domains, mailbox_ids, lead_list_ids, sequence_ids or mission_ids")
 	}
 	if n > 10000 {
 		return errInvalid("move at most 10000 records at a time")
@@ -874,7 +869,7 @@ func (m *brandMembers) check(a *access) error {
 	for i, d := range m.Domains {
 		m.Domains[i] = strings.ToLower(strings.TrimSpace(d))
 	}
-	for _, ids := range [][]string{m.ProjectIDs, m.MailboxIDs, m.LeadListIDs, m.SequenceIDs, m.MissionIDs} {
+	for _, ids := range [][]string{m.MailboxIDs, m.LeadListIDs, m.SequenceIDs, m.MissionIDs} {
 		if !allUUIDs(ids) {
 			return errInvalid("ids must be UUIDs")
 		}
@@ -903,8 +898,7 @@ func (s *Server) removeFromBrand(w http.ResponseWriter, r *http.Request) {
 
 // moveBrandMembers sets brand_id on the named records: to the brand when
 // adding (taking them from any other brand), to null when removing (only
-// records in this brand). A project brings everything in it along. Unknown
-// names are ignored and not counted.
+// records in this brand). Unknown names are ignored and not counted.
 func (s *Server) moveBrandMembers(w http.ResponseWriter, r *http.Request, add bool) {
 	a := accessFrom(r.Context())
 	var req brandMembers
@@ -932,26 +926,14 @@ func (s *Server) moveBrandMembers(w http.ResponseWriter, r *http.Request, add bo
 		}
 		const notSame = `brand_id IS DISTINCT FROM $3 AND ($4::uuid IS NULL OR brand_id = $4)`
 		run := func(n *int, table, match string, ids any) error {
-			tag, err := tx.Exec(ctx, `UPDATE `+table+` SET brand_id = $3 WHERE workspace_id = $1 AND `+match+` AND `+notSame+` AND project_id IS NULL`,
+			tag, err := tx.Exec(ctx, `UPDATE `+table+` SET brand_id = $3 WHERE workspace_id = $1 AND `+match+` AND `+notSame,
 				a.WorkspaceID, ids, to, from)
 			if err != nil {
 				return err
 			}
 			*n += int(tag.RowsAffected())
-			var held int
-			if err := tx.QueryRow(ctx, `SELECT count(*) FROM `+table+` WHERE workspace_id = $1 AND `+match+` AND project_id IS NOT NULL`,
-				a.WorkspaceID, ids).Scan(&held); err != nil {
-				return err
-			}
-			moved.InProject += held
 			return nil
 		}
-		tag, err := tx.Exec(ctx, `UPDATE projects SET brand_id = $3, updated_at = now()
-			WHERE workspace_id = $1 AND id = ANY($2::uuid[]) AND `+notSame, a.WorkspaceID, req.ProjectIDs, to, from)
-		if err != nil {
-			return err
-		}
-		moved.Projects = int(tag.RowsAffected())
 		steps := []struct {
 			n            *int
 			table, match string
@@ -975,12 +957,12 @@ func (s *Server) moveBrandMembers(w http.ResponseWriter, r *http.Request, add bo
 				return err
 			}
 		}
-		if moved.Projects+moved.Domains+moved.Mailboxes+moved.LeadLists+moved.Sequences+moved.Missions == 0 {
+		if moved.Domains+moved.Mailboxes+moved.LeadLists+moved.Sequences+moved.Missions == 0 {
 			return nil
 		}
 		// Mailboxes and sequences changing brand changes which mailbox may
 		// serve which sequence.
-		if moved.Projects > 0 || moved.Mailboxes > 0 || moved.Sequences > 0 {
+		if moved.Mailboxes > 0 || moved.Sequences > 0 {
 			if err := allocation.Request(ctx, tx, a.WorkspaceID); err != nil {
 				return err
 			}
@@ -990,7 +972,7 @@ func (s *Server) moveBrandMembers(w http.ResponseWriter, r *http.Request, add bo
 			action = "brand.records_removed"
 		}
 		return record(ctx, tx, &a.principal, a.WorkspaceID, action, "brand", b.ID, map[string]any{
-			"project_ids": req.ProjectIDs, "domains": len(req.Domains), "mailbox_ids": req.MailboxIDs,
+			"domains": len(req.Domains), "mailbox_ids": req.MailboxIDs,
 			"lead_list_ids": req.LeadListIDs, "sequence_ids": req.SequenceIDs, "mission_ids": req.MissionIDs, "moved": moved,
 		})
 	})
@@ -1017,22 +999,13 @@ func (s *Server) brandRef(ctx context.Context, ws string, ref *string) (*string,
 // brand shares.
 var errSharedRecord = errDenied("this is shared by every brand; only someone with access to every brand can change it")
 
-// brandWrite checks a brand-limited caller may put a record in project and
-// brand, and returns the brand to use: the project's when there is one, and
-// the caller's only brand when none is given. Others pass brand through.
+// brandWrite checks a brand-limited caller may put a record in brand, and
+// returns the brand to use: the caller's only brand when none is given. Others pass brand through.
 func brandWrite(ctx context.Context, tx interface {
 	QueryRow(context.Context, string, ...any) pgx.Row
-}, a *access, project, brand *string) (*string, error) {
+}, a *access, brand *string) (*string, error) {
 	if a.Brands == nil {
 		return brand, nil
-	}
-	if project != nil {
-		var own *string
-		err := tx.QueryRow(ctx, `SELECT brand_id::text FROM projects WHERE id = $1 AND workspace_id = $2`, *project, a.WorkspaceID).Scan(&own)
-		if errors.Is(err, pgx.ErrNoRows) || (err == nil && !a.writes(nil, own)) {
-			return nil, errInvalid("project not found")
-		}
-		return own, err
 	}
 	if brand == nil {
 		if len(a.Brands) == 1 {
@@ -1040,7 +1013,7 @@ func brandWrite(ctx context.Context, tx interface {
 		}
 		return nil, errInvalid("brand_id is required: you can only add records to your own brands")
 	}
-	if !a.writes(nil, brand) {
+	if !a.writes(brand) {
 		return nil, errInvalid("brand not found")
 	}
 	return brand, nil

@@ -49,6 +49,19 @@ A feature whose items are companies (the item's ref is the company's domain) can
 
 The feature says which company an item is (`Company`, with the brand to add it for) and records the outcome in its own data (`Linked`, in the transaction that adds or finds the record, and `Stopped`). Every outcome is counted in the run's summaries and metrics like any other stage.
 
+## Shared steps for people
+
+A feature whose items are people at companies can add the engine's own steps with `Host.Pipeline().RegisterPeopleSteps`, and send items to the first one, `find_email`:
+
+| Step | What it does | Outcomes |
+| --- | --- | --- |
+| `find_email` | Finds the person's work address with the email finder: the learned pattern and history first, then the workspace's own verifier when confidence is low. An address the feature already has (a data provider's, a published one) is verified instead | On to `contact_check` for found, verified or risky (risky is a warning); skip `not_found` or `undeliverable`; wait while a check is pending; pause when the verifier refuses or runs out |
+| `contact_check` | Checks the address against the contact rules for cold email. Opt-outs (including a withdrawn consent), bounces and a bad address stop it; a competitor, customer or partner entry, or a record held for review, only warns | Skip `opted_out`, `bounced` or `undeliverable`; otherwise on to `add_person` |
+| `add_person` | Adds the person as a prospect record (`EnsurePeople`, with the feature as `acquired_via`), linked to their company record | Done, on to `enroll` when the feature names campaigns, or on to the feature's next step |
+| `enroll` | Only when the feature sets `Campaign`. Adds the person to that sequence, as enrolling by hand does: their lead is found by record, or made from the address with the feature as its source, and the enrollment starts now. The sequence's own daily new-lead limit and sending hours pace the sends. `Campaign` returning "" passes the item through, and asking to hold keeps it held (`campaign_ready`) until the feature releases it to `enroll`, for people someone approves first | Done (also when already enrolled), or on to the feature's next step; skip `opted_out` or `in_another_campaign`; pause the run with `campaign_unavailable` when the sequence is gone, archived or runs in a connected sequencer |
+
+The feature says who an item is (`Contact`: name, title, company domain and record, and the address once known), records the address found (`Found`) and the outcome (`Linked`, in the transaction that adds the record, `Enrolled`, in the transaction that enrolls them, and `Stopped`). `Contact.RecordID` is the person's record once `Linked` has run; `enroll` needs it. Data providers are reached with `Connection.SearchPeople` on the workspace's own `data.search_people` connection, and `RoleAddress` tells a shared inbox (info@, sales@) from a person's address.
+
 ## Limits and breakers
 
 `Limits` hold a rate limit and a circuit breaker per outside account (`integration:<id>`, `ai:<workspace>`), shared by every worker through `pipeline_limits`:

@@ -182,10 +182,14 @@ func Exchange(ctx context.Context, cl *Client, d Definition, app OAuthApp, code,
 	if d.OAuth.AppIDAuthCode {
 		return appIDExchange(ctx, cl, d, app, code)
 	}
-	return tokenCall(ctx, cl, d, url.Values{
+	out, err := tokenCall(ctx, cl, d, url.Values{
 		"grant_type": {"authorization_code"}, "code": {code}, "redirect_uri": {redirectURI},
 		"client_id": {app.ClientID}, "client_secret": {app.ClientSecret}, "code_verifier": {verifier},
 	}, "")
+	if err == nil && d.OAuth.KeepClientID {
+		out["client_id"] = app.ClientID
+	}
+	return out, err
 }
 
 // Refresh renews expired OAuth credentials. It returns creds unchanged when
@@ -209,6 +213,9 @@ func Refresh(ctx context.Context, cl *Client, d Definition, app OAuthApp, creds 
 		if _, ok := out[k]; !ok && k != "expires_at" {
 			out[k] = v
 		}
+	}
+	if d.OAuth.KeepClientID && app.ClientID != "" {
+		out["client_id"] = app.ClientID
 	}
 	return out, true, nil
 }

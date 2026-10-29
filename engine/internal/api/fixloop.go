@@ -160,7 +160,7 @@ func (s *Server) verifyFix(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if !a.writes(nil, fix.BrandID) {
+	if !a.writes(fix.BrandID) {
 		writeError(w, r, http.StatusForbidden, "forbidden", string(errSharedRecord))
 		return
 	}

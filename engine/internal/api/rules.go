@@ -126,7 +126,7 @@ func (s *Server) findRule(w http.ResponseWriter, r *http.Request, a *access, id 
 		return nil, false
 	}
 	v, err := scanRuleView(s.pool.QueryRow(r.Context(), ruleSelect+` AND id = $2`, a.WorkspaceID, id))
-	if errors.Is(err, pgx.ErrNoRows) || (err == nil && !a.sees(nil, v.BrandID)) {
+	if errors.Is(err, pgx.ErrNoRows) || (err == nil && !a.sees(v.BrandID)) {
 		writeError(w, r, http.StatusNotFound, "not_found", "rule not found")
 		return nil, false
 	}
@@ -240,7 +240,7 @@ func (s *Server) applyRule(r *http.Request, a *access, f ruleFields, v *ruleView
 	if v.Trigger.Kind == rules.KindAudience {
 		var listBrand *string
 		err := s.pool.QueryRow(ctx, `SELECT brand_id::text FROM smart_lists WHERE workspace_id = $1 AND id = $2`, a.WorkspaceID, v.Trigger.ListID).Scan(&listBrand)
-		if errors.Is(err, pgx.ErrNoRows) || (err == nil && !a.sees(nil, listBrand)) {
+		if errors.Is(err, pgx.ErrNoRows) || (err == nil && !a.sees(listBrand)) {
 			return errInvalid("list_id is not a smart list in this workspace")
 		}
 		if err != nil {
@@ -277,7 +277,7 @@ func (s *Server) createRule(w http.ResponseWriter, r *http.Request) {
 	if !s.ruleApplied(w, r, s.applyRule(r, a, f, &v)) {
 		return
 	}
-	if !a.writes(nil, v.BrandID) {
+	if !a.writes(v.BrandID) {
 		writeError(w, r, http.StatusForbidden, "forbidden", "you can only make rules for your brands: set brand_id")
 		return
 	}
@@ -350,7 +350,7 @@ func (s *Server) updateRule(w http.ResponseWriter, r *http.Request) {
 	case cur.Status == "active" && !f.onlyLabels():
 		writeError(w, r, http.StatusConflict, "conflict", "the rule is active; pause it to change more than its name and description")
 		return
-	case !a.writes(nil, cur.BrandID):
+	case !a.writes(cur.BrandID):
 		writeError(w, r, http.StatusForbidden, "forbidden", "this rule covers every brand; you are limited to some brands")
 		return
 	}
@@ -358,7 +358,7 @@ func (s *Server) updateRule(w http.ResponseWriter, r *http.Request) {
 	if !s.ruleApplied(w, r, s.applyRule(r, a, f, &v)) {
 		return
 	}
-	if !a.writes(nil, v.BrandID) {
+	if !a.writes(v.BrandID) {
 		writeError(w, r, http.StatusForbidden, "forbidden", "you can only make rules for your brands: set brand_id")
 		return
 	}
@@ -458,7 +458,7 @@ func (s *Server) archiveRule(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) setRuleStatus(w http.ResponseWriter, r *http.Request, a *access, cur *ruleView, to string, from []string) {
-	if !a.writes(nil, cur.BrandID) {
+	if !a.writes(cur.BrandID) {
 		writeError(w, r, http.StatusForbidden, "forbidden", "this rule covers every brand; you are limited to some brands")
 		return
 	}

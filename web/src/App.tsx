@@ -287,6 +287,7 @@ function Shell({ me, onSignOut, onReload }: { me: Me; onSignOut: () => void; onR
     };
   }, [kind, item, link, wsId]); // eslint-disable-line react-hooks/exhaustive-deps
   const [unread, setUnread] = useState(0);
+  const [pitchesWaiting, setPitchesWaiting] = useState(0);
   const ws = me.workspaces.find((w) => w.id === wsId);
   // What the person may do here, from their role. The server checks every
   // request; this only hides what would be refused.
@@ -370,11 +371,16 @@ function Shell({ me, onSignOut, onReload }: { me: Me; onSignOut: () => void; onR
     if (was !== undefined && was !== lastBrand.current && item) setTab(tab);
   }, [pickedBrand, brandState.loaded]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Unread replies show on the Inbox tab, for the brand picked in the
-  // sidebar, refreshed every 30 seconds.
+  // Unread replies show on the Inbox tab, and link pitches waiting for
+  // approval on Link building, for the brand picked in the sidebar,
+  // refreshed every 30 seconds.
   useEffect(() => {
     if (!wsId) return;
-    const load = () => api.GET("/v1/workspaces/{ws}/stats", { params: { path: { ws: wsId }, query: pickedBrand ? { brand: pickedBrand } : {} } }).then(({ data }) => data && setUnread(data.unread_replies));
+    const load = () => api.GET("/v1/workspaces/{ws}/stats", { params: { path: { ws: wsId }, query: pickedBrand ? { brand: pickedBrand } : {} } }).then(({ data }) => {
+      if (!data) return;
+      setUnread(data.unread_replies);
+      setPitchesWaiting(data.link_pitches_waiting);
+    });
     load();
     const t = setInterval(load, 30000);
     return () => clearInterval(t);
@@ -492,6 +498,7 @@ function Shell({ me, onSignOut, onReload }: { me: Me; onSignOut: () => void; onR
         tab={tab}
         onTab={go}
         unread={unread}
+        counts={{ "link-building": pitchesWaiting }}
         theme={theme}
         onTheme={toggleTheme}
         onSearch={() => setPalette(true)}
@@ -565,7 +572,7 @@ function Shell({ me, onSignOut, onReload }: { me: Me; onSignOut: () => void; onR
         {ready && ws && tab === "infrastructure" && <Infrastructure key={ws.id} ws={ws.id} canManage={writer} canApprove={isAdmin} open={item ?? ""} onOpen={(it) => setItem(it || undefined)} go={setTab} />}
         {ready && ws && tab === "mailboxes" && <Mailboxes key={ws.id} ws={ws.id} canManage={writer} openOAuth={!!outcome.ws} go={setTab} />}
         {ready && ws && tab === "domains" && <Domains key={ws.id} ws={ws.id} canManage={writer} open={item ?? ""} onOpen={(d) => setItem(d || undefined)} go={setTab} />}
-        {ready && ws && tab === "link-building" && <LinkBuilding key={ws.id} ws={ws.id} canManage={can("seo.manage")} go={setTab} />}
+        {ready && ws && tab === "link-building" && <LinkBuilding key={ws.id} ws={ws.id} canManage={can("seo.manage")} go={setTab} waiting={pitchesWaiting} onWaiting={setPitchesWaiting} />}
         {ready && ws && tab === "news" && <News key={ws.id} ws={ws.id} canManage={can("seo.manage")} canLists={can("customers.manage")} go={setTab} />}
         {ready && ws && tab === "allocation" && <Allocation key={ws.id} ws={ws.id} canManage={writer} canSetMode={isAdmin} go={setTab} />}
         {ready && ws && tab === "senders" && <Senders key={ws.id} ws={ws.id} canManage={writer} canManageTeams={isAdmin} />}

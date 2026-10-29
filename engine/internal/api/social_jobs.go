@@ -444,7 +444,7 @@ func (s *Server) DraftSocialAction(ctx context.Context, ws, id string, last bool
 	if resp.Usage.InputTokens > 0 || resp.Usage.OutputTokens > 0 {
 		// On the workspace's own AI bill, against the mission that asked.
 		c := aiChoice{Provider: choice.Provider, IntegrationID: choice.IntegrationID, Model: choice.Model, Price: choice.Price, Task: socialReplyTask}
-		if err := recordAISpend(ctx, s.pool, c, ws, x.mission, nil, nil, resp.Usage, "social_draft:"+id, "Social reply draft on "+socialChannels[x.channel].Name); err != nil {
+		if err := recordAISpend(ctx, s.pool, c, ws, x.mission, nil, resp.Usage, "social_draft:"+id, "Social reply draft on "+socialChannels[x.channel].Name); err != nil {
 			s.log.Error("recording social draft spend", "workspace_id", ws, "error", err)
 		} else if _, err := s.pool.Exec(ctx, `
 			UPDATE spend_entries e SET channel = $3, brand_id = COALESCE(e.brand_id, (SELECT a.brand_id FROM social_actions a WHERE a.workspace_id = $1 AND a.id = $4))

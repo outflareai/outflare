@@ -89,7 +89,7 @@ func (s *Server) newsSearchFor(w http.ResponseWriter, r *http.Request, a *access
 		v, err := scanNewsSearch(s.pool.QueryRow(r.Context(), `SELECT `+newsSearchCols+` FROM news_searches n
 			WHERE n.workspace_id = $1 AND n.id = $2`, a.WorkspaceID, id))
 		switch {
-		case err == nil && a.sees(nil, v.BrandID):
+		case err == nil && a.sees(v.BrandID):
 			return &v, true
 		case err != nil && !errors.Is(err, pgx.ErrNoRows):
 			s.internal(w, r, err)
@@ -215,7 +215,7 @@ func (s *Server) createNewsSearch(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.BrandID != "" {
 		id, err := s.brandIDFor(ctx, a.WorkspaceID, req.BrandID)
-		if errors.Is(err, errNotFound) || (err == nil && !a.sees(nil, &id)) {
+		if errors.Is(err, errNotFound) || (err == nil && !a.sees(&id)) {
 			bad("brand_id: brand not found")
 			return
 		}
@@ -229,7 +229,7 @@ func (s *Server) createNewsSearch(w http.ResponseWriter, r *http.Request) {
 		bad("a coverage search needs brand_id: the brand whose coverage it finds")
 		return
 	}
-	if !a.writes(nil, v.BrandID) {
+	if !a.writes(v.BrandID) {
 		writeError(w, r, http.StatusForbidden, "forbidden", string(errSharedRecord))
 		return
 	}
@@ -284,7 +284,7 @@ func (s *Server) updateNewsSearch(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if !a.writes(nil, v.BrandID) {
+	if !a.writes(v.BrandID) {
 		writeError(w, r, http.StatusForbidden, "forbidden", string(errSharedRecord))
 		return
 	}
@@ -323,7 +323,7 @@ func (s *Server) deleteNewsSearch(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if !a.writes(nil, v.BrandID) {
+	if !a.writes(v.BrandID) {
 		writeError(w, r, http.StatusForbidden, "forbidden", string(errSharedRecord))
 		return
 	}
@@ -356,7 +356,7 @@ func (s *Server) runNewsSearch(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if !a.writes(nil, v.BrandID) {
+	if !a.writes(v.BrandID) {
 		writeError(w, r, http.StatusForbidden, "forbidden", string(errSharedRecord))
 		return
 	}
@@ -655,7 +655,7 @@ func (s *Server) addCoverage(w http.ResponseWriter, r *http.Request) {
 	bad := func(msg string) { writeError(w, r, http.StatusBadRequest, "invalid_request", msg) }
 	ctx := r.Context()
 	brand, err := s.brandIDFor(ctx, a.WorkspaceID, req.BrandID)
-	if errors.Is(err, errNotFound) || (err == nil && !a.sees(nil, &brand)) {
+	if errors.Is(err, errNotFound) || (err == nil && !a.sees(&brand)) {
 		bad("brand_id: brand not found")
 		return
 	}
@@ -663,7 +663,7 @@ func (s *Server) addCoverage(w http.ResponseWriter, r *http.Request) {
 		s.internal(w, r, err)
 		return
 	}
-	if !a.writes(nil, &brand) {
+	if !a.writes(&brand) {
 		writeError(w, r, http.StatusForbidden, "forbidden", string(errSharedRecord))
 		return
 	}
@@ -732,11 +732,11 @@ func (s *Server) updateCoverage(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	if c == nil || !a.sees(nil, &c.BrandID) {
+	if c == nil || !a.sees(&c.BrandID) {
 		writeError(w, r, http.StatusNotFound, "not_found", "coverage not found")
 		return
 	}
-	if !a.writes(nil, &c.BrandID) {
+	if !a.writes(&c.BrandID) {
 		writeError(w, r, http.StatusForbidden, "forbidden", string(errSharedRecord))
 		return
 	}

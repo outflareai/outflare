@@ -75,7 +75,7 @@ func TestInboxLabelsTagsAndViews(t *testing.T) {
 	if ask["group"] != "hot" || ask["category_confidence"] != 0.92 || ask["category_source"] != "ai" || ask["source"] != "emailbison" {
 		t.Fatalf("reply view: %v", ask)
 	}
-	for _, q := range []string{"group=warm", "category=maybe", "needs_review=yes", "min_confidence=2", "project_id=x"} {
+	for _, q := range []string{"group=warm", "category=maybe", "needs_review=yes", "min_confidence=2"} {
 		owner.must(400, "GET", base+"/inbox?"+q, nil)
 	}
 

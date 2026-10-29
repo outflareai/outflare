@@ -313,7 +313,7 @@ func (s *Server) DraftSocialPublication(ctx context.Context, ws, id string, last
 		// account's brand.
 		c := aiChoice{Provider: choice.Provider, IntegrationID: choice.IntegrationID, Model: choice.Model, Price: choice.Price, Task: socialPostTask}
 		ref := "social_publication_draft:" + id + ":" + strconv.FormatInt(time.Now().UnixMicro(), 10)
-		if err := recordAISpend(ctx, s.pool, c, ws, mission, nil, nil, resp.Usage, ref, "Social post draft on "+socialChannelName(channel)); err != nil {
+		if err := recordAISpend(ctx, s.pool, c, ws, mission, nil, resp.Usage, ref, "Social post draft on "+socialChannelName(channel)); err != nil {
 			s.log.Error("recording social post draft spend", "workspace_id", ws, "error", err)
 		} else if _, err := s.pool.Exec(ctx, `
 			UPDATE spend_entries e SET channel = $3, brand_id = COALESCE(e.brand_id, (SELECT p.brand_id FROM social_publications p WHERE p.workspace_id = $1 AND p.id = $4))

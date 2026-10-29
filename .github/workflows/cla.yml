@@ -3,7 +3,8 @@
 # "claude" (the login GitHub maps Claude Code's co-author address to) cover
 # commits written by Claude Code for the maintainers; outflare-publisher[bot]
 # writes the release pull requests; outflare-importer[bot] commits accepted
-# pull requests from contributors who signed here, as their co-author.
+# pull requests from contributors who signed here, as their co-author;
+# outflare-merger[bot] merges main into pull requests to bring them current.
 name: CLA
 
 # pull_request_target and issue_comment are safe here: the job never checks
@@ -44,4 +45,4 @@ jobs:
           path-to-document: https://github.com/outflareai/outflare/blob/main/CLA.md
           path-to-signatures: signatures/v1/cla.json
           branch: cla-signatures
-          allowlist: jackfitzgerald,outflare-publisher[bot],outflare-importer[bot],dependabot[bot],renovate[bot],github-actions[bot],claude[bot],Claude,claude
+          allowlist: jackfitzgerald,outflare-publisher[bot],outflare-importer[bot],outflare-merger[bot],dependabot[bot],renovate[bot],github-actions[bot],claude[bot],Claude,claude

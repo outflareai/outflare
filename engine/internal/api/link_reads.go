@@ -334,7 +334,7 @@ func (s *Server) readLinks(w http.ResponseWriter, r *http.Request) {
 		}
 		req.SiteID, req.BrandID = &sites[0].ID, sites[0].BrandID
 	}
-	if !a.writes(nil, req.BrandID) {
+	if !a.writes(req.BrandID) {
 		writeError(w, r, http.StatusForbidden, "forbidden", "brand-limited callers read links for one of their brands' sites; pass site_id")
 		return
 	}

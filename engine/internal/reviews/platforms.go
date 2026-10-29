@@ -219,10 +219,14 @@ func PageURL(p Page, n int) string {
 }
 
 // RenderJS says whether a platform's page must be read in a browser that
-// runs its scripts: Google builds the page in the browser, and G2 answers
-// anything else with a bot check. Other platforms are read without, and
-// again in a browser when a read shows no reviews.
-func RenderJS(platform string) bool { return platform == Google || platform == G2 }
+// runs its scripts: Google builds the page in the browser, and G2,
+// Trustpilot and Capterra answer anything else with a bot check. Reading
+// them in a browser from the start sends each page to the reader once,
+// rather than once without and again in a browser. A platform without is
+// read again in a browser when a read shows no reviews.
+func RenderJS(platform string) bool {
+	return platform == Google || platform == G2 || platform == Trustpilot || platform == Capterra
+}
 
 // NewestFirst says whether a platform's pages list reviews newest first,
 // so a daily read can stop at the first review it already has. Capterra's

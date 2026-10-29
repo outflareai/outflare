@@ -56,7 +56,17 @@ type Step struct {
 	To              string `json:"to,omitempty"`
 	// What a failed action does: stop (the default: the run fails),
 	// continue (go on to next) or a step id to go to.
-	OnError string `json:"on_error,omitempty"`
+	// set_consent: granted or withdrawn, for topic (empty: all marketing
+	// email).
+	Consent string `json:"consent,omitempty"`
+	// assign_owner: one member (owner_id), or members to spread people
+	// between evenly; replace_owner changes an owner already set.
+	OwnerID      string   `json:"owner_id,omitempty"`
+	Members      []string `json:"members,omitempty"`
+	ReplaceOwner bool     `json:"replace_owner,omitempty"`
+	// move_deal: the deal to move or open.
+	Deal    *DealMove `json:"deal,omitempty"`
+	OnError string    `json:"on_error,omitempty"`
 }
 
 // Condition is one test on a person or what started their run.

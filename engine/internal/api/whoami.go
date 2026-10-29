@@ -32,7 +32,6 @@ func (s *Server) whoami(w http.ResponseWriter, r *http.Request) {
 		Kind        string     `json:"kind"`
 		WorkspaceID *string    `json:"workspace_id"`
 		Workspace   *wsRef     `json:"workspace"`
-		ProjectID   *string    `json:"project_id"`
 		BrandID     *string    `json:"brand_id"`
 		Brand       *brandRef  `json:"brand"`
 		Scopes      []string   `json:"scopes"`
@@ -54,7 +53,7 @@ func (s *Server) whoami(w http.ResponseWriter, r *http.Request) {
 	out.Actor.ID, out.Actor.Type = p.ActorID, p.ActorType
 	switch {
 	case p.TokenID != "":
-		t := &tokenView{ID: p.TokenID, Kind: "workspace", WorkspaceID: &p.TokenWorkspaceID, ProjectID: p.TokenProjectID, Scopes: p.TokenScopes,
+		t := &tokenView{ID: p.TokenID, Kind: "workspace", WorkspaceID: &p.TokenWorkspaceID, Scopes: p.TokenScopes,
 			Workspace: &wsRef{ID: p.TokenWorkspaceID}, BrandID: p.TokenBrandID}
 		var handle, name *string
 		if err := s.pool.QueryRow(ctx, `SELECT t.name, t.expires_at, w.slug, w.name, w.test, b.handle, b.name FROM api_tokens t JOIN workspaces w ON w.id = t.workspace_id

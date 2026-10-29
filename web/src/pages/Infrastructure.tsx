@@ -247,8 +247,8 @@ function MoveMenu({ ws, m, onDone }: { ws: string; m: Mailbox; onDone: () => voi
 
 type Form = {
   name: string;
-  // Kept as it was on an existing plan until projects are removed.
-  project_id: string;
+  // Kept as it was on an existing plan.
+  brand_id: string;
   supplier: string;
   provider: "google" | "microsoft";
   domain_count: number;
@@ -267,7 +267,7 @@ type Form = {
 function formFrom(p?: InfraPlan): Form {
   return {
     name: p?.name ?? "",
-    project_id: p?.project_id ?? "",
+    brand_id: p?.brand_id ?? "",
     supplier: p?.supplier ?? "manual",
     provider: (p?.provider as Form["provider"]) ?? "google",
     domain_count: p?.domain_count ?? 10,
@@ -288,7 +288,7 @@ function body(f: Form): InfraPlanInput {
   const domains = f.domains.split(/[\s,]+/).map((d) => d.trim()).filter(Boolean);
   return {
     name: f.name.trim(),
-    project_id: f.project_id || null,
+    brand_id: f.brand_id || null,
     supplier: f.supplier,
     provider: f.provider,
     domain_count: Math.max(f.domain_count, domains.length),

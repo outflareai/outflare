@@ -140,3 +140,58 @@ func TestDashboardUsesRealMetrics(t *testing.T) {
 		t.Fatal("no queries found in the dashboard")
 	}
 }
+
+// Pull requests that add dashboard rows in parallel each take "the next
+// free" panel id and row, so they can clash after merging: Grafana then
+// mixes up panels that share an id and draws overlapping ones on top of
+// each other.
+func TestDashboardLayoutIsClean(t *testing.T) {
+	raw, err := os.ReadFile(monitoringDir + "grafana/dashboards/outflare.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	type panel struct {
+		ID      int    `json:"id"`
+		Title   string `json:"title"`
+		GridPos struct {
+			X, Y, W, H int
+		} `json:"gridPos"`
+		Panels []panel `json:"panels"`
+	}
+	var dash struct {
+		Panels []panel `json:"panels"`
+	}
+	if err := json.Unmarshal(raw, &dash); err != nil {
+		t.Fatal(err)
+	}
+	var all []panel
+	for _, p := range dash.Panels {
+		all = append(all, p)
+		// A collapsed row keeps its panels inside it; they share the id
+		// space but are laid out only when the row opens.
+		all = append(all, p.Panels...)
+	}
+	if len(all) == 0 {
+		t.Fatal("no panels found in the dashboard")
+	}
+	ids := map[int]string{}
+	for _, p := range all {
+		if prev, ok := ids[p.ID]; ok {
+			t.Errorf("panels %q and %q share id %d; give the later one an id above the current highest", prev, p.Title, p.ID)
+		}
+		ids[p.ID] = p.Title
+	}
+	top := dash.Panels
+	for i, a := range top {
+		g := a.GridPos
+		if g.W <= 0 || g.H <= 0 || g.X < 0 || g.Y < 0 || g.X+g.W > 24 {
+			t.Errorf("panel %q has gridPos %+v outside the 24-column grid", a.Title, g)
+		}
+		for _, b := range top[i+1:] {
+			h := b.GridPos
+			if g.X < h.X+h.W && h.X < g.X+g.W && g.Y < h.Y+h.H && h.Y < g.Y+g.H {
+				t.Errorf("panels %q %+v and %q %+v overlap; move the later section down", a.Title, g, b.Title, h)
+			}
+		}
+	}
+}

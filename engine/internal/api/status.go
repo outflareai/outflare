@@ -136,10 +136,6 @@ func (s *Server) workspaceStatus(ctx context.Context, ws string, sel brandSel) (
 		}
 		return col + ` = $2::uuid`
 	}
-	// A project's brand, for rows that belong to a project.
-	byProject := func(col string) string {
-		return bf(`(SELECT p.brand_id FROM projects p WHERE p.id = ` + col + `)`)
-	}
 	v := statusView{Blockers: []statusBlocker{}, CheckedAt: time.Now().UTC()}
 	// Links open on the brand asked about.
 	brandPage := s.appPath(ctx, ws, "")
@@ -171,7 +167,7 @@ func (s *Server) workspaceStatus(ctx context.Context, ws string, sel brandSel) (
 			(SELECT count(*) FROM inbound_messages i JOIN mailboxes m ON m.id = i.mailbox_id
 			 WHERE i.workspace_id = $1 AND i.kind = 'reply' AND NOT i.read AND NOT i.done AND `+bf("m.brand_id")+`),
 			(SELECT count(*) FROM mission_actions a JOIN missions x ON x.id = a.mission_id WHERE a.workspace_id = $1 AND a.status = 'pending' AND `+bf("x.brand_id")+`),
-			(SELECT count(*) FROM infra_plans WHERE workspace_id = $1 AND status = 'draft' AND `+byProject("project_id")+`),
+			(SELECT count(*) FROM infra_plans WHERE workspace_id = $1 AND status = 'draft' AND `+bf("brand_id")+`),
 			(SELECT count(*) FROM allocation_status st JOIN sequences q ON q.id = st.sequence_id
 			 WHERE st.workspace_id = $1 AND q.status = 'active' AND st.needed_daily > st.active_daily AND `+bf("q.brand_id")+`),
 			(SELECT count(*) FROM fixes WHERE workspace_id = $1 AND status = 'open' AND severity = 'error')`, ws, brandArg,
@@ -391,6 +387,19 @@ func (s *Server) workspaceStatus(ctx context.Context, ws string, sel brandSel) (
 			Fix: statusFix{Tool: "list_social_replies", Page: page("social"), Who: "person"}})
 	}
 
+	// Link pitches drafted for a person to approve before they send.
+	pitches, nPitches, err := s.statusItems(ctx, `
+		SELECT k.id::text, x.page_url, '', count(*) OVER ()::int FROM link_pitches k JOIN link_prospects x ON x.id = k.prospect_id
+		WHERE k.workspace_id = $1 AND k.status = 'draft' ORDER BY k.created_at DESC LIMIT 5`, ws)
+	if err != nil {
+		return v, err
+	}
+	if nPitches > 0 {
+		add(statusBlocker{Code: "link_pitches_waiting", Severity: "info", Area: "sequences", Title: countOf(nPitches, "link pitch waits", "link pitches wait") + " for approval",
+			Detail: "Nothing sends until a person approves it (or writes the opener, without AI). list_link_pitches with status draft lists them.", Count: nPitches, Items: pitches,
+			Fix: statusFix{Tool: "list_link_pitches", Page: page("link-building"), Who: "person"}})
+	}
+
 	// Customer data: possible duplicates to decide, new event names held
 	// until approved, and CRM imports that failed.
 	var dupes, quarantined int
@@ -449,16 +458,14 @@ func (s *Server) workspaceStatus(ctx context.Context, ws string, sel brandSel) (
 	}
 	// Records in no brand, in a workspace with brands: they show under
 	// no brand, so someone should put each in its brand (Brands → Not in a
-	// brand). Records in a project follow the project, so they count once,
-	// as the project.
+	// brand).
 	if sel.all() {
 		loose, nLoose, err := s.statusItems(ctx, `
 			WITH loose AS (
-				SELECT 'projects' AS kind, count(*) AS n FROM projects WHERE workspace_id = $1 AND brand_id IS NULL AND status <> 'archived'
-				UNION ALL SELECT 'sending domains', count(*) FROM sending_domains WHERE workspace_id = $1 AND brand_id IS NULL AND project_id IS NULL
-				UNION ALL SELECT 'mailboxes', count(*) FROM mailboxes m WHERE workspace_id = $1 AND brand_id IS NULL AND project_id IS NULL AND lifecycle_stage <> 'retired'
-				UNION ALL SELECT 'lead lists', count(*) FROM lead_lists WHERE workspace_id = $1 AND brand_id IS NULL AND project_id IS NULL
-				UNION ALL SELECT 'sequences', count(*) FROM sequences WHERE workspace_id = $1 AND brand_id IS NULL AND project_id IS NULL AND status <> 'archived'
+				SELECT 'sending domains' AS kind, count(*) AS n FROM sending_domains WHERE workspace_id = $1 AND brand_id IS NULL
+				UNION ALL SELECT 'mailboxes', count(*) FROM mailboxes m WHERE workspace_id = $1 AND brand_id IS NULL AND lifecycle_stage <> 'retired'
+				UNION ALL SELECT 'lead lists', count(*) FROM lead_lists WHERE workspace_id = $1 AND brand_id IS NULL
+				UNION ALL SELECT 'sequences', count(*) FROM sequences WHERE workspace_id = $1 AND brand_id IS NULL AND status <> 'archived'
 			)
 			SELECT kind, n::text || ' ' || kind, '', sum(n) OVER ()::int FROM loose, (SELECT 1 FROM brands WHERE workspace_id = $1 AND status = 'active' LIMIT 1) b
 			WHERE n > 0 ORDER BY n DESC`, ws)

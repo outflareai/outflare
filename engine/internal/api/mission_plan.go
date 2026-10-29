@@ -2,7 +2,6 @@ package api
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"net/http"
 	"strings"
@@ -25,7 +24,8 @@ const planEstimateCents = 10
 func (s *Server) planMission(w http.ResponseWriter, r *http.Request) {
 	a := accessFrom(r.Context())
 	var req struct {
-		Goal      string  `json:"goal"`
+		Goal string `json:"goal"`
+		// Ignored: projects were removed. Accepted so older clients still work.
 		ProjectID *string `json:"project_id"`
 	}
 	if !decode(w, r, &req) {
@@ -45,12 +45,12 @@ func (s *Server) planMission(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	name := ai.Provider.Name
-	in := missionInput{ProjectID: optional[string]{Set: req.ProjectID != nil, Value: req.ProjectID}}
-	// Check the project and the token's project before spending on a plan.
+	var in missionInput
+	// Check the token before spending on a plan.
 	if err := pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error { return s.checkMissionRefs(ctx, tx, a, &in, true) }); s.missionError(w, r, err) {
 		return
 	}
-	snap, err := s.planSnapshot(ctx, a.WorkspaceID, in.ProjectID.Value)
+	snap, err := s.planSnapshot(ctx, a.WorkspaceID)
 	if err != nil {
 		s.internal(w, r, err)
 		return
@@ -58,7 +58,7 @@ func (s *Server) planMission(w http.ResponseWriter, r *http.Request) {
 	draft, usage, err := planner.Plan(ctx, planner.LLM{M: ai.Model}, req.Goal, snap)
 	if err != nil {
 		// A failed call can still have cost something.
-		if serr := recordAISpend(ctx, s.pool, ai, a.WorkspaceID, nil, in.ProjectID.Value, &a.ActorID, usage.LLM, "mission-plan-failed:"+RequestID(ctx), name+" tried to plan a mission"); serr != nil {
+		if serr := recordAISpend(ctx, s.pool, ai, a.WorkspaceID, nil, &a.ActorID, usage.LLM, "mission-plan-failed:"+RequestID(ctx), name+" tried to plan a mission"); serr != nil {
 			s.log.Error("plan spend", "err", serr)
 		}
 		switch {
@@ -121,7 +121,7 @@ func (s *Server) planMission(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		// What the plan cost, on the workspace's own bill with the provider.
-		if err := recordAISpend(ctx, tx, ai, a.WorkspaceID, &id, in.ProjectID.Value, &a.ActorID, usage.LLM, "mission-plan:"+id, name+" planned the mission"); err != nil {
+		if err := recordAISpend(ctx, tx, ai, a.WorkspaceID, &id, &a.ActorID, usage.LLM, "mission-plan:"+id, name+" planned the mission"); err != nil {
 			return err
 		}
 		return record(ctx, tx, &a.principal, a.WorkspaceID, "mission.planned", "mission", id, map[string]any{
@@ -161,14 +161,14 @@ func nonNil[T any](s []T) []T {
 
 // planSnapshot summarises the workspace for the planner. It holds counts
 // and names, never lead lists, email addresses or credentials.
-func (s *Server) planSnapshot(ctx context.Context, ws string, projectID *string) (planner.Snapshot, error) {
+func (s *Server) planSnapshot(ctx context.Context, ws string) (planner.Snapshot, error) {
 	snap := planner.Snapshot{Today: time.Now().UTC(), Sequences: []planner.Sequence{}, Connected: []string{}, Catalog: []planner.CatalogItem{}}
 	if err := s.pool.QueryRow(ctx, `SELECT name FROM workspaces WHERE id = $1`, ws).Scan(&snap.Workspace); err != nil {
 		return snap, err
 	}
 	if err := s.pool.QueryRow(ctx, `
 		SELECT count(*), count(*) FILTER (WHERE status = 'active'), COALESCE(sum(daily_limit) FILTER (WHERE status = 'active'), 0)
-		FROM mailboxes WHERE workspace_id = $1 AND ($2::uuid IS NULL OR project_id = $2)`, ws, projectID).
+		FROM mailboxes WHERE workspace_id = $1`, ws).
 		Scan(&snap.Mailboxes.Total, &snap.Mailboxes.Ready, &snap.Mailboxes.DailyCapacity); err != nil {
 		return snap, err
 	}
@@ -178,8 +178,8 @@ func (s *Server) planSnapshot(ctx context.Context, ws string, projectID *string)
 		return snap, err
 	}
 	rows, err := s.pool.Query(ctx, `
-		SELECT id, name, status FROM sequences WHERE workspace_id = $1 AND ($2::uuid IS NULL OR project_id = $2)
-		ORDER BY updated_at DESC LIMIT 20`, ws, projectID)
+		SELECT id, name, status FROM sequences WHERE workspace_id = $1
+		ORDER BY updated_at DESC LIMIT 20`, ws)
 	if err != nil {
 		return snap, err
 	}
@@ -190,17 +190,11 @@ func (s *Server) planSnapshot(ctx context.Context, ws string, projectID *string)
 	if err != nil {
 		return snap, err
 	}
-	if projectID != nil {
-		var p planner.Project
-		var name, offer, audience, market, brief string
-		if err := s.pool.QueryRow(ctx, `SELECT id, name, COALESCE(offer, ''), COALESCE(audience, ''), COALESCE(market, ''), COALESCE(brief, '') FROM projects WHERE id = $1`, *projectID).
-			Scan(&p.ID, &name, &offer, &audience, &market, &brief); err != nil {
-			return snap, err
-		}
-		p.Name = name
-		p.Brief, _ = json.Marshal(map[string]string{"offer": offer, "audience": audience, "market": market, "brief": brief})
-		snap.Project = &p
+	company, err := s.loadContext(ctx, ws)
+	if err != nil {
+		return snap, err
 	}
+	snap.Context = contextMarkdown(company, nil)
 	if s.integrations != nil {
 		list, err := s.integrations.List(ctx, s.pool, ws, "")
 		if err != nil {

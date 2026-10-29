@@ -8,6 +8,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { ago } from "../format";
 import type { Tab } from "../App";
 import { useBrand } from "@/lib/brand";
+import { RecordPartners } from "./Partners";
 
 // How each verification result reads in the table. Unverified addresses are
 // checked automatically before their first email, so they aren't a problem.
@@ -375,6 +376,7 @@ function LeadDialog({ ws, lead, lists, canManage, listName, onClose, onSaved, on
               </select>
             </label>
           )}
+          {lead?.record_id && <div className="text-[13px]"><RecordPartners ws={ws} record={lead.record_id} /></div>}
           <ErrorText>{error}</ErrorText>
           <DialogFooter className="flex-row justify-end gap-2">
             {lead && canManage && <Button type="button" variant="danger" className="mr-auto" onClick={() => onDelete(lead)}>Delete</Button>}

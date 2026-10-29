@@ -61,6 +61,10 @@ type partnerImportView struct {
 	FinishedAt    *time.Time           `json:"finished_at"`
 }
 
+// errPaginationStuck stops an import whose platform answers the next page
+// with the one before it.
+var errPaginationStuck = errors.New("the partner platform sent the same page twice, so it isn't paging as expected; nothing more was read. Tell us which platform this was")
+
 type partnerImportSummary struct {
 	Kinds      []partnerImportCount `json:"kinds"`
 	Issues     []partnerImportIssue `json:"issues"`
@@ -85,6 +89,9 @@ type partnerImportIssue struct {
 	Kind       string `json:"kind"`
 	ExternalID string `json:"external_id"`
 	Reason     string `json:"reason"`
+	// Message says why a whole kind couldn't be read (reason unreadable):
+	// the kind, the HTTP status and the answer's shape, never its values.
+	Message string `json:"message,omitempty"`
 }
 
 type partnerImportProgress struct {
@@ -134,9 +141,87 @@ func scanPartnerImport(row pgx.Row) (partnerImportView, error) {
 
 func (s *Server) routesPartnerImports(mux *http.ServeMux) {
 	read, manage := auth.ScopePartnersRead, auth.ScopePartnersManage
-	mux.HandleFunc("POST /v1/workspaces/{ws}/partner-programs/{id}/imports", s.inWorkspace(manage, s.startPartnerImport))
-	mux.HandleFunc("GET /v1/workspaces/{ws}/partner-programs/{id}/imports", s.inWorkspace(read, s.listPartnerImports))
-	mux.HandleFunc("GET /v1/workspaces/{ws}/partner-programs/{id}/imports/{import}", s.inWorkspace(read, s.getPartnerImport))
+	mux.HandleFunc("POST /v1/workspaces/{ws}/partner-programs/{id}/imports", s.inBrand(manage, s.startPartnerImport))
+	mux.HandleFunc("GET /v1/workspaces/{ws}/partner-programs/{id}/imports", s.inBrand(read, s.listPartnerImports))
+	mux.HandleFunc("GET /v1/workspaces/{ws}/partner-programs/{id}/imports/{import}", s.inBrand(read, s.getPartnerImport))
+	mux.HandleFunc("GET /v1/workspaces/{ws}/partner-programs/{id}/import-sources", s.inBrand(manage, s.listPartnerImportSources))
+}
+
+// partnerImportIntegration finds the connected partner platform: the one
+// asked for, or the first. errNotFound when there is none.
+func (s *Server) partnerImportIntegration(ctx context.Context, ws, want string) (id, connector string, err error) {
+	var ids []string
+	for _, d := range s.integrations.Registry.All() {
+		if slices.Contains(d.Capabilities, connectors.CapPartnersImport) {
+			ids = append(ids, d.ID)
+		}
+	}
+	err = s.pool.QueryRow(ctx, `SELECT id::text, connector FROM integrations WHERE workspace_id = $1 AND connector = ANY($2) AND status = 'connected'
+		AND ($3 = '' OR id::text = $3) ORDER BY created_at LIMIT 1`, ws, ids, want).Scan(&id, &connector)
+	return id, connector, err
+}
+
+// listPartnerImportSources lists the programs in the connected partner
+// platform account, so the person importing picks one instead of typing
+// its id. It only reads.
+func (s *Server) listPartnerImportSources(w http.ResponseWriter, r *http.Request) {
+	a := accessFrom(r.Context())
+	if _, ok := s.findPartnerProgram(w, r, a.WorkspaceID, r.PathValue("id")); !ok {
+		return
+	}
+	want := r.URL.Query().Get("integration_id")
+	if want != "" && !validUUID(want) {
+		writeError(w, r, http.StatusBadRequest, "invalid_request", "integration_id is a connection's id")
+		return
+	}
+	ctx := r.Context()
+	integration, _, err := s.partnerImportIntegration(ctx, a.WorkspaceID, want)
+	if errors.Is(err, pgx.ErrNoRows) {
+		writeError(w, r, http.StatusConflict, "connector_needed", "Connect Tolt first (Connectors, Partner programs), with your own Tolt API key.")
+		return
+	}
+	if err != nil {
+		s.internal(w, r, err)
+		return
+	}
+	o, err := s.integrations.Open(ctx, s.pool, a.WorkspaceID, integration)
+	if err != nil {
+		s.internal(w, r, err)
+		return
+	}
+	imp, ok := o.Connector.(connectors.PartnerImporter)
+	if !ok {
+		writeError(w, r, http.StatusBadRequest, "invalid_request", o.Connector.Definition().Name+" can't import a partner program")
+		return
+	}
+	progs, err := imp.PartnerPrograms(ctx, o.Client, o.Creds)
+	if err != nil {
+		connectorError(w, r, err)
+		return
+	}
+	pick := ""
+	if p, ok := pickPartnerSource(progs); ok {
+		pick = p.ID
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"data": progs, "integration_id": integration, "suggested": pick})
+}
+
+// pickPartnerSource is the program an import takes when none was named:
+// the only one, or else the only one that is active.
+func pickPartnerSource(progs []connectors.PartnerProgram) (connectors.PartnerProgram, bool) {
+	if len(progs) == 1 {
+		return progs[0], true
+	}
+	var live []connectors.PartnerProgram
+	for _, p := range progs {
+		if p.Status == "active" {
+			live = append(live, p)
+		}
+	}
+	if len(live) == 1 {
+		return live[0], true
+	}
+	return connectors.PartnerProgram{}, false
 }
 
 // startPartnerImport queues an import into the program from the
@@ -164,15 +249,7 @@ func (s *Server) startPartnerImport(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ctx := r.Context()
-	var ids []string
-	for _, d := range s.integrations.Registry.All() {
-		if slices.Contains(d.Capabilities, connectors.CapPartnersImport) {
-			ids = append(ids, d.ID)
-		}
-	}
-	var integration, connector string
-	err := s.pool.QueryRow(ctx, `SELECT id::text, connector FROM integrations WHERE workspace_id = $1 AND connector = ANY($2) AND status = 'connected'
-		AND ($3 = '' OR id::text = $3) ORDER BY created_at LIMIT 1`, a.WorkspaceID, ids, in.IntegrationID).Scan(&integration, &connector)
+	integration, connector, err := s.partnerImportIntegration(ctx, a.WorkspaceID, in.IntegrationID)
 	if errors.Is(err, pgx.ErrNoRows) {
 		if in.IntegrationID != "" {
 			writeError(w, r, http.StatusBadRequest, "invalid_request", "integration_id: no connected partner platform with that id")
@@ -287,6 +364,9 @@ type partnerImportRun struct {
 	imp       connectors.PartnerImporter
 	progress  partnerImportProgress
 	sum       partnerImportSummary
+	// asked holds the partners fetched by id in this step, or found
+	// missing there, so each is asked for once.
+	asked map[string]bool
 }
 
 // runPartnerImportStep reads pages until the step's time is up, then
@@ -312,22 +392,27 @@ func (s *Server) runPartnerImportStep(ctx context.Context, ws, id string, last b
 	run.sum.normalize()
 	run.by = principal{ActorID: deref(actorID), ActorType: actorType}
 
-	done, err := run.step(ctx, program, integration)
+	done, err := run.step(ctx, program, integration, last)
 	if err != nil {
 		permanent := errors.Is(err, connectors.ErrNotFound) || connectors.KindOf(err) == connectors.ErrAuth ||
-			connectors.KindOf(err) == connectors.ErrInvalid || errors.As(err, new(errInvalid))
+			connectors.KindOf(err) == connectors.ErrInvalid || errors.As(err, new(errInvalid)) || errors.Is(err, errPaginationStuck)
 		if !last && !permanent {
+			// Keep the pages this step stored, so the retry carries on
+			// after them and the summary still counts them as new.
+			if serr := run.saveProgress(ctx); serr != nil {
+				return errors.Join(err, serr)
+			}
 			return err
 		}
 		return run.finish(ctx, err)
 	}
 	if done {
-		return run.finish(ctx, nil)
+		return run.finish(ctx, run.nothingRead())
 	}
 	return run.save(ctx)
 }
 
-func (r *partnerImportRun) step(ctx context.Context, program string, integration *string) (bool, error) {
+func (r *partnerImportRun) step(ctx context.Context, program string, integration *string, last bool) (bool, error) {
 	prog, err := scanPartnerProgram(r.s.pool.QueryRow(ctx, partnerProgramSelect+` AND p.id = $2`, r.ws, program))
 	if err != nil {
 		return false, err
@@ -358,10 +443,20 @@ func (r *partnerImportRun) step(ctx context.Context, program string, integration
 		kind := kinds[r.progress.Kind]
 		page, next, err := r.imp.PartnerPage(ctx, r.o.Client, r.o.Creds, r.source, kind, r.progress.After)
 		if err != nil {
-			return false, err
+			if !r.kindFailed(ctx, kind, err, last) {
+				return false, err
+			}
+			r.progress.Kind++
+			r.progress.After = ""
+			continue
 		}
 		if err := r.page(ctx, kind, page); err != nil {
 			return false, err
+		}
+		if next != "" && next == r.progress.After {
+			// The platform sent the same page again: it ignored the
+			// cursor, and reading on would never end.
+			return false, errPaginationStuck
 		}
 		r.progress.After = next
 		if next == "" {
@@ -377,11 +472,11 @@ func (r *partnerImportRun) pickProgram(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	switch len(progs) {
-	case 0:
+	if len(progs) == 0 {
 		return errInvalid("the " + r.o.Connector.Definition().Name + " account has no program")
-	case 1:
-		r.source = progs[0].ID
+	}
+	if p, ok := pickPartnerSource(progs); ok {
+		r.source = p.ID
 		_, err := r.s.pool.Exec(ctx, `UPDATE partner_imports SET source_program = $2 WHERE id = $1`, r.id, r.source)
 		return err
 	}
@@ -390,6 +485,56 @@ func (r *partnerImportRun) pickProgram(ctx context.Context) error {
 		ids = append(ids, p.ID)
 	}
 	return errInvalid("the account has " + fmt.Sprint(len(progs)) + " programs: start the import again with source_program, one of " + strings.Join(ids, ", "))
+}
+
+// kindFailed decides whether a kind the platform wouldn't give can be left
+// out so the import reads the others: an answer that can't be read or a
+// request it refuses (asking again gets the same), or any failure but a
+// refused key on the last attempt. It notes the kind as unreadable.
+func (r *partnerImportRun) kindFailed(ctx context.Context, kind string, err error, last bool) bool {
+	unreadable := errors.As(err, new(*connectors.UnreadableError))
+	if !unreadable {
+		switch k := connectors.KindOf(err); {
+		case k == connectors.ErrAuth, k != connectors.ErrInvalid && !last:
+			return false
+		}
+	}
+	code := "unreadable"
+	if !unreadable {
+		code = crmImportErrorCode(err)
+	}
+	track.Fail(ctx, r.s.log, track.Event{Name: "partner_import.kind_skipped", WorkspaceID: r.ws, Surface: "job",
+		Props: map[string]any{"import_id": r.id, "connector": r.connector, "kind": kind}}, code, err)
+	metrics.PartnerImportObjects(kind, "unreadable", 1)
+	// Kept whatever the cap: one per kind at most, and it matters most.
+	r.sum.Issues = append(r.sum.Issues, partnerImportIssue{Kind: kind, Reason: "unreadable", Message: cutUTF8(err.Error(), 500)})
+	return true
+}
+
+// nothingRead fails an import that couldn't read a single kind: that is
+// the connection or the program, not one list.
+func (r *partnerImportRun) nothingRead() error {
+	var first string
+	n := 0
+	for _, i := range r.sum.Issues {
+		if i.Reason == "unreadable" {
+			if n == 0 {
+				first = i.Message
+			}
+			n++
+		}
+	}
+	if n < len(connectors.PartnerImportKinds) {
+		return nil
+	}
+	return &connectors.UnreadableError{Message: "nothing could be read: " + first}
+}
+
+// saveProgress keeps where the import got to and its summary.
+func (r *partnerImportRun) saveProgress(ctx context.Context) error {
+	_, err := r.s.pool.Exec(ctx, `UPDATE partner_imports SET progress = $3, summary = $4 WHERE workspace_id = $1 AND id = $2`,
+		r.ws, r.id, r.progress, r.sum)
+	return err
 }
 
 func (r *partnerImportRun) save(ctx context.Context) error {
@@ -413,6 +558,12 @@ func (r *partnerImportRun) finish(ctx context.Context, runErr error) error {
 		m := runErr.Error()
 		msg = &m
 		code = crmImportErrorCode(runErr)
+		if errors.Is(runErr, errPaginationStuck) {
+			code = "pagination_stuck"
+		}
+		if errors.As(runErr, new(*connectors.UnreadableError)) {
+			code = "unreadable"
+		}
 		track.Fail(ctx, r.s.log, track.Event{Name: "partner_import.failed", WorkspaceID: r.ws, Surface: "job",
 			Props: map[string]any{"import_id": r.id, "connector": r.connector}}, code, runErr)
 	}
@@ -469,11 +620,63 @@ func (r *partnerImportRun) note(kind, result string) {
 	metrics.PartnerImportObjects(kind, result, 1)
 }
 
+// missingPartners brings in, one by one, the partners a page's promo
+// codes, customers and commissions name that the partner list didn't give
+// (Tolt lists only onboarded partners), when the platform can read a
+// partner by id. They count as partners read.
+func (r *partnerImportRun) missingPartners(ctx context.Context, page connectors.PartnerObjects,
+	oneOf func(string, func(pgx.Tx) (string, error), string) error) error {
+	f, ok := r.imp.(connectors.PartnerFetcher)
+	if !ok {
+		return nil
+	}
+	ids := page.PartnerIDs()
+	if len(page.PromoCodes) > 0 || len(page.Customers) > 0 || len(page.Commissions) > 0 {
+		// The partners links name too, once the list has been read: a
+		// partner with a link but nothing else is still a partner.
+		for id := range r.progress.Codes {
+			ids = append(ids, id)
+		}
+		slices.Sort(ids[len(page.PartnerIDs()):])
+	}
+	for _, id := range ids {
+		if r.asked[id] {
+			continue
+		}
+		if r.asked == nil {
+			r.asked = map[string]bool{}
+		}
+		r.asked[id] = true
+		var known bool
+		if err := r.s.pool.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM partner_import_refs WHERE program_id = $1 AND connector = $2
+			AND kind = 'partner' AND external_id = $3)`, r.prog.ID, r.connector, id).Scan(&known); err != nil {
+			return err
+		}
+		if known {
+			continue
+		}
+		p, err := f.PartnerByID(ctx, r.o.Client, r.o.Creds, r.source, id)
+		switch {
+		case errors.As(err, new(*connectors.UnreadableError)) || connectors.KindOf(err) == connectors.ErrInvalid:
+			// Gone there, or not readable: what names it is skipped.
+			r.warn(connectors.PartnerKindPartners, id, "partner_unavailable")
+			continue
+		case err != nil:
+			return err
+		}
+		r.sum.count(connectors.PartnerKindPartners).Seen++
+		if err := oneOf(connectors.PartnerKindPartners, func(tx pgx.Tx) (string, error) { return r.partner(ctx, tx, p) }, id); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // page stores one page, each object in its own transaction, so one that
 // can't come over never holds up the rest.
 func (r *partnerImportRun) page(ctx context.Context, kind string, page connectors.PartnerObjects) error {
 	r.sum.count(kind).Seen += page.Len()
-	one := func(f func(tx pgx.Tx) (string, error), external string) error {
+	oneOf := func(kind string, f func(tx pgx.Tx) (string, error), external string) error {
 		var result string
 		err := pgx.BeginFunc(ctx, r.s.pool, func(tx pgx.Tx) error {
 			var err error
@@ -490,6 +693,10 @@ func (r *partnerImportRun) page(ctx context.Context, kind string, page connector
 		}
 		r.note(kind, result)
 		return nil
+	}
+	one := func(f func(tx pgx.Tx) (string, error), external string) error { return oneOf(kind, f, external) }
+	if err := r.missingPartners(ctx, page, oneOf); err != nil {
+		return err
 	}
 	switch kind {
 	case connectors.PartnerKindLinks:
@@ -673,7 +880,19 @@ func (r *partnerImportRun) customer(ctx context.Context, tx pgx.Tx, c connectors
 	if c.ID == "" {
 		return "", importSkip("incomplete")
 	}
-	if _, ok, err := r.ref(ctx, tx, "customer", c.ID); err != nil || ok {
+	if local, ok, err := r.ref(ctx, tx, "customer", c.ID); err != nil || ok {
+		if err != nil {
+			return "", err
+		}
+		// Imported before: still add ids an earlier run didn't keep.
+		var rec string
+		err := tx.QueryRow(ctx, `SELECT record_id::text FROM partner_referrals WHERE workspace_id = $1 AND id::text = $2`, r.ws, local).Scan(&rec)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return "unchanged", nil
+		}
+		if err == nil {
+			err = r.aliases(ctx, tx, rec, c)
+		}
 		return "unchanged", err
 	}
 	member, ok, err := r.ref(ctx, tx, "partner", c.PartnerID)
@@ -692,6 +911,9 @@ func (r *partnerImportRun) customer(ctx context.Context, tx pgx.Tx, c connectors
 		return "", importSkip("no_email")
 	}
 	if err != nil {
+		return "", err
+	}
+	if err := r.aliases(ctx, tx, rec, c); err != nil {
 		return "", err
 	}
 	at := c.Created
@@ -717,6 +939,34 @@ func (r *partnerImportRun) customer(ctx context.Context, tx pgx.Tx, c connectors
 		return "", err
 	}
 	return "created", r.keep(ctx, tx, "customer", c.ID, id)
+}
+
+// aliases keeps the other ids the backend may report the customer by
+// (Tolt's cus_... id) as user ids of their record, so conversions sent
+// with them after the switch credit the partner. An id another record
+// already holds stays there, and the import lists it.
+func (r *partnerImportRun) aliases(ctx context.Context, tx pgx.Tx, rec string, c connectors.ImportCustomer) error {
+	for _, alias := range c.Aliases {
+		alias = cutUTF8(alias, 200)
+		if alias == "" || alias == c.CustomerID {
+			continue
+		}
+		owner, ok, err := customers.OwnerOf(ctx, tx, r.ws, "user_id", alias)
+		if err != nil {
+			return err
+		}
+		if ok {
+			if owner != rec {
+				r.warn("customers", c.ID, "customer_id_taken")
+			}
+			continue
+		}
+		if _, err := tx.Exec(ctx, `INSERT INTO record_identities (workspace_id, record_id, namespace, value, verified, verified_at, source)
+			VALUES ($1, $2, 'user_id', $3, true, now(), 'partners') ON CONFLICT DO NOTHING`, r.ws, rec, alias); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (r *partnerImportRun) currency(c string) string {

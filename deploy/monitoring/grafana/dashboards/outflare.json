@@ -5675,7 +5675,7 @@
       "type": "timeseries",
       "title": "Link pitch openers written, by outcome",
       "description": "Openers the workspaces' own AI wrote for link pitches, per hour. Normal: mostly written; no_ai and ai_unavailable are workspaces without AI connected or over their limit. ai_failed rising means the model's answers broke: check link_pitches.write jobs.",
-      "id": 119,
+      "id": 133,
       "datasource": {
         "type": "prometheus",
         "uid": "${datasource}"
@@ -5725,7 +5725,7 @@
       "type": "timeseries",
       "title": "Link pitch replies read, by kind",
       "description": "Replies to link pitches the workspaces' AI read, per hour, by what they say. Normal: a mix of other, declined and agreed, with few wants_payment. ai_failed rising means reading broke: check link_pitches.read_reply jobs.",
-      "id": 120,
+      "id": 134,
       "datasource": {
         "type": "prometheus",
         "uid": "${datasource}"
@@ -5775,7 +5775,7 @@
       "type": "timeseries",
       "title": "Agreed and live link checks, by outcome",
       "description": "Checks of links sites agreed to add, and of live ones, per hour. Normal: mostly not_yet and still_live, some live; removed is a site taking a link down. unreachable high for hours means OutflareBot can't reach pages: check link_live.schedule_failed in the log.",
-      "id": 121,
+      "id": 135,
       "datasource": {
         "type": "prometheus",
         "uid": "${datasource}"
@@ -6056,7 +6056,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 418
+        "y": 427
       },
       "targets": [
         {
@@ -6105,13 +6105,13 @@
     {
       "type": "row",
       "title": "Partners (referrals, affiliates, influencers)",
-      "id": 124,
+      "id": 136,
       "collapsed": false,
       "gridPos": {
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 426
+        "y": 435
       },
       "panels": []
     },
@@ -6128,7 +6128,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 427
+        "y": 436
       },
       "targets": [
         {
@@ -6181,7 +6181,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 427
+        "y": 436
       },
       "targets": [
         {
@@ -6225,7 +6225,7 @@
       "type": "timeseries",
       "title": "Reward ledger changes",
       "description": "Ledger entries per minute by kind and event: created by conversions, approved when their hold ends, reversed by refunds, paid through payouts.",
-      "id": 122,
+      "id": 137,
       "datasource": {
         "type": "prometheus",
         "uid": "${datasource}"
@@ -6234,7 +6234,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 435
+        "y": 444
       },
       "targets": [
         {
@@ -6278,7 +6278,7 @@
       "type": "timeseries",
       "title": "Oldest reward past its hold",
       "description": "How long the oldest reward that should approve on its own has waited past its hold. Normal is under two minutes: the approver runs every minute.",
-      "id": 123,
+      "id": 138,
       "datasource": {
         "type": "prometheus",
         "uid": "${datasource}"
@@ -6287,7 +6287,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 435
+        "y": 444
       },
       "targets": [
         {
@@ -6337,7 +6337,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 443
+        "y": 452
       },
       "targets": [
         {
@@ -6390,7 +6390,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 443
+        "y": 452
       },
       "targets": [
         {
@@ -6434,7 +6434,7 @@
       "type": "timeseries",
       "title": "Postbacks to partners' trackers, by outcome",
       "description": "Calls to affiliates' own trackers per hour. sent is normal; retried and unreachable are a tracker that is down (theirs) or this server unable to reach outside addresses; rejected is a tracker that refused the URL (the partner's template).",
-      "id": 129,
+      "id": 139,
       "datasource": {
         "type": "prometheus",
         "uid": "${datasource}"
@@ -6443,7 +6443,7 @@
         "h": 8,
         "w": 24,
         "x": 0,
-        "y": 451
+        "y": 460
       },
       "targets": [
         {
@@ -6486,12 +6486,12 @@
     {
       "type": "row",
       "title": "Meetings on timelines (customer events)",
-      "id": 130,
+      "id": 140,
       "gridPos": {
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 443
+        "y": 468
       },
       "collapsed": false,
       "panels": []
@@ -6509,7 +6509,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 444
+        "y": 469
       },
       "targets": [
         {
@@ -6562,7 +6562,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 444
+        "y": 469
       },
       "targets": [
         {
@@ -6591,6 +6591,191 @@
         },
         "tooltip": {
           "mode": "single"
+        }
+      }
+    },
+    {
+      "type": "row",
+      "title": "Redirect links (campaign short links)",
+      "id": 141,
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 477
+      },
+      "panels": []
+    },
+    {
+      "type": "timeseries",
+      "title": "Redirect link clicks, by outcome",
+      "description": "Clicks per minute on campaign redirect links (/l/{code}): counted is a person, bot a link scanner or preview, unknown a code that isn't a link (old or mistyped), error a click that couldn't be stored (the person was still sent on). Mostly counted is normal; any steady error means clicks are being lost, usually the database.",
+      "id": 142,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 478
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (outcome) (rate(outflare_redirect_clicks_total{job=\"$job\"}[5m])) * 60",
+          "legendFormat": "{{outcome}}",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "fillOpacity": 10,
+            "stacking": {
+              "mode": "normal"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "mean",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "type": "row",
+      "title": "Ad tracking health (paid clicks arriving on sites)",
+      "id": 143,
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 486
+      },
+      "panels": []
+    },
+    {
+      "type": "timeseries",
+      "title": "Paid ad landings, by how they were tracked",
+      "description": "Landing pages per minute from paid ads (a paid utm_medium), by outcome: click_id is the network's own click id (best), ad_ids only the tracking template's ad ids, none neither, which means the ad has no tracking template and can be credited only by its UTM tags. Mostly click_id is normal; a network that is mostly none has ads without the template (Paid ads → Tracking templates).",
+      "id": 144,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 487
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (outcome) (rate(outflare_ad_tracking_arrivals_total{job=\"$job\"}[5m])) * 60",
+          "legendFormat": "{{outcome}}",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "fillOpacity": 10,
+            "stacking": {
+              "mode": "normal"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "mean",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Unfilled tracking template macros, by network",
+      "description": "Template values per minute that arrived as the macro itself ({{ad.id}}, __CID__) because the network didn't fill it in. Zero is normal. A steady line for one network means its macro in the template is wrong: check engine/internal/adtrack against that network's docs.",
+      "id": 145,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 487
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (network) (rate(outflare_ad_tracking_unfilled_macros_total{job=\"$job\"}[5m])) * 60",
+          "legendFormat": "{{network}}",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "fillOpacity": 10,
+            "stacking": {
+              "mode": "normal"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "mean",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
         }
       }
     }

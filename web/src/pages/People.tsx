@@ -13,6 +13,7 @@ import type { Tab } from "../App";
 import { displayName, fieldLabelValue, identity, nameItem, namespaces, originPhrases, origins, useCatalog, type CatalogInfo } from "@/lib/records";
 import { AddIdentity, eraseRecord, RecordConsent, RecordDialog } from "./RecordEdit";
 import { Duplicates } from "./Duplicates";
+import { RecordPartners } from "./Partners";
 
 type Rec = Schemas["Record"];
 type Field = Schemas["Field"];
@@ -394,6 +395,7 @@ function RecordPage({ ws, id, cat, canManage, onOpen, go }: { ws: string; id: st
           <Identities key={`i${tick}`} ws={ws} rec={rec} canManage={manage} onChange={changed} />
           <Links links={links} fields={fields} onOpen={onOpen} />
           {people && <Consents key={`c${tick}`} ws={ws} id={id} canManage={manage} onChange={changed} go={go} />}
+          {people && <div className="rounded-md border p-4 text-sm empty:hidden"><RecordPartners ws={ws} record={id} go={() => go("partners")} /></div>}
         </div>
         <div className="space-y-4 lg:col-span-2">
           <Tabs value={section} onValueChange={(v) => setSection(v as typeof section)}>

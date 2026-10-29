@@ -32,11 +32,11 @@ func testPool(t *testing.T) *pgxpool.Pool {
 	return pool
 }
 
-// fixture is a workspace with two sequences in one project, one mailbox,
+// fixture is a workspace with two sequences in one brand, one mailbox,
 // and a lead at acme.test who was emailed by sequence A and replied.
 type fixture struct {
-	ws, project, seqA, seqB, mailbox, lead, lead2 string
-	at                                            time.Time
+	ws, brand, seqA, seqB, mailbox, lead, lead2 string
+	at                                          time.Time
 }
 
 func setup(t *testing.T, pool *pgxpool.Pool) fixture {
@@ -51,9 +51,9 @@ func setup(t *testing.T, pool *pgxpool.Pool) fixture {
 		}
 	}
 	q(`INSERT INTO workspaces (name, slug) VALUES ('Outcomes', 'outcomes-' || gen_random_uuid()) RETURNING id`, nil, &f.ws)
-	q(`INSERT INTO projects (workspace_id, name) VALUES ($1, 'Agencies AU') RETURNING id`, []any{f.ws}, &f.project)
-	q(`INSERT INTO sequences (workspace_id, name, project_id) VALUES ($1, 'A', $2) RETURNING id`, []any{f.ws, f.project}, &f.seqA)
-	q(`INSERT INTO sequences (workspace_id, name, project_id) VALUES ($1, 'B', $2) RETURNING id`, []any{f.ws, f.project}, &f.seqB)
+	q(`INSERT INTO brands (workspace_id, name, handle) VALUES ($1, 'Agencies AU', 'agencies-au') RETURNING id`, []any{f.ws}, &f.brand)
+	q(`INSERT INTO sequences (workspace_id, name, brand_id) VALUES ($1, 'A', $2) RETURNING id`, []any{f.ws, f.brand}, &f.seqA)
+	q(`INSERT INTO sequences (workspace_id, name, brand_id) VALUES ($1, 'B', $2) RETURNING id`, []any{f.ws, f.brand}, &f.seqB)
 	q(`INSERT INTO mailboxes (workspace_id, email, provider, smtp_host, smtp_port, smtp_username, imap_host, imap_port, imap_username, credentials)
 		VALUES ($1, 'jo@send.test', 'other', 'smtp', 587, 'jo', 'imap', 993, 'jo', '\x00') RETURNING id`, []any{f.ws}, &f.mailbox)
 	q(`INSERT INTO leads (workspace_id, email) VALUES ($1, 'sam@acme.test') RETURNING id`, []any{f.ws}, &f.lead)
@@ -129,7 +129,7 @@ func TestAttributionAndCostPerMeeting(t *testing.T) {
 		t.Fatalf("meetings: %d", len(ms))
 	}
 	for _, m := range ms {
-		if m.SequenceID == nil || *m.SequenceID != f.seqA || m.ProjectID == nil || *m.ProjectID != f.project || m.InboundID == nil {
+		if m.SequenceID == nil || *m.SequenceID != f.seqA || m.InboundID == nil {
 			t.Fatalf("attribution: %+v", m)
 		}
 	}
@@ -187,20 +187,20 @@ func TestAttributionAndCostPerMeeting(t *testing.T) {
 		t.Fatalf("sequence A: %+v", a)
 	}
 
-	// Recurring: $90 a month on the mailbox's project, for the last 30.5 days of a
+	// Recurring: $90 a month on sequence A, in the brand, for the last 30.5 days of a
 	// 60-day window.
 	tx(t, pool, func(tx pgx.Tx) {
-		if _, err := outcomes.CreateRecurring(ctx, tx, f.ws, "", outcomes.Recurring{ProjectID: &f.project, Category: "mailboxes", Name: "Seats",
+		if _, err := outcomes.CreateRecurring(ctx, tx, f.ws, "", outcomes.Recurring{SequenceID: &f.seqA, Category: "mailboxes", Name: "Seats",
 			AmountCents: 9000, StartsOn: outcomes.Date{Time: f.at}}); err != nil {
 			t.Fatal(err)
 		}
 	})
-	rep, err = outcomes.Summary(ctx, pool, f.ws, outcomes.ReportFilter{From: from, To: to, GroupBy: outcomes.GroupProject})
+	rep, err = outcomes.Summary(ctx, pool, f.ws, outcomes.ReportFilter{From: from, To: to, GroupBy: outcomes.GroupBrand})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(rep.Rows) != 1 || rep.Rows[0].Name != "Agencies AU" {
-		t.Fatalf("project rows: %+v", rep.Rows)
+		t.Fatalf("brand rows: %+v", rep.Rows)
 	}
 	days := 30.5 // from the start of the day the seat began
 	want := int64(math.Round(4400 + 9000*12*days/365))

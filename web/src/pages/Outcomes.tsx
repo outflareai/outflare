@@ -869,7 +869,6 @@ const recurringBody = (r: RecurringSpend) => ({
   provider: r.provider,
   starts_on: r.starts_on,
   ends_on: r.ends_on ?? null,
-  project_id: r.project_id ?? null,
   sequence_id: r.sequence_id ?? null,
   note: r.note,
 });
@@ -1027,8 +1026,6 @@ function RecurringForm({ ws, currency, sequences, editing, onClose, onDone }: { 
   const [starts, setStarts] = useState(editing?.starts_on ?? day(new Date()));
   const [ends, setEnds] = useState(editing?.ends_on ?? "");
   const [seq, setSeq] = useState(editing?.sequence_id ?? "");
-  // Kept as it was until projects are removed; no longer picked here.
-  const project = editing?.project_id ?? "";
   const [error, setError] = useState("");
 
   async function submit(e: FormEvent) {
@@ -1044,7 +1041,6 @@ function RecurringForm({ ws, currency, sequences, editing, onClose, onDone }: { 
       starts_on: starts,
       ends_on: ends || null,
       sequence_id: seq || null,
-      project_id: seq ? null : project || null,
       provider: editing?.provider ?? "",
       note: editing?.note ?? "",
     };

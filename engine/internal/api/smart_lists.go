@@ -100,7 +100,7 @@ func (s *Server) findSmartList(w http.ResponseWriter, r *http.Request, a *access
 		return nil, false
 	}
 	v, err := scanSmartList(s.pool.QueryRow(r.Context(), smartListSelect+` AND l.id = $2`, a.WorkspaceID, id))
-	if errors.Is(err, pgx.ErrNoRows) || (err == nil && !a.sees(nil, v.BrandID)) {
+	if errors.Is(err, pgx.ErrNoRows) || (err == nil && !a.sees(v.BrandID)) {
 		writeError(w, r, http.StatusNotFound, "not_found", "smart list not found")
 		return nil, false
 	}
@@ -256,7 +256,7 @@ func (s *Server) createSmartList(w http.ResponseWriter, r *http.Request) {
 	if !s.smartListApplied(w, r, s.applySmartList(r, a, f, &v)) {
 		return
 	}
-	if !a.writes(nil, v.BrandID) {
+	if !a.writes(v.BrandID) {
 		writeError(w, r, http.StatusForbidden, "forbidden", "you can only make smart lists for your brands: set brand_id")
 		return
 	}
@@ -309,14 +309,14 @@ func (s *Server) updateSmartList(w http.ResponseWriter, r *http.Request) {
 	if !decode(w, r, &f) {
 		return
 	}
-	if !a.writes(nil, v.BrandID) {
+	if !a.writes(v.BrandID) {
 		writeError(w, r, http.StatusForbidden, "forbidden", "this list holds people of every brand; you are limited to some brands")
 		return
 	}
 	if !s.smartListApplied(w, r, s.applySmartList(r, a, f, v)) {
 		return
 	}
-	if !a.writes(nil, v.BrandID) {
+	if !a.writes(v.BrandID) {
 		writeError(w, r, http.StatusForbidden, "forbidden", "you can only make smart lists for your brands: set brand_id")
 		return
 	}
@@ -361,7 +361,7 @@ func (s *Server) deleteSmartList(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if !a.writes(nil, v.BrandID) {
+	if !a.writes(v.BrandID) {
 		writeError(w, r, http.StatusForbidden, "forbidden", "this list holds people of every brand; you are limited to some brands")
 		return
 	}
@@ -417,7 +417,7 @@ func (s *Server) previewSmartList(w http.ResponseWriter, r *http.Request) {
 	var brand *string
 	if in.BrandID != nil {
 		id, err := s.brandIDFor(r.Context(), a.WorkspaceID, *in.BrandID)
-		if errors.Is(err, errNotFound) || (err == nil && !a.sees(nil, &id)) {
+		if errors.Is(err, errNotFound) || (err == nil && !a.sees(&id)) {
 			writeError(w, r, http.StatusBadRequest, "invalid_request", "brand_id must be one of the workspace's brands, or null for every brand")
 			return
 		}
@@ -522,7 +522,7 @@ func (s *Server) changeStaticMembers(w http.ResponseWriter, r *http.Request, add
 		writeError(w, r, http.StatusBadRequest, "invalid_request", "record_ids is 1 to 10,000 record ids")
 		return
 	}
-	if !a.writes(nil, v.BrandID) {
+	if !a.writes(v.BrandID) {
 		writeError(w, r, http.StatusForbidden, "forbidden", "this list holds people of every brand; you are limited to some brands")
 		return
 	}

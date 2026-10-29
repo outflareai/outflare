@@ -283,7 +283,7 @@ func (s *Server) loadTicket(ctx context.Context, ws, id string) (fixTicketView, 
 // writes a 404.
 func (s *Server) ticketFor(w http.ResponseWriter, r *http.Request, a *access) (*fixTicketView, bool) {
 	v, err := s.loadTicket(r.Context(), a.WorkspaceID, r.PathValue("ticket"))
-	if err == nil && a.sees(nil, v.BrandID) {
+	if err == nil && a.sees(v.BrandID) {
 		return &v, true
 	}
 	if err != nil && !errors.Is(err, errNotFound) {
@@ -411,7 +411,7 @@ func (s *Server) writeFixTicket(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if !a.writes(nil, t.BrandID) {
+	if !a.writes(t.BrandID) {
 		writeError(w, r, http.StatusForbidden, "forbidden", string(errSharedRecord))
 		return
 	}
@@ -472,7 +472,7 @@ func (s *Server) reviewFixTicket(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if !a.writes(nil, t.BrandID) {
+	if !a.writes(t.BrandID) {
 		writeError(w, r, http.StatusForbidden, "forbidden", string(errSharedRecord))
 		return
 	}
@@ -704,7 +704,7 @@ func (s *Server) createFixGuideline(w http.ResponseWriter, r *http.Request) {
 		writeError(w, r, http.StatusBadRequest, "invalid_request", "rule is only for a site's guideline (subject_id)")
 		return
 	}
-	if !a.writes(nil, brand) {
+	if !a.writes(brand) {
 		writeError(w, r, http.StatusForbidden, "forbidden", string(errSharedRecord))
 		return
 	}
@@ -738,7 +738,7 @@ func (s *Server) deleteFixGuideline(w http.ResponseWriter, r *http.Request) {
 	err := errNotFound
 	if validUUID(id) {
 		err = s.pool.QueryRow(ctx, `SELECT brand_id::text FROM fix_guidelines WHERE id = $1 AND workspace_id = $2`, id, a.WorkspaceID).Scan(&brand)
-		if errors.Is(err, pgx.ErrNoRows) || (err == nil && !a.sees(nil, brand)) {
+		if errors.Is(err, pgx.ErrNoRows) || (err == nil && !a.sees(brand)) {
 			err = errNotFound
 		}
 	}
@@ -750,7 +750,7 @@ func (s *Server) deleteFixGuideline(w http.ResponseWriter, r *http.Request) {
 		s.internal(w, r, err)
 		return
 	}
-	if !a.writes(nil, brand) {
+	if !a.writes(brand) {
 		writeError(w, r, http.StatusForbidden, "forbidden", string(errSharedRecord))
 		return
 	}
@@ -909,7 +909,7 @@ func (s *Server) fixTicketWriteJob(ctx context.Context, job jobs.Job) error {
 	resp, err := ai.Model.Chat(ctx, llm.Request{System: briefSystem, Messages: []llm.Message{{Role: "user", Text: prompt}},
 		JSONSchema: briefSchema, MaxTokens: 3000})
 	name := ai.Provider.Name
-	if serr := recordAISpend(ctx, s.pool, ai, ws, nil, nil, nil, resp.Usage, "fix_ticket:"+id+":"+time.Now().UTC().Format(time.RFC3339), name+" wrote a fix ticket"); serr != nil {
+	if serr := recordAISpend(ctx, s.pool, ai, ws, nil, nil, resp.Usage, "fix_ticket:"+id+":"+time.Now().UTC().Format(time.RFC3339), name+" wrote a fix ticket"); serr != nil {
 		s.log.Error("fix ticket spend", "ticket_id", id, "err", serr)
 	}
 	if err != nil {

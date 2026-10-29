@@ -111,7 +111,7 @@ func knowledgeCollectionFor(ctx context.Context, q pgx.Tx, a *access, id string)
 		return knowledgeCollectionView{}, errNotFound
 	}
 	v, err := scanKnowledgeCollection(q.QueryRow(ctx, knowledgeCollectionSelect+` AND c.id = $2`, a.WorkspaceID, id))
-	if errors.Is(err, pgx.ErrNoRows) || (err == nil && !a.sees(nil, v.BrandID)) {
+	if errors.Is(err, pgx.ErrNoRows) || (err == nil && !a.sees(v.BrandID)) {
 		return knowledgeCollectionView{}, errNotFound
 	}
 	return v, err
@@ -224,7 +224,7 @@ func (s *Server) createKnowledgeCollection(w http.ResponseWriter, r *http.Reques
 				brand = p.BrandID
 			}
 		}
-		if brand, err = brandWrite(ctx, tx, a, nil, brand); err != nil {
+		if brand, err = brandWrite(ctx, tx, a, brand); err != nil {
 			return err
 		}
 		if err := checkKnowledgeParent(ctx, tx, a, "", in.ParentID.Value, brand); err != nil {
@@ -280,7 +280,7 @@ func (s *Server) updateKnowledgeCollection(w http.ResponseWriter, r *http.Reques
 		if err != nil {
 			return err
 		}
-		if !a.writes(nil, cur.BrandID) {
+		if !a.writes(cur.BrandID) {
 			return errSharedRecord
 		}
 		brand := cur.BrandID
@@ -288,7 +288,7 @@ func (s *Server) updateKnowledgeCollection(w http.ResponseWriter, r *http.Reques
 			if brand, err = s.brandRef(ctx, a.WorkspaceID, in.BrandID.Value); err != nil {
 				return err
 			}
-			if a.Brands != nil && (brand == nil || !a.writes(nil, brand)) {
+			if a.Brands != nil && (brand == nil || !a.writes(brand)) {
 				return errInvalid("you can only move folders between your own brands")
 			}
 		}
@@ -344,7 +344,7 @@ func (s *Server) deleteKnowledgeCollection(w http.ResponseWriter, r *http.Reques
 		if err != nil {
 			return err
 		}
-		if !a.writes(nil, cur.BrandID) {
+		if !a.writes(cur.BrandID) {
 			return errSharedRecord
 		}
 		items, err := tx.Exec(ctx, `UPDATE knowledge_items SET collection_id = $3 WHERE workspace_id = $1 AND collection_id = $2`, a.WorkspaceID, cur.ID, cur.ParentID)
@@ -449,7 +449,7 @@ func knowledgeItemFor(ctx context.Context, q interface {
 	}
 	v, err := scanKnowledgeItem(q.QueryRow(ctx, `SELECT `+knowledgeItemColumns+knowledgeItemJoins+`
 		WHERE i.workspace_id = $1 AND i.id = $2 AND (i.deleted_at IS NULL OR $3)`, a.WorkspaceID, id, bin), true)
-	if errors.Is(err, pgx.ErrNoRows) || (err == nil && !a.sees(nil, v.BrandID)) {
+	if errors.Is(err, pgx.ErrNoRows) || (err == nil && !a.sees(v.BrandID)) {
 		return knowledgeItemView{}, errNotFound
 	}
 	return v, err
@@ -603,9 +603,8 @@ func knowledgeOwner(ctx context.Context, tx pgx.Tx, ws string, user *string) (*s
 	var actor string
 	err := tx.QueryRow(ctx, `
 		SELECT u.actor_id::text FROM users u
-		WHERE u.id = $2 AND u.disabled_at IS NULL AND (
-			EXISTS (SELECT 1 FROM memberships m WHERE m.workspace_id = $1 AND m.user_id = u.id) OR
-			EXISTS (SELECT 1 FROM agency_members am JOIN workspaces w ON w.agency_id = am.agency_id WHERE w.id = $1 AND am.user_id = u.id))`,
+		WHERE u.id = $2 AND u.disabled_at IS NULL AND
+			EXISTS (SELECT 1 FROM memberships m WHERE m.workspace_id = $1 AND m.user_id = u.id)`,
 		ws, *user).Scan(&actor)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, errInvalid("owner_id must be a member of the workspace")
@@ -667,7 +666,7 @@ func (s *Server) createKnowledgeItem(w http.ResponseWriter, r *http.Request) {
 		if brand, err = knowledgeCollectionBrand(ctx, tx, a, in.CollectionID.Value, brand, in.BrandID.Set); err != nil {
 			return err
 		}
-		if brand, err = brandWrite(ctx, tx, a, nil, brand); err != nil {
+		if brand, err = brandWrite(ctx, tx, a, brand); err != nil {
 			return err
 		}
 		owner := nullIfEmpty(a.ActorID)
@@ -750,7 +749,7 @@ func (s *Server) updateKnowledgeItem(w http.ResponseWriter, r *http.Request) {
 		if _, err := tx.Exec(ctx, `SELECT 1 FROM knowledge_items WHERE id = $1 FOR UPDATE`, cur.ID); err != nil {
 			return err
 		}
-		if !a.writes(nil, cur.BrandID) {
+		if !a.writes(cur.BrandID) {
 			return errSharedRecord
 		}
 		brand := cur.BrandID
@@ -758,7 +757,7 @@ func (s *Server) updateKnowledgeItem(w http.ResponseWriter, r *http.Request) {
 			if brand, err = s.brandRef(ctx, a.WorkspaceID, in.BrandID.Value); err != nil {
 				return err
 			}
-			if a.Brands != nil && (brand == nil || !a.writes(nil, brand)) {
+			if a.Brands != nil && (brand == nil || !a.writes(brand)) {
 				return errInvalid("you can only move knowledge between your own brands")
 			}
 		}
@@ -825,7 +824,7 @@ func (s *Server) deleteKnowledgeItem(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			return err
 		}
-		if !a.writes(nil, cur.BrandID) {
+		if !a.writes(cur.BrandID) {
 			return errSharedRecord
 		}
 		if permanent {
@@ -860,7 +859,7 @@ func (s *Server) restoreKnowledgeItem(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			return err
 		}
-		if !a.writes(nil, cur.BrandID) {
+		if !a.writes(cur.BrandID) {
 			return errSharedRecord
 		}
 		if cur.DeletedAt == nil {
@@ -936,7 +935,7 @@ func (s *Server) restoreKnowledgeVersion(w http.ResponseWriter, r *http.Request)
 		if err != nil {
 			return err
 		}
-		if !a.writes(nil, cur.BrandID) {
+		if !a.writes(cur.BrandID) {
 			return errSharedRecord
 		}
 		var title, body string

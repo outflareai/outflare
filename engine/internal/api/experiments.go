@@ -45,7 +45,7 @@ func (s *Server) experimentFor(w http.ResponseWriter, r *http.Request, a *access
 	id := r.PathValue("id")
 	if validUUID(id) {
 		e, err := experiments.Get(r.Context(), s.pool, a.WorkspaceID, id)
-		if err == nil && a.sees(nil, e.BrandID) {
+		if err == nil && a.sees(e.BrandID) {
 			v := &experimentView{Experiment: e}
 			if err := s.pool.QueryRow(r.Context(), `SELECT host FROM seo_sites WHERE id = $1`, e.SiteID).Scan(&v.SiteHost); err != nil {
 				s.internal(w, r, err)
@@ -190,7 +190,7 @@ func (s *Server) createExperiment(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	err := s.pool.QueryRow(ctx, `SELECT host, brand_id::text FROM seo_sites WHERE id = $1 AND workspace_id = $2`, req.SiteID, a.WorkspaceID).Scan(&host, &brand)
-	if errors.Is(err, pgx.ErrNoRows) || (err == nil && !a.sees(nil, brand)) {
+	if errors.Is(err, pgx.ErrNoRows) || (err == nil && !a.sees(brand)) {
 		bad("site_id is an SEO site in this workspace; GET .../seo-sites lists them")
 		return
 	}
@@ -198,7 +198,7 @@ func (s *Server) createExperiment(w http.ResponseWriter, r *http.Request) {
 		s.internal(w, r, err)
 		return
 	}
-	if !a.writes(nil, brand) {
+	if !a.writes(brand) {
 		writeError(w, r, http.StatusForbidden, "forbidden", string(errSharedRecord))
 		return
 	}
@@ -255,7 +255,7 @@ func (s *Server) writableExperiment(w http.ResponseWriter, r *http.Request, a *a
 	if !ok {
 		return nil, false
 	}
-	if !a.writes(nil, v.BrandID) {
+	if !a.writes(v.BrandID) {
 		writeError(w, r, http.StatusForbidden, "forbidden", string(errSharedRecord))
 		return nil, false
 	}

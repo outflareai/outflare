@@ -13,11 +13,10 @@
 //     mailbox with leads in flight drains before it moves.
 //   - Locks are respected; manual_only mailboxes are never touched.
 //   - Only ready mailboxes are allocated.
-//   - A mailbox in a project serves only that project's sequences.
+//   - A brand's mailbox serves only that brand's sequences.
 //
 // Soft preferences decide the order: the sequence's preferred senders,
-// then its team's senders, then shared or unassigned senders; within each,
-// the sequence's own project's mailboxes before workspace-shared ones. Another
+// then its team's senders, then shared or unassigned senders. Another
 // team's mailboxes are only proposed, for that team to approve.
 package allocation
 
@@ -86,8 +85,6 @@ type Mailbox struct {
 	Email  string
 	Domain string
 	PoolID string
-	// ProjectID is the project that owns the mailbox, or "" when shared.
-	ProjectID string
 	// BrandID is the brand that owns the mailbox, or "" when shared.
 	BrandID    string
 	DailyLimit int
@@ -138,8 +135,6 @@ type Sequence struct {
 	Demand   int
 	MinDaily int
 	PoolID   string
-	// ProjectID is the sequence's project, or "".
-	ProjectID string
 	// BrandID is the sequence's brand, or "".
 	BrandID string
 	// Preferred holds the sender ids picked before the rest of the team.
@@ -214,7 +209,6 @@ const (
 	whyOutside       = "busy on an outside platform, or its platform has not synced"
 	whyNoRoute       = "not connected where this campaign sends"
 	whyReadOnly      = "the platform picks mailboxes itself"
-	whyOtherProject  = "belongs to another project"
 	whyOtherBrand    = "belongs to another brand"
 )
 
@@ -287,7 +281,7 @@ func (p *planner) housekeeping() {
 			to := ""
 			reason := "Finished its follow-ups for " + p.name(a.SequenceID) + "."
 			var link string
-			if n := p.seq(a.NextSequenceID); n != nil && n.Status != "archived" && p.lockAllows(m, n) && p.routable(m, n) && projectAllows(m, n) {
+			if n := p.seq(a.NextSequenceID); n != nil && n.Status != "archived" && p.lockAllows(m, n) && p.routable(m, n) {
 				to = n.ID
 				link, _ = p.route(m, n)
 				p.now[m.ID] = to
@@ -312,8 +306,6 @@ func (p *planner) housekeeping() {
 			if m.Lock.Kind == LockSequence {
 				next = m.Lock.SequenceID
 			}
-		case !projectAllows(m, s):
-			why = "It now belongs to another project."
 		case !brandAllows(m, s):
 			why = "It now belongs to another brand."
 		case m.SenderRetired:
@@ -386,10 +378,7 @@ func (p *planner) trimSurplus() {
 			if c := cmp.Compare(a.Assignment.InFlight, b.Assignment.InFlight); c != 0 {
 				return c
 			}
-			if c := -cmp.Compare(p.tier(a, s), p.tier(b, s)); c != 0 {
-				return c // other teams' first
-			}
-			return -cmp.Compare(shared(a, s), shared(b, s)) // then shared ones, keeping the project's own
+			return -cmp.Compare(p.tier(a, s), p.tier(b, s)) // other teams' first
 		})
 		for _, m := range mine {
 			if have-m.DailyLimit < s.Demand {
@@ -447,8 +436,6 @@ func (p *planner) eligible(m *Mailbox, s *Sequence) (bool, string) {
 	switch {
 	case m.Lock != nil && m.Lock.Kind == LockManualOnly:
 		return false, whyManualOnly
-	case !projectAllows(m, s):
-		return false, whyOtherProject
 	case !brandAllows(m, s):
 		return false, whyOtherBrand
 	case m.Lock != nil && !p.lockAllows(m, s):
@@ -473,25 +460,10 @@ func (p *planner) eligible(m *Mailbox, s *Sequence) (bool, string) {
 	return true, ""
 }
 
-// projectAllows reports whether m may serve s: a project's mailbox serves
-// only that project's sequences; a shared one serves any.
-func projectAllows(m *Mailbox, s *Sequence) bool {
-	return m.ProjectID == "" || m.ProjectID == s.ProjectID
-}
-
 // brandAllows reports whether m may serve s: a brand's mailbox serves only
 // that brand's sequences; a shared one serves any.
 func brandAllows(m *Mailbox, s *Sequence) bool {
 	return m.BrandID == "" || m.BrandID == s.BrandID
-}
-
-// shared is 1 for a workspace-shared mailbox serving a project's sequence,
-// so the project's own mailboxes sort first.
-func shared(m *Mailbox, s *Sequence) int {
-	if s.ProjectID != "" && m.ProjectID == "" {
-		return 1
-	}
-	return 0
 }
 
 // route is the link m would send in for s, "" for Outflare itself, and
@@ -636,9 +608,6 @@ func (p *planner) fill() {
 				if c := cmp.Compare(p.tier(a, s), p.tier(b, s)); c != 0 {
 					return c
 				}
-				if c := cmp.Compare(shared(a, s), shared(b, s)); c != 0 {
-					return c
-				}
 				return cmp.Compare(b.DailyLimit, a.DailyLimit)
 			})
 			for _, m := range cands {
@@ -694,12 +663,6 @@ func (p *planner) best(list []*Mailbox, s *Sequence) int {
 	for i := 1; i < len(list); i++ {
 		a, b := list[i], list[best]
 		if c := cmp.Compare(p.tier(a, s), p.tier(b, s)); c != 0 {
-			if c < 0 {
-				best = i
-			}
-			continue
-		}
-		if c := cmp.Compare(shared(a, s), shared(b, s)); c != 0 {
 			if c < 0 {
 				best = i
 			}

@@ -749,7 +749,7 @@ func (r *runner) commitTx(ctx context.Context, tx pgx.Tx) error {
 		integration := id
 		note := "List " + r.run.Kind
 		if _, _, err := outcomes.Record(ctx, tx, outcomes.Entry{
-			WorkspaceID: r.ws, ProjectID: r.run.ProjectID, Category: outcomes.CategoryData, Provider: provider,
+			WorkspaceID: r.ws, Category: outcomes.CategoryData, Provider: provider,
 			IntegrationID: &integration, Units: &units, UnitName: "credit", OccurredAt: time.Now(),
 			Source: outcomes.SourceAuto, Ref: &ref, Note: note, ActorID: r.run.RequestedBy,
 		}); err != nil {

@@ -713,7 +713,7 @@ func (s *Server) changeMember(w http.ResponseWriter, r *http.Request, a *access,
 // themselves each time they refresh (stillGranted).
 func limitMemberTokens(ctx context.Context, tx pgx.Tx, p *principal, ws, userID string, allowed []string, brands []string) error {
 	rows, err := tx.Query(ctx, `
-		SELECT t.id, t.scopes, t.brand_id::text, t.project_id IS NOT NULL FROM api_tokens t
+		SELECT t.id, t.scopes, t.brand_id::text FROM api_tokens t
 		WHERE t.workspace_id = $1 AND t.created_by = $2 AND t.revoked_at IS NULL
 		  AND NOT EXISTS (SELECT 1 FROM oauth_grants g WHERE g.api_token_id = t.id)
 		FOR UPDATE OF t`, ws, userID)
@@ -721,14 +721,13 @@ func limitMemberTokens(ctx context.Context, tx pgx.Tx, p *principal, ws, userID 
 		return err
 	}
 	type token struct {
-		id      string
-		scopes  []string
-		brand   *string
-		project bool
+		id     string
+		scopes []string
+		brand  *string
 	}
 	list, err := pgx.CollectRows(rows, func(r pgx.CollectableRow) (token, error) {
 		var t token
-		err := r.Scan(&t.id, &t.scopes, &t.brand, &t.project)
+		err := r.Scan(&t.id, &t.scopes, &t.brand)
 		return t, err
 	})
 	if err != nil {
@@ -742,7 +741,7 @@ func limitMemberTokens(ctx context.Context, tx pgx.Tx, p *principal, ws, userID 
 			reason = "member_removed"
 		case len(keep) == 0:
 			reason = "role_changed"
-		case len(brands) > 0 && !t.project && (t.brand == nil || !slices.Contains(brands, *t.brand)):
+		case len(brands) > 0 && (t.brand == nil || !slices.Contains(brands, *t.brand)):
 			reason = "brands_changed"
 		}
 		if reason != "" {
@@ -1133,8 +1132,6 @@ type tokenView struct {
 	CreatedAt  time.Time  `json:"created_at"`
 	ExpiresAt  *time.Time `json:"expires_at"`
 	LastUsedAt *time.Time `json:"last_used_at"`
-	// Set when the token only sees and changes one project.
-	ProjectID *string `json:"project_id"`
 	// Set when the token only sees one brand's records and the shared ones,
 	// and changes only that brand's.
 	BrandID *string `json:"brand_id"`
@@ -1150,12 +1147,12 @@ type tokenLimitsView struct {
 	DefaultTeamID    *string `json:"default_team_id"`
 }
 
-const tokenColumns = `id, name, prefix, scopes, created_at, expires_at, last_used_at, project_id::text, brand_id::text,
+const tokenColumns = `id, name, prefix, scopes, created_at, expires_at, last_used_at, brand_id::text,
 	daily_send_budget, CASE max_priority WHEN 0 THEN 'low' WHEN 1 THEN 'normal' WHEN 2 THEN 'high' END, may_take_mailboxes, default_team_id::text`
 
 func scanToken(row pgx.Row) (tokenView, error) {
 	var v tokenView
-	err := row.Scan(&v.ID, &v.Name, &v.Prefix, &v.Scopes, &v.CreatedAt, &v.ExpiresAt, &v.LastUsedAt, &v.ProjectID, &v.BrandID,
+	err := row.Scan(&v.ID, &v.Name, &v.Prefix, &v.Scopes, &v.CreatedAt, &v.ExpiresAt, &v.LastUsedAt, &v.BrandID,
 		&v.DailySendBudget, &v.MaxPriority, &v.MayTakeMailboxes, &v.DefaultTeamID)
 	return v, err
 }
@@ -1237,10 +1234,11 @@ func (s *Server) createToken(w http.ResponseWriter, r *http.Request) {
 		Name          string   `json:"name"`
 		Scopes        []string `json:"scopes"`
 		ExpiresInDays *int     `json:"expires_in_days"`
-		// Binds the token to one project. Fixed for the token's life.
+		// Refused: projects were removed. Ignoring it would make a token
+		// that reaches more than the caller asked for.
 		ProjectID *string `json:"project_id"`
 		// Binds the token to one brand, by id or handle. Fixed for the
-		// token's life; not with project_id.
+		// token's life.
 		Brand *string `json:"brand"`
 		tokenLimits
 	}
@@ -1271,8 +1269,8 @@ func (s *Server) createToken(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	if req.Brand != nil && req.ProjectID != nil {
-		writeError(w, r, http.StatusBadRequest, "invalid_request", "a token is bound to a brand or to a project, not both: a project token already keeps to its project's brand")
+	if req.ProjectID != nil {
+		writeError(w, r, http.StatusBadRequest, "invalid_request", "project_id: projects were removed; limit the token to a brand with brand instead")
 		return
 	}
 	var brand *string
@@ -1311,32 +1309,21 @@ func (s *Server) createToken(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			return err
 		}
-		if p := req.ProjectID; p != nil {
-			var ok bool
-			if validUUID(*p) {
-				if err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM projects WHERE id = $1 AND workspace_id = $2)`, *p, a.WorkspaceID).Scan(&ok); err != nil {
-					return err
-				}
-			}
-			if !ok {
-				return errInvalid("project not found")
-			}
-		}
 		var actorID string
 		if err := tx.QueryRow(ctx, `INSERT INTO actors (workspace_id, type, display_name) VALUES ($1, 'api_token', $2) RETURNING id`, a.WorkspaceID, name).Scan(&actorID); err != nil {
 			return err
 		}
 		v, err = scanToken(tx.QueryRow(ctx, `
 			INSERT INTO api_tokens (workspace_id, actor_id, name, prefix, token_hash, scopes, created_by, expires_at,
-			                        daily_send_budget, max_priority, may_take_mailboxes, default_team_id, project_id, brand_id)
-			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, COALESCE($11, false), $12, $13, $14)
+			                        daily_send_budget, max_priority, may_take_mailboxes, default_team_id, brand_id)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, COALESCE($11, false), $12, $13)
 			RETURNING `+tokenColumns,
 			a.WorkspaceID, actorID, name, prefix, hash, req.Scopes, createdBy, expiresAt,
-			req.DailySendBudget.Value, prio, req.MayTakeMailboxes, req.DefaultTeamID.Value, req.ProjectID, brand))
+			req.DailySendBudget.Value, prio, req.MayTakeMailboxes, req.DefaultTeamID.Value, brand))
 		if err != nil {
 			return err
 		}
-		return record(ctx, tx, &a.principal, a.WorkspaceID, "token.created", "api_token", v.ID, map[string]any{"name": name, "scopes": req.Scopes, "project_id": req.ProjectID, "brand_id": brand})
+		return record(ctx, tx, &a.principal, a.WorkspaceID, "token.created", "api_token", v.ID, map[string]any{"name": name, "scopes": req.Scopes, "brand_id": brand})
 	})
 	if s.allocError(w, r, err) {
 		return

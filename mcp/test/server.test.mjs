@@ -290,20 +290,12 @@ test("starts in a mission from the option", async () => {
   assert.equal(calls[0].headers.get("outflare-mission"), MISSION);
 });
 
-test("reads a project's brief and edits it with the version it read", async () => {
-  const PROJ = "44444444-4444-4444-8444-444444444444";
-  const { client, calls } = await connect(() => [200, { project_id: PROJ, version: 3, markdown: "# Fintech" }]);
-  const res = await client.callTool({ name: "get_project_brief", arguments: { project_id: PROJ } });
-  assert.equal(JSON.parse(res.content[0].text).version, 3);
-  assert.equal(calls[0].url.pathname, `/v1/workspaces/${WS}/projects/${PROJ}/brief`);
-
-  await client.callTool({ name: "update_project", arguments: { project_id: PROJ, brief: "Lead with the audit.", brief_version: 3, icp: { titles: ["CFO"] } } });
-  assert.equal(calls[1].method, "PATCH");
-  assert.equal(calls[1].url.pathname, `/v1/workspaces/${WS}/projects/${PROJ}`);
-  assert.deepEqual(JSON.parse(calls[1].body), { brief: "Lead with the audit.", brief_version: 3, icp: { titles: ["CFO"] } });
-
-  await client.callTool({ name: "add_to_project", arguments: { project_id: PROJ, domains: ["acme-mail.com"] } });
-  assert.equal(calls[2].url.pathname, `/v1/workspaces/${WS}/projects/${PROJ}/add`);
+test("projects were removed: no project tools", async () => {
+  const { client } = await connect(() => [200, {}]);
+  const names = (await client.listTools()).tools.map((t) => t.name);
+  for (const gone of ["list_projects", "get_project_brief", "create_project", "update_project", "add_to_project", "remove_from_project"]) {
+    assert.ok(!names.includes(gone), gone);
+  }
 });
 
 test("analytics for agents: changes, catalog resource, prompts and compact answers", async () => {
@@ -371,7 +363,6 @@ test("get_context comes first and joins the context with the status and onboardi
     context: { company: "Acme", missing: ["goals", "voice"], ask_for_missing: true, version: 2 },
     memories: [{ id: SEQ, kind: "preference", text: "No pricing in email one", pinned: true }],
     memory_count: 1,
-    projects: [],
     markdown: "# Acme\n\n## Remembered\n\n- (preference) No pricing in email one\n",
   };
   const status = { summary: "1 problem is stopping sending: no mailboxes connected.", can_send: false, setup: [], blockers: [{ code: "no_mailboxes" }] };

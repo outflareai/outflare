@@ -87,7 +87,7 @@ export interface paths {
         };
         /**
          * Who the caller is
-         * @description Any session or token. For an API token: its workspace, project, scopes and expiry, so a client
+         * @description Any session or token. For an API token: its workspace, brand, scopes and expiry, so a client
          *     holding only a token can find everything else. For a signed-in person: the user (GET /v1/me lists their
          *     workspaces).
          */
@@ -717,7 +717,7 @@ export interface paths {
             path: {
                 /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
                 ws: components["parameters"]["Workspace"];
-                kind: "sequence" | "project" | "list" | "mission" | "server" | "plan" | "connection" | "token" | "webhook";
+                kind: "sequence" | "list" | "mission" | "server" | "plan" | "connection" | "token" | "webhook";
                 /** @description The item's ID, or any slug it has had. Underscores read as dashes. */
                 ref: string;
             };
@@ -725,7 +725,7 @@ export interface paths {
         };
         /**
          * Find an item by the slug in its web app URL
-         * @description Scope: workspace.read, plus the item's own read scope (sequences.read, projects.read, leads.read for lists,
+         * @description Scope: workspace.read, plus the item's own read scope (sequences.read, leads.read for lists,
          *     missions.read, mailboxes.read for servers, infrastructure.read for plans, integrations.read for connections,
          *     tokens.manage for API tokens, webhooks.read for webhook endpoints). The web app names items by a slug made from
          *     their name (https://app.outflare.ai/acme/sequences/q3-founders); a connection's slug comes from its connector
@@ -2235,13 +2235,13 @@ export interface paths {
         };
         /**
          * List lead lists, with each list's latest run
-         * @description Scope: leads.read. A project token sees only its project's lists.
+         * @description Scope: leads.read.
          */
         get: operations["listLeadLists"];
         put?: never;
         /**
          * Create a lead list, optionally built from a data provider search
-         * @description Scope: leads.manage. A list with search_integration_id and filters is a search list that can be built and refreshed from that provider. Set build to true to queue the first build in the same call. A project token's lists always belong to its project.
+         * @description Scope: leads.manage. A list with search_integration_id and filters is a search list that can be built and refreshed from that provider. Set build to true to queue the first build in the same call.
          */
         post: operations["createLeadList"];
         delete?: never;
@@ -2965,7 +2965,6 @@ export interface paths {
          *     nothing until its status is set to `active`. Defaults: UTC,
          *     Monday to Friday, 09:00 to 17:00, no daily cap on new leads, stop on
          *     reply.
-         *     A project token's sequences always belong to its project.
          */
         post: operations["createSequence"];
         delete?: never;
@@ -3087,8 +3086,6 @@ export interface paths {
          *     leads are skipped, and so are leads active in another sequence
          *     unless `skip_active_elsewhere` is false. Adding a lead twice does
          *     nothing.
-         *     A project token can only use `list_id` for one of its project's
-         *     lists, and `lead_ids` reach only leads on its project's lists.
          */
         post: operations["enrollLeads"];
         delete?: never;
@@ -3168,6 +3165,30 @@ export interface paths {
          *     stops every active sequence for it in the workspace.
          */
         post: operations["unsubscribe"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/l/{code}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                code: string;
+            };
+            cookie?: never;
+        };
+        /**
+         * Follow a campaign's redirect link
+         * @description Counts the click (flagging link scanners and previews) and sends the
+         *     person to the link's tagged page, with `ofclk`, the click's key,
+         *     added. A link whose campaign is archived still works.
+         */
+        get: operations["followRedirectLink"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -3546,15 +3567,15 @@ export interface paths {
          * @description Scope inbox.read. What Outflare does when a reply gets a label it is
          *     sure of (rules, a person, or the AI at 80% or more): the defaults,
          *     the actions each label can take, and the sets saved for the
-         *     workspace, a project or a sequence. For a reply, the sequence's set
-         *     wins over its project's, which wins over the workspace's, label by
-         *     label; labels no set names follow the defaults.
+         *     workspace or a sequence. For a reply, the sequence's set wins over
+         *     the workspace's, label by label; labels no set names follow the defaults.
          */
         get: operations["getReplyRules"];
         /**
-         * Save the reply rules for the workspace, a project or a sequence
-         * @description Scope inbox.manage. Replaces the set for the workspace (no ids), a
-         *     project (project_id) or a sequence (sequence_id). Labels left out
+         * Save the reply rules for the workspace or a sequence
+         * @description Scope inbox.manage. Replaces the set for the workspace (no id) or a
+         *     sequence (sequence_id). A project_id is refused with 400: projects
+         *     were removed. Labels left out
          *     follow the next set up; an empty rules object removes the set and
          *     answers {"cleared": true}. Every action can be undone: a snoozed
          *     reply can be woken, a restarted or enrolled lead stopped.
@@ -4175,8 +4196,10 @@ export interface paths {
          * Make a tagged link
          * @description Scope: analytics.manage. Tags a page with the campaign's utm_source, utm_medium and utm_campaign, the content and
          *     term given, and its ofc code. Tags the page already had are replaced; other parameters stay. The same page,
-         *     content and term give back the link already made (200). Links go straight to the page, with no redirect: the
-         *     website tracking snippet reads the tags there.
+         *     content and term give back the link already made (200). Links go straight to the page by default: the website
+         *     tracking snippet reads the tags there. With `redirect` (or the campaign's `redirect_links`), the link also gets a
+         *     short redirect link that counts each click first, for places the snippet can't run; asking again for a link
+         *     made without one adds it.
          */
         post: operations["createTrackingLink"];
         delete?: never;
@@ -6722,7 +6745,17 @@ export interface paths {
          */
         get: operations["listLinkSequences"];
         put?: never;
-        post?: never;
+        /**
+         * Create the starter sequence for link pitches
+         * @description Scope: sequences.manage. Creates a draft sequence ready for link
+         *     pitches: a first email with `{{custom.opener}}` (the opener the
+         *     workspace's AI writes for each page) and one follow-up five days
+         *     later in the same thread, from the sender's first name. Each pitch
+         *     waits for approval. Edit its steps, mailboxes and sending window
+         *     like any sequence; it sends nothing until a pitch through it is
+         *     approved. `name` defaults to "Link pitches".
+         */
+        post: operations["createLinkSequence"];
         delete?: never;
         options?: never;
         head?: never;
@@ -6932,6 +6965,293 @@ export interface paths {
         get: operations["listNewsArticles"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/workspaces/{ws}/pr-experts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+            };
+            cookie?: never;
+        };
+        /**
+         * List PR experts
+         * @description Scope: seo.read. The people each brand quotes in its stories, the default first.
+         */
+        get: operations["listPRExperts"];
+        put?: never;
+        /**
+         * Add a PR expert
+         * @description Scope: seo.manage. Adds a person a brand quotes: an existing person
+         *     record (`record_id`), or one found or added by `email` and `name`.
+         *     The brand's first expert is its default; `is_default` makes this
+         *     one the default instead. A brand has at most 50.
+         */
+        post: operations["createPRExpert"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/workspaces/{ws}/pr-experts/{expert}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                expert: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Remove a PR expert
+         * @description Scope: seo.manage. Their quotes go too, and an approved story that used one goes back to draft. Their person record stays.
+         */
+        delete: operations["deletePRExpert"];
+        options?: never;
+        head?: never;
+        /**
+         * Change a PR expert
+         * @description Scope: seo.manage. `is_default: true` makes them the brand's default expert.
+         */
+        patch: operations["updatePRExpert"];
+        trace?: never;
+    };
+    "/v1/workspaces/{ws}/stories": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+            };
+            cookie?: never;
+        };
+        /**
+         * List stories
+         * @description Scope: seo.read. Digital PR stories, last changed first, without their facts and quotes (get one story for those). Leaves out archived ones unless `status` asks for them.
+         */
+        get: operations["listStories"];
+        put?: never;
+        /**
+         * Start a story
+         * @description Scope: seo.manage. A story starts as an `idea`, or a `draft` when
+         *     it has a release. Add the facts behind its numbers and its
+         *     expert's quotes, check it, and a person approves it.
+         */
+        post: operations["createStory"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/workspaces/{ws}/stories/{story}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                story: string;
+            };
+            cookie?: never;
+        };
+        /**
+         * Get a story
+         * @description Scope: seo.read. With its facts and quotes.
+         */
+        get: operations["getStory"];
+        put?: never;
+        post?: never;
+        /**
+         * Delete a story
+         * @description Scope: seo.manage. With its facts and quotes. To keep it, archive it instead.
+         */
+        delete: operations["deleteStory"];
+        options?: never;
+        head?: never;
+        /**
+         * Change a story
+         * @description Scope: seo.manage. Changing an approved story's headline, kind,
+         *     release or embargo moves it back to `draft`. `status` moves it
+         *     between `idea`, `draft` and `archived`; approving is
+         *     `POST .../approve`.
+         */
+        patch: operations["updateStory"];
+        trace?: never;
+    };
+    "/v1/workspaces/{ws}/stories/{story}/facts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                story: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Add a fact to a story
+         * @description Scope: seo.manage. A fact the story states and where it comes from
+         *     (`source_url`, `source_note` or both). Every number in the release
+         *     must appear in one of the story's facts. Figures from the brand's
+         *     own data are aggregates only, never about a person. A story has at
+         *     most 100 facts.
+         */
+        post: operations["addStoryFact"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/workspaces/{ws}/stories/{story}/facts/{fact}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                story: string;
+                fact: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Remove a fact from a story
+         * @description Scope: seo.manage. An approved story goes back to draft.
+         */
+        delete: operations["deleteStoryFact"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/workspaces/{ws}/stories/{story}/quotes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                story: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Add a quote to a story
+         * @description Scope: seo.manage. A quote by one of the brand's experts (the
+         *     default when `expert_id` is left out), as a draft. Only a quote the
+         *     expert approved may appear in the release.
+         */
+        post: operations["addStoryQuote"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/workspaces/{ws}/stories/{story}/quotes/{quote}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                story: string;
+                quote: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Change a quote, or record its approval
+         * @description Scope: seo.manage. New words (`body`) make the quote a draft again,
+         *     and an approved story that used it goes back to draft. `status:
+         *     approved` records that the expert agreed to these exact words,
+         *     with `approval_note` saying how; only a person can record it (403
+         *     for tokens and agents). Changing the words and approving them are
+         *     two calls.
+         */
+        patch: operations["updateStoryQuote"];
+        trace?: never;
+    };
+    "/v1/workspaces/{ws}/stories/{story}/check": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                story: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Check a story's release
+         * @description Scope: seo.read. Checks the release and keeps the result on the
+         *     story (`last_check`). Errors stop approval: no release, a number
+         *     that appears in no fact, a fact without a source, a quoted passage
+         *     that isn't an approved quote. Warnings are for the person
+         *     approving: hype that journalists skip, and finance or health claims
+         *     that need a second look. Costs nothing.
+         */
+        post: operations["checkStory"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/workspaces/{ws}/stories/{story}/approve": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                story: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Approve a story's release
+         * @description Scope: seo.manage. Checks the release and, when it passes, marks
+         *     the story approved: it may be pitched. Only a person can approve
+         *     (403 for tokens and agents); 409 `check_failed` when the check
+         *     finds errors, kept on the story as `last_check`.
+         */
+        post: operations["approveStory"];
         delete?: never;
         options?: never;
         head?: never;
@@ -10290,14 +10610,14 @@ export interface paths {
         /**
          * Cost per reply, meeting and deal
          * @description Scope: outcomes.read. Sends, replies, meetings, deals and spend over a
-         *     period, for the workspace or per project or sequence, with cost per
+         *     period, for the workspace or per sequence or brand, with cost per
          *     reply, per meeting, per held meeting and per deal. Spend tied to a
-         *     sequence, project, mailbox or domain is charged to it directly; the
+         *     sequence, brand, mailbox or domain is charged to it directly; the
          *     rest is shared out by each row's share of emails sent. Usage recorded
          *     only as units (credits) is priced with the workspace's spend rates and
          *     reported as estimated; usage with no rate is listed under `unpriced`.
          *     Nothing is converted between currencies. group_by=brand compares
-         *     brands (a row's brand is its sequence's or project's), and brand keeps
+         *     brands (a row's brand is its sequence's), and brand keeps
          *     the report to one brand.
          */
         get: operations["outcomesReport"];
@@ -10403,8 +10723,8 @@ export interface paths {
          * Log a meeting
          * @description Scope: outcomes.manage. For meetings no connected calendar sees. Give
          *     lead_id or attendee_email; the meeting is tied to the sequence that
-         *     last emailed that lead, unless sequence_id or project_id is given
-         *     (which pins it). Status defaults to held for a meeting more than an
+         *     last emailed that lead, unless sequence_id is given (which pins
+         *     it). Status defaults to held for a meeting more than an
          *     hour in the past, otherwise booked.
          */
         post: operations["createMeeting"];
@@ -10441,8 +10761,8 @@ export interface paths {
         head?: never;
         /**
          * Mark a meeting held, no-show or qualified, or fix its attribution
-         * @description Scope: outcomes.manage. Setting sequence_id, project_id or
-         *     unattributed pins the attribution so syncs never move it. A status a
+         * @description Scope: outcomes.manage. Setting sequence_id or unattributed
+         *     pins the attribution so syncs never move it. A status a
          *     person sets (held, no_show) is kept by syncs, unless the source
          *     cancels the meeting.
          */
@@ -10530,8 +10850,7 @@ export interface paths {
          *     units with a unit_name (e.g. 1200 credit) to have reports price it
          *     with the workspace's rates. With a ref already in the ledger nothing
          *     is added and the existing entry comes back with 200, so retries never
-         *     double count. project_id is filled from the sequence, mailbox or
-         *     domain when left out.
+         *     double count.
          */
         post: operations["recordSpend"];
         delete?: never;
@@ -10917,7 +11236,6 @@ export interface paths {
          * @description Scope: missions.run. Starts as a draft: writes made in it are dry
          *     runs until a person approves it. A mission created with an API token
          *     is run by that token; a person can assign any token with token_id.
-         *     A token bound to a project creates missions only in that project.
          */
         post: operations["createMission"];
         delete?: never;
@@ -10953,7 +11271,7 @@ export interface paths {
          *     one the call fails with 409 `connector_needed`; with a provider but
          *     no model or price chosen, 409 `ai_model_needed`; past the
          *     workspace's monthly AI limit, 409 `ai_budget_reached`. The model is
-         *     sent the goal, the project brief and a summary of the workspace,
+         *     sent the goal, the company context and a summary of the workspace,
          *     never lead lists, email addresses or keys.
          */
         post: operations["planMission"];
@@ -10977,8 +11295,8 @@ export interface paths {
         /**
          * Check in on a mission
          * @description Scope: missions.read. What an agent reads before it acts: the
-         *     mission, the project brief (and whether it changed since approval),
-         *     what Outflare knows about the company (context and pinned memories),
+         *     mission, its brand's context when it has a brand, what Outflare
+         *     knows about the company (context and pinned memories),
          *     limits, progress, open connect requests and the latest notes.
          */
         get: operations["getMission"];
@@ -10990,7 +11308,7 @@ export interface paths {
         /**
          * Change a mission
          * @description Scope: missions.run. Once a mission is approved, changing its mode,
-         *     limits, token or project also needs missions.approve, and an agent
+         *     limits or token also needs missions.approve, and an agent
          *     cannot change its own. An ended mission cannot change.
          */
         patch: operations["updateMission"];
@@ -11036,8 +11354,7 @@ export interface paths {
         /**
          * Approve and start a mission
          * @description Scope: missions.approve. A person, or an approver token that is not
-         *     the mission's own. Records the project brief version it was
-         *     approved against.
+         *     the mission's own.
          *
          *     `runner: builtin` hands the mission to Outflare's own agent, which
          *     runs it in turns with the workspace's AI model (`GET /ai-settings`).
@@ -11975,11 +12292,9 @@ export interface paths {
          * @description Scope: workspace.read. What an agent reads at the start of every
          *     conversation, so the person never has to repeat themselves: the
          *     company context (who they are, goals, voice, rules), pinned and
-         *     recent memories, and the projects whose briefs hold each motion's
-         *     offer and audience. `context.missing` lists the onboarding fields
+         *     recent memories, and the brands' summaries. `context.missing` lists the onboarding fields
          *     still empty; when `context.ask_for_missing` is true, ask the person
-         *     for them once and save the answers with PATCH. A project token sees
-         *     workspace-wide memories and its own project's.
+         *     for them once and save the answers with PATCH.
          */
         get: operations["getContext"];
         put?: never;
@@ -11989,12 +12304,13 @@ export interface paths {
         head?: never;
         /**
          * Edit the company context
-         * @description Scope: context.manage, not available to project tokens. Send only
+         * @description Scope: context.manage. Send only
          *     the fields to change; a real change bumps `version`. Send the
          *     `version` you read to avoid overwriting someone else's edit: if the
          *     context changed since, the update fails with 409 `context_changed`.
-         *     Offer, audience, market and ideal customer belong on projects, not
-         *     here.
+         *     A brand's offer and audience belong in its own context
+         *     (PATCH /brands/{brand}/context); ideal customers in customer
+         *     profiles.
          */
         patch: operations["updateContext"];
         trace?: never;
@@ -12096,8 +12412,8 @@ export interface paths {
          * @description Scope: context.manage. Save one lasting fact, preference or decision
          *     in a sentence, such as "Never mention pricing in a first email".
          *     Never a transcript. Saving the same text again keeps one memory. A
-         *     call made inside a mission records the mission. A project token
-         *     saves into its own project. A workspace keeps at most 1000.
+         *     call made inside a mission records the mission. A workspace keeps at
+         *     most 1000.
          */
         post: operations["createMemory"];
         delete?: never;
@@ -12129,7 +12445,7 @@ export interface paths {
         head?: never;
         /**
          * Change a memory
-         * @description Scope: context.manage. Correct its text, change its kind, pin it, or move it to a project (null for the whole workspace).
+         * @description Scope: context.manage. Correct its text, change its kind, pin it, or move it to a brand (brand_id, null for the whole workspace).
          */
         patch: operations["updateMemory"];
         trace?: never;
@@ -12378,14 +12694,14 @@ export interface paths {
         /**
          * List ideal customer profiles
          * @description Scope: projects.read. Who the workspace sells to: each profile is a description in words plus filters in the
-         *     same vocabulary as lead searches. Projects, lead list fit scores and the lead finder read them. Active ones by
+         *     same vocabulary as lead searches. Lead lists, lead list fit scores and the lead finder read them. Active ones by
          *     default, by name.
          */
         get: operations["listCustomerProfiles"];
         put?: never;
         /**
          * Create an ideal customer profile
-         * @description Scope: projects.manage. Link it to projects with their `profile_id`. At most 500 per workspace.
+         * @description Scope: projects.manage. Link it to lead lists with their `profile_id`. At most 500 per workspace.
          */
         post: operations["createCustomerProfile"];
         delete?: never;
@@ -12417,161 +12733,9 @@ export interface paths {
         head?: never;
         /**
          * Edit, archive or restore an ideal customer profile
-         * @description Scope: projects.manage. New filters are copied to every project that uses the profile, and bump those
-         *     projects' `brief_version`. A change to description or filters bumps the profile's `version`.
+         * @description Scope: projects.manage. A change to description or filters bumps the profile's `version`.
          */
         patch: operations["updateCustomerProfile"];
-        trace?: never;
-    };
-    "/v1/workspaces/{ws}/projects": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
-                ws: components["parameters"]["Workspace"];
-            };
-            cookie?: never;
-        };
-        /**
-         * List projects
-         * @description Scope: projects.read. A project is one go-to-market motion: an offer
-         *     sold to one ideal customer in one market. It holds the brief people
-         *     and agents work from and owns domains, mailboxes, lead lists and
-         *     sequences. A project token sees only its own project.
-         */
-        get: operations["listProjects"];
-        put?: never;
-        /**
-         * Create a project
-         * @description Scope: projects.manage, not available to project tokens. Names are unique in the workspace, ignoring case.
-         */
-        post: operations["createProject"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/workspaces/{ws}/projects/{id}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
-                ws: components["parameters"]["Workspace"];
-                id: string;
-            };
-            cookie?: never;
-        };
-        /**
-         * Get a project
-         * @description Scope: projects.read.
-         */
-        get: operations["getProject"];
-        put?: never;
-        post?: never;
-        /**
-         * Delete a project
-         * @description Scope: projects.manage, not available to project tokens. Its domains,
-         *     mailboxes, lists and sequences stay and become shared by the
-         *     workspace. Fails with 409 `project_has_tokens` while the project has
-         *     live API tokens; revoke them first, or archive the project instead.
-         */
-        delete: operations["deleteProject"];
-        options?: never;
-        head?: never;
-        /**
-         * Edit a project's brief, status or daily send limit
-         * @description Scope: projects.manage. A change to offer, audience, market, brief or
-         *     icp bumps `brief_version`. Send the `brief_version` you read to make
-         *     sure you are not overwriting someone else's edit: if the brief has
-         *     changed since, the update fails with 409 `brief_changed`. `status:
-         *     paused` holds every send from the project's sequences; `archived`
-         *     also hides it from the default list.
-         */
-        patch: operations["updateProject"];
-        trace?: never;
-    };
-    "/v1/workspaces/{ws}/projects/{id}/brief": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
-                ws: components["parameters"]["Workspace"];
-                id: string;
-            };
-            cookie?: never;
-        };
-        /**
-         * Read a project's brief
-         * @description Scope: projects.read. What an agent should read before writing copy,
-         *     building a list or planning a campaign for the project: the
-         *     structured fields plus the whole brief as one Markdown document.
-         *     Keep `version` and compare it later to know the brief moved.
-         */
-        get: operations["getProjectBrief"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/workspaces/{ws}/projects/{id}/add": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
-                ws: components["parameters"]["Workspace"];
-                id: string;
-            };
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Move domains, mailboxes, lists or sequences into a project
-         * @description Scope: projects.manage, plus mailboxes.manage for domains and
-         *     mailboxes, leads.manage for lists and sequences.manage for
-         *     sequences. Not available to project tokens. Records in another
-         *     project move to this one. A domain brings its mailboxes unless
-         *     `with_mailboxes` is false. A project's mailboxes only send for that
-         *     project's sequences, so moving one can take it off a sequence (it
-         *     finishes follow-ups first).
-         */
-        post: operations["addToProject"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/workspaces/{ws}/projects/{id}/remove": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
-                ws: components["parameters"]["Workspace"];
-                id: string;
-            };
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Make a project's domains, mailboxes, lists or sequences shared again
-         * @description Scope: projects.manage, plus read access to each kind of record moved (as addToProject). Only records in this project change.
-         */
-        post: operations["removeFromProject"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
         trace?: never;
     };
     "/v1/workspaces/{ws}/catalog": {
@@ -12974,8 +13138,10 @@ export interface paths {
          *     and keep its history, archive it instead (PATCH with archived: true). Goes with it: the records merged into
          *     it, its identities, links, field history and consents and, for a person, everything about them: their
          *     leads (also any lead with one of their emails), the cold email sent to them and their replies, meetings,
-         *     lifecycle email sent to them alone, product events, website visits and journey runs. Deals, payments and
-         *     opt-outs stay, unlinked; a company's people stay, unlinked from it. erased counts the rows removed, by
+         *     lifecycle email sent to them alone, product events, website visits, journey runs, partner referrals and
+         *     partner portal sign-ins. Deals, payments and opt-outs stay, unlinked; a partner's memberships, rewards and
+         *     payouts stay on a new archived record named "Erased partner" with no name or identities, suspended and
+         *     without payout details or notes, so commission totals still add up; a company's people stay, unlinked from it. erased counts the rows removed, by
          *     table. A deal is deleted with DELETE .../deals/{deal}.
          */
         delete: operations["deleteRecord"];
@@ -14315,6 +14481,59 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/workspaces/{ws}/ab-tests/{test}/checklist": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                test: string;
+            };
+            cookie?: never;
+        };
+        /**
+         * Check an A/B test before it starts
+         * @description Scope: analytics.read. What would stop the test measuring anything useful: the flag (fail when archived, has one
+         *     version or lost the control; warn when off), another running test of the flag (fail), whether pages showed its
+         *     versions in the last 7 days, whether visitors reach the first goal, how long it is likely to take, and
+         *     guardrails. ready is false while any check fails.
+         */
+        get: operations["getABTestChecklist"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/workspaces/{ws}/ab-tests/{test}/ship": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                test: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Ship a version of an A/B test
+         * @description Scope: analytics.manage. Shows the chosen version to everyone: the flag gives it all the traffic (weight 100,
+         *     the others 0) at full rollout and is turned on. A running test ends with it as the decision, keeping its
+         *     results; a finished test's decision changes. 409 for a draft.
+         */
+        post: operations["shipABTest"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/workspaces/{ws}/ab-tests/{test}/duplicate": {
         parameters: {
             query?: never;
@@ -14452,14 +14671,14 @@ export interface paths {
          * @description Scope: workspace.read. The businesses this company markets, each
          *     with its own website, such as Geonode and Repocket. Connectors,
          *     members, tokens, leads and suppressions are the workspace's and
-         *     shared by every brand; a brand owns its context, memories, projects
-         *     and sending setup. A workspace with no brands works as one brand.
+         *     shared by every brand; a brand owns its context, memories, lists,
+         *     sequences and sending setup. A workspace with no brands works as one brand.
          */
         get: operations["listBrands"];
         put?: never;
         /**
          * Add a brand
-         * @description Scope: context.manage. Names and handles are unique in the workspace. Then write its context with PATCH /brands/{brand}/context and move its projects and domains in with POST /brands/{brand}/add.
+         * @description Scope: context.manage. Names and handles are unique in the workspace. Then write its context with PATCH /brands/{brand}/context and move its domains and sequences in with POST /brands/{brand}/add.
          */
         post: operations["createBrand"];
         delete?: never;
@@ -14893,14 +15112,13 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Move projects, domains, mailboxes, lists, sequences or missions into a brand
+         * Move domains, mailboxes, lists, sequences or missions into a brand
          * @description Scope: projects.manage, plus mailboxes.manage for domains and
          *     mailboxes, leads.manage for lists, sequences.manage for sequences
          *     and missions.run for missions. Records in another brand move to
-         *     this one. A project brings everything in it; a record in a project
-         *     keeps the project's brand (counted in `in_project`). A domain brings
+         *     this one. A domain brings
          *     its mailboxes unless `with_mailboxes` is false. A brand's mailboxes
-         *     only send for that brand's sequences.
+         *     send for any of that brand's sequences.
          */
         post: operations["addToBrand"];
         delete?: never;
@@ -15639,8 +15857,8 @@ export interface paths {
         /**
          * Draft a plan for domains and mailboxes
          * @description Scope: infrastructure.manage. "10 domains and 30 mailboxes for this
-         *     project by the 14th" is `domain_count: 10, mailboxes_per_domain: 3,
-         *     ready_by: "2026-11-14", project_id`. Domain names come from `brand`
+         *     brand by the 14th" is `domain_count: 10, mailboxes_per_domain: 3,
+         *     ready_by: "2026-11-14", brand_id`. Domain names come from `brand`
          *     unless you list them in `domains`; listing a domain the workspace
          *     already has adds mailboxes to it instead of buying it. Mailbox names
          *     come from `personas`. A plan with a supplier is priced in the
@@ -16893,6 +17111,36 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/workspaces/{ws}/journeys/{id}/test": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Test a journey with one person
+         * @description Scope: emails.read. Takes one person through the journey's live version (or its draft) and says, step by step,
+         *     what would happen to them: which way each branch goes, the subject of each email they would get or why they
+         *     would be skipped, and what each action would do. Nothing is sent, written or recorded: the steps run in a
+         *     transaction that is rolled back. A wait passes at once. The event that starts the run is the one given, or the
+         *     person's latest trigger event. A branch on something they may still do (an event, an opened or clicked email)
+         *     follows the data as it is now; set paths to see the other way. refusal says why they wouldn't start a run now
+         *     (the test goes through the steps anyway).
+         */
+        post: operations["testJourney"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/workspaces/{ws}/journeys/{id}/runs": {
         parameters: {
             query?: never;
@@ -17145,6 +17393,31 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/workspaces/{ws}/partner-programs/{id}/stats": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                /** @description A program's id or slug. */
+                id: string;
+            };
+            cookie?: never;
+        };
+        /**
+         * A program's totals
+         * @description Scope: partners.read. The program's figures across all its partners: partners by status, and the sum of every partner's stats.
+         */
+        get: operations["getPartnerProgramStats"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/workspaces/{ws}/partner-programs/{id}": {
         parameters: {
             query?: never;
@@ -17189,9 +17462,11 @@ export interface paths {
         get?: never;
         /**
          * Replace a partner program's reward rules
-         * @description Scope: partners.manage. Rules stack: every rule a conversion matches gives a reward, except that only the best
-         *     cash rule (percent or fixed) for the partner counts: a group's own rule beats one for everyone, then the highest
-         *     tier (min_sales) reached. [] makes the program track only. Rewards already in the ledger keep what they earned.
+         * @description Scope: partners.manage. Every action rule a conversion matches gives a reward, but only one cash rule (percent
+         *     or fixed) pays, whatever the rules' order: a partner's own rule (partner_id) beats their group's, which beats one
+         *     for everyone; then the highest tier (min_sales) reached; then the narrower recurrence (first, then months, then
+         *     every); then a rule for named product_ids; then the one paying more. [] makes the program track only. Rewards
+         *     already in the ledger keep what they earned.
          */
         put: operations["setPartnerRules"];
         post?: never;
@@ -17306,9 +17581,38 @@ export interface paths {
          *     Run it as often as you like until switch-over day: every object is matched by its id there, so a run adds only
          *     what is new and brings over status changes. Importing sends no reward webhooks and imported sales are not
          *     customer events. One import runs at a time per program (409 conflict); 409 connector_needed when Tolt isn't
-         *     connected. With no source_program, the account's only program is used.
+         *     connected. With no source_program, the account's only program is used, or its only active one
+         *     (listPartnerImportSources lists them).
          */
         post: operations["startPartnerImport"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/workspaces/{ws}/partner-programs/{id}/import-sources": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                /** @description A program's id or slug. */
+                id: string;
+            };
+            cookie?: never;
+        };
+        /**
+         * List the programs an import can read
+         * @description Scope: partners.manage. Reads the programs in the connected partner platform account (Tolt, with your own API
+         *     key), to pick one for startPartnerImport's source_program. suggested is the program an import takes when none
+         *     is named: the only one, or the only active one; empty when you must choose. 409 connector_needed when Tolt isn't
+         *     connected. Nothing is changed on the platform.
+         */
+        get: operations["listPartnerImportSources"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -17792,6 +18096,33 @@ export interface paths {
          * @description Scope: partners.manage. Even before its hold ends. Cash is logged as a cost and counts toward the next payout; an action fires partner_reward.approved for your system.
          */
         post: operations["approvePartnerReward"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/workspaces/{ws}/partner-rewards/bulk": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Approve or reject many held rewards
+         * @description Scope: partners.manage. Approves or rejects pending rewards: those in ids, or every pending one of a program
+         *     (program) or partner (partner_id), optionally of one kind. Each is recorded as if done alone
+         *     (partner_reward.approved or .rejected, with their webhooks). Up to 1,000 a call: more says there are others,
+         *     so call again. Rewards that aren't pending, that you can't see, or that are in a program shared by every brand
+         *     while you are limited to some are listed in skipped with why.
+         */
+        post: operations["bulkPartnerRewards"];
         delete?: never;
         options?: never;
         head?: never;
@@ -19303,7 +19634,11 @@ export interface webhooks {
         };
         get?: never;
         put?: never;
-        /** A project was created. */
+        /**
+         * A project was created.
+         * @deprecated
+         * @description No longer sent, since projects were removed. Listed so existing subscriptions stay valid.
+         */
         post: operations["webhook_project_created"];
         delete?: never;
         options?: never;
@@ -19320,7 +19655,11 @@ export interface webhooks {
         };
         get?: never;
         put?: never;
-        /** A project's brief or settings changed. */
+        /**
+         * A project's brief or settings changed.
+         * @deprecated
+         * @description No longer sent, since projects were removed. Listed so existing subscriptions stay valid.
+         */
         post: operations["webhook_project_updated"];
         delete?: never;
         options?: never;
@@ -19337,7 +19676,11 @@ export interface webhooks {
         };
         get?: never;
         put?: never;
-        /** A project was deleted. */
+        /**
+         * A project was deleted.
+         * @deprecated
+         * @description No longer sent, since projects were removed. Listed so existing subscriptions stay valid.
+         */
         post: operations["webhook_project_deleted"];
         delete?: never;
         options?: never;
@@ -21448,7 +21791,6 @@ export interface components {
             token_id: string | null;
             /** @description The brand the call was about, when it named one. */
             brand_id: string | null;
-            project_id: string | null;
         };
         /** @description Work was queued as a job. Follow it with GET job.url (also in the Location header). */
         QueuedJob: {
@@ -21666,7 +22008,7 @@ export interface components {
             active_sequences: string;
             sent_24h: string;
             replies_24h: string;
-            projects: string;
+            brands: string;
             missions: string;
             api_tokens: string;
             active_users_7d: string;
@@ -21698,7 +22040,8 @@ export interface components {
             goal: string;
             /**
              * Format: uuid
-             * @description Plan inside this project, using its brief.
+             * @deprecated
+             * @description Ignored: projects were removed.
              */
             project_id?: string;
         };
@@ -21729,7 +22072,11 @@ export interface components {
         };
         MissionInput: {
             name?: string;
-            /** Format: uuid */
+            /**
+             * Format: uuid
+             * @deprecated
+             * @description Ignored: projects were removed.
+             */
             project_id?: string | null;
             /** @description The goal in words. */
             goal?: string;
@@ -21739,7 +22086,7 @@ export interface components {
              */
             goal_metric?: "meetings" | "replies" | "sends" | "leads" | "revenue_attributed" | "revenue_deals" | "revenue_referred" | null;
             goal_target?: number | null;
-            /** @description Guidance on top of the project brief (Markdown). */
+            /** @description Guidance on top of the company and brand context (Markdown). */
             instructions?: string;
             /** @description The agent's plan (Markdown). */
             plan?: string;
@@ -21762,14 +22109,11 @@ export interface components {
             /** Format: uuid */
             id: string;
             name: string;
-            /** Format: uuid */
-            project_id: string | null;
             /**
              * Format: uuid
-             * @description The brand that owns it, or null when shared by every brand. In a project it is the project's brand.
+             * @description The brand that owns it, or null when shared by every brand.
              */
             brand_id: string | null;
-            project_name: string | null;
             goal: {
                 text: string;
                 /** @enum {string|null} */
@@ -21816,7 +22160,10 @@ export interface components {
             calls: number;
             /** Format: date-time */
             last_call_at: string | null;
-            /** @description Project brief version at approval. */
+            /**
+             * @deprecated
+             * @description Always null for missions approved after projects were removed.
+             */
             brief_version: number | null;
             /** Format: uuid */
             approved_by: string | null;
@@ -21944,7 +22291,11 @@ export interface components {
              * @enum {string}
              */
             mode?: "dry_run" | "approve_writes" | "autonomous";
-            /** Format: uuid */
+            /**
+             * Format: uuid
+             * @deprecated
+             * @description Ignored: projects were removed.
+             */
             project_id?: string | null;
             /**
              * Format: uuid
@@ -22050,22 +22401,6 @@ export interface components {
             summary: string;
             /** @description Why the last turn failed; empty when it went fine. Three failures in a row pause the mission. */
             error: string;
-        };
-        MissionBrief: {
-            /** Format: uuid */
-            project_id: string;
-            name: string;
-            offer: string;
-            audience: string;
-            market: string;
-            brief: string;
-            icp: {
-                [key: string]: unknown;
-            };
-            version: number;
-            /** Format: date-time */
-            updated_at: string;
-            changed_since_approval: boolean;
         };
         MissionCall: {
             id: number;
@@ -22584,6 +22919,11 @@ export interface components {
              * @description Only partners in this group; null is everyone.
              */
             group_id: string | null;
+            /**
+             * Format: uuid
+             * @description Only this partner: their own rate. It beats their group's rule and the program's; null is everyone (or the group).
+             */
+            partner_id: string | null;
             /** @description The conversion that earns it: signup, sale, or a custom conversion's event_name (such as trial_started). */
             trigger: string;
             /**
@@ -22620,6 +22960,11 @@ export interface components {
         PartnerRuleInput: {
             /** Format: uuid */
             group_id?: string | null;
+            /**
+             * Format: uuid
+             * @description A partner in this program, for their own rate. Not with group_id. A program's new rules can't name partners yet.
+             */
+            partner_id?: string | null;
             /** @description signup (or lead), sale, or a custom conversion's event_name. */
             trigger: string;
             /**
@@ -22769,10 +23114,15 @@ export interface components {
                     /**
                      * @description incomplete, no_email, link_param (a link's parameter isn't ref or via, which the website script reads),
                      *     extra_link (a partner's second link: their code is the first), code_changed (the partner got a new
-                     *     code), partner_missing, customer_missing, promo_code_invalid, promo_code_taken, already_referred
-                     *     (another partner has the customer here), status_conflict (rejected there after it was approved here).
+                     *     code), partner_missing, partner_unavailable (a partner other objects name that the platform couldn't
+                     *     give by id either), customer_missing, promo_code_invalid, promo_code_taken, already_referred
+                     *     (another partner has the customer here), status_conflict (rejected there after it was approved here),
+                     *     unreadable (the platform's answer for the whole kind couldn't be read, or it refused the request; the
+                     *     import read the other kinds, and message says why).
                      */
                     reason: string;
+                    /** @description For unreadable: the kind, the HTTP status and the answer's shape, never its values. */
+                    message?: string;
                 }[];
                 more_issues: number;
             };
@@ -23145,6 +23495,8 @@ export interface components {
             id: string;
             /** Format: uuid */
             partner_id: string;
+            /** @description The partner's name, or their code when they have none. */
+            partner_name: string;
             /** Format: uuid */
             program_id: string;
             /** Format: int64 */
@@ -23183,10 +23535,14 @@ export interface components {
             landing_url: string;
             /** @description The landing page with the campaign's tags, ready to share; '' without a landing page. */
             landing_link: string;
+            /** @description New links in the campaign get a short redirect link unless a link says otherwise. Off by default: the website tracking snippet reads the tags without a redirect. */
+            redirect_links: boolean;
             /** @enum {string} */
             status: "active" | "archived";
             /** @description Links made in it. */
             links: number;
+            /** @description Clicks on the campaign's redirect links, without link scanners and previews. */
+            clicks: number;
             /** Format: date-time */
             created_at: string;
             /** Format: date-time */
@@ -23208,6 +23564,8 @@ export interface components {
              * @enum {string}
              */
             status?: "active" | "archived";
+            /** @description Give new links a short redirect link unless a link says otherwise. Links made before keep what they have. */
+            redirect_links?: boolean;
         };
         TrackingLink: {
             /** Format: uuid */
@@ -23220,8 +23578,12 @@ export interface components {
             content: string;
             /** @description utm_term; '' for none. */
             term: string;
-            /** @description The link to share. */
+            /** @description The link to share: the page with the campaign's tags. */
             tagged_url: string;
+            /** @description The short redirect link (/l/{code}, on the workspace's tracking domain when it has one) that counts a click and sends the person to tagged_url; null when the link has none. Share it where the tracking snippet can't run. */
+            redirect_url: string | null;
+            /** @description Clicks on the redirect link, without link scanners and previews; 0 without one. */
+            clicks: number;
             /** Format: date-time */
             created_at: string;
         };
@@ -23545,9 +23907,9 @@ export interface components {
         JourneyStep: {
             id: string;
             /** @enum {string} */
-            kind: "email" | "wait" | "branch" | "exit" | "set_field" | "add_tag" | "remove_tag" | "add_to_list" | "remove_from_list" | "enter_journey" | "exit_journey" | "enroll_in_sequence" | "stop_sequences" | "suppress" | "unsubscribe_topic" | "alert";
+            kind: "email" | "wait" | "branch" | "exit" | "set_field" | "add_tag" | "remove_tag" | "add_to_list" | "remove_from_list" | "enter_journey" | "exit_journey" | "enroll_in_sequence" | "stop_sequences" | "suppress" | "unsubscribe_topic" | "alert" | "transactional_email" | "set_consent" | "assign_owner" | "move_deal";
             name?: string;
-            /** @description email: a lifecycle template's handle or id. */
+            /** @description email: a lifecycle template's handle or id. transactional_email: a transactional one's. */
             template?: string;
             /** @description wait: how long. */
             wait_seconds?: number;
@@ -23615,6 +23977,31 @@ export interface components {
              * @enum {string}
              */
             to?: "owner" | "admins";
+            /**
+             * @description set_consent: what the person agreed to or declined, for topic (empty: all marketing email). Recorded with the run as its evidence.
+             * @enum {string}
+             */
+            consent?: "granted" | "withdrawn";
+            /**
+             * Format: uuid
+             * @description assign_owner: the member (user id) who becomes the owner.
+             */
+            owner_id?: string;
+            /** @description assign_owner: members to spread people between; the one who owns the fewest active records gets the next. */
+            members?: string[];
+            /** @description assign_owner: change an owner already set. Off by default: someone with an owner keeps them. */
+            replace_owner?: boolean;
+            /** @description move_deal: move the person's newest open deal forward to stage, or open one there, as reply rules do. */
+            deal?: {
+                /** @description The record type of deals, such as deal. */
+                type: string;
+                /** @description Its status field that holds the stage, such as deal_stage. */
+                field: string;
+                /** @description The stage to move to. */
+                stage: string;
+                /** @description Final stages (won, lost): a deal in one is never moved, and a new one is opened instead. */
+                closed?: string[];
+            };
             /** @description Action steps: stop (the default: the run fails), continue, or a step id to go to. */
             on_error?: string;
         };
@@ -23720,6 +24107,44 @@ export interface components {
             /** @description The first step starts. */
             steps?: components["schemas"]["JourneyStep"][];
         };
+        JourneyTest: {
+            /** @enum {string} */
+            version: "live" | "draft";
+            /** @description Why the person wouldn't start a run now, such as already in the journey. Absent when they would. */
+            refusal?: string;
+            /**
+             * Format: date-time
+             * @description When the trigger event the test used happened; null when the request gave one or there was none.
+             */
+            event_at: string | null;
+            /** @description The steps they would go through, in order. */
+            steps: {
+                step: string;
+                kind: string;
+                /** @description What the step would do, in a run step's words: sent, skipped, waited, yes, no, done, failed, exited. */
+                outcome: string;
+                /** @description Why it was skipped or failed. */
+                detail?: string;
+                /** @description The step it would go to. */
+                next?: string;
+                /** @description An email step's subject, as the person would get it. */
+                subject?: string;
+                /**
+                 * @description A branch: the way the data points now. Differs from outcome when paths chose the other way.
+                 * @enum {string}
+                 */
+                data?: "yes" | "no";
+                /** @description A branch on something they may still do: no now, but it may be yes by then. */
+                can_change?: boolean;
+            }[];
+            /**
+             * @description How the run would end.
+             * @enum {string}
+             */
+            end: "completed" | "exited" | "failed";
+            /** @description Why it would exit or fail: exit_step, exit_condition, email_failed, action_failed. */
+            end_reason?: string;
+        };
         JourneyVersion: {
             /** Format: uuid */
             id: string;
@@ -23783,8 +24208,8 @@ export interface components {
             /** @description Only on a single run. */
             history?: {
                 step: string;
-                /** @enum {string} */
-                kind: "email" | "wait" | "branch" | "exit";
+                /** @description The step's kind, as in JourneyStep. */
+                kind: string;
                 outcome: string;
                 /** Format: uuid */
                 email_id: string | null;
@@ -28321,6 +28746,18 @@ export interface components {
             /** Format: date-time */
             checked_at: string;
         };
+        LinkSequence: {
+            /** Format: uuid */
+            sequence_id: string;
+            name: string;
+            status: string;
+            brand_id: string | null;
+            /** @description Each pitch waits for a person to approve it. */
+            approve_pitches: boolean;
+            /** @description A step uses {{custom.opener}}. */
+            uses_opener: boolean;
+            pitches: number;
+        };
         LinkPitch: {
             /** Format: uuid */
             id: string;
@@ -28544,6 +28981,102 @@ export interface components {
             read_status: "up" | "gone" | "blocked" | "opted_out" | "unreachable" | "failed" | null;
             /** @description The person records of its authors, when their address was found. */
             journalist_ids: string[];
+        };
+        PRExpert: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            brand_id: string;
+            /**
+             * Format: uuid
+             * @description Their person record.
+             */
+            record_id: string;
+            name: string;
+            email: string | null;
+            title: string;
+            topics: string[];
+            /** @description The expert quotes go to when none is named. */
+            is_default: boolean;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            updated_at: string;
+        };
+        /**
+         * @description data: a finding from numbers. reactive: comment on today's news. comment: an expert's view on a topic.
+         * @enum {string}
+         */
+        StoryKind: "data" | "reactive" | "comment";
+        /** @enum {string} */
+        StoryFactSource: "own_data" | "public_data" | "news" | "brand_fact" | "other";
+        /** @enum {string} */
+        StoryQuoteStatus: "draft" | "approved" | "withdrawn";
+        StoryProblem: {
+            /** @enum {string} */
+            code: "no_release" | "unsourced_number" | "fact_without_source" | "unapproved_quote" | "hype_phrase" | "needs_second_look";
+            /** @description The number, phrase or passage it is about. */
+            detail: string;
+        };
+        StoryCheck: {
+            /** @description No errors: a person may approve it. */
+            ok: boolean;
+            errors: components["schemas"]["StoryProblem"][];
+            warnings: components["schemas"]["StoryProblem"][];
+        };
+        Story: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            brand_id: string;
+            kind: components["schemas"]["StoryKind"];
+            title: string;
+            summary: string;
+            /** @description The press release */
+            release: string;
+            /** @description The news article a reactive story answers. */
+            article_id: string | null;
+            /** @enum {string} */
+            status: "idea" | "draft" | "approved" | "archived";
+            /** Format: date-time */
+            embargo_until: string | null;
+            last_check: components["schemas"]["StoryCheck"] | null;
+            /** Format: date-time */
+            checked_at: string | null;
+            /** Format: date-time */
+            approved_at: string | null;
+            source: string;
+            /** @description With one story only. */
+            facts?: {
+                /** Format: uuid */
+                id: string;
+                statement: string;
+                source_kind: components["schemas"]["StoryFactSource"];
+                source_url: string;
+                source_note: string;
+                /** Format: date-time */
+                created_at: string;
+            }[];
+            /** @description With one story only. */
+            quotes?: {
+                /** Format: uuid */
+                id: string;
+                /** Format: uuid */
+                expert_id: string;
+                body: string;
+                status: components["schemas"]["StoryQuoteStatus"];
+                approval_note: string;
+                /** Format: date-time */
+                approved_at: string | null;
+                /** Format: date-time */
+                created_at: string;
+                /** Format: date-time */
+                updated_at: string;
+            }[];
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            updated_at: string;
         };
         Journalist: {
             /**
@@ -29386,8 +29919,6 @@ export interface components {
             /** Format: uuid */
             id: string;
             /** Format: uuid */
-            project_id: string | null;
-            /** Format: uuid */
             sequence_id: string | null;
             /** Format: uuid */
             mission_id: string | null;
@@ -29427,7 +29958,6 @@ export interface components {
             updated_at: string;
             lead_email: string | null;
             sequence_name: string | null;
-            project_name: string | null;
         };
         NewMeeting: {
             /** Format: uuid */
@@ -29436,8 +29966,12 @@ export interface components {
             attendee_name?: string;
             /** Format: uuid */
             sequence_id?: string;
-            /** Format: uuid */
-            project_id?: string;
+            /**
+             * Format: uuid
+             * @deprecated
+             * @description Ignored: projects were removed.
+             */
+            project_id?: string | null;
             /** Format: uuid */
             mission_id?: string;
             title?: string;
@@ -29464,8 +29998,12 @@ export interface components {
             starts_at?: string;
             /** Format: uuid */
             sequence_id?: string;
-            /** Format: uuid */
-            project_id?: string;
+            /**
+             * Format: uuid
+             * @deprecated
+             * @description Ignored: projects were removed.
+             */
+            project_id?: string | null;
             /** @description An id, or empty to clear. */
             mission_id?: string;
             /** @description Not from outreach; pins that. */
@@ -29475,8 +30013,6 @@ export interface components {
         Deal: {
             /** Format: uuid */
             id: string;
-            /** Format: uuid */
-            project_id: string | null;
             /** Format: uuid */
             sequence_id: string | null;
             /** Format: uuid */
@@ -29512,7 +30048,6 @@ export interface components {
             updated_at: string;
             lead_email: string | null;
             sequence_name: string | null;
-            project_name: string | null;
         };
         NewDeal: {
             name: string;
@@ -29523,8 +30058,12 @@ export interface components {
             meeting_id?: string;
             /** Format: uuid */
             sequence_id?: string;
-            /** Format: uuid */
-            project_id?: string;
+            /**
+             * Format: uuid
+             * @deprecated
+             * @description Ignored: projects were removed.
+             */
+            project_id?: string | null;
             /** Format: uuid */
             mission_id?: string;
             stage?: string;
@@ -29553,8 +30092,12 @@ export interface components {
             closed_at?: string;
             /** Format: uuid */
             sequence_id?: string;
-            /** Format: uuid */
-            project_id?: string;
+            /**
+             * Format: uuid
+             * @deprecated
+             * @description Ignored: projects were removed.
+             */
+            project_id?: string | null;
             mission_id?: string;
             unattributed?: boolean;
         };
@@ -29563,8 +30106,6 @@ export interface components {
         SpendEntry: {
             /** Format: uuid */
             id: string;
-            /** Format: uuid */
-            project_id: string | null;
             /** Format: uuid */
             sequence_id: string | null;
             /** Format: uuid */
@@ -29607,8 +30148,12 @@ export interface components {
             currency?: string;
             /** Format: date-time */
             occurred_at?: string;
-            /** Format: uuid */
-            project_id?: string;
+            /**
+             * Format: uuid
+             * @deprecated
+             * @description Ignored: projects were removed.
+             */
+            project_id?: string | null;
             /** Format: uuid */
             sequence_id?: string;
             /** Format: uuid */
@@ -29640,7 +30185,11 @@ export interface components {
             starts_on?: string;
             /** Format: date */
             ends_on?: string | null;
-            /** Format: uuid */
+            /**
+             * Format: uuid
+             * @deprecated
+             * @description Ignored: projects were removed.
+             */
             project_id?: string | null;
             /** Format: uuid */
             sequence_id?: string | null;
@@ -29681,7 +30230,7 @@ export interface components {
             };
         };
         OutcomeRow: {
-            /** @description The project or sequence id; empty for outcomes in no group; all for the workspace. */
+            /** @description The sequence or brand id; empty for outcomes in no group; all for the workspace. */
             key: string;
             name: string;
             sent: number;
@@ -29714,7 +30263,7 @@ export interface components {
             /** Format: date-time */
             to: string;
             /** @enum {string} */
-            group_by: "none" | "project" | "sequence" | "brand";
+            group_by: "none" | "sequence" | "brand";
             currency: string;
             totals: components["schemas"]["OutcomeRow"];
             rows: components["schemas"]["OutcomeRow"][];
@@ -29888,11 +30437,6 @@ export interface components {
             last_used_at?: string | null;
             /**
              * Format: uuid
-             * @description The project this token is bound to, or null for the whole workspace.
-             */
-            project_id?: string | null;
-            /**
-             * Format: uuid
              * @description The brand this token is bound to, or null.
              */
             brand_id?: string | null;
@@ -29975,12 +30519,7 @@ export interface components {
             provider: "google" | "microsoft" | "other" | "simulated";
             /**
              * Format: uuid
-             * @description The project that owns the mailbox; it then sends only for that project's sequences. Null: shared by the workspace.
-             */
-            project_id?: string | null;
-            /**
-             * Format: uuid
-             * @description The brand that owns it, or null when shared by every brand. In a project it is the project's brand.
+             * @description The brand that owns it, or null when shared by every brand.
              */
             brand_id?: string | null;
             /** @enum {string} */
@@ -30244,12 +30783,7 @@ export interface components {
             daily_limit: number | null;
             /**
              * Format: uuid
-             * @description The project that owns the domain, or null when shared. Move it with POST /projects/{id}/add.
-             */
-            project_id?: string | null;
-            /**
-             * Format: uuid
-             * @description The brand that owns it, or null when shared by every brand. In a project it is the project's brand.
+             * @description The brand that owns it, or null when shared by every brand.
              */
             brand_id?: string | null;
             notes: string;
@@ -30561,7 +31095,7 @@ export interface components {
             /**
              * Format: uuid
              * @deprecated
-             * @description Projects are being removed; leave it out. Null shares the list with the whole workspace.
+             * @description Ignored: projects were removed.
              */
             project_id?: string | null;
             /**
@@ -30702,12 +31236,7 @@ export interface components {
             description: string;
             /**
              * Format: uuid
-             * @deprecated
-             */
-            project_id: string | null;
-            /**
-             * Format: uuid
-             * @description The brand that owns it, or null when shared by every brand. In a project it is the project's brand.
+             * @description The brand that owns it, or null when shared by every brand.
              */
             brand_id: string | null;
             /**
@@ -30739,7 +31268,7 @@ export interface components {
             updated_at: string;
         };
         LeadListMember: components["schemas"]["Lead"] & {
-            /** @description ICP fit. Null when the list and its project have no profile. */
+            /** @description ICP fit. Null when the list has no profile. */
             score: number | null;
             /**
              * @example [
@@ -30784,8 +31313,6 @@ export interface components {
             id: string;
             /** Format: uuid */
             list_id: string | null;
-            /** Format: uuid */
-            project_id: string | null;
             /** @enum {string} */
             kind: "preview" | "build" | "refresh" | "enrich";
             /** @enum {string} */
@@ -31116,8 +31643,6 @@ export interface components {
             status: "active" | "archived";
             /** @description Bumped on every change to description or filters. */
             version: number;
-            /** @description The projects that use it. */
-            project_ids: string[];
             /** Format: date-time */
             created_at: string;
             /** Format: date-time */
@@ -31144,56 +31669,6 @@ export interface components {
             employee_ranges?: string[];
             locations?: string[];
             keywords?: string[];
-        };
-        Project: {
-            /** Format: uuid */
-            id: string;
-            /** @example Fintech CFOs, AU */
-            name: string;
-            /**
-             * @description paused: none of its sequences send. archived: paused and hidden from the default list.
-             * @enum {string}
-             */
-            status: "active" | "paused" | "archived";
-            /**
-             * Format: uuid
-             * @description The brand the project markets, or null when it is not one brand's. Everything in the project has its brand.
-             */
-            brand_id: string | null;
-            /** @description What is sold. */
-            offer: string;
-            /** @description Who buys it, in words. */
-            audience: string;
-            /** @description Where, and in which language. */
-            market: string;
-            /** @description Everything else, in Markdown: messaging, proof, objections, words to avoid. */
-            brief: string;
-            icp: components["schemas"]["ICP"];
-            /**
-             * Format: uuid
-             * @description The ideal customer profile the icp belongs to; icp is always its filters. A project given an icp without one gets a profile of its own.
-             */
-            profile_id: string | null;
-            /** @description Bumped on every change to offer, audience, market, brief, icp or profile. */
-            brief_version: number;
-            /** Format: date-time */
-            brief_updated_at: string;
-            /** @description Most cold sends from all of the project's sequences together in any 24 hours. Null is no project limit. */
-            daily_send_limit: number | null;
-            counts: {
-                domains: number;
-                mailboxes: number;
-                lead_lists: number;
-                /** @description Not archived. */
-                sequences: number;
-                active_sequences: number;
-            };
-            /** @description Cold sends from its sequences in the last 24 hours. */
-            sent_24h: number;
-            /** Format: date-time */
-            created_at: string;
-            /** Format: date-time */
-            updated_at: string;
         };
         CompanyContext: {
             /** @description The company's name. */
@@ -31514,7 +31989,7 @@ export interface components {
         };
         WorkspaceContext: {
             context: components["schemas"]["CompanyContext"];
-            /** @description The brand asked for with ?brand=, or a project token's project's brand; null otherwise. */
+            /** @description The brand asked for with ?brand=; null otherwise. */
             brand: components["schemas"]["BrandContext"] | null;
             /** @description The workspace's active brands, one line each, so an agent can ask which one the work is for. Empty for a company with one brand. */
             brands: {
@@ -31531,17 +32006,6 @@ export interface components {
             memories: components["schemas"]["Memory"][];
             /** @description Every memory the caller can see; search the rest with GET .../memories?q=. */
             memory_count: number;
-            projects: {
-                /** Format: uuid */
-                id: string;
-                name: string;
-                /** @enum {string} */
-                status: "active" | "paused" | "archived";
-                /** Format: uuid */
-                brand_id: string | null;
-                brief_version: number;
-                has_brief: boolean;
-            }[];
             /** @description The company context and memories as one Markdown document, ready to put in a prompt. */
             markdown: string;
         };
@@ -31553,12 +32017,7 @@ export interface components {
             text: string;
             /**
              * Format: uuid
-             * @description Null when it is true for the whole workspace.
-             */
-            project_id: string | null;
-            /**
-             * Format: uuid
-             * @description The brand it is true for. With project_id it is the project's brand; with neither, it is true for the whole company.
+             * @description The brand it is true for; null when it is true for the whole company.
              */
             brand_id: string | null;
             /** @description Pinned memories come back with every context read. */
@@ -31587,10 +32046,11 @@ export interface components {
             kind?: "preference" | "decision" | "fact" | "feedback";
             /**
              * Format: uuid
-             * @description The project it is about; null for the whole workspace.
+             * @deprecated
+             * @description Ignored: projects were removed.
              */
             project_id?: string | null;
-            /** @description The brand it is true for: a brand's id or handle. Null with no project: true for the whole company. Ignored with project_id, whose brand it takes. */
+            /** @description The brand it is true for: a brand's id or handle. Null: true for the whole company. */
             brand_id?: string | null;
             /** @description Pin what every conversation should know. Defaults to false. */
             pinned?: boolean;
@@ -31748,7 +32208,7 @@ export interface components {
                  * @description Stable; new codes may be added.
                  * @enum {string}
                  */
-                code: "no_mailboxes" | "none_ready" | "mailbox_error" | "domain_critical" | "server_paused" | "connection_broken" | "connection_requested" | "approval_waiting" | "mission_paused" | "allocation_short" | "infra_plan_waiting" | "unread_replies" | "context_missing" | "analytics_site_unmapped" | "brand_without_analytics" | "fixes_waiting" | "email_domain_failed" | "email_broadcast_failed" | "email_broadcast_audience_warning" | "social_drafts_waiting" | "duplicates_waiting" | "events_quarantined" | "crm_import_failed" | "install_broken" | "install_outdated" | "records_unassigned";
+                code: "no_mailboxes" | "none_ready" | "mailbox_error" | "domain_critical" | "server_paused" | "connection_broken" | "connection_requested" | "approval_waiting" | "mission_paused" | "allocation_short" | "infra_plan_waiting" | "unread_replies" | "context_missing" | "analytics_site_unmapped" | "brand_without_analytics" | "fixes_waiting" | "email_domain_failed" | "email_broadcast_failed" | "email_broadcast_audience_warning" | "social_drafts_waiting" | "link_pitches_waiting" | "duplicates_waiting" | "events_quarantined" | "crm_import_failed" | "install_broken" | "install_outdated" | "records_unassigned";
                 /** @enum {string} */
                 severity: "critical" | "warning" | "info";
                 /** @enum {string} */
@@ -32435,8 +32895,6 @@ export interface components {
             /** @description The brand context's version. */
             context_version: number;
             counts: {
-                /** @description Not archived. */
-                projects: number;
                 domains: number;
                 mailboxes: number;
                 lead_lists: number;
@@ -32885,7 +33343,10 @@ export interface components {
             version?: number;
         };
         BrandMembers: {
-            /** @description A project brings everything in it. */
+            /**
+             * @deprecated
+             * @description Ignored: projects were removed.
+             */
             project_ids?: string[];
             /**
              * @example [
@@ -32901,71 +33362,11 @@ export interface components {
             with_mailboxes?: boolean;
         };
         BrandMoved: {
-            projects: number;
             domains: number;
             mailboxes: number;
             lead_lists: number;
             sequences: number;
             missions: number;
-            /** @description Named records left as they were because they are in a project: they take the project's brand, so move the project instead. */
-            in_project: number;
-        };
-        ProjectInput: {
-            name?: string;
-            /** @enum {string} */
-            status?: "active" | "paused" | "archived";
-            offer?: string;
-            audience?: string;
-            market?: string;
-            brief?: string;
-            /** @description Replaces the whole ICP, and so the filters of the profile it belongs to. Null clears it. */
-            icp?: components["schemas"]["ICPInput"] | null;
-            /**
-             * Format: uuid
-             * @description The ideal customer profile to use: its filters become the icp. It must be shared or of the project's brand. Null unlinks it and keeps the icp.
-             */
-            profile_id?: string | null;
-            daily_send_limit?: number | null;
-            /** @description The brand the project markets: a brand's id or handle. Null makes it shared. Changing it moves everything in the project to the brand. Not for project tokens. */
-            brand_id?: string | null;
-            /** @description Updates only: the version your edit is based on. A brief edit fails with 409 if the brief changed since. */
-            brief_version?: number;
-        };
-        ProjectBrief: {
-            /** Format: uuid */
-            project_id?: string;
-            name?: string;
-            /** @enum {string} */
-            status?: "active" | "paused" | "archived";
-            version?: number;
-            /** Format: date-time */
-            updated_at?: string;
-            offer?: string;
-            audience?: string;
-            market?: string;
-            icp?: components["schemas"]["ICP"];
-            brief?: string;
-            /** @description Everything above as one Markdown document, ready to put in a prompt. */
-            markdown?: string;
-        };
-        ProjectMembers: {
-            /**
-             * @example [
-             *       "acme-mail.com"
-             *     ]
-             */
-            domains?: string[];
-            mailbox_ids?: string[];
-            lead_list_ids?: string[];
-            sequence_ids?: string[];
-            /** @description Whether a domain's mailboxes move with it. Default true. */
-            with_mailboxes?: boolean;
-        };
-        ProjectMoved: {
-            domains: number;
-            mailboxes: number;
-            lead_lists: number;
-            sequences: number;
         };
         Team: {
             /** Format: uuid */
@@ -33187,7 +33588,7 @@ export interface components {
             /**
              * Format: uuid
              * @deprecated
-             * @description Projects are being removed; leave it out. The project the sequence belongs to. Null: shared.
+             * @description Ignored: projects were removed.
              */
             project_id?: string | null;
             /**
@@ -33260,12 +33661,7 @@ export interface components {
             status: "draft" | "active" | "paused" | "archived";
             /**
              * Format: uuid
-             * @deprecated
-             */
-            project_id?: string | null;
-            /**
-             * Format: uuid
-             * @description The brand that owns it, or null when shared by every brand. In a project it is the project's brand.
+             * @description The brand that owns it, or null when shared by every brand.
              */
             brand_id?: string | null;
             /** Format: uuid */
@@ -33368,7 +33764,7 @@ export interface components {
             name: string;
             company: string;
             status: components["schemas"]["EnrollmentStatus"];
-            /** @description Why it is waiting or ended, e.g. outside_sending_window, mailbox_daily_limit, domain_paused, domain_daily_limit, server_paused, server_daily_limit, sequence_daily_new_limit, sequence_daily_send_limit, no_mailbox_allocated, sender_mailbox_gone (its mailbox was removed; resolve with orphaned-follow-ups), token_daily_budget, project_paused, project_daily_limit, missing_variable: first_name, suppressed_email:bounced. */
+            /** @description Why it is waiting or ended, e.g. outside_sending_window, mailbox_daily_limit, domain_paused, domain_daily_limit, server_paused, server_daily_limit, sequence_daily_new_limit, sequence_daily_send_limit, no_mailbox_allocated, sender_mailbox_gone (its mailbox was removed; resolve with orphaned-follow-ups), token_daily_budget, missing_variable: first_name, suppressed_email:bounced. */
             status_reason: string | null;
             next_step: number;
             /** Format: date-time */
@@ -33481,11 +33877,6 @@ export interface components {
             needs_review: boolean;
             /** Format: date-time */
             classified_at: string | null;
-            /**
-             * Format: uuid
-             * @description The project of its sequence or mailbox.
-             */
-            project_id: string | null;
             /**
              * Format: uuid
              * @description The brand of its sequence or mailbox.
@@ -33644,11 +34035,6 @@ export interface components {
             id: string;
             /**
              * Format: uuid
-             * @description Set for a project's set.
-             */
-            project_id: string | null;
-            /**
-             * Format: uuid
              * @description Set for a sequence's set.
              */
             sequence_id: string | null;
@@ -33663,7 +34049,7 @@ export interface components {
             /** @description Seen by the whole workspace; otherwise only by the person who saved it. */
             shared: boolean;
             /**
-             * @description Query parameters for GET .../inbox: status, kind, category, group, source, tag, assigned_to, mailbox_id, sequence_id, project_id, brand, unread, needs_review, min_confidence, q.
+             * @description Query parameters for GET .../inbox: status, kind, category, group, source, tag, assigned_to, mailbox_id, sequence_id, brand, unread, needs_review, min_confidence, q.
              * @example {
              *       "group": "hot",
              *       "status": "open",
@@ -33727,6 +34113,8 @@ export interface components {
             active_sequences: number;
             active_enrollments: number;
             leads: number;
+            /** @description Draft link pitches waiting for a person to approve them (or to write the opener, without AI). */
+            link_pitches_waiting: number;
         };
         SupplierMailbox: {
             /** @description The supplier's id for the mailbox. */
@@ -33964,7 +34352,16 @@ export interface components {
         };
         InfraPlanInput: {
             name?: string;
-            /** Format: uuid */
+            /**
+             * Format: uuid
+             * @description The brand the plan is for: its new domains and mailboxes join it. Null: shared by every brand.
+             */
+            brand_id?: string | null;
+            /**
+             * Format: uuid
+             * @deprecated
+             * @description Ignored: projects were removed.
+             */
             project_id?: string | null;
             /** @description manual (you buy; the plan waits for you), or a supplier connector such as cheapinboxes. See `suppliers` on GET /infrastructure. */
             supplier?: string;
@@ -34037,8 +34434,11 @@ export interface components {
         };
         InfraPlan: {
             name: string;
-            /** Format: uuid */
-            project_id: string | null;
+            /**
+             * Format: uuid
+             * @description The brand the plan is for: its new domains and mailboxes join it. Null: shared by every brand.
+             */
+            brand_id: string | null;
             /** @description manual (you buy; the plan waits for you), or a supplier connector such as cheapinboxes. See `suppliers` on GET /infrastructure. */
             supplier: string;
             /**
@@ -34212,8 +34612,6 @@ export interface components {
         LogToken: string;
         /** @description Only calls made in this mission. */
         LogMission: string;
-        /** @description Only calls about this project. */
-        LogProject: string;
         /** @description Text to find in the path, route, operation, error code, request id, MCP tool, agent or client. */
         LogQuery: string;
         /**
@@ -34399,8 +34797,6 @@ export interface operations {
                                 /** @description A test workspace, where nothing reaches the outside world. */
                                 test: boolean;
                             };
-                            /** Format: uuid */
-                            project_id: string | null;
                             /**
                              * Format: uuid
                              * @description Set for a brand token: it sees that brand's records and the shared ones, and changes only that brand's.
@@ -35455,7 +35851,7 @@ export interface operations {
             path: {
                 /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
                 ws: components["parameters"]["Workspace"];
-                kind: "sequence" | "project" | "list" | "mission" | "server" | "plan" | "connection" | "token" | "webhook";
+                kind: "sequence" | "list" | "mission" | "server" | "plan" | "connection" | "token" | "webhook";
                 /** @description The item's ID, or any slug it has had. Underscores read as dashes. */
                 ref: string;
             };
@@ -35952,11 +36348,12 @@ export interface operations {
                     default_team_id?: string | null;
                     /**
                      * Format: uuid
-                     * @description Binds the token to one project: it sees and changes only that project's records, and endpoints that are not project-aware refuse it. Fixed for the token's life.
+                     * @deprecated
+                     * @description Projects were removed: a token with a project_id is refused with 400. Limit it to a brand with `brand` instead.
                      */
                     project_id?: string | null;
                     /**
-                     * @description Binds the token to one brand, by id or handle: it sees that brand's records and the shared ones, changes only that brand's, and endpoints that need every brand refuse it. Fixed for the token's life; not with project_id.
+                     * @description Binds the token to one brand, by id or handle: it sees that brand's records and the shared ones, changes only that brand's, and endpoints that need every brand refuse it. Fixed for the token's life.
                      * @example repocket
                      */
                     brand?: string | null;
@@ -36476,8 +36873,6 @@ export interface operations {
                 token_id?: components["parameters"]["LogToken"];
                 /** @description Only calls made in this mission. */
                 mission_id?: components["parameters"]["LogMission"];
-                /** @description Only calls about this project. */
-                project_id?: components["parameters"]["LogProject"];
                 /** @description Only records of this brand: its id or handle, none for records shared by every brand, or all (the default). */
                 brand?: components["parameters"]["Brand"];
                 /** @description Text to find in the path, route, operation, error code, request id, MCP tool, agent or client. */
@@ -36587,8 +36982,6 @@ export interface operations {
                 token_id?: components["parameters"]["LogToken"];
                 /** @description Only calls made in this mission. */
                 mission_id?: components["parameters"]["LogMission"];
-                /** @description Only calls about this project. */
-                project_id?: components["parameters"]["LogProject"];
                 /** @description Only records of this brand: its id or handle, none for records shared by every brand, or all (the default). */
                 brand?: components["parameters"]["Brand"];
                 /** @description Text to find in the path, route, operation, error code, request id, MCP tool, agent or client. */
@@ -36670,8 +37063,6 @@ export interface operations {
                 token_id?: components["parameters"]["LogToken"];
                 /** @description Only calls made in this mission. */
                 mission_id?: components["parameters"]["LogMission"];
-                /** @description Only calls about this project. */
-                project_id?: components["parameters"]["LogProject"];
                 /** @description Only records of this brand: its id or handle, none for records shared by every brand, or all (the default). */
                 brand?: components["parameters"]["Brand"];
                 /** @description Text to find in the path, route, operation, error code, request id, MCP tool, agent or client. */
@@ -37120,8 +37511,6 @@ export interface operations {
                 pool_id?: string;
                 domain?: string;
                 server_id?: string;
-                /** @description A project's id, or none for records shared by the workspace. A project token always sees only its project. */
-                project_id?: string;
             };
             header?: never;
             path: {
@@ -37554,8 +37943,6 @@ export interface operations {
             query?: {
                 /** @description Only records of this brand: its id or handle, none for records shared by every brand, or all (the default). */
                 brand?: components["parameters"]["Brand"];
-                /** @description A project's id, or none for records shared by the workspace. A project token always sees only its project. */
-                project_id?: string;
             };
             header?: never;
             path: {
@@ -38635,8 +39022,6 @@ export interface operations {
             query?: {
                 /** @description Only records of this brand: its id or handle, none for records shared by every brand, or all (the default). */
                 brand?: components["parameters"]["Brand"];
-                /** @description A project's id, or none for lists shared by the whole workspace. */
-                project_id?: string;
                 kind?: "manual" | "search";
             };
             header?: never;
@@ -38734,7 +39119,7 @@ export interface operations {
                     /**
                      * Format: uuid
                      * @deprecated
-                     * @description Projects are being removed; use profile_id.
+                     * @description Ignored: projects were removed. Use profile_id.
                      */
                     project_id?: string | null;
                     /**
@@ -40043,8 +40428,6 @@ export interface operations {
             query?: {
                 /** @description Only records of this brand: its id or handle, none for records shared by every brand, or all (the default). */
                 brand?: components["parameters"]["Brand"];
-                /** @description A project's id, or none for records shared by the workspace. A project token always sees only its project. */
-                project_id?: string;
             };
             header?: never;
             path: {
@@ -40547,6 +40930,37 @@ export interface operations {
             default: components["responses"]["Error"];
         };
     };
+    followRedirectLink: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                code: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The tagged page. */
+            302: {
+                headers: {
+                    Location?: string;
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The link is not valid. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/plain": unknown;
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
     syncMailbox: {
         parameters: {
             query?: never;
@@ -40692,8 +41106,6 @@ export interface operations {
                 source?: string;
                 /** @description true: replies whose label is unsure, or an unsure opt-out that was acted on. */
                 needs_review?: boolean;
-                /** @description The project of the reply's sequence or mailbox. */
-                project_id?: string;
                 /** @description Only replies labelled at least this surely (0 to 1). */
                 min_confidence?: number;
                 /** @description me (signed-in person only), none, or a user id. */
@@ -41409,7 +41821,11 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": {
-                    /** Format: uuid */
+                    /**
+                     * Format: uuid
+                     * @deprecated
+                     * @description Refused with 400: projects were removed.
+                     */
                     project_id?: string;
                     /** Format: uuid */
                     sequence_id?: string;
@@ -42384,6 +42800,8 @@ export interface operations {
                     content?: string;
                     /** @description utm_term: the keyword, for search ads. */
                     term?: string;
+                    /** @description Give the link a short redirect link. The campaign's redirect_links when left out. */
+                    redirect?: boolean;
                 };
             };
         };
@@ -47151,20 +47569,52 @@ export interface operations {
                 };
                 content: {
                     "application/json": {
-                        data: {
-                            /** Format: uuid */
-                            sequence_id: string;
-                            name: string;
-                            status: string;
-                            brand_id: string | null;
-                            approve_pitches: boolean;
-                            uses_opener: boolean;
-                            pitches: number;
-                        }[];
+                        data: components["schemas"]["LinkSequence"][];
                     };
                 };
             };
             404: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    createLinkSequence: {
+        parameters: {
+            query?: never;
+            header?: {
+                /**
+                 * @description Makes the write safe to retry. A repeat with the same key from the same caller within 24 hours gets the first
+                 *     answer back (with `Idempotent-Replayed: true`) instead of running again. The same key for a different request
+                 *     is refused with 422 `idempotency_key_reused`; while the first is still running, 409 `idempotency_in_progress`.
+                 *     Use a new random key, such as a UUID, for each distinct write.
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": {
+                    name?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The sequence. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LinkSequence"];
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            400: components["responses"]["Error"];
+            403: components["responses"]["Error"];
             default: components["responses"]["Error"];
         };
     };
@@ -47638,6 +48088,621 @@ export interface operations {
             };
             400: components["responses"]["Error"];
             404: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    listPRExperts: {
+        parameters: {
+            query?: {
+                /** @description Only records of this brand: its id or handle, none for records shared by every brand, or all (the default). */
+                brand?: components["parameters"]["Brand"];
+            };
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Experts. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["PRExpert"][];
+                    };
+                };
+            };
+            404: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    createPRExpert: {
+        parameters: {
+            query?: never;
+            header?: {
+                /**
+                 * @description Makes the write safe to retry. A repeat with the same key from the same caller within 24 hours gets the first
+                 *     answer back (with `Idempotent-Replayed: true`) instead of running again. The same key for a different request
+                 *     is refused with 422 `idempotency_key_reused`; while the first is still running, 409 `idempotency_in_progress`.
+                 *     Use a new random key, such as a UUID, for each distinct write.
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @description A brand's id or handle. */
+                    brand_id: string;
+                    /**
+                     * Format: uuid
+                     * @description A person record.
+                     */
+                    record_id?: string;
+                    email?: string;
+                    name?: string;
+                    /** @example CEO */
+                    title?: string;
+                    topics?: string[];
+                    is_default?: boolean;
+                };
+            };
+        };
+        responses: {
+            /** @description The expert. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PRExpert"];
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            400: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    deletePRExpert: {
+        parameters: {
+            query?: never;
+            header?: {
+                /**
+                 * @description Makes the write safe to retry. A repeat with the same key from the same caller within 24 hours gets the first
+                 *     answer back (with `Idempotent-Replayed: true`) instead of running again. The same key for a different request
+                 *     is refused with 422 `idempotency_key_reused`; while the first is still running, 409 `idempotency_in_progress`.
+                 *     Use a new random key, such as a UUID, for each distinct write.
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                expert: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            202: components["responses"]["MissionHeld"];
+            /** @description Removed. */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    updatePRExpert: {
+        parameters: {
+            query?: never;
+            header?: {
+                /**
+                 * @description Makes the write safe to retry. A repeat with the same key from the same caller within 24 hours gets the first
+                 *     answer back (with `Idempotent-Replayed: true`) instead of running again. The same key for a different request
+                 *     is refused with 422 `idempotency_key_reused`; while the first is still running, 409 `idempotency_in_progress`.
+                 *     Use a new random key, such as a UUID, for each distinct write.
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                expert: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    title?: string;
+                    topics?: string[];
+                    is_default?: boolean;
+                };
+            };
+        };
+        responses: {
+            /** @description The expert. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PRExpert"];
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            400: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    listStories: {
+        parameters: {
+            query?: {
+                /** @description Only records of this brand: its id or handle, none for records shared by every brand, or all (the default). */
+                brand?: components["parameters"]["Brand"];
+                /** @description One status, or several separated by commas. */
+                status?: string;
+                limit?: number;
+                offset?: number;
+                /**
+                 * @description Only these fields of each item, comma separated (fields=id,email,status); id always comes back.
+                 *     Paging fields stay. A field the items don't have answers 400 naming the ones they do. Any GET takes it.
+                 */
+                fields?: components["parameters"]["Fields"];
+                /**
+                 * @description next_cursor from the previous page, unchanged. Every paged list takes it, so one loop pages them all:
+                 *     call, then call again with cursor=next_cursor until next_cursor is null. Cursors are opaque; don't build them.
+                 */
+                cursor?: components["parameters"]["Cursor"];
+            };
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Stories. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["Story"][];
+                        total: number;
+                        next_offset: number | null;
+                        next_cursor: components["schemas"]["NextCursor"];
+                    };
+                };
+            };
+            400: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    createStory: {
+        parameters: {
+            query?: never;
+            header?: {
+                /**
+                 * @description Makes the write safe to retry. A repeat with the same key from the same caller within 24 hours gets the first
+                 *     answer back (with `Idempotent-Replayed: true`) instead of running again. The same key for a different request
+                 *     is refused with 422 `idempotency_key_reused`; while the first is still running, 409 `idempotency_in_progress`.
+                 *     Use a new random key, such as a UUID, for each distinct write.
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @description A brand's id or handle. */
+                    brand_id: string;
+                    /** @description The headline. */
+                    title: string;
+                    kind?: components["schemas"]["StoryKind"];
+                    summary?: string;
+                    /** @description The press release */
+                    release?: string;
+                    /** @description The news article a reactive story answers; empty for none. */
+                    article_id?: string;
+                    /** Format: date-time */
+                    embargo_until?: string | null;
+                    /** @description Who started it. Default manual for people, api for tokens. */
+                    source?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The story. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Story"];
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            400: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    getStory: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                story: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The story. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Story"];
+                };
+            };
+            404: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    deleteStory: {
+        parameters: {
+            query?: never;
+            header?: {
+                /**
+                 * @description Makes the write safe to retry. A repeat with the same key from the same caller within 24 hours gets the first
+                 *     answer back (with `Idempotent-Replayed: true`) instead of running again. The same key for a different request
+                 *     is refused with 422 `idempotency_key_reused`; while the first is still running, 409 `idempotency_in_progress`.
+                 *     Use a new random key, such as a UUID, for each distinct write.
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                story: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            202: components["responses"]["MissionHeld"];
+            /** @description Deleted. */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    updateStory: {
+        parameters: {
+            query?: never;
+            header?: {
+                /**
+                 * @description Makes the write safe to retry. A repeat with the same key from the same caller within 24 hours gets the first
+                 *     answer back (with `Idempotent-Replayed: true`) instead of running again. The same key for a different request
+                 *     is refused with 422 `idempotency_key_reused`; while the first is still running, 409 `idempotency_in_progress`.
+                 *     Use a new random key, such as a UUID, for each distinct write.
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                story: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    title?: string;
+                    kind?: components["schemas"]["StoryKind"];
+                    summary?: string;
+                    release?: string;
+                    article_id?: string;
+                    /** Format: date-time */
+                    embargo_until?: string | null;
+                    /** @enum {string} */
+                    status?: "idea" | "draft" | "archived";
+                };
+            };
+        };
+        responses: {
+            /** @description The story. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Story"];
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            400: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    addStoryFact: {
+        parameters: {
+            query?: never;
+            header?: {
+                /**
+                 * @description Makes the write safe to retry. A repeat with the same key from the same caller within 24 hours gets the first
+                 *     answer back (with `Idempotent-Replayed: true`) instead of running again. The same key for a different request
+                 *     is refused with 422 `idempotency_key_reused`; while the first is still running, 409 `idempotency_in_progress`.
+                 *     Use a new random key, such as a UUID, for each distinct write.
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                story: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @example 37% of the sites we measured blocked their own customers' bots */
+                    statement: string;
+                    source_kind: components["schemas"]["StoryFactSource"];
+                    source_url?: string;
+                    /** @example Query: bot blocks by site, October */
+                    source_note?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The story. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Story"];
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            400: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    deleteStoryFact: {
+        parameters: {
+            query?: never;
+            header?: {
+                /**
+                 * @description Makes the write safe to retry. A repeat with the same key from the same caller within 24 hours gets the first
+                 *     answer back (with `Idempotent-Replayed: true`) instead of running again. The same key for a different request
+                 *     is refused with 422 `idempotency_key_reused`; while the first is still running, 409 `idempotency_in_progress`.
+                 *     Use a new random key, such as a UUID, for each distinct write.
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                story: string;
+                fact: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The story. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Story"];
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    addStoryQuote: {
+        parameters: {
+            query?: never;
+            header?: {
+                /**
+                 * @description Makes the write safe to retry. A repeat with the same key from the same caller within 24 hours gets the first
+                 *     answer back (with `Idempotent-Replayed: true`) instead of running again. The same key for a different request
+                 *     is refused with 422 `idempotency_key_reused`; while the first is still running, 409 `idempotency_in_progress`.
+                 *     Use a new random key, such as a UUID, for each distinct write.
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                story: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    body: string;
+                    /** Format: uuid */
+                    expert_id?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The story. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Story"];
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            400: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    updateStoryQuote: {
+        parameters: {
+            query?: never;
+            header?: {
+                /**
+                 * @description Makes the write safe to retry. A repeat with the same key from the same caller within 24 hours gets the first
+                 *     answer back (with `Idempotent-Replayed: true`) instead of running again. The same key for a different request
+                 *     is refused with 422 `idempotency_key_reused`; while the first is still running, 409 `idempotency_in_progress`.
+                 *     Use a new random key, such as a UUID, for each distinct write.
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                story: string;
+                quote: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    body?: string;
+                    status?: components["schemas"]["StoryQuoteStatus"];
+                    /** @example Approved by email on 29 Oct */
+                    approval_note?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The story. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Story"];
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            400: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    checkStory: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                story: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The check. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StoryCheck"];
+                };
+            };
+            404: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    approveStory: {
+        parameters: {
+            query?: never;
+            header?: {
+                /**
+                 * @description Makes the write safe to retry. A repeat with the same key from the same caller within 24 hours gets the first
+                 *     answer back (with `Idempotent-Replayed: true`) instead of running again. The same key for a different request
+                 *     is refused with 422 `idempotency_key_reused`; while the first is still running, 409 `idempotency_in_progress`.
+                 *     Use a new random key, such as a UUID, for each distinct write.
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                story: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The story. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Story"];
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
             default: components["responses"]["Error"];
         };
     };
@@ -53604,10 +54669,9 @@ export interface operations {
                 from?: components["parameters"]["From"];
                 /** @description End of the period. A date includes that whole day. Default now. */
                 to?: components["parameters"]["To"];
-                group_by?: "none" | "project" | "sequence" | "brand";
+                group_by?: "none" | "sequence" | "brand";
                 /** @description Only records of this brand: its id or handle, none for records shared by every brand, or all (the default). */
                 brand?: components["parameters"]["Brand"];
-                project_id?: string;
                 sequence_id?: string;
                 /** @description Only meetings, deals and spend recorded for this mission. */
                 mission_id?: string;
@@ -53644,7 +54708,7 @@ export interface operations {
                 from?: components["parameters"]["From"];
                 /** @description End of the period. A date includes that whole day. Default now. */
                 to?: components["parameters"]["To"];
-                group_by?: "none" | "project" | "sequence" | "brand";
+                group_by?: "none" | "sequence" | "brand";
                 /** @description Only records of this brand: its id or handle, none for records shared by every brand, or all (the default). */
                 brand?: components["parameters"]["Brand"];
                 currency?: string;
@@ -53743,7 +54807,6 @@ export interface operations {
                 from?: components["parameters"]["From"];
                 /** @description End of the period. A date includes that whole day. Default now. */
                 to?: components["parameters"]["To"];
-                project_id?: string;
                 sequence_id?: string;
                 mission_id?: string;
                 status?: components["schemas"]["MeetingStatus"];
@@ -53934,7 +54997,6 @@ export interface operations {
                 from?: components["parameters"]["From"];
                 /** @description End of the period. A date includes that whole day. Default now. */
                 to?: components["parameters"]["To"];
-                project_id?: string;
                 sequence_id?: string;
                 mission_id?: string;
                 state?: "open" | "won" | "lost";
@@ -54122,7 +55184,6 @@ export interface operations {
                 from?: components["parameters"]["From"];
                 /** @description End of the period. A date includes that whole day. Default now. */
                 to?: components["parameters"]["To"];
-                project_id?: string;
                 sequence_id?: string;
                 mission_id?: string;
                 category?: components["schemas"]["SpendCategory"];
@@ -54765,7 +55826,6 @@ export interface operations {
                 brand?: components["parameters"]["Brand"];
                 /** @description Comma-separated statuses. */
                 status?: string;
-                project_id?: string;
             };
             header?: never;
             path: {
@@ -54873,7 +55933,8 @@ export interface operations {
                 content: {
                     "application/json": {
                         mission?: components["schemas"]["Mission"];
-                        brief?: components["schemas"]["MissionBrief"] | null;
+                        /** @description The mission's brand's context; null for a mission every brand shares. */
+                        brand?: components["schemas"]["BrandContext"] | null;
                         company?: {
                             context?: components["schemas"]["CompanyContext"];
                             /** @description Pinned memories. */
@@ -56419,7 +57480,7 @@ export interface operations {
     getContext: {
         parameters: {
             query?: {
-                /** @description A brand's id or handle: adds that brand's context and keeps memories and projects to the company's and the brand's. A project token gets its project's brand. */
+                /** @description A brand's id or handle: adds that brand's context and keeps memories to the company's and the brand's. */
                 brand?: string;
             };
             header?: never;
@@ -56580,8 +57641,6 @@ export interface operations {
                 /** @description Words the memory contains. */
                 q?: string;
                 kind?: "preference" | "decision" | "fact" | "feedback";
-                /** @description A project's id, or none for workspace-wide memories. */
-                project_id?: string;
                 pinned?: boolean;
                 /** @description 1 to 200. Default 50. */
                 limit?: number;
@@ -57333,288 +58392,6 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["CustomerProfile"];
-                };
-            };
-            202: components["responses"]["MissionHeld"];
-            400: components["responses"]["Error"];
-            403: components["responses"]["Error"];
-            404: components["responses"]["Error"];
-            default: components["responses"]["Error"];
-        };
-    };
-    listProjects: {
-        parameters: {
-            query?: {
-                /** @description Only records of this brand: its id or handle, none for records shared by every brand, or all (the default). */
-                brand?: components["parameters"]["Brand"];
-                /** @description Default lists every project but archived ones. */
-                status?: "active" | "paused" | "archived" | "all";
-            };
-            header?: never;
-            path: {
-                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
-                ws: components["parameters"]["Workspace"];
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Projects by name, archived last. */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        data: components["schemas"]["Project"][];
-                    };
-                };
-            };
-            default: components["responses"]["Error"];
-        };
-    };
-    createProject: {
-        parameters: {
-            query?: never;
-            header?: {
-                /**
-                 * @description Makes the write safe to retry. A repeat with the same key from the same caller within 24 hours gets the first
-                 *     answer back (with `Idempotent-Replayed: true`) instead of running again. The same key for a different request
-                 *     is refused with 422 `idempotency_key_reused`; while the first is still running, 409 `idempotency_in_progress`.
-                 *     Use a new random key, such as a UUID, for each distinct write.
-                 */
-                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
-            };
-            path: {
-                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
-                ws: components["parameters"]["Workspace"];
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["ProjectInput"] & unknown;
-            };
-        };
-        responses: {
-            /** @description The project. */
-            201: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Project"];
-                };
-            };
-            202: components["responses"]["MissionHeld"];
-            400: components["responses"]["Error"];
-            default: components["responses"]["Error"];
-        };
-    };
-    getProject: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
-                ws: components["parameters"]["Workspace"];
-                id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description The project. */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Project"];
-                };
-            };
-            404: components["responses"]["Error"];
-            default: components["responses"]["Error"];
-        };
-    };
-    deleteProject: {
-        parameters: {
-            query?: never;
-            header?: {
-                /**
-                 * @description Makes the write safe to retry. A repeat with the same key from the same caller within 24 hours gets the first
-                 *     answer back (with `Idempotent-Replayed: true`) instead of running again. The same key for a different request
-                 *     is refused with 422 `idempotency_key_reused`; while the first is still running, 409 `idempotency_in_progress`.
-                 *     Use a new random key, such as a UUID, for each distinct write.
-                 */
-                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
-            };
-            path: {
-                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
-                ws: components["parameters"]["Workspace"];
-                id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            202: components["responses"]["MissionHeld"];
-            /** @description Deleted. */
-            204: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            404: components["responses"]["Error"];
-            409: components["responses"]["Error"];
-            default: components["responses"]["Error"];
-        };
-    };
-    updateProject: {
-        parameters: {
-            query?: never;
-            header?: {
-                /**
-                 * @description Makes the write safe to retry. A repeat with the same key from the same caller within 24 hours gets the first
-                 *     answer back (with `Idempotent-Replayed: true`) instead of running again. The same key for a different request
-                 *     is refused with 422 `idempotency_key_reused`; while the first is still running, 409 `idempotency_in_progress`.
-                 *     Use a new random key, such as a UUID, for each distinct write.
-                 */
-                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
-            };
-            path: {
-                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
-                ws: components["parameters"]["Workspace"];
-                id: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["ProjectInput"];
-            };
-        };
-        responses: {
-            /** @description The project. */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Project"];
-                };
-            };
-            202: components["responses"]["MissionHeld"];
-            400: components["responses"]["Error"];
-            404: components["responses"]["Error"];
-            409: components["responses"]["Error"];
-            default: components["responses"]["Error"];
-        };
-    };
-    getProjectBrief: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
-                ws: components["parameters"]["Workspace"];
-                id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description The brief. */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ProjectBrief"];
-                };
-            };
-            404: components["responses"]["Error"];
-            default: components["responses"]["Error"];
-        };
-    };
-    addToProject: {
-        parameters: {
-            query?: never;
-            header?: {
-                /**
-                 * @description Makes the write safe to retry. A repeat with the same key from the same caller within 24 hours gets the first
-                 *     answer back (with `Idempotent-Replayed: true`) instead of running again. The same key for a different request
-                 *     is refused with 422 `idempotency_key_reused`; while the first is still running, 409 `idempotency_in_progress`.
-                 *     Use a new random key, such as a UUID, for each distinct write.
-                 */
-                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
-            };
-            path: {
-                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
-                ws: components["parameters"]["Workspace"];
-                id: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["ProjectMembers"];
-            };
-        };
-        responses: {
-            /** @description How many records moved. Unknown ids and names are ignored. */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        moved: components["schemas"]["ProjectMoved"];
-                    };
-                };
-            };
-            202: components["responses"]["MissionHeld"];
-            400: components["responses"]["Error"];
-            403: components["responses"]["Error"];
-            404: components["responses"]["Error"];
-            default: components["responses"]["Error"];
-        };
-    };
-    removeFromProject: {
-        parameters: {
-            query?: never;
-            header?: {
-                /**
-                 * @description Makes the write safe to retry. A repeat with the same key from the same caller within 24 hours gets the first
-                 *     answer back (with `Idempotent-Replayed: true`) instead of running again. The same key for a different request
-                 *     is refused with 422 `idempotency_key_reused`; while the first is still running, 409 `idempotency_in_progress`.
-                 *     Use a new random key, such as a UUID, for each distinct write.
-                 */
-                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
-            };
-            path: {
-                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
-                ws: components["parameters"]["Workspace"];
-                id: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["ProjectMembers"];
-            };
-        };
-        responses: {
-            /** @description How many records moved. */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        moved: components["schemas"]["ProjectMoved"];
-                    };
                 };
             };
             202: components["responses"]["MissionHeld"];
@@ -60556,6 +61333,75 @@ export interface operations {
             content: {
                 "application/json": {
                     frozen: boolean;
+                };
+            };
+        };
+        responses: {
+            /** @description The test. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ABTest"];
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            default: components["responses"]["Error"];
+        };
+    };
+    getABTestChecklist: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                test: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The checklist. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** Format: uuid */
+                        test_id: string;
+                        ready: boolean;
+                        checks: {
+                            /** @enum {string} */
+                            id: "flag" | "one_at_a_time" | "exposures" | "goal" | "duration" | "guardrails";
+                            /** @enum {string} */
+                            status: "ok" | "warn" | "fail";
+                            text: string;
+                        }[];
+                    };
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    shipABTest: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                test: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @description One of the flag's versions. */
+                    variant: string;
                 };
             };
         };
@@ -65198,6 +66044,57 @@ export interface operations {
             default: components["responses"]["Error"];
         };
     };
+    testJourney: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /**
+                     * Format: uuid
+                     * @description The person to test with.
+                     */
+                    record_id: string;
+                    /**
+                     * @description Which version to test. A journey not yet activated is its own draft.
+                     * @default live
+                     * @enum {string}
+                     */
+                    version?: "live" | "draft";
+                    /** @description The properties of the event that starts the run. Left out: the person's latest trigger event. */
+                    event?: {
+                        [key: string]: unknown;
+                    };
+                    /** @description Branch step ids to send down yes or no whatever the data says. */
+                    paths?: {
+                        [key: string]: "yes" | "no";
+                    };
+                };
+            };
+        };
+        responses: {
+            /** @description The path the person would take. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["JourneyTest"];
+                };
+            };
+            400: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
     listJourneyRuns: {
         parameters: {
             query?: {
@@ -65658,6 +66555,41 @@ export interface operations {
             default: components["responses"]["Error"];
         };
     };
+    getPartnerProgramStats: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                /** @description A program's id or slug. */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The totals. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PartnerStats"] & {
+                        partners: {
+                            total: number;
+                            active: number;
+                            pending: number;
+                            suspended: number;
+                            rejected: number;
+                        };
+                    };
+                };
+            };
+            404: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
     getPartnerProgram: {
         parameters: {
             query?: never;
@@ -65965,6 +66897,55 @@ export interface operations {
             400: components["responses"]["Error"];
             404: components["responses"]["Error"];
             409: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    listPartnerImportSources: {
+        parameters: {
+            query?: {
+                /** @description The connection; the first connected partner platform when left out. */
+                integration_id?: string;
+            };
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                /** @description A program's id or slug. */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The platform's programs. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: {
+                            /** @description The program's id on the platform: pass it as source_program. */
+                            id: string;
+                            name: string;
+                            /** @description Upper case, or empty when the platform doesn't say. */
+                            currency: string;
+                            /** @description active, inactive, or empty when the platform doesn't say. */
+                            status: string;
+                        }[];
+                        /** Format: uuid */
+                        integration_id: string;
+                        /** @description The program an import takes when none is named, or empty. */
+                        suggested: string;
+                    };
+                };
+            };
+            400: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+            422: components["responses"]["Error"];
+            429: components["responses"]["Error"];
+            502: components["responses"]["Error"];
             default: components["responses"]["Error"];
         };
     };
@@ -66929,6 +67910,71 @@ export interface operations {
             default: components["responses"]["Error"];
         };
     };
+    bulkPartnerRewards: {
+        parameters: {
+            query?: never;
+            header?: {
+                /**
+                 * @description Makes the write safe to retry. A repeat with the same key from the same caller within 24 hours gets the first
+                 *     answer back (with `Idempotent-Replayed: true`) instead of running again. The same key for a different request
+                 *     is refused with 422 `idempotency_key_reused`; while the first is still running, 409 `idempotency_in_progress`.
+                 *     Use a new random key, such as a UUID, for each distinct write.
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @enum {string} */
+                    action: "approve" | "reject";
+                    ids?: string[];
+                    /** @description A program's id or slug: all its pending rewards. */
+                    program?: string;
+                    /**
+                     * Format: uuid
+                     * @description A partner: all their pending rewards.
+                     */
+                    partner_id?: string;
+                    /** @enum {string} */
+                    kind?: "cash" | "fee" | "action" | "adjustment";
+                    /** @description Reject only: why, for the partner. */
+                    note?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description What changed. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @enum {string} */
+                        action: "approve" | "reject";
+                        /** @description How many were approved or rejected. */
+                        done: number;
+                        skipped: {
+                            id: string;
+                            /** @description not_found, shared_program, or the reward's status (approved, rejected, paid, fulfilled). */
+                            reason: string;
+                        }[];
+                        /** @description More pending rewards match; call again. */
+                        more: boolean;
+                    };
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            400: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
     rejectPartnerReward: {
         parameters: {
             query?: never;
@@ -67051,6 +68097,8 @@ export interface operations {
                 brand?: components["parameters"]["Brand"];
                 status?: "due" | "paid" | "canceled";
                 partner_id?: string;
+                /** @description A program's id or slug. */
+                program?: string;
                 limit?: number;
                 before?: string;
                 /**

@@ -47,8 +47,6 @@ type principal struct {
 	TokenWorkspaceID string
 	TokenScopes      []string
 	TokenOwnerID     string // the user who made the token, if they still exist
-	// Set when the token is bound to one project.
-	TokenProjectID *string
 	// Set when the token is bound to one brand.
 	TokenBrandID *string
 	// Set when the token is a connected app's (an OAuth grant): its
@@ -71,13 +69,10 @@ type access struct {
 	// RoleID is set when the person is on a role the workspace made.
 	RoleID *string
 	Scopes []string
-	// ProjectID is set for a project token: it sees and changes only that
-	// project's records. Only routes registered with inProject let one in.
-	ProjectID *string
 	// Brands is set for a brand-limited caller: an operator or viewer kept
 	// to some brands, or a brand token. It sees those brands' records and
 	// the shared ones, changes only its brands' records, and is let in
-	// only on routes registered with inBrand or inProject. Nil means every
+	// only on routes registered with inBrand. Nil means every
 	// brand.
 	Brands []string
 	// Test is true in a test workspace: mailboxes are simulated and
@@ -85,22 +80,16 @@ type access struct {
 	Test bool
 }
 
-// sees reports whether the caller may see a record owned by project and
-// brand (nil for shared).
-func (a *access) sees(project, brand *string) bool {
-	if a.ProjectID != nil {
-		return project != nil && *project == *a.ProjectID
-	}
+// sees reports whether the caller may see a record owned by brand (nil for
+// shared).
+func (a *access) sees(brand *string) bool {
 	return a.Brands == nil || brand == nil || slices.Contains(a.Brands, *brand)
 }
 
-// writes reports whether the caller may change a record owned by project
-// and brand. A brand-limited caller only reads shared records, since
-// changing them would change every brand.
-func (a *access) writes(project, brand *string) bool {
-	if a.ProjectID != nil {
-		return project != nil && *project == *a.ProjectID
-	}
+// writes reports whether the caller may change a record owned by brand. A
+// brand-limited caller only reads shared records, since changing them would
+// change every brand.
+func (a *access) writes(brand *string) bool {
 	return a.Brands == nil || (brand != nil && slices.Contains(a.Brands, *brand))
 }
 
@@ -179,9 +168,9 @@ func (s *Server) authenticateSession(r *http.Request) (*principal, error) {
 			WHERE token_hash = $1 AND revoked_at IS NULL AND (expires_at IS NULL OR expires_at > now())
 			  -- A disabled account's tokens stop with it.
 			  AND NOT EXISTS (SELECT 1 FROM users u WHERE u.id = api_tokens.created_by AND u.disabled_at IS NOT NULL)
-			RETURNING id, actor_id, workspace_id, scopes, project_id::text, brand_id::text, coalesce(created_by::text, ''),
+			RETURNING id, actor_id, workspace_id, scopes, brand_id::text, coalesce(created_by::text, ''),
 				coalesce((SELECT g.id::text FROM oauth_grants g WHERE g.api_token_id = api_tokens.id), ''), require_mission`, hash,
-		).Scan(&p.TokenID, &p.ActorID, &p.TokenWorkspaceID, &p.TokenScopes, &p.TokenProjectID, &p.TokenBrandID, &p.TokenOwnerID, &p.TokenGrantID, &p.TokenRequiresMission)
+		).Scan(&p.TokenID, &p.ActorID, &p.TokenWorkspaceID, &p.TokenScopes, &p.TokenBrandID, &p.TokenOwnerID, &p.TokenGrantID, &p.TokenRequiresMission)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, nil
 		}
@@ -208,7 +197,6 @@ func (s *Server) authenticateSession(r *http.Request) (*principal, error) {
 // when the package's tests ask, so the tests can check the document.
 type routeAccess struct {
 	Scope         string `yaml:"scope,omitempty"`
-	ProjectTokens bool   `yaml:"project_tokens,omitempty"`
 	BrandLimited  bool   `yaml:"brand_limited,omitempty"`
 	SignedIn      bool   `yaml:"signed_in,omitempty"`
 	Authenticated bool   `yaml:"authenticated,omitempty"` // any caller: a session or any token
@@ -239,10 +227,10 @@ func (s *Server) requireUser(next http.HandlerFunc) http.HandlerFunc {
 }
 
 // inWorkspace runs next only when the caller has scope in the {ws} workspace.
-// Project tokens and brand-limited callers are refused: the route has not
-// been made project- or brand-aware.
+// Brand-limited callers are refused: the route has not been made
+// brand-aware.
 func (s *Server) inWorkspace(scope string, next http.HandlerFunc) http.HandlerFunc {
-	return s.workspaceRoute(scope, false, false, next)
+	return s.workspaceRoute(scope, false, next)
 }
 
 // inBrand is inWorkspace for routes that also serve brand-limited callers
@@ -250,19 +238,12 @@ func (s *Server) inWorkspace(scope string, next http.HandlerFunc) http.HandlerFu
 // lists, return 404 for other brands' records, and refuse changes outside
 // them (access.sees, access.writes, brandFilter).
 func (s *Server) inBrand(scope string, next http.HandlerFunc) http.HandlerFunc {
-	return s.workspaceRoute(scope, false, true, next)
+	return s.workspaceRoute(scope, true, next)
 }
 
-// inProject is inBrand for routes that also serve project tokens. The
-// handler must keep a project token to its project (access.ProjectID):
-// filter lists, return 404 for other projects' records, and create inside it.
-func (s *Server) inProject(scope string, next http.HandlerFunc) http.HandlerFunc {
-	return s.workspaceRoute(scope, true, true, next)
-}
-
-func (s *Server) workspaceRoute(scope string, projectAware, brandAware bool, next http.HandlerFunc) http.HandlerFunc {
+func (s *Server) workspaceRoute(scope string, brandAware bool, next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		noteAccess(r, routeAccess{Scope: scope, ProjectTokens: projectAware, BrandLimited: brandAware})
+		noteAccess(r, routeAccess{Scope: scope, BrandLimited: brandAware})
 		p, ok := s.authenticated(w, r)
 		if !ok {
 			return
@@ -284,12 +265,7 @@ func (s *Server) workspaceRoute(scope string, projectAware, brandAware bool, nex
 				writeError(w, r, http.StatusNotFound, "not_found", "workspace not found")
 				return
 			}
-			if p.TokenProjectID != nil && !projectAware {
-				writeError(w, r, http.StatusForbidden, "forbidden", "this endpoint is not available to a project token; use a workspace token")
-				return
-			}
 			a.Scopes = p.TokenScopes
-			a.ProjectID = p.TokenProjectID
 			if p.TokenBrandID != nil {
 				a.Brands = []string{*p.TokenBrandID}
 			}

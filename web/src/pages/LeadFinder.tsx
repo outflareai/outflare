@@ -6,7 +6,7 @@
 // client. Everything runs on the workspace's own Geonode and AI accounts.
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import type { CustomerProfile } from "@outflare/sdk";
+import type { CustomerProfile, Sequence } from "@outflare/sdk";
 import { api, errorMessage } from "../api";
 import { Badge, Button, Card, Empty, ErrorText, field, Loading, PageHeader, Stat, Stats, toast } from "../ui";
 import { ago, plural } from "../format";
@@ -18,7 +18,15 @@ import { TagInput } from "@/components/icp";
 
 type Props = { ws: string; canManage: boolean; onConnectors: () => void; onProfiles: () => void };
 
-type Settings = { respect_robots: boolean; review: boolean; share_index: boolean; eu_notice_accepted_at: string | null };
+type Settings = { respect_robots: boolean; review: boolean; share_index: boolean; generic_emails?: boolean; eu_notice_accepted_at: string | null };
+// Someone a run looked up at one of its added companies.
+type Contact = {
+  id: string; domain: string; source: "website" | "provider" | "inbox"; first_name: string; last_name: string; title: string; email: string;
+  email_code: string; confidence: number; status: "finding" | "added" | "ready" | "enrolled" | "stopped"; stop_code: string | null; warnings: string[];
+  record_id: string | null; sequence_id?: string | null;
+};
+// The campaign a profile's people go into: held for you unless auto_add.
+type Campaign = { profile_id: string; sequence_id: string | null; auto_add: boolean; daily_limit: number; ready_limit: number };
 type Qualifier = { id: string | null; profile_id: string | null; version: number; accept: string[]; reject: string[] };
 type Estimate = { searches: number; pages: number; max_ai_cents: number; provider_usd: number; per_company_usd: number };
 type Run = {
@@ -83,16 +91,24 @@ const stages: { id: string; label: string; what: string }[] = [
   { id: "known", label: "Already known", what: "Skips companies already in your CRM" },
   { id: "contact_rules", label: "Contact rules", what: "Stops companies that opted out or bounced; customers, partners and competitors only warn" },
   { id: "add_to_crm", label: "Add to CRM", what: "Adds the company as a prospect" },
+  { id: "people", label: "Pick people", what: "Picks who to contact: people the site names, people from your data provider, and shared inboxes if you allow them" },
+  { id: "find_email", label: "Find email", what: "Finds and checks each person's work email" },
+  { id: "contact_check", label: "Contact rules", what: "Stops people who opted out or bounced" },
+  { id: "add_person", label: "Add person", what: "Adds the person to your CRM, linked to the company" },
+  { id: "enroll", label: "Add to campaign", what: "Adds the person to the profile's campaign, after you approve them unless auto-add is on" },
 ];
 const codeLabel: Record<string, string> = {
   target_reached: "enough found", rejected: "not a fit", unreachable: "site couldn't be read", no_ideas: "no new searches",
   no_answer: "no clear answer", cancelled: "stopped", reviewed: "reviewed", review: "waiting for you", maybe: "maybe, left for you",
-  added: "added", dismissed: "dismissed", not_found: "gone", rate_limited: "slowed by rate limit", provider_error: "provider error, retried",
+  added: "added", dismissed: "dismissed", not_found: "not found", rate_limited: "slowed by rate limit", provider_error: "provider error, retried",
   connector_quota: "Geonode limit", page_budget_reached: "page limit", ai_budget_reached: "AI limit", search_budget: "search limit",
   interrupted: "interrupted, retried", internal: "error, retried", stage_error: "error, retried", no_result: "retried",
+  no_people: "nobody to contact", undeliverable: "email doesn't work", verify_pending: "checking email",
   already_known: "already in your CRM", opted_out: "opted out", bounced: "bounced", not_a_company: "not a company domain",
   connector_needed: "needs a connection", connector_auth: "key refused", connector_unavailable: "provider down, retried",
   ai_model_needed: "needs an AI model", usage_limit_reached: "usage limit",
+  in_another_campaign: "in another campaign", campaign_ready: "ready for campaign", campaign_full: "campaign full, waiting",
+  campaign_unavailable: "campaign unavailable",
 };
 function waited(seconds: number) {
   if (seconds < 60) return `${Math.round(seconds)}s`;
@@ -180,7 +196,7 @@ export function LeadFinder({ ws, canManage, onConnectors, onProfiles }: Props) {
             </span>
           )} />
       )}
-      {starting && <StartDialog base={base} profiles={profiles.filter((p) => p.status === "active")} settings={settings} onClose={() => setStarting(false)}
+      {starting && <StartDialog ws={ws} base={base} profiles={profiles.filter((p) => p.status === "active")} settings={settings} onClose={() => setStarting(false)}
         onStarted={(id) => { setStarting(false); setOpen(id); }} />}
       {editingSettings && <SettingsDialog base={base} settings={settings} onClose={() => setEditingSettings(false)} onSaved={(s) => { setSettings(s); setEditingSettings(false); }} />}
     </div>
@@ -199,12 +215,15 @@ function Notice({ canManage, onAccept }: { canManage: boolean; onAccept: () => v
   );
 }
 
-function StartDialog({ base, profiles, settings, onClose, onStarted }: { base: string; profiles: CustomerProfile[]; settings: Settings; onClose: () => void; onStarted: (id: string) => void }) {
+function StartDialog({ ws, base, profiles, settings, onClose, onStarted }: { ws: string; base: string; profiles: CustomerProfile[]; settings: Settings; onClose: () => void; onStarted: (id: string) => void }) {
   const [profile, setProfile] = useState(profiles[0]?.id ?? "");
   const [target, setTarget] = useState(25);
   const [review, setReview] = useState(settings.review);
   const [estimate, setEstimate] = useState<Estimate | null>(null);
   const [qualifier, setQualifier] = useState<Qualifier | null>(null);
+  // Null on a server without campaigns: the picker stays hidden.
+  const [campaign, setCampaign] = useState<Campaign | null>(null);
+  const [sequences, setSequences] = useState<Sequence[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
 
@@ -213,8 +232,13 @@ function StartDialog({ base, profiles, settings, onClose, onStarted }: { base: s
     call<Estimate>("POST", `${base}/estimate`, { target }).then(({ data }) => setEstimate(data ?? null));
   }, [base, target]);
   useEffect(() => {
-    if (profile) call<Qualifier>("GET", `${base}/qualifiers?profile_id=${profile}`).then(({ data }) => setQualifier(data ?? null));
+    if (!profile) return;
+    call<Qualifier>("GET", `${base}/qualifiers?profile_id=${profile}`).then(({ data }) => setQualifier(data ?? null));
+    call<Campaign>("GET", `${base}/profiles/${profile}/campaign`).then(({ data }) => setCampaign(data ?? null));
   }, [base, profile]);
+  useEffect(() => {
+    api.GET("/v1/workspaces/{ws}/sequences", { params: { path: { ws } } }).then(({ data }) => setSequences((data?.data ?? []).filter((q) => q.status !== "archived")));
+  }, [ws]);
 
   async function start() {
     setBusy(true);
@@ -224,6 +248,13 @@ function StartDialog({ base, profiles, settings, onClose, onStarted }: { base: s
       if (q.error) {
         setBusy(false);
         return setError(errorMessage(q.error));
+      }
+    }
+    if (campaign) {
+      const c = await call<Campaign>("PUT", `${base}/profiles/${profile}/campaign`, { sequence_id: campaign.sequence_id ?? "", auto_add: campaign.auto_add });
+      if (c.error) {
+        setBusy(false);
+        return setError(errorMessage(c.error));
       }
     }
     const { data, error } = await call<Run>("POST", `${base}/runs`, { profile_id: profile, target, review });
@@ -265,6 +296,31 @@ function StartDialog({ base, profiles, settings, onClose, onStarted }: { base: s
             </span>
             <Switch checked={review} onCheckedChange={setReview} />
           </label>
+          {campaign && (
+            <div className="space-y-3 rounded-md border px-3 py-3">
+              <label className="block space-y-1 text-[13px]">
+                <span className="font-medium">Send people to a campaign</span>
+                <select className={`${field} w-full`} value={campaign.sequence_id ?? ""} onChange={(e) => setCampaign({ ...campaign, sequence_id: e.target.value || null })}>
+                  <option value="">None: keep them in the CRM</option>
+                  {sequences.map((q) => <option key={q.id} value={q.id}>{q.name}</option>)}
+                </select>
+                <span className="block text-[12px] text-muted-foreground">
+                  {campaign.sequence_id
+                    ? "Saved for this profile. The campaign sends at its own daily limit, and the lead finder stops searching while three days of people are already waiting."
+                    : "People found are added to your CRM, linked to their company."}
+                </span>
+              </label>
+              {campaign.sequence_id && (
+                <label className="flex cursor-pointer items-start justify-between gap-3 text-[13px]">
+                  <span>
+                    <span className="block">Add people without asking</span>
+                    <span className="block text-[12px] text-muted-foreground">Off: they wait under "Ready for campaign" until you add them. Unconfirmed emails always wait.</span>
+                  </span>
+                  <Switch checked={campaign.auto_add} onCheckedChange={(v) => setCampaign({ ...campaign, auto_add: v })} />
+                </label>
+              )}
+            </div>
+          )}
           {estimate && (
             <p className="rounded-md bg-muted px-3 py-2 text-[12px] text-muted-foreground">
               At most {plural(estimate.searches, "search", "searches")} and {plural(estimate.pages, "page")} on Geonode (about {usd(estimate.provider_usd)}), and up to {usd(estimate.max_ai_cents / 100)} of AI: about {usd(estimate.per_company_usd)} a company at most. It usually spends less.
@@ -285,17 +341,18 @@ function SettingsDialog({ base, settings, onClose, onSaved }: { base: string; se
   const [s, setS] = useState(settings);
   const [error, setError] = useState("");
   async function save() {
-    const { data, error } = await call<Settings>("PATCH", `${base}/settings`, { respect_robots: s.respect_robots, review: s.review, share_index: s.share_index });
+    const { data, error } = await call<Settings>("PATCH", `${base}/settings`, { respect_robots: s.respect_robots, review: s.review, share_index: s.share_index,
+      ...(s.generic_emails !== undefined && { generic_emails: s.generic_emails }) });
     if (error) return setError(errorMessage(error));
     onSaved(data!);
   }
-  const row = (key: "respect_robots" | "review" | "share_index", title: string, body: string) => (
+  const row = (key: "respect_robots" | "review" | "share_index" | "generic_emails", title: string, body: string) => (
     <label className="flex cursor-pointer items-start justify-between gap-3 text-[13px]">
       <span>
         <span className="block">{title}</span>
         <span className="block text-[12px] text-muted-foreground">{body}</span>
       </span>
-      <Switch checked={s[key]} onCheckedChange={(v) => setS({ ...s, [key]: v })} />
+      <Switch checked={!!s[key]} onCheckedChange={(v) => setS({ ...s, [key]: v })} />
     </label>
   );
   return (
@@ -308,6 +365,7 @@ function SettingsDialog({ base, settings, onClose, onSaved }: { base: string; se
           {row("review", "Review before adding", "Runs stop for you to pick which companies to add.")}
           {row("respect_robots", "Follow robots.txt", "Skip pages a site's robots.txt asks crawlers not to read. Off reads any public page; it never logs in.")}
           {row("share_index", "Share public company facts", "Facts read from company websites (never people or email addresses) go into a shared index, so a site is read once for everyone. Off neither adds to it nor uses it.")}
+          {settings.generic_emails !== undefined && row("generic_emails", "Email shared inboxes too", "Also add a company's published shared addresses, such as info@, contact@ or sales@, as contacts. Off contacts named people only.")}
           <ErrorText>{error}</ErrorText>
           <div className="flex justify-end gap-2">
             <Button variant="ghost" onClick={onClose}>Cancel</Button>
@@ -322,21 +380,26 @@ function SettingsDialog({ base, settings, onClose, onSaved }: { base: string; se
 function RunView({ base, id, canManage, profiles, onBack, onConnectors }: { base: string; id: string; canManage: boolean; profiles: CustomerProfile[]; onBack: () => void; onConnectors: () => void }) {
   const [run, setRun] = useState<Run | null>(null);
   const [cands, setCands] = useState<Candidate[]>([]);
+  const [contacts, setContacts] = useState<Contact[]>([]);
   const [show, setShow] = useState<"fit" | "reject" | "all">("fit");
   const [picked, setPicked] = useState<Set<string>>(new Set());
   const [resuming, setResuming] = useState(false);
+  // Set after adding people to the campaign, until they are all in.
+  const [enrolling, setEnrolling] = useState(false);
   const [error, setError] = useState("");
   const load = useCallback(async () => {
-    const [r, c] = await Promise.all([call<Run>("GET", `${base}/runs/${id}`), call<{ data: Candidate[] }>("GET", `${base}/runs/${id}/candidates`)]);
+    const [r, c, k] = await Promise.all([call<Run>("GET", `${base}/runs/${id}`), call<{ data: Candidate[] }>("GET", `${base}/runs/${id}/candidates`),
+      call<{ data: Contact[] }>("GET", `${base}/runs/${id}/contacts`)]);
     if (r.error) setError(errorMessage(r.error));
     if (r.data) setRun(r.data);
     setCands(c.data?.data ?? []);
+    setContacts(k.data?.data ?? []);
   }, [base, id]);
   useEffect(() => {
     load();
   }, [load]);
   // Refresh while it finds, and while picked companies are being added.
-  const busy = cands.some(adding);
+  const busy = cands.some(adding) || contacts.some((k) => k.status === "finding" || (enrolling && k.status === "ready"));
   useEffect(() => {
     if (run?.status !== "queued" && run?.status !== "running" && !busy) return;
     const t = setInterval(load, 3000);
@@ -355,6 +418,13 @@ function RunView({ base, id, canManage, profiles, onBack, onConnectors }: { base
       ? data?.adding != null ? `Adding ${plural(data.adding, "company", "companies")}. Each one is checked against your opt-out list first.` : `Added ${plural(data?.added ?? 0, "company", "companies")} to your companies.`
       : `Dismissed ${plural(data?.dismissed ?? 0, "company", "companies")}.`);
     setPicked(new Set());
+    load();
+  }
+  async function enroll(ids?: string[]) {
+    const { data, error } = await call<{ adding: number }>("POST", `${base}/runs/${id}/contacts/enroll`, ids ? { contact_ids: ids } : {});
+    if (error) return toast(errorMessage(error), "error");
+    toast(`Adding ${plural(data?.adding ?? 0, "person", "people")} to the campaign.`);
+    setEnrolling(true);
     load();
   }
   async function cancel() {
@@ -457,6 +527,7 @@ function RunView({ base, id, canManage, profiles, onBack, onConnectors }: { base
           )}
         />
       )}
+      {contacts.length > 0 && <People contacts={contacts} canManage={canManage} onEnroll={enroll} />}
       {run.queries.length > 0 && (
         <details className="text-[12px] text-muted-foreground">
           <summary className="cursor-pointer">{plural(run.queries.length, "search", "searches")} planned</summary>
@@ -465,6 +536,69 @@ function RunView({ base, id, canManage, profiles, onBack, onConnectors }: { base
       )}
       {resuming && <ResumeDialog base={base} run={run} onClose={() => setResuming(false)} onResumed={() => { setResuming(false); load(); }} />}
     </div>
+  );
+}
+
+const sourceLabel = { website: "Their website", provider: "Data provider", inbox: "Shared inbox" } as const;
+
+// People lists who the run is contacting at its added companies, and what
+// happened to each: being found, added to the CRM, or stopped and why.
+function People({ contacts, canManage, onEnroll }: { contacts: Contact[]; canManage: boolean; onEnroll: (ids?: string[]) => void }) {
+  const inCRM = contacts.filter((k) => k.record_id).length;
+  const ready = contacts.filter((k) => k.status === "ready");
+  const enrolled = contacts.filter((k) => k.status === "enrolled").length;
+  const sure = ready.filter((k) => k.email_code !== "risky");
+  return (
+    <Card title="People found" description={`${plural(inCRM, "person", "people")} added to your CRM, linked to their company${enrolled ? `; ${enrolled} in the campaign` : ""}.`}>
+      {ready.length > 0 && (
+        <div className="mb-3 flex flex-wrap items-center justify-between gap-2 rounded-md bg-muted px-3 py-2 text-[13px]">
+          <span><span className="font-medium">{plural(ready.length, "person", "people")} ready for the campaign.</span> They go in once you add them.</span>
+          {canManage && (
+            <span className="flex gap-2">
+              {sure.length > 0 && sure.length < ready.length && <Button variant="ghost" onClick={() => onEnroll(sure.map((k) => k.id))}>Add {sure.length} confirmed</Button>}
+              <Button onClick={() => onEnroll()}>Add all to campaign</Button>
+            </span>
+          )}
+        </div>
+      )}
+      <div className="overflow-x-auto">
+        <table className="w-full text-[13px]">
+          <thead className="text-left font-mono text-[11px] tracking-wide text-muted-foreground uppercase">
+            <tr>
+              <th className="py-1.5 pr-3 font-medium">Person</th>
+              <th className="py-1.5 pr-3 font-medium">Company</th>
+              <th className="py-1.5 pr-3 font-medium">Email</th>
+              <th className="py-1.5 pr-3 font-medium">From</th>
+              <th className="py-1.5 font-medium"></th>
+            </tr>
+          </thead>
+          <tbody>
+            {contacts.map((k) => {
+              const name = `${k.first_name} ${k.last_name}`.trim();
+              const warnings = k.warnings.filter((w) => w !== "risky_email").map(warningLabel);
+              return (
+                <tr key={k.id} className="border-t align-top">
+                  <td className="py-1.5 pr-3">{name || <span className="text-muted-foreground">Shared inbox</span>}{k.title && <span className="block text-[12px] text-muted-foreground">{k.title}</span>}</td>
+                  <td className="py-1.5 pr-3 text-muted-foreground">{k.domain}</td>
+                  <td className="py-1.5 pr-3 font-mono text-[12px]">{k.email || "…"}{k.email_code === "risky" && <span className="ml-1 text-amber-600 dark:text-amber-400" title="Nothing could confirm this address">unconfirmed</span>}</td>
+                  <td className="py-1.5 pr-3 text-[12px] text-muted-foreground">{sourceLabel[k.source]}</td>
+                  <td className="py-1.5">
+                    <span className="inline-flex flex-wrap gap-1">
+                      {k.status === "added" ? <Badge tone="green">Added</Badge>
+                        : k.status === "ready" ? <Badge tone="amber">Ready for campaign</Badge>
+                        : k.status === "enrolled" ? <Badge tone="green">In campaign</Badge>
+                        : k.status === "stopped" ? <Badge tone="red" title={k.warnings.join("\n")}>{k.record_id ? "In CRM, not in campaign" : "Not added"}: {codeLabel[k.stop_code ?? ""] ?? k.stop_code}</Badge>
+                        : <Badge tone="blue">Finding</Badge>}
+                      {k.status !== "stopped" && k.status !== "finding" && warnings.length > 0 && <Badge tone="amber" title={warnings.join("\n")}>{warnings.length === 1 ? warnings[0] : "Check"}</Badge>}
+                    </span>
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    </Card>
   );
 }
 

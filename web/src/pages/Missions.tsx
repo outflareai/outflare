@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState, type FormEvent, type ReactNode } from "react";
-import type { APIToken, Mission, MissionAction, MissionBrief, MissionCall, MissionMode, MissionUpdate } from "@outflare/sdk";
+import type { APIToken, BrandContext, Mission, MissionAction, MissionCall, MissionMode, MissionUpdate } from "@outflare/sdk";
 import { useBrand } from "@/lib/brand";
 import { BrandBadge } from "@/components/brand-badge";
 import { api, errorMessage } from "../api";
@@ -47,7 +47,7 @@ const money = (cents: number) => (cents / 100).toLocaleString(undefined, { style
 const endsAt = (iso: string) => new Date(iso).toLocaleString(undefined, { weekday: "short", day: "numeric", month: "short", year: "numeric", hour: "numeric", minute: "2-digit", timeZoneName: "short" });
 const isLive = (m: Mission) => !["completed", "stopped", "failed"].includes(m.status);
 
-type Detail = { mission: Mission; brief: MissionBrief | null; updates: MissionUpdate[]; open_connect_requests: MissionUpdate[]; how_to_act: { header: string; writes: string } };
+type Detail = { mission: Mission; brand?: BrandContext | null; updates: MissionUpdate[]; open_connect_requests: MissionUpdate[]; how_to_act: { header: string; writes: string } };
 
 export function Missions({ ws, canManage, open, setOpen }: { ws: string; canManage: boolean; open?: string; setOpen: (id?: string) => void }) {
   if (open) return <MissionDetail key={open} ws={ws} id={open} canManage={canManage} onBack={() => setOpen(undefined)} />;
@@ -301,7 +301,7 @@ function FirstMission({ ws, canManage, onCreate }: { ws: string; canManage: bool
         />
         <Card title="How a mission runs">
           <ol className="list-decimal space-y-1.5 pl-5 text-[13px]">
-            <li>The agent creates the mission and reads the brief. Its changes are dry runs.</li>
+            <li>The agent creates the mission and reads the company and brand context. Its changes are dry runs.</li>
             <li>It asks you to connect any tool it needs, like an email verifier.</li>
             <li>It sends you its plan. You approve it and choose how changes run.</li>
             <li>It works, posting progress here. You approve changes, answer questions or pause it.</li>
@@ -614,7 +614,7 @@ function MissionDetail({ ws, id, canManage, onBack }: { ws: string; id: string; 
         <Tabs defaultValue="activity" className="min-w-0">
           <TabsList>
             <TabsTrigger value="activity">Activity</TabsTrigger>
-            <TabsTrigger value="plan">Plan and brief</TabsTrigger>
+            <TabsTrigger value="plan">Plan and context</TabsTrigger>
             <TabsTrigger value="calls">Calls ({m.calls.toLocaleString()})</TabsTrigger>
             <TabsTrigger value="changes">Changes</TabsTrigger>
           </TabsList>
@@ -626,14 +626,13 @@ function MissionDetail({ ws, id, canManage, onBack }: { ws: string; id: string; 
               {m.plan ? <Prose text={m.plan} /> : <p className="text-[13px] text-muted-foreground">An agent submits its plan with submit_mission_plan before you approve.</p>}
             </Card>
             {m.instructions && <Card title="Instructions"><Prose text={m.instructions} /></Card>}
-            {d.brief && (
-              <Card title="Brief" description={`From the ${d.brief.name} project, version ${d.brief.version}. Projects are being removed; briefs now live in brand context.`}>
+            {d.brand && (
+              <Card title={`${d.brand.name} context`} description="What the agent reads about this mission's brand, on top of the company's.">
                 <div className="space-y-3 text-[13px]">
-                  {d.brief.changed_since_approval && <p className="rounded border border-amber-500/30 bg-amber-500/10 px-2 py-1 text-amber-800 dark:text-amber-300">The brief changed after this mission was approved (approved against version {m.brief_version}).</p>}
-                  {([["Offer", d.brief.offer], ["Audience", d.brief.audience], ["Market", d.brief.market]] as const).filter(([, v]) => v).map(([k, v]) => (
+                  {([["About", d.brand.about], ["Audience", d.brand.audience], ["Goals", d.brand.goals]] as const).filter(([, v]) => v).map(([k, v]) => (
                     <div key={k}><div className="text-[12px] text-muted-foreground">{k}</div><div>{v}</div></div>
                   ))}
-                  {d.brief.brief && <Prose text={d.brief.brief} />}
+                  {d.brand.notes && <Prose text={d.brand.notes} />}
                 </div>
               </Card>
             )}
@@ -735,7 +734,7 @@ function NeedsYou({ ws, d, canManage, refresh, onChange }: { ws: string; d: Deta
     <Card title="Needs you" description="The agent is waiting on these.">
       <div className="space-y-3">
         {m.status === "pending_approval" && (
-          <p className="text-[13px]">The plan is waiting for your approval. Read it under <span className="font-medium">Plan and brief</span>, then use <span className="font-medium">Review and approve</span> above.</p>
+          <p className="text-[13px]">The plan is waiting for your approval. Read it under <span className="font-medium">Plan and context</span>, then use <span className="font-medium">Review and approve</span> above.</p>
         )}
         {question && <Question ws={ws} missionId={m.id} q={question} canAnswer={canManage && isLive(m)} onAnswered={onChange} />}
         {requests.map((r) => (

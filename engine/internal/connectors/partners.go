@@ -40,10 +40,50 @@ type PartnerImporter interface {
 	PartnerPage(ctx context.Context, cl *Client, creds Creds, program, kind, after string) (page PartnerObjects, next string, err error)
 }
 
+// PartnerFetcher is a PartnerImporter that can read one partner by id.
+// An import uses it for a partner that a promo code, customer or
+// commission names but the partner list didn't give, such as one the
+// platform leaves out of its list (not onboarded, invited).
+type PartnerFetcher interface {
+	PartnerByID(ctx context.Context, cl *Client, creds Creds, program, id string) (ImportPartner, error)
+}
+
+// PartnerIDs are the partners a page's promo codes, customers and
+// commissions name, each once.
+func (p PartnerObjects) PartnerIDs() []string {
+	seen := map[string]bool{}
+	var out []string
+	add := func(id string) {
+		if id != "" && !seen[id] {
+			seen[id] = true
+			out = append(out, id)
+		}
+	}
+	for _, c := range p.PromoCodes {
+		add(c.PartnerID)
+	}
+	for _, c := range p.Customers {
+		add(c.PartnerID)
+	}
+	for _, c := range p.Commissions {
+		add(c.PartnerID)
+	}
+	return out
+}
+
+// UnreadableError is a page the platform answered that couldn't be read:
+// not JSON, or no list in it. Asking again gets the same answer, so an
+// import notes it and reads the next kind.
+type UnreadableError struct{ Message string }
+
+func (e *UnreadableError) Error() string { return e.Message }
+
 type PartnerProgram struct {
 	ID       string `json:"id"`
 	Name     string `json:"name"`
 	Currency string `json:"currency"` // "" when the platform doesn't say
+	// Status is active, inactive, or "" when the platform doesn't say.
+	Status string `json:"status"`
 }
 
 // PartnerObjects is one page; only the slice for the kind read is set.
@@ -94,7 +134,11 @@ type ImportCustomer struct {
 	Email     string
 	// CustomerID is the workspace's own id for them, as its backend sent it.
 	CustomerID string
-	Created    time.Time
+	// Aliases are other ids the workspace's backend may report them by
+	// after switching over, such as the platform's own customer id that
+	// its sign-up call returned and the backend stored.
+	Aliases []string
+	Created time.Time
 }
 
 type ImportTransaction struct {

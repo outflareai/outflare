@@ -59,7 +59,6 @@ type inboundView struct {
 	Details            map[string]any `json:"details"`
 	NeedsReview        bool           `json:"needs_review"`
 	ClassifiedAt       *time.Time     `json:"classified_at"`
-	ProjectID          *string        `json:"project_id"`
 	BrandID            *string        `json:"brand_id"`
 	Group              *string        `json:"group"`
 }
@@ -79,7 +78,7 @@ const inboundSelect = `
 	       i.lead_id, NULLIF(trim(l.first_name || ' ' || l.last_name), ''), NULLIF(l.company, ''), i.sequence_id, q.name, i.received_at,
 	       i.category, i.category_source, i.assigned_to, u.name, i.snoozed_until, i.done, i.labels,
 	       i.source, i.integration_id, i.category_confidence, i.category_reason, i.details, i.needs_review, i.classified_at,
-	       COALESCE(q.project_id, m.project_id), COALESCE(q.brand_id, m.brand_id), NULL::text
+	       COALESCE(q.brand_id, m.brand_id), NULL::text
 	FROM inbound_messages i
 	JOIN mailboxes m ON m.id = i.mailbox_id
 	LEFT JOIN leads l ON l.id = i.lead_id
@@ -187,13 +186,6 @@ func (s *Server) listInbox(w http.ResponseWriter, r *http.Request) {
 	default:
 		writeError(w, r, http.StatusBadRequest, "invalid_request", "needs_review must be true or false")
 		return
-	}
-	if v := q.Get("project_id"); v != "" {
-		if !validUUID(v) {
-			writeError(w, r, http.StatusBadRequest, "invalid_request", "project_id must be a UUID")
-			return
-		}
-		where += ` AND COALESCE(q.project_id, m.project_id) = ` + arg(v)
 	}
 	if v := q.Get("min_confidence"); v != "" {
 		f, err := strconv.ParseFloat(v, 64)
@@ -308,11 +300,11 @@ func (s *Server) inboundBrand(w http.ResponseWriter, r *http.Request, a *access,
 			WHERE i.id = $1 AND i.workspace_id = $2`, id, a.WorkspaceID).Scan(&brand)
 	}
 	switch {
-	case errors.Is(err, pgx.ErrNoRows) || (err == nil && !a.sees(nil, brand)):
+	case errors.Is(err, pgx.ErrNoRows) || (err == nil && !a.sees(brand)):
 		writeError(w, r, http.StatusNotFound, "not_found", "message not found")
 	case err != nil:
 		s.internal(w, r, err)
-	case write && !a.writes(nil, brand):
+	case write && !a.writes(brand):
 		writeError(w, r, http.StatusForbidden, "forbidden", "this came to a mailbox every brand shares; only someone with access to every brand can change it")
 	default:
 		return true

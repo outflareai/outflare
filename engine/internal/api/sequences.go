@@ -24,16 +24,16 @@ import (
 
 func (s *Server) routesSequences(mux *http.ServeMux) {
 	read, manage := auth.ScopeSequencesRead, auth.ScopeSequencesManage
-	mux.HandleFunc("GET /v1/workspaces/{ws}/sequences", s.inProject(read, s.listSequences))
-	mux.HandleFunc("POST /v1/workspaces/{ws}/sequences", s.inProject(manage, s.createSequence))
-	mux.HandleFunc("GET /v1/workspaces/{ws}/sequences/{id}", s.inProject(read, s.getSequence))
-	mux.HandleFunc("PATCH /v1/workspaces/{ws}/sequences/{id}", s.inProject(manage, s.projectSequence(s.updateSequence)))
-	mux.HandleFunc("DELETE /v1/workspaces/{ws}/sequences/{id}", s.inProject(manage, s.projectSequence(s.deleteSequence)))
-	mux.HandleFunc("PUT /v1/workspaces/{ws}/sequences/{id}/steps", s.inProject(manage, s.projectSequence(s.putSteps)))
-	mux.HandleFunc("POST /v1/workspaces/{ws}/sequences/{id}/preview", s.inProject(read, s.projectSequence(s.previewSequence)))
-	mux.HandleFunc("GET /v1/workspaces/{ws}/sequences/{id}/enrollments", s.inProject(read, s.listEnrollments))
-	mux.HandleFunc("POST /v1/workspaces/{ws}/sequences/{id}/enrollments", s.inProject(manage, s.projectSequence(s.enroll)))
-	mux.HandleFunc("POST /v1/workspaces/{ws}/sequences/{id}/enrollments/{eid}/stop", s.inProject(manage, s.projectSequence(s.stopEnrollment)))
+	mux.HandleFunc("GET /v1/workspaces/{ws}/sequences", s.inBrand(read, s.listSequences))
+	mux.HandleFunc("POST /v1/workspaces/{ws}/sequences", s.inBrand(manage, s.createSequence))
+	mux.HandleFunc("GET /v1/workspaces/{ws}/sequences/{id}", s.inBrand(read, s.getSequence))
+	mux.HandleFunc("PATCH /v1/workspaces/{ws}/sequences/{id}", s.inBrand(manage, s.brandSequence(s.updateSequence)))
+	mux.HandleFunc("DELETE /v1/workspaces/{ws}/sequences/{id}", s.inBrand(manage, s.brandSequence(s.deleteSequence)))
+	mux.HandleFunc("PUT /v1/workspaces/{ws}/sequences/{id}/steps", s.inBrand(manage, s.brandSequence(s.putSteps)))
+	mux.HandleFunc("POST /v1/workspaces/{ws}/sequences/{id}/preview", s.inBrand(read, s.brandSequence(s.previewSequence)))
+	mux.HandleFunc("GET /v1/workspaces/{ws}/sequences/{id}/enrollments", s.inBrand(read, s.listEnrollments))
+	mux.HandleFunc("POST /v1/workspaces/{ws}/sequences/{id}/enrollments", s.inBrand(manage, s.brandSequence(s.enroll)))
+	mux.HandleFunc("POST /v1/workspaces/{ws}/sequences/{id}/enrollments/{eid}/stop", s.inBrand(manage, s.brandSequence(s.stopEnrollment)))
 	mux.HandleFunc("GET /v1/workspaces/{ws}/messages", s.inWorkspace(read, s.listMessages))
 	mux.HandleFunc("POST /v1/workspaces/{ws}/mailboxes/{id}/test-send", s.inWorkspace(auth.ScopeMailboxesManage, s.testSend))
 	// Public: the links in sent emails.
@@ -54,7 +54,6 @@ type sequenceView struct {
 	ID            string  `json:"id"`
 	Name          string  `json:"name"`
 	Status        string  `json:"status"`
-	ProjectID     *string `json:"project_id"`
 	BrandID       *string `json:"brand_id"`
 	PoolID        *string `json:"pool_id"`
 	Timezone      string  `json:"timezone"`
@@ -100,14 +99,10 @@ var priorityNames = []string{"low", "normal", "high"}
 var enrollmentStatuses = []string{"active", "completed", "stopped", "unsubscribed", "bounced", "replied", "blocked", "failed"}
 
 // loadSequences returns the workspace's sequences but archived ones, or the
-// one with id. project filters to a project's sequences ("none": shared).
-func (s *Server) loadSequences(ctx context.Context, ws string, id *string, project ...string) ([]sequenceView, error) {
-	proj := ""
-	if len(project) > 0 {
-		proj = project[0]
-	}
+// one with id.
+func (s *Server) loadSequences(ctx context.Context, ws string, id *string) ([]sequenceView, error) {
 	rows, err := s.pool.Query(ctx, `
-		SELECT id, name, status, project_id::text, sequences.brand_id::text, pool_id, timezone, send_days::int[], to_char(send_start, 'HH24:MI'), to_char(send_end, 'HH24:MI'),
+		SELECT id, name, status, sequences.brand_id::text, pool_id, timezone, send_days::int[], to_char(send_start, 'HH24:MI'), to_char(send_end, 'HH24:MI'),
 		       daily_new_limit, daily_send_limit, stop_on_reply, created_at, updated_at,
 		       team_id, priority, target_daily, min_daily, allocation_mode,
 		       EXISTS (SELECT 1 FROM actors ac WHERE ac.id = sequences.created_by AND ac.type = 'api_token'),
@@ -117,15 +112,14 @@ func (s *Server) loadSequences(ctx context.Context, ws string, id *string, proje
 		       sequences.mission_id::text
 		FROM sequences LEFT JOIN allocation_status st ON st.sequence_id = sequences.id
 		WHERE sequences.workspace_id = $1 AND (($2::uuid IS NULL AND sequences.status <> 'archived') OR sequences.id = $2)
-		  AND ($3 = '' OR ($3 = 'none' AND sequences.project_id IS NULL) OR sequences.project_id::text = $3)
-		ORDER BY sequences.created_at DESC`, ws, id, proj)
+		ORDER BY sequences.created_at DESC`, ws, id)
 	if err != nil {
 		return nil, err
 	}
 	list, err := pgx.CollectRows(rows, func(r pgx.CollectableRow) (sequenceView, error) {
 		var v sequenceView
 		var prio int16
-		err := r.Scan(&v.ID, &v.Name, &v.Status, &v.ProjectID, &v.BrandID, &v.PoolID, &v.Timezone, &v.SendDays, &v.SendStart, &v.SendEnd,
+		err := r.Scan(&v.ID, &v.Name, &v.Status, &v.BrandID, &v.PoolID, &v.Timezone, &v.SendDays, &v.SendStart, &v.SendEnd,
 			&v.DailyNewLimit, &v.DailySendLimit, &v.StopOnReply, &v.CreatedAt, &v.UpdatedAt,
 			&v.TeamID, &prio, &v.TargetDaily, &v.MinDaily, &v.AllocationMode, &v.StartedByAgent,
 			&v.Allocation.ActiveDaily, &v.Allocation.NeededDaily, &v.Allocation.Note, &v.Allocation.PlannedAt,
@@ -212,15 +206,11 @@ func (s *Server) loadSequences(ctx context.Context, ws string, id *string, proje
 
 func (s *Server) listSequences(w http.ResponseWriter, r *http.Request) {
 	a := accessFrom(r.Context())
-	project, ok := projectFilter(w, r)
-	if !ok {
-		return
-	}
 	brand, ok := s.brandFilter(w, r)
 	if !ok {
 		return
 	}
-	list, err := s.loadSequences(r.Context(), a.WorkspaceID, nil, project)
+	list, err := s.loadSequences(r.Context(), a.WorkspaceID, nil)
 	if err != nil {
 		s.internal(w, r, err)
 		return
@@ -249,7 +239,7 @@ func (s *Server) findSequence(w http.ResponseWriter, r *http.Request, ws, id str
 		s.internal(w, r, err)
 		return nil, false
 	}
-	if len(list) == 0 || !accessFrom(r.Context()).sees(list[0].ProjectID, list[0].BrandID) {
+	if len(list) == 0 || !accessFrom(r.Context()).sees(list[0].BrandID) {
 		writeError(w, r, http.StatusNotFound, "not_found", "sequence not found")
 		return nil, false
 	}
@@ -259,7 +249,8 @@ func (s *Server) findSequence(w http.ResponseWriter, r *http.Request, ws, id str
 // sequenceSettings are the fields shared by create and update. Pointers are
 // "leave as is" when absent.
 type sequenceSettings struct {
-	Name          *string          `json:"name"`
+	Name *string `json:"name"`
+	// Ignored: projects were removed. Accepted so older clients still work.
 	ProjectID     optional[string] `json:"project_id"`
 	PoolID        optional[string] `json:"pool_id"`
 	Timezone      *string          `json:"timezone"`
@@ -297,7 +288,7 @@ func saveLinkSettings(ctx context.Context, tx pgx.Tx, id string, q *sequenceSett
 // touchesAllocation reports whether the request changes anything the
 // allocator plans from.
 func (q *sequenceSettings) touchesAllocation() bool {
-	return q.ProjectID.Set || q.PoolID.Set || q.DailyNewLimit.Set || q.TeamID.Set || q.Priority != nil || q.TargetDaily.Set ||
+	return q.PoolID.Set || q.DailyNewLimit.Set || q.TeamID.Set || q.Priority != nil || q.TargetDaily.Set ||
 		q.MinDaily.Set || q.AllocationMode.Set || q.PreferredSenderIDs != nil
 }
 
@@ -318,9 +309,6 @@ func (q *sequenceSettings) validate() error {
 	}
 	if q.PoolID.Value != nil && !validUUID(*q.PoolID.Value) {
 		return errInvalid("pool not found")
-	}
-	if q.ProjectID.Value != nil && !validUUID(*q.ProjectID.Value) {
-		return errInvalid("project not found")
 	}
 	if q.Timezone != nil {
 		if _, err := time.LoadLocation(*q.Timezone); err != nil || *q.Timezone == "" || *q.Timezone == "Local" {
@@ -471,55 +459,11 @@ func (s *Server) createSequence(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	if a.ProjectID != nil {
-		if req.ProjectID.Set && (req.ProjectID.Value == nil || *req.ProjectID.Value != *a.ProjectID) {
-			writeError(w, r, http.StatusBadRequest, "invalid_request", "a project token creates sequences only in its own project")
-			return
-		}
-		req.ProjectID = optional[string]{Set: true, Value: a.ProjectID}
-	}
 	ctx := r.Context()
 	var id string
 	err := pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
-		if err := s.checkPool(ctx, tx, a.WorkspaceID, req.PoolID.Value); err != nil {
-			return err
-		}
-		if err := s.checkAllocation(ctx, tx, a, &req.sequenceSettings, true); err != nil {
-			return err
-		}
-		if err := checkProjectRef(ctx, tx, a.WorkspaceID, req.ProjectID.Value); err != nil {
-			return err
-		}
-		var brand *string
-		if a.ProjectID == nil {
-			var err error
-			if brand, err = brandWrite(ctx, tx, a, req.ProjectID.Value, nil); err != nil {
-				return err
-			}
-		}
-		days := req.SendDays
-		if days == nil {
-			days = []int{1, 2, 3, 4, 5}
-		}
-		if err := tx.QueryRow(ctx, `
-			INSERT INTO sequences (workspace_id, name, pool_id, timezone, send_days, send_start, send_end, daily_new_limit, stop_on_reply,
-			                       team_id, priority, target_daily, min_daily, allocation_mode, created_by, project_id, mission_id, brand_id)
-			VALUES ($1, $2, $3, COALESCE($4, 'UTC'), $5, COALESCE($6::time, '09:00'), COALESCE($7::time, '17:00'), $8, COALESCE($9, true),
-			        $10, COALESCE($11, 1), $12, $13, $14, $15, $16, NULLIF($17, '')::uuid, $18)
-			RETURNING id`,
-			a.WorkspaceID, *req.Name, req.PoolID.Value, req.Timezone, days, req.SendStart, req.SendEnd,
-			req.DailyNewLimit.Value, req.StopOnReply,
-			req.TeamID.Value, req.priority(), req.TargetDaily.Value, req.MinDaily.Value, req.AllocationMode.Value, a.ActorID,
-			req.ProjectID.Value, missions.ID(ctx), brand).Scan(&id); err != nil {
-			return err
-		}
-		if err := writePreferred(ctx, tx, id, req.PreferredSenderIDs); err != nil {
-			return err
-		}
-		if err := saveLinkSettings(ctx, tx, id, &req.sequenceSettings); err != nil {
-			return err
-		}
-		if err := writeSteps(ctx, tx, id, req.Steps); err != nil {
+		var err error
+		if id, err = s.insertSequence(ctx, tx, a, &req.sequenceSettings, req.Steps); err != nil {
 			return err
 		}
 		return record(ctx, tx, &a.principal, a.WorkspaceID, "sequence.created", "sequence", id, map[string]any{"name": *req.Name})
@@ -532,21 +476,64 @@ func (s *Server) createSequence(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// projectSequence lets a project token or a brand-limited caller through
-// to a sequence's handler only when it may see the sequence, and to a
-// change only when it may change it; anyone else always passes.
-func (s *Server) projectSequence(next http.HandlerFunc) http.HandlerFunc {
+// insertSequence creates a sequence with its settings and steps in tx, after
+// the same checks as POST /sequences, and answers its id. The caller records
+// the event.
+func (s *Server) insertSequence(ctx context.Context, tx pgx.Tx, a *access, q *sequenceSettings, steps []stepInput) (string, error) {
+	var id string
+	if err := s.checkPool(ctx, tx, a.WorkspaceID, q.PoolID.Value); err != nil {
+		return "", err
+	}
+	if err := s.checkAllocation(ctx, tx, a, q, true); err != nil {
+		return "", err
+	}
+	brand, err := brandWrite(ctx, tx, a, nil)
+	if err != nil {
+		return "", err
+	}
+	days := q.SendDays
+	if days == nil {
+		days = []int{1, 2, 3, 4, 5}
+	}
+	if err := tx.QueryRow(ctx, `
+		INSERT INTO sequences (workspace_id, name, pool_id, timezone, send_days, send_start, send_end, daily_new_limit, stop_on_reply,
+		                       team_id, priority, target_daily, min_daily, allocation_mode, created_by, mission_id, brand_id)
+		VALUES ($1, $2, $3, COALESCE($4, 'UTC'), $5, COALESCE($6::time, '09:00'), COALESCE($7::time, '17:00'), $8, COALESCE($9, true),
+		        $10, COALESCE($11, 1), $12, $13, $14, $15, NULLIF($16, '')::uuid, $17)
+		RETURNING id`,
+		a.WorkspaceID, *q.Name, q.PoolID.Value, q.Timezone, days, q.SendStart, q.SendEnd,
+		q.DailyNewLimit.Value, q.StopOnReply,
+		q.TeamID.Value, q.priority(), q.TargetDaily.Value, q.MinDaily.Value, q.AllocationMode.Value, a.ActorID,
+		missions.ID(ctx), brand).Scan(&id); err != nil {
+		return "", err
+	}
+	if err := writePreferred(ctx, tx, id, q.PreferredSenderIDs); err != nil {
+		return "", err
+	}
+	if err := saveLinkSettings(ctx, tx, id, q); err != nil {
+		return "", err
+	}
+	if err := writeSteps(ctx, tx, id, steps); err != nil {
+		return "", err
+	}
+	return id, nil
+}
+
+// brandSequence lets a brand-limited caller through to a sequence's
+// handler only when it may see the sequence, and to a change only when it
+// may change it; anyone else always passes.
+func (s *Server) brandSequence(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		a := accessFrom(r.Context())
-		if a.ProjectID != nil || a.Brands != nil {
+		if a.Brands != nil {
 			if !validUUID(r.PathValue("id")) {
 				writeError(w, r, http.StatusNotFound, "not_found", "sequence not found")
 				return
 			}
-			var project, brand *string
-			err := s.pool.QueryRow(r.Context(), `SELECT project_id::text, brand_id::text FROM sequences WHERE id = $1 AND workspace_id = $2`,
-				r.PathValue("id"), a.WorkspaceID).Scan(&project, &brand)
-			if errors.Is(err, pgx.ErrNoRows) || (err == nil && !a.sees(project, brand)) {
+			var brand *string
+			err := s.pool.QueryRow(r.Context(), `SELECT brand_id::text FROM sequences WHERE id = $1 AND workspace_id = $2`,
+				r.PathValue("id"), a.WorkspaceID).Scan(&brand)
+			if errors.Is(err, pgx.ErrNoRows) || (err == nil && !a.sees(brand)) {
 				writeError(w, r, http.StatusNotFound, "not_found", "sequence not found")
 				return
 			}
@@ -555,7 +542,7 @@ func (s *Server) projectSequence(next http.HandlerFunc) http.HandlerFunc {
 				return
 			}
 			preview := strings.HasSuffix(r.URL.Path, "/preview")
-			if r.Method != http.MethodGet && !preview && !a.writes(project, brand) {
+			if r.Method != http.MethodGet && !preview && !a.writes(brand) {
 				writeError(w, r, http.StatusForbidden, "forbidden", string(errSharedRecord))
 				return
 			}
@@ -607,14 +594,6 @@ func (s *Server) updateSequence(w http.ResponseWriter, r *http.Request) {
 		writeError(w, r, http.StatusBadRequest, "invalid_request", "status can be set to active, paused or archived")
 		return
 	}
-	if a.ProjectID != nil && req.ProjectID.Set && (req.ProjectID.Value == nil || *req.ProjectID.Value != *a.ProjectID) {
-		writeError(w, r, http.StatusBadRequest, "invalid_request", "a project token cannot move sequences between projects")
-		return
-	}
-	if a.Brands != nil && req.ProjectID.Set && req.ProjectID.Value == nil {
-		writeError(w, r, http.StatusBadRequest, "invalid_request", "you can only keep sequences in your brands' projects")
-		return
-	}
 	ctx := r.Context()
 	err := pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
 		var old string
@@ -638,14 +617,6 @@ func (s *Server) updateSequence(w http.ResponseWriter, r *http.Request) {
 		if err := s.checkAllocation(ctx, tx, a, &req.sequenceSettings, false); err != nil {
 			return err
 		}
-		if err := checkProjectRef(ctx, tx, a.WorkspaceID, req.ProjectID.Value); err != nil {
-			return err
-		}
-		if a.Brands != nil && req.ProjectID.Value != nil {
-			if _, err := brandWrite(ctx, tx, a, req.ProjectID.Value, nil); err != nil {
-				return err
-			}
-		}
 		var days []int
 		if req.SendDays != nil {
 			days = req.SendDays
@@ -666,14 +637,12 @@ func (s *Server) updateSequence(w http.ResponseWriter, r *http.Request) {
 				target_daily = CASE WHEN $17 THEN $18::int ELSE target_daily END,
 				min_daily = CASE WHEN $19 THEN $20::int ELSE min_daily END,
 				allocation_mode = CASE WHEN $21 THEN $22::text ELSE allocation_mode END,
-				project_id = CASE WHEN $23 THEN $24::uuid ELSE project_id END,
 				updated_at = now()
 			WHERE id = $1 AND workspace_id = $2`,
 			id, a.WorkspaceID, req.Name, req.PoolID.Set, req.PoolID.Value, req.Timezone, days, req.SendStart, req.SendEnd,
 			req.DailyNewLimit.Set, req.DailyNewLimit.Value, req.StopOnReply, req.Status,
 			req.TeamID.Set, req.TeamID.Value, req.priority(), req.TargetDaily.Set, req.TargetDaily.Value,
-			req.MinDaily.Set, req.MinDaily.Value, req.AllocationMode.Set, req.AllocationMode.Value,
-			req.ProjectID.Set, req.ProjectID.Value)
+			req.MinDaily.Set, req.MinDaily.Value, req.AllocationMode.Set, req.AllocationMode.Value)
 		if err != nil {
 			return err
 		}
@@ -977,19 +946,10 @@ func (s *Server) enroll(w http.ResponseWriter, r *http.Request) {
 		} else if p != "" {
 			return errLinked(p)
 		}
-		if a.ProjectID != nil && req.ListID != nil {
-			if err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM lead_lists WHERE id = $1 AND workspace_id = $2 AND project_id = $3)`,
-				*req.ListID, a.WorkspaceID, *a.ProjectID).Scan(&ok); err != nil {
-				return err
-			}
-			if !ok {
-				return errInvalid("list_id is not a list in this token's project")
-			}
-		}
 		if a.Brands != nil && req.ListID != nil && validUUID(*req.ListID) {
 			var brand *string
 			err := tx.QueryRow(ctx, `SELECT brand_id::text FROM lead_lists WHERE id = $1 AND workspace_id = $2`, *req.ListID, a.WorkspaceID).Scan(&brand)
-			if errors.Is(err, pgx.ErrNoRows) || (err == nil && !a.sees(nil, brand)) {
+			if errors.Is(err, pgx.ErrNoRows) || (err == nil && !a.sees(brand)) {
 				return errInvalid("list_id is not a list in your brands")
 			}
 			if err != nil {
@@ -1010,9 +970,6 @@ func (s *Server) enroll(w http.ResponseWriter, r *http.Request) {
 					l.id = ANY($3::uuid[]) OR
 					($4::uuid IS NOT NULL AND EXISTS (SELECT 1 FROM lead_list_members m JOIN lead_lists ll ON ll.id = m.list_id
 						WHERE m.lead_id = l.id AND m.list_id = $4 AND ll.workspace_id = $2)))
-				  -- A project token reaches only leads on its project's lists.
-				  AND ($6::uuid IS NULL OR EXISTS (SELECT 1 FROM lead_list_members m JOIN lead_lists ll ON ll.id = m.list_id
-						WHERE m.lead_id = l.id AND ll.project_id = $6))
 			), ins AS (
 				INSERT INTO enrollments (workspace_id, sequence_id, lead_id, next_send_at)
 				SELECT $2, $1, id, now() FROM cand
@@ -1024,7 +981,7 @@ func (s *Server) enroll(w http.ResponseWriter, r *http.Request) {
 			       count(*) FILTER (WHERE here),
 			       count(*) FILTER (WHERE NOT here AND suppressed),
 			       count(*) FILTER (WHERE NOT here AND NOT suppressed AND elsewhere AND $5)
-			FROM cand`, id, a.WorkspaceID, req.LeadIDs, req.ListID, skip, a.ProjectID,
+			FROM cand`, id, a.WorkspaceID, req.LeadIDs, req.ListID, skip,
 		).Scan(&res.Enrolled, &res.AlreadyEnrolled, &res.Suppressed, &res.ActiveElsewhere)
 		if err != nil {
 			return err
@@ -1063,7 +1020,7 @@ func (s *Server) listEnrollments(w http.ResponseWriter, r *http.Request) {
 		writeError(w, r, http.StatusNotFound, "not_found", "sequence not found")
 		return
 	}
-	if a.ProjectID != nil || a.Brands != nil {
+	if a.Brands != nil {
 		if _, ok := s.findSequence(w, r, a.WorkspaceID, id); !ok {
 			return
 		}

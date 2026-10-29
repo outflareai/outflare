@@ -74,37 +74,32 @@ func TestBrandsContextAndFilters(t *testing.T) {
 		t.Fatalf("stale brand context: %v", e)
 	}
 
-	// Memories at three levels: company, brand and project.
-	geoProj := owner.must(201, "POST", base+"/projects", map[string]any{"name": "Proxy buyers", "brand_id": "geonode"})
-	if geoProj["brand_id"] != geo["id"] {
-		t.Fatalf("project brand: %v", geoProj["brand_id"])
-	}
-	owner.must(400, "POST", base+"/projects", map[string]any{"name": "Lost", "brand_id": "nope"})
+	// Memories at two levels: company and brand.
 	owner.must(201, "POST", base+"/memories", map[string]any{"text": "Jack approves new domains", "pinned": true})
 	rm := owner.must(201, "POST", base+"/memories", map[string]any{"text": "No discounts over 20%", "brand_id": "repocket"})
 	if rm["brand_id"] != rid {
 		t.Fatalf("brand memory: %v", rm)
 	}
-	pm := owner.must(201, "POST", base+"/memories", map[string]any{"text": "Proxy buyers want SOCKS5", "project_id": geoProj["id"]})
-	if pm["brand_id"] != geo["id"] {
-		t.Fatalf("project memory takes the project's brand: %v", pm)
+	gm := owner.must(201, "POST", base+"/memories", map[string]any{"text": "Proxy buyers want SOCKS5", "brand_id": "geonode"})
+	if gm["brand_id"] != geo["id"] {
+		t.Fatalf("geonode memory: %v", gm)
 	}
 
 	// Without a brand: the company layer and a line per brand.
 	c := owner.must(200, "GET", base+"/context", nil)
 	md := c["markdown"].(string)
 	if c["memory_count"] != 1.0 || len(c["brands"].([]any)) != 2 || !strings.Contains(md, "Repocket (brand repocket, repocket.com): Earn passive income") ||
-		!strings.Contains(md, "How our brands relate") {
+		!strings.Contains(md, "How our brands relate") || c["projects"] != nil {
 		t.Fatalf("company context: %v\n%s", c, md)
 	}
 	// With a brand: company and brand together, other brands' memories left out.
 	c = owner.must(200, "GET", base+"/context?brand=repocket", nil)
 	md = c["markdown"].(string)
-	if c["brand"].(map[string]any)["brand_id"] != rid || c["memory_count"] != 2.0 || len(c["projects"].([]any)) != 0 ||
+	if c["brand"].(map[string]any)["brand_id"] != rid || c["memory_count"] != 2.0 ||
 		!strings.Contains(md, "Never promise uptime") || !strings.Contains(md, "# Brand: Repocket") || !strings.Contains(md, "- Fire TV: https://www.amazon.com/dp/B0") || !strings.Contains(md, "Never mention Geonode") {
 		t.Fatalf("repocket context: %v\n%s", c, md)
 	}
-	if c := owner.must(200, "GET", base+"/context?brand=geonode", nil); c["memory_count"] != 2.0 || len(c["projects"].([]any)) != 1 {
+	if c := owner.must(200, "GET", base+"/context?brand=geonode", nil); c["memory_count"] != 2.0 {
 		t.Fatalf("geonode context: %v", c)
 	}
 	owner.must(404, "GET", base+"/context?brand=nope", nil)
@@ -112,48 +107,25 @@ func TestBrandsContextAndFilters(t *testing.T) {
 		t.Fatalf("company memories: %v", n)
 	}
 
-	// A project token reads its project's brand without asking for it.
-	ptok := owner.must(201, "POST", base+"/api-tokens", map[string]any{"name": "p", "scopes": []string{"workspace.read"}, "project_id": geoProj["id"]})
-	agent := &client{t: t, h: h, bearer: ptok["token"].(string)}
-	if c := agent.must(200, "GET", base+"/context", nil); c["brand"].(map[string]any)["brand_id"] != geo["id"] || len(c["brands"].([]any)) != 1 {
-		t.Fatalf("project token context: %v", c)
-	}
-	agent.must(404, "GET", base+"/context?brand=repocket", nil)
-	agent.must(403, "GET", base+"/brands", nil)
-
-	// Moving records: a project brings its records, records in a project
-	// stay with it, and lists filter by brand.
+	// Moving records: lists filter by brand.
 	list := owner.must(201, "POST", base+"/lead-lists", map[string]any{"name": "Gamers"})
-	inProj := owner.must(201, "POST", base+"/lead-lists", map[string]any{"name": "Proxy leads", "project_id": geoProj["id"]})
-	if inProj["brand_id"] != geo["id"] {
-		t.Fatalf("list in project: %v", inProj["brand_id"])
-	}
+	other := owner.must(201, "POST", base+"/lead-lists", map[string]any{"name": "Proxy leads"})
 	owner.must(400, "POST", base+"/brands/repocket/add", map[string]any{})
 	moved := owner.must(200, "POST", base+"/brands/repocket/add", map[string]any{
-		"lead_list_ids": []string{list["id"].(string), inProj["id"].(string)},
+		"lead_list_ids": []string{list["id"].(string), other["id"].(string)},
 	})["moved"].(map[string]any)
-	if moved["lead_lists"] != 1.0 || moved["in_project"] != 1.0 {
+	if moved["lead_lists"] != 2.0 || moved["in_project"] != nil {
 		t.Fatalf("moved: %v", moved)
 	}
-	if n := len(owner.must(200, "GET", base+"/lead-lists?brand=repocket", nil)["data"].([]any)); n != 1 {
+	if n := len(owner.must(200, "GET", base+"/lead-lists?brand=repocket", nil)["data"].([]any)); n != 2 {
 		t.Fatalf("repocket lists: %d", n)
 	}
 	if n := len(owner.must(200, "GET", base+"/lead-lists?brand=none", nil)["data"].([]any)); n != 0 {
 		t.Fatalf("shared lists: %d", n)
 	}
 	owner.must(404, "GET", base+"/lead-lists?brand=nope", nil)
-	// Moving the project to Repocket moves its list and memory too.
-	if m := owner.must(200, "POST", base+"/brands/repocket/add", map[string]any{"project_ids": []string{geoProj["id"].(string)}})["moved"].(map[string]any); m["projects"] != 1.0 {
-		t.Fatalf("project moved: %v", m)
-	}
-	if n := len(owner.must(200, "GET", base+"/lead-lists?brand=repocket", nil)["data"].([]any)); n != 2 {
-		t.Fatalf("repocket lists after project move: %d", n)
-	}
-	if n := len(owner.must(200, "GET", base+"/projects?brand=geonode", nil)["data"].([]any)); n != 0 {
-		t.Fatalf("geonode projects: %d", n)
-	}
 	b := owner.must(200, "GET", base+"/brands/repocket", nil)
-	if c := b["counts"].(map[string]any); c["projects"] != 1.0 || c["lead_lists"] != 2.0 {
+	if c := b["counts"].(map[string]any); c["projects"] != nil || c["lead_lists"] != 2.0 {
 		t.Fatalf("counts: %v", c)
 	}
 	owner.must(200, "POST", base+"/brands/repocket/remove", map[string]any{"lead_list_ids": []string{list["id"].(string)}})
@@ -313,18 +285,20 @@ func TestBrandAccess(t *testing.T) {
 
 	geo := owner.must(201, "POST", base+"/brands", map[string]any{"name": "Geonode", "website": "geonode.com"})["id"].(string)
 	rp := owner.must(201, "POST", base+"/brands", map[string]any{"name": "Repocket", "website": "repocket.com"})["id"].(string)
-	geoProj := owner.must(201, "POST", base+"/projects", map[string]any{"name": "Proxy buyers", "brand_id": "geonode"})["id"].(string)
-	rpProj := owner.must(201, "POST", base+"/projects", map[string]any{"name": "Bandwidth sharers", "brand_id": "repocket"})["id"].(string)
-	shared := owner.must(201, "POST", base+"/projects", map[string]any{"name": "Partners"})["id"].(string)
+	geoSeq := owner.must(201, "POST", base+"/sequences", map[string]any{"name": "Proxy buyers"})["id"].(string)
+	rpSeq := owner.must(201, "POST", base+"/sequences", map[string]any{"name": "Bandwidth sharers"})["id"].(string)
+	shared := owner.must(201, "POST", base+"/sequences", map[string]any{"name": "Partners"})["id"].(string)
 	owner.must(201, "POST", base+"/memories", map[string]any{"text": "Geonode pricing is secret", "brand_id": "geonode"})
 	owner.must(201, "POST", base+"/memories", map[string]any{"text": "Company fact"})
-	geoList := owner.must(201, "POST", base+"/lead-lists", map[string]any{"name": "Geonode buyers", "project_id": geoProj})["id"].(string)
+	geoList := owner.must(201, "POST", base+"/lead-lists", map[string]any{"name": "Geonode buyers"})["id"].(string)
 	sharedList := owner.must(201, "POST", base+"/lead-lists", map[string]any{"name": "Everyone"})["id"].(string)
+	owner.must(200, "POST", base+"/brands/geonode/add", map[string]any{"sequence_ids": []string{geoSeq}, "lead_list_ids": []string{geoList}})
+	owner.must(200, "POST", base+"/brands/repocket/add", map[string]any{"sequence_ids": []string{rpSeq}})
 
-	// A brand token: one brand, never with a project.
+	// A brand token: one brand. Projects were removed, so project_id is refused.
 	scopes := []string{"workspace.read", "projects.manage", "leads.manage", "context.manage", "sequences.manage", "inbox.read", "analytics.read", "integrations.read"}
 	owner.must(400, "POST", base+"/api-tokens", map[string]any{"name": "x", "scopes": scopes, "brand": "nope"})
-	owner.must(400, "POST", base+"/api-tokens", map[string]any{"name": "x", "scopes": scopes, "brand": "repocket", "project_id": rpProj})
+	owner.must(400, "POST", base+"/api-tokens", map[string]any{"name": "x", "scopes": scopes, "brand": "repocket", "project_id": rpSeq})
 	tok := owner.must(201, "POST", base+"/api-tokens", map[string]any{"name": "Repocket agent", "scopes": scopes, "brand": "repocket"})
 	if tok["api_token"].(map[string]any)["brand_id"] != rp {
 		t.Fatalf("token view: %v", tok["api_token"])
@@ -345,8 +319,8 @@ func TestBrandAccess(t *testing.T) {
 		}
 		return out
 	}
-	if p := ids(agent, base+"/projects"); len(p) != 2 || !p[rpProj] || !p[shared] {
-		t.Fatalf("agent projects: %v", p)
+	if p := ids(agent, base+"/sequences"); len(p) != 2 || !p[rpSeq] || !p[shared] {
+		t.Fatalf("agent sequences: %v", p)
 	}
 	if b := ids(agent, base+"/brands"); len(b) != 1 || !b[rp] {
 		t.Fatalf("agent brands: %v", b)
@@ -354,8 +328,8 @@ func TestBrandAccess(t *testing.T) {
 	if l := ids(agent, base+"/lead-lists"); len(l) != 1 || !l[sharedList] {
 		t.Fatalf("agent lists: %v", l)
 	}
-	agent.must(404, "GET", base+"/projects/"+geoProj, nil)
-	agent.must(404, "GET", base+"/projects?brand=geonode", nil)
+	agent.must(404, "GET", base+"/sequences/"+geoSeq, nil)
+	agent.must(404, "GET", base+"/sequences?brand=geonode", nil)
 	agent.must(404, "GET", base+"/brands/geonode", nil)
 	agent.must(404, "GET", base+"/lead-lists/"+geoList, nil)
 	agent.must(404, "GET", base+"/context?brand=geonode", nil)
@@ -370,21 +344,15 @@ func TestBrandAccess(t *testing.T) {
 	}
 
 	// It changes only its brand's records, and creates in its brand.
-	agent.must(403, "PATCH", base+"/projects/"+shared, map[string]any{"market": "Everywhere"})
+	agent.must(403, "PATCH", base+"/sequences/"+shared, map[string]any{"name": "Everywhere"})
 	agent.must(403, "PATCH", base+"/lead-lists/"+sharedList, map[string]any{"name": "Mine"})
-	agent.must(200, "PATCH", base+"/projects/"+rpProj, map[string]any{"market": "Students"})
-	agent.must(400, "PATCH", base+"/projects/"+rpProj, map[string]any{"brand_id": "geonode"})
-	agent.must(400, "POST", base+"/projects", map[string]any{"name": "Theirs", "brand_id": "geonode"})
-	if p := agent.must(201, "POST", base+"/projects", map[string]any{"name": "Repocket TV"}); p["brand_id"] != rp {
-		t.Fatalf("agent's project: %v", p)
-	}
+	agent.must(200, "PATCH", base+"/sequences/"+rpSeq, map[string]any{"name": "Students"})
 	if m := agent.must(201, "POST", base+"/memories", map[string]any{"text": "Students love it"}); m["brand_id"] != rp {
 		t.Fatalf("agent's memory: %v", m)
 	}
 	if l := agent.must(201, "POST", base+"/lead-lists", map[string]any{"name": "Students"}); l["brand_id"] != rp {
 		t.Fatalf("agent's list: %v", l)
 	}
-	agent.must(400, "POST", base+"/lead-lists", map[string]any{"name": "Sneaky", "project_id": geoProj})
 	if q := agent.must(201, "POST", base+"/sequences", map[string]any{"name": "Repocket intro"}); q["brand_id"] != rp {
 		t.Fatalf("agent's sequence: %v", q)
 	}
@@ -409,10 +377,10 @@ func TestBrandAccess(t *testing.T) {
 	if b := op.must(200, "GET", "/v1/me", nil)["workspaces"].([]any)[0].(map[string]any)["brand_ids"].([]any); len(b) != 1 || b[0] != geo {
 		t.Fatalf("me brands: %v", b)
 	}
-	if p := ids(op, base+"/projects"); len(p) != 2 || !p[geoProj] || !p[shared] {
-		t.Fatalf("operator projects: %v", p)
+	if p := ids(op, base+"/sequences"); len(p) != 2 || !p[geoSeq] || !p[shared] {
+		t.Fatalf("operator sequences: %v", p)
 	}
-	op.must(404, "GET", base+"/projects/"+rpProj, nil)
+	op.must(404, "GET", base+"/sequences/"+rpSeq, nil)
 	op.must(403, "GET", base+"/status", nil)
 
 	var opID string
@@ -427,7 +395,7 @@ func TestBrandAccess(t *testing.T) {
 	owner.must(400, "PATCH", base+"/members/"+opID, map[string]any{})
 	owner.must(400, "PATCH", base+"/members/"+opID, map[string]any{"brand_ids": []string{"nope"}})
 	owner.must(200, "PATCH", base+"/members/"+opID, map[string]any{"brand_ids": []string{"geonode", "repocket"}})
-	op.must(200, "GET", base+"/projects/"+rpProj, nil)
+	op.must(200, "GET", base+"/sequences/"+rpSeq, nil)
 	op.must(403, "GET", base+"/status", nil)
 	owner.must(200, "PATCH", base+"/members/"+opID, map[string]any{"brand_ids": []string{}})
 	op.must(200, "GET", base+"/status", nil)
@@ -437,7 +405,7 @@ func TestBrandAccess(t *testing.T) {
 		t.Fatalf("promoted: %v", m)
 	}
 	owner.must(400, "PATCH", base+"/members/"+opID, map[string]any{"brand_ids": []string{"geonode"}})
-	op.must(200, "GET", base+"/projects/"+rpProj, nil)
+	op.must(200, "GET", base+"/sequences/"+rpSeq, nil)
 
 	if n := len(named(got(), "member.brands_changed")); n != 4 {
 		t.Fatalf("member.brands_changed events: %d", n)

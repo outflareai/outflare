@@ -6,6 +6,66 @@ Each pull request that changes what Outflare does adds a change note in [changes
 
 ## [Unreleased]
 
+## [0.35.0] - 2026-10-29
+
+### Changed
+
+- Link building has a starter sequence for pitches, ready in one click, with your AI's opener in the first email and one follow-up. Pitches waiting for your approval now show as a count on Link building and its Pitches tab.
+
+### Fixed
+
+- Partners: which cash reward rule pays no longer depends on the rules' order. A first-sale rule beats an every-sale one on a tie, so 10% on the first sale with 2% on every sale pays 10% then 2%, in either order. "First months" rules now take any number of months in the program settings.
+
+## [0.34.0] - 2026-10-29
+
+### Added
+
+- Stories: write a press release for each brand with the facts behind every number and quotes your experts approved. Outflare checks that every number has a source and every quote was approved, flags hype and finance or health claims, and a person approves the release before it is pitched.
+- Apple Ads (formerly Apple Search Ads): connect your own Apple Ads API user to read each ad account's campaigns and daily spend, impressions, taps and installs, for App Store and Apple Maps campaigns. It only reads; installs are measured in your app, so nothing is sent back.
+- Amazon Ads: sign in with Amazon to read each advertising profile's Sponsored Products campaigns and daily spend, impressions, clicks, purchases and sales, in every marketplace and region the sign-in reaches.
+- Outbrain Ads: connect your own Outbrain login with Amplify API access to read each marketer's campaigns and daily spend, impressions, clicks and conversions. It only reads; Outbrain's API has no way to send conversions back.
+
+### Changed
+
+- CRM → Lead finder can send the people it finds into a campaign. Pick one when you start a run: it is saved for that ideal customer profile. People then wait under "Ready for campaign" with an "Add all to campaign" button, or go in by themselves once you turn on "Add people without asking". Unconfirmed emails always wait for you.
+- Conversions sent back to TikTok and Snapchat now also match on their pixels' own cookies (`_ttp` and `_scid`), read only once the visitor allows marketing, and the tracking templates for TikTok, Snapchat and Pinterest show which connector sends their conversions.
+
+## [0.33.0] - 2026-10-29
+
+### Added
+
+- Taboola Ads: paste your own Backstage API client id and secret to read each advertiser account's campaigns and daily spend, impressions, clicks and conversions, and send your conversions back to Taboola's event-based conversions as server-to-server actions, matched on its click id.
+- Test a journey before it reaches anyone: pick a person, and the flow lights up the path they would take, with each step saying what it would do, the subject of every email they'd get or why they'd be skipped. Nothing is sent or saved. Send any check the other way to see that path too. Also over the API and MCP.
+- Pinterest Ads: sign in with Pinterest to read each ad account's campaigns and daily spend, impressions, clicks and conversions, and send your conversions back through Pinterest's Conversions API with your own conversion access token.
+- Redirect links: give a campaign link a short address, on your tracking domain, that counts each click before sending people to the tagged page. Use them where the tracking snippet can't run, such as bio links, partner pages and QR codes, per link or for a whole campaign. Link scanners and previews aren't counted.
+
+### Changed
+
+- CRM → Lead finder shows the people found at each added company: where each one came from, their email, and whether they were added to your CRM or stopped by your opt-out list. Settings has a switch to also contact a company's shared inboxes, such as info@ or sales@.
+- Partners: program settings have an Install section with the website snippet for HTML, Next.js and Google Tag Manager, with your site key filled in, and the backend calls that report sign-ups and sales.
+- Partners: Import from Tolt lists the programs in your Tolt account to pick from, instead of asking for a program id, and picks the only active one by itself.
+- Projects are gone from the API and the MCP server: brands and sequences replace them. A brand's mailboxes now send for any of its sequences, a project's reply rules became its sequences' rules, and outcome reports group by sequence or brand. Older clients that still send `project_id` keep working; it is ignored, except on new API tokens and reply rules, where it is refused.
+- Deleting a partner's record now keeps what they earned and were paid: their rewards and payouts move to an archived "Erased partner" record with no name, email or payout details, so commission totals and payout history still add up. Their referrals and portal sign-ins are still erased.
+- Monitoring now shows how well paid ad clicks are tracked on each network: with the network's click id, with only the tracking template's ad ids, or with neither, plus template macros a network left unfilled. Two new info alerts flag a network whose ads mostly arrive untracked or whose macros don't fill in.
+- Partners: approve or reject many held rewards at once. Pick them on Rewards or approve every pending one in a program; through the API and MCP, by ids or for a whole program or partner.
+- Partners: give one partner their own commission rate (Commission rate in their menu, or a reward rule with `partner_id`). It replaces the program's rate and their group's for them.
+- Partners: a person's record page, and their panel in Visitors and Leads, show the partner programs they are in (code, status, sales and what is due) and the partner who referred them.
+- Partners: people and API tokens limited to some brands can now run their brands' partner programs, with their partners, rewards and payouts. They read programs shared by every brand without changing them, and never see another brand's.
+
+### Fixed
+
+- Partners: the Tolt import reads Tolt's current API (v2), so referred customers come over, and partners of every status (pending, rejected and suspended too) are read. Tolt's API has no payout details, so partners give theirs on the portal.
+- Trustpilot and Capterra review pages are now read in a browser from the first try, and Geonode gets up to 60 seconds per page, so pages behind a bot check come back instead of timing out, and each page is sent to Geonode once.
+- Partners: the Tolt import now reads Tolt's customers list. A kind it can't read is noted as `unreadable`, with Tolt's HTTP status and the shape of its answer, instead of stopping the run, so transactions and commissions still come over.
+- Pages and API responses built from several lookups now always show one consistent moment. Before, a cookie scan could briefly show as finished with none of its cookies listed.
+- Tracking templates now match each ad network's own docs: Quora's template carries its campaign, ad set and ad ids, Outbrain's adds campaign and ad names, Taboola's no longer repeats the click id Taboola adds itself, and LinkedIn's explains that its values are chosen as dynamic values on the campaign.
+- Partners: the Tolt import keeps Tolt's own customer id (`cus_...`) on each referred customer, so renewals your backend reports with it still credit the partner (run the import again to add it to customers already imported). An import whose pages don't advance now stops with `pagination_stuck` instead of reading the first page forever.
+
+### Upgrading
+
+- API tokens limited to one project are now workspace tokens with the same scopes, so each can see and change the whole workspace. Review them on the API tokens page and revoke any that should stay narrow.
+- runs migration 0262.
+
 ## [0.32.0] - 2026-10-29
 
 ### Changed

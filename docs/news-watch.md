@@ -2,7 +2,7 @@
 
 The news watch reads the news for you. Save a search, and Outflare runs it on a schedule through your own web search connection and keeps every article it finds. A **topic** search follows a subject, such as "residential proxies", so you can see what is being written and who writes it. A **coverage** search looks for a brand, such as "Northpeak", and keeps each article about it as that brand's **coverage**.
 
-It is the first part of digital PR in Outflare: finding a story only your brand can tell, getting it to the journalists who cover the topic, and counting the coverage it wins. It also finds the journalists who write the articles and makes media lists of them. Stories and pitching come next.
+It is the first part of digital PR in Outflare: finding a story only your brand can tell, getting it to the journalists who cover the topic, and counting the coverage it wins. It also finds the journalists who write the articles and makes media lists of them. [Stories](stories.md) turn what you find into a release with sourced facts and approved quotes; pitching comes next.
 
 ## What it needs
 

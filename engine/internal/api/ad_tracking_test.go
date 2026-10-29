@@ -20,7 +20,8 @@ func TestAdTrackingTemplates(t *testing.T) {
 		t.Fatalf("tiktok: %v", tiktok)
 	}
 	tt := tiktok[0].(map[string]any)
-	if !strings.Contains(tt["template"].(string), "of_campaign=__CAMPAIGN_ID__") || tt["click_ids"].([]any)[0] != "ttclid" || tt["connector"] != nil {
+	if !strings.Contains(tt["template"].(string), "of_campaign=__CAMPAIGN_ID__") || tt["click_ids"].([]any)[0] != "ttclid" ||
+		tt["connector"] != "tiktok_ads" || len(tt["cookies"].([]any)) != 1 || tt["cookies"].([]any)[0] != "_ttp" {
 		t.Errorf("tiktok: %v", tt)
 	}
 	meta := owner.must(200, "GET", base+"/ads/tracking-templates?network=meta", nil)["data"].([]any)[0].(map[string]any)
@@ -28,7 +29,7 @@ func TestAdTrackingTemplates(t *testing.T) {
 		t.Errorf("meta: %v", meta)
 	}
 	apple := owner.must(200, "GET", base+"/ads/tracking-templates?network=apple_search_ads", nil)["data"].([]any)[0].(map[string]any)
-	if apple["template"] != "" || apple["field"] != nil {
+	if apple["template"] != "" || apple["field"] != nil || apple["connector"] != "apple_ads" {
 		t.Errorf("apple search ads: %v", apple)
 	}
 	owner.must(400, "GET", base+"/ads/tracking-templates?network=myspace", nil)

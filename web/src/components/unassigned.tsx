@@ -1,7 +1,6 @@
 // Records in no brand. With one brand picked, every page shows only that
 // brand's records, so these show nowhere but under All brands. This card
-// lists them by kind and puts the ones ticked into a brand in one go. A
-// record in a project follows its project, so only the project is listed.
+// lists them by kind and puts the ones ticked into a brand in one go.
 
 import { useCallback, useEffect, useState } from "react";
 import type { Brand } from "@outflare/sdk";
@@ -10,11 +9,10 @@ import { Button, Card, Loading, field, toast } from "../ui";
 import { plural } from "../format";
 import { Checkbox } from "@/components/ui/checkbox";
 
-type Kind = "project_ids" | "domains" | "mailbox_ids" | "lead_list_ids" | "sequence_ids";
+type Kind = "domains" | "mailbox_ids" | "lead_list_ids" | "sequence_ids";
 type Row = { key: string; name: string; sub?: string };
 
 const kinds: { kind: Kind; label: string; one: string; many: string }[] = [
-  { kind: "project_ids", label: "Projects (being removed)", one: "project", many: "projects" },
   { kind: "domains", label: "Sending domains", one: "domain", many: "domains" },
   { kind: "mailbox_ids", label: "Mailboxes", one: "mailbox", many: "mailboxes" },
   { kind: "lead_list_ids", label: "Lead lists", one: "lead list", many: "lead lists" },
@@ -23,30 +21,27 @@ const kinds: { kind: Kind; label: string; one: string; many: string }[] = [
 
 export function NotInABrand({ ws, brands, canEdit, onMoved }: { ws: string; brands: Brand[]; canEdit: boolean; onMoved?: () => void }) {
   const [rows, setRows] = useState<Record<Kind, Row[]> | null>(null);
-  const [picked, setPicked] = useState<Record<Kind, string[]>>({ project_ids: [], domains: [], mailbox_ids: [], lead_list_ids: [], sequence_ids: [] });
+  const [picked, setPicked] = useState<Record<Kind, string[]>>({ domains: [], mailbox_ids: [], lead_list_ids: [], sequence_ids: [] });
   const [open, setOpen] = useState<Kind | null>(null);
   const [to, setTo] = useState("");
   const [busy, setBusy] = useState(false);
 
   const load = useCallback(async () => {
     const none = { params: { path: { ws }, query: { brand: "none" } } };
-    const [p, d, m, l, s] = await Promise.all([
-      api.GET("/v1/workspaces/{ws}/projects", none),
+    const [d, m, l, s] = await Promise.all([
       api.GET("/v1/workspaces/{ws}/sending-domains", none),
       api.GET("/v1/workspaces/{ws}/mailboxes", none),
       api.GET("/v1/workspaces/{ws}/lead-lists", none),
       api.GET("/v1/workspaces/{ws}/sequences", none),
     ]);
-    // Records in a project follow it; moving the project moves them.
-    const loose = <T extends { project_id?: string | null }>(x: T[] | undefined) => (x ?? []).filter((r) => !r.project_id);
+    const loose = <T,>(x: T[] | undefined) => x ?? [];
     setRows({
-      project_ids: (p.data?.data ?? []).filter((x) => x.status !== "archived").map((x) => ({ key: x.id, name: x.name })),
       domains: loose(d.data?.data).map((x) => ({ key: x.domain, name: x.domain })),
       mailbox_ids: loose(m.data?.data).filter((x) => x.lifecycle.stage !== "retired").map((x) => ({ key: x.id, name: x.email, sub: x.domain })),
       lead_list_ids: loose(l.data?.data).map((x) => ({ key: x.id, name: x.name })),
       sequence_ids: loose(s.data?.data).filter((x) => x.status !== "archived").map((x) => ({ key: x.id, name: x.name })),
     });
-    setPicked({ project_ids: [], domains: [], mailbox_ids: [], lead_list_ids: [], sequence_ids: [] });
+    setPicked({ domains: [], mailbox_ids: [], lead_list_ids: [], sequence_ids: [] });
   }, [ws]);
   useEffect(() => void load(), [load]);
 
@@ -72,7 +67,7 @@ export function NotInABrand({ ws, brands, canEdit, onMoved }: { ws: string; bran
   return (
     <Card
       title={`Not in a brand · ${total}`}
-      description="These count for no brand, so they don't show when one brand is picked in the sidebar. Tick what belongs to a brand and move it there. A domain brings its mailboxes. Projects are being removed; until then, a project's domains, mailboxes, lists and sequences move with it."
+      description="These count for no brand, so they don't show when one brand is picked in the sidebar. Tick what belongs to a brand and move it there. A domain brings its mailboxes."
     >
       <div className="space-y-2">
         {kinds.filter((k) => rows[k.kind].length > 0).map((k) => {

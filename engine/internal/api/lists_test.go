@@ -251,9 +251,9 @@ func TestBuildListFromSearchWithWaterfall(t *testing.T) {
 		t.Fatalf("enrich: %v", last)
 	}
 
-	// Lists are filtered by project, and audit events record runs.
-	if out := owner.must(200, "GET", base+"/lead-lists?project_id=none", nil); len(out["data"].([]any)) != 2 {
-		t.Fatalf("project filter: %v", out)
+	// Lists are filtered by brand, and audit events record runs.
+	if out := owner.must(200, "GET", base+"/lead-lists?brand=none", nil); len(out["data"].([]any)) != 2 {
+		t.Fatalf("brand filter: %v", out)
 	}
 	audit := owner.must(200, "GET", base+"/audit-events?action=lead_list.build_done", nil)
 	if len(audit["data"].([]any)) == 0 {
@@ -263,29 +263,13 @@ func TestBuildListFromSearchWithWaterfall(t *testing.T) {
 	owner.must(404, "GET", base+"/lead-lists/"+listID, nil)
 }
 
-func TestProjectTokenSeesOnlyItsLists(t *testing.T) {
+// Projects were removed: an older client's project_id is accepted and ignored.
+func TestListProjectIDIsIgnored(t *testing.T) {
 	e := freshListEnv(t)
 	owner, ws := setupOwner(t, e.h)
 	base := "/v1/workspaces/" + ws
-	proj := owner.must(201, "POST", base+"/projects", map[string]any{"name": "Fintech AU", "icp": map[string]any{"titles": []string{"cfo"}}})
-	pid := proj["id"].(string)
-	shared := owner.must(201, "POST", base+"/lead-lists", map[string]any{"name": "Shared"})
-	tok := owner.must(201, "POST", base+"/api-tokens", map[string]any{"name": "Agent", "scopes": []string{"leads.read", "leads.manage"}, "project_id": pid})
-	agent := &client{t: t, h: e.h, bearer: tok["token"].(string)}
-
-	// The agent's new list lands in its project, whatever it asks for.
-	mine := agent.must(201, "POST", base+"/lead-lists", map[string]any{"name": "Agent list"})
-	if mine["project_id"] != pid {
-		t.Fatalf("project: %v", mine)
-	}
-	agent.must(400, "POST", base+"/lead-lists", map[string]any{"name": "Escape", "project_id": nil})
-	if l := agent.must(200, "GET", base+"/lead-lists", nil)["data"].([]any); len(l) != 1 {
-		t.Fatalf("agent sees: %v", l)
-	}
-	agent.must(404, "GET", base+"/lead-lists/"+shared["id"].(string), nil)
-	agent.must(404, "DELETE", base+"/lead-lists/"+shared["id"].(string), nil)
-	agent.must(404, "GET", base+"/lead-lists?project_id=none", nil)
-	if l := owner.must(200, "GET", base+"/lead-lists?project_id="+pid, nil)["data"].([]any); len(l) != 1 {
-		t.Fatalf("owner by project: %v", l)
+	l := owner.must(201, "POST", base+"/lead-lists", map[string]any{"name": "Old client", "project_id": "00000000-0000-0000-0000-000000000000"})
+	if _, ok := l["project_id"]; ok {
+		t.Fatalf("list still has a project: %v", l)
 	}
 }

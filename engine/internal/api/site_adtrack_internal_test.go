@@ -71,7 +71,7 @@ func TestSiteAdTrackingClient(t *testing.T) {
 		opts, _ := json.Marshal(map[string]any{
 			"href":    "https://northpeak.example/pricing?ttclid=E.C.P.tt1&ScCid=sc-1&of_campaign=1800001&of_ad=1800003&of_adset=__AID__",
 			"consent": consent,
-			"cookies": map[string]string{"_fbp": "fb.1.1761600000000.111", "_gcl_aw": "GCL.1761600000.gc1", "other": "x"},
+			"cookies": map[string]string{"_fbp": "fb.1.1761600000000.111", "_gcl_aw": "GCL.1761600000.gc1", "_ttp": "ttp-1", "_scid": "scid-1", "other": "x"},
 			"track":   "signed_up",
 		})
 		out, err := exec.Command(node, "testdata/run_site.mjs", "site.js", string(opts)).CombinedOutput()
@@ -94,7 +94,7 @@ func TestSiteAdTrackingClient(t *testing.T) {
 
 	ev := run("granted")
 	page, conv := ev[0].Properties, ev[1].Properties
-	want := map[string]string{"ttclid": "E.C.P.tt1", "ScCid": "sc-1", "fbp": "fb.1.1761600000000.111", "gcl_aw": "GCL.1761600000.gc1"}
+	want := map[string]string{"ttclid": "E.C.P.tt1", "ScCid": "sc-1", "fbp": "fb.1.1761600000000.111", "gcl_aw": "GCL.1761600000.gc1", "ttp": "ttp-1", "scid": "scid-1"}
 	if !sameStrings(page.ClickIDs, want) {
 		t.Errorf("page click ids %v, want %v", page.ClickIDs, want)
 	}
@@ -102,7 +102,7 @@ func TestSiteAdTrackingClient(t *testing.T) {
 	if page.Ad["campaign"] != "1800001" || page.Ad["ad"] != "1800003" {
 		t.Errorf("page ad %v", page.Ad)
 	}
-	if conv.Plan != "pro" || !sameStrings(conv.ClickIDs, map[string]string{"fbp": "fb.1.1761600000000.111", "gcl_aw": "GCL.1761600000.gc1"}) {
+	if conv.Plan != "pro" || !sameStrings(conv.ClickIDs, map[string]string{"fbp": "fb.1.1761600000000.111", "gcl_aw": "GCL.1761600000.gc1", "ttp": "ttp-1", "scid": "scid-1"}) {
 		t.Errorf("conversion %+v", conv)
 	}
 

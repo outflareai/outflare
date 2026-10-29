@@ -434,6 +434,18 @@ function TestSheet({ ws, test, flag, canManage, onClose, onChanged, onFlagChange
     onChanged();
   }
 
+  async function ship(variant: string) {
+    const what = variant === test.control ? `${variant}, the control,` : variant;
+    if (!(await confirmAction(`Ship ${variant}?`, `Everyone sees ${what} from now on: ${test.flag_key} gives it all the traffic.${test.status === "running" ? " The test ends, keeping its results." : ""}`, `Ship ${variant}`))) return;
+    setBusy(true);
+    const { error } = await api.POST("/v1/workspaces/{ws}/ab-tests/{test}/ship", { params: { path: { ws, test: test.id } }, body: { variant } });
+    setBusy(false);
+    if (error) return setError(errorMessage(error));
+    toast(`Shipped ${variant}.`);
+    onFlagChanged();
+    onChanged();
+  }
+
   async function duplicate() {
     setBusy(true);
     const { data, error } = await api.POST("/v1/workspaces/{ws}/ab-tests/{test}/duplicate", { params: { path: { ws, test: test.id } } });
@@ -483,6 +495,7 @@ function TestSheet({ ws, test, flag, canManage, onClose, onChanged, onFlagChange
                   <VersionsPanel ws={ws} flag={flag} onAdded={onFlagChanged} />
                 </div>
               )}
+              <ChecklistPanel ws={ws} testID={test.id} deps={JSON.stringify([goals, guardrails, minEffect])} />
               <p className="text-muted-foreground">Make sure the pages read the flag (<span className="font-mono">outflare.flag("{test.flag_key}")</span>, or <span className="font-mono">data-flags</span> and its class), so visitors join when they see their version.</p>
               {canManage && (
                 <div className="flex gap-2 border-t pt-4">
@@ -542,7 +555,9 @@ function TestSheet({ ws, test, flag, canManage, onClose, onChanged, onFlagChange
                 </div>
               )}
               {canManage && (
-                <div className="flex gap-2">
+                <div className="flex flex-wrap gap-2">
+                  {results.winner && <Button disabled={busy} onClick={() => ship(results.winner)}>Ship {results.winner} to everyone</Button>}
+                  {test.status === "done" && !results.winner && test.decision && <Button variant="ghost" disabled={busy} onClick={() => ship(test.decision)}>Ship {test.decision} to everyone</Button>}
                   <Button variant="ghost" disabled={busy} onClick={duplicate}>Duplicate as a new draft</Button>
                 </div>
               )}
@@ -666,5 +681,34 @@ function segmentLabel(by: string, key: string): string {
   if (by === "visitor" || by === "device") return key.charAt(0).toUpperCase() + key.slice(1);
   if (by === "source" && key === "direct") return "Direct";
   return key;
+}
+
+const checkTone = { ok: "green", warn: "amber", fail: "red" } as const;
+
+// ChecklistPanel says what would stop a draft measuring anything useful,
+// read fresh when its goals change (the saved test's; deps only re-reads).
+function ChecklistPanel({ ws, testID, deps }: { ws: string; testID: string; deps: string }) {
+  const [checks, setChecks] = useState<{ id: string; status: "ok" | "warn" | "fail"; text: string }[] | null>(null);
+  useEffect(() => {
+    let live = true;
+    api.GET("/v1/workspaces/{ws}/ab-tests/{test}/checklist", { params: { path: { ws, test: testID } } }).then(({ data }) => {
+      if (live) setChecks(data?.checks ?? []);
+    });
+    return () => {
+      live = false;
+    };
+  }, [ws, testID, deps]);
+  if (!checks) return null;
+  return (
+    <div className="space-y-1 rounded-md border p-3">
+      <span className="block font-medium">Before you start</span>
+      {checks.map((c) => (
+        <div key={c.id} className="flex items-start gap-2 text-[12px]">
+          <Badge tone={checkTone[c.status]}>{c.status === "ok" ? "OK" : c.status === "warn" ? "Check" : "Fix"}</Badge>
+          <span>{c.text}</span>
+        </div>
+      ))}
+    </div>
+  );
 }
 

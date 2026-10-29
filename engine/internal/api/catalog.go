@@ -213,8 +213,8 @@ func opts(pairs ...string) []catalogOption {
 }
 
 // builtinOptionSets are the shared choices every workspace has, so the
-// industry or country of a lead, a CRM company, an import and a project's
-// ideal customer all use the same values.
+// industry or country of a lead, a CRM company, an import and a customer
+// profile all use the same values.
 var builtinOptionSets = func() []optionSetView {
 	c := make([]catalogOption, 0, len(countries))
 	for _, p := range countries {

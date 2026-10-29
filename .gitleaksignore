@@ -8,3 +8,5 @@
 0ffd6b4dd07a39225b961e2c642ccdbf5450cc2b:engine/internal/api/ai_settings_test.go:generic-api-key:78
 42005cf7a2cb34aee16fdea582488d75211de52f:engine/internal/api/emails_activity_test.go:generic-api-key:29
 f34253d15ffbdd22bc560453b8da4b3020c1c677:engine/internal/connectors/seo/geonode.go:generic-api-key:211
+2771b7dc62616f6e00597b61c08535a180e710c3:docs/ai-accounts.md:curl-auth-header:25
+2771b7dc62616f6e00597b61c08535a180e710c3:docs/ai-accounts.md:curl-auth-header:31

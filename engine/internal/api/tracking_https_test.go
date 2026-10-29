@@ -78,15 +78,27 @@ func TestTrackingDomainHTTPS(t *testing.T) {
 		t.Fatalf("verified: %v", td)
 	}
 	// Verified but without a certificate, links keep the server's address.
-	waitUntil(t, func() bool { a, _ := certs.got(); return len(a) > 0 })
+	// The first look finds it pending and queues the next one. Wait for that
+	// job to be committed, not just for the provider to be asked: the job
+	// asks first and queues the next look after, in its own transaction.
+	waitUntil(t, func() bool {
+		var n int
+		if err := e.pool.QueryRow(ctx, `SELECT count(*) FROM jobs WHERE kind = 'tracking.domain_https' AND status = 'queued' AND workspace_id = $1 AND (payload ->> 'n')::int = 1`, ws).Scan(&n); err != nil {
+			t.Fatal(err)
+		}
+		return n == 1
+	})
+	if a, _ := certs.got(); len(a) != 1 || a[0] != "links.acme.example" {
+		t.Fatalf("asked the provider for: %v", a)
+	}
 	if got := links(); got != "https://app.outflare.test" {
 		t.Fatalf("links before the certificate: %s", got)
 	}
 
 	// Issued: the next look marks it active and links move to the domain.
 	certs.set(api.CertState{Status: "active"})
-	if _, err := e.pool.Exec(ctx, `UPDATE jobs SET run_at = now() WHERE kind = 'tracking.domain_https' AND status = 'queued'`); err != nil {
-		t.Fatal(err)
+	if tag, err := e.pool.Exec(ctx, `UPDATE jobs SET run_at = now() WHERE kind = 'tracking.domain_https' AND status = 'queued' AND workspace_id = $1`, ws); err != nil || tag.RowsAffected() != 1 {
+		t.Fatalf("bring the next look forward: %v (%d rows)", err, tag.RowsAffected())
 	}
 	waitUntil(t, func() bool {
 		d := owner.must(200, "GET", base+"/tracking-domains", nil)["data"].([]any)[0].(map[string]any)

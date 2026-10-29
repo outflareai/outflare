@@ -77,7 +77,7 @@ Anything that can send an HTTP request can add leads: a Clay HTTP API column, Za
 
 ## Permissions
 
-Reading lists and runs needs `leads.read`; creating, editing, running and deleting needs `leads.manage`. A project token sees only its project's lists, and creates lists inside its project.
+Reading lists and runs needs `leads.read`; creating, editing, running and deleting needs `leads.manage`. A brand token sees only its brand's lists and the shared ones, and creates lists in its brand.
 
 ## Agents
 

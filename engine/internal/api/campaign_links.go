@@ -9,6 +9,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/outflareai/outflare/engine/internal/auth"
+	"github.com/outflareai/outflare/engine/internal/tracking"
 	"github.com/outflareai/outflare/engine/internal/utm"
 )
 
@@ -48,23 +49,29 @@ type trackingCampaignView struct {
 	LandingURL string  `json:"landing_url"`
 	// LandingLink is the landing page with the campaign's tags, ready to
 	// share; "" without a landing page.
-	LandingLink string    `json:"landing_link"`
-	Status      string    `json:"status"`
-	Links       int       `json:"links"`
-	CreatedAt   time.Time `json:"created_at"`
-	UpdatedAt   time.Time `json:"updated_at"`
+	LandingLink string `json:"landing_link"`
+	// RedirectLinks makes every new link in the campaign a redirect link.
+	RedirectLinks bool   `json:"redirect_links"`
+	Status        string `json:"status"`
+	Links         int    `json:"links"`
+	// Clicks on the campaign's redirect links, without automated ones.
+	Clicks    int       `json:"clicks"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
 }
 
 const trackingCampaignSelect = `
 	SELECT c.id::text, c.name, c.slug, c.code, c.channel, c.source, c.medium, c.brand_id::text, c.object_kind, c.object_id,
-	       c.landing_url, c.status, (SELECT count(*) FROM tracking_links l WHERE l.campaign_id = c.id)::int, c.created_at, c.updated_at
+	       c.landing_url, c.redirect_links, c.status, (SELECT count(*) FROM tracking_links l WHERE l.campaign_id = c.id)::int,
+	       (SELECT count(*) FROM tracking_link_clicks k JOIN tracking_links l ON l.id = k.link_id WHERE l.campaign_id = c.id AND NOT k.likely_bot)::int,
+	       c.created_at, c.updated_at
 	FROM tracking_campaigns c
 	WHERE c.workspace_id = $1`
 
 func scanTrackingCampaign(row pgx.Row) (trackingCampaignView, error) {
 	var v trackingCampaignView
 	err := row.Scan(&v.ID, &v.Name, &v.Slug, &v.Code, &v.Channel, &v.Source, &v.Medium, &v.BrandID, &v.ObjectKind, &v.ObjectID,
-		&v.LandingURL, &v.Status, &v.Links, &v.CreatedAt, &v.UpdatedAt)
+		&v.LandingURL, &v.RedirectLinks, &v.Status, &v.Links, &v.Clicks, &v.CreatedAt, &v.UpdatedAt)
 	if err == nil && v.LandingURL != "" {
 		v.LandingLink, _ = v.campaign().Link(v.LandingURL, "")
 	}
@@ -147,6 +154,8 @@ type trackingCampaignInput struct {
 	Brand      *string `json:"brand"`
 	LandingURL *string `json:"landing_url"`
 	Status     *string `json:"status"`
+	// RedirectLinks makes new links redirect links unless a link says.
+	RedirectLinks *bool `json:"redirect_links"`
 }
 
 // cleanLanding checks a landing page and drops tags it already had.
@@ -239,10 +248,10 @@ func (s *Server) createTrackingCampaign(w http.ResponseWriter, r *http.Request) 
 			return errInvalid("a workspace can have at most 5,000 campaigns; archive old ones and reuse them")
 		}
 		err := tx.QueryRow(ctx, `
-			INSERT INTO tracking_campaigns (workspace_id, brand_id, name, slug, code, channel, source, medium, landing_url, created_by)
-			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+			INSERT INTO tracking_campaigns (workspace_id, brand_id, name, slug, code, channel, source, medium, landing_url, created_by, redirect_links)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, COALESCE($11, false))
 			ON CONFLICT (workspace_id, slug) DO NOTHING RETURNING id::text`,
-			a.WorkspaceID, brand, name, slug, utm.NewCode(), ch.ID, source, ch.Medium, deref(landing), nullIfEmpty(a.ActorID)).Scan(&id)
+			a.WorkspaceID, brand, name, slug, utm.NewCode(), ch.ID, source, ch.Medium, deref(landing), nullIfEmpty(a.ActorID), in.RedirectLinks).Scan(&id)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return errConflict
 		}
@@ -307,9 +316,9 @@ func (s *Server) updateTrackingCampaign(w http.ResponseWriter, r *http.Request) 
 	err = pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
 		if _, err := tx.Exec(ctx, `
 			UPDATE tracking_campaigns SET name = COALESCE($3, name), landing_url = COALESCE($4, landing_url),
-				brand_id = $5, status = COALESCE($6, status), updated_at = now()
+				brand_id = $5, status = COALESCE($6, status), redirect_links = COALESCE($7, redirect_links), updated_at = now()
 			WHERE workspace_id = $1 AND id = $2`,
-			a.WorkspaceID, cur.ID, name, landing, brand, in.Status); err != nil {
+			a.WorkspaceID, cur.ID, name, landing, brand, in.Status, in.RedirectLinks); err != nil {
 			return err
 		}
 		action := "tracking_campaign.updated"
@@ -327,13 +336,18 @@ func (s *Server) updateTrackingCampaign(w http.ResponseWriter, r *http.Request) 
 }
 
 type trackingLinkView struct {
-	ID         string    `json:"id"`
-	CampaignID string    `json:"campaign_id"`
-	URL        string    `json:"url"`
-	Content    string    `json:"content"`
-	Term       string    `json:"term"`
-	TaggedURL  string    `json:"tagged_url"`
-	CreatedAt  time.Time `json:"created_at"`
+	ID         string `json:"id"`
+	CampaignID string `json:"campaign_id"`
+	URL        string `json:"url"`
+	Content    string `json:"content"`
+	Term       string `json:"term"`
+	TaggedURL  string `json:"tagged_url"`
+	// RedirectURL is the link's short redirect link, nil when it has none.
+	RedirectURL *string `json:"redirect_url"`
+	// Clicks on the redirect link, without automated ones.
+	Clicks    int       `json:"clicks"`
+	CreatedAt time.Time `json:"created_at"`
+	code      *string
 }
 
 func (s *Server) listTrackingLinks(w http.ResponseWriter, r *http.Request) {
@@ -342,16 +356,22 @@ func (s *Server) listTrackingLinks(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	rows, err := s.pool.Query(r.Context(), `SELECT id::text, url, content, term, created_at FROM tracking_links
-		WHERE workspace_id = $1 AND campaign_id = $2 ORDER BY created_at DESC, id`, a.WorkspaceID, c.ID)
+	base, err := tracking.BaseURL(r.Context(), s.pool, a.WorkspaceID, s.publicURL)
+	if err != nil {
+		s.internal(w, r, err)
+		return
+	}
+	rows, err := s.pool.Query(r.Context(), `SELECT l.id::text, l.url, l.content, l.term, l.redirect_code,
+			(SELECT count(*) FROM tracking_link_clicks k WHERE k.link_id = l.id AND NOT k.likely_bot)::int, l.created_at
+		FROM tracking_links l WHERE l.workspace_id = $1 AND l.campaign_id = $2 ORDER BY l.created_at DESC, l.id`, a.WorkspaceID, c.ID)
 	if err != nil {
 		s.internal(w, r, err)
 		return
 	}
 	list, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (trackingLinkView, error) {
 		v := trackingLinkView{CampaignID: c.ID}
-		err := row.Scan(&v.ID, &v.URL, &v.Content, &v.Term, &v.CreatedAt)
-		v.TaggedURL = tagLink(*c, v)
+		err := row.Scan(&v.ID, &v.URL, &v.Content, &v.Term, &v.code, &v.Clicks, &v.CreatedAt)
+		v.finish(*c, base)
 		return v, err
 	})
 	if err != nil {
@@ -362,6 +382,15 @@ func (s *Server) listTrackingLinks(w http.ResponseWriter, r *http.Request) {
 		list = []trackingLinkView{}
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"data": list})
+}
+
+// finish fills in the link's tagged and redirect links.
+func (v *trackingLinkView) finish(c trackingCampaignView, base string) {
+	v.TaggedURL = tagLink(c, *v)
+	if v.code != nil {
+		u := base + "/l/" + *v.code
+		v.RedirectURL = &u
+	}
 }
 
 func tagLink(c trackingCampaignView, l trackingLinkView) string {
@@ -381,6 +410,9 @@ func (s *Server) createTrackingLink(w http.ResponseWriter, r *http.Request) {
 		URL     *string `json:"url"`
 		Content string  `json:"content"`
 		Term    string  `json:"term"`
+		// Redirect gives the link a short redirect link; the campaign's
+		// redirect_links when left out.
+		Redirect *bool `json:"redirect"`
 	}
 	if !decode(w, r, &in) {
 		return
@@ -407,13 +439,31 @@ func (s *Server) createTrackingLink(w http.ResponseWriter, r *http.Request) {
 		writeError(w, r, http.StatusBadRequest, "invalid_request", utm.ErrContent.Error())
 		return
 	}
+	redirect := c.RedirectLinks
+	if in.Redirect != nil {
+		redirect = *in.Redirect
+	}
+	base, err := tracking.BaseURL(r.Context(), s.pool, a.WorkspaceID, s.publicURL)
+	if err != nil {
+		s.internal(w, r, err)
+		return
+	}
 	ctx := r.Context()
 	created := false
 	err = pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
-		err := tx.QueryRow(ctx, `SELECT id::text, created_at FROM tracking_links WHERE campaign_id = $1 AND url = $2 AND content = $3 AND term = $4`,
-			c.ID, l.URL, l.Content, l.Term).Scan(&l.ID, &l.CreatedAt)
+		err := tx.QueryRow(ctx, `SELECT id::text, redirect_code, created_at FROM tracking_links WHERE campaign_id = $1 AND url = $2 AND content = $3 AND term = $4`,
+			c.ID, l.URL, l.Content, l.Term).Scan(&l.ID, &l.code, &l.CreatedAt)
 		if err == nil {
-			return nil
+			// The same link again. Asking for a redirect gives it one; a
+			// redirect link it has keeps working, since it may be printed.
+			if !redirect || l.code != nil {
+				return nil
+			}
+			if l.code, err = addRedirectCode(ctx, tx, a.WorkspaceID, l.ID); err != nil {
+				return err
+			}
+			return record(ctx, tx, &a.principal, a.WorkspaceID, "tracking_link.redirect_added", "tracking_link", l.ID,
+				map[string]any{"campaign_id": c.ID, "channel": c.Channel})
 		}
 		if !errors.Is(err, pgx.ErrNoRows) {
 			return err
@@ -431,13 +481,18 @@ func (s *Server) createTrackingLink(w http.ResponseWriter, r *http.Request) {
 			return err
 		}
 		created = true
+		if redirect {
+			if l.code, err = addRedirectCode(ctx, tx, a.WorkspaceID, l.ID); err != nil {
+				return err
+			}
+		}
 		return record(ctx, tx, &a.principal, a.WorkspaceID, "tracking_link.created", "tracking_link", l.ID,
-			map[string]any{"campaign_id": c.ID, "channel": c.Channel, "has_content": l.Content != ""})
+			map[string]any{"campaign_id": c.ID, "channel": c.Channel, "has_content": l.Content != "", "redirect": redirect})
 	})
 	if s.allocError(w, r, err) {
 		return
 	}
-	l.TaggedURL = tagLink(*c, l)
+	l.finish(*c, base)
 	status := http.StatusOK
 	if created {
 		status = http.StatusCreated

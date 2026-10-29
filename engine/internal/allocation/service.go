@@ -159,7 +159,7 @@ func Load(ctx context.Context, tx pgx.Tx, workspaceID string, now time.Time) (*S
 	rows, err := tx.Query(ctx, `
 		SELECT s.id::text, s.name, s.status, COALESCE(s.team_id::text, ''), s.priority,
 		       s.target_daily, s.daily_new_limit, (SELECT count(*) FROM sequence_steps WHERE sequence_id = s.id)::int,
-		       COALESCE(s.min_daily, 0), COALESCE(s.pool_id::text, ''), COALESCE(s.project_id::text, ''), COALESCE(s.brand_id::text, ''), s.created_at,
+		       COALESCE(s.min_daily, 0), COALESCE(s.pool_id::text, ''), COALESCE(s.brand_id::text, ''), s.created_at,
 		       COALESCE(s.allocation_mode, t.allocation_mode, w.allocation_mode),
 		       tok.id IS NOT NULL, COALESCE(tok.may_take_mailboxes, true), tok.daily_send_budget,
 		       COALESCE((SELECT array_agg(sender_id::text) FROM sequence_senders WHERE sequence_id = s.id), '{}')
@@ -180,7 +180,7 @@ func Load(ctx context.Context, tx pgx.Tx, workspaceID string, now time.Time) (*S
 		var byToken bool
 		var preferred []string
 		if err := rows.Scan(&q.ID, &q.Name, &q.Status, &q.TeamID, &q.Priority, &target, &newLimit, &steps,
-			&q.MinDaily, &q.PoolID, &q.ProjectID, &q.BrandID, &q.CreatedAt, &mode, &byToken, &q.MayTake, &budget, &preferred); err != nil {
+			&q.MinDaily, &q.PoolID, &q.BrandID, &q.CreatedAt, &mode, &byToken, &q.MayTake, &budget, &preferred); err != nil {
 			rows.Close()
 			return nil, err
 		}
@@ -197,7 +197,7 @@ func Load(ctx context.Context, tx pgx.Tx, workspaceID string, now time.Time) (*S
 	}
 
 	rows, err = tx.Query(ctx, `
-		SELECT m.id::text, m.email, m.domain, COALESCE(m.pool_id::text, ''), COALESCE(m.project_id::text, ''), COALESCE(m.brand_id::text, ''), m.daily_limit, m.status,
+		SELECT m.id::text, m.email, m.domain, COALESCE(m.pool_id::text, ''), COALESCE(m.brand_id::text, ''), m.daily_limit, m.status,
 		       COALESCE(d.status, 'active'), COALESCE(d.spf, 'pending'),
 		       COALESCE(d.blocklists @> '[{"status": "listed"}]'::jsonb, false),
 		       m.lifecycle_stage, m.stage_until,
@@ -236,7 +236,7 @@ func Load(ctx context.Context, tx pgx.Tx, workspaceID string, now time.Time) (*S
 		var inFlight, drainDays int
 		var linkID string
 		var serverPaused bool
-		if err := rows.Scan(&m.ID, &m.Email, &m.Domain, &m.PoolID, &m.ProjectID, &m.BrandID, &m.DailyLimit, &status,
+		if err := rows.Scan(&m.ID, &m.Email, &m.Domain, &m.PoolID, &m.BrandID, &m.DailyLimit, &status,
 			&domainStatus, &spf, &listed, &stage, &stageUntil,
 			&m.SenderID, &m.SenderName, &m.SenderConfirmed, &m.SenderShared, &m.SenderRetired, &m.SenderTeams,
 			&lockKind, &lockSeq, &lockTeam, &assignSeq, &assignState, &assignNext, &assignSource, &version, &inFlight,

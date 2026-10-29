@@ -43,6 +43,8 @@ func (s *Server) routesABTests(mux *http.ServeMux) {
 	mux.HandleFunc("POST /v1/workspaces/{ws}/ab-tests/{test}/end", s.inWorkspace(manage, s.endABTest))
 	mux.HandleFunc("POST /v1/workspaces/{ws}/ab-tests/{test}/freeze", s.inWorkspace(manage, s.freezeABTest))
 	mux.HandleFunc("POST /v1/workspaces/{ws}/ab-tests/{test}/duplicate", s.inWorkspace(manage, s.duplicateABTest))
+	mux.HandleFunc("GET /v1/workspaces/{ws}/ab-tests/{test}/checklist", s.inWorkspace(read, s.abTestChecklist))
+	mux.HandleFunc("POST /v1/workspaces/{ws}/ab-tests/{test}/ship", s.inWorkspace(manage, s.shipABTest))
 	mux.HandleFunc("GET /v1/workspaces/{ws}/ab-tests/{test}/results", s.inWorkspace(read, s.abTestResults))
 	mux.HandleFunc("GET /v1/workspaces/{ws}/ab-tests/{test}/breakdown", s.inWorkspace(read, s.abTestBreakdown))
 }
@@ -146,7 +148,7 @@ func (s *Server) listABTests(w http.ResponseWriter, r *http.Request) {
 	}
 	out := list[:0]
 	for _, t := range list {
-		if a.sees(nil, t.BrandID) {
+		if a.sees(t.BrandID) {
 			out = append(out, t)
 		}
 	}
@@ -163,7 +165,7 @@ func (s *Server) oneABTest(w http.ResponseWriter, r *http.Request) (abTestView, 
 			s.internal(w, r, err)
 			return abTestView{}, false
 		}
-		if len(list) == 1 && a.sees(nil, list[0].BrandID) {
+		if len(list) == 1 && a.sees(list[0].BrandID) {
 			return list[0], true
 		}
 	}
@@ -313,7 +315,7 @@ func (s *Server) createABTest(w http.ResponseWriter, r *http.Request) {
 		if f.Status == "archived" {
 			return errInvalid("this flag is archived; test a live one")
 		}
-		if !a.writes(nil, f.BrandID) {
+		if !a.writes(f.BrandID) {
 			return errDenied(brandLimitedMessage)
 		}
 		t := abTestView{FlagID: f.ID, BrandID: f.BrandID, Status: "draft"}
@@ -360,7 +362,7 @@ func (s *Server) changeABTest(w http.ResponseWriter, r *http.Request, fn func(ct
 	if !ok {
 		return
 	}
-	if !a.writes(nil, cur.BrandID) {
+	if !a.writes(cur.BrandID) {
 		writeError(w, r, http.StatusForbidden, "forbidden", brandLimitedMessage)
 		return
 	}
@@ -429,7 +431,7 @@ func (s *Server) startABTest(w http.ResponseWriter, r *http.Request) {
 		case !abtests.HasVariant(variantKeys(f), t.Control):
 			return errABConflict("the control is no longer one of the flag's variants (" + strings.Join(variantKeys(f), ", ") + "): change the control first")
 		}
-		if !a.writes(nil, f.BrandID) {
+		if !a.writes(f.BrandID) {
 			return errDenied(brandLimitedMessage)
 		}
 		if f.Status == "off" {
@@ -657,7 +659,7 @@ func (s *Server) planABTest(w http.ResponseWriter, r *http.Request) {
 	if s.abWriteError(w, r, err) {
 		return
 	}
-	if !a.sees(nil, f.BrandID) {
+	if !a.sees(f.BrandID) {
 		writeError(w, r, http.StatusNotFound, "not_found", "flag not found: use its id or key")
 		return
 	}
@@ -766,7 +768,7 @@ func (s *Server) duplicateABTest(w http.ResponseWriter, r *http.Request) {
 		if f.Status == "archived" {
 			return errABConflict("this test's flag is archived; test a live one")
 		}
-		if !a.writes(nil, f.BrandID) {
+		if !a.writes(f.BrandID) {
 			return errDenied(brandLimitedMessage)
 		}
 		var n int

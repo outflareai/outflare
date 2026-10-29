@@ -40,7 +40,6 @@ type Event struct {
 // workspace ($2).
 var brandOf = map[string]string{
 	"brand":                `SELECT id FROM brands WHERE id = $1::uuid AND workspace_id = $2`,
-	"project":              `SELECT brand_id FROM projects WHERE id = $1::uuid AND workspace_id = $2`,
 	"sequence":             `SELECT brand_id FROM sequences WHERE id = $1::uuid AND workspace_id = $2`,
 	"lead_list":            `SELECT brand_id FROM lead_lists WHERE id = $1::uuid AND workspace_id = $2`,
 	"mission":              `SELECT brand_id FROM missions WHERE id = $1::uuid AND workspace_id = $2`,
@@ -52,11 +51,11 @@ var brandOf = map[string]string{
 	"inbound_message": `SELECT COALESCE(s.brand_id, m.brand_id) FROM inbound_messages i
 		LEFT JOIN sequences s ON s.id = i.sequence_id LEFT JOIN mailboxes m ON m.id = i.mailbox_id
 		WHERE i.id = $1::uuid AND i.workspace_id = $2`,
-	"meeting": `SELECT COALESCE(s.brand_id, p.brand_id) FROM meetings x
-		LEFT JOIN sequences s ON s.id = x.sequence_id LEFT JOIN projects p ON p.id = x.project_id
+	"meeting": `SELECT s.brand_id FROM meetings x
+		LEFT JOIN sequences s ON s.id = x.sequence_id
 		WHERE x.id = $1::uuid AND x.workspace_id = $2`,
-	"deal": `SELECT COALESCE(s.brand_id, p.brand_id) FROM deals x
-		LEFT JOIN sequences s ON s.id = x.sequence_id LEFT JOIN projects p ON p.id = x.project_id
+	"deal": `SELECT s.brand_id FROM deals x
+		LEFT JOIN sequences s ON s.id = x.sequence_id
 		WHERE x.id = $1::uuid AND x.workspace_id = $2`,
 	"mission_action": `SELECT m.brand_id FROM mission_actions a JOIN missions m ON m.id = a.mission_id WHERE a.id = $1::uuid AND m.workspace_id = $2`,
 	"review_page":    `SELECT brand_id FROM review_pages WHERE id = $1::uuid AND workspace_id = $2`,
@@ -66,6 +65,8 @@ var brandOf = map[string]string{
 	"link_prospect":  `SELECT brand_id FROM link_prospects WHERE id = $1::uuid AND workspace_id = $2`,
 	"news_search":    `SELECT brand_id FROM news_searches WHERE id = $1::uuid AND workspace_id = $2`,
 	"coverage":       `SELECT brand_id FROM coverage WHERE id = $1::uuid AND workspace_id = $2`,
+	"story":          `SELECT brand_id FROM stories WHERE id = $1::uuid AND workspace_id = $2`,
+	"pr_expert":      `SELECT brand_id FROM pr_experts WHERE id = $1::uuid AND workspace_id = $2`,
 	// A domain's id is its name.
 	"domain": `SELECT brand_id FROM sending_domains WHERE domain = lower($1) AND workspace_id = $2`,
 }

@@ -73,6 +73,10 @@ type Touch struct {
 
 var paidMediums = map[string]bool{"cpc": true, "ppc": true, "paid": true, "paidsearch": true, "paid-search": true, "paid_search": true,
 	"paidsocial": true, "paid-social": true, "paid_social": true, "display": true, "cpm": true, "cpv": true, "banner": true, "ads": true, "ad": true}
+
+// PaidMedium reports whether a cleaned utm_medium means a paid ad.
+func PaidMedium(m string) bool { return paidMediums[m] }
+
 var emailMediums = map[string]bool{"email": true, "e-mail": true, "newsletter": true, "mail": true}
 var socialMediums = map[string]bool{"social": true, "social-network": true, "social-media": true, "sm": true, "organic_social": true, "organic-social": true}
 var affiliateMediums = map[string]bool{"affiliate": true, "affiliates": true, "partner": true, "partners": true}

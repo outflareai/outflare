@@ -63,9 +63,9 @@ const (
 	// Managing them is logging meetings, deals and spend by hand.
 	ScopeOutcomesRead   = "outcomes.read"
 	ScopeOutcomesManage = "outcomes.manage"
+	// Customer profiles and moving records between brands. The names are
+	// from projects, which were removed; tokens keep them, so they stay.
 	ScopeProjectsRead   = "projects.read"
-	// Managing projects is creating them, editing the brief and moving
-	// domains, mailboxes, lists and sequences between them.
 	ScopeProjectsManage = "projects.manage"
 	// Infrastructure plans: reading them, drafting and changing them, and
 	// approving one, which may buy domains and mailboxes with the

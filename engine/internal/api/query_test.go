@@ -187,7 +187,8 @@ func TestQueryTablesMatchSchema(t *testing.T) {
 
 var ownViews = func() map[string]bool {
 	files, _ := filepath.Glob("../db/migrations/*.sql")
-	re := regexp.MustCompile(`(?i)CREATE\s+(?:OR\s+REPLACE\s+)?VIEW\s+query\.(\w+)`)
+	// In file order, so a view a later migration drops is not counted.
+	re := regexp.MustCompile(`(?i)(CREATE\s+(?:OR\s+REPLACE\s+)?|DROP\s+)VIEW\s+(?:IF\s+EXISTS\s+)?query\.(\w+)`)
 	views := map[string]bool{}
 	for _, f := range files {
 		b, err := os.ReadFile(f)
@@ -195,7 +196,7 @@ var ownViews = func() map[string]bool {
 			panic(err)
 		}
 		for _, m := range re.FindAllStringSubmatch(string(b), -1) {
-			views[m[1]] = true
+			views[m[2]] = !strings.HasPrefix(strings.ToUpper(m[1]), "DROP")
 		}
 	}
 	return views

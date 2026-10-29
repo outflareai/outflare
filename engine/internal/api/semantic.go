@@ -541,7 +541,7 @@ func (s *Server) semanticEmbedJob(ctx context.Context, j jobs.Job) error {
 		embedded += len(batch)
 	}
 	// What the run cost, booked once on the workspace's own provider bill.
-	if err := recordAISpend(ctx, s.pool, c, ws, nil, nil, nil, used, fmt.Sprintf("embed:%d", j.ID), "Meaning-based search"); err != nil {
+	if err := recordAISpend(ctx, s.pool, c, ws, nil, nil, used, fmt.Sprintf("embed:%d", j.ID), "Meaning-based search"); err != nil {
 		return err
 	}
 	ev.Props["items"], ev.Props["unchanged"], ev.Props["deleted"] = embedded, unchanged, deleted
@@ -575,7 +575,7 @@ func (s *Server) queryVector(ctx context.Context, ws string, c aiChoice, cfg llm
 		return nil, err
 	}
 	vecs, u, err := llm.Embed(ctx, cfg, []string{q})
-	if err := recordAISpend(ctx, s.pool, c, ws, nil, nil, nil, u, "", "Meaning-based search"); err != nil {
+	if err := recordAISpend(ctx, s.pool, c, ws, nil, nil, u, "", "Meaning-based search"); err != nil {
 		return nil, err
 	}
 	if err != nil {
