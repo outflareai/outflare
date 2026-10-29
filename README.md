@@ -610,7 +610,7 @@ claude mcp add outflare -e OUTFLARE_URL=https://outflare.example.com -e OUTFLARE
 
 Set `OUTFLARE_MCP_READ_ONLY=1` there for an agent that only reports.
 
-An agent starts every conversation with `get_context`: what Outflare knows about the company, its memories and projects, and what is blocked, in one call. It asks only for what is missing, saves what you tell it with `update_context` and `remember`, and every failed call says the next step to take. See [docs/agent-memory.md](docs/agent-memory.md) for the design, and [mcp/README.md](mcp/README.md) for the tools and for Claude Desktop and Cursor setup.
+An agent starts every conversation with `get_context`: what Outflare knows about the company, its memories and projects, and what is blocked, in one call. It asks only for what is missing, saves what you tell it with `update_context` and `remember`, and every failed call says the next step to take. See [docs/agent-memory.md](docs/agent-memory.md) for the design, and [mcp/README.md](mcp/README.md) for the tools and for Claude Desktop and Cursor setup. Longer things the business knows (policies, product details, stock answers) go in the [knowledge base](docs/knowledge.md), which agents search with `search_knowledge`.
 
 ### Missions
 

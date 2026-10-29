@@ -78,6 +78,11 @@ Agents forget everything between chats, and different clients share nothing. Out
 | `remember` | Save one lasting fact, preference or decision in a sentence. Never transcripts |
 | `list_memories` | Search memories before asking something the person may have said before |
 | `update_memory`, `forget` | Correct or delete a memory |
+| `search_knowledge`, `get_knowledge` | Search the knowledge base (articles and quick answers the business wrote) before answering a question about its products, prices or policies, then read the best match. Never tell a customer what is `team` |
+| `add_knowledge`, `update_knowledge` | Write down a policy, process, product detail or stock answer longer than a memory, or correct one (the old text is kept as a version) |
+| `delete_knowledge`, `restore_knowledge` | Move an item to the bin (kept 30 days), or take it out |
+| `list_knowledge_versions`, `restore_knowledge_version` | An item's history, and putting an earlier version back |
+| `list_knowledge_folders`, `add_knowledge_folder`, `update_knowledge_folder`, `delete_knowledge_folder` | The folders knowledge is kept in |
 | `get_onboarding` | The getting-started steps for the first brand (brand, AI key, goal, website script and DNS, tools, star and follow, first mission, then team): each `done` or `skipped`, `next_step`, and the tool or page that does it |
 | `update_onboarding` | Pick what to do first, skip getting-started steps, bring them back, or close the walk-through in the app |
 | `get_brand_setup` | One brand's setup steps in order (website script, DNS records, analytics, Search Console, email, payments, ads, social, CRM), with the snippet, DNS record, AI prompt and developer message for the install steps |

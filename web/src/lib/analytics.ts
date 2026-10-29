@@ -98,6 +98,9 @@ export type UiEvent =
   | "ui.journey_version_viewed" // an older journey version shown read-only (version, current)
   | "ui.rule_trigger_picked" // the rule card's sentence builder switched to another kind of trigger (kind)
   | "ui.rule_followup_picked" // "When this fires, do…" picked a first step for a new journey (kind)
+  | "ui.knowledge_formatted" // formatting used in the knowledge editor (command: h2, bold, ul, table, ...; how: toolbar, slash, key)
+  | "ui.knowledge_pasted" // formatted text pasted into the knowledge editor and kept as Markdown
+  | "ui.knowledge_started" // the knowledge editor opened for something new (kind: article, snippet; template: none or a starter's id)
   | "ui.playbook_opened" // a playbook opened on the Playbooks page (playbook_id, ready)
   | "ui.playbook_prompt_copied" // a playbook's prompt copied (playbook_id)
   | "ui.dialog_answered" // a confirm or prompt dialog: the choice, or cancelled

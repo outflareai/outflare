@@ -11,6 +11,7 @@ Outflare remembers the business, not the conversation.
 | Company context: company, website, what they do, goals, voice, rules, notes | The conversation and its reasoning |
 | Memories: one-line preferences, decisions, facts and feedback | Drafts not accepted yet |
 | Project briefs: offer, audience, market, ICP filters | Which calls it made and why |
+| [Knowledge](knowledge.md): articles and quick answers the team wrote | |
 | What happened: audit log, events feed, missions and their calls | Plans for this session |
 
 Chat transcripts are never stored: the client keeps them, they are large and sensitive, and little in them is worth reusing. What is worth reusing the agent distills into a memory, tells the person in one line, and the person can correct or forget it on the Company page.

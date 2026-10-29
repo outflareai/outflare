@@ -157,6 +157,11 @@ var Catalog = []Event{
 	// Brands
 	{"brand.created", "brands", "A brand was added to the workspace."},
 	{"brand.updated", "brands", "A brand's name, website or settings changed. data.fields lists what changed."},
+	// Knowledge
+	{"knowledge.created", "knowledge", "An article or quick answer was added to the knowledge base. data has kind (article, snippet), title, visibility (public, customers_ai, team), status (draft, published), version, collection_id and brand_id; GET .../knowledge/items/{id} has the text."},
+	{"knowledge.updated", "knowledge", "A knowledge item changed. data is as for knowledge.created, plus text_changed (a new version was kept) and restored_version when an earlier version was restored."},
+	{"knowledge.deleted", "knowledge", "A knowledge item was moved to the bin. It is deleted for good after 30 days unless restored."},
+	{"knowledge.restored", "knowledge", "A knowledge item was taken out of the bin."},
 	// Broadcasts and journeys
 	{"email_broadcast.created", "lifecycle_email", "A broadcast was drafted or scheduled."},
 	{"email_broadcast.started", "lifecycle_email", "A broadcast started sending."},

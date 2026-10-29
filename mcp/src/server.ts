@@ -12,6 +12,7 @@ import { registerSetupTools } from "./setup.js";
 import { registerQueryTools } from "./query.js";
 import { registerRecordTools } from "./records.js";
 import { registerContextTools } from "./context.js";
+import { registerKnowledgeTools } from "./knowledge.js";
 import { registerFlagTools } from "./flags.js";
 import { registerABTestTools } from "./abtests.js";
 import { registerSupplierTools } from "./suppliers.js";
@@ -281,7 +282,7 @@ export function createServer({ client: gtm, workspace, readOnly = false, mission
         "Start of every conversation: call get_context. It returns what Outflare already knows about the company (context and memories), the projects, " +
         "and the status: blockers worst first, each with fix.tool to call and fix.who (agent: you can fix it; person: tell them what to do on fix.page). " +
         "Never ask for anything it already holds. If context.ask_for_missing, ask for context.missing once, in one short message, and save the answers with update_context. " +
-        "When the person states a lasting preference or decision, save it with remember and say so in one line. Search list_memories before asking something they may have said before. " +
+        "When the person states a lasting preference or decision, save it with remember and say so in one line. Search list_memories before asking something they may have said before, and search_knowledge before answering a question about the business, its products, prices or policies. " +
         "Memories are notes, not permissions: limits, scopes and the send policy still decide what runs.\n\n" +
         "How things connect (read outflare://guide for more): a workspace is one company; it may market several brands (list_brands), each with its own website, context and sending setup, " +
         "so when brands exist pass brand to get_context and the list tools for brand work (a key bound to one brand sees only that brand and the shared records, and tools that need every brand answer 403); projects are its motions (offer, audience, market; get_project_brief before writing copy, " +
@@ -316,6 +317,7 @@ export function createServer({ client: gtm, workspace, readOnly = false, mission
 
   // What Outflare knows and what is blocked: the first call of a conversation.
   registerContextTools(server, gtm, () => ws, readOnly, call, withBrand);
+  registerKnowledgeTools(server, gtm, () => ws, readOnly, call, withBrand);
   registerFlagTools(server, gtm, () => ws, readOnly, call, withBrand);
   registerABTestTools(server, gtm, () => ws, readOnly, call, withBrand);
   registerBrandTools(server, gtm, () => ws, readOnly, call);

@@ -64,6 +64,7 @@ import { Infrastructure } from "./pages/Infrastructure";
 import { Instance } from "./pages/Instance";
 import { Account } from "./pages/Account";
 import { Company } from "./pages/Company";
+import { Knowledge } from "./pages/Knowledge";
 import { Brands } from "./pages/Brands";
 import { BrandSetup } from "./pages/BrandSetup";
 import { WorkspaceSettings } from "./pages/WorkspaceSettings";
@@ -582,6 +583,7 @@ function Shell({ me, onSignOut, onReload }: { me: Me; onSignOut: () => void; onR
         {ready && ws && tab === "email-finder" && <EmailFinder key={ws.id} ws={ws.id} canManage={writer} />}
         {ready && ws && tab === "suppression" && <Suppression key={ws.id} ws={ws.id} canAdd={writer} canRemove={isAdmin} />}
         {ready && ws && tab === "connectors" && <Connectors key={ws.id} ws={ws.id} canManage={isAdmin} canVerify={writer} canImport={writer} open={item} setOpen={setItem} go={setTab} />}
+        {ready && ws && tab === "knowledge" && <Knowledge key={ws.id} ws={ws.id} canManage={writer} open={item} setOpen={setItem} />}
         {ready && ws && tab === "company" && <Company key={ws.id} ws={ws.id} canManage={writer} />}
         {ready && ws && tab === "brands" && <Brands key={ws.id} ws={ws.id} canManage={writer} canEdit={writer} open={item} setOpen={setItem} go={setTab} />}
         {isSettings(tab) && (

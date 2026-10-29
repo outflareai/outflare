@@ -39,14 +39,16 @@ type Event struct {
 // brandOf finds a target's brand, by target type, from its id ($1) in the
 // workspace ($2).
 var brandOf = map[string]string{
-	"brand":      `SELECT id FROM brands WHERE id = $1::uuid AND workspace_id = $2`,
-	"project":    `SELECT brand_id FROM projects WHERE id = $1::uuid AND workspace_id = $2`,
-	"sequence":   `SELECT brand_id FROM sequences WHERE id = $1::uuid AND workspace_id = $2`,
-	"lead_list":  `SELECT brand_id FROM lead_lists WHERE id = $1::uuid AND workspace_id = $2`,
-	"mission":    `SELECT brand_id FROM missions WHERE id = $1::uuid AND workspace_id = $2`,
-	"mailbox":    `SELECT brand_id FROM mailboxes WHERE id = $1::uuid AND workspace_id = $2`,
-	"memory":     `SELECT brand_id FROM memories WHERE id = $1::uuid AND workspace_id = $2`,
-	"enrollment": `SELECT s.brand_id FROM enrollments e JOIN sequences s ON s.id = e.sequence_id WHERE e.id = $1::uuid AND e.workspace_id = $2`,
+	"brand":                `SELECT id FROM brands WHERE id = $1::uuid AND workspace_id = $2`,
+	"project":              `SELECT brand_id FROM projects WHERE id = $1::uuid AND workspace_id = $2`,
+	"sequence":             `SELECT brand_id FROM sequences WHERE id = $1::uuid AND workspace_id = $2`,
+	"lead_list":            `SELECT brand_id FROM lead_lists WHERE id = $1::uuid AND workspace_id = $2`,
+	"mission":              `SELECT brand_id FROM missions WHERE id = $1::uuid AND workspace_id = $2`,
+	"mailbox":              `SELECT brand_id FROM mailboxes WHERE id = $1::uuid AND workspace_id = $2`,
+	"memory":               `SELECT brand_id FROM memories WHERE id = $1::uuid AND workspace_id = $2`,
+	"knowledge":            `SELECT brand_id FROM knowledge_items WHERE id = $1::uuid AND workspace_id = $2`,
+	"knowledge_collection": `SELECT brand_id FROM knowledge_collections WHERE id = $1::uuid AND workspace_id = $2`,
+	"enrollment":           `SELECT s.brand_id FROM enrollments e JOIN sequences s ON s.id = e.sequence_id WHERE e.id = $1::uuid AND e.workspace_id = $2`,
 	"inbound_message": `SELECT COALESCE(s.brand_id, m.brand_id) FROM inbound_messages i
 		LEFT JOIN sequences s ON s.id = i.sequence_id LEFT JOIN mailboxes m ON m.id = i.mailbox_id
 		WHERE i.id = $1::uuid AND i.workspace_id = $2`,

@@ -93,6 +93,7 @@ export const tabNames: Record<Tab, string> = {
   journeys: "Journeys",
   rules: "Rules",
   providers: "Email providers",
+  knowledge: "Knowledge",
   company: "About your company",
   brands: "Brands",
   "ideal-customers": "Ideal customers",
@@ -170,6 +171,7 @@ export const tabBlurbs: Record<Tab, string> = {
   reddit: "Find threads where your brand can help, reply with a disclosure from its own account, and count the sign-ups.",
   seo: "Domain rating, backlinks and the keywords your sites rank for, from DataForSEO or Ahrefs.",
   connectors: "The services Outflare can use, connected once for the whole workspace.",
+  knowledge: "Articles and quick answers your team writes once: products, prices, policies and stock answers. Your team and every AI in Outflare answer from them.",
   company: "What Outflare knows about your company, so people and agents never have to repeat it.",
   brands: "The businesses you market from this workspace, each with its own website, context, links and mailboxes.",
   "ideal-customers": "Who you sell to, described once for projects, lead lists and the lead finder.",
@@ -281,15 +283,18 @@ export const modules: Module[] = [
   { id: "analytics", label: "Analytics", icon: "reports", tabs: ["channels", "outcomes", "analytics", "tracking", "flags", "ab-tests", "links"] },
   // Playbooks: recipes that use every module above, from playbooks/ in the repository.
   { id: "playbooks", label: "Playbooks", icon: "playbooks", tabs: ["playbooks"] },
-  // The company hub: what Outflare knows about the business, for every module.
-  { id: "company", label: "Company", icon: "company", tabs: ["company", "brands", "setup", "ideal-customers"] },
+  // What the business knows: knowledge, company context and memories, which
+  // every module and agent reads.
+  { id: "knowledge", label: "Knowledge", icon: "book", tabs: ["knowledge", "company"] },
+  // The company hub: its brands, their setup and who it sells to.
+  { id: "company", label: "Company", icon: "company", tabs: ["brands", "setup", "ideal-customers"] },
 ];
 export const moduleOf = (t: Tab) => modules.find((m) => m.tabs.includes(t));
 const allModules = modules;
 
 // Pages that work for someone kept to some brands. The others need every
 // brand (the API answers 403), so they are hidden from them.
-const brandTabs: readonly Tab[] = ["overview", "seo-overview", "audits", "fixes", "experiments", "keywords", "ai-visibility", "backlinks", "competitors", "link-building", "news", "reddit", "social", "reviews", "ads", "visitors", "tracking", "flags", "ab-tests", "inbox", "projects", "sequences", "people", "leads", "lists", "rules", "lead-finder", "suppression", "mailboxes", "domains", "company", "brands", "setup", "ideal-customers", "members", "account", "instance"];
+const brandTabs: readonly Tab[] = ["overview", "seo-overview", "audits", "fixes", "experiments", "keywords", "ai-visibility", "backlinks", "competitors", "link-building", "news", "reddit", "social", "reviews", "ads", "visitors", "tracking", "flags", "ab-tests", "inbox", "projects", "sequences", "people", "leads", "lists", "rules", "lead-finder", "suppression", "mailboxes", "domains", "knowledge", "company", "brands", "setup", "ideal-customers", "members", "account", "instance"];
 export const canOpen = (ws: Workspace | undefined, t: Tab) => !ws?.brand_ids?.length || brandTabs.includes(t);
 
 // The sidebar keeps two things. Pins are kept in this browser for the
@@ -1012,6 +1017,8 @@ function callFor(tab: Tab, ws: string, item?: string): Call {
       return { title: "Email topics", path: "/v1/workspaces/{ws}/email-topics", params: base, mcp: "list_email_topics", ask: "Add topics for product updates and our monthly newsletter, and put my lifecycle templates in the right one.", scope: "emails.read" };
     case "providers":
       return { title: "Email providers", path: "/v1/workspaces/{ws}/email-providers", params: base, mcp: "list_email_providers", ask: "Is my email provider still in the SES sandbox, and are my sending domains verified?", scope: "emails.read" };
+    case "knowledge":
+      return { title: "Knowledge", path: "/v1/workspaces/{ws}/knowledge/items", params: base, mcp: "search_knowledge", ask: "Write down our refund policy: full refunds within 30 days, no questions asked.", scope: "workspace.read" };
     case "company":
       return { title: "What Outflare knows about the company", path: "/v1/workspaces/{ws}/context", params: base, mcp: "get_context", ask: "What do you know about my company, and what is blocking my outreach?", scope: "workspace.read" };
     case "brands":
