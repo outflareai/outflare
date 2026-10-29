@@ -149,12 +149,20 @@ var billingFields = []fieldView{
 	computedField("billing_status", "Billing status", "select", "billing_status", true, "Trialing, active, past due or canceled, from their subscriptions."),
 }
 
+// workFields are on people and companies: labels anyone, the API or a
+// journey step can put on a record, and the workspace member who owns it
+// (alerts go to them).
+var workFields = []fieldView{
+	builtinField("tags", "Tags", "text", "", "", true, true, "Labels such as vip, churn-risk or partner: lowercase, up to 50 characters each."),
+	builtinField("owner", "Owner", "actor_reference", "", "", false, true, "The workspace member who owns the record. Alerts about it go to them."),
+}
+
 // lateBuiltins are built-in field keys added after workspaces could make
 // their own fields, so a workspace may already have a field of that key.
 // Where it does, its own field wins and the built-in is left out.
 var lateBuiltins = func() []string {
-	keys := make([]string, 0, len(billingFields)+len(touchFields))
-	for _, f := range slices.Concat(billingFields, touchFields) {
+	keys := make([]string, 0, len(billingFields)+len(touchFields)+len(workFields))
+	for _, f := range slices.Concat(billingFields, touchFields, workFields) {
 		keys = append(keys, f.Key)
 	}
 	return keys
@@ -181,7 +189,7 @@ var builtinTypes = []recordTypeView{
 			builtinField("linkedin_url", "LinkedIn", "url", "", "", false, false, ""),
 			builtinField("lifecycle_stage", "Lifecycle stage", "status", "lifecycle_stage", "", false, true, ""),
 			billingFields[0], billingFields[1], billingFields[2], billingFields[3], billingFields[4],
-		}, touchFields)},
+		}, touchFields, workFields)},
 	{Key: "account", Name: "Company", Plural: "Companies", Builtin: true,
 		Description: "A company or other organization: a customer account, a prospect company, a partner. Its domains are identities.",
 		Fields: []fieldView{
@@ -192,6 +200,7 @@ var builtinTypes = []recordTypeView{
 			builtinField("linkedin_url", "LinkedIn", "url", "", "", false, false, ""),
 			builtinField("lifecycle_stage", "Lifecycle stage", "status", "lifecycle_stage", "", false, true, ""),
 			billingFields[0], billingFields[1], billingFields[2], billingFields[3], billingFields[4],
+			workFields[0], workFields[1],
 		}},
 }
 

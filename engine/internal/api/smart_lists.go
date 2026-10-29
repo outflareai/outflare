@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"slices"
 	"strings"
 	"time"
 
@@ -29,12 +30,15 @@ func (s *Server) routesSmartLists(mux *http.ServeMux) {
 	mux.HandleFunc("DELETE /v1/workspaces/{ws}/smart-lists/{id}", s.inBrand(manage, s.deleteSmartList))
 	mux.HandleFunc("GET /v1/workspaces/{ws}/smart-lists/{id}/members", s.inBrand(read, s.listSmartListMembers))
 	mux.HandleFunc("POST /v1/workspaces/{ws}/smart-lists/{id}/refresh", s.inBrand(manage, s.refreshSmartList))
+	mux.HandleFunc("POST /v1/workspaces/{ws}/smart-lists/{id}/members", s.inBrand(manage, s.addStaticMembers))
+	mux.HandleFunc("POST /v1/workspaces/{ws}/smart-lists/{id}/members/remove", s.inBrand(manage, s.removeStaticMembers))
 }
 
 type smartListView struct {
 	ID          string            `json:"id"`
 	Name        string            `json:"name"`
 	Description string            `json:"description"`
+	Kind        string            `json:"kind"`
 	BrandID     *string           `json:"brand_id"`
 	Rules       []smartlists.Rule `json:"rules"`
 	Match       string            `json:"match"`
@@ -45,17 +49,23 @@ type smartListView struct {
 	UpdatedAt   time.Time         `json:"updated_at"`
 }
 
-const smartListSelect = `SELECT l.id, l.name, l.description, l.brand_id, l.rules, l.match, l.members, l.refreshed_at, l.error_code,
+const smartListSelect = `SELECT l.id, l.name, l.description, l.kind, l.brand_id, l.rules, l.match, l.members, l.refreshed_at, l.error_code,
 	l.created_at, l.updated_at FROM smart_lists l WHERE l.workspace_id = $1`
 
 func scanSmartList(row pgx.Row) (smartListView, error) {
 	var v smartListView
 	var rules []byte
-	err := row.Scan(&v.ID, &v.Name, &v.Description, &v.BrandID, &rules, &v.Match, &v.Members, &v.RefreshedAt, &v.ErrorCode, &v.CreatedAt, &v.UpdatedAt)
+	err := row.Scan(&v.ID, &v.Name, &v.Description, &v.Kind, &v.BrandID, &rules, &v.Match, &v.Members, &v.RefreshedAt, &v.ErrorCode, &v.CreatedAt, &v.UpdatedAt)
 	if err != nil {
 		return v, err
 	}
 	v.Rules = []smartlists.Rule{}
+	if v.Kind == smartlists.KindStatic {
+		// A static list's stored rules only keep older versions from
+		// filling it; it has none.
+		v.RefreshedAt = nil
+		return v, nil
+	}
 	_ = json.Unmarshal(rules, &v.Rules)
 	return v, nil
 }
@@ -109,6 +119,7 @@ func (s *Server) getSmartList(w http.ResponseWriter, r *http.Request) {
 }
 
 type smartListFields struct {
+	Kind        *string            `json:"kind"`
 	Name        *string            `json:"name"`
 	Description *string            `json:"description"`
 	BrandID     optional[string]   `json:"brand_id"`
@@ -148,6 +159,12 @@ func (s *Server) applySmartList(r *http.Request, a *access, f smartListFields, v
 			}
 			v.BrandID = &id
 		}
+	}
+	if v.Kind == smartlists.KindStatic {
+		if f.Rules != nil || f.Match != nil {
+			return errInvalid("a static list has no rules: add and remove people with POST .../smart-lists/{id}/members")
+		}
+		return nil
 	}
 	if f.Rules != nil {
 		v.Rules = *f.Rules
@@ -228,7 +245,14 @@ func (s *Server) createSmartList(w http.ResponseWriter, r *http.Request) {
 		writeError(w, r, http.StatusBadRequest, "invalid_request", "name is required")
 		return
 	}
-	v := smartListView{Rules: []smartlists.Rule{}, Match: "all"}
+	v := smartListView{Kind: smartlists.KindSmart, Rules: []smartlists.Rule{}, Match: "all"}
+	if f.Kind != nil {
+		if *f.Kind != smartlists.KindSmart && *f.Kind != smartlists.KindStatic {
+			writeError(w, r, http.StatusBadRequest, "invalid_request", "kind is smart or static")
+			return
+		}
+		v.Kind = *f.Kind
+	}
 	if !s.smartListApplied(w, r, s.applySmartList(r, a, f, &v)) {
 		return
 	}
@@ -240,19 +264,27 @@ func (s *Server) createSmartList(w http.ResponseWriter, r *http.Request) {
 	var id string
 	err := pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
 		rules, _ := json.Marshal(v.Rules)
+		var refreshed *time.Time
+		if v.Kind == smartlists.KindStatic {
+			rules, _ = json.Marshal(smartlists.NobodyRules)
+			refreshed = &smartlists.Never
+		}
 		var createdBy *string
 		if a.ActorID != "" {
 			createdBy = &a.ActorID
 		}
-		if err := tx.QueryRow(ctx, `INSERT INTO smart_lists (workspace_id, brand_id, name, description, rules, match, created_by)
-			VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id`, a.WorkspaceID, v.BrandID, v.Name, v.Description, rules, v.Match, createdBy).Scan(&id); err != nil {
+		if err := tx.QueryRow(ctx, `INSERT INTO smart_lists (workspace_id, brand_id, name, description, kind, rules, match, refreshed_at, created_by)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING id`, a.WorkspaceID, v.BrandID, v.Name, v.Description, v.Kind, rules, v.Match,
+			refreshed, createdBy).Scan(&id); err != nil {
 			return err
 		}
-		if _, err := smartlists.Enqueue(ctx, tx, a.WorkspaceID, id, true); err != nil {
-			return err
+		if v.Kind == smartlists.KindSmart {
+			if _, err := smartlists.Enqueue(ctx, tx, a.WorkspaceID, id, true); err != nil {
+				return err
+			}
 		}
 		return record(ctx, tx, &a.principal, a.WorkspaceID, "smart_list.created", "smart_list", id,
-			map[string]any{"rules": len(v.Rules), "match": v.Match, "branded": v.BrandID != nil})
+			map[string]any{"kind": v.Kind, "rules": len(v.Rules), "match": v.Match, "branded": v.BrandID != nil})
 	})
 	if uniqueViolation(err) {
 		writeError(w, r, http.StatusConflict, "conflict", "a list with this name already exists")
@@ -288,14 +320,21 @@ func (s *Server) updateSmartList(w http.ResponseWriter, r *http.Request) {
 		writeError(w, r, http.StatusForbidden, "forbidden", "you can only make smart lists for your brands: set brand_id")
 		return
 	}
+	if f.Kind != nil && *f.Kind != v.Kind {
+		writeError(w, r, http.StatusBadRequest, "invalid_request", "a list's kind can't change: make a new list")
+		return
+	}
 	ctx := r.Context()
 	err := pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
 		rules, _ := json.Marshal(v.Rules)
+		if v.Kind == smartlists.KindStatic {
+			rules, _ = json.Marshal(smartlists.NobodyRules)
+		}
 		if _, err := tx.Exec(ctx, `UPDATE smart_lists SET name = $3, description = $4, brand_id = $5, rules = $6, match = $7, updated_at = now()
 			WHERE workspace_id = $1 AND id = $2`, a.WorkspaceID, v.ID, v.Name, v.Description, v.BrandID, rules, v.Match); err != nil {
 			return err
 		}
-		if f.changesMembers() {
+		if f.changesMembers() && v.Kind == smartlists.KindSmart {
 			if _, err := smartlists.Enqueue(ctx, tx, a.WorkspaceID, v.ID, true); err != nil {
 				return err
 			}
@@ -454,4 +493,63 @@ func (s *Server) listSmartListMembers(w http.ResponseWriter, r *http.Request) {
 		next = &c
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"data": list, "next_before": next})
+}
+
+// addStaticMembers puts people in a static list, and removeStaticMembers
+// takes them out. Rules acting on people joining or leaving the list hear
+// of it, as for a smart list's refresh.
+func (s *Server) addStaticMembers(w http.ResponseWriter, r *http.Request) {
+	s.changeStaticMembers(w, r, true)
+}
+
+func (s *Server) removeStaticMembers(w http.ResponseWriter, r *http.Request) {
+	s.changeStaticMembers(w, r, false)
+}
+
+func (s *Server) changeStaticMembers(w http.ResponseWriter, r *http.Request, add bool) {
+	a := accessFrom(r.Context())
+	v, ok := s.findSmartList(w, r, a, r.PathValue("id"))
+	if !ok {
+		return
+	}
+	var in struct {
+		RecordIDs []string `json:"record_ids"`
+	}
+	if !decode(w, r, &in) {
+		return
+	}
+	if len(in.RecordIDs) == 0 || len(in.RecordIDs) > 10000 || slices.ContainsFunc(in.RecordIDs, func(id string) bool { return !validUUID(id) }) {
+		writeError(w, r, http.StatusBadRequest, "invalid_request", "record_ids is 1 to 10,000 record ids")
+		return
+	}
+	if !a.writes(nil, v.BrandID) {
+		writeError(w, r, http.StatusForbidden, "forbidden", "this list holds people of every brand; you are limited to some brands")
+		return
+	}
+	ctx := r.Context()
+	var c smartlists.Change
+	err := pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
+		var err error
+		action := "smart_list.members_added"
+		if add {
+			c, err = smartlists.AddStatic(ctx, tx, a.WorkspaceID, v.ID, in.RecordIDs, "api", "")
+		} else {
+			action = "smart_list.members_removed"
+			c, err = smartlists.RemoveStatic(ctx, tx, a.WorkspaceID, v.ID, in.RecordIDs)
+		}
+		if err != nil || c.Changed == 0 {
+			return err
+		}
+		return record(ctx, tx, &a.principal, a.WorkspaceID, action, "smart_list", v.ID, map[string]any{"count": c.Changed, "members": c.Members})
+	})
+	switch {
+	case errors.Is(err, smartlists.ErrNotStatic):
+		writeError(w, r, http.StatusConflict, "conflict", err.Error())
+	case errors.Is(err, smartlists.ErrGone):
+		writeError(w, r, http.StatusNotFound, "not_found", "smart list not found")
+	case err != nil:
+		s.internal(w, r, err)
+	default:
+		writeJSON(w, http.StatusOK, c)
+	}
 }

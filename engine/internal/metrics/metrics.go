@@ -253,6 +253,16 @@ var (
 		Help: "How long the oldest conversion waiting to be sent has waited, as of this process's last round.",
 	})
 
+	// Meetings on people's timelines (outcomes.MeetingEvents).
+	meetingEvents = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Namespace: namespace, Subsystem: "meeting_events", Name: "total",
+		Help: "Meeting events recorded on people's timelines, by status (booked, held, no_show, canceled).",
+	}, []string{"status"})
+	meetingEventsPending = prometheus.NewGauge(prometheus.GaugeOpts{
+		Namespace: namespace, Subsystem: "meeting_events", Name: "pending",
+		Help: "Meetings tied to a person whose latest status isn't recorded as an event yet, as of this process's last round.",
+	})
+
 	// Reviews: reading brands' review pages through the workspace's own
 	// page reader.
 	reviewReads = prometheus.NewCounterVec(prometheus.CounterOpts{
@@ -375,6 +385,7 @@ var own = []prometheus.Collector{
 	ruleEvaluations,
 	semanticRuns, semanticItems, semanticDuration, semanticAvailable, semanticWorkspaces,
 	adConversions, adConversionsOldest,
+	meetingEvents, meetingEventsPending,
 	reviewReads, reviewsFound, socialReads, syncRuns, linkReads, linkPageChecks, archiveLookups, linkPitches, linkReplies, linkLiveChecks,
 	socialPublishes,
 	partnerClicks, partnerConversions, partnerRewards, partnerRewardsOverdue, partnerImports, partnerImportObjects, partnerPostbacks,
@@ -678,6 +689,14 @@ func AdConversions(connector string, sent, skipped, failed int) {
 // AdConversionsOldest records how long the oldest waiting conversion has
 // waited.
 func AdConversionsOldest(d time.Duration) { adConversionsOldest.Set(d.Seconds()) }
+
+// MeetingEventsRecorded counts meeting events recorded with one status.
+func MeetingEventsRecorded(status string, n int) {
+	meetingEvents.WithLabelValues(status).Add(float64(n))
+}
+
+// SetMeetingEventsPending sets how many meetings wait for their event.
+func SetMeetingEventsPending(n int) { meetingEventsPending.Set(float64(n)) }
 
 // PartnerClick counts a partner short link click by outcome.
 func PartnerClick(outcome string) { partnerClicks.WithLabelValues(outcome).Inc() }

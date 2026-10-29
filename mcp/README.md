@@ -121,7 +121,7 @@ Read (always available):
 | `list_email_templates`, `get_email_template`, `preview_email_template` | Email templates and their variables; fill content with sample data without sending |
 | `list_email_topics` | Subscription topics for lifecycle email, such as product updates |
 | `list_email_broadcasts`, `get_email_broadcast` | Lifecycle emails sent to many people at once, with results; who was skipped and why |
-| `list_journeys`, `get_journey`, `list_journey_runs` | If-this-then-that flows for people on customer records, what each step did, and who is in them |
+| `list_journeys`, `get_journey`, `list_journey_runs`, `list_journey_step_kinds` | If-this-then-that flows for people on customer records, what each step did, who is in them, and every kind of step a journey can have |
 | `list_rules`, `get_rule`, `simulate_rule`, `list_rule_firings` | The rules engine: rules that turn what happens to records into business events, a dry run of what one would have done, and when it fired for whom |
 | `list_emails`, `get_email`, `get_email_recipient` | Transactional and lifecycle emails with delivery status, opens, clicks and what triggered each; one email's content and timeline; everything one address was sent |
 | `list_lead_lists`, `get_lead_list` | Lead lists with sizes, search settings and the latest build |
@@ -226,11 +226,12 @@ Write (left out when `OUTFLARE_MCP_READ_ONLY=1`):
 | `get_semantic_search`, `set_semantic_search` | Read whether meaning-based search is on and how far along it is, or turn it off and on |
 | `list_query_tables`, `run_query` | Read-only SQL over the workspace's own data (people, companies, product events, deals, outreach, replies, emails, visits): counts, sums, rates and joins in one call. It sees only what the connection may read, and never changes anything |
 | `get_catalog` | Everything customer records can hold: record types (person, account and the workspace's own), their fields, the shared option lists and product events. Read it before writing records |
-| `list_records`, `get_record`, `lookup_record`, `review_record` | Find people, companies and other records by type, name or identity; `lookup_record` says which record holds an email or id verified; approve or reject records held for review |
+| `list_records`, `get_record`, `lookup_record`, `review_record` | Find people, companies and other records by type, name, identity or field values; `lookup_record` says which record holds an email or id verified; approve or reject records held for review |
 | `get_record_history`, `list_record_identities`, `list_record_links` | A record's changes (who, when, which source), its emails, phones and ids (closed ones too) and its links |
 | `get_record_timeline`, `list_record_consents`, `list_customer_events` | One timeline per person or company across every module (product events, changes, identities, consent, cold email and replies, meetings, deals, visits, opt-outs, journeys; a company with its people), a person's current consents, and product events (unmatched anonymous ones too) |
 | `list_record_duplicates` | Pairs of records that may be the same human (a shared email or phone), with both records |
 | `create_record`, `update_record` | Add or change a record; values are checked against the catalog, and a higher-precedence source's values are kept |
+| `delete_record` | Erase a person or company for good, with their activity, for an erasure request; optionally never contact them again |
 | `add_record_identity`, `close_record_identity` | Add, verify or change an email, phone or id (`replaces` for a changed email), or remove one |
 | `link_records`, `end_record_link` | Link two records, such as partner_of, or end a link |
 | `create_record_type`, `update_record_type`, `create_field`, `update_field` | Add or change record types and fields in the shared catalog |
@@ -255,6 +256,7 @@ Write (left out when `OUTFLARE_MCP_READ_ONLY=1`):
 | `create_lead_list`, `update_lead_list` | A manual list, or one built from a data provider search with an email waterfall, ICP scoring, dedupe and credit caps |
 | `run_lead_list` | Build, refresh or enrich a list (spends provider credits, within the caps) |
 | `create_smart_list`, `update_smart_list`, `refresh_smart_list`, `delete_smart_list` | Make a list that keeps itself up to date from rules, change its rules, bring it up to date now, or delete it (its people stay) |
+| `add_to_static_list`, `remove_from_static_list` | Put people in, or take them out of, a static list (`create_smart_list` with kind static), which holds the people put in it |
 | `create_flag`, `update_flag`, `archive_flag` | Add a switch or a split between versions, turn it on or off, change who gets it, or archive it |
 | `create_ab_test`, `update_ab_test`, `start_ab_test`, `end_ab_test`, `freeze_ab_test`, `duplicate_ab_test` | Set up an A/B test of a flag with its control, goals and guardrails, start measuring, stop new visitors joining, end it with the version chosen, or copy it into a new draft |
 | `suggest_ab_tests`, `write_ab_test_versions`, `summarize_ab_test` | Have the workspace's own AI model suggest tests, write versions of a flag from a prompt, or summarise results (the engine decides the recommendation) |
@@ -346,13 +348,16 @@ Write (left out when `OUTFLARE_MCP_READ_ONLY=1`):
 | `create_tracking_campaign`, `update_tracking_campaign` | Make a campaign (channel, source, utm_campaign, ofc code), or rename, rebrand or archive it |
 | `list_tracking_links`, `create_tracking_link` | Tagged links in a campaign; make one for any page, with content and term |
 | `get_attribution_settings`, `update_attribution_settings` | The default attribution model (last non-direct touch), the lookback and which events count as conversions |
-| `get_attribution_channels`, `get_attribution_campaigns` | Visits, conversions, revenue and cost per channel, and per source and campaign, under any of the five models |
+| `list_attribution_models`, `create_attribution_model`, `update_attribution_model`, `archive_attribution_model` | The workspace's own attribution models: windows per channel, channels left out, position weights and half-life, each change a new version |
+| `list_conversion_definitions`, `create_conversion_definition`, `update_conversion_definition`, `archive_conversion_definition`, `list_conversion_presets`, `add_conversion_preset` | What the workspace counts as a conversion: an event, filters, a value and each ad network's name for it, with presets by kind of business |
+| `get_attribution_channels`, `get_attribution_campaigns` | Visits, conversions, revenue and cost per channel, and per source and campaign, under any model |
 | `list_attribution_conversions` | Credited sign-ups, payments and refunds with the visits that got the credit |
 | `list_ad_connections` | List connected ad platforms and what each still needs |
 | `list_ad_accounts` | List ad accounts with currency, brand and sync status |
 | `update_ad_account` | Set an ad account's brand, or switch its sync |
 | `list_ad_campaigns` | Campaigns ranked by spend, with platform-reported results |
 | `get_ads_summary` | Ad spend and results grouped by platform, brand, account or day |
+| `list_ad_tracking_templates` | The tracking template to paste into each ad network, with its click ids and macros |
 | `sync_ads` | Sync ad platforms now instead of within six hours |
 | `list_ad_conversion_targets` | Where an ad account's conversions can go (conversion actions, pixels, goals) |
 | `list_ad_conversion_rules`, `create_ad_conversion_rule`, `update_ad_conversion_rule`, `delete_ad_conversion_rule` | Send a customer event to an ad platform as a conversion |

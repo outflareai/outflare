@@ -71,7 +71,7 @@
   if (!script) return;
   var key = script.getAttribute("data-key") || "";
   // Sent with every batch, so Outflare can tell a site running an old copy.
-  var VERSION = "4";
+  var VERSION = "5";
   // Events go where the script came from: a path the site forwards keeps
   // its prefix.
   var src = new URL(script.src, location.href);
@@ -81,7 +81,12 @@
   var domains = (script.getAttribute("data-domains") || "").split(/[\s,]+/).filter(Boolean).map(function (d) { return d.toLowerCase().replace(/^www\./, ""); });
   var mode = script.getAttribute("data-consent") || "auto";
   var COOKIE = "of_aid", CHOICE = "of_consent", YEAR = 31536000;
-  var clickIDs = ["gclid", "gbraid", "wbraid", "fbclid", "msclkid", "li_fat_id", "rdt_cid", "twclid"];
+  // Click ids ad networks add to landing pages, the ad ids an Outflare
+  // tracking template adds (of_campaign and the rest), and the cookies ad
+  // pixels set, read only with marketing consent.
+  var clickIDs = ["gclid", "gbraid", "wbraid", "dclid", "fbclid", "msclkid", "li_fat_id", "rdt_cid", "twclid", "ttclid", "ScCid", "epik", "tblci", "ob_click_id", "qclid", "irclickid"];
+  var adParams = ["campaign", "adset", "ad", "placement"];
+  var adCookies = { _fbp: "fbp", _fbc: "fbc", _gcl_aw: "gcl_aw" };
 
   function needsConsent() {
     if (mode === "required") return true;
@@ -234,13 +239,28 @@
     });
     return any ? c : null;
   }
+  // The ad pixels' cookies, once the visitor allows marketing.
+  function cookieIDs(ids) {
+    if (!cats.marketing) return false;
+    var any = false;
+    for (var name in adCookies) {
+      var m = d.cookie.match(new RegExp("(?:^|;\\s*)" + name + "=([^;]{1,500})"));
+      if (m) { ids[adCookies[name]] = m[1]; any = true; }
+    }
+    return any;
+  }
   function landing(q) {
-    var p = {}, ids = {}, any = false;
+    var p = {}, ids = {}, ad = {}, any = cookieIDs(ids), anyAd = false;
     clickIDs.forEach(function (k) {
       var v = q.get(k);
       if (v) { ids[k] = v; any = true; }
     });
     if (any) p.click_ids = ids;
+    adParams.forEach(function (k) {
+      var v = q.get("of_" + k);
+      if (v) { ad[k] = v; anyAd = true; }
+    });
+    if (anyAd) p.ad = ad;
     if (q.get("ofc")) p.ofc = q.get("ofc");
     var ref = q.get("ref") || q.get("via");
     if (ref) p.ref = ref;
@@ -292,8 +312,11 @@
   // server to server is counted once.
   function track(event, properties) {
     if (!event) return;
-    var q = new URLSearchParams(location.search), id = uuid();
-    send([{ type: "track", event: String(event), anonymousId: anon, messageId: id, properties: properties || {}, context: context(q) }]);
+    var q = new URLSearchParams(location.search), id = uuid(), props = {}, ids = {};
+    for (var k in properties || {}) props[k] = properties[k];
+    // A conversion carries the ad pixels' cookies, for sending it back.
+    if (!props.click_ids && cookieIDs(ids)) props.click_ids = ids;
+    send([{ type: "track", event: String(event), anonymousId: anon, messageId: id, properties: props, context: context(q) }]);
     return id;
   }
 

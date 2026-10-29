@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"errors"
 	"math"
 	"net/http"
 	"regexp"
@@ -44,11 +45,11 @@ type attributionSettings struct {
 func (s *Server) loadAttributionSettings(ctx context.Context, ws string) (attributionSettings, error) {
 	v := attributionSettings{Models: attribution.Models}
 	err := s.pool.QueryRow(ctx, `
-		WITH ins AS (INSERT INTO attribution_settings (workspace_id) VALUES ($1) ON CONFLICT DO NOTHING
+		WITH ins AS (INSERT INTO attribution_settings (workspace_id, lookback_days) VALUES ($1, $2) ON CONFLICT DO NOTHING
 			RETURNING model, lookback_days, conversion_events, backfilled_at, updated_at)
 		SELECT * FROM ins
 		UNION ALL SELECT model, lookback_days, conversion_events, backfilled_at, updated_at FROM attribution_settings WHERE workspace_id = $1
-		LIMIT 1`, ws).Scan(&v.Model, &v.LookbackDays, &v.ConversionEvents, &v.BackfilledAt, &v.UpdatedAt)
+		LIMIT 1`, ws, attribution.DefaultLookbackDays).Scan(&v.Model, &v.LookbackDays, &v.ConversionEvents, &v.BackfilledAt, &v.UpdatedAt)
 	return v, err
 }
 
@@ -73,9 +74,18 @@ func (s *Server) updateAttributionSettings(w http.ResponseWriter, r *http.Reques
 	if !decode(w, r, &in) {
 		return
 	}
-	if in.Model != nil && !attribution.ValidModel(*in.Model) {
-		writeError(w, r, http.StatusBadRequest, "invalid_request", "model is one of "+strings.Join(attribution.Models, ", "))
-		return
+	// The default is a built-in model or a workspace model's key, which
+	// follows its latest version (a pinned version is for one module).
+	if in.Model != nil {
+		if _, _, err := attribution.Resolve(r.Context(), s.pool, a.WorkspaceID, *in.Model); err != nil || strings.Contains(*in.Model, "@") {
+			if err != nil && !errors.Is(err, attribution.ErrUnknownModel) && !errors.Is(err, attribution.ErrNotCredited) {
+				s.internal(w, r, err)
+				return
+			}
+			writeError(w, r, http.StatusBadRequest, "invalid_request", "model is one of "+strings.Join(attribution.Models, ", ")+
+				", or the key of one of the workspace's models that isn't archived (no @version)")
+			return
+		}
 	}
 	if in.LookbackDays != nil && (*in.LookbackDays < 1 || *in.LookbackDays > 365) {
 		writeError(w, r, http.StatusBadRequest, "invalid_request", "lookback_days must be 1 to 365")
@@ -151,9 +161,13 @@ func (s *Server) updateAttributionSettings(w http.ResponseWriter, r *http.Reques
 // (the last 28 days by default), model (the workspace's), brand.
 type attributionFilter struct {
 	from, to string
-	model    string
-	settings attributionSettings
-	brand    brandSel
+	// ref is the model as asked for (a built-in id, a model's key or
+	// key@version); model is the id its credits are stored under, and
+	// version the workspace model's version, if it is one.
+	ref, model string
+	version    *int
+	settings   attributionSettings
+	brand      brandSel
 }
 
 func (s *Server) attributionQuery(w http.ResponseWriter, r *http.Request) (attributionFilter, bool) {
@@ -180,11 +194,7 @@ func (s *Server) attributionQuery(w http.ResponseWriter, r *http.Request) (attri
 		writeError(w, r, http.StatusBadRequest, "invalid_request", "from must be on or before to, and at most three years before it")
 		return attributionFilter{}, false
 	}
-	model := q.Get("model")
-	if model != "" && !attribution.ValidModel(model) {
-		writeError(w, r, http.StatusBadRequest, "invalid_request", "model is one of "+strings.Join(attribution.Models, ", "))
-		return attributionFilter{}, false
-	}
+	ref := q.Get("model")
 	brand, ok := s.brandFilter(w, r)
 	if !ok {
 		return attributionFilter{}, false
@@ -194,10 +204,28 @@ func (s *Server) attributionQuery(w http.ResponseWriter, r *http.Request) (attri
 		s.internal(w, r, err)
 		return attributionFilter{}, false
 	}
-	if model == "" {
-		model = settings.Model
+	if ref == "" {
+		ref = settings.Model
 	}
-	return attributionFilter{from: from.Format(time.DateOnly), to: to.Format(time.DateOnly), model: model, settings: settings, brand: brand}, true
+	f := attributionFilter{from: from.Format(time.DateOnly), to: to.Format(time.DateOnly), ref: ref, settings: settings, brand: brand}
+	model, version, err := attribution.Resolve(r.Context(), s.pool, accessFrom(r.Context()).WorkspaceID, ref)
+	switch {
+	case errors.Is(err, attribution.ErrUnknownModel):
+		writeError(w, r, http.StatusBadRequest, "invalid_request", "model is one of "+strings.Join(attribution.Models, ", ")+
+			", or the key of one of the workspace's models (GET .../attribution/models), optionally with @version")
+		return attributionFilter{}, false
+	case errors.Is(err, attribution.ErrNotCredited):
+		writeError(w, r, http.StatusBadRequest, "invalid_request", err.Error())
+		return attributionFilter{}, false
+	case err != nil:
+		s.internal(w, r, err)
+		return attributionFilter{}, false
+	}
+	f.model = model
+	if version != nil {
+		f.version = &version.Version
+	}
+	return f, true
 }
 
 // money is an amount in one currency.
@@ -407,7 +435,7 @@ func (s *Server) attributionChannels(w http.ResponseWriter, r *http.Request) {
 		out = append(out, channelView{x, moneyList(cost[id])})
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"model": f.model, "from": f.from, "to": f.to,
+		"model": f.ref, "model_version": f.version, "from": f.from, "to": f.to,
 		"lookback_days": f.settings.LookbackDays, "conversion_events": f.settings.ConversionEvents,
 		"pending_visits": pending, "data": out, "unallocated_cost": moneyList(cost[""]),
 	})
@@ -532,7 +560,7 @@ func (s *Server) attributionCampaigns(w http.ResponseWriter, r *http.Request) {
 	if len(out) > 500 {
 		out = out[:500]
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"model": f.model, "from": f.from, "to": f.to, "data": out})
+	writeJSON(w, http.StatusOK, map[string]any{"model": f.ref, "model_version": f.version, "from": f.from, "to": f.to, "data": out})
 }
 
 type attributionCredit struct {
@@ -646,5 +674,5 @@ func (s *Server) listAttributionConversions(w http.ResponseWriter, r *http.Reque
 		t := out[len(out)-1].OccurredAt.Format(time.RFC3339Nano)
 		next = &t
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"model": f.model, "data": out, "next_before": next})
+	writeJSON(w, http.StatusOK, map[string]any{"model": f.ref, "model_version": f.version, "data": out, "next_before": next})
 }

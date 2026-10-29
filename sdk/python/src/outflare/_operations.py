@@ -195,6 +195,27 @@ class Operations(_Mixin):
             idempotency_key=idempotency_key,
         )
 
+    def add_conversion_preset(
+        self,
+        preset: str,
+        *,
+        ws: str | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Add a preset's conversion definitions.
+
+        Scope: analytics.manage. Adds the preset's definitions whose keys the workspace doesn't use yet, so adding it twice changes nothing. Conversions are credited again when any is added.
+
+        Needs: the analytics.manage scope.
+        POST /v1/workspaces/{ws}/conversion-definitions/presets/{preset}
+        """
+        return self._call(
+            "POST",
+            "/v1/workspaces/{ws}/conversion-definitions/presets/{preset}",
+            path={"preset": preset, "ws": ws},
+            idempotency_key=idempotency_key,
+        )
+
     def add_coverage(
         self,
         *,
@@ -766,6 +787,33 @@ class Operations(_Mixin):
             idempotency_key=idempotency_key,
         )
 
+    def add_static_list_members(
+        self,
+        id: str,
+        *,
+        ws: str | None = None,
+        record_ids: list[str],
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Put people in a static list.
+
+        Scope: customers.manage. Only a static list takes people; a smart list fills itself (409). People only: not
+        companies, merged or archived records, or, for a brand's list, another brand's people. Rules acting on people
+        joining the list hear of it.
+
+        Needs: the customers.manage scope.
+        POST /v1/workspaces/{ws}/smart-lists/{id}/members
+        """
+        return self._call(
+            "POST",
+            "/v1/workspaces/{ws}/smart-lists/{id}/members",
+            path={"id": id, "ws": ws},
+            body={"record_ids": record_ids},
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
     def add_suppressions(
         self,
         *,
@@ -1277,6 +1325,48 @@ class Operations(_Mixin):
             "POST",
             "/v1/workspaces/{ws}/social/series/{id}/approve",
             path={"id": id, "ws": ws},
+            idempotency_key=idempotency_key,
+        )
+
+    def archive_attribution_model(
+        self,
+        key: str,
+        *,
+        ws: str | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Archive an attribution model.
+
+        Scope: analytics.manage. Reports can no longer read it, except a version a module pins. The workspace's default model can't be archived.
+
+        Needs: the analytics.manage scope.
+        DELETE /v1/workspaces/{ws}/attribution/models/{key}
+        """
+        return self._call(
+            "DELETE",
+            "/v1/workspaces/{ws}/attribution/models/{key}",
+            path={"key": key, "ws": ws},
+            idempotency_key=idempotency_key,
+        )
+
+    def archive_conversion_definition(
+        self,
+        key: str,
+        *,
+        ws: str | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Archive a conversion definition.
+
+        Scope: analytics.manage. It stops counting, and conversions are credited again without it.
+
+        Needs: the analytics.manage scope.
+        DELETE /v1/workspaces/{ws}/conversion-definitions/{key}
+        """
+        return self._call(
+            "DELETE",
+            "/v1/workspaces/{ws}/conversion-definitions/{key}",
+            path={"key": key, "ws": ws},
             idempotency_key=idempotency_key,
         )
 
@@ -2308,6 +2398,34 @@ class Operations(_Mixin):
             idempotency_key=idempotency_key,
         )
 
+    def create_attribution_model(
+        self,
+        *,
+        ws: str | None = None,
+        key: str | None = None,
+        name: str | None = None,
+        spec: dict[str, Any] | None = None,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Make an attribution model.
+
+        Scope: analytics.manage. Makes version 1 of a model, from a built-in one with your own options, such as
+        `{"key": "paid-7-day", "name": "Paid ads 7 days", "spec": {"base": "last_non_direct", "channel_lookback_days": {"paid_ads": 7}}}`.
+        Every conversion is credited again in the background, so the model covers the past too.
+
+        Needs: the analytics.manage scope.
+        POST /v1/workspaces/{ws}/attribution/models
+        """
+        return self._call(
+            "POST",
+            "/v1/workspaces/{ws}/attribution/models",
+            path={"ws": ws},
+            body={"key": key, "name": name, "spec": spec},
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
     def create_brand(
         self,
         *,
@@ -2387,6 +2505,54 @@ class Operations(_Mixin):
                 "name": name,
                 "reason": reason,
                 "use_for_verification": use_for_verification,
+            },
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
+    def create_conversion_definition(
+        self,
+        *,
+        ws: str | None = None,
+        attribution: bool | None = None,
+        currency: str | None = None,
+        event: str | None = None,
+        filters: list[dict[str, Any]] | None = None,
+        fixed_value_minor: int | None = None,
+        name: str | None = None,
+        network_events: dict[str, Any] | None = None,
+        value_mode: Literal["none", "fixed", "property"] | None = None,
+        value_property: str | None = None,
+        value_unit: Literal["major", "minor"] | None = None,
+        key: str | None = None,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Define a conversion.
+
+        Scope: analytics.manage. Such as a call over a minute:
+        `{"key": "qualified_call", "name": "Qualified call", "event": "call.completed", "filters": [{"property": "duration_s", "op": "gt", "value": 60}], "value_mode": "fixed", "fixed_value_minor": 5000, "currency": "USD"}`.
+        Every conversion is credited again in the background.
+
+        Needs: the analytics.manage scope.
+        POST /v1/workspaces/{ws}/conversion-definitions
+        """
+        return self._call(
+            "POST",
+            "/v1/workspaces/{ws}/conversion-definitions",
+            path={"ws": ws},
+            body={
+                "attribution": attribution,
+                "currency": currency,
+                "event": event,
+                "filters": filters,
+                "fixed_value_minor": fixed_value_minor,
+                "name": name,
+                "network_events": network_events,
+                "value_mode": value_mode,
+                "value_property": value_property,
+                "value_unit": value_unit,
+                "key": key,
             },
             extra_body=extra_body,
             idempotency_key=idempotency_key,
@@ -3059,6 +3225,8 @@ class Operations(_Mixin):
         brand_id: str | None = None,
         description: str | None = None,
         entry: Literal["once", "again"] | None = None,
+        exit_conditions: list[dict[str, Any]] | None = None,
+        exit_events: list[str] | None = None,
         goal_event: str | None = None,
         name: str | None = None,
         steps: list[dict[str, Any]] | None = None,
@@ -3083,6 +3251,8 @@ class Operations(_Mixin):
                 "brand_id": brand_id,
                 "description": description,
                 "entry": entry,
+                "exit_conditions": exit_conditions,
+                "exit_events": exit_events,
                 "goal_event": goal_event,
                 "name": name,
                 "steps": steps,
@@ -4195,6 +4365,7 @@ class Operations(_Mixin):
         ws: str | None = None,
         brand_id: str | None = None,
         description: str | None = None,
+        kind: Literal["smart", "static"] | None = None,
         match: Literal["all", "any"] | None = None,
         name: str | None = None,
         rules: list[dict[str, Any]] | None = None,
@@ -4214,7 +4385,14 @@ class Operations(_Mixin):
             "POST",
             "/v1/workspaces/{ws}/smart-lists",
             path={"ws": ws},
-            body={"brand_id": brand_id, "description": description, "match": match, "name": name, "rules": rules},
+            body={
+                "brand_id": brand_id,
+                "description": description,
+                "kind": kind,
+                "match": match,
+                "name": name,
+                "rules": rules,
+            },
             extra_body=extra_body,
             idempotency_key=idempotency_key,
         )
@@ -5133,6 +5311,36 @@ class Operations(_Mixin):
             "DELETE",
             "/v1/workspaces/{ws}/projects/{id}",
             path={"id": id, "ws": ws},
+            idempotency_key=idempotency_key,
+        )
+
+    def delete_record(
+        self,
+        record: str,
+        *,
+        ws: str | None = None,
+        suppress: bool | None = None,
+        version: int | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Erase a customer record.
+
+        Scope: customers.manage. Deletes a person or company for good, such as for an erasure request; to hide one
+        and keep its history, archive it instead (PATCH with archived: true). Goes with it: the records merged into
+        it, its identities, links, field history and consents and, for a person, everything about them: their
+        leads (also any lead with one of their emails), the cold email sent to them and their replies, meetings,
+        lifecycle email sent to them alone, product events, website visits and journey runs. Deals, payments and
+        opt-outs stay, unlinked; a company's people stay, unlinked from it. erased counts the rows removed, by
+        table. A deal is deleted with DELETE .../deals/{deal}.
+
+        Needs: the customers.manage scope.
+        DELETE /v1/workspaces/{ws}/records/{record}
+        """
+        return self._call(
+            "DELETE",
+            "/v1/workspaces/{ws}/records/{record}",
+            path={"record": record, "ws": ws},
+            query={"suppress": suppress, "version": version},
             idempotency_key=idempotency_key,
         )
 
@@ -6652,7 +6860,7 @@ class Operations(_Mixin):
         channel: str | None = None,
         from_: str | None = None,
         to: str | None = None,
-        model: Literal["last_non_direct", "first_touch", "linear", "position", "time_decay"] | None = None,
+        model: str | None = None,
         brand: str | None = None,
     ) -> Any:
         """Drill a channel down to its sources and campaigns.
@@ -6675,7 +6883,7 @@ class Operations(_Mixin):
         ws: str | None = None,
         from_: str | None = None,
         to: str | None = None,
-        model: Literal["last_non_direct", "first_touch", "linear", "position", "time_decay"] | None = None,
+        model: str | None = None,
         brand: str | None = None,
     ) -> Any:
         """Visits, conversions, revenue and cost for every channel.
@@ -6698,6 +6906,25 @@ class Operations(_Mixin):
             query={"from": from_, "to": to, "model": model, "brand": brand},
         )
 
+    def get_attribution_model(
+        self,
+        key: str,
+        *,
+        ws: str | None = None,
+    ) -> Any:
+        """Every version of an attribution model.
+
+        Scope: analytics.read. Newest first, with the modules that pin each version.
+
+        Needs: the analytics.read scope.
+        GET /v1/workspaces/{ws}/attribution/models/{key}
+        """
+        return self._call(
+            "GET",
+            "/v1/workspaces/{ws}/attribution/models/{key}",
+            path={"key": key, "ws": ws},
+        )
+
     def get_attribution_settings(
         self,
         *,
@@ -6705,7 +6932,7 @@ class Operations(_Mixin):
     ) -> Any:
         """Get how conversions are credited to channels.
 
-        Scope: analytics.read. The default model reports use (last non-direct touch unless changed), how many days before a conversion a visit can get credit (90), and which customer events count as conversions.
+        Scope: analytics.read. The default model reports use (last non-direct touch unless changed), how many days before a conversion a visit can get credit (30), and which customer events count as conversions.
 
         Needs: the analytics.read scope.
         GET /v1/workspaces/{ws}/attribution/settings
@@ -7036,6 +7263,25 @@ class Operations(_Mixin):
             "/v1/workspaces/{ws}/context",
             path={"ws": ws},
             query={"brand": brand},
+        )
+
+    def get_conversion_definition(
+        self,
+        key: str,
+        *,
+        ws: str | None = None,
+    ) -> Any:
+        """Get a conversion definition.
+
+        Scope: analytics.read.
+
+        Needs: the analytics.read scope.
+        GET /v1/workspaces/{ws}/conversion-definitions/{key}
+        """
+        return self._call(
+            "GET",
+            "/v1/workspaces/{ws}/conversion-definitions/{key}",
+            path={"key": key, "ws": ws},
         )
 
     def get_cookie_policy(
@@ -10332,6 +10578,31 @@ class Operations(_Mixin):
             query={"account_id": account_id},
         )
 
+    def list_ad_tracking_templates(
+        self,
+        *,
+        ws: str | None = None,
+        network: str | None = None,
+    ) -> Any:
+        """List tracking templates for each ad network.
+
+        Scope: analytics.read. For every ad network (the six paid media reads, then TikTok, Snapchat, Pinterest, Taboola,
+        Outbrain, Quora, Apple Search Ads and Amazon Ads), the tracking template to paste into the network's own field
+        (`field`), so every paid click lands with UTM tags and the network's own campaign, ad set and ad ids
+        (`of_campaign`, `of_adset`, `of_ad`, `of_placement`). site.js stores them on the visit, so a sale can be credited to
+        an ad by its id even when names change. Also lists the click ids each network adds by itself and the cookies of its
+        pixel that site.js reads with consent. `template` is empty for a network whose ads don't link to a website.
+
+        Needs: the analytics.read scope.
+        GET /v1/workspaces/{ws}/ads/tracking-templates
+        """
+        return self._call(
+            "GET",
+            "/v1/workspaces/{ws}/ads/tracking-templates",
+            path={"ws": ws},
+            query={"network": network},
+        )
+
     def list_agent_apps(
         self,
         *,
@@ -10713,7 +10984,7 @@ class Operations(_Mixin):
         record_id: str | None = None,
         from_: str | None = None,
         to: str | None = None,
-        model: Literal["last_non_direct", "first_touch", "linear", "position", "time_decay"] | None = None,
+        model: str | None = None,
         brand: str | None = None,
         limit: int | None = None,
         before: str | None = None,
@@ -10744,6 +11015,28 @@ class Operations(_Mixin):
                 "cursor": cursor,
                 "fields": fields,
             },
+        )
+
+    def list_attribution_models(
+        self,
+        *,
+        ws: str | None = None,
+        archived: bool | None = None,
+    ) -> Any:
+        """List attribution models.
+
+        Scope: analytics.read. The five built-in models, and the workspace's own models at their latest version
+        (archived ones too with archived=true). A workspace's model starts from a built-in one and changes its windows,
+        channels left out, position weights or time-decay half-life. Reports take its key as model.
+
+        Needs: the analytics.read scope.
+        GET /v1/workspaces/{ws}/attribution/models
+        """
+        return self._call(
+            "GET",
+            "/v1/workspaces/{ws}/attribution/models",
+            path={"ws": ws},
+            query={"archived": archived},
         )
 
     def list_audit_events(
@@ -11068,6 +11361,48 @@ class Operations(_Mixin):
             "/v1/workspaces/{ws}/connectors",
             path={"ws": ws},
             query={"category": category},
+        )
+
+    def list_conversion_definitions(
+        self,
+        *,
+        ws: str | None = None,
+        archived: bool | None = None,
+    ) -> Any:
+        """List conversion definitions.
+
+        Scope: analytics.read. What the workspace counts as a conversion, defined on the customer events stream and never
+        tied to one integration: a customer event (signed_up, payment.succeeded, meeting.held, call.completed), filters on
+        its properties, what it is worth, and each ad network's own name for it. Attribution credits channels with every
+        definition that has attribution on, besides the events in GET .../attribution/settings. Archived ones too with
+        archived=true.
+
+        Needs: the analytics.read scope.
+        GET /v1/workspaces/{ws}/conversion-definitions
+        """
+        return self._call(
+            "GET",
+            "/v1/workspaces/{ws}/conversion-definitions",
+            path={"ws": ws},
+            query={"archived": archived},
+        )
+
+    def list_conversion_presets(
+        self,
+        *,
+        ws: str | None = None,
+    ) -> Any:
+        """Starting points for conversion definitions.
+
+        Scope: analytics.read. Sets of definitions a kind of business usually starts from (SaaS, booked calls, e-commerce, lead generation). Adding one copies them; change anything afterwards.
+
+        Needs: the analytics.read scope.
+        GET /v1/workspaces/{ws}/conversion-definitions/presets
+        """
+        return self._call(
+            "GET",
+            "/v1/workspaces/{ws}/conversion-definitions/presets",
+            path={"ws": ws},
         )
 
     def list_cookie_policy_versions(
@@ -12354,6 +12689,25 @@ class Operations(_Mixin):
                 "after": after,
                 "limit": limit,
             },
+        )
+
+    def list_journey_step_kinds(
+        self,
+        *,
+        ws: str | None = None,
+    ) -> Any:
+        """The kinds of journey step.
+
+        Scope: emails.read. Every kind of step a journey can have, for a step picker: its group, label, what it needs
+        connected, its settings as JSON Schema, and which fields name the step after it.
+
+        Needs: the emails.read scope.
+        GET /v1/workspaces/{ws}/journeys/step-kinds
+        """
+        return self._call(
+            "GET",
+            "/v1/workspaces/{ws}/journeys/step-kinds",
+            path={"ws": ws},
         )
 
     def list_journey_versions(
@@ -13717,6 +14071,7 @@ class Operations(_Mixin):
         ws: str | None = None,
         type: str | None = None,
         q: str | None = None,
+        attribute: list[str] | None = None,
         origin: Literal["first_party", "prospect", "crm_sync", "import", "manual"] | None = None,
         archived: Literal["false", "true", "all"] | None = None,
         review: Literal["approved", "needs_review", "all"] | None = None,
@@ -13730,7 +14085,8 @@ class Operations(_Mixin):
         """List customer records.
 
         Scope: customers.read. People, companies and the workspace's own record types, newest first. Merged records
-        are left out. q matches the name or any active identity, such as part of an email.
+        are left out. q matches the name or any active identity, such as part of an email. attribute narrows by
+        the catalog's fields.
 
         Needs: the customers.read scope.
         GET /v1/workspaces/{ws}/records
@@ -13742,6 +14098,7 @@ class Operations(_Mixin):
             query={
                 "type": type,
                 "q": q,
+                "attribute": attribute,
                 "origin": origin,
                 "archived": archived,
                 "review": review,
@@ -16603,6 +16960,31 @@ class Operations(_Mixin):
             "DELETE",
             "/v1/workspaces/{ws}/site-keys/{id}/proxy-secret",
             path={"id": id, "ws": ws},
+            idempotency_key=idempotency_key,
+        )
+
+    def remove_static_list_members(
+        self,
+        id: str,
+        *,
+        ws: str | None = None,
+        record_ids: list[str],
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Take people out of a static list.
+
+        Scope: customers.manage. Rules acting on people leaving the list hear of it.
+
+        Needs: the customers.manage scope.
+        POST /v1/workspaces/{ws}/smart-lists/{id}/members/remove
+        """
+        return self._call(
+            "POST",
+            "/v1/workspaces/{ws}/smart-lists/{id}/members/remove",
+            path={"id": id, "ws": ws},
+            body={"record_ids": record_ids},
+            extra_body=extra_body,
             idempotency_key=idempotency_key,
         )
 
@@ -19853,19 +20235,46 @@ class Operations(_Mixin):
             idempotency_key=idempotency_key,
         )
 
+    def update_attribution_model(
+        self,
+        key: str,
+        *,
+        ws: str | None = None,
+        name: str | None = None,
+        spec: dict[str, Any] | None = None,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Change an attribution model.
+
+        Scope: analytics.manage. A new spec makes the next version and credits every conversion again; the old version
+        stays credited only while a module pins it. A new name alone keeps the version.
+
+        Needs: the analytics.manage scope.
+        PATCH /v1/workspaces/{ws}/attribution/models/{key}
+        """
+        return self._call(
+            "PATCH",
+            "/v1/workspaces/{ws}/attribution/models/{key}",
+            path={"key": key, "ws": ws},
+            body={"name": name, "spec": spec},
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
     def update_attribution_settings(
         self,
         *,
         ws: str | None = None,
         conversion_events: list[str] | None = None,
         lookback_days: int | None = None,
-        model: Literal["last_non_direct", "first_touch", "linear", "position", "time_decay"] | None = None,
+        model: str | None = None,
         extra_body: dict[str, Any] | None = None,
         idempotency_key: str | None = None,
     ) -> Any:
         """Change the default model, the lookback or which events count.
 
-        Scope: analytics.manage. Every model's credits are kept, so changing the model only changes what reports show by default. Changing the lookback or the events credits every conversion again in the background, within a few minutes.
+        Scope: analytics.manage. Every model's credits are kept, so changing the model only changes what reports show by default. model can be a built-in model or the key of one of the workspace's own models. Changing the lookback or the events credits every conversion again in the background, within a few minutes.
 
         Needs: the analytics.manage scope.
         PATCH /v1/workspaces/{ws}/attribution/settings
@@ -20192,6 +20601,51 @@ class Operations(_Mixin):
                 "version": version,
                 "voice": voice,
                 "website": website,
+            },
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
+    def update_conversion_definition(
+        self,
+        key: str,
+        *,
+        ws: str | None = None,
+        attribution: bool | None = None,
+        currency: str | None = None,
+        event: str | None = None,
+        filters: list[dict[str, Any]] | None = None,
+        fixed_value_minor: int | None = None,
+        name: str | None = None,
+        network_events: dict[str, Any] | None = None,
+        value_mode: Literal["none", "fixed", "property"] | None = None,
+        value_property: str | None = None,
+        value_unit: Literal["major", "minor"] | None = None,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Change a conversion definition.
+
+        Scope: analytics.manage. Fields left out keep their values; the key never changes. Switching value_mode clears the other mode's fields. Every conversion is credited again.
+
+        Needs: the analytics.manage scope.
+        PATCH /v1/workspaces/{ws}/conversion-definitions/{key}
+        """
+        return self._call(
+            "PATCH",
+            "/v1/workspaces/{ws}/conversion-definitions/{key}",
+            path={"key": key, "ws": ws},
+            body={
+                "attribution": attribution,
+                "currency": currency,
+                "event": event,
+                "filters": filters,
+                "fixed_value_minor": fixed_value_minor,
+                "name": name,
+                "network_events": network_events,
+                "value_mode": value_mode,
+                "value_property": value_property,
+                "value_unit": value_unit,
             },
             extra_body=extra_body,
             idempotency_key=idempotency_key,
@@ -20939,6 +21393,8 @@ class Operations(_Mixin):
         brand_id: str | None = None,
         description: str | None = None,
         entry: Literal["once", "again"] | None = None,
+        exit_conditions: list[dict[str, Any]] | None = None,
+        exit_events: list[str] | None = None,
         goal_event: str | None = None,
         name: str | None = None,
         steps: list[dict[str, Any]] | None = None,
@@ -20963,6 +21419,8 @@ class Operations(_Mixin):
                 "brand_id": brand_id,
                 "description": description,
                 "entry": entry,
+                "exit_conditions": exit_conditions,
+                "exit_events": exit_events,
                 "goal_event": goal_event,
                 "name": name,
                 "steps": steps,
@@ -20978,6 +21436,8 @@ class Operations(_Mixin):
         *,
         ws: str | None = None,
         entry: Literal["once", "again"] | None = None,
+        exit_conditions: list[dict[str, Any]] | None = None,
+        exit_events: list[str] | None = None,
         goal_event: str | None = None,
         steps: list[dict[str, Any]] | None = None,
         trigger: dict[str, Any] | None = None,
@@ -20996,7 +21456,14 @@ class Operations(_Mixin):
             "PATCH",
             "/v1/workspaces/{ws}/journeys/{id}/draft",
             path={"id": id, "ws": ws},
-            body={"entry": entry, "goal_event": goal_event, "steps": steps, "trigger": trigger},
+            body={
+                "entry": entry,
+                "exit_conditions": exit_conditions,
+                "exit_events": exit_events,
+                "goal_event": goal_event,
+                "steps": steps,
+                "trigger": trigger,
+            },
             extra_body=extra_body,
             idempotency_key=idempotency_key,
         )
@@ -22307,6 +22774,7 @@ class Operations(_Mixin):
         ws: str | None = None,
         brand_id: str | None = None,
         description: str | None = None,
+        kind: Literal["smart", "static"] | None = None,
         match: Literal["all", "any"] | None = None,
         name: str | None = None,
         rules: list[dict[str, Any]] | None = None,
@@ -22325,7 +22793,14 @@ class Operations(_Mixin):
             "PATCH",
             "/v1/workspaces/{ws}/smart-lists/{id}",
             path={"id": id, "ws": ws},
-            body={"brand_id": brand_id, "description": description, "match": match, "name": name, "rules": rules},
+            body={
+                "brand_id": brand_id,
+                "description": description,
+                "kind": kind,
+                "match": match,
+                "name": name,
+                "rules": rules,
+            },
             extra_body=extra_body,
             idempotency_key=idempotency_key,
         )

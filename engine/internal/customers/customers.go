@@ -276,7 +276,7 @@ const (
 func EventAdded(ctx context.Context, q Querier, workspaceID, eventID, name string) error {
 	var journey, rule bool
 	if err := q.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM journeys WHERE workspace_id = $1
-		AND ((status = 'active' AND trigger_event = $2) OR (status IN ('active', 'paused') AND goal_event = $2))),
+		AND ((status = 'active' AND trigger_event = $2) OR (status IN ('active', 'paused') AND (goal_event = $2 OR $2 = ANY (exit_events))))),
 		EXISTS (SELECT 1 FROM rules WHERE workspace_id = $1 AND status = 'active' AND $2 = ANY (watch_events))`,
 		workspaceID, name).Scan(&journey, &rule); err != nil {
 		return err

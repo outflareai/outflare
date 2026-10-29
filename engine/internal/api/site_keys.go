@@ -20,6 +20,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"golang.org/x/net/publicsuffix"
 
+	"github.com/outflareai/outflare/engine/internal/adtrack"
 	"github.com/outflareai/outflare/engine/internal/auth"
 	"github.com/outflareai/outflare/engine/internal/metrics"
 	"github.com/outflareai/outflare/engine/internal/visitors"
@@ -60,8 +61,9 @@ const (
 
 var (
 	siteKinds = []string{"page", "track"}
-	// The click ids ad platforms add to landing pages.
-	siteClickIDs = []string{"gclid", "gbraid", "wbraid", "fbclid", "msclkid", "li_fat_id", "rdt_cid", "twclid"}
+	// The click ids ad platforms add to landing pages, and the cookies of
+	// their pixels site.js reads with consent (adtrack).
+	siteClickIDs = append(adtrack.Params(), siteCookieKeys()...)
 	siteCampaign = []string{"source", "medium", "name", "term", "content", "id"}
 	sitePage     = []string{"url", "path", "search", "referrer", "title"}
 	originRe     = regexp.MustCompile(`^https?://(\*\.)?[a-z0-9.-]+(:[0-9]{1,5})?$`)
@@ -840,6 +842,15 @@ func siteMessage(raw json.RawMessage, ua string, excluded []string) (eventMessag
 	return m, token, nil
 }
 
+// siteCookieKeys are the keys site.js sends network cookies under.
+func siteCookieKeys() []string {
+	out := make([]string, len(adtrack.Cookies))
+	for i, c := range adtrack.Cookies {
+		out[i] = c.Key
+	}
+	return out
+}
+
 // siteMessageOf is siteMessage before the click token is taken out.
 func siteMessageOf(raw json.RawMessage, ua string, excluded []string) (eventMessage, error) {
 	var m eventMessage
@@ -876,6 +887,16 @@ func siteMessageOf(raw json.RawMessage, ua string, excluded []string) (eventMess
 		}
 	} else {
 		delete(props, "click_ids")
+	}
+	// The ad the tracking template named, with the network's own ids. Only
+	// page views carry it: a track event's ad is the site's own property.
+	if kind == "page" {
+		in, _ := props["ad"].(map[string]any)
+		if ad, _ := adtrack.CleanAd(in); len(ad) > 0 {
+			props["ad"] = ad
+		} else {
+			delete(props, "ad")
+		}
 	}
 	ctxIn, err := m.object(maxEventContext, "context")
 	if err != nil {

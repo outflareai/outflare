@@ -2559,7 +2559,37 @@ export interface paths {
          */
         get: operations["listSmartListMembers"];
         put?: never;
-        post?: never;
+        /**
+         * Put people in a static list
+         * @description Scope: customers.manage. Only a static list takes people; a smart list fills itself (409). People only: not
+         *     companies, merged or archived records, or, for a brand's list, another brand's people. Rules acting on people
+         *     joining the list hear of it.
+         */
+        post: operations["addStaticListMembers"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/workspaces/{ws}/smart-lists/{id}/members/remove": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Take people out of a static list
+         * @description Scope: customers.manage. Rules acting on people leaving the list hear of it.
+         */
+        post: operations["removeStaticListMembers"];
         delete?: never;
         options?: never;
         head?: never;
@@ -4167,7 +4197,7 @@ export interface paths {
         };
         /**
          * Get how conversions are credited to channels
-         * @description Scope: analytics.read. The default model reports use (last non-direct touch unless changed), how many days before a conversion a visit can get credit (90), and which customer events count as conversions.
+         * @description Scope: analytics.read. The default model reports use (last non-direct touch unless changed), how many days before a conversion a visit can get credit (30), and which customer events count as conversions.
          */
         get: operations["getAttributionSettings"];
         put?: never;
@@ -4177,9 +4207,185 @@ export interface paths {
         head?: never;
         /**
          * Change the default model, the lookback or which events count
-         * @description Scope: analytics.manage. Every model's credits are kept, so changing the model only changes what reports show by default. Changing the lookback or the events credits every conversion again in the background, within a few minutes.
+         * @description Scope: analytics.manage. Every model's credits are kept, so changing the model only changes what reports show by default. model can be a built-in model or the key of one of the workspace's own models. Changing the lookback or the events credits every conversion again in the background, within a few minutes.
          */
         patch: operations["updateAttributionSettings"];
+        trace?: never;
+    };
+    "/v1/workspaces/{ws}/attribution/models": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+            };
+            cookie?: never;
+        };
+        /**
+         * List attribution models
+         * @description Scope: analytics.read. The five built-in models, and the workspace's own models at their latest version
+         *     (archived ones too with archived=true). A workspace's model starts from a built-in one and changes its windows,
+         *     channels left out, position weights or time-decay half-life. Reports take its key as model.
+         */
+        get: operations["listAttributionModels"];
+        put?: never;
+        /**
+         * Make an attribution model
+         * @description Scope: analytics.manage. Makes version 1 of a model, from a built-in one with your own options, such as
+         *     `{"key": "paid-7-day", "name": "Paid ads 7 days", "spec": {"base": "last_non_direct", "channel_lookback_days": {"paid_ads": 7}}}`.
+         *     Every conversion is credited again in the background, so the model covers the past too.
+         */
+        post: operations["createAttributionModel"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/workspaces/{ws}/attribution/models/{key}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                key: string;
+            };
+            cookie?: never;
+        };
+        /**
+         * Every version of an attribution model
+         * @description Scope: analytics.read. Newest first, with the modules that pin each version.
+         */
+        get: operations["getAttributionModel"];
+        put?: never;
+        post?: never;
+        /**
+         * Archive an attribution model
+         * @description Scope: analytics.manage. Reports can no longer read it, except a version a module pins. The workspace's default model can't be archived.
+         */
+        delete: operations["archiveAttributionModel"];
+        options?: never;
+        head?: never;
+        /**
+         * Change an attribution model
+         * @description Scope: analytics.manage. A new spec makes the next version and credits every conversion again; the old version
+         *     stays credited only while a module pins it. A new name alone keeps the version.
+         */
+        patch: operations["updateAttributionModel"];
+        trace?: never;
+    };
+    "/v1/workspaces/{ws}/conversion-definitions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+            };
+            cookie?: never;
+        };
+        /**
+         * List conversion definitions
+         * @description Scope: analytics.read. What the workspace counts as a conversion, defined on the customer events stream and never
+         *     tied to one integration: a customer event (signed_up, payment.succeeded, meeting.held, call.completed), filters on
+         *     its properties, what it is worth, and each ad network's own name for it. Attribution credits channels with every
+         *     definition that has attribution on, besides the events in GET .../attribution/settings. Archived ones too with
+         *     archived=true.
+         */
+        get: operations["listConversionDefinitions"];
+        put?: never;
+        /**
+         * Define a conversion
+         * @description Scope: analytics.manage. Such as a call over a minute:
+         *     `{"key": "qualified_call", "name": "Qualified call", "event": "call.completed", "filters": [{"property": "duration_s", "op": "gt", "value": 60}], "value_mode": "fixed", "fixed_value_minor": 5000, "currency": "USD"}`.
+         *     Every conversion is credited again in the background.
+         */
+        post: operations["createConversionDefinition"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/workspaces/{ws}/conversion-definitions/presets": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+            };
+            cookie?: never;
+        };
+        /**
+         * Starting points for conversion definitions
+         * @description Scope: analytics.read. Sets of definitions a kind of business usually starts from (SaaS, booked calls, e-commerce, lead generation). Adding one copies them; change anything afterwards.
+         */
+        get: operations["listConversionPresets"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/workspaces/{ws}/conversion-definitions/presets/{preset}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                preset: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Add a preset's conversion definitions
+         * @description Scope: analytics.manage. Adds the preset's definitions whose keys the workspace doesn't use yet, so adding it twice changes nothing. Conversions are credited again when any is added.
+         */
+        post: operations["addConversionPreset"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/workspaces/{ws}/conversion-definitions/{key}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                key: string;
+            };
+            cookie?: never;
+        };
+        /**
+         * Get a conversion definition
+         * @description Scope: analytics.read.
+         */
+        get: operations["getConversionDefinition"];
+        put?: never;
+        post?: never;
+        /**
+         * Archive a conversion definition
+         * @description Scope: analytics.manage. It stops counting, and conversions are credited again without it.
+         */
+        delete: operations["archiveConversionDefinition"];
+        options?: never;
+        head?: never;
+        /**
+         * Change a conversion definition
+         * @description Scope: analytics.manage. Fields left out keep their values; the key never changes. Switching value_mode clears the other mode's fields. Every conversion is credited again.
+         */
+        patch: operations["updateConversionDefinition"];
         trace?: never;
     };
     "/v1/workspaces/{ws}/attribution/channels": {
@@ -4680,6 +4886,34 @@ export interface paths {
          *     credentials and never shown again. A sync starts straight away.
          */
         put: operations["setAdConnectionSetup"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/workspaces/{ws}/ads/tracking-templates": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+            };
+            cookie?: never;
+        };
+        /**
+         * List tracking templates for each ad network
+         * @description Scope: analytics.read. For every ad network (the six paid media reads, then TikTok, Snapchat, Pinterest, Taboola,
+         *     Outbrain, Quora, Apple Search Ads and Amazon Ads), the tracking template to paste into the network's own field
+         *     (`field`), so every paid click lands with UTM tags and the network's own campaign, ad set and ad ids
+         *     (`of_campaign`, `of_adset`, `of_ad`, `of_placement`). site.js stores them on the visit, so a sale can be credited to
+         *     an ad by its id even when names change. Also lists the click ids each network adds by itself and the cookies of its
+         *     pixel that site.js reads with consent. `template` is empty for a network whose ads don't link to a website.
+         */
+        get: operations["listAdTrackingTemplates"];
+        put?: never;
         post?: never;
         delete?: never;
         options?: never;
@@ -12362,7 +12596,8 @@ export interface paths {
         /**
          * List customer records
          * @description Scope: customers.read. People, companies and the workspace's own record types, newest first. Merged records
-         *     are left out. q matches the name or any active identity, such as part of an email.
+         *     are left out. q matches the name or any active identity, such as part of an email. attribute narrows by
+         *     the catalog's fields.
          */
         get: operations["listRecords"];
         put?: never;
@@ -12498,7 +12733,17 @@ export interface paths {
         get: operations["getRecord"];
         put?: never;
         post?: never;
-        delete?: never;
+        /**
+         * Erase a customer record
+         * @description Scope: customers.manage. Deletes a person or company for good, such as for an erasure request; to hide one
+         *     and keep its history, archive it instead (PATCH with archived: true). Goes with it: the records merged into
+         *     it, its identities, links, field history and consents and, for a person, everything about them: their
+         *     leads (also any lead with one of their emails), the cold email sent to them and their replies, meetings,
+         *     lifecycle email sent to them alone, product events, website visits and journey runs. Deals, payments and
+         *     opt-outs stay, unlinked; a company's people stay, unlinked from it. erased counts the rows removed, by
+         *     table. A deal is deleted with DELETE .../deals/{deal}.
+         */
+        delete: operations["deleteRecord"];
         options?: never;
         head?: never;
         /**
@@ -16189,6 +16434,30 @@ export interface paths {
          *     wait, branch on conditions, exit. Activate it to start.
          */
         post: operations["createJourney"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/workspaces/{ws}/journeys/step-kinds": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+            };
+            cookie?: never;
+        };
+        /**
+         * The kinds of journey step
+         * @description Scope: emails.read. Every kind of step a journey can have, for a step picker: its group, label, what it needs
+         *     connected, its settings as JSON Schema, and which fields name the step after it.
+         */
+        get: operations["listJourneyStepKinds"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -21769,17 +22038,140 @@ export interface components {
             sources: string[];
         };
         /**
+         * @description A built-in model (AttributionBuiltInModel), or the key of one of the workspace's own models (GET .../attribution/models),
+         *     which reads its latest version. key@version reads a pinned version, such as the one an affiliate program uses.
+         * @example last_non_direct
+         */
+        AttributionModel: string;
+        /**
          * @description last_non_direct: the last visit that wasn't direct gets it all. first_touch: the first visit. linear: shared evenly. position: 40% first, 40% last, 20% shared by the rest. time_decay: shared, halving for every week before the conversion. Direct visits get credit only when there is nothing else.
          * @enum {string}
          */
-        AttributionModel: "last_non_direct" | "first_touch" | "linear" | "position" | "time_decay";
+        AttributionBuiltInModel: "last_non_direct" | "first_touch" | "linear" | "position" | "time_decay";
+        /** @description How a model shares a conversion between the visits before it. The five built-in models are specs with only base set. */
+        AttributionSpec: {
+            base: components["schemas"]["AttributionBuiltInModel"];
+            /** @description How far back a visit can be; 0 or absent for the workspace's look-back. */
+            lookback_days?: number;
+            /** @description A window per channel, in days (1 to 365), such as {"paid_ads": 7}. Channels are the campaign channels (GET .../tracking-taxonomy) and direct. */
+            channel_lookback_days?: {
+                [key: string]: number;
+            };
+            /** @description Channels that never get credit. A conversion with no visit left goes to direct. */
+            exclude_channels?: string[];
+            /** @description position only: the first visit's share (0.4 by default). */
+            first_weight?: number;
+            /** @description position only: the last visit's share (0.4 by default). The middle visits share the rest. */
+            last_weight?: number;
+            /** @description time_decay only: a visit's weight halves for every this many days before the conversion (7 by default). */
+            half_life_days?: number;
+        };
+        AttributionCustomModel: {
+            /**
+             * Format: uuid
+             * @description This version's id.
+             */
+            id: string;
+            /** @example paid-7-day */
+            key: string;
+            version: number;
+            name: string;
+            spec: components["schemas"]["AttributionSpec"];
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            archived_at: string | null;
+            /** @description Modules that pin this version, as module:ref. A pinned version stays credited after the model changes. */
+            pinned_by: string[];
+        };
+        AttributionModelInput: {
+            /** @description Required when making one; not a built-in model's id. */
+            key?: string;
+            name?: string;
+            spec?: components["schemas"]["AttributionSpec"];
+        };
+        ConversionFilter: {
+            /**
+             * @description A property key, or a dotted path such as plan.tier.
+             * @example duration_s
+             */
+            property: string;
+            /** @enum {string} */
+            op: "eq" | "neq" | "gt" | "gte" | "lt" | "lte" | "in" | "contains" | "exists" | "not_exists";
+            /** @description A number for gt, gte, lt and lte; a list for in; none for exists and not_exists. eq, neq and in compare as numbers when both sides are, otherwise as text ignoring case. */
+            value?: unknown;
+        };
+        ConversionDefinitionFields: {
+            name?: string;
+            /**
+             * @description The customer event's catalog name.
+             * @example meeting.held
+             */
+            event?: string;
+            /** @description All must match; none means every such event. */
+            filters?: components["schemas"]["ConversionFilter"][];
+            /**
+             * @description What one conversion is worth: nothing, fixed_value_minor, or the value_property of the event.
+             * @enum {string}
+             */
+            value_mode?: "none" | "fixed" | "property";
+            /**
+             * Format: int64
+             * @description In minor units (cents).
+             */
+            fixed_value_minor?: number | null;
+            /** @description A property key or dotted path, such as revenue or amount_minor. */
+            value_property?: string;
+            /**
+             * @description major: 12.50; minor: 1250.
+             * @enum {string}
+             */
+            value_unit?: "major" | "minor";
+            /** @description Empty: the event's currency property. */
+            currency?: string;
+            /**
+             * @description Each ad network's own name for it, by network id.
+             * @example {
+             *       "meta": "Purchase",
+             *       "tiktok": "CompletePayment"
+             *     }
+             */
+            network_events?: {
+                [key: string]: string;
+            };
+            /** @description Whether attribution credits channels with it (default true). */
+            attribution?: boolean;
+        };
+        ConversionDefinitionInput: components["schemas"]["ConversionDefinitionFields"] & {
+            /** @description Required when making one; never changes. */
+            key?: string;
+        };
+        ConversionDefinition: components["schemas"]["ConversionDefinitionFields"] & {
+            id: string;
+            /** @example held_call */
+            key: string;
+            /** Format: date-time */
+            archived_at: string | null;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            updated_at: string;
+        };
+        ConversionPreset: {
+            /** @example booked_calls */
+            id: string;
+            name: string;
+            description: string;
+            definitions: components["schemas"]["ConversionDefinition"][];
+        };
         AttributionSettings: {
             model: components["schemas"]["AttributionModel"];
             /** @description How many days before a conversion a visit can get credit. */
             lookback_days: number;
             /** @description Customer events that count as conversions. With payment.succeeded, refunds are taken off its revenue. */
             conversion_events: string[];
-            models: components["schemas"]["AttributionModel"][];
+            /** @description The built-in models. The workspace's own are at GET .../attribution/models. */
+            models: components["schemas"]["AttributionBuiltInModel"][];
             /**
              * Format: date-time
              * @description When every past conversion was last credited; null while that is running.
@@ -21812,6 +22204,8 @@ export interface components {
         };
         AttributionChannels: {
             model: components["schemas"]["AttributionModel"];
+            /** @description The version of the workspace's model the report read; null for a built-in model. */
+            model_version?: number | null;
             /** Format: date */
             from: string;
             /** Format: date */
@@ -22798,6 +23192,26 @@ export interface components {
             /** @description What was replayed and how to read the numbers. */
             note: string;
         };
+        JourneyStepKind: {
+            kind: string;
+            /** @enum {string} */
+            group: "messaging" | "data" | "cross_campaign" | "notify" | "integrations" | "ai" | "flow";
+            label: string;
+            description: string;
+            /** @description Connections the workspace needs for the step to work. */
+            requires: {
+                connection: string;
+                label: string;
+            }[];
+            /** @description The step's settings, as JSON Schema. */
+            settings_schema: {
+                [key: string]: unknown;
+            };
+            /** @description The step fields that name the step after it (next; then and else; paths[].next for a list). */
+            outputs: string[];
+            /** @description The field naming the step to go to when it fails (on_error), for steps that can fail. */
+            error_output?: string;
+        };
         /** @enum {string} */
         JourneyStatus: "draft" | "active" | "paused" | "archived";
         /** @enum {string} */
@@ -22820,10 +23234,15 @@ export interface components {
             /** @description What eq, neq, gt, lt and contains compare with. */
             value?: unknown;
         };
+        /**
+         * @description One step. The settings each kind takes, and the fields that name the step after it, are in
+         *     GET .../journeys/step-kinds. Action steps (everything but email, wait, branch and exit) report done, skipped (with
+         *     why) or failed, and a failed one does what on_error says.
+         */
         JourneyStep: {
             id: string;
             /** @enum {string} */
-            kind: "email" | "wait" | "branch" | "exit";
+            kind: "email" | "wait" | "branch" | "exit" | "set_field" | "add_tag" | "remove_tag" | "add_to_list" | "remove_from_list" | "enter_journey" | "exit_journey" | "enroll_in_sequence" | "stop_sequences" | "suppress" | "unsubscribe_topic" | "alert";
             name?: string;
             /** @description email: a lifecycle template's handle or id. */
             template?: string;
@@ -22840,8 +23259,61 @@ export interface components {
             then?: string;
             /** @description branch: the step when they don't; empty ends the run. */
             else?: string;
-            /** @description email and wait: the step after; empty ends the run as completed. */
+            /** @description The step after; empty ends the run as completed. */
             next?: string;
+            /** @description set_field: the field's key. */
+            field?: string;
+            /**
+             * @description set_field: set (the default), clear or increment.
+             * @enum {string}
+             */
+            change?: "set" | "clear" | "increment";
+            /** @description set_field: the value, or {{event.x}} / {{person.x}} to copy one. */
+            value?: unknown;
+            /** @description set_field: overwrite a value a person set by hand. Off by default: the step is then skipped. */
+            overwrite_manual?: boolean;
+            /** @description add_tag, remove_tag: the tag. */
+            tag?: string;
+            /**
+             * Format: uuid
+             * @description add_to_list, remove_from_list: a static list.
+             */
+            list_id?: string;
+            /**
+             * Format: uuid
+             * @description enter_journey, exit_journey: the other journey.
+             */
+            journey_id?: string;
+            /**
+             * Format: uuid
+             * @description enroll_in_sequence, stop_sequences (scope sequence): the sequence.
+             */
+            sequence_id?: string;
+            /**
+             * @description exit_journey: journey or others. stop_sequences: sequence, all (the default) or company.
+             * @enum {string}
+             */
+            scope?: "journey" | "others" | "sequence" | "all" | "company";
+            /** @description enroll_in_sequence: enroll even when active in another sequence. */
+            allow_elsewhere?: boolean;
+            /**
+             * @description suppress: their email addresses (the default) or their work domain.
+             * @enum {string}
+             */
+            target?: "email" | "domain";
+            /** @description unsubscribe_topic: an email topic's key; empty for all marketing email. */
+            topic?: string;
+            /** @description alert: what it says. */
+            title?: string;
+            /** @description alert: a line of detail. */
+            text?: string;
+            /**
+             * @description alert: the record's owner (the default) or the owners and admins.
+             * @enum {string}
+             */
+            to?: "owner" | "admins";
+            /** @description Action steps: stop (the default: the run fails), continue, or a step id to go to. */
+            on_error?: string;
         };
         JourneyTrigger: {
             /** @enum {string} */
@@ -22867,6 +23339,10 @@ export interface components {
             entry?: "once" | "again";
             /** @description Doing this event ends their run: they reached the goal. */
             goal_event?: string | null;
+            /** @description Doing any of these events ends their run at once, even mid-wait. */
+            exit_events?: string[];
+            /** @description Attribute conditions: when any holds, the run ends before its next step, and nobody who already meets one starts. */
+            exit_conditions?: components["schemas"]["JourneyCondition"][];
             /** @description The first step starts. */
             steps?: components["schemas"]["JourneyStep"][];
         };
@@ -22887,6 +23363,8 @@ export interface components {
             /** @enum {string} */
             entry: "once" | "again";
             goal_event: string | null;
+            exit_events: string[];
+            exit_conditions: components["schemas"]["JourneyCondition"][];
             steps: components["schemas"]["JourneyStep"][];
             /** @description Goes up each time what it does (trigger */
             version: number;
@@ -22904,7 +23382,7 @@ export interface components {
                 exited: number;
                 failed: number;
             };
-            /** @description Only on a single journey: by step id, how many runs had each outcome (sent, skipped, waited, yes, no, failed). */
+            /** @description Only on a single journey: by step id, how many runs had each outcome (sent, skipped, waited, yes, no, done, failed). */
             step_stats?: {
                 [key: string]: {
                     [key: string]: number;
@@ -22932,6 +23410,10 @@ export interface components {
             /** @enum {string} */
             entry?: "once" | "again";
             goal_event?: string | null;
+            /** @description Doing any of these events ends their run at once, even mid-wait. */
+            exit_events?: string[];
+            /** @description Attribute conditions: when any holds, the run ends before its next step. */
+            exit_conditions?: components["schemas"]["JourneyCondition"][];
             /** @description The first step starts. */
             steps?: components["schemas"]["JourneyStep"][];
         };
@@ -22954,6 +23436,8 @@ export interface components {
             /** @enum {string} */
             entry: "once" | "again";
             goal_event: string | null;
+            exit_events: string[];
+            exit_conditions: components["schemas"]["JourneyCondition"][];
             steps: components["schemas"]["JourneyStep"][];
             /** @description People going through this version now. */
             runs_active: number;
@@ -24611,6 +25095,54 @@ export interface components {
             /** Format: date-time */
             last_ok_at: string | null;
             last_error: string | null;
+        };
+        AdTrackingTemplate: {
+            /**
+             * @description The network's id, also its utm_source.
+             * @example tiktok
+             */
+            network: string;
+            /** @example TikTok Ads */
+            label: string;
+            /**
+             * @description The paid media connector that reads its accounts, null until there is one.
+             * @example google_ads
+             */
+            connector: string | null;
+            /** @description Where the template goes, in the network's own words. Null when its ads don't link to a website. */
+            field: string | null;
+            /**
+             * @description The query string to paste, with the network's macros left for it to fill in. Empty when `field` is null.
+             * @example utm_source=tiktok&utm_medium=cpc&utm_campaign=__CAMPAIGN_NAME__&of_campaign=__CAMPAIGN_ID__
+             */
+            template: string;
+            /** @description The network's placeholders the template uses, by what they fill in. */
+            macros: {
+                campaign_id?: string;
+                campaign_name?: string;
+                adset_id?: string;
+                ad_id?: string;
+                ad_name?: string;
+                placement?: string;
+                keyword?: string;
+                click_id?: string;
+            };
+            /**
+             * @description The click id parameters the network adds to landing pages.
+             * @example [
+             *       "ttclid"
+             *     ]
+             */
+            click_ids: string[];
+            /**
+             * @description Cookies of the network's pixel site.js reads with consent and sends with the click ids.
+             * @example [
+             *       "_fbp",
+             *       "_fbc"
+             *     ]
+             */
+            cookies: string[];
+            note: string | null;
         };
         AdAccount: {
             /** Format: uuid */
@@ -29781,7 +30313,21 @@ export interface components {
             /** @description What eq, neq, gt, lt and contains compare with: text, a number or true or false. */
             value?: unknown;
         };
+        StaticListMembersInput: {
+            record_ids: string[];
+        };
+        StaticListChange: {
+            /** @description How many joined or left. */
+            changed: number;
+            /** @description How many are in the list now. */
+            members: number;
+        };
         SmartListInput: {
+            /**
+             * @description smart (the default): fills itself from its rules. static: holds the people put in it (POST .../members). Set when the list is made.
+             * @enum {string}
+             */
+            kind?: "smart" | "static";
             name?: string;
             description?: string;
             /** @description A brand's id or handle, or null for people of every brand. */
@@ -29798,6 +30344,11 @@ export interface components {
             id: string;
             name: string;
             description: string;
+            /**
+             * @description smart: fills itself from its rules. static: holds the people put in it; it has no rules and is never refreshed.
+             * @enum {string}
+             */
+            kind: "smart" | "static";
             /**
              * Format: uuid
              * @description Null: people of every brand.
@@ -38361,6 +38912,90 @@ export interface operations {
             default: components["responses"]["Error"];
         };
     };
+    addStaticListMembers: {
+        parameters: {
+            query?: never;
+            header?: {
+                /**
+                 * @description Makes the write safe to retry. A repeat with the same key from the same caller within 24 hours gets the first
+                 *     answer back (with `Idempotent-Replayed: true`) instead of running again. The same key for a different request
+                 *     is refused with 422 `idempotency_key_reused`; while the first is still running, 409 `idempotency_in_progress`.
+                 *     Use a new random key, such as a UUID, for each distinct write.
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["StaticListMembersInput"];
+            };
+        };
+        responses: {
+            /** @description How many joined, and the count now. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StaticListChange"];
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            400: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    removeStaticListMembers: {
+        parameters: {
+            query?: never;
+            header?: {
+                /**
+                 * @description Makes the write safe to retry. A repeat with the same key from the same caller within 24 hours gets the first
+                 *     answer back (with `Idempotent-Replayed: true`) instead of running again. The same key for a different request
+                 *     is refused with 422 `idempotency_key_reused`; while the first is still running, 409 `idempotency_in_progress`.
+                 *     Use a new random key, such as a UUID, for each distinct write.
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["StaticListMembersInput"];
+            };
+        };
+        responses: {
+            /** @description How many left, and the count now. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StaticListChange"];
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            400: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
     refreshSmartList: {
         parameters: {
             query?: never;
@@ -41371,6 +42006,395 @@ export interface operations {
             default: components["responses"]["Error"];
         };
     };
+    listAttributionModels: {
+        parameters: {
+            query?: {
+                archived?: boolean;
+            };
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The models. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        built_in: {
+                            id: components["schemas"]["AttributionBuiltInModel"];
+                            spec: components["schemas"]["AttributionSpec"];
+                        }[];
+                        data: components["schemas"]["AttributionCustomModel"][];
+                    };
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    createAttributionModel: {
+        parameters: {
+            query?: never;
+            header?: {
+                /**
+                 * @description Makes the write safe to retry. A repeat with the same key from the same caller within 24 hours gets the first
+                 *     answer back (with `Idempotent-Replayed: true`) instead of running again. The same key for a different request
+                 *     is refused with 422 `idempotency_key_reused`; while the first is still running, 409 `idempotency_in_progress`.
+                 *     Use a new random key, such as a UUID, for each distinct write.
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AttributionModelInput"];
+            };
+        };
+        responses: {
+            /** @description The model's first version. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AttributionCustomModel"];
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            400: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    getAttributionModel: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                key: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The versions. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["AttributionCustomModel"][];
+                    };
+                };
+            };
+            404: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    archiveAttributionModel: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                key: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            202: components["responses"]["MissionHeld"];
+            /** @description Archived. */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    updateAttributionModel: {
+        parameters: {
+            query?: never;
+            header?: {
+                /**
+                 * @description Makes the write safe to retry. A repeat with the same key from the same caller within 24 hours gets the first
+                 *     answer back (with `Idempotent-Replayed: true`) instead of running again. The same key for a different request
+                 *     is refused with 422 `idempotency_key_reused`; while the first is still running, 409 `idempotency_in_progress`.
+                 *     Use a new random key, such as a UUID, for each distinct write.
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                key: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AttributionModelInput"];
+            };
+        };
+        responses: {
+            /** @description The model's latest version. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AttributionCustomModel"];
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            400: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    listConversionDefinitions: {
+        parameters: {
+            query?: {
+                archived?: boolean;
+            };
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The definitions, by key. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["ConversionDefinition"][];
+                    };
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    createConversionDefinition: {
+        parameters: {
+            query?: never;
+            header?: {
+                /**
+                 * @description Makes the write safe to retry. A repeat with the same key from the same caller within 24 hours gets the first
+                 *     answer back (with `Idempotent-Replayed: true`) instead of running again. The same key for a different request
+                 *     is refused with 422 `idempotency_key_reused`; while the first is still running, 409 `idempotency_in_progress`.
+                 *     Use a new random key, such as a UUID, for each distinct write.
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ConversionDefinitionInput"];
+            };
+        };
+        responses: {
+            /** @description The definition. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConversionDefinition"];
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            400: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    listConversionPresets: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The presets. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["ConversionPreset"][];
+                    };
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    addConversionPreset: {
+        parameters: {
+            query?: never;
+            header?: {
+                /**
+                 * @description Makes the write safe to retry. A repeat with the same key from the same caller within 24 hours gets the first
+                 *     answer back (with `Idempotent-Replayed: true`) instead of running again. The same key for a different request
+                 *     is refused with 422 `idempotency_key_reused`; while the first is still running, 409 `idempotency_in_progress`.
+                 *     Use a new random key, such as a UUID, for each distinct write.
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                preset: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description What was added, and the keys already there. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        added: components["schemas"]["ConversionDefinition"][];
+                        skipped: string[];
+                    };
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            404: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    getConversionDefinition: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                key: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The definition. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConversionDefinition"];
+                };
+            };
+            404: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    archiveConversionDefinition: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                key: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            202: components["responses"]["MissionHeld"];
+            /** @description Archived. */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            404: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    updateConversionDefinition: {
+        parameters: {
+            query?: never;
+            header?: {
+                /**
+                 * @description Makes the write safe to retry. A repeat with the same key from the same caller within 24 hours gets the first
+                 *     answer back (with `Idempotent-Replayed: true`) instead of running again. The same key for a different request
+                 *     is refused with 422 `idempotency_key_reused`; while the first is still running, 409 `idempotency_in_progress`.
+                 *     Use a new random key, such as a UUID, for each distinct write.
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                key: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ConversionDefinitionInput"];
+            };
+        };
+        responses: {
+            /** @description The definition. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConversionDefinition"];
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            400: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
     getAttributionChannels: {
         parameters: {
             query?: {
@@ -41437,6 +42461,7 @@ export interface operations {
                 content: {
                     "application/json": {
                         model: string;
+                        model_version?: number | null;
                         /** Format: date */
                         from: string;
                         /** Format: date */
@@ -41496,6 +42521,7 @@ export interface operations {
                 content: {
                     "application/json": {
                         model: string;
+                        model_version?: number | null;
                         data: components["schemas"]["AttributionConversion"][];
                         /** Format: date-time */
                         next_before: string | null;
@@ -42197,6 +43223,35 @@ export interface operations {
             400: components["responses"]["Error"];
             404: components["responses"]["Error"];
             422: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    listAdTrackingTemplates: {
+        parameters: {
+            query?: {
+                /** @description Only this network, by id. */
+                network?: string;
+            };
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The networks, in display order. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["AdTrackingTemplate"][];
+                    };
+                };
+            };
             default: components["responses"]["Error"];
         };
     };
@@ -56007,6 +57062,12 @@ export interface operations {
                 /** @description A record type's key: person, account or the workspace's own. */
                 type?: string;
                 q?: string;
+                /**
+                 * @description A field's key and a value, such as lifecycle_stage:customer; repeat it for more (at most 20). Values of one
+                 *     field are alternatives, different fields must all match. A list field, such as a person's companies (by
+                 *     record id), matches when it holds the value.
+                 */
+                attribute?: string[];
                 origin?: components["schemas"]["RecordOrigin"];
                 /** @description Default false. */
                 archived?: "false" | "true" | "all";
@@ -56261,6 +57322,55 @@ export interface operations {
                     "application/json": components["schemas"]["Record"];
                 };
             };
+            default: components["responses"]["Error"];
+        };
+    };
+    deleteRecord: {
+        parameters: {
+            query?: {
+                /** @description true adds a person's emails (a company's domains) to the opt-out list first (reason do_not_contact), so a later import or sync can't contact them again. */
+                suppress?: boolean;
+                /** @description The record's version, as read: the delete is refused with record_changed if it changed since. Agents must send it (version_required). */
+                version?: number;
+            };
+            header?: {
+                /**
+                 * @description Makes the write safe to retry. A repeat with the same key from the same caller within 24 hours gets the first
+                 *     answer back (with `Idempotent-Replayed: true`) instead of running again. The same key for a different request
+                 *     is refused with 422 `idempotency_key_reused`; while the first is still running, 409 `idempotency_in_progress`.
+                 *     Use a new random key, such as a UUID, for each distinct write.
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                record: components["parameters"]["RecordID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description What was erased. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** Format: uuid */
+                        id: string;
+                        type: string;
+                        /** @description Rows removed, by table, such as records, leads and messages. */
+                        erased: {
+                            [key: string]: number;
+                        };
+                        /** @description Opt-out entries added. */
+                        suppressed: number;
+                    };
+                };
+            };
+            202: components["responses"]["MissionHeld"];
             default: components["responses"]["Error"];
         };
     };
@@ -62659,6 +63769,32 @@ export interface operations {
             };
             202: components["responses"]["MissionHeld"];
             400: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    listJourneyStepKinds: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Step kinds. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["JourneyStepKind"][];
+                    };
+                };
+            };
             default: components["responses"]["Error"];
         };
     };

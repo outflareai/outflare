@@ -1,6 +1,7 @@
 package api_test
 
 import (
+	"slices"
 	"strings"
 	"testing"
 
@@ -318,5 +319,41 @@ func TestRecordsBrandLimited(t *testing.T) {
 	e := agent.must(409, "POST", base+"/records/"+mine["id"].(string)+"/identities", map[string]any{"namespace": "user_id", "value": "np_1"})
 	if strings.Contains(e["error"].(map[string]any)["message"].(string), theirs) {
 		t.Fatalf("leaked owner: %v", e)
+	}
+}
+
+func TestRecordsAttributeFilter(t *testing.T) {
+	h := freshServer(t)
+	owner, ws := setupOwner(t, h)
+	base := "/v1/workspaces/" + ws + "/records"
+	acme := owner.must(201, "POST", base, map[string]any{"type": "account", "name": "Acme", "attributes": map[string]any{"industry": "software"}})["id"].(string)
+	owner.must(201, "POST", base, map[string]any{"type": "account", "name": "Northpeak", "attributes": map[string]any{"industry": "fintech"}})
+	owner.must(201, "POST", base, map[string]any{"type": "person", "name": "Ana Diaz",
+		"attributes": map[string]any{"lifecycle_stage": "customer", "seniority": "c_suite", "companies": []string{acme}}})
+	owner.must(201, "POST", base, map[string]any{"type": "person", "name": "Ben Ito", "attributes": map[string]any{"lifecycle_stage": "trial", "seniority": "c_suite"}})
+	owner.must(201, "POST", base, map[string]any{"type": "person", "name": "Cy Park", "attributes": map[string]any{"lifecycle_stage": "lead"}})
+
+	names := func(query string) string {
+		var out []string
+		for _, r := range owner.must(200, "GET", base+"?"+query, nil)["data"].([]any) {
+			out = append(out, r.(map[string]any)["name"].(string))
+		}
+		slices.Sort(out)
+		return strings.Join(out, ",")
+	}
+	for query, want := range map[string]string{
+		"type=account&attribute=industry:fintech":                                                                    "Northpeak",
+		"type=person&attribute=lifecycle_stage:customer&attribute=lifecycle_stage:trial":                             "Ana Diaz,Ben Ito",
+		"type=person&attribute=lifecycle_stage:customer&attribute=lifecycle_stage:trial&attribute=seniority:c_suite": "Ana Diaz,Ben Ito",
+		"type=person&attribute=seniority:c_suite&attribute=lifecycle_stage:lead":                                     "",
+		"type=person&attribute=companies:" + acme:                                                                    "Ana Diaz",
+		"type=person&attribute=companies:" + acme + "&q=ana":                                                         "Ana Diaz",
+	} {
+		if got := names(query); got != want {
+			t.Errorf("%s: got %q, want %q", query, got, want)
+		}
+	}
+	for _, bad := range []string{"attribute=industry", "attribute=Bad-Key:x", "attribute=industry:"} {
+		owner.must(400, "GET", base+"?"+bad, nil)
 	}
 }

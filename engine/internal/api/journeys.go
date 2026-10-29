@@ -23,6 +23,7 @@ import (
 func (s *Server) routesJourneys(mux *http.ServeMux) {
 	read, send, manage := auth.ScopeEmailsRead, auth.ScopeEmailsSend, auth.ScopeEmailsManage
 	mux.HandleFunc("GET /v1/workspaces/{ws}/journeys", s.inWorkspace(read, s.listJourneys))
+	mux.HandleFunc("GET /v1/workspaces/{ws}/journeys/step-kinds", s.inWorkspace(read, s.listJourneyStepKinds))
 	mux.HandleFunc("POST /v1/workspaces/{ws}/journeys", s.inWorkspace(manage, s.createJourney))
 	mux.HandleFunc("GET /v1/workspaces/{ws}/journeys/{id}", s.inWorkspace(read, s.getJourney))
 	mux.HandleFunc("PATCH /v1/workspaces/{ws}/journeys/{id}", s.inWorkspace(manage, s.updateJourney))
@@ -56,18 +57,23 @@ type journeyStats struct {
 }
 
 type journeyView struct {
-	ID          string          `json:"id"`
-	Name        string          `json:"name"`
-	Description string          `json:"description"`
-	Status      string          `json:"status"`
-	BrandID     *string         `json:"brand_id"`
-	Trigger     journeyTrigger  `json:"trigger"`
-	Entry       string          `json:"entry"`
-	GoalEvent   *string         `json:"goal_event"`
-	Steps       []journeys.Step `json:"steps"`
-	Version     int             `json:"version"`
-	ActivatedAt *time.Time      `json:"activated_at"`
-	Stats       journeyStats    `json:"stats"`
+	ID          string         `json:"id"`
+	Name        string         `json:"name"`
+	Description string         `json:"description"`
+	Status      string         `json:"status"`
+	BrandID     *string        `json:"brand_id"`
+	Trigger     journeyTrigger `json:"trigger"`
+	Entry       string         `json:"entry"`
+	GoalEvent   *string        `json:"goal_event"`
+	// Exit criteria: these events end a run at once; these conditions (any
+	// of them) end it before its next step, and keep people who already
+	// meet them from starting.
+	ExitEvents     []string             `json:"exit_events"`
+	ExitConditions []journeys.Condition `json:"exit_conditions"`
+	Steps          []journeys.Step      `json:"steps"`
+	Version        int                  `json:"version"`
+	ActivatedAt    *time.Time           `json:"activated_at"`
+	Stats          journeyStats         `json:"stats"`
 	// When its draft version last changed, or nil when it has none.
 	DraftUpdatedAt *time.Time `json:"draft_updated_at"`
 	// What each step did, by step id and outcome (sent, skipped, yes,
@@ -84,7 +90,7 @@ type journeyView struct {
 
 const journeySelect = `
 	SELECT j.id, j.name, j.description, j.status, j.brand_id, j.trigger_kind, j.trigger_event, j.trigger_filter, j.entry, j.goal_event,
-	       j.steps, j.version, j.activated_at,
+	       j.exit_events, j.exit_conditions, j.steps, j.version, j.activated_at,
 	       COALESCE(st.entered, 0), COALESCE(st.active, 0), COALESCE(st.completed, 0), COALESCE(st.exited, 0), COALESCE(st.failed, 0),
 	       j.created_at, j.updated_at,
 	       (SELECT d.updated_at FROM journey_versions d WHERE d.journey_id = j.id AND d.status = 'draft')
@@ -100,14 +106,15 @@ const journeySelect = `
 
 func scanJourney(row pgx.Row) (journeyView, error) {
 	var v journeyView
-	var filter, steps []byte
+	var filter, steps, exitConds []byte
 	err := row.Scan(&v.ID, &v.Name, &v.Description, &v.Status, &v.BrandID, &v.Trigger.Kind, &v.Trigger.Event, &filter, &v.Entry, &v.GoalEvent,
-		&steps, &v.Version, &v.ActivatedAt, &v.Stats.Entered, &v.Stats.Active, &v.Stats.Completed, &v.Stats.Exited, &v.Stats.Failed,
+		&v.ExitEvents, &exitConds, &steps, &v.Version, &v.ActivatedAt, &v.Stats.Entered, &v.Stats.Active, &v.Stats.Completed, &v.Stats.Exited, &v.Stats.Failed,
 		&v.CreatedAt, &v.UpdatedAt, &v.DraftUpdatedAt)
 	if err != nil {
 		return v, err
 	}
-	v.Trigger.Filter, v.Steps = []journeys.Condition{}, []journeys.Step{}
+	v.Trigger.Filter, v.Steps, v.ExitConditions = []journeys.Condition{}, []journeys.Step{}, []journeys.Condition{}
+	_ = json.Unmarshal(exitConds, &v.ExitConditions)
 	_ = json.Unmarshal(filter, &v.Trigger.Filter)
 	_ = json.Unmarshal(steps, &v.Steps)
 	return v, nil
@@ -240,19 +247,21 @@ func (s *Server) getJourney(w http.ResponseWriter, r *http.Request) {
 }
 
 type journeyFields struct {
-	Name        *string          `json:"name"`
-	Description *string          `json:"description"`
-	BrandID     optional[string] `json:"brand_id"`
-	Trigger     *journeyTrigger  `json:"trigger"`
-	Entry       *string          `json:"entry"`
-	GoalEvent   optional[string] `json:"goal_event"`
-	Steps       *[]journeys.Step `json:"steps"`
+	Name           *string               `json:"name"`
+	Description    *string               `json:"description"`
+	BrandID        optional[string]      `json:"brand_id"`
+	Trigger        *journeyTrigger       `json:"trigger"`
+	Entry          *string               `json:"entry"`
+	GoalEvent      optional[string]      `json:"goal_event"`
+	ExitEvents     *[]string             `json:"exit_events"`
+	ExitConditions *[]journeys.Condition `json:"exit_conditions"`
+	Steps          *[]journeys.Step      `json:"steps"`
 }
 
 // onlyLabels reports whether f changes nothing but the name and
 // description, which can change while a journey runs.
 func (f journeyFields) onlyLabels() bool {
-	return !f.BrandID.Set && f.Trigger == nil && f.Entry == nil && !f.GoalEvent.Set && f.Steps == nil
+	return !f.BrandID.Set && f.Trigger == nil && f.Entry == nil && !f.GoalEvent.Set && f.Steps == nil && f.ExitEvents == nil && f.ExitConditions == nil
 }
 
 // applyJourney checks f and applies it to v.
@@ -309,6 +318,23 @@ func (s *Server) applyJourney(r *http.Request, ws string, f journeyFields, v *jo
 		}
 		v.GoalEvent = f.GoalEvent.Value
 	}
+	if f.ExitEvents != nil {
+		if len(*f.ExitEvents) > 10 {
+			return errInvalid("a journey has at most 10 exit events")
+		}
+		for _, e := range *f.ExitEvents {
+			if !journeys.ValidEventName(e) {
+				return errInvalid("exit_events are event names such as order_completed")
+			}
+		}
+		v.ExitEvents = *f.ExitEvents
+	}
+	if f.ExitConditions != nil {
+		if msg := journeys.CheckFilter(*f.ExitConditions); msg != "" {
+			return errInvalid("exit_conditions: " + msg)
+		}
+		v.ExitConditions = *f.ExitConditions
+	}
 	if f.Steps != nil {
 		if msg := journeys.Check(*f.Steps); msg != "" {
 			return errInvalid(msg)
@@ -355,7 +381,8 @@ func (s *Server) createJourney(w http.ResponseWriter, r *http.Request) {
 		writeError(w, r, http.StatusBadRequest, "invalid_request", "name is required")
 		return
 	}
-	v := journeyView{Trigger: journeyTrigger{Kind: "manual", Filter: []journeys.Condition{}}, Entry: "once", Steps: []journeys.Step{}}
+	v := journeyView{Trigger: journeyTrigger{Kind: "manual", Filter: []journeys.Condition{}}, Entry: "once", Steps: []journeys.Step{},
+		ExitEvents: []string{}, ExitConditions: []journeys.Condition{}}
 	if !s.journeyApplied(w, r, s.applyJourney(r, a.WorkspaceID, f, &v)) {
 		return
 	}
@@ -368,9 +395,11 @@ func (s *Server) createJourney(w http.ResponseWriter, r *http.Request) {
 		if a.ActorID != "" {
 			createdBy = &a.ActorID
 		}
+		exitConds, _ := json.Marshal(v.ExitConditions)
 		if err := tx.QueryRow(ctx, `INSERT INTO journeys (workspace_id, brand_id, name, description, trigger_kind, trigger_event, trigger_filter,
-			entry, goal_event, steps, created_by) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11) RETURNING id`,
-			a.WorkspaceID, v.BrandID, v.Name, v.Description, v.Trigger.Kind, v.Trigger.Event, filter, v.Entry, v.GoalEvent, steps, createdBy).Scan(&id); err != nil {
+			entry, goal_event, steps, created_by, exit_events, exit_conditions) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13) RETURNING id`,
+			a.WorkspaceID, v.BrandID, v.Name, v.Description, v.Trigger.Kind, v.Trigger.Event, filter, v.Entry, v.GoalEvent, steps, createdBy,
+			v.ExitEvents, exitConds).Scan(&id); err != nil {
 			return err
 		}
 		return record(ctx, tx, &a.principal, a.WorkspaceID, "journey.created", "journey", id,
@@ -435,10 +464,11 @@ func (s *Server) updateJourney(w http.ResponseWriter, r *http.Request) {
 		if !f.onlyLabels() {
 			bump = 1
 		}
+		exitConds, _ := json.Marshal(v.ExitConditions)
 		if _, err := tx.Exec(ctx, `UPDATE journeys SET brand_id = $3, name = $4, description = $5, trigger_kind = $6, trigger_event = $7,
-			trigger_filter = $8, entry = $9, goal_event = $10, steps = $11, version = version + $12, updated_at = now()
-			WHERE workspace_id = $1 AND id = $2`, a.WorkspaceID, cur.ID, v.BrandID, v.Name, v.Description, v.Trigger.Kind, v.Trigger.Event,
-			filter, v.Entry, v.GoalEvent, steps, bump); err != nil {
+			trigger_filter = $8, entry = $9, goal_event = $10, steps = $11, version = version + $12, exit_events = $13, exit_conditions = $14,
+			updated_at = now() WHERE workspace_id = $1 AND id = $2`, a.WorkspaceID, cur.ID, v.BrandID, v.Name, v.Description, v.Trigger.Kind, v.Trigger.Event,
+			filter, v.Entry, v.GoalEvent, steps, bump, v.ExitEvents, exitConds); err != nil {
 			return err
 		}
 		if bump == 1 && cur.Status == "paused" {
@@ -476,6 +506,9 @@ func (s *Server) activateJourney(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !s.journeyApplied(w, r, s.checkJourneyTemplates(r, a.WorkspaceID, cur.Steps, true)) {
+		return
+	}
+	if !s.journeyApplied(w, r, s.checkJourneyRefs(r, a.WorkspaceID, cur.Steps)) {
 		return
 	}
 	s.setJourneyStatus(w, r, a, cur, "active", []string{"draft", "paused"})
@@ -784,4 +817,37 @@ func (s *Server) exitJourneyRun(w http.ResponseWriter, r *http.Request) {
 	if v, ok := s.findJourneyRun(w, r, a.WorkspaceID, cur.ID, run.ID); ok {
 		writeJSON(w, http.StatusOK, v)
 	}
+}
+
+// listJourneyStepKinds is the catalog of step kinds the flow builder's
+// step picker shows: each kind's group, label, settings and outputs.
+func (s *Server) listJourneyStepKinds(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, map[string]any{"data": journeys.StepKinds()})
+}
+
+// checkJourneyRefs checks, to go live, that the lists, journeys and
+// sequences action steps name are the workspace's: a static list, a
+// journey that isn't archived, a sequence that isn't archived.
+func (s *Server) checkJourneyRefs(r *http.Request, ws string, steps []journeys.Step) error {
+	for _, st := range steps {
+		var q, ref, what string
+		switch {
+		case st.ListID != "" && (st.Kind == "add_to_list" || st.Kind == "remove_from_list"):
+			q, ref, what = `SELECT EXISTS (SELECT 1 FROM smart_lists WHERE workspace_id = $1 AND id = $2 AND kind = 'static')`, st.ListID, "a static list"
+		case st.JourneyID != "" && (st.Kind == "enter_journey" || st.Kind == "exit_journey"):
+			q, ref, what = `SELECT EXISTS (SELECT 1 FROM journeys WHERE workspace_id = $1 AND id = $2 AND status <> 'archived')`, st.JourneyID, "a journey"
+		case st.SequenceID != "" && (st.Kind == "enroll_in_sequence" || st.Kind == "stop_sequences"):
+			q, ref, what = `SELECT EXISTS (SELECT 1 FROM sequences WHERE workspace_id = $1 AND id = $2 AND status <> 'archived')`, st.SequenceID, "a sequence"
+		default:
+			continue
+		}
+		var ok bool
+		if err := s.pool.QueryRow(r.Context(), q, ws, ref).Scan(&ok); err != nil {
+			return err
+		}
+		if !ok {
+			return errInvalid("step " + st.ID + ": " + ref + " is not " + what + " in this workspace")
+		}
+	}
+	return nil
 }

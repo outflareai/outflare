@@ -3541,6 +3541,61 @@ paths:
         "400": { $ref: "#/components/responses/Error" }
         "404": { $ref: "#/components/responses/Error" }
         default: { $ref: "#/components/responses/Error" }
+    post:
+      operationId: addStaticListMembers
+      x-outflare-access: { scope: customers.manage, brand_limited: true }
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      summary: Put people in a static list
+      description: |
+        Scope: customers.manage. Only a static list takes people; a smart list fills itself (409). People only: not
+        companies, merged or archived records, or, for a brand's list, another brand's people. Rules acting on people
+        joining the list hear of it.
+      tags: [lists]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/StaticListMembersInput" }
+      responses:
+        "200":
+          description: How many joined, and the count now.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/StaticListChange" }
+        "400": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        "202": { $ref: "#/components/responses/MissionHeld" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/workspaces/{ws}/smart-lists/{id}/members/remove:
+    parameters:
+      - { $ref: "#/components/parameters/Workspace" }
+      - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+    post:
+      operationId: removeStaticListMembers
+      x-outflare-access: { scope: customers.manage, brand_limited: true }
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      summary: Take people out of a static list
+      description: "Scope: customers.manage. Rules acting on people leaving the list hear of it."
+      tags: [lists]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/StaticListMembersInput" }
+      responses:
+        "200":
+          description: How many left, and the count now.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/StaticListChange" }
+        "400": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        "202": { $ref: "#/components/responses/MissionHeld" }
+        default: { $ref: "#/components/responses/Error" }
   /v1/workspaces/{ws}/smart-lists/{id}/refresh:
     parameters:
       - { $ref: "#/components/parameters/Workspace" }
@@ -5719,7 +5774,7 @@ paths:
       operationId: getAttributionSettings
       x-outflare-access: { scope: analytics.read }
       summary: Get how conversions are credited to channels
-      description: "Scope: analytics.read. The default model reports use (last non-direct touch unless changed), how many days before a conversion a visit can get credit (90), and which customer events count as conversions."
+      description: "Scope: analytics.read. The default model reports use (last non-direct touch unless changed), how many days before a conversion a visit can get credit (30), and which customer events count as conversions."
       tags: [analytics]
       responses:
         "200":
@@ -5733,7 +5788,7 @@ paths:
       x-outflare-access: { scope: analytics.manage }
       parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
       summary: Change the default model, the lookback or which events count
-      description: "Scope: analytics.manage. Every model's credits are kept, so changing the model only changes what reports show by default. Changing the lookback or the events credits every conversion again in the background, within a few minutes."
+      description: "Scope: analytics.manage. Every model's credits are kept, so changing the model only changes what reports show by default. model can be a built-in model or the key of one of the workspace's own models. Changing the lookback or the events credits every conversion again in the background, within a few minutes."
       tags: [analytics]
       requestBody:
         required: true
@@ -5748,6 +5803,272 @@ paths:
               schema: { $ref: "#/components/schemas/AttributionSettings" }
         "400": { $ref: "#/components/responses/Error" }
         "202": { $ref: "#/components/responses/MissionHeld" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/workspaces/{ws}/attribution/models:
+    parameters:
+      - { $ref: "#/components/parameters/Workspace" }
+    get:
+      operationId: listAttributionModels
+      x-outflare-access: { scope: analytics.read }
+      summary: List attribution models
+      description: |
+        Scope: analytics.read. The five built-in models, and the workspace's own models at their latest version
+        (archived ones too with archived=true). A workspace's model starts from a built-in one and changes its windows,
+        channels left out, position weights or time-decay half-life. Reports take its key as model.
+      tags: [analytics]
+      parameters:
+        - { name: archived, in: query, required: false, schema: { type: boolean } }
+      responses:
+        "200":
+          description: The models.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [built_in, data]
+                properties:
+                  built_in:
+                    type: array
+                    items:
+                      type: object
+                      required: [id, spec]
+                      properties:
+                        id: { $ref: "#/components/schemas/AttributionBuiltInModel" }
+                        spec: { $ref: "#/components/schemas/AttributionSpec" }
+                  data: { type: array, items: { $ref: "#/components/schemas/AttributionCustomModel" } }
+        default: { $ref: "#/components/responses/Error" }
+    post:
+      operationId: createAttributionModel
+      x-outflare-access: { scope: analytics.manage }
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      summary: Make an attribution model
+      description: |
+        Scope: analytics.manage. Makes version 1 of a model, from a built-in one with your own options, such as
+        `{"key": "paid-7-day", "name": "Paid ads 7 days", "spec": {"base": "last_non_direct", "channel_lookback_days": {"paid_ads": 7}}}`.
+        Every conversion is credited again in the background, so the model covers the past too.
+      tags: [analytics]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/AttributionModelInput" }
+      responses:
+        "201":
+          description: The model's first version.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AttributionCustomModel" }
+        "202": { $ref: "#/components/responses/MissionHeld" }
+        "400": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/workspaces/{ws}/attribution/models/{key}:
+    parameters:
+      - { $ref: "#/components/parameters/Workspace" }
+      - { name: key, in: path, required: true, schema: { type: string } }
+    get:
+      operationId: getAttributionModel
+      x-outflare-access: { scope: analytics.read }
+      summary: Every version of an attribution model
+      description: "Scope: analytics.read. Newest first, with the modules that pin each version."
+      tags: [analytics]
+      responses:
+        "200":
+          description: The versions.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data: { type: array, items: { $ref: "#/components/schemas/AttributionCustomModel" } }
+        "404": { $ref: "#/components/responses/Error" }
+        default: { $ref: "#/components/responses/Error" }
+    patch:
+      operationId: updateAttributionModel
+      x-outflare-access: { scope: analytics.manage }
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      summary: Change an attribution model
+      description: |
+        Scope: analytics.manage. A new spec makes the next version and credits every conversion again; the old version
+        stays credited only while a module pins it. A new name alone keeps the version.
+      tags: [analytics]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/AttributionModelInput" }
+      responses:
+        "200":
+          description: The model's latest version.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AttributionCustomModel" }
+        "202": { $ref: "#/components/responses/MissionHeld" }
+        "400": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        default: { $ref: "#/components/responses/Error" }
+    delete:
+      operationId: archiveAttributionModel
+      x-outflare-access: { scope: analytics.manage }
+      summary: Archive an attribution model
+      description: "Scope: analytics.manage. Reports can no longer read it, except a version a module pins. The workspace's default model can't be archived."
+      tags: [analytics]
+      responses:
+        "204": { description: Archived. }
+        "202": { $ref: "#/components/responses/MissionHeld" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/workspaces/{ws}/conversion-definitions:
+    parameters:
+      - { $ref: "#/components/parameters/Workspace" }
+    get:
+      operationId: listConversionDefinitions
+      x-outflare-access: { scope: analytics.read }
+      summary: List conversion definitions
+      description: |
+        Scope: analytics.read. What the workspace counts as a conversion, defined on the customer events stream and never
+        tied to one integration: a customer event (signed_up, payment.succeeded, meeting.held, call.completed), filters on
+        its properties, what it is worth, and each ad network's own name for it. Attribution credits channels with every
+        definition that has attribution on, besides the events in GET .../attribution/settings. Archived ones too with
+        archived=true.
+      tags: [analytics]
+      parameters:
+        - { name: archived, in: query, required: false, schema: { type: boolean } }
+      responses:
+        "200":
+          description: The definitions, by key.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data: { type: array, items: { $ref: "#/components/schemas/ConversionDefinition" } }
+        default: { $ref: "#/components/responses/Error" }
+    post:
+      operationId: createConversionDefinition
+      x-outflare-access: { scope: analytics.manage }
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      summary: Define a conversion
+      description: |
+        Scope: analytics.manage. Such as a call over a minute:
+        `{"key": "qualified_call", "name": "Qualified call", "event": "call.completed", "filters": [{"property": "duration_s", "op": "gt", "value": 60}], "value_mode": "fixed", "fixed_value_minor": 5000, "currency": "USD"}`.
+        Every conversion is credited again in the background.
+      tags: [analytics]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ConversionDefinitionInput" }
+      responses:
+        "201":
+          description: The definition.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ConversionDefinition" }
+        "202": { $ref: "#/components/responses/MissionHeld" }
+        "400": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/workspaces/{ws}/conversion-definitions/presets:
+    parameters:
+      - { $ref: "#/components/parameters/Workspace" }
+    get:
+      operationId: listConversionPresets
+      x-outflare-access: { scope: analytics.read }
+      summary: Starting points for conversion definitions
+      description: "Scope: analytics.read. Sets of definitions a kind of business usually starts from (SaaS, booked calls, e-commerce, lead generation). Adding one copies them; change anything afterwards."
+      tags: [analytics]
+      responses:
+        "200":
+          description: The presets.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data: { type: array, items: { $ref: "#/components/schemas/ConversionPreset" } }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/workspaces/{ws}/conversion-definitions/presets/{preset}:
+    parameters:
+      - { $ref: "#/components/parameters/Workspace" }
+      - { name: preset, in: path, required: true, schema: { type: string, example: booked_calls } }
+    post:
+      operationId: addConversionPreset
+      x-outflare-access: { scope: analytics.manage }
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      summary: Add a preset's conversion definitions
+      description: "Scope: analytics.manage. Adds the preset's definitions whose keys the workspace doesn't use yet, so adding it twice changes nothing. Conversions are credited again when any is added."
+      tags: [analytics]
+      responses:
+        "200":
+          description: What was added, and the keys already there.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [added, skipped]
+                properties:
+                  added: { type: array, items: { $ref: "#/components/schemas/ConversionDefinition" } }
+                  skipped: { type: array, items: { type: string } }
+        "202": { $ref: "#/components/responses/MissionHeld" }
+        "404": { $ref: "#/components/responses/Error" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/workspaces/{ws}/conversion-definitions/{key}:
+    parameters:
+      - { $ref: "#/components/parameters/Workspace" }
+      - { name: key, in: path, required: true, schema: { type: string } }
+    get:
+      operationId: getConversionDefinition
+      x-outflare-access: { scope: analytics.read }
+      summary: Get a conversion definition
+      description: "Scope: analytics.read."
+      tags: [analytics]
+      responses:
+        "200":
+          description: The definition.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ConversionDefinition" }
+        "404": { $ref: "#/components/responses/Error" }
+        default: { $ref: "#/components/responses/Error" }
+    patch:
+      operationId: updateConversionDefinition
+      x-outflare-access: { scope: analytics.manage }
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      summary: Change a conversion definition
+      description: "Scope: analytics.manage. Fields left out keep their values; the key never changes. Switching value_mode clears the other mode's fields. Every conversion is credited again."
+      tags: [analytics]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ConversionDefinitionInput" }
+      responses:
+        "200":
+          description: The definition.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ConversionDefinition" }
+        "202": { $ref: "#/components/responses/MissionHeld" }
+        "400": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        default: { $ref: "#/components/responses/Error" }
+    delete:
+      operationId: archiveConversionDefinition
+      x-outflare-access: { scope: analytics.manage }
+      summary: Archive a conversion definition
+      description: "Scope: analytics.manage. It stops counting, and conversions are credited again without it."
+      tags: [analytics]
+      responses:
+        "204": { description: Archived. }
+        "202": { $ref: "#/components/responses/MissionHeld" }
+        "404": { $ref: "#/components/responses/Error" }
         default: { $ref: "#/components/responses/Error" }
   /v1/workspaces/{ws}/attribution/channels:
     parameters:
@@ -5804,6 +6125,7 @@ paths:
                 required: [model, from, to, data]
                 properties:
                   model: { type: string }
+                  model_version: { type: [integer, "null"] }
                   from: { type: string, format: date }
                   to: { type: string, format: date }
                   data: { type: array, items: { $ref: "#/components/schemas/AttributionCampaignRow" } }
@@ -5841,6 +6163,7 @@ paths:
                 required: [model, data, next_before]
                 properties:
                   model: { type: string }
+                  model_version: { type: [integer, "null"] }
                   data: { type: array, items: { $ref: "#/components/schemas/AttributionConversion" } }
                   next_before: { type: [string, "null"], format: date-time }
                   next_cursor: { $ref: "#/components/schemas/NextCursor" }
@@ -6374,6 +6697,34 @@ paths:
         "404": { $ref: "#/components/responses/Error" }
         "422": { $ref: "#/components/responses/Error" }
         "202": { $ref: "#/components/responses/MissionHeld" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/workspaces/{ws}/ads/tracking-templates:
+    parameters:
+      - { $ref: "#/components/parameters/Workspace" }
+    get:
+      operationId: listAdTrackingTemplates
+      x-outflare-access: { scope: analytics.read }
+      summary: List tracking templates for each ad network
+      description: |
+        Scope: analytics.read. For every ad network (the six paid media reads, then TikTok, Snapchat, Pinterest, Taboola,
+        Outbrain, Quora, Apple Search Ads and Amazon Ads), the tracking template to paste into the network's own field
+        (`field`), so every paid click lands with UTM tags and the network's own campaign, ad set and ad ids
+        (`of_campaign`, `of_adset`, `of_ad`, `of_placement`). site.js stores them on the visit, so a sale can be credited to
+        an ad by its id even when names change. Also lists the click ids each network adds by itself and the cookies of its
+        pixel that site.js reads with consent. `template` is empty for a network whose ads don't link to a website.
+      tags: [ads]
+      parameters:
+        - { name: network, in: query, required: false, description: "Only this network, by id.", schema: { type: string, example: tiktok } }
+      responses:
+        "200":
+          description: The networks, in display order.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data: { type: array, items: { $ref: "#/components/schemas/AdTrackingTemplate" } }
         default: { $ref: "#/components/responses/Error" }
   /v1/workspaces/{ws}/ads/accounts:
     parameters:
@@ -16529,11 +16880,22 @@ paths:
       summary: List customer records
       description: |
         Scope: customers.read. People, companies and the workspace's own record types, newest first. Merged records
-        are left out. q matches the name or any active identity, such as part of an email.
+        are left out. q matches the name or any active identity, such as part of an email. attribute narrows by
+        the catalog's fields.
       tags: [records]
       parameters:
         - { name: type, in: query, description: "A record type's key: person, account or the workspace's own.", schema: { type: string } }
         - { name: q, in: query, schema: { type: string } }
+        - name: attribute
+          in: query
+          description: |
+            A field's key and a value, such as lifecycle_stage:customer; repeat it for more (at most 20). Values of one
+            field are alternatives, different fields must all match. A list field, such as a person's companies (by
+            record id), matches when it holds the value.
+          style: form
+          explode: true
+          allowReserved: true
+          schema: { type: array, maxItems: 20, items: { type: string, example: "lifecycle_stage:customer" } }
         - { name: origin, in: query, schema: { $ref: "#/components/schemas/RecordOrigin" } }
         - { name: archived, in: query, description: Default false., schema: { type: string, enum: ["false", "true", all] } }
         - { name: review, in: query, description: "Default approved: records held for review are left out. needs_review lists only those.", schema: { type: string, enum: [approved, needs_review, all] } }
@@ -16723,6 +17085,38 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Record" }
+        "202": { $ref: "#/components/responses/MissionHeld" }
+        default: { $ref: "#/components/responses/Error" }
+    delete:
+      operationId: deleteRecord
+      x-outflare-access: { scope: customers.manage, brand_limited: true }
+      parameters:
+        - { $ref: "#/components/parameters/IdempotencyKey" }
+        - { name: suppress, in: query, description: "true adds a person's emails (a company's domains) to the opt-out list first (reason do_not_contact), so a later import or sync can't contact them again.", schema: { type: boolean, default: false } }
+        - { name: version, in: query, description: "The record's version, as read: the delete is refused with record_changed if it changed since. Agents must send it (version_required).", schema: { type: integer } }
+      summary: Erase a customer record
+      description: |
+        Scope: customers.manage. Deletes a person or company for good, such as for an erasure request; to hide one
+        and keep its history, archive it instead (PATCH with archived: true). Goes with it: the records merged into
+        it, its identities, links, field history and consents and, for a person, everything about them: their
+        leads (also any lead with one of their emails), the cold email sent to them and their replies, meetings,
+        lifecycle email sent to them alone, product events, website visits and journey runs. Deals, payments and
+        opt-outs stay, unlinked; a company's people stay, unlinked from it. erased counts the rows removed, by
+        table. A deal is deleted with DELETE .../deals/{deal}.
+      tags: [records]
+      responses:
+        "200":
+          description: What was erased.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [id, type, erased, suppressed]
+                properties:
+                  id: { type: string, format: uuid }
+                  type: { type: string }
+                  erased: { type: object, additionalProperties: { type: integer }, description: "Rows removed, by table, such as records, leads and messages." }
+                  suppressed: { type: integer, description: Opt-out entries added. }
         "202": { $ref: "#/components/responses/MissionHeld" }
         default: { $ref: "#/components/responses/Error" }
   /v1/workspaces/{ws}/records/{record}/history:
@@ -21358,6 +21752,27 @@ paths:
               schema: { $ref: "#/components/schemas/Journey" }
         "400": { $ref: "#/components/responses/Error" }
         "202": { $ref: "#/components/responses/MissionHeld" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/workspaces/{ws}/journeys/step-kinds:
+    parameters: [{ $ref: "#/components/parameters/Workspace" }]
+    get:
+      operationId: listJourneyStepKinds
+      x-outflare-access: { scope: emails.read }
+      summary: The kinds of journey step
+      description: |
+        Scope: emails.read. Every kind of step a journey can have, for a step picker: its group, label, what it needs
+        connected, its settings as JSON Schema, and which fields name the step after it.
+      tags: [emails]
+      responses:
+        "200":
+          description: Step kinds.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data: { type: array, items: { $ref: "#/components/schemas/JourneyStepKind" } }
         default: { $ref: "#/components/responses/Error" }
   /v1/workspaces/{ws}/journeys/{id}:
     parameters:
@@ -26368,8 +26783,93 @@ components:
         sources: { type: array, items: { type: string }, description: "The usual utm_source values, most common first. Any other source is allowed." }
     AttributionModel:
       type: string
+      pattern: "^[a-z][a-z0-9_-]{0,39}(@[1-9][0-9]{0,5})?$"
+      example: last_non_direct
+      description: |
+        A built-in model (AttributionBuiltInModel), or the key of one of the workspace's own models (GET .../attribution/models),
+        which reads its latest version. key@version reads a pinned version, such as the one an affiliate program uses.
+    AttributionBuiltInModel:
+      type: string
       description: "last_non_direct: the last visit that wasn't direct gets it all. first_touch: the first visit. linear: shared evenly. position: 40% first, 40% last, 20% shared by the rest. time_decay: shared, halving for every week before the conversion. Direct visits get credit only when there is nothing else."
       enum: [last_non_direct, first_touch, linear, position, time_decay]
+    AttributionSpec:
+      type: object
+      required: [base]
+      description: How a model shares a conversion between the visits before it. The five built-in models are specs with only base set.
+      properties:
+        base: { $ref: "#/components/schemas/AttributionBuiltInModel" }
+        lookback_days: { type: integer, minimum: 0, maximum: 365, description: "How far back a visit can be; 0 or absent for the workspace's look-back." }
+        channel_lookback_days:
+          type: object
+          description: "A window per channel, in days (1 to 365), such as {\"paid_ads\": 7}. Channels are the campaign channels (GET .../tracking-taxonomy) and direct."
+          additionalProperties: { type: integer, minimum: 1, maximum: 365 }
+        exclude_channels: { type: array, items: { type: string }, description: "Channels that never get credit. A conversion with no visit left goes to direct." }
+        first_weight: { type: number, minimum: 0, maximum: 1, description: "position only: the first visit's share (0.4 by default)." }
+        last_weight: { type: number, minimum: 0, maximum: 1, description: "position only: the last visit's share (0.4 by default). The middle visits share the rest." }
+        half_life_days: { type: number, minimum: 0.5, maximum: 365, description: "time_decay only: a visit's weight halves for every this many days before the conversion (7 by default)." }
+    AttributionCustomModel:
+      type: object
+      required: [id, key, version, name, spec, created_at, archived_at, pinned_by]
+      properties:
+        id: { type: string, format: uuid, description: "This version's id." }
+        key: { type: string, example: paid-7-day }
+        version: { type: integer, minimum: 1 }
+        name: { type: string }
+        spec: { $ref: "#/components/schemas/AttributionSpec" }
+        created_at: { type: string, format: date-time }
+        archived_at: { type: [string, "null"], format: date-time }
+        pinned_by: { type: array, items: { type: string }, description: "Modules that pin this version, as module:ref. A pinned version stays credited after the model changes." }
+    AttributionModelInput:
+      type: object
+      properties:
+        key: { type: string, pattern: "^[a-z][a-z0-9-]{0,39}$", description: "Required when making one; not a built-in model's id." }
+        name: { type: string, minLength: 1, maxLength: 80 }
+        spec: { $ref: "#/components/schemas/AttributionSpec" }
+    ConversionFilter:
+      type: object
+      required: [property, op]
+      properties:
+        property: { type: string, description: "A property key, or a dotted path such as plan.tier.", example: duration_s }
+        op: { type: string, enum: [eq, neq, gt, gte, lt, lte, in, contains, exists, not_exists] }
+        value: { description: "A number for gt, gte, lt and lte; a list for in; none for exists and not_exists. eq, neq and in compare as numbers when both sides are, otherwise as text ignoring case." }
+    ConversionDefinitionFields:
+      type: object
+      properties:
+        name: { type: string, minLength: 1, maxLength: 80 }
+        event: { type: string, description: "The customer event's catalog name.", example: meeting.held }
+        filters: { type: array, maxItems: 10, items: { $ref: "#/components/schemas/ConversionFilter" }, description: "All must match; none means every such event." }
+        value_mode: { type: string, enum: [none, fixed, property], description: "What one conversion is worth: nothing, fixed_value_minor, or the value_property of the event." }
+        fixed_value_minor: { type: [integer, "null"], format: int64, minimum: 0, description: "In minor units (cents)." }
+        value_property: { type: string, description: "A property key or dotted path, such as revenue or amount_minor." }
+        value_unit: { type: string, enum: [major, minor], description: "major: 12.50; minor: 1250." }
+        currency: { type: string, pattern: "^([A-Z]{3})?$", description: "Empty: the event's currency property." }
+        network_events: { type: object, additionalProperties: { type: string }, description: "Each ad network's own name for it, by network id.", example: { meta: Purchase, tiktok: CompletePayment } }
+        attribution: { type: boolean, description: "Whether attribution credits channels with it (default true)." }
+    ConversionDefinitionInput:
+      allOf:
+        - $ref: "#/components/schemas/ConversionDefinitionFields"
+        - type: object
+          properties:
+            key: { type: string, pattern: "^[a-z][a-z0-9_-]{0,39}$", description: "Required when making one; never changes." }
+    ConversionDefinition:
+      allOf:
+        - $ref: "#/components/schemas/ConversionDefinitionFields"
+        - type: object
+          required: [id, key, name, event, filters, value_mode, fixed_value_minor, value_property, value_unit, currency, network_events, attribution, archived_at, created_at, updated_at]
+          properties:
+            id: { type: string }
+            key: { type: string, example: held_call }
+            archived_at: { type: [string, "null"], format: date-time }
+            created_at: { type: string, format: date-time }
+            updated_at: { type: string, format: date-time }
+    ConversionPreset:
+      type: object
+      required: [id, name, description, definitions]
+      properties:
+        id: { type: string, example: booked_calls }
+        name: { type: string }
+        description: { type: string }
+        definitions: { type: array, items: { $ref: "#/components/schemas/ConversionDefinition" } }
     AttributionSettings:
       type: object
       required: [model, lookback_days, conversion_events, models, backfilled_at, updated_at]
@@ -26377,7 +26877,7 @@ components:
         model: { $ref: "#/components/schemas/AttributionModel" }
         lookback_days: { type: integer, minimum: 1, maximum: 365, description: "How many days before a conversion a visit can get credit." }
         conversion_events: { type: array, items: { type: string }, description: "Customer events that count as conversions. With payment.succeeded, refunds are taken off its revenue." }
-        models: { type: array, items: { $ref: "#/components/schemas/AttributionModel" } }
+        models: { type: array, description: "The built-in models. The workspace's own are at GET .../attribution/models.", items: { $ref: "#/components/schemas/AttributionBuiltInModel" } }
         backfilled_at: { type: [string, "null"], format: date-time, description: "When every past conversion was last credited; null while that is running." }
         updated_at: { type: string, format: date-time }
     AttributionSettingsInput:
@@ -26408,6 +26908,7 @@ components:
       required: [model, from, to, lookback_days, conversion_events, pending_visits, data, unallocated_cost]
       properties:
         model: { $ref: "#/components/schemas/AttributionModel" }
+        model_version: { type: [integer, "null"], description: "The version of the workspace's model the report read; null for a built-in model." }
         from: { type: string, format: date }
         to: { type: string, format: date }
         lookback_days: { type: integer }
@@ -27046,6 +27547,26 @@ components:
         checked: { type: integer, description: Events or records looked at. }
         truncated: { type: boolean, description: More than 50,000 to look at; the numbers are a lower bound. }
         note: { type: string, description: What was replayed and how to read the numbers. }
+    JourneyStepKind:
+      type: object
+      required: [kind, group, label, description, requires, settings_schema, outputs]
+      properties:
+        kind: { type: string }
+        group: { type: string, enum: [messaging, data, cross_campaign, notify, integrations, ai, flow] }
+        label: { type: string }
+        description: { type: string }
+        requires:
+          type: array
+          description: Connections the workspace needs for the step to work.
+          items:
+            type: object
+            required: [connection, label]
+            properties:
+              connection: { type: string }
+              label: { type: string }
+        settings_schema: { type: object, additionalProperties: true, description: "The step's settings, as JSON Schema." }
+        outputs: { type: array, items: { type: string }, description: "The step fields that name the step after it (next; then and else; paths[].next for a list)." }
+        error_output: { type: string, description: "The field naming the step to go to when it fails (on_error), for steps that can fail." }
     JourneyStatus: { type: string, enum: [draft, active, paused, archived] }
     JourneyRunStatus: { type: string, enum: [active, completed, exited, failed] }
     JourneyCondition:
@@ -27066,9 +27587,16 @@ components:
     JourneyStep:
       type: object
       required: [id, kind]
+      description: |
+        One step. The settings each kind takes, and the fields that name the step after it, are in
+        GET .../journeys/step-kinds. Action steps (everything but email, wait, branch and exit) report done, skipped (with
+        why) or failed, and a failed one does what on_error says.
       properties:
         id: { type: string, pattern: "^[a-z0-9][a-z0-9_-]{0,39}$" }
-        kind: { type: string, enum: [email, wait, branch, exit] }
+        kind:
+          type: string
+          enum: [email, wait, branch, exit, set_field, add_tag, remove_tag, add_to_list, remove_from_list, enter_journey, exit_journey,
+            enroll_in_sequence, stop_sequences, suppress, unsubscribe_topic, alert]
         name: { type: string, maxLength: 100 }
         template: { type: string, description: "email: a lifecycle template's handle or id." }
         wait_seconds: { type: integer, minimum: 60, maximum: 7776000, description: "wait: how long." }
@@ -27076,7 +27604,23 @@ components:
         match: { type: string, enum: [all, any], description: "branch: all (the default) or any must hold." }
         then: { type: string, description: "branch: the step when they hold; empty ends the run." }
         else: { type: string, description: "branch: the step when they don't; empty ends the run." }
-        next: { type: string, description: "email and wait: the step after; empty ends the run as completed." }
+        next: { type: string, description: "The step after; empty ends the run as completed." }
+        field: { type: string, description: "set_field: the field's key." }
+        change: { type: string, enum: [set, clear, increment], description: "set_field: set (the default), clear or increment." }
+        value: { description: "set_field: the value, or {{event.x}} / {{person.x}} to copy one." }
+        overwrite_manual: { type: boolean, description: "set_field: overwrite a value a person set by hand. Off by default: the step is then skipped." }
+        tag: { type: string, maxLength: 50, description: "add_tag, remove_tag: the tag." }
+        list_id: { type: string, format: uuid, description: "add_to_list, remove_from_list: a static list." }
+        journey_id: { type: string, format: uuid, description: "enter_journey, exit_journey: the other journey." }
+        sequence_id: { type: string, format: uuid, description: "enroll_in_sequence, stop_sequences (scope sequence): the sequence." }
+        scope: { type: string, enum: [journey, others, sequence, all, company], description: "exit_journey: journey or others. stop_sequences: sequence, all (the default) or company." }
+        allow_elsewhere: { type: boolean, description: "enroll_in_sequence: enroll even when active in another sequence." }
+        target: { type: string, enum: [email, domain], description: "suppress: their email addresses (the default) or their work domain." }
+        topic: { type: string, description: "unsubscribe_topic: an email topic's key; empty for all marketing email." }
+        title: { type: string, maxLength: 120, description: "alert: what it says." }
+        text: { type: string, maxLength: 500, description: "alert: a line of detail." }
+        to: { type: string, enum: [owner, admins], description: "alert: the record's owner (the default) or the owners and admins." }
+        on_error: { type: string, description: "Action steps: stop (the default: the run fails), continue, or a step id to go to." }
     JourneyTrigger:
       type: object
       required: [kind]
@@ -27093,10 +27637,12 @@ components:
         trigger: { $ref: "#/components/schemas/JourneyTrigger" }
         entry: { type: string, enum: [once, again], description: "once: a person goes through it once ever. again: again after they finish." }
         goal_event: { type: [string, "null"], description: "Doing this event ends their run: they reached the goal." }
+        exit_events: { type: array, maxItems: 10, items: { type: string }, description: "Doing any of these events ends their run at once, even mid-wait." }
+        exit_conditions: { type: array, maxItems: 20, items: { $ref: "#/components/schemas/JourneyCondition" }, description: "Attribute conditions: when any holds, the run ends before its next step, and nobody who already meets one starts." }
         steps: { type: array, maxItems: 100, items: { $ref: "#/components/schemas/JourneyStep" }, description: The first step starts. }
     Journey:
       type: object
-      required: [id, name, description, status, brand_id, trigger, entry, goal_event, steps, version, activated_at, draft_updated_at, stats, created_at, updated_at]
+      required: [id, name, description, status, brand_id, trigger, entry, goal_event, exit_events, exit_conditions, steps, version, activated_at, draft_updated_at, stats, created_at, updated_at]
       properties:
         id: { type: string, format: uuid }
         name: { type: string }
@@ -27112,6 +27658,8 @@ components:
             filter: { type: array, items: { $ref: "#/components/schemas/JourneyCondition" } }
         entry: { type: string, enum: [once, again] }
         goal_event: { type: [string, "null"] }
+        exit_events: { type: array, items: { type: string } }
+        exit_conditions: { type: array, items: { $ref: "#/components/schemas/JourneyCondition" } }
         steps: { type: array, items: { $ref: "#/components/schemas/JourneyStep" } }
         version: { type: integer, description: Goes up each time what it does (trigger, entry, goal or steps) changes. }
         activated_at: { type: [string, "null"], format: date-time }
@@ -27127,7 +27675,7 @@ components:
             failed: { type: integer }
         step_stats:
           type: object
-          description: "Only on a single journey: by step id, how many runs had each outcome (sent, skipped, waited, yes, no, failed)."
+          description: "Only on a single journey: by step id, how many runs had each outcome (sent, skipped, waited, yes, no, done, failed)."
           additionalProperties: { type: object, additionalProperties: { type: integer } }
         at_step:
           type: object
@@ -27151,10 +27699,12 @@ components:
         trigger: { $ref: "#/components/schemas/JourneyTrigger" }
         entry: { type: string, enum: [once, again] }
         goal_event: { type: [string, "null"] }
+        exit_events: { type: array, maxItems: 10, items: { type: string }, description: "Doing any of these events ends their run at once, even mid-wait." }
+        exit_conditions: { type: array, maxItems: 20, items: { $ref: "#/components/schemas/JourneyCondition" }, description: "Attribute conditions: when any holds, the run ends before its next step." }
         steps: { type: array, maxItems: 100, items: { $ref: "#/components/schemas/JourneyStep" }, description: The first step starts. }
     JourneyVersion:
       type: object
-      required: [id, status, version, trigger, entry, goal_event, steps, runs_active, created_at, updated_at, published_at]
+      required: [id, status, version, trigger, entry, goal_event, exit_events, exit_conditions, steps, runs_active, created_at, updated_at, published_at]
       properties:
         id: { type: string, format: uuid }
         status: { type: string, enum: [draft, published], description: "draft: being edited. published: went live once." }
@@ -27168,6 +27718,8 @@ components:
             filter: { type: array, items: { $ref: "#/components/schemas/JourneyCondition" } }
         entry: { type: string, enum: [once, again] }
         goal_event: { type: [string, "null"] }
+        exit_events: { type: array, items: { type: string } }
+        exit_conditions: { type: array, items: { $ref: "#/components/schemas/JourneyCondition" } }
         steps: { type: array, items: { $ref: "#/components/schemas/JourneyStep" } }
         runs_active: { type: integer, description: People going through this version now. }
         created_at: { type: string, format: date-time }
@@ -28479,6 +29031,30 @@ components:
         last_run_at: { type: [string, "null"], format: date-time }
         last_ok_at: { type: [string, "null"], format: date-time }
         last_error: { type: [string, "null"] }
+    AdTrackingTemplate:
+      type: object
+      required: [network, label, connector, field, template, macros, click_ids, cookies, note]
+      properties:
+        network: { type: string, description: "The network's id, also its utm_source.", example: tiktok }
+        label: { type: string, example: TikTok Ads }
+        connector: { type: [string, "null"], description: "The paid media connector that reads its accounts, null until there is one.", example: google_ads }
+        field: { type: [string, "null"], description: "Where the template goes, in the network's own words. Null when its ads don't link to a website." }
+        template: { type: string, description: "The query string to paste, with the network's macros left for it to fill in. Empty when `field` is null.", example: "utm_source=tiktok&utm_medium=cpc&utm_campaign=__CAMPAIGN_NAME__&of_campaign=__CAMPAIGN_ID__" }
+        macros:
+          type: object
+          description: The network's placeholders the template uses, by what they fill in.
+          properties:
+            campaign_id: { type: string }
+            campaign_name: { type: string }
+            adset_id: { type: string }
+            ad_id: { type: string }
+            ad_name: { type: string }
+            placement: { type: string }
+            keyword: { type: string }
+            click_id: { type: string }
+        click_ids: { type: array, items: { type: string }, description: "The click id parameters the network adds to landing pages.", example: [ttclid] }
+        cookies: { type: array, items: { type: string }, description: "Cookies of the network's pixel site.js reads with consent and sends with the click ids.", example: [_fbp, _fbc] }
+        note: { type: [string, "null"] }
     AdAccount:
       type: object
       required: [id, integration_id, connector, external_id, name, currency, time_zone, brand_id, sync_on, status, first_day, last_day, last_synced_at, last_error, created_at]
@@ -32621,9 +33197,21 @@ components:
         news_search: { type: string, format: uuid, description: A news search's id. }
         op: { type: string, enum: [eq, neq, gt, lt, contains, exists, not_exists] }
         value: { description: "What eq, neq, gt, lt and contains compare with: text, a number or true or false." }
+    StaticListMembersInput:
+      type: object
+      required: [record_ids]
+      properties:
+        record_ids: { type: array, minItems: 1, maxItems: 10000, items: { type: string, format: uuid } }
+    StaticListChange:
+      type: object
+      required: [changed, members]
+      properties:
+        changed: { type: integer, description: How many joined or left. }
+        members: { type: integer, description: How many are in the list now. }
     SmartListInput:
       type: object
       properties:
+        kind: { type: string, enum: [smart, static], description: "smart (the default): fills itself from its rules. static: holds the people put in it (POST .../members). Set when the list is made." }
         name: { type: string, minLength: 1, maxLength: 200 }
         description: { type: string, maxLength: 2000 }
         brand_id: { type: [string, "null"], description: "A brand's id or handle, or null for people of every brand." }
@@ -32631,11 +33219,12 @@ components:
         match: { type: string, enum: [all, any], description: "Whether a person must pass all the rules (the default) or any of them." }
     SmartList:
       type: object
-      required: [id, name, description, brand_id, rules, match, members, refreshed_at, error_code, created_at, updated_at]
+      required: [id, name, description, kind, brand_id, rules, match, members, refreshed_at, error_code, created_at, updated_at]
       properties:
         id: { type: string, format: uuid }
         name: { type: string }
         description: { type: string }
+        kind: { type: string, enum: [smart, static], description: "smart: fills itself from its rules. static: holds the people put in it; it has no rules and is never refreshed." }
         brand_id: { type: [string, "null"], format: uuid, description: "Null: people of every brand." }
         rules: { type: array, items: { $ref: "#/components/schemas/SmartListRule" } }
         match: { type: string, enum: [all, any] }

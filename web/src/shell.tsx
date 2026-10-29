@@ -72,6 +72,7 @@ export const tabNames: Record<Tab, string> = {
   outcomes: "Outcomes",
   projects: "Projects",
   sequences: "Sequences",
+  people: "People",
   leads: "Leads",
   lists: "Lists",
   "lead-finder": "Lead finder",
@@ -122,6 +123,7 @@ export const tabBlurbs: Record<Tab, string> = {
   missions: "Goals your agents work toward, such as 10 meetings by a date. Approve the plan, see every call, stop it any time.",
   projects: "The brief for each motion: offer, ideal customer, tone and budget. People and agents work from it.",
   sequences: "The emails and follow-ups each lead gets, the schedule they send on, and who is in them.",
+  people: "Every person and company Outflare knows: their fields, timeline, consent and duplicates.",
   leads: "Everyone you can contact, where they came from, and what has been sent to them.",
   lists: "Saved searches that build lead lists from your data providers and keep them fresh.",
   "lead-finder": "AI that searches the web for companies that fit your ideal customer, reads their websites and says which fit and why.",
@@ -197,6 +199,7 @@ export const tabDocs: Partial<Record<Tab, string>> = {
   playbooks: "/playbooks/",
   projects: "/docs/guides/projects/",
   sequences: "/docs/guides/sequences/",
+  people: "/docs/guides/customer-records/",
   leads: "/docs/guides/import-leads/",
   lists: "/docs/guides/lead-lists/",
   suppression: "/docs/concepts/policy-check/",
@@ -252,7 +255,7 @@ export const tabDocs: Partial<Record<Tab, string>> = {
 };
 
 // "g" then this key opens the page.
-export const shortcuts: Partial<Record<Tab, string>> = { overview: "o", tools: "t", reports: "r", analytics: "w", inbox: "i", missions: "a", outcomes: "c", projects: "p", sequences: "s", leads: "l", suppression: "x", mailboxes: "m", domains: "d", infrastructure: "f", warmup: "u", seo: "e", fixes: "k", connectors: "n" };
+export const shortcuts: Partial<Record<Tab, string>> = { overview: "o", tools: "t", reports: "r", analytics: "w", inbox: "i", missions: "a", outcomes: "c", projects: "p", sequences: "s", people: "h", leads: "l", suppression: "x", mailboxes: "m", domains: "d", infrastructure: "f", warmup: "u", seo: "e", fixes: "k", connectors: "n" };
 
 export type NavGroup = { label?: string; tabs: Tab[] };
 
@@ -265,7 +268,7 @@ export const everyday: Tab[] = ["overview", "inbox", "missions", "projects"];
 
 export type Module = { id: string; label: string; icon: IconName; tabs: Tab[] };
 export const modules: Module[] = [
-  { id: "crm", label: "CRM", icon: "leads", tabs: ["leads", "lists", "lead-finder", "email-finder", "suppression"] },
+  { id: "crm", label: "CRM", icon: "leads", tabs: ["people", "leads", "lists", "lead-finder", "email-finder", "suppression"] },
   { id: "visitors", label: "Visitors", icon: "visitors", tabs: ["visitors"] },
   { id: "outreach", label: "Outreach", icon: "sequences", tabs: ["sequences", "link-building", "news", "allocation", "reports"] },
   { id: "deliverability", label: "Deliverability", icon: "mailboxes", tabs: ["infrastructure", "mailboxes", "domains", "warmup", "servers", "senders"] },
@@ -286,7 +289,7 @@ const allModules = modules;
 
 // Pages that work for someone kept to some brands. The others need every
 // brand (the API answers 403), so they are hidden from them.
-const brandTabs: readonly Tab[] = ["overview", "seo-overview", "audits", "fixes", "experiments", "keywords", "ai-visibility", "backlinks", "competitors", "link-building", "news", "reddit", "social", "reviews", "ads", "visitors", "tracking", "flags", "ab-tests", "inbox", "projects", "sequences", "leads", "lists", "rules", "lead-finder", "suppression", "mailboxes", "domains", "company", "brands", "setup", "ideal-customers", "members", "account", "instance"];
+const brandTabs: readonly Tab[] = ["overview", "seo-overview", "audits", "fixes", "experiments", "keywords", "ai-visibility", "backlinks", "competitors", "link-building", "news", "reddit", "social", "reviews", "ads", "visitors", "tracking", "flags", "ab-tests", "inbox", "projects", "sequences", "people", "leads", "lists", "rules", "lead-finder", "suppression", "mailboxes", "domains", "company", "brands", "setup", "ideal-customers", "members", "account", "instance"];
 export const canOpen = (ws: Workspace | undefined, t: Tab) => !ws?.brand_ids?.length || brandTabs.includes(t);
 
 // The sidebar keeps two things. Pins are kept in this browser for the
@@ -949,6 +952,12 @@ function callFor(tab: Tab, ws: string, item?: string): Call {
       return item
         ? { title: "One sequence", path: "/v1/workspaces/{ws}/sequences/{id}", params: { ...base, id: item }, mcp: "get_sequence", ask: "How is this sequence performing by step?", scope: "sequences.read" }
         : { title: "All sequences", path: "/v1/workspaces/{ws}/sequences", params: base, mcp: "list_sequences", ask: "List my active sequences and their reply rates.", scope: "sequences.read" };
+    case "people":
+      return item && /^[0-9a-f-]{36}$/.test(item)
+        ? { title: "One record", path: "/v1/workspaces/{ws}/records/{record}", params: { ...base, record: item }, mcp: "get_record", ask: "Summarise this person's history with us and what to do next.", scope: "customers.read" }
+        : item === "duplicates"
+          ? { title: "Possible duplicates", path: "/v1/workspaces/{ws}/records/duplicates", params: base, mcp: "list_record_duplicates", ask: "Which possible duplicates are safe to merge, and which look like two different people?", scope: "customers.read" }
+          : { title: item === "companies" ? "Companies" : "People", path: "/v1/workspaces/{ws}/records", params: base, query: { type: item === "companies" ? "account" : "person", limit: 50 }, mcp: "list_records", ask: "Which customers at fintech companies haven't heard from us this month?", scope: "customers.read" };
     case "leads":
       return { title: "Leads", path: "/v1/workspaces/{ws}/leads", params: base, query: { limit: 50 }, mcp: "list_leads", ask: "Find leads at companies in fintech.", scope: "leads.read" };
     case "lists":

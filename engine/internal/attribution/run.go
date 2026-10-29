@@ -7,12 +7,14 @@ import (
 	"log/slog"
 	"math"
 	"net/url"
+	"slices"
 	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/outflareai/outflare/engine/internal/conversions"
 	"github.com/outflareai/outflare/engine/internal/track"
 	"github.com/outflareai/outflare/engine/internal/utm"
 )
@@ -58,7 +60,8 @@ func (r *Runner) Tick(ctx context.Context) (visits, conversions int, err error) 
 	if visits, err = r.classifyBatch(ctx); err != nil {
 		return visits, 0, err
 	}
-	if _, err := r.Pool.Exec(ctx, `INSERT INTO attribution_settings (workspace_id) SELECT id FROM workspaces ON CONFLICT DO NOTHING`); err != nil {
+	if _, err := r.Pool.Exec(ctx, `INSERT INTO attribution_settings (workspace_id, lookback_days) SELECT id, $1 FROM workspaces ON CONFLICT DO NOTHING`,
+		DefaultLookbackDays); err != nil {
 		return visits, 0, err
 	}
 	rows, err := r.Pool.Query(ctx, `SELECT workspace_id::text FROM attribution_settings`)
@@ -237,30 +240,50 @@ func (r *Runner) creditWorkspace(ctx context.Context, ws string) (int, error) {
 	var lookback int
 	var events []string
 	var backfilled *time.Time
-	if err := r.Pool.QueryRow(ctx, `SELECT lookback_days, conversion_events, backfilled_at FROM attribution_settings WHERE workspace_id = $1`, ws).
-		Scan(&lookback, &events, &backfilled); err != nil {
+	var changed time.Time
+	if err := r.Pool.QueryRow(ctx, `SELECT lookback_days, conversion_events, backfilled_at, updated_at FROM attribution_settings WHERE workspace_id = $1`, ws).
+		Scan(&lookback, &events, &backfilled, &changed); err != nil {
+		return 0, err
+	}
+	// The events that count: the settings' conversion_events, each as it
+	// is, and the workspace's conversion definitions that credit channels,
+	// each when its filters match.
+	defs, defNames, err := conversions.ForAttribution(ctx, r.Pool, ws)
+	if err != nil {
 		return 0, err
 	}
 	names := append([]string{}, events...)
-	for _, e := range events {
-		if e == "payment.succeeded" {
-			names = append(names, "payment.refunded")
+	for _, e := range defNames {
+		if !slices.Contains(names, e) {
+			names = append(names, e)
 		}
+	}
+	if slices.Contains(names, "payment.succeeded") {
+		names = append(names, "payment.refunded")
 	}
 	since := time.Now().Add(-recentWindow)
 	if backfilled == nil {
 		since = time.Time{} // everything, after the settings change
+		// What was credited before the change is credited again.
+		if _, err := r.Pool.Exec(ctx, `DELETE FROM attribution_conversions WHERE workspace_id = $1 AND credited_at < $2`, ws, changed); err != nil {
+			return 0, err
+		}
 	}
+	// Events are read in order from a cursor, so ones that don't count
+	// (a definition's filters didn't match, a refund waiting for its
+	// payment) never hold up the ones after them.
 	total, refunds := 0, 0
+	at := cursor{at: since, id: "00000000-0000-0000-0000-000000000000"}
 	for {
-		n, rf, fetched, err := r.creditBatch(ctx, ws, names, since, settle, lookback)
+		n, rf, fetched, next, err := r.creditBatch(ctx, ws, names, at, settle, lookback, events, defs)
 		total, refunds = total+n, refunds+rf
 		if err != nil {
 			return total, err
 		}
-		if fetched < conversionBatch || n == 0 {
+		if fetched < conversionBatch {
 			break
 		}
+		at = next
 	}
 	if backfilled == nil {
 		if _, err := r.Pool.Exec(ctx, `UPDATE attribution_settings SET backfilled_at = now() WHERE workspace_id = $1`, ws); err != nil {
@@ -274,16 +297,26 @@ func (r *Runner) creditWorkspace(ctx context.Context, ws string) (int, error) {
 	return total, nil
 }
 
+// cursor is where creditBatch carries on from: the last event it read.
+type cursor struct {
+	at time.Time
+	id string
+}
+
 // creditBatch credits up to conversionBatch conversions in one
-// transaction. A refund whose payment isn't credited yet waits.
-func (r *Runner) creditBatch(ctx context.Context, ws string, names []string, since time.Time, settle time.Duration, lookback int) (n, refunds, fetched int, err error) {
+// transaction, from the events after at. An event counts when it is one of
+// plain (the settings' conversion_events) or a definition matches it. A
+// refund whose payment isn't credited yet waits.
+func (r *Runner) creditBatch(ctx context.Context, ws string, names []string, at cursor, settle time.Duration, lookback int,
+	plain []string, defs []conversions.Definition) (n, refunds, fetched int, next cursor, err error) {
+	next = at
 	err = pgx.BeginFunc(ctx, r.Pool, func(tx pgx.Tx) error {
 		rows, err := tx.Query(ctx, `
 			SELECT e.id::text, e.record_id::text, e.anonymous_id, e.brand_id::text, e.name, e.occurred_at, e.properties
 			FROM customer_events e
-			WHERE e.workspace_id = $1 AND e.name = ANY($2) AND e.kind = 'track' AND e.occurred_at >= $3 AND e.occurred_at <= $4
+			WHERE e.workspace_id = $1 AND e.name = ANY($2) AND e.kind = 'track' AND (e.occurred_at, e.id) > ($3, $6::uuid) AND e.occurred_at <= $4
 			  AND NOT EXISTS (SELECT 1 FROM attribution_conversions c WHERE c.event_id = e.id)
-			ORDER BY e.occurred_at LIMIT $5`, ws, names, since, time.Now().Add(-settle), conversionBatch)
+			ORDER BY e.occurred_at, e.id LIMIT $5`, ws, names, at.at, time.Now().Add(-settle), conversionBatch, at.id)
 		if err != nil {
 			return err
 		}
@@ -301,9 +334,16 @@ func (r *Runner) creditBatch(ctx context.Context, ws string, names []string, sin
 			return err
 		}
 		fetched = len(list)
+		if fetched > 0 {
+			next = cursor{at: list[fetched-1].at, id: list[fetched-1].id}
+		}
 		var own []string
+		var models []CreditModel
 		if len(list) > 0 {
 			if own, err = ownHosts(ctx, tx, ws); err != nil {
+				return err
+			}
+			if models, err = creditModels(ctx, tx, ws, lookback); err != nil {
 				return err
 			}
 		}
@@ -328,14 +368,22 @@ func (r *Runner) creditBatch(ctx context.Context, ws string, names []string, sin
 					continue
 				}
 			}
-			if err := credit(ctx, tx, ws, c, own, lookback); err != nil {
+			var def *conversions.Definition
+			if c.name != "payment.refunded" {
+				var props map[string]any
+				_ = json.Unmarshal(c.props, &props)
+				if def = conversions.For(defs, c.name, props); def == nil && !slices.Contains(plain, c.name) {
+					continue // a definition's event that its filters leave out
+				}
+			}
+			if err := credit(ctx, tx, ws, c, own, models, def); err != nil {
 				return err
 			}
 			n++
 		}
 		return nil
 	})
-	return n, refunds, fetched, err
+	return n, refunds, fetched, next, err
 }
 
 // creditRefund gives a refund the same credits as the payment it refunds,
@@ -368,7 +416,13 @@ func creditRefund(ctx context.Context, tx pgx.Tx, ws string, c conversion) (bool
 
 // credit matches a conversion to the visits before it and stores its
 // credits under every model.
-func credit(ctx context.Context, tx pgx.Tx, ws string, c conversion, own []string, lookback int) error {
+func credit(ctx context.Context, tx pgx.Tx, ws string, c conversion, own []string, models []CreditModel, def *conversions.Definition) error {
+	// Visits as far back as the widest model looks; each model then keeps
+	// the ones in its own windows.
+	lookback := 0
+	for _, m := range models {
+		lookback = max(lookback, m.Spec.window(0))
+	}
 	rows, err := tx.Query(ctx, `SELECT `+visitCols+`, s.started_at, s.channel, s.source, s.campaign, s.tracking_campaign_id::text, s.tag_method,
 			COALESCE(s.record_id = $2, false)
 		FROM site_sessions s `+visitJoin+`
@@ -402,7 +456,7 @@ func credit(ctx context.Context, tx pgx.Tx, ws string, c conversion, own []strin
 	if err := rows.Err(); err != nil {
 		return err
 	}
-	matched := "none"
+	matched, touches := "none", 0
 	points := make([]Point, len(visits))
 	for i := range visits {
 		v := &visits[i]
@@ -412,23 +466,39 @@ func credit(ctx context.Context, tx pgx.Tx, ws string, c conversion, own []strin
 				return err
 			}
 		}
-		points[i] = Point{At: v.at, Direct: v.touch.Channel == Direct}
+		points[i] = Point{At: v.at, Direct: v.touch.Channel == Direct, Channel: v.touch.Channel}
+		// The conversion's touches are those in the workspace's own
+		// window (the first model's), whatever wider ones others look at.
+		if !models[0].Spec.counts(points[i], c.at) {
+			continue
+		}
+		touches++
 		if v.byRec {
 			matched = "record"
 		} else if matched == "none" {
 			matched = "anonymous"
 		}
 	}
+	// A definition says what the conversion is worth; an event that only
+	// the settings name keeps its own value.
 	value, cur := c.value()
-	if _, err := tx.Exec(ctx, `INSERT INTO attribution_conversions (event_id, workspace_id, record_id, brand_id, name, occurred_at, value_minor, currency, touches, matched_by)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`, c.id, ws, c.recordID, c.brandID, c.name, c.at, value, cur, len(visits), matched); err != nil {
+	var defID *string
+	if def != nil {
+		var props map[string]any
+		_ = json.Unmarshal(c.props, &props)
+		value, cur = def.Value(props)
+		defID = &def.ID
+	}
+	if _, err := tx.Exec(ctx, `INSERT INTO attribution_conversions (event_id, workspace_id, record_id, brand_id, name, occurred_at, value_minor, currency, touches, matched_by, definition_id)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`, c.id, ws, c.recordID, c.brandID, c.name, c.at, value, cur, touches, matched, defID); err != nil {
 		return err
 	}
 	batch := &pgx.Batch{}
 	const ins = `INSERT INTO attribution_credits (event_id, workspace_id, model, position, session_id, touch_at, channel, source, campaign,
 		tracking_campaign_id, tag_method, weight) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`
-	for _, m := range Models {
-		w := Weights(m, points, c.at)
+	for _, model := range models {
+		m := model.ID
+		w := model.Spec.Weights(points, c.at)
 		if w == nil {
 			batch.Queue(ins, c.id, ws, m, 0, nil, nil, Direct, "(direct)", "", nil, "none", 1)
 			continue

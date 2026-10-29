@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"regexp"
 	"strings"
 	"sync"
@@ -112,7 +113,8 @@ func TestBrandSetupChecklist(t *testing.T) {
 	}
 
 	// The first visit ticks it off, and the script's version is kept.
-	b2, _ := json.Marshal(map[string]any{"key": key, "v": "4", "batch": []any{map[string]any{"type": "page", "anonymousId": "a-1", "messageId": "m-1",
+	current := siteScriptVersion(t)
+	b2, _ := json.Marshal(map[string]any{"key": key, "v": current, "batch": []any{map[string]any{"type": "page", "anonymousId": "a-1", "messageId": "m-1",
 		"context": map[string]any{"page": map[string]any{"url": "https://northpeak.example/", "path": "/"}}}}})
 	req := httptest.NewRequest("POST", "/v1/site/events", strings.NewReader(string(b2)))
 	req.Header.Set("Content-Type", "text/plain")
@@ -123,7 +125,7 @@ func TestBrandSetupChecklist(t *testing.T) {
 		t.Fatalf("site event: %d %s", rec.Code, rec.Body)
 	}
 	var version string
-	if err := e.pool.QueryRow(context.Background(), `SELECT script_version FROM site_keys WHERE key = $1`, key).Scan(&version); err != nil || version != "4" {
+	if err := e.pool.QueryRow(context.Background(), `SELECT script_version FROM site_keys WHERE key = $1`, key).Scan(&version); err != nil || version != current {
 		t.Fatalf("script version %q %v", version, err)
 	}
 	o = owner.must(200, "GET", setup, nil)
@@ -179,7 +181,7 @@ func TestBrandSetupChecklist(t *testing.T) {
 
 	// Install health: nothing wrong yet, with what was looked at.
 	h := owner.must(200, "GET", base+"/install-health?brand="+b["handle"].(string), nil)
-	if len(h["checks"].([]any)) != 0 || h["checked"].(map[string]any)["site_keys"] != 1.0 || h["latest"].(map[string]any)["site_script"] != "4" {
+	if len(h["checks"].([]any)) != 0 || h["checked"].(map[string]any)["site_keys"] != 1.0 || h["latest"].(map[string]any)["site_script"] != current {
 		t.Fatalf("health: %v", h)
 	}
 }
@@ -418,4 +420,18 @@ func TestInstallHealthFindsProblems(t *testing.T) {
 	if since := owner.must(200, "GET", base+"/install-health", nil)["checks"].([]any)[0].(map[string]any)["since"]; since == nil {
 		t.Fatal("no since on a known issue")
 	}
+}
+
+// siteScriptVersion is the VERSION the served site.js sends.
+func siteScriptVersion(t *testing.T) string {
+	t.Helper()
+	b, err := os.ReadFile("site.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := regexp.MustCompile(`VERSION = "([^"]+)"`).FindSubmatch(b)
+	if m == nil {
+		t.Fatal("site.js has no VERSION")
+	}
+	return string(m[1])
 }

@@ -27,6 +27,9 @@ type Service struct {
 	Pool   *pgxpool.Pool
 	Emails *emails.Service
 	Log    *slog.Logger
+	// Fields writes record fields for set_field and tag steps (the API
+	// server). Without it those steps fail.
+	Fields FieldWriter
 }
 
 // Register adds the job handlers to q.
@@ -42,16 +45,21 @@ type journey struct {
 	brandID                            *string
 	filter                             []Condition
 	steps                              []Step
+	// Exit criteria: these events end a run at once; these conditions
+	// (any of them) end it before its next step.
+	exitEvents     []string
+	exitConditions []Condition
 }
 
 func loadJourney(ctx context.Context, q jobs.Querier, ws, id string, lock bool) (*journey, error) {
 	var j journey
-	var filter, steps []byte
-	sql := `SELECT id, workspace_id, status, trigger_kind, entry, version, brand_id, trigger_filter, steps FROM journeys WHERE workspace_id = $1 AND id = $2`
+	var filter, steps, exitConds []byte
+	sql := `SELECT id, workspace_id, status, trigger_kind, entry, version, brand_id, trigger_filter, steps, exit_events, exit_conditions FROM journeys
+		WHERE workspace_id = $1 AND id = $2`
 	if lock {
 		sql += ` FOR SHARE`
 	}
-	err := q.QueryRow(ctx, sql, ws, id).Scan(&j.id, &j.ws, &j.status, &j.triggerKind, &j.entry, &j.version, &j.brandID, &filter, &steps)
+	err := q.QueryRow(ctx, sql, ws, id).Scan(&j.id, &j.ws, &j.status, &j.triggerKind, &j.entry, &j.version, &j.brandID, &filter, &steps, &j.exitEvents, &exitConds)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil
 	}
@@ -62,6 +70,9 @@ func loadJourney(ctx context.Context, q jobs.Querier, ws, id string, lock bool) 
 		return nil, err
 	}
 	if err := json.Unmarshal(steps, &j.steps); err != nil {
+		return nil, err
+	}
+	if err := json.Unmarshal(exitConds, &j.exitConditions); err != nil {
 		return nil, err
 	}
 	return &j, nil
@@ -130,18 +141,25 @@ func (s *Service) eventJob(ctx context.Context, job jobs.Job) error {
 			return err
 		}
 		// Goals first: an event that ends a run never also restarts it.
-		rows, err := tx.Query(ctx, `UPDATE journey_runs r SET status = 'exited', exit_reason = 'goal', finished_at = now(), next_at = NULL, updated_at = now()
-			FROM journeys j WHERE j.id = r.journey_id AND j.workspace_id = $1 AND j.status IN ('active', 'paused') AND j.goal_event = $2
-			  AND r.record_id = $3 AND r.status = 'active' RETURNING r.journey_id::text`, ws, name, *rec)
+		// Exit events too: they end a run at once, even mid-wait.
+		rows, err := tx.Query(ctx, `UPDATE journey_runs r SET status = 'exited',
+				exit_reason = CASE WHEN j.goal_event = $2 THEN 'goal' ELSE 'exit_event' END, finished_at = now(), next_at = NULL, updated_at = now()
+			FROM journeys j WHERE j.id = r.journey_id AND j.workspace_id = $1 AND j.status IN ('active', 'paused')
+			  AND (j.goal_event = $2 OR $2 = ANY (j.exit_events))
+			  AND r.record_id = $3 AND r.status = 'active' RETURNING r.journey_id::text, r.exit_reason`, ws, name, *rec)
 		if err != nil {
 			return err
 		}
-		ended, err := pgx.CollectRows(rows, pgx.RowTo[string])
+		type ended struct{ journey, reason string }
+		list, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (ended, error) {
+			var e ended
+			return e, row.Scan(&e.journey, &e.reason)
+		})
 		if err != nil {
 			return err
 		}
-		for _, jid := range ended {
-			if err := record(ctx, tx, ws, "journey_run.exited", jid, map[string]any{"reason": "goal"}); err != nil {
+		for _, e := range list {
+			if err := record(ctx, tx, ws, "journey_run.exited", e.journey, map[string]any{"reason": e.reason}); err != nil {
 				return err
 			}
 		}
@@ -194,6 +212,10 @@ func Enroll(ctx context.Context, tx pgx.Tx, ws, journeyID, recordID string, even
 	}
 	var attributes map[string]any
 	_ = json.Unmarshal(attrs, &attributes)
+	// Someone who already meets the exit criteria never starts.
+	if len(j.exitConditions) > 0 && Holds(attributes, context, j.exitConditions, "any") {
+		return "", "already meets the journey's exit criteria", nil
+	}
 	if !manual && len(j.filter) > 0 {
 		ok, err := holds(ctx, tx, subject{ws: ws, recordID: recordID, attributes: attributes, context: context, entered: time.Now()}, j.filter, "all")
 		if err != nil {
@@ -347,6 +369,15 @@ func (s *Service) advance(ctx context.Context, ws, runID string) (bool, error) {
 		if st == nil {
 			return s.finish(ctx, tx, ws, r, "exited", "step_removed")
 		}
+		if len(j.exitConditions) > 0 && r.nextAt == nil {
+			attrs, err := attributes(ctx, tx, ws, r.recordID)
+			if err != nil {
+				return err
+			}
+			if Holds(attrs, r.context, j.exitConditions, "any") {
+				return s.finish(ctx, tx, ws, r, "exited", "exit_condition")
+			}
+		}
 		var next, outcome, detail string
 		var emailID *string
 		switch st.Kind {
@@ -397,6 +428,29 @@ func (s *Service) advance(ctx context.Context, ws, runID string) (bool, error) {
 				return err
 			}
 			return s.finish(ctx, tx, ws, r, "exited", "exit_step")
+		default:
+			a := action(st.Kind)
+			if a == nil {
+				return s.finish(ctx, tx, ws, r, "failed", "unknown_step")
+			}
+			var err error
+			outcome, detail, err = a.run(ctx, &act{s: s, tx: tx, ws: ws, j: j, r: r, st: st})
+			if err != nil {
+				return err
+			}
+			next = st.Next
+			if outcome == "failed" {
+				switch st.OnError {
+				case "", "stop":
+					if err := logStep(ctx, tx, ws, r, st, "failed", nil, detail); err != nil {
+						return err
+					}
+					return s.finish(ctx, tx, ws, r, "failed", "action_failed")
+				case "continue":
+				default:
+					next = st.OnError
+				}
+			}
 		}
 		if err := logStep(ctx, tx, ws, r, st, outcome, emailID, detail); err != nil {
 			return err

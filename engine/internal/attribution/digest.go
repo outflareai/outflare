@@ -40,6 +40,15 @@ func digestSection(ctx context.Context, q digests.Querier, ws string, p digests.
 	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 		return s, err
 	}
+	// A workspace's own default model is stored as its key; its credits
+	// are under its latest version's id.
+	if id, _, err := Resolve(ctx, q, ws, model); err == nil {
+		model = id
+	} else if errors.Is(err, ErrUnknownModel) || errors.Is(err, ErrNotCredited) {
+		model = LastNonDirect
+	} else {
+		return s, err
+	}
 	now, err := periodTotals(ctx, q, ws, model, p.Start, p.End)
 	if err != nil {
 		return s, err

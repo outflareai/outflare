@@ -19,7 +19,7 @@ func TestAttribution(t *testing.T) {
 	ctx := context.Background()
 
 	s := owner.must(200, "GET", base+"/attribution/settings", nil)
-	if s["model"] != "last_non_direct" || s["lookback_days"] != float64(90) || len(s["conversion_events"].([]any)) != 2 {
+	if s["model"] != "last_non_direct" || s["lookback_days"] != float64(30) || len(s["conversion_events"].([]any)) != 2 {
 		t.Fatalf("settings = %v", s)
 	}
 	owner.must(400, "PATCH", base+"/attribution/settings", map[string]any{"model": "most_recent"})

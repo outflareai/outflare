@@ -2272,9 +2272,24 @@ export function createServer({ client: gtm, workspace, readOnly = false, mission
   );
 
   const attributionModel = z
-    .enum(["last_non_direct", "first_touch", "linear", "position", "time_decay"])
+    .string()
+    .regex(/^[a-z][a-z0-9_-]{0,39}(@[1-9][0-9]{0,5})?$/)
     .optional()
-    .describe("Which model's credits to read; the workspace's default when left out. position is 40% first, 40% last, 20% the rest.");
+    .describe(
+      "Which model's credits to read; the workspace's default when left out. A built-in model (last_non_direct, first_touch, linear, " +
+        "position: 40% first, 40% last, 20% the rest, time_decay), or the key of one of the workspace's models (list_attribution_models), with @version for a pinned version.",
+    );
+  const attributionSpec = z
+    .object({
+      base: z.enum(["last_non_direct", "first_touch", "linear", "position", "time_decay"]),
+      lookback_days: z.number().int().min(0).max(365).optional().describe("0 or left out: the workspace's look-back."),
+      channel_lookback_days: z.record(z.string(), z.number().int().min(1).max(365)).optional().describe('A window per channel, such as {"paid_ads": 7}.'),
+      exclude_channels: z.array(z.string()).optional().describe("Channels that never get credit."),
+      first_weight: z.number().min(0).max(1).optional().describe("position only (0.4 by default)."),
+      last_weight: z.number().min(0).max(1).optional().describe("position only (0.4 by default)."),
+      half_life_days: z.number().min(0.5).max(365).optional().describe("time_decay only (7 by default)."),
+    })
+    .describe("Start from a built-in model and change its windows, channels left out, position weights or half-life.");
   const attributionDay = z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional();
   const attributionRange = {
     from: attributionDay.describe("First day, such as 2026-09-27. Default: 27 days before to."),
@@ -2309,6 +2324,142 @@ export function createServer({ client: gtm, workspace, readOnly = false, mission
       annotations: write,
     },
     (body) => call(() => gtm.PATCH("/v1/workspaces/{ws}/attribution/settings", { params: { path }, body })),
+  );
+
+  server.registerTool(
+    "list_attribution_models",
+    {
+      title: "List attribution models",
+      description: "The five built-in models, and the workspace's own models at their latest version, with the modules that pin a version.",
+      inputSchema: { archived: z.boolean().optional() },
+      annotations: read,
+    },
+    (query) => call(() => gtm.GET("/v1/workspaces/{ws}/attribution/models", { params: { path, query } })),
+  );
+
+  server.registerTool(
+    "create_attribution_model",
+    {
+      title: "Make an attribution model",
+      description:
+        "Make the workspace's own model from a built-in one, such as last non-direct with paid ads counting for 7 days. Reports then take its key as model. " +
+        "Every conversion is credited again in the background.",
+      inputSchema: {
+        key: z.string().regex(/^[a-z][a-z0-9-]{0,39}$/).describe("Such as paid-7-day; not a built-in model's id."),
+        name: z.string().min(1).max(80),
+        spec: attributionSpec,
+      },
+      annotations: write,
+    },
+    (body) => call(() => gtm.POST("/v1/workspaces/{ws}/attribution/models", { params: { path }, body })),
+  );
+
+  server.registerTool(
+    "update_attribution_model",
+    {
+      title: "Change an attribution model",
+      description: "A new spec makes the model's next version and credits every conversion again; a version a module pins keeps its credits. A new name alone keeps the version.",
+      inputSchema: { key: z.string().min(1), name: z.string().min(1).max(80).optional(), spec: attributionSpec.optional() },
+      annotations: { ...write, idempotentHint: true },
+    },
+    ({ key, ...body }) => call(() => gtm.PATCH("/v1/workspaces/{ws}/attribution/models/{key}", { params: { path: { ws, key } }, body })),
+  );
+
+  server.registerTool(
+    "archive_attribution_model",
+    {
+      title: "Archive an attribution model",
+      description: "Reports can no longer read it, except a version a module pins. The workspace's default model can't be archived.",
+      inputSchema: { key: z.string().min(1) },
+      annotations: { ...write, destructiveHint: true, idempotentHint: true },
+    },
+    ({ key }) => call(() => gtm.DELETE("/v1/workspaces/{ws}/attribution/models/{key}", { params: { path: { ws, key } } })),
+  );
+
+  const conversionFilter = z.object({
+    property: z.string().min(1).describe("A property key, or a dotted path such as plan.tier."),
+    op: z.enum(["eq", "neq", "gt", "gte", "lt", "lte", "in", "contains", "exists", "not_exists"]),
+    value: z.any().optional().describe("A number for gt/gte/lt/lte, a list for in, none for exists/not_exists."),
+  });
+  const conversionFields = {
+    name: z.string().min(1).max(80).optional(),
+    event: z.string().optional().describe("The customer event, such as signed_up, payment.succeeded, meeting.held or call.completed."),
+    filters: z.array(conversionFilter).max(10).optional().describe("All must match; none means every such event."),
+    value_mode: z.enum(["none", "fixed", "property"]).optional(),
+    fixed_value_minor: z.number().int().min(0).nullable().optional().describe("For fixed: cents."),
+    value_property: z.string().optional().describe("For property: such as revenue or amount_minor."),
+    value_unit: z.enum(["major", "minor"]).optional().describe("major 12.50, minor 1250."),
+    currency: z.string().regex(/^([A-Z]{3})?$/).optional().describe("Empty: the event's own currency property."),
+    network_events: z.record(z.string(), z.string()).optional().describe('Each ad network\'s own name for it, such as {"meta": "Purchase"}.'),
+    attribution: z.boolean().optional().describe("Whether attribution credits channels with it (default true)."),
+  };
+
+  server.registerTool(
+    "list_conversion_definitions",
+    {
+      title: "List conversion definitions",
+      description:
+        "What the workspace counts as a conversion, on the customer events stream: an event, filters on its properties, its value and each ad network's name for it. " +
+        "Attribution credits channels with them; ad send-back and partner programs read them too.",
+      inputSchema: { archived: z.boolean().optional() },
+      annotations: read,
+    },
+    (query) => call(() => gtm.GET("/v1/workspaces/{ws}/conversion-definitions", { params: { path, query } })),
+  );
+
+  server.registerTool(
+    "list_conversion_presets",
+    {
+      title: "Conversion definition presets",
+      description: "Starting points by kind of business: SaaS, booked calls, e-commerce, lead generation.",
+      inputSchema: {},
+      annotations: read,
+    },
+    () => call(() => gtm.GET("/v1/workspaces/{ws}/conversion-definitions/presets", { params: { path } })),
+  );
+
+  server.registerTool(
+    "add_conversion_preset",
+    {
+      title: "Add a preset's conversion definitions",
+      description: "Adds the preset's definitions whose keys the workspace doesn't use yet; adding it twice changes nothing. Conversions are credited again.",
+      inputSchema: { preset: z.string().min(1).describe("saas, booked_calls, ecommerce or lead_gen.") },
+      annotations: { ...write, idempotentHint: true },
+    },
+    ({ preset }) => call(() => gtm.POST("/v1/workspaces/{ws}/conversion-definitions/presets/{preset}", { params: { path: { ws, preset } } })),
+  );
+
+  server.registerTool(
+    "create_conversion_definition",
+    {
+      title: "Define a conversion",
+      description: "Such as a call over a minute: event call.completed, filter duration_s gt 60, a fixed value. Conversions are credited again in the background.",
+      inputSchema: { key: z.string().regex(/^[a-z][a-z0-9_-]{0,39}$/), ...conversionFields },
+      annotations: write,
+    },
+    (body) => call(() => gtm.POST("/v1/workspaces/{ws}/conversion-definitions", { params: { path }, body })),
+  );
+
+  server.registerTool(
+    "update_conversion_definition",
+    {
+      title: "Change a conversion definition",
+      description: "Fields left out keep their values; switching value_mode clears the other mode's fields. Conversions are credited again.",
+      inputSchema: { key: z.string().min(1), ...conversionFields },
+      annotations: { ...write, idempotentHint: true },
+    },
+    ({ key, ...body }) => call(() => gtm.PATCH("/v1/workspaces/{ws}/conversion-definitions/{key}", { params: { path: { ws, key } }, body })),
+  );
+
+  server.registerTool(
+    "archive_conversion_definition",
+    {
+      title: "Archive a conversion definition",
+      description: "It stops counting, and conversions are credited again without it.",
+      inputSchema: { key: z.string().min(1) },
+      annotations: { ...write, destructiveHint: true, idempotentHint: true },
+    },
+    ({ key }) => call(() => gtm.DELETE("/v1/workspaces/{ws}/conversion-definitions/{key}", { params: { path: { ws, key } } })),
   );
 
   server.registerTool(
@@ -2352,7 +2503,7 @@ export function createServer({ client: gtm, workspace, readOnly = false, mission
     (query) => call(() => gtm.GET("/v1/workspaces/{ws}/attribution/conversions", { params: { path, query } })),
   );
 
-  const adConnector = z.enum(["google_ads", "meta_ads", "microsoft_ads", "reddit_ads", "x_ads", "linkedin_ads", "tiktok_ads"]).optional();
+  const adConnector = z.enum(["google_ads", "meta_ads", "microsoft_ads", "reddit_ads", "x_ads", "linkedin_ads", "tiktok_ads", "snapchat_ads"]).optional();
   const adDay = z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional();
 
   server.registerTool(
@@ -2360,7 +2511,7 @@ export function createServer({ client: gtm, workspace, readOnly = false, mission
     {
       title: "List connected ad platforms",
       description:
-        "Each connected ad platform (Google Ads, Meta Ads, Microsoft Ads, Reddit Ads, X Ads, LinkedIn Ads, TikTok Ads), its accounts and sync status, and setup_needed when it still waits for a field such as a developer token. " +
+        "Each connected ad platform (Google Ads, Meta Ads, Microsoft Ads, Reddit Ads, X Ads, LinkedIn Ads, TikTok Ads, Snapchat Ads), its accounts and sync status, and setup_needed when it still waits for a field such as a developer token. " +
         "A person adds that field in Integrations; agents never handle keys.",
       inputSchema: {},
       annotations: read,
@@ -2428,6 +2579,19 @@ export function createServer({ client: gtm, workspace, readOnly = false, mission
       annotations: read,
     },
     (q) => callCompact(() => gtm.GET("/v1/workspaces/{ws}/ads/summary", { params: { path, query: withBrand(q) } })),
+  );
+
+  server.registerTool(
+    "list_ad_tracking_templates",
+    {
+      title: "Tracking templates for each ad network",
+      description:
+        "The query string to paste into each ad network's tracking field (Google's final URL suffix, Meta's URL parameters, TikTok's URL parameters and so on), " +
+        "so paid clicks land with UTM tags and the network's own campaign, ad set and ad ids, plus the click ids each network adds and the pixel cookies read with consent.",
+      inputSchema: { network: z.string().min(1).optional().describe("Only this network, by id: google, meta, tiktok, snapchat...") },
+      annotations: read,
+    },
+    (q) => call(() => gtm.GET("/v1/workspaces/{ws}/ads/tracking-templates", { params: { path, query: q } })),
   );
 
   server.registerTool(
@@ -5445,8 +5609,9 @@ export function createServer({ client: gtm, workspace, readOnly = false, mission
     "create_smart_list",
     {
       title: "Create a smart list",
-      description: "A list that fills itself from rules and stays up to date as people's records and events change. It can then be used for email, journeys and ads.",
-      inputSchema: { ...smartListFields, name: z.string().min(1).max(200) },
+      description:
+        "A list that fills itself from rules and stays up to date as people's records and events change (kind smart, the default), or a static list that holds the people put in it (kind static: add_to_static_list). It can then be used for email, journeys and ads.",
+      inputSchema: { ...smartListFields, name: z.string().min(1).max(200), kind: z.enum(["smart", "static"]).optional() },
       annotations: write,
     },
     (body) => call(() => gtm.POST("/v1/workspaces/{ws}/smart-lists", { params: { path }, body })),
@@ -5461,6 +5626,29 @@ export function createServer({ client: gtm, workspace, readOnly = false, mission
       annotations: write,
     },
     ({ list_id, ...body }) => call(() => gtm.PATCH("/v1/workspaces/{ws}/smart-lists/{id}", { params: { path: { ...path, id: list_id } }, body })),
+  );
+
+  server.registerTool(
+    "add_to_static_list",
+    {
+      title: "Put people in a static list",
+      description: "Add people (customer record ids) to a static list. Rules acting on people joining the list hear of it.",
+      inputSchema: { list_id: id, record_ids: z.array(z.string()).min(1).max(10000) },
+      annotations: write,
+    },
+    ({ list_id, ...body }) => call(() => gtm.POST("/v1/workspaces/{ws}/smart-lists/{id}/members", { params: { path: { ...path, id: list_id } }, body })),
+  );
+
+  server.registerTool(
+    "remove_from_static_list",
+    {
+      title: "Take people out of a static list",
+      description: "Remove people (customer record ids) from a static list.",
+      inputSchema: { list_id: id, record_ids: z.array(z.string()).min(1).max(10000) },
+      annotations: write,
+    },
+    ({ list_id, ...body }) =>
+      call(() => gtm.POST("/v1/workspaces/{ws}/smart-lists/{id}/members/remove", { params: { path: { ...path, id: list_id } }, body })),
   );
 
   server.registerTool(
@@ -7879,11 +8067,34 @@ export function createServer({ client: gtm, workspace, readOnly = false, mission
       .describe("event: a customer event with this name starts a run, if the person and event meet filter (attribute and property conditions). manual: people are added with add_to_journey."),
     entry: z.enum(["once", "again"]).optional().describe("once (default): a person goes through it once ever. again: again after they finish."),
     goal_event: z.string().nullable().optional().describe("Doing this event ends their run: they reached the goal."),
+    exit_events: z.array(z.string()).max(10).optional().describe("Doing any of these events ends their run at once, even mid-wait."),
+    exit_conditions: z
+      .array(condition)
+      .max(20)
+      .optional()
+      .describe("Attribute conditions: when any holds, the run ends before its next step, and nobody who already meets one starts."),
     steps: z
       .array(
         z.object({
           id: z.string().describe("Lowercase letters, digits, - or _."),
-          kind: z.enum(["email", "wait", "branch", "exit"]),
+          kind: z.enum([
+            "email",
+            "wait",
+            "branch",
+            "exit",
+            "set_field",
+            "add_tag",
+            "remove_tag",
+            "add_to_list",
+            "remove_from_list",
+            "enter_journey",
+            "exit_journey",
+            "enroll_in_sequence",
+            "stop_sequences",
+            "suppress",
+            "unsubscribe_topic",
+            "alert",
+          ]),
           name: z.string().optional(),
           template: z.string().optional().describe("email: a lifecycle template's handle."),
           wait_seconds: z.number().int().min(60).max(7776000).optional(),
@@ -7892,12 +8103,40 @@ export function createServer({ client: gtm, workspace, readOnly = false, mission
           then: z.string().optional(),
           else: z.string().optional(),
           next: z.string().optional().describe("The step after; empty ends the run."),
+          field: z.string().optional().describe("set_field: the field's key."),
+          change: z.enum(["set", "clear", "increment"]).optional(),
+          value: z.unknown().optional().describe("set_field: the value, or {{event.x}} / {{person.x}}."),
+          overwrite_manual: z.boolean().optional().describe("set_field: overwrite a value a person set by hand."),
+          tag: z.string().optional(),
+          list_id: z.string().optional().describe("add_to_list, remove_from_list: a static list."),
+          journey_id: z.string().optional(),
+          sequence_id: z.string().optional(),
+          scope: z.enum(["journey", "others", "sequence", "all", "company"]).optional(),
+          allow_elsewhere: z.boolean().optional(),
+          target: z.enum(["email", "domain"]).optional(),
+          topic: z.string().optional(),
+          title: z.string().optional(),
+          text: z.string().optional(),
+          to: z.enum(["owner", "admins"]).optional(),
+          on_error: z.string().optional().describe("Action steps: stop (default), continue, or a step id."),
         }),
       )
       .max(100)
       .optional()
-      .describe("The first step starts. email and wait go to next; branch goes to then or else; no loops."),
+      .describe("The first step starts; no loops. Each kind's settings: list_journey_step_kinds."),
   };
+
+  server.registerTool(
+    "list_journey_step_kinds",
+    {
+      title: "List the kinds of journey step",
+      description:
+        "Every step a journey can have: email, wait, branch, exit, and actions that change the person's fields and tags, move them between lists, journeys and sequences, suppress them, unsubscribe them or raise an alert. Each with its settings as JSON Schema.",
+      inputSchema: {},
+      annotations: read,
+    },
+    () => call(() => gtm.GET("/v1/workspaces/{ws}/journeys/step-kinds", { params: { path } })),
+  );
 
   server.registerTool(
     "list_journeys",
@@ -7961,8 +8200,16 @@ export function createServer({ client: gtm, workspace, readOnly = false, mission
     {
       title: "Edit a live journey's draft version",
       description:
-        "A live (active or paused) journey is read-only: this starts a draft version from it (or reuses the draft already there) and, with any of trigger, entry, goal_event or steps, changes the draft. The live version keeps running until publish_journey.",
-      inputSchema: { journey: z.string().describe("The journey's id."), trigger: journeyFields.trigger, entry: journeyFields.entry, goal_event: journeyFields.goal_event, steps: journeyFields.steps },
+        "A live (active or paused) journey is read-only: this starts a draft version from it (or reuses the draft already there) and, with any of trigger, entry, goal_event, exit_events, exit_conditions or steps, changes the draft. The live version keeps running until publish_journey.",
+      inputSchema: {
+        journey: z.string().describe("The journey's id."),
+        trigger: journeyFields.trigger,
+        entry: journeyFields.entry,
+        goal_event: journeyFields.goal_event,
+        exit_events: journeyFields.exit_events,
+        exit_conditions: journeyFields.exit_conditions,
+        steps: journeyFields.steps,
+      },
       annotations: write,
     },
     async ({ journey, ...body }) => {

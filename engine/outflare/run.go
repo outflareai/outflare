@@ -330,7 +330,8 @@ func Run(ctx context.Context, log *slog.Logger, cmd string, exts ...Extension) e
 	lifecycle.Register(sendQueue)
 	// Journeys start runs from customer events and move them through their
 	// steps, sending with the lifecycle service.
-	(&journeys.Service{Pool: pool, Emails: lifecycle, Log: log}).Register(queue)
+	journeyRuns := &journeys.Service{Pool: pool, Emails: lifecycle, Log: log}
+	journeyRuns.Register(queue)
 	// Smart lists keep their members up to date from their rules.
 	smart := &smartlists.Service{Pool: pool, Log: log}
 	smart.Register(queue)
@@ -378,6 +379,8 @@ func Run(ctx context.Context, log *slog.Logger, cmd string, exts ...Extension) e
 		SiteInbox: true, QueryConnections: queryConnections(cfg.QueryConnections),
 		Routes: host.registerRoutes, Middleware: host.middleware, Capabilities: host.capabilities, WorkspaceRoutes: host.workspaceRoutes, MenuLinks: host.menuLinks, AITools: host.aiTools,
 	})
+	// Journey steps that change fields write through the API's checks.
+	journeyRuns.Fields = apiServer
 	host.server = apiServer
 	researcher.Models = apiServer.AIModels()
 	labeller.Models = apiServer.AIModels()
@@ -542,6 +545,12 @@ func Run(ctx context.Context, log *slog.Logger, cmd string, exts ...Extension) e
 		go func() {
 			defer wg.Done()
 			(&attribution.Runner{Pool: pool, Log: log}).Run(ctx, time.Minute)
+		}()
+		// Meetings on people's timelines, as customer events.
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			outcomes.RunMeetingEvents(ctx, pool, log, time.Minute)
 		}()
 		wg.Add(1)
 		go func() {

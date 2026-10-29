@@ -18,6 +18,9 @@
 // report sent and what the policy elements were filled with.
 // With quiet, no onFlags callback reads the flags; read lists flags to read
 // with outflare.flag once they arrive. tracked lists the track events sent.
+// cookies (an object) adds cookies to cookie, consent is the data-consent
+// mode (granted by default), track an event to send after the page view,
+// and bodies lists what each post sent.
 import { readFileSync } from "node:fs";
 import vm from "node:vm";
 
@@ -45,6 +48,7 @@ const sessionStorage = {
 // A cookie jar that behaves like document.cookie: setting one name keeps
 // the others, and max-age=0 removes it. Domains are ignored.
 const jar = new Map((opt.cookie || "").split(/;\s*/).filter(Boolean).map((c) => c.split("=")));
+for (const [k, v] of Object.entries(opt.cookies || {})) jar.set(k, v);
 const ran = [];
 const held = (opt.held || []).map((h) => {
   const a = { type: "text/plain", "data-category": h.category, ...(h.src ? { src: h.src } : {}) };
@@ -104,6 +108,7 @@ const choices = [];
 let bannerAsks = 0;
 const cookieReports = [];
 const tracked = [];
+const bodies = [];
 const fetch = (url, init) => {
   if (url.includes("/v1/site/cookie-policy")) {
     return Promise.resolve({ ok: true, status: 200, text: () => Promise.resolve("<div>policy</div>") });
@@ -121,7 +126,9 @@ const fetch = (url, init) => {
     return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve(opt.banner || { enabled: false }) });
   }
   if (url.endsWith("/v1/site/events")) {
-    for (const e of JSON.parse(init.body).batch) if (e.type === "track") tracked.push({ event: e.event, properties: e.properties });
+    const body = JSON.parse(init.body);
+    bodies.push(body);
+    for (const e of body.batch) if (e.type === "track") tracked.push({ event: e.event, properties: e.properties });
   }
   if (url.endsWith("/v1/site/flags")) {
     flagAsks++;
@@ -143,6 +150,7 @@ vm.runInContext(readFileSync(file, "utf8"), ctx);
 for (let i = 0; i < 5; i++) await new Promise((r) => setImmediate(r));
 let state = null;
 for (const [name, ...args] of opt.calls || []) state = window.outflare[name](...args);
+if (opt.track) window.outflare.track(opt.track, { plan: "pro" });
 let got = null;
 if (opt.flags && !opt.quiet) window.outflare.onFlags((f) => { got = { flags: { ...f }, payload: window.outflare.flagPayload("hero") }; });
 for (const k of opt.read || []) window.outflare.onFlags(() => window.outflare.flag(k));
@@ -153,4 +161,4 @@ for (let i = 0; i < 10; i++) {
 }
 console.log(JSON.stringify({ anon: window.outflare.anonymousId(), href, posts, flagAsks, got, classes: [...classes].sort(), tracked, stored: Object.fromEntries(storage),
   choices, bannerAsks, cookieReports, policy: spots.map((s) => s.innerHTML), local: Object.fromEntries(local), state, consent: window.outflare.consent(), dataLayer: (window.dataLayer || []).map((a) => [...a]), uetq: window.uetq || null, fbq, ran,
-  cookies: Object.fromEntries(jar) }));
+  cookies: Object.fromEntries(jar), bodies }));

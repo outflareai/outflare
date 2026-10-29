@@ -299,7 +299,7 @@ var Follows = []Ref{
 	{"journey_runs", "record_id"}, {"payment_subscriptions", "record_id"}, {"seo_competitors", "record_id"},
 	{"site_sessions", "record_id"}, {"site_visitors", "record_id"}, {"site_visitors", "account_id"},
 	{"ad_conversion_sends", "record_id"}, {"attribution_conversions", "record_id"}, {"link_prospects", "record_id"},
-	{"rule_firings", "record_id"}, {"coverage", "record_id"}, {"news_article_authors", "record_id"},
+	{"rule_firings", "record_id"}, {"coverage", "record_id"}, {"static_list_members", "record_id"}, {"news_article_authors", "record_id"},
 	{"link_prospect_contacts", "record_id"},
 	{"link_pitches", "record_id"},
 	{"partner_memberships", "record_id"}, {"partner_referrals", "record_id"}, {"partner_conversions", "record_id"},
@@ -362,6 +362,9 @@ func Follow(ctx context.Context, tx pgx.Tx, workspaceID, fromID, intoID string) 
 		}
 		// A rule that fired for both in the same episode keeps the kept
 		// record's firing.
+		if r.Table == "static_list_members" {
+			sql += ` AND NOT EXISTS (SELECT 1 FROM static_list_members o WHERE o.list_id = static_list_members.list_id AND o.record_id = $2)`
+		}
 		if r.Table == "rule_firings" {
 			sql += ` AND NOT EXISTS (SELECT 1 FROM rule_firings o WHERE o.rule_id = rule_firings.rule_id AND o.record_id = $2 AND o.episode_key = rule_firings.episode_key)`
 		}

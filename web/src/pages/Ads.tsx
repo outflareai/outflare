@@ -8,6 +8,7 @@ import { Badge, Button, Card, ErrorText, Input, Loading, PageHeader, Stat, Stats
 import { ago } from "../format";
 import type { Tab } from "../App";
 import { AdConversions } from "./AdConversions";
+import { AdTrackingTemplates } from "./AdTracking";
 
 // Paid ads: spend, clicks and what each platform says it brought in, read
 // every six hours from the workspace's own ad accounts. Conversions and ROAS
@@ -23,6 +24,7 @@ const platforms: { id: string; name: string }[] = [
   { id: "x_ads", name: "X Ads" },
   { id: "linkedin_ads", name: "LinkedIn Ads" },
   { id: "tiktok_ads", name: "TikTok Ads" },
+  { id: "snapchat_ads", name: "Snapchat Ads" },
 ];
 const platformName = (id: string) => platforms.find((p) => p.id === id)?.name ?? id;
 
@@ -115,9 +117,10 @@ export function Ads({ ws, canManage, go }: Props) {
     return (
       <div className="space-y-6">
         {header}
-        <Card title="Connect an ad account" description="Google Ads, Meta Ads, Microsoft Advertising, Reddit Ads, X Ads, LinkedIn Ads and TikTok Ads. Each one is your own account: Outflare never provides one, and nothing is read until you connect it.">
+        <Card title="Connect an ad account" description="Google Ads, Meta Ads, Microsoft Advertising, Reddit Ads, X Ads, LinkedIn Ads, TikTok Ads and Snapchat Ads. Each one is your own account: Outflare never provides one, and nothing is read until you connect it.">
           {canManage ? <Button onClick={() => go("connectors", "ads")}>Connect an ad platform</Button> : <p className="text-[13px] text-muted-foreground">Ask an admin to connect your ad accounts.</p>}
         </Card>
+        <AdTrackingTemplates ws={ws} />
       </div>
     );
 
@@ -228,6 +231,8 @@ export function Ads({ ws, canManage, go }: Props) {
           ]}
         />
       </Card>
+
+      <AdTrackingTemplates ws={ws} />
 
       <Card title="Connections" description="Your ad platform sign-ins. Add or remove one under Connectors.">
         <div className="space-y-2 text-[13px]">

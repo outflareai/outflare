@@ -51,7 +51,7 @@ func fake(t *testing.T, routes map[string]any) (*c.Client, *[]seen, string) {
 	t.Cleanup(srv.Close)
 	cl := &c.Client{BaseURLs: map[string]string{}}
 	for _, id := range []string{"google_ads", "meta_ads", "microsoft_ads.customer", "microsoft_ads.campaign", "microsoft_ads.reporting",
-		"reddit_ads", "reddit_ads.conversions", "x_ads", "linkedin_ads", "tiktok_ads"} {
+		"reddit_ads", "reddit_ads.conversions", "x_ads", "linkedin_ads", "tiktok_ads", "snapchat_ads", "snapchat_ads.conversions"} {
 		cl.BaseURLs[id] = srv.URL
 	}
 	return cl, &reqs, srv.URL
@@ -75,8 +75,8 @@ func TestDefinitions(t *testing.T) {
 			t.Errorf("%s offers OAuth without a consent screen", d.ID)
 		}
 	}
-	if len(ids) != 7 {
-		t.Fatalf("want seven ad platforms, got %d", len(ids))
+	if len(ids) != 8 {
+		t.Fatalf("want eight ad platforms, got %d", len(ids))
 	}
 }
 
@@ -592,5 +592,88 @@ func TestTikTokSignIn(t *testing.T) {
 	cl2.BaseURLs["tiktok_ads.token"] = srv2 + "/oauth2/access_token/"
 	if _, err := c.Exchange(ctx, cl2, d, app, "old", "https://app.example.com/cb", "v"); c.KindOf(err) != c.ErrAuth {
 		t.Fatalf("a refused code: %v", err)
+	}
+}
+
+func TestSnapchatAds(t *testing.T) {
+	cl, reqs, _ := fake(t, map[string]any{
+		"GET /me": map[string]any{"me": map[string]any{"id": "u1", "display_name": "Northpeak"}},
+		"GET /me/organizations": map[string]any{"organizations": []any{map[string]any{"organization": map[string]any{"id": "o1",
+			"ad_accounts": []any{map[string]any{"id": "a1", "name": "Northpeak", "currency": "eur", "timezone": "Europe/Berlin"}}}}}},
+		"GET /adaccounts/a1/campaigns": func(r *http.Request) any {
+			if r.URL.Query().Get("cursor") == "" {
+				return map[string]any{"campaigns": []any{map[string]any{"campaign": map[string]any{"id": "c1", "name": "Lens", "status": "ACTIVE", "objective": "WEB_CONVERSION", "daily_budget_micro": 20_000_000}}},
+					"paging": map[string]any{"next_link": "http://" + r.Host + r.URL.Path + "?cursor=2"}}
+			}
+			return map[string]any{"campaigns": []any{map[string]any{"campaign": map[string]any{"id": "c2", "name": "Old", "status": "PAUSED"}}}}
+		},
+		"GET /adaccounts/a1/stats": map[string]any{"timeseries_stats": []any{map[string]any{"timeseries_stat": map[string]any{"breakdown_stats": map[string]any{
+			"campaign": []any{map[string]any{"id": "c1", "timeseries": []any{
+				map[string]any{"start_time": "2026-10-01T00:00:00.000+02:00", "stats": map[string]any{"impressions": 800, "swipes": 12, "spend": 4_500_000, "conversion_purchases": 2}},
+				map[string]any{"start_time": "2026-10-02T00:00:00.000+02:00", "stats": map[string]any{"impressions": 0, "swipes": 0, "spend": 0}},
+			}}}}}}}},
+	})
+	sn := SnapchatAds{}
+	creds := c.Creds{"access_token": "tok"}
+	acct0, err := sn.Test(ctx, cl, creds)
+	if err != nil || acct0.Name != "Northpeak" {
+		t.Fatalf("test %+v %v", acct0, err)
+	}
+	accts, err := sn.AdAccounts(ctx, cl, creds)
+	if err != nil || len(accts) != 1 || accts[0].Currency != "EUR" || accts[0].Meta["organization_id"] != "o1" {
+		t.Fatalf("accounts %+v %v", accts, err)
+	}
+	// The second page comes from the next link, a full URL on the API host.
+	camps, err := sn.AdCampaigns(ctx, cl, creds, accts[0])
+	if err != nil || len(camps) != 2 || camps[0].Status != c.AdActive || *camps[0].DailyBudgetMicros != 20_000_000 || camps[1].Status != c.AdPaused {
+		t.Fatalf("campaigns %+v %v", camps, err)
+	}
+	n := len(*reqs)
+	days, err := sn.AdDays(ctx, cl, creds, accts[0], "2026-09-01", "2026-10-02")
+	if err != nil || len(days) != 2 || days[0].SpendMicros != 4_500_000 || days[0].Clicks != 12 || days[0].Date != "2026-10-01" || *days[0].Conversions != 2 {
+		t.Fatalf("days %+v %v", days, err)
+	}
+	// 32 days are two calls, each from midnight in Berlin.
+	got := (*reqs)[n:]
+	if len(got) != 2 || !strings.Contains(got[0].query, "start_time=2026-09-01T00%3A00%3A00%2B02%3A00") || !strings.Contains(got[1].query, "start_time=2026-10-02T00%3A00%3A00%2B02%3A00") {
+		t.Fatalf("stats windows %+v", got)
+	}
+}
+
+func TestSnapchatAdsConversions(t *testing.T) {
+	cl, reqs, _ := fake(t, map[string]any{
+		"GET /adaccounts/a1/pixels": map[string]any{"pixels": []any{map[string]any{"pixel": map[string]any{"id": "PX9", "name": "Site"}}}},
+		"POST /PX9/events":          map[string]any{"status": "VALID"},
+	})
+	sn, acct := SnapchatAds{}, c.AdAccount{ID: "a1"}
+	if got := c.MissingSetup(SnapchatAds{}, c.Creds{}); len(got) != 0 {
+		t.Fatalf("the conversions token is optional: %+v", got)
+	}
+	creds := c.Creds{"access_token": "tok"}
+	ts, err := sn.ConversionTargets(ctx, cl, creds, acct)
+	if err != nil || len(ts) != 1 || ts[0].ID != "PX9" {
+		t.Fatalf("targets %+v %v", ts, err)
+	}
+	cv := conv(0, map[string]string{"ScCid": "sc1", "scid": "cookie9"})
+	cv.EventType = "PURCHASE"
+	empty := c.AdConversion{EventID: "msg-2", Index: 1, ClickIDs: map[string]string{"gclid": "g"}}
+	res, err := sn.SendConversions(ctx, cl, creds, acct, ts[0], []c.AdConversion{cv, empty})
+	if err != nil || !res[0].OK || !res[1].Skipped {
+		t.Fatalf("send %+v %v", res, err)
+	}
+	last := (*reqs)[len(*reqs)-1]
+	for _, want := range []string{`"event_name":"PURCHASE"`, `"sc_click_id":"sc1"`, `"sc_cookie1":"cookie9"`, `"event_id":"msg-1"`, `"action_source":"WEB"`, `"value":12.5`, `"ph":["` + c.HashID("15550100") + `"]`} {
+		if !strings.Contains(last.body, want) {
+			t.Fatalf("event body lacks %s: %s", want, last.body)
+		}
+	}
+	if last.header.Get("Authorization") != "Bearer tok" {
+		t.Fatalf("sends with the sign-in token: %v", last.header)
+	}
+	if _, err := sn.SendConversions(ctx, cl, c.Creds{"access_token": "tok", "conversions_token": "ct"}, acct, ts[0], []c.AdConversion{cv}); err != nil {
+		t.Fatal(err)
+	}
+	if got := (*reqs)[len(*reqs)-1].header.Get("Authorization"); got != "Bearer ct" {
+		t.Fatalf("conversions token not used: %q", got)
 	}
 }

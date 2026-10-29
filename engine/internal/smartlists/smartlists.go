@@ -3,6 +3,7 @@
 // pro and paid in the last 90 days". A refresh works out who matches in one
 // statement, adds the people who started matching and removes the ones
 // who stopped, so smart_list_members is always the current membership.
+// A static list (static.go) holds whoever is put in it instead.
 // Lists refresh when they are saved, when someone asks, and on a sweep
 // every few minutes for rules that depend on time ("in the last 90 days").
 // The API handlers in engine/internal/api own making and changing lists.
@@ -368,7 +369,11 @@ func Members(ctx context.Context, q Querier, ws, listID string, seen []string, a
 	}
 	more, args := Seen(seen, args)
 	cond += more
-	rows, err := q.Query(ctx, `SELECT `+personCols+`, m.entered_at FROM smart_list_members m JOIN records r ON r.id = m.record_id
+	table, err := membersTable(ctx, q, ws, listID)
+	if err != nil {
+		return nil, err
+	}
+	rows, err := q.Query(ctx, `SELECT `+personCols+`, m.entered_at FROM `+table+` m JOIN records r ON r.id = m.record_id
 		WHERE m.workspace_id = $1 AND m.list_id = $2`+cond+` ORDER BY m.entered_at DESC, m.record_id DESC LIMIT $3`, args...)
 	if err != nil {
 		return nil, err
@@ -398,14 +403,20 @@ var ErrGone = errors.New("smart list not found")
 func Refresh(ctx context.Context, tx pgx.Tx, ws, listID string) (Result, error) {
 	var res Result
 	var raw []byte
-	var match string
+	var match, kind string
 	var brandID *string
-	err := tx.QueryRow(ctx, `SELECT rules, match, brand_id FROM smart_lists WHERE workspace_id = $1 AND id = $2 FOR UPDATE`, ws, listID).
-		Scan(&raw, &match, &brandID)
+	err := tx.QueryRow(ctx, `SELECT rules, match, brand_id, kind FROM smart_lists WHERE workspace_id = $1 AND id = $2 FOR UPDATE`, ws, listID).
+		Scan(&raw, &match, &brandID, &kind)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return res, ErrGone
 	}
 	if err != nil {
+		return res, err
+	}
+	// A static list has no rules to refresh from: only its count.
+	if kind == KindStatic {
+		err := tx.QueryRow(ctx, `UPDATE smart_lists SET members = (SELECT count(*) FROM static_list_members WHERE list_id = $2), error_code = NULL
+			WHERE workspace_id = $1 AND id = $2 RETURNING members`, ws, listID).Scan(&res.Members)
 		return res, err
 	}
 	var rules []Rule
@@ -536,7 +547,7 @@ func (s *Service) Run(ctx context.Context, tick time.Duration) {
 // Sweep enqueues a refresh for every list that is due.
 func (s *Service) Sweep(ctx context.Context) error {
 	rows, err := s.Pool.Query(ctx, `SELECT workspace_id::text, id::text FROM smart_lists
-		WHERE refreshed_at IS NULL OR refreshed_at < now() - $1::interval ORDER BY refreshed_at NULLS FIRST LIMIT 1000`,
+		WHERE kind = 'smart' AND (refreshed_at IS NULL OR refreshed_at < now() - $1::interval) ORDER BY refreshed_at NULLS FIRST LIMIT 1000`,
 		fmt.Sprintf("%d seconds", int(Every.Seconds())))
 	if err != nil {
 		return err

@@ -83,6 +83,12 @@ Reading lists and runs needs `leads.read`; creating, editing, running and deleti
 
 MCP tools: `list_data_providers`, `preview_lead_search`, `create_lead_list`, `update_lead_list`, `run_lead_list`, `get_list_run`, `list_list_runs`, `cancel_list_run`, `list_lead_lists`, `get_lead_list`, `list_lead_list_members`, `get_lead_sources`. The tools that can spend credits are marked as reaching the outside world, so MCP clients can ask before running them.
 
+## Static lists
+
+A static list holds the people someone, the API or a journey puts in it, such as webinar attendees or beta testers. Nothing refreshes it. Make one with `POST .../smart-lists` and `"kind": "static"`. Put people in with `POST .../smart-lists/{id}/members` and `{"record_ids": [...]}`, and take them out with `POST .../smart-lists/{id}/members/remove` (MCP `add_to_static_list` and `remove_from_static_list`). A journey's `add_to_list` and `remove_from_list` steps do the same.
+
+Only people count: not companies, merged or archived records, or, for a brand's list, another brand's people. A static list is used wherever a smart list is: [rules](rules.md) acting on people joining or leaving it hear of each change.
+
 ## Smart lists
 
 A smart list is a group of people on your [customer records](customers.md) that keeps itself up to date: Outflare adds people when they start matching its rules and removes them when they stop. Make one from **Lists → New list → Smart list**, pick the rules, watch the count change as you go, and save.

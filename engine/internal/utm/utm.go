@@ -38,7 +38,8 @@ type Channel struct {
 // Channels a campaign can be in, in display order. Direct traffic has no
 // links, so it is not one.
 var Channels = []Channel{
-	{ID: "paid_ads", Label: "Paid ads", Medium: "cpc", Sources: []string{"google", "meta", "linkedin", "microsoft", "reddit", "x", "tiktok"}},
+	{ID: "paid_ads", Label: "Paid ads", Medium: "cpc", Sources: []string{"google", "meta", "linkedin", "microsoft", "reddit", "x", "tiktok",
+		"snapchat", "pinterest", "taboola", "outbrain", "quora", "apple_search_ads", "amazon_ads"}},
 	{ID: "organic_social", Label: "Organic social", Medium: "social", Sources: []string{"linkedin", "x", "facebook", "instagram", "youtube", "tiktok", "threads", "bluesky"}},
 	{ID: "reddit", Label: "Reddit", Medium: "social", Sources: []string{"reddit"}},
 	{ID: "outbound_email", Label: "Outbound email", Medium: "email", Sources: []string{"outflare", "emailbison", "instantly", "smartlead"}},
@@ -70,6 +71,8 @@ var aliases = map[string]string{
 	"google-ads": "google", "googleads": "google", "adwords": "google", "google.com": "google",
 	"bing-ads": "microsoft", "microsoft-ads": "microsoft", "bing.com": "bing",
 	"facebook-ads": "meta", "meta-ads": "meta",
+	"tiktok-ads": "tiktok", "snap": "snapchat", "snapchat-ads": "snapchat", "pinterest-ads": "pinterest",
+	"apple-search-ads": "apple_search_ads", "asa": "apple_search_ads", "amazon-ads": "amazon_ads",
 	"chat.openai.com": "chatgpt", "chatgpt.com": "chatgpt", "openai": "chatgpt", "perplexity.ai": "perplexity",
 }
 

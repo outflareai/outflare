@@ -92,7 +92,8 @@ func Simulate(ctx context.Context, pool *pgxpool.Pool, r Rule, days int) (Simula
 			}
 			sim.Note = "People in the list now. The rule fires for people who join from when it is active."
 			rows, err = tx.Query(ctx, `SELECT m.record_id::text, r.brand_id::text, r.attributes, '{}'::jsonb, m.entered_at
-				FROM smart_list_members m JOIN records r ON r.id = m.record_id AND r.merged_into IS NULL AND r.archived_at IS NULL
+				FROM (SELECT record_id, entered_at, workspace_id, list_id FROM smart_list_members UNION ALL
+					SELECT record_id, entered_at, workspace_id, list_id FROM static_list_members) m JOIN records r ON r.id = m.record_id AND r.merged_into IS NULL AND r.archived_at IS NULL
 				WHERE m.workspace_id = $1 AND m.list_id = $2 ORDER BY m.entered_at LIMIT $3`, r.WorkspaceID, r.Trigger.ListID, simulateLimit+1)
 		default:
 			return fmt.Errorf("rules: unknown trigger kind %q", r.Trigger.Kind)

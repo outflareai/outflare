@@ -23,6 +23,7 @@ stays off until the workspace connects it.
 | X Ads (`x_ads`) | Your own X developer app's API key and secret, plus an access token and secret for the account that runs the ads | Ads API access approved for that app by X |
 | LinkedIn Ads (`linkedin_ads`) | Sign in with LinkedIn (`r_ads`, `r_ads_reporting`) | Advertising API access approved for the app by LinkedIn |
 | TikTok Ads (`tiktok_ads`) | Sign in with TikTok For Business and choose the ad accounts to share (Ad Account Management and Reporting read access). To add accounts later, connect again. | Nothing |
+| Snapchat Ads (`snapchat_ads`) | Sign in with Snapchat (`snapchat-marketing-api`). Every ad account of every organization you belong to is listed. | Nothing |
 
 Signing in uses the operator's OAuth app (`CONNECTOR_<ID>_CLIENT_ID` and
 `_CLIENT_SECRET`, see [connectors.md](connectors.md)); the tokens it produces
@@ -70,6 +71,10 @@ All of them take `brand`. Money is in micros of the account's currency
 server has a tool for each (`list_ad_accounts`, `list_ad_campaigns`,
 `get_ads_summary`, `sync_ads`, `list_ad_connections`, `update_ad_account`).
 
+To credit sales to each ad by its id, paste the network's tracking template
+into it ([website tracking](website-tracking.md#ad-tracking-templates)): every
+paid click then lands with the network's own campaign, ad set and ad ids.
+
 ## Sending conversions back
 
 A conversion rule sends one customer event (such as `signed_up` or
@@ -83,6 +88,7 @@ conversion on one ad account:
 | Microsoft Advertising | An offline conversion goal | `msclkid`; hashed email and phone | The developer token above |
 | Reddit Ads | The Conversions API, as SignUp, Lead, Purchase and so on | `rdt_cid`, hashed email and record id | The workspace's own Conversions API access token, from Reddit Ads Manager → Events Manager |
 | TikTok Ads | A pixel, through the Events API, as CompletePayment, CompleteRegistration, SubmitForm and so on | `ttclid`, the `_ttp` cookie (`ttp`), hashed email, phone and record id | The sign-in's Pixel and Events access; if TikTok refuses it, an Events API access token from Events Manager on the connection |
+| Snapchat Ads | A Snap Pixel, through the Conversions API, as PURCHASE, SIGN_UP, SUBSCRIBE and so on | `ScCid`, the `_scid` cookie (`scid`), hashed email, phone and record id | The sign-in's access; if Snapchat refuses it, a Conversions API token from Ads Manager → Business Details on the connection |
 
 How it works:
 
@@ -94,7 +100,7 @@ How it works:
   phone come from the person's record, hashed with SHA-256 before they leave;
   nothing is sent in the clear and nothing is copied into the send log.
 - The event's message id is the conversion's id (Google's order id, Meta's,
-  Reddit's and TikTok's event id). On the website, `outflare.track()` returns it: pass it to
+  Reddit's, TikTok's and Snapchat's event id). On the website, `outflare.track()` returns it: pass it to
   the browser pixel as its event id (`fbq('track', 'Purchase', {}, {eventID:
   id})`) and the platform counts a conversion once when both send it.
 - The value comes from an event property (in major units, 12.50, or minor units,

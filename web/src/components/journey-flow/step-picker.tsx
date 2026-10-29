@@ -3,6 +3,8 @@
 // Flow control). A kind that needs a connection the workspace hasn't made
 // is greyed out with a link to make it.
 
+import { useEffect, useState } from "react";
+import { api } from "../../api";
 import { CommandDialog, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
 import { builtinKinds, groupOrder, groupText, type StepKind } from "./model";
 import { iconFor } from "./flow";
@@ -42,9 +44,28 @@ export function StepPicker({ kinds, onPick, onClose, onConnect }: { kinds: StepK
   );
 }
 
-// useStepKinds is the step kinds a journey can use. Until the API serves
-// its catalog (GET .../journeys/step-kinds, with which connections each
-// kind needs), it is today's four.
-export function useStepKinds(_ws: string): StepKind[] {
-  return builtinKinds;
+// useStepKinds is the step kinds a journey can use, from the API's catalog
+// (GET .../journeys/step-kinds), with whether the workspace has made each
+// connection a kind needs. Until it answers, or if it can't, it is the
+// built-in four.
+export function useStepKinds(ws: string): StepKind[] {
+  const [kinds, setKinds] = useState<StepKind[]>(builtinKinds);
+  useEffect(() => {
+    let live = true;
+    Promise.all([
+      api.GET("/v1/workspaces/{ws}/journeys/step-kinds", { params: { path: { ws } } }),
+      api.GET("/v1/workspaces/{ws}/integrations", { params: { path: { ws } } }),
+    ]).then(([k, i]) => {
+      if (!live || !k.data) return;
+      // A requirement named after a connector (slack) is met when it is
+      // connected; others (an email provider) aren't checked here.
+      const connectors = i.data ? new Set(i.data.data.filter((x) => x.status === "connected").map((x) => x.connector)) : null;
+      setKinds((k.data.data as StepKind[]).map((kind) => ({
+        ...kind,
+        requires: kind.requires.map((r) => (connectors && r.connection !== "email_provider" ? { ...r, connected: connectors.has(r.connection) } : r)),
+      })));
+    }).catch(() => {});
+    return () => { live = false; };
+  }, [ws]);
+  return kinds;
 }

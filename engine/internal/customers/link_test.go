@@ -307,3 +307,19 @@ func suppressed(t *testing.T, pool *pgxpool.Pool, ws, email string) bool {
 	}
 	return n > 0
 }
+
+// Erasing a record decides about every column a merge moves: its rows go
+// with the person, or stay unlinked as the business's.
+func TestEveryFollowIsErasedOrKept(t *testing.T) {
+	for _, ref := range customers.Follows {
+		erased, kept := slices.Contains(customers.Erased, ref), slices.Contains(customers.Kept, ref)
+		if erased == kept {
+			t.Errorf("%s.%s must be in exactly one of customers.Erased and customers.Kept", ref.Table, ref.Column)
+		}
+	}
+	for _, ref := range slices.Concat(customers.Erased, customers.Kept) {
+		if !slices.Contains(customers.Follows, ref) {
+			t.Errorf("%s.%s is erased or kept but not in customers.Follows", ref.Table, ref.Column)
+		}
+	}
+}

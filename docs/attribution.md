@@ -18,21 +18,26 @@ The first rule that matches wins:
 | --- | --- | --- | --- |
 | 1 | An `ofc` code from a [campaign link](campaign-links.md) | the campaign's channel, source and slug | `ofc` |
 | 2 | A partner's `ref` code | `affiliates`, source `partner` | `ref` |
-| 3 | An ad click id: `gclid`, `gbraid`, `wbraid` (Google), `msclkid` (Microsoft), `li_fat_id` (LinkedIn), `rdt_cid` (Reddit), `twclid` (X), `ttclid` (TikTok) | `paid_ads` | `click_id` |
+| 3 | An ad click id: `gclid`, `gbraid`, `wbraid`, `dclid` (Google), `msclkid` (Microsoft), `li_fat_id` (LinkedIn), `rdt_cid` (Reddit), `twclid` (X), `ttclid` (TikTok), `ScCid` (Snapchat), `epik` (Pinterest), `tblci` (Taboola), `ob_click_id` (Outbrain), `qclid` (Quora); or Impact's `irclickid`, which is a partner click | `paid_ads`, or `affiliates` for `irclickid` | `click_id` |
 | 4 | UTM tags: `utm_medium` decides the channel (`cpc`, `paid_social`, `display` are paid ads; `email` is lifecycle email, or outbound email from a sequencer; `social` is organic social or Reddit; `affiliate`, `referral`, `organic`, `ai`), otherwise the source does | from the tags | `utm` |
 | 5 | A referrer that isn't one of the workspace's own sites: AI assistants (ChatGPT, Perplexity, Gemini, Claude, Copilot), Reddit, search engines, social networks, else referral | from the referrer | `referrer` |
 | 6 | Nothing | `direct` | `none` |
 
 `fbclid` is not an ad click id: Facebook adds it to every link, paid or not,
-so Meta ads need UTM tags or a campaign link. Webmail referrers are ignored.
+so Meta ads need UTM tags, a campaign link or a [tracking template](website-tracking.md#ad-tracking-templates).
+The list lives in `engine/internal/adtrack`. Webmail referrers are ignored.
 
 ## Conversions and credit
 
 A conversion is a customer event the workspace counts: `signed_up` and
-`payment.succeeded` unless changed. A few minutes after one happens (so the
+`payment.succeeded` unless changed. A business that sells on calls adds
+`meeting.booked` or `meeting.held`, which every meeting tied to a person
+records ([customers.md](customers.md#meetings-as-events)). A workspace's own [conversion definitions](conversions.md)
+count too: an event with filters on its properties and a value, such as a
+call over a minute. A few minutes after one happens (so the
 visit and the identify call that tie it to a person have landed), the run
 finds the visits before it, by the person's record or, before they were
-identified, by the browser's anonymous id, up to the lookback (90 days) and
+identified, by the browser's anonymous id, up to the lookback (30 days unless changed) and
 at most 50 visits, and stores the credit under all five models at once:
 
 | Model | `model` | Who gets the credit |
@@ -55,6 +60,52 @@ Because every model is stored, switching the model in a report is instant
 and changes nothing. Changing the lookback or which events count credits
 every conversion again in the background.
 
+## Your own models
+
+The five models are a starting point. A workspace can make its own from any
+of them (**Analytics → Channels** lists them in the model switch;
+`POST /v1/workspaces/{ws}/attribution/models` or MCP
+`create_attribution_model`, scope `analytics.manage`), changing:
+
+| Option | What it does |
+| --- | --- |
+| `lookback_days` | How far back a visit can be (the workspace's look-back unless set) |
+| `channel_lookback_days` | A window per channel, such as `{"paid_ads": 7}`: a paid click counts for 7 days, everything else for the look-back |
+| `exclude_channels` | Channels that never get credit, such as `direct` or `lifecycle_email` |
+| `first_weight`, `last_weight` | For `position`: the first and last visit's shares (0.4 each by default); the middle shares the rest |
+| `half_life_days` | For `time_decay`: a visit's weight halves for every this many days before the conversion (7 by default) |
+
+```json
+{"key": "paid-7-day", "name": "Paid ads 7 days", "spec": {"base": "last_non_direct", "channel_lookback_days": {"paid_ads": 7}}}
+```
+
+A conversion with no visit left after the options goes to direct.
+
+**Versions.** A model's key names its latest version. Changing its options
+(`PATCH .../attribution/models/{key}`) adds the next version and credits
+every conversion again in the background, so the new version covers the
+past too; a new name alone keeps the version. Reports take the key as
+`model` and say which version they read (`model_version`). Archiving a
+model (`DELETE`) stops its credits; the workspace's default model can't be
+archived.
+
+**Who uses which model.**
+
+- Reports and the CMO view use the workspace's default (a built-in model or
+  one of its own), with the model switch to compare others.
+- Missions use the default unless the mission asks for its own model, by
+  passing `model` to the reports.
+- A module that must never move, such as an affiliate program's commission
+  rule, pins the exact version it uses (`attribution.Pin` in
+  `engine/internal/attribution`). A pinned version keeps being credited after
+  the model changes or is archived, and reports can still read it as
+  `key@version`, so a report change never changes what partners are owed.
+  `GET .../attribution/models/{key}` lists each version's pins.
+- Conversions sent back to ad networks ([paid-media.md](paid-media.md)) carry
+  no attribution: every conversion goes to every network that has a rule
+  for it, each network credits it by its own rules, and our reports show its
+  numbers next to ours.
+
 ## Reports
 
 - `GET /v1/workspaces/{ws}/attribution/channels`: for every channel, visits,
@@ -66,7 +117,8 @@ every conversion again in the background.
 - `GET /v1/workspaces/{ws}/attribution/conversions`: credited conversions,
   newest first, with the visits that got the credit.
 - `GET` and `PATCH /v1/workspaces/{ws}/attribution/settings`: the default
-  model, `lookback_days` and `conversion_events`.
+  model (built in or the workspace's own), `lookback_days` and
+  `conversion_events`.
 
 Each takes `from`, `to`, `model` and `brand`. Reading needs
 `analytics.read`; changing settings `analytics.manage`. Paid ads read the
@@ -98,13 +150,20 @@ Migrations 0230 and 0231 add `channel`, `source`, `campaign`,
 `attribution_settings`, `attribution_conversions` (one row per credited
 event, with its value, how it was matched and how many visits came before
 it) and `attribution_credits` (one row per model and credited visit, with
-its weight). The code is `engine/internal/attribution`.
+its weight). Migration 0240 adds `attribution_models` (one row per version
+of a workspace's model, its options in `spec`) and `attribution_model_pins`;
+a workspace model's credits are in `attribution_credits` under the model
+`m:` and its version's id. It also made 30 days the default look-back:
+workspaces that had never changed theirs moved from 90 to 30 and were
+credited again. The code is `engine/internal/attribution`.
 
 ## Events
 
 `attribution.credited` (with `conversions`, `refunds` and `backfill`) after
 a run credits anything, `attribution.run_failed` when a run fails, and the
-audit action `attribution.settings_updated`.
+audit actions `attribution.settings_updated`, `attribution.model_created`,
+`attribution.model_updated`, `attribution.model_renamed` and
+`attribution.model_archived`.
 
 ## Not built yet
 

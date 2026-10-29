@@ -314,6 +314,15 @@ groups:
         annotations:
           summary: "Over a quarter of queries are running past 15 seconds: the query views may need an index, or the database is overloaded."
 
+      - alert: OutflareMeetingEventsBacklog
+        # Meetings tied to a person are recorded as customer events every
+        # minute; a backlog that stays means the loop keeps failing.
+        expr: max(outflare_meeting_events_pending) > 500
+        for: 30m
+        labels: { severity: warning }
+        annotations:
+          summary: "Over 500 meetings have waited 30 minutes for their meeting.* event on people's timelines; check meeting_events.run_failed in the engine log. Booked calls don't count as conversions until it drains."
+
       - alert: OutflareSemanticSearchNoPgvector
         # Workspaces have meaning-based search on, but the database can't
         # store vectors, so it does nothing for them.

@@ -30,14 +30,15 @@ On every page, including in-app navigation, the snippet sends a `page` event on 
 
 - `context.page`: the URL, host, path, query string, referrer and title. The URL and query string keep every parameter, so reports can filter on any of them, except the ones the site key's `excluded_params` lists (names such as `plan`, or prefixes such as `fb_*`) and the ones always left out: sign-in tokens, passwords, codes, session ids, signatures, and any value that is an email address or a signed token. So a sign-in link or an `?email=` in an address never reaches your data. The referrer, another site's address, keeps only its origin and path.
 - `context.campaign`: the `utm_source`, `utm_medium`, `utm_campaign` (as `name`), `utm_term`, `utm_content` and `utm_id` tags.
-- `properties.click_ids`: whichever ad click ids the page had (`gclid`, `gbraid`, `wbraid`, `fbclid`, `msclkid`, `li_fat_id`, `rdt_cid`, `twclid`).
+- `properties.click_ids`: whichever ad click ids the page had (`gclid`, `gbraid`, `wbraid`, `dclid`, `fbclid`, `msclkid`, `li_fat_id`, `rdt_cid`, `twclid`, `ttclid`, `ScCid`, `epik`, `tblci`, `ob_click_id`, `qclid`, `irclickid`) and, once the visitor allows marketing, the cookies ad pixels set: `fbp` and `fbc` from Meta's `_fbp` and `_fbc`, `gcl_aw` from Google's `_gcl_aw`. Track events carry the cookies too, so a conversion sent back to a network can be matched to the click.
+- `properties.ad`: the network's own ids from a [tracking template](#ad-tracking-templates) (`of_campaign`, `of_adset`, `of_ad`, `of_placement`), as `campaign`, `adset`, `ad` and `placement`. A macro the network left unfilled, such as `{{ad.id}}`, is dropped.
 - `properties.ofc` (an Outflare campaign link) and `properties.ref` (a referral or partner code, from `ref` or `via`).
 
 `outflare.track("Signup Started", {plan: "pro"})` sends a track event and returns its message id, which you can give an ad pixel as its event id so a conversion sent back from [Paid ads](paid-media.md#sending-conversions-back) counts once. Its name must be a plain one: dotted names such as `payment.succeeded` belong to Outflare and its connectors, and a browser can't send them. A name the workspace hasn't defined arrives quarantined in the catalog, like any other. Once 100 names are waiting for approval, the browser can only send names that are already there.
 
 ## Visits, touches and devices
 
-Each event joins a visit: a session that ends after 30 minutes without an event, or when the visitor comes back through a different campaign (new tags, a new ad click id, a `ref` or an `ofc`). The visit's id is in `context.sessionId`. A visit keeps its landing page, referrer, tags, click ids, `ref` and `ofc`, plus a rough country (from the browser's time zone, not its address), device type (desktop, mobile, tablet), browser and system. A visit from another page of your own site, or from another of the key's origins, is not counted as a referral.
+Each event joins a visit: a session that ends after 30 minutes without an event, or when the visitor comes back through a different campaign (new tags, a new ad click id or ad, a `ref` or an `ofc`; an ad pixel's cookie never starts one). The visit's id is in `context.sessionId`. A visit keeps its landing page, referrer, tags, click ids, ad ids, `ref` and `ofc`, plus a rough country (from the browser's time zone, not its address), device type (desktop, mobile, tablet), browser and system. A visit from another page of your own site, or from another of the key's origins, is not counted as a referral.
 
 When your product identifies a visitor, their visits join their record, and Outflare works out these fields on the person (computed, so nobody writes them):
 
@@ -45,9 +46,23 @@ When your product identifies a visitor, their visits join their record, and Outf
 - The same with `last_touch_`: their latest visit that came from somewhere, or their latest visit if all were direct.
 - `referral_code`: the partner code (`ref`) on their latest visit that had one.
 
-The source is the visit's `utm_source`, else the ad platform behind its click id (`gclid` is google, `fbclid` facebook), else the site that linked to it, else `direct`. The medium is `utm_medium`, else `cpc`, `referral` or `none` the same way. Channels and attribution models are worked out from the visits on the server. When two records merge, their visits move together and the touches are worked out again.
+The source is the visit's `utm_source`, else the ad network behind its click id (`gclid` is google, `ttclid` tiktok, `fbclid` facebook), else the site that linked to it, else `direct`. The medium is `utm_medium`, else `cpc`, `referral` or `none` the same way. Channels and attribution models are worked out from the visits on the server. When two records merge, their visits move together and the touches are worked out again.
 
 Requests from bots, crawlers, link previews, monitors and scripts are counted on the key (`bots_today`) and not stored. A browser driven by automation (`navigator.webdriver`) sends nothing. When a request fails on the network or with a server error, the snippet tries again after 1, 5 and 25 seconds. Each event has its own `messageId`, so a retry is never stored twice.
+
+## Ad tracking templates
+
+A tracking template is one string you paste into an ad network once, so every paid click lands with UTM tags and the network's own campaign, ad set and ad ids. That is how media buyers set up Hyros, RedTrack and Voluum, and it lets a sale be credited to an ad by its id, even after the ad is renamed. **Paid ads → Tracking templates**, `GET /v1/workspaces/{ws}/ads/tracking-templates` (scope `analytics.read`) or MCP `list_ad_tracking_templates` give each network's template, the field it goes in, the click id the network adds by itself and the cookies of its pixel.
+
+For Meta, paste this into the ad's **URL parameters**:
+
+```text
+utm_source=meta&utm_medium=cpc&utm_campaign={{campaign.name}}&utm_content={{ad.name}}&of_campaign={{campaign.id}}&of_adset={{adset.id}}&of_ad={{ad.id}}&of_placement={{placement}}
+```
+
+There are templates for Google Ads and Microsoft Advertising (the final URL suffix), Meta, LinkedIn, Reddit, TikTok, Snapchat, Pinterest, Taboola and Outbrain. X, Quora and Amazon Ads have no macros for their ids, so their template is the tags alone. Apple Search Ads send people to your app, not your site, so they have none. A template works without connecting the network: connecting it in [Paid ads](paid-media.md) adds its spend, and sends conversions back.
+
+The script reads click ids and `of_` parameters on any page, and the pixel cookies only after consent (see [Consent](#consent)).
 
 ## Serve it from your own domain
 
@@ -116,6 +131,8 @@ With consent, the snippet keeps the visitor's id in a first-party cookie, `of_ai
 - With `data-consent="auto"` (the default), visitors whose time zone is in the EEA, Switzerland or the UK, and anyone with Global Privacy Control on, start without a cookie.
 - `data-consent="required"` does the same for everyone.
 - `data-consent="granted"` is for sites whose own banner asks first and only loads the snippet afterwards.
+
+Ad pixels' cookies (`_fbp`, `_fbc`, `_gcl_aw`) are read only once the visitor allows the marketing category, whatever they chose for analytics. Without a consent banner, marketing follows the analytics answer. Click ids and `of_` ad ids come from the page's address, so they are read either way, and are kept only on that page's visit until consent.
 
 Without consent, the campaign tags a visitor landed with are on that first page's visit only. If they sign up later, on another visit or another domain, Outflare can't join the two. On a site without a consent banner, keep the landing page's `utm_*`, click ids, `ref` and `ofc` (for example in the sign-up form or its URL) and send them with the sign-up `identify`: the tags in `context.campaign` and the click ids in `properties.click_ids`, as the snippet does. The sign-up is then credited even when the visits can't be joined.
 

@@ -6432,6 +6432,117 @@
           "sort": "desc"
         }
       }
+    },
+    {
+      "type": "row",
+      "title": "Meetings on timelines (customer events)",
+      "id": 130,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 443
+      },
+      "collapsed": false,
+      "panels": []
+    },
+    {
+      "type": "timeseries",
+      "title": "Meeting events recorded, by status",
+      "description": "Meeting events per minute recorded on people's timelines (meeting.booked, held, no_show, canceled), from calendars, CRMs, the app and the API. It follows how many meetings are booked and change; a backfill after an upgrade shows as one burst.",
+      "id": 131,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 444
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (status) (rate(outflare_meeting_events_total{job=\"$job\"}[5m])) * 60",
+          "legendFormat": "{{status}}",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "fillOpacity": 10,
+            "stacking": {
+              "mode": "normal"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "mean",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Meetings waiting for their event",
+      "description": "Meetings tied to a person whose latest status isn't on their timeline yet. Normal is near zero, drained every minute; a backlog that stays means the meeting events loop is failing (meeting_events.run_failed in the log).",
+      "id": 132,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 444
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "max(outflare_meeting_events_pending{job=\"$job\"})",
+          "legendFormat": "pending",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "fillOpacity": 10
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "single"
+        }
+      }
     }
   ]
 }

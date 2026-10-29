@@ -16,7 +16,7 @@ type Model = AttributionSettings["model"];
 type Row = AttributionChannels["data"][number];
 type Money = Row["revenue"][number];
 
-const models: { id: Model; label: string; help: string }[] = [
+const builtIn: { id: Model; label: string; help: string }[] = [
   { id: "last_non_direct", label: "Last non-direct touch", help: "The last visit that wasn't direct gets all the credit." },
   { id: "first_touch", label: "First touch", help: "The first visit gets all the credit." },
   { id: "linear", label: "Linear", help: "Every visit gets an equal share." },
@@ -78,6 +78,10 @@ export function Channels({ ws, canManage, go }: Props) {
   const [days, setDays] = useState<(typeof ranges)[number]>(28);
   const [settings, setSettings] = useState<AttributionSettings | null>(null);
   const [model, setModel] = useState<Model | "">("");
+  // The workspace's own models (GET .../attribution/models) after the
+  // built-in ones.
+  const [custom, setCustom] = useState<{ id: Model; label: string; help: string }[]>([]);
+  const models = [...builtIn, ...custom];
   const [report, setReport] = useState<AttributionChannels | null>(null);
   const [open, setOpen] = useState<Row | null>(null);
   const [error, setError] = useState("");
@@ -89,13 +93,15 @@ export function Channels({ ws, canManage, go }: Props) {
 
   const load = useCallback(async () => {
     const query = { ...range(), ...(brandKey ? { brand: brandKey } : {}), ...(model ? { model } : {}) };
-    const [s, r] = await Promise.all([
+    const [s, r, m] = await Promise.all([
       api.GET("/v1/workspaces/{ws}/attribution/settings", { params: { path: { ws } } }),
       api.GET("/v1/workspaces/{ws}/attribution/channels", { params: { path: { ws }, query } }),
+      api.GET("/v1/workspaces/{ws}/attribution/models", { params: { path: { ws } } }),
     ]);
     setError(s.error || r.error ? errorMessage(s.error ?? r.error) : "");
     if (s.data) setSettings(s.data);
     if (r.data) setReport(r.data);
+    if (m.data) setCustom(m.data.data.map((x) => ({ id: x.key, label: x.name, help: `Your own model, version ${x.version}, starting from ${builtIn.find((b) => b.id === x.spec.base)?.label ?? x.spec.base}.` })));
   }, [ws, brandKey, model, range]);
   useEffect(() => {
     load();

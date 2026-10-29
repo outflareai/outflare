@@ -36,6 +36,27 @@ type Step struct {
 	Then       string      `json:"then,omitempty"`
 	Else       string      `json:"else,omitempty"`
 	Next       string      `json:"next,omitempty"`
+
+	// Action steps (actions.go). Which settings a kind takes is in its
+	// entry in Actions.
+	Field           string `json:"field,omitempty"`
+	Change          string `json:"change,omitempty"`
+	Value           any    `json:"value,omitempty"`
+	OverwriteManual bool   `json:"overwrite_manual,omitempty"`
+	Tag             string `json:"tag,omitempty"`
+	ListID          string `json:"list_id,omitempty"`
+	JourneyID       string `json:"journey_id,omitempty"`
+	SequenceID      string `json:"sequence_id,omitempty"`
+	Scope           string `json:"scope,omitempty"`
+	AllowElsewhere  bool   `json:"allow_elsewhere,omitempty"`
+	Target          string `json:"target,omitempty"`
+	Topic           string `json:"topic,omitempty"`
+	Title           string `json:"title,omitempty"`
+	Text            string `json:"text,omitempty"`
+	To              string `json:"to,omitempty"`
+	// What a failed action does: stop (the default: the run fails),
+	// continue (go on to next) or a step id to go to.
+	OnError string `json:"on_error,omitempty"`
 }
 
 // Condition is one test on a person or what started their run.
@@ -121,11 +142,20 @@ func Check(steps []Step) string {
 				return "step " + st.ID + ": an exit step ends the run, so it has no next"
 			}
 		default:
-			return "step " + st.ID + ": kind is email, wait, branch or exit"
+			a := action(st.Kind)
+			if a == nil {
+				return "step " + st.ID + ": kind is one of " + strings.Join(KindNames(), ", ")
+			}
+			if msg := a.check(*st); msg != "" {
+				return "step " + st.ID + ": " + msg
+			}
+		}
+		if st.OnError != "" && (action(st.Kind) == nil) {
+			return "step " + st.ID + ": on_error is for action steps"
 		}
 	}
 	for _, st := range steps {
-		for _, to := range []string{st.Next, st.Then, st.Else} {
+		for _, to := range []string{st.Next, st.Then, st.Else, errorStep(st.OnError)} {
 			if to != "" && byID[to] == nil {
 				return "step " + st.ID + " goes to " + to + ", which is not a step"
 			}
@@ -151,7 +181,7 @@ func Check(steps []Step) string {
 		}
 		state[id] = 1
 		st := byID[id]
-		ok := visit(st.Next) && visit(st.Then) && visit(st.Else)
+		ok := visit(st.Next) && visit(st.Then) && visit(st.Else) && visit(errorStep(st.OnError))
 		state[id] = 2
 		return ok
 	}
@@ -225,10 +255,19 @@ func CheckFilter(filter []Condition) string {
 	return ""
 }
 
-// Links is the steps a step goes on to: next, or then and else.
+// errorStep is the step on_error goes to, or "" for stop and continue.
+func errorStep(onError string) string {
+	if onError == "stop" || onError == "continue" {
+		return ""
+	}
+	return onError
+}
+
+// Links is the steps a step goes on to: next, then and else, and where a
+// failed action goes (on_error).
 func (st Step) Links() []string {
 	out := []string{}
-	for _, to := range []string{st.Next, st.Then, st.Else} {
+	for _, to := range []string{st.Next, st.Then, st.Else, errorStep(st.OnError)} {
 		if to != "" {
 			out = append(out, to)
 		}

@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/outflareai/outflare/engine/internal/adtrack"
 	"github.com/outflareai/outflare/engine/internal/utm"
 )
 
@@ -42,7 +43,7 @@ const Direct = "direct"
 
 // Defaults for a workspace that hasn't changed its settings.
 const (
-	DefaultLookbackDays = 90
+	DefaultLookbackDays = 30
 	// Time decay halves a touch's weight for every week before the
 	// conversion.
 	halfLife = 7 * 24 * time.Hour
@@ -68,14 +69,6 @@ type Touch struct {
 	Channel, Source, Campaign string
 	CampaignID                *string
 	Method                    string // ofc, ref, click_id, utm, referrer, none
-}
-
-// clickIDs are the ad click ids that prove a paid click, with the
-// platform. fbclid is not one: Facebook adds it to every link, paid or
-// not, so Meta ads need UTM tags.
-var clickIDs = []struct{ key, source string }{
-	{"gclid", "google"}, {"gbraid", "google"}, {"wbraid", "google"}, {"msclkid", "microsoft"},
-	{"li_fat_id", "linkedin"}, {"rdt_cid", "reddit"}, {"twclid", "x"}, {"ttclid", "tiktok"},
 }
 
 var paidMediums = map[string]bool{"cpc": true, "ppc": true, "paid": true, "paidsearch": true, "paid-search": true, "paid_search": true,
@@ -107,9 +100,12 @@ func Classify(v Visit, own []string) Touch {
 	if strings.TrimSpace(v.Ref) != "" {
 		return Touch{Channel: "affiliates", Source: "partner", Campaign: campaign, Method: "ref"}
 	}
-	for _, c := range clickIDs {
-		if v.ClickIDs[c.key] != "" {
-			return Touch{Channel: "paid_ads", Source: c.source, Campaign: campaign, Method: "click_id"}
+	// A click id that proves a paid click (adtrack.ClickIDs). fbclid is
+	// not one: Facebook adds it to every link, paid or not, so Meta ads
+	// need UTM tags.
+	for _, c := range adtrack.ClickIDs {
+		if c.Paid && v.ClickIDs[c.Param] != "" {
+			return Touch{Channel: c.Channel, Source: c.Source, Campaign: campaign, Method: "click_id"}
 		}
 	}
 	source := cut(utm.Source(v.UTMSource), 80)
@@ -232,20 +228,35 @@ func cut(s string, n int) string {
 type Point struct {
 	At     time.Time
 	Direct bool
+	// Channel is the touch's channel, for models that leave channels out
+	// or give them their own window.
+	Channel string
 }
 
-// Weights shares one conversion at time at between touches, under a model.
-// It returns the share of each touch by index, zero for none; the shares
-// add up to 1. With no touches it returns nil, and the conversion goes to
-// direct.
+// Weights shares one conversion at time at between touches, under a
+// built-in model with no window. See Spec.Weights.
 func Weights(model string, touches []Point, at time.Time) []float64 {
+	return Spec{Base: model}.Weights(touches, at)
+}
+
+// Weights shares one conversion at time at between touches. It returns the
+// share of each touch by index, zero for none; the shares add up to 1.
+// Touches the spec leaves out (an excluded channel, or older than its
+// window) get nothing. With no touch left it returns nil, and the
+// conversion goes to direct.
+func (s Spec) Weights(touches []Point, at time.Time) []float64 {
 	n := len(touches)
 	if n == 0 {
 		return nil
 	}
-	order := make([]int, n)
-	for i := range order {
-		order[i] = i
+	order := make([]int, 0, n)
+	for i, t := range touches {
+		if s.counts(t, at) {
+			order = append(order, i)
+		}
+	}
+	if len(order) == 0 {
+		return nil
 	}
 	sort.SliceStable(order, func(a, b int) bool { return touches[order[a]].At.Before(touches[order[b]].At) })
 	// Every model but last-click style ones ignores direct visits when
@@ -260,7 +271,7 @@ func Weights(model string, touches []Point, at time.Time) []float64 {
 		cands = order
 	}
 	w := make([]float64, n)
-	switch model {
+	switch s.Base {
 	case FirstTouch:
 		w[cands[0]] = 1
 	case Linear:
@@ -268,25 +279,31 @@ func Weights(model string, touches []Point, at time.Time) []float64 {
 			w[i] = 1 / float64(len(cands))
 		}
 	case Position:
+		first, last := s.positionWeights()
 		switch k := len(cands); k {
 		case 1:
 			w[cands[0]] = 1
 		case 2:
-			w[cands[0]], w[cands[1]] = 0.5, 0.5
+			// Two touches share what the middle would have had.
+			w[cands[0]], w[cands[1]] = first/(first+last), last/(first+last)
 		default:
-			w[cands[0]], w[cands[k-1]] = 0.4, 0.4
+			w[cands[0]], w[cands[k-1]] = first, last
 			for _, i := range cands[1 : k-1] {
-				w[i] = 0.2 / float64(k-2)
+				w[i] = (1 - first - last) / float64(k-2)
 			}
 		}
 	case TimeDecay:
+		half := halfLife
+		if s.HalfLifeDays > 0 {
+			half = time.Duration(s.HalfLifeDays * float64(24*time.Hour))
+		}
 		total := 0.0
 		for _, i := range cands {
 			age := at.Sub(touches[i].At)
 			if age < 0 {
 				age = 0
 			}
-			w[i] = math.Pow(0.5, float64(age)/float64(halfLife))
+			w[i] = math.Pow(0.5, float64(age)/float64(half))
 			total += w[i]
 		}
 		for _, i := range cands {

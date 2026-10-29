@@ -257,15 +257,35 @@ with the rule's dry run. On a phone the flow is read-only.
     email step's email was delivered, opened or clicked (`{"email":
     "opened", "step": "welcome", "op": "exists"}`).
   - `exit` ends the run. An empty `next` ends it as completed.
+- **Actions.** Steps that do something besides email, each going on to
+  `next`:
+  - **Data.**
+    - `set_field` sets, clears or increments a field (`field`, `change`, `value`). `value` can copy one with `{{event.x}}` or `{{person.x}}`. It never overwrites a value a person set by hand, unless `overwrite_manual` is on; the step is then `skipped`.
+    - `add_tag` and `remove_tag` put a tag on the person or take it off.
+    - `add_to_list` and `remove_from_list` move them in or out of a static list ([lists.md](lists.md#static-lists)).
+  - **Other campaigns.**
+    - `enter_journey` starts another journey.
+    - `exit_journey` ends their run in another journey (`scope` `journey`) or in every other journey (`others`).
+    - `enroll_in_sequence` adds them to a cold-email sequence through their lead, which it makes from their verified email if they have none. Suppressed people are skipped, and so are people already active elsewhere unless `allow_elsewhere` is on.
+    - `stop_sequences` stops their cold email: in one sequence, in every sequence (`all`, the default), or for everyone at their company (`company`).
+    - `suppress` adds their addresses, or their work domain, to the suppression list.
+    - `unsubscribe_topic` withdraws their consent to a topic, or to all marketing email.
+  - **Notify.** `alert` raises an alert (`title`, `text`) to the record's `owner` or to the owners and admins. It is emailed or sent to Slack as alert settings say.
+
+  Each action is done, `skipped` with why, or `failed`. A failed step does what its `on_error` says: `stop` (the default) fails the run, `continue` goes on to `next`, and a step id goes there. `GET .../journeys/step-kinds` (MCP `list_journey_step_kinds`) lists every kind with its settings as JSON Schema and the fields that name the next step. The flow builder's step picker reads it.
 - **Goal.** When the person does `goal_event`, their run ends with reason
   `goal`.
+- **Exit criteria.**
+  - `exit_events`: doing any of these ends the run at once, even mid-wait, with reason `exit_event`.
+  - `exit_conditions`: attribute conditions. When any holds, the run ends before its next step (`exit_condition`). Someone who already meets one never starts. This includes a manual add, which answers 409.
 - **Changing it.** Activating checks every email step's template is
-  published. A journey that hasn't gone live yet changes freely. A live
+  published, and that the lists, journeys and sequences action steps name
+  are the workspace's. A journey that hasn't gone live yet changes freely. A live
   one is read-only: **Edit** makes a draft version beside it (`POST
   .../journeys/{id}/draft`, then `PATCH .../draft`; MCP
   `edit_journey_draft`) while the live version keeps running, and
   **Publish** (`POST .../journeys/{id}/publish`, MCP `publish_journey`)
-  swaps it in as the next version, after the activation checks and a check
+  swaps it in as the next version, with its exit criteria, after the activation checks and a check
   that every step can be reached. You choose what happens to the people
   already in it: they finish on the version they entered on (`runs`
   `keep`, the default), or move onto the new version at the same step

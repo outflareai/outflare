@@ -67,6 +67,11 @@ export function registerRecordTools(server: McpServer, gtm: MissionClient, works
       inputSchema: {
         type: typeKey.optional(),
         q: z.string().optional(),
+        attribute: z
+          .array(z.string())
+          .max(20)
+          .optional()
+          .describe("Field filters as key:value, such as lifecycle_stage:customer. Values of one field are alternatives; different fields must all match. companies takes a company's record id."),
         origin: origins.optional(),
         archived: z.enum(["false", "true", "all"]).optional(),
         review: z.enum(["approved", "needs_review", "all"]).optional(),
@@ -278,6 +283,25 @@ export function registerRecordTools(server: McpServer, gtm: MissionClient, works
       annotations: write,
     },
     ({ record_id, ...body }) => call(() => gtm.PATCH("/v1/workspaces/{ws}/records/{record}", { params: { path: recordPath(record_id) }, body })),
+  );
+
+  server.registerTool(
+    "delete_record",
+    {
+      title: "Erase a customer record",
+      description:
+        "Deletes a person or company for good, such as for an erasure request: the record, records merged into it, and for a person their leads, " +
+        "cold email and replies, meetings, product events and visits. Deals, payments and opt-outs stay. To hide a record and keep its history, " +
+        "archive it with update_record instead. suppress adds their emails (a company's domains) to the opt-out list. Only when the user asked " +
+        "for this record to be deleted. version is required: send the version from get_record.",
+      inputSchema: {
+        record_id: id,
+        suppress: z.boolean().optional().describe("Also never contact them again."),
+        version: z.number().int().describe("The record's version, from get_record."),
+      },
+      annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: false },
+    },
+    ({ record_id, ...query }) => call(() => gtm.DELETE("/v1/workspaces/{ws}/records/{record}", { params: { path: recordPath(record_id), query } })),
   );
 
   server.registerTool(

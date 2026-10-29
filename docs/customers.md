@@ -11,7 +11,7 @@ Everything here works the same from the REST API and the MCP server.
 The catalog says what records can hold. Read it first (`GET /v1/workspaces/{ws}/catalog`, MCP `get_catalog`) and reuse what is there before adding anything.
 
 - **Record types.** Every workspace has `person` and `account` (shown as Companies), and a `deal` type (Deals) it can change like its own. Add your own with `POST .../catalog/types`, such as `subscription`. A type's key never changes; archiving one keeps its records.
-- **Fields.** Each type has fields, each the one definition of a fact for every feature: imports, list filters, enrichment, the CRM and merge tags all use it. Built in: first and last name, job title, seniority, companies, country, city, time zone, LinkedIn and lifecycle stage for people; website, industry, company size, country, LinkedIn and lifecycle stage for companies. Add your own with `POST .../catalog/types/{type}/fields`.
+- **Fields.** Each type has fields, each the one definition of a fact for every feature: imports, list filters, enrichment, the CRM and merge tags all use it. Built in: first and last name, job title, seniority, companies, country, city, time zone, LinkedIn and lifecycle stage for people; website, industry, company size, country, LinkedIn and lifecycle stage for companies. Both have **tags** (labels such as `vip` or `churn-risk`, made lowercase, up to 50 characters each) and an **owner** (a member of the workspace; alerts about the record go to them). Add your own with `POST .../catalog/types/{type}/fields`.
 - **Value types.** `text`, `number`, `currency` (`{"amount_minor": 1999, "currency": "USD"}`), `date`, `timestamp`, `checkbox`, `select` and `status` (an option key), `rating` (0 to 5), `email`, `phone` (international format), `url`, `location`, `record_reference` (another record, such as a deal's company) and `actor_reference` (a member of the workspace). `multiple` fields take a list. A field's key, value type, option list and target never change; anything else can, and a field can be archived.
 - **Option lists.** `select` and `status` fields share option lists, so the industry of a lead, a CRM company and an import are the same values. Built in: country (ISO 3166 codes), industry, company size, seniority and lifecycle stage. Add your own, such as deal stages, with `POST .../catalog/option-sets`. Options are archived, never deleted, so old values keep their meaning.
 - **Product events.** `POST .../catalog/events` defines an event your product sends, such as `product.activated`, with its properties. Only approved events will drive segments, rules and journeys.
@@ -48,6 +48,19 @@ Every lead is a person record. A new lead joins the person who already has its e
 A lead's details live on its person. Whenever a lead is added, imported, edited or enriched, its first and last name, job title and LinkedIn are copied to the person's fields, its phone becomes an unverified phone identity, and its company becomes the person's company (found or added by the website's domain, or the email's when that is a company's own, never a personal mailbox such as Gmail). They are written with the source `import`: they fill what is empty and update what a lead set before, but never replace a value a person typed, a CRM sync or enrichment set. The `customers.lead_fields` job copies what older leads know. Cold email's merge tags read the person back, so a correction made on the record (a job title, a first name) is what goes out, and the person's other text fields work as merge tags by their field key.
 
 Cold email, replies, meetings and deals carry the person's `record_id` too: from their lead, or else from the person who has the address (a reply's sender, a meeting's attendee). Lifecycle email to one address links to its verified owner. Merging two records moves all of it to the one kept.
+
+### Meetings as events
+
+A meeting tied to a person is also an event on their timeline, so a booked or held call can be a conversion like a sign-up or a payment ([attribution](attribution.md)), start a journey, or feed a rule. Whatever booked or changed it (Google Calendar, Outlook, Calendly, Cal.com, HubSpot, the app or the API), the person gets:
+
+| Event | When |
+| --- | --- |
+| `meeting.booked` | When it was booked (every meeting gets this first) |
+| `meeting.held` | When it ended (or started, without an end time), once its status is held |
+| `meeting.no_show` | The same, for a no-show |
+| `meeting.canceled` | When it was canceled |
+
+Each has `meeting_id`, `source`, `attribution`, `starts_at` and, when the meeting has them, `sequence_id`, `project_id` and `mission_id`, with source `meetings`. They are recorded within a minute of the change, or of the meeting being tied to the person, and each only once. Meetings from before this were recorded too, with the times they happened.
 
 ## Identities
 
@@ -127,7 +140,7 @@ Outflare merges on its own in one case only: when your product sends a verified 
 
 | Kind | What |
 | --- | --- |
-| `event` | Product events (for a company, the group calls that named it). Lifecycle email (`email.sent`, `email.delivered`, `email.opened` and so on, source `lifecycle`; see [docs/lifecycle-email.md](lifecycle-email.md)) and payments arrive as events too. |
+| `event` | Product events (for a company, the group calls that named it). Lifecycle email (`email.sent`, `email.delivered`, `email.opened` and so on, source `lifecycle`; see [docs/lifecycle-email.md](lifecycle-email.md)), payments and [meetings](#meetings-as-events) (`meeting.booked`, `meeting.held` and so on) arrive as events too. |
 | `attribute_change` | A field changed: old and new value, who changed it and from which source |
 | `identity` | An email, phone or other identity added or closed |
 | `consent` | Consent given or withdrawn |

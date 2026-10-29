@@ -137,6 +137,7 @@ export type UiEvent =
   | "ui.analytics_site_brand_created" // a new brand made from a site no brand fitted, in that step (connector)
   | "ui.connect_for_opened" // a page's Connect button for a service it needs, such as Geonode on Social (connector, from)
   | "ui.connect_for_returned" // back on that page after Connectors (connector, from, connected)
+  | "ui.record_dialog_closed" // People: the add or edit dialog closed without saving, after typing (mode: add, edit; type; changed: fields changed)
   | "ui.cloud_feature_shown" // an Outflare Cloud feature's page on a server that doesn't run it (capability)
   | "ui.cloud_feature_clicked"; // its link to Outflare Cloud (capability)
 

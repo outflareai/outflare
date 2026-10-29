@@ -6,6 +6,12 @@ Each pull request that changes what Outflare does adds a change note in [changes
 
 ## [Unreleased]
 
+## [0.28.0] - 2026-10-29
+
+### Added
+
+- People and Companies in the web app (CRM → People): search and filter records by brand and field, see each one's timeline, history, emails, links and consent, edit them, and merge or dismiss duplicates. Deleting a person now erases them and their activity for good, for erasure requests (also `DELETE .../records/{record}` and `delete_record`).
+
 ## [0.27.0] - 2026-10-29
 
 ### Added

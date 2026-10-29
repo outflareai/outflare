@@ -12,6 +12,8 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"golang.org/x/net/publicsuffix"
+
+	"github.com/outflareai/outflare/engine/internal/adtrack"
 )
 
 // Website visits. Every page and track event a site key takes belongs to a
@@ -97,26 +99,55 @@ func parseUA(ua string) (device, browser, os string) {
 type siteTouch struct {
 	source, medium, campaign, term, content string
 	clickIDs                                map[string]string
-	ref, ofc                                string
+	// ad is the ad the tracking template named (adtrack.AdParams).
+	ad       map[string]string
+	ref, ofc string
+	// cookies are the network pixels' cookies (adtrack.Cookies). They are
+	// kept with the click ids but say who the browser is, not how it
+	// arrived, so they never start a visit.
+	cookies map[string]string
 }
 
 // arrived reports whether the event carries anything saying how the
 // visitor arrived. One that doesn't continues the visit it is in.
 func (t siteTouch) arrived() bool {
-	return t.source != "" || t.medium != "" || t.campaign != "" || len(t.clickIDs) > 0 || t.ref != "" || t.ofc != ""
+	return t.source != "" || t.medium != "" || t.campaign != "" || len(t.clickIDs) > 0 || len(t.ad) > 0 || t.ref != "" || t.ofc != ""
 }
 
 // same reports whether two touches are the same arrival.
 func (t siteTouch) same(o siteTouch) bool {
-	if len(t.clickIDs) != len(o.clickIDs) {
+	return sameStrings(t.clickIDs, o.clickIDs) && sameStrings(t.ad, o.ad) &&
+		t.source == o.source && t.medium == o.medium && t.campaign == o.campaign && t.ref == o.ref && t.ofc == o.ofc
+}
+
+func sameStrings(a, b map[string]string) bool {
+	if len(a) != len(b) {
 		return false
 	}
-	for k, v := range t.clickIDs {
-		if o.clickIDs[k] != v {
+	for k, v := range a {
+		if b[k] != v {
 			return false
 		}
 	}
-	return t.source == o.source && t.medium == o.medium && t.campaign == o.campaign && t.ref == o.ref && t.ofc == o.ofc
+	return true
+}
+
+// splitCookies takes the network cookies out of a visit's click ids.
+func splitCookies(ids map[string]string) (clicks, cookies map[string]string) {
+	for k, v := range ids {
+		if adtrack.IsCookie(k) {
+			if cookies == nil {
+				cookies = map[string]string{}
+			}
+			cookies[k] = v
+		} else {
+			if clicks == nil {
+				clicks = map[string]string{}
+			}
+			clicks[k] = v
+		}
+	}
+	return clicks, cookies
 }
 
 // touchOf reads a cleaned browser event's arrival.
@@ -128,14 +159,21 @@ func touchOf(props, ctxObj map[string]any) siteTouch {
 	camp, _ := ctxObj["campaign"].(map[string]any)
 	t := siteTouch{source: str(camp, "source"), medium: str(camp, "medium"), campaign: str(camp, "name"),
 		term: str(camp, "term"), content: str(camp, "content"), ref: cutUTF8(str(props, "ref"), 200), ofc: cutUTF8(str(props, "ofc"), 200)}
-	if ids, ok := props["click_ids"].(map[string]any); ok {
-		t.clickIDs = map[string]string{}
-		for k, v := range ids {
+	strs := func(key string) map[string]string {
+		obj, _ := props[key].(map[string]any)
+		var out map[string]string
+		for k, v := range obj {
 			if s, ok := v.(string); ok {
-				t.clickIDs[k] = s
+				if out == nil {
+					out = map[string]string{}
+				}
+				out[k] = s
 			}
 		}
+		return out
 	}
+	t.clickIDs, t.cookies = splitCookies(strs("click_ids"))
+	t.ad = strs("ad")
 	return t
 }
 
@@ -153,24 +191,22 @@ func siteSession(ctx context.Context, tx pgx.Tx, a *access, v siteVisitor, m eve
 	}
 	touch := touchOf(props, ctxObj)
 	page := m.text("type") == "page"
+	if !page {
+		touch.ad = nil
+	}
 
 	var id string
 	var last time.Time
 	var prev siteTouch
-	var prevIDs map[string]string
-	err = tx.QueryRow(ctx, `SELECT id::text, last_seen_at, utm_source, utm_medium, utm_campaign, click_ids, ref, ofc FROM site_sessions
+	var prevIDs, prevAd map[string]string
+	err = tx.QueryRow(ctx, `SELECT id::text, last_seen_at, utm_source, utm_medium, utm_campaign, click_ids, ad, ref, ofc FROM site_sessions
 		WHERE workspace_id = $1 AND anonymous_id = $2 ORDER BY last_seen_at DESC LIMIT 1 FOR UPDATE`, a.WorkspaceID, anon).
-		Scan(&id, &last, &prev.source, &prev.medium, &prev.campaign, &prevIDs, &prev.ref, &prev.ofc)
+		Scan(&id, &last, &prev.source, &prev.medium, &prev.campaign, &prevIDs, &prevAd, &prev.ref, &prev.ofc)
 	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 		return false, err
 	}
-	prev.clickIDs = prevIDs
-	if len(prev.clickIDs) == 0 {
-		prev.clickIDs = nil
-	}
-	if len(touch.clickIDs) == 0 {
-		touch.clickIDs = nil
-	}
+	prev.clickIDs, prev.cookies = splitCookies(prevIDs)
+	prev.ad = prevAd
 	isNew := id == "" || now.Sub(last) > siteSessionIdle || (touch.arrived() && !touch.same(prev))
 	if isNew {
 		pageObj, _ := ctxObj["page"].(map[string]any)
@@ -192,22 +228,51 @@ func siteSession(ctx context.Context, tx pgx.Tx, a *access, v siteVisitor, m eve
 		if err != nil {
 			return false, err
 		}
-		ids := touch.clickIDs
-		if ids == nil {
-			ids = map[string]string{}
+		// The visit keeps the browser's network cookies, from this event
+		// or, on the same browser, from the visit before.
+		ids := map[string]string{}
+		for k, v := range prev.cookies {
+			ids[k] = v
+		}
+		for k, v := range touch.cookies {
+			ids[k] = v
+		}
+		for k, v := range touch.clickIDs {
+			ids[k] = v
+		}
+		ad := touch.ad
+		if ad == nil {
+			ad = map[string]string{}
 		}
 		if err := tx.QueryRow(ctx, `INSERT INTO site_sessions (workspace_id, key_id, brand_id, anonymous_id, record_id, started_at, last_seen_at, events, pageviews,
 				landing_url, landing_path, referrer, referrer_host, utm_source, utm_medium, utm_campaign, utm_term, utm_content, click_ids, ref, ofc,
-				country, timezone, device, browser, os)
-			VALUES ($1, $2, $3, $4, $5, $6, $6, 1, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24) RETURNING id::text`,
+				country, timezone, device, browser, os, ad)
+			VALUES ($1, $2, $3, $4, $5, $6, $6, 1, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25) RETURNING id::text`,
 			a.WorkspaceID, v.keyID, v.brandID, anon, rec, now, boolInt(page), cutUTF8(str("url"), 2000), cutUTF8(str("path"), 2000),
 			cutUTF8(referrer, 2000), cutUTF8(refHost, 253), touch.source, touch.medium, touch.campaign, touch.term, touch.content, ids,
-			touch.ref, touch.ofc, zoneCountry[tz], cutUTF8(tz, 100), v.device, v.browser, v.os).Scan(&id); err != nil {
+			touch.ref, touch.ofc, zoneCountry[tz], cutUTF8(tz, 100), v.device, v.browser, v.os, ad).Scan(&id); err != nil {
 			return false, err
 		}
-	} else if _, err := tx.Exec(ctx, `UPDATE site_sessions SET last_seen_at = $2, events = events + 1, pageviews = pageviews + $3 WHERE id = $1`,
-		id, now, boolInt(page)); err != nil {
-		return false, err
+	} else {
+		// A pixel often sets its cookie after the first page view: the
+		// visit takes it from a later event.
+		var cookies map[string]string
+		for k, v := range touch.cookies {
+			if prev.cookies[k] != v {
+				if cookies == nil {
+					cookies = map[string]string{}
+				}
+				cookies[k] = v
+			}
+		}
+		if cookies == nil {
+			cookies = map[string]string{}
+		}
+		if _, err := tx.Exec(ctx, `UPDATE site_sessions SET last_seen_at = $2, events = events + 1, pageviews = pageviews + $3,
+				click_ids = click_ids || $4::jsonb WHERE id = $1`,
+			id, now, boolInt(page), cookies); err != nil {
+			return false, err
+		}
 	}
 	ctxObj["sessionId"] = id
 	m["context"] = mustJSON(ctxObj)
@@ -252,8 +317,13 @@ var touchFields = []fieldView{
 }
 
 // clickPlatforms are the ad platforms behind each click id.
-var clickPlatforms = map[string]string{"gclid": "google", "gbraid": "google", "wbraid": "google", "fbclid": "facebook",
-	"msclkid": "microsoft", "li_fat_id": "linkedin", "rdt_cid": "reddit", "twclid": "x"}
+var clickPlatforms = func() map[string]string {
+	out := map[string]string{}
+	for _, c := range adtrack.ClickIDs {
+		out[c.Param] = c.Source
+	}
+	return out
+}()
 
 // sourceMedium names where a visit came from the way analytics tools do:
 // its tags first, then an ad click id, then the linking site.

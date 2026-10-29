@@ -14,11 +14,13 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/jackc/pgx/v5"
 
 	"github.com/outflareai/outflare/engine/internal/auth"
 	"github.com/outflareai/outflare/engine/internal/customers"
+	"github.com/outflareai/outflare/engine/internal/leads"
 )
 
 // Customer records: the people, companies and other things a workspace
@@ -40,6 +42,7 @@ func (s *Server) routesRecords(mux *http.ServeMux) {
 	mux.HandleFunc("GET "+base+"/lookup", s.inBrand(read, s.lookupRecords))
 	mux.HandleFunc("GET "+base+"/{record}", s.inBrand(read, s.getRecord))
 	mux.HandleFunc("PATCH "+base+"/{record}", s.inBrand(manage, s.updateRecord))
+	mux.HandleFunc("DELETE "+base+"/{record}", s.inBrand(manage, s.deleteRecord))
 	mux.HandleFunc("POST "+base+"/{record}/review", s.inBrand(manage, s.reviewRecord))
 	mux.HandleFunc("GET "+base+"/{record}/history", s.inBrand(read, s.recordHistory))
 	mux.HandleFunc("GET "+base+"/{record}/identities", s.inBrand(read, s.listIdentities))
@@ -237,6 +240,11 @@ func normalizeValue(ctx context.Context, tx pgx.Tx, c *catalog, ws string, f *fi
 			n, err := normalizeOne(c, f, item)
 			if err != nil {
 				return nil, err
+			}
+			if f.Builtin && f.Key == "tags" {
+				if n, err = NormalizeTag(n); err != nil {
+					return nil, err
+				}
 			}
 			k := fmt.Sprint(n)
 			if !seen[k] {
@@ -1071,6 +1079,98 @@ func (s *Server) updateRecord(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, view)
 }
 
+// deleteRecord erases a person or company for good: the record, the
+// records merged into it, and what customers.Erased says is theirs. With
+// suppress=true their emails (a company's domains) go on the opt-out
+// list first, so a later import or sync can't contact them again.
+func (s *Server) deleteRecord(w http.ResponseWriter, r *http.Request) {
+	a := accessFrom(r.Context())
+	ctx := r.Context()
+	q := r.URL.Query()
+	suppress := q.Get("suppress") == "true"
+	var version *int
+	if v := q.Get("version"); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil {
+			writeError(w, r, http.StatusBadRequest, "invalid_request", "version is the record's version, as read")
+			return
+		}
+		version = &n
+	} else if agentWrite(r) {
+		writeError(w, r, http.StatusBadRequest, "version_required", versionRequired)
+		return
+	}
+	var out map[string]any
+	err := pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
+		rec, err := lockRecord(ctx, tx, a, r.PathValue("record"))
+		if err != nil {
+			return err
+		}
+		if version != nil && *version != rec.Version {
+			return recordConflict{"record_changed", fmt.Sprintf("the record changed since version %d (it is at %d): read it again before deleting it", *version, rec.Version)}
+		}
+		if rec.Type == "deal" {
+			return errInvalid("a deal is deleted with DELETE .../deals/{deal}")
+		}
+		// The records merged into it are the same person, kept for their
+		// history: they go too.
+		rows, err := tx.Query(ctx, `WITH RECURSIVE m AS (SELECT id FROM records WHERE id = $1
+				UNION SELECT r.id FROM records r JOIN m ON r.merged_into = m.id WHERE r.workspace_id = $2)
+			SELECT id::text FROM m`, rec.ID, a.WorkspaceID)
+		if err != nil {
+			return err
+		}
+		ids, err := pgx.CollectRows(rows, pgx.RowTo[string])
+		if err != nil {
+			return err
+		}
+		rows, err = tx.Query(ctx, `SELECT DISTINCT namespace, value FROM record_identities
+			WHERE workspace_id = $1 AND record_id = ANY($2) AND namespace IN ('email', 'domain')`, a.WorkspaceID, ids)
+		if err != nil {
+			return err
+		}
+		var emails []string
+		var block []leads.Suppression
+		for rows.Next() {
+			var ns, v string
+			if err := rows.Scan(&ns, &v); err != nil {
+				return err
+			}
+			if ns == "email" {
+				emails = append(emails, v)
+			}
+			// A person's emails, or a company's domains.
+			if (ns == "email") == (rec.Type == "person") {
+				block = append(block, leads.Suppression{Kind: ns, Value: v})
+			}
+		}
+		if err := rows.Err(); err != nil {
+			return err
+		}
+		suppressed := 0
+		if suppress {
+			if suppressed, err = leads.Suppress(ctx, tx, a.WorkspaceID, leads.Added{Reason: "do_not_contact", Source: "record_deleted",
+				Method: leads.MethodManual, ActorID: a.ActorID, ActorType: a.ActorType}, block); err != nil {
+				return err
+			}
+		}
+		// A company's own people stay: only its links to them go.
+		if rec.Type != "person" {
+			emails = nil
+		}
+		gone, err := customers.Erase(ctx, tx, a.WorkspaceID, ids, emails)
+		if err != nil {
+			return err
+		}
+		out = map[string]any{"id": rec.ID, "type": rec.Type, "erased": gone, "suppressed": suppressed}
+		return record(ctx, tx, &a.principal, a.WorkspaceID, "record.deleted", "record", rec.ID, out)
+	})
+	if s.recordError(w, r, err) {
+		return
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
 func (s *Server) listRecords(w http.ResponseWriter, r *http.Request) {
 	a := accessFrom(r.Context())
 	ctx := r.Context()
@@ -1121,6 +1221,34 @@ func (s *Server) listRecords(w http.ResponseWriter, r *http.Request) {
 	if v := q.Get("acquired_via"); v != "" {
 		args = append(args, strings.Split(v, ","))
 		where += fmt.Sprintf(` AND r.acquired_via = ANY($%d)`, len(args))
+	}
+	// attribute=key:value, repeated: values of one field are alternatives,
+	// different fields must all match. A list value matches when it holds
+	// the value, such as a person's companies.
+	if conds := q["attribute"]; len(conds) > 0 {
+		if len(conds) > 20 {
+			writeError(w, r, http.StatusBadRequest, "invalid_request", "at most 20 attribute filters")
+			return
+		}
+		byKey := map[string][]string{}
+		var keys []string
+		for _, c := range conds {
+			k, v, ok := strings.Cut(c, ":")
+			if !ok || !fieldKeyShape.MatchString(k) || v == "" {
+				writeError(w, r, http.StatusBadRequest, "invalid_request", "attribute is a field key and a value, such as attribute=lifecycle_stage:customer")
+				return
+			}
+			if _, seen := byKey[k]; !seen {
+				keys = append(keys, k)
+			}
+			byKey[k] = append(byKey[k], v)
+		}
+		for _, k := range keys {
+			args = append(args, k, byKey[k])
+			kn, vn := len(args)-1, len(args)
+			where += fmt.Sprintf(` AND (r.attributes->>$%d = ANY($%d::text[]) OR EXISTS (SELECT 1 FROM unnest($%d::text[]) v
+				WHERE jsonb_typeof(r.attributes->$%d) = 'array' AND r.attributes->$%d @> jsonb_build_array(v)))`, kn, vn, vn, kn, kn)
+		}
 	}
 	if text := strings.ToLower(strings.TrimSpace(q.Get("q"))); text != "" {
 		args = append(args, escapeLike(text))
@@ -1533,4 +1661,15 @@ func (s *Server) endRelationship(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, view)
+}
+
+// NormalizeTag makes a tag lowercase, trimmed and at most 50 characters,
+// so "VIP " and "vip" are one tag.
+func NormalizeTag(v any) (any, error) {
+	t, _ := v.(string)
+	t = strings.ToLower(strings.Join(strings.Fields(t), " "))
+	if t == "" || utf8.RuneCountInString(t) > 50 {
+		return nil, errInvalid("each tag is 1 to 50 characters")
+	}
+	return t, nil
 }
