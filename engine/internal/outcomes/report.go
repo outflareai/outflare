@@ -58,6 +58,10 @@ type Row struct {
 	PipelineCents int64 `json:"pipeline_cents"`
 	WonCents      int64 `json:"won_cents"`
 
+	// Links pitched through the row's sequences that went live in the
+	// period (link building).
+	LiveLinks int `json:"live_links"`
+
 	Spend Spend `json:"spend"`
 
 	CostPerReply   *int64 `json:"cost_per_reply_cents"`
@@ -65,6 +69,7 @@ type Row struct {
 	CostPerHeld    *int64 `json:"cost_per_held_meeting_cents"`
 	CostPerDeal    *int64 `json:"cost_per_deal_cents"`
 	CostPerWon     *int64 `json:"cost_per_won_deal_cents"`
+	CostPerLink    *int64 `json:"cost_per_live_link_cents"`
 	// Won revenue per unit of spend, when both are known.
 	ROI *float64 `json:"roi"`
 }
@@ -292,6 +297,34 @@ func Summary(ctx context.Context, q Querier, ws string, f ReportFilter) (Report,
 		}
 		if qualified {
 			a.Qualified += n
+		}
+	}
+	rs.Close()
+	if err := rs.Err(); err != nil {
+		return rep, err
+	}
+
+	// Links that went live in the period, by the sequence that pitched
+	// them.
+	rs, err = q.Query(ctx, `
+		SELECT k.sequence_id::text, s.project_id::text, count(DISTINCT x.id)
+		FROM link_prospects x JOIN link_pitches k ON k.prospect_id = x.id AND k.status = 'enrolled'
+		JOIN sequences s ON s.id = k.sequence_id
+		WHERE x.workspace_id = $1 AND x.stage = 'live' AND x.live_at >= $2 AND x.live_at < $3 AND $6 = ''
+		  AND ($4 = '' OR s.project_id::text = $4) AND ($5 = '' OR k.sequence_id::text = $5)
+		GROUP BY 1, 2`, ws, f.From, f.To, f.ProjectID, f.SequenceID, f.MissionID)
+	if err != nil {
+		return rep, err
+	}
+	for rs.Next() {
+		var seq, project *string
+		var n int
+		if err := rs.Scan(&seq, &project, &n); err != nil {
+			rs.Close()
+			return rep, err
+		}
+		if keep(brands.of(seq, project)) {
+			get(key(seq, project)).LiveLinks += n
 		}
 	}
 	rs.Close()
@@ -561,6 +594,7 @@ func Summary(ctx context.Context, q Querier, ws string, f ReportFilter) (Report,
 		tot.Qualified += a.Qualified
 		tot.Deals += a.Deals
 		tot.Won += a.Won
+		tot.LiveLinks += a.LiveLinks
 		tot.PipelineCents += a.PipelineCents
 		tot.WonCents += a.WonCents
 		tot.direct += a.direct
@@ -712,8 +746,8 @@ func (a *acc) finish() {
 		v := int64(math.Round(spend / float64(n)))
 		return &v
 	}
-	a.CostPerReply, a.CostPerMeeting, a.CostPerHeld, a.CostPerDeal, a.CostPerWon =
-		per(a.Replies), per(a.Meetings), per(a.Held), per(a.Deals), per(a.Won)
+	a.CostPerReply, a.CostPerMeeting, a.CostPerHeld, a.CostPerDeal, a.CostPerWon, a.CostPerLink =
+		per(a.Replies), per(a.Meetings), per(a.Held), per(a.Deals), per(a.Won), per(a.LiveLinks)
 	if spend > 0 && a.WonCents > 0 {
 		r := float64(a.WonCents) / spend
 		a.ROI = &r

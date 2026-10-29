@@ -34,7 +34,7 @@ credential.
 
 ## What is stored
 
-A sync runs every six hours. The first one reads 90 days; later runs read the
+A sync runs every six hours, and a failed one is tried again sooner: after 15 minutes, then 1 and 2 hours, then every 4 hours until one works. The first one reads 90 days; later runs read the
 last 7 days, and the last 30 once a day, because platforms keep revising recent
 numbers. Each run stores:
 

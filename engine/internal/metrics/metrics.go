@@ -259,6 +259,12 @@ var (
 		Namespace: namespace, Subsystem: "reviews", Name: "page_reads_total",
 		Help: "Review page reads, by platform and outcome (success, blocked, page_not_found, not_a_review_page, save_failed, connector_error).",
 	}, []string{"platform", "outcome"})
+	// Scheduled syncs of connections (analytics, Search Console, page
+	// conversions, ads, SEO snapshots).
+	syncRuns = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Namespace: namespace, Subsystem: "sync", Name: "runs_total",
+		Help: "Scheduled sync runs of connections, by module (analytics, search_console, page_conversions, ads, seo) and outcome (success, internal, connector_auth, connector_quota, connector_unavailable, connector_invalid).",
+	}, []string{"module", "outcome"})
 	// Social accounts: reading followers of connected accounts and of the
 	// public profiles in brand links.
 	socialReads = prometheus.NewCounterVec(prometheus.CounterOpts{
@@ -297,6 +303,10 @@ var (
 		Namespace: namespace, Subsystem: "partners", Name: "rewards_total",
 		Help: "Reward ledger changes, by kind (cash, fee, action, adjustment) and event (created, approved, rejected, reversed, fulfilled, paid).",
 	}, []string{"kind", "event"})
+	partnerPostbacks = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Namespace: namespace, Subsystem: "partners", Name: "postbacks_total",
+		Help: "Postbacks to partners' own trackers, by outcome (sent, retried, rejected: the tracker refused it, unreachable: failed after every retry, invalid).",
+	}, []string{"outcome"})
 	partnerImports = prometheus.NewCounterVec(prometheus.CounterOpts{
 		Namespace: namespace, Subsystem: "partners", Name: "imports_total",
 		Help: "Partner program imports from another platform that finished, by connector and outcome (done, failed).",
@@ -320,6 +330,10 @@ var (
 		Namespace: namespace, Subsystem: "news", Name: "found_total",
 		Help: "What news search runs kept for the first time, by kind (article: a new article in the workspace, coverage: a new coverage item for a brand).",
 	}, []string{"kind"})
+	newsReads = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Namespace: namespace, Subsystem: "news", Name: "article_reads_total",
+		Help: "Reads of news articles' pages for their byline, by status (up, gone, blocked, opted_out, unreachable, failed) and journalist (true when the read found a new journalist).",
+	}, []string{"status", "journalist"})
 
 	linkPageChecks = prometheus.NewCounterVec(prometheus.CounterOpts{
 		Namespace: namespace, Subsystem: "seo", Name: "link_page_checks_total",
@@ -329,6 +343,13 @@ var (
 		Namespace: namespace, Subsystem: "seo", Name: "archive_lookups_total",
 		Help: "Internet Archive lookups of broken links, by outcome (found, none, error).",
 	}, []string{"outcome"})
+
+	linkPitches = linkCounter("link_pitches_written_total",
+		"Openers the workspace's AI wrote for link pitches, by outcome (written, no_ai, ai_unavailable, ai_failed).", "outcome")
+	linkReplies = linkCounter("link_replies_read_total",
+		"Replies to link pitches the workspace's AI read, by what they say (agreed, declined, wants_payment, wants_content, other, no_ai, ai_unavailable, ai_failed).", "kind")
+	linkLiveChecks = linkCounter("link_live_checks_total",
+		"Checks of agreed and live links, by what they found (live, not_yet, removed, still_live, unreachable).", "outcome")
 
 	buildInfo = prometheus.NewGaugeVec(prometheus.GaugeOpts{
 		Namespace: namespace, Name: "build_info",
@@ -354,10 +375,10 @@ var own = []prometheus.Collector{
 	ruleEvaluations,
 	semanticRuns, semanticItems, semanticDuration, semanticAvailable, semanticWorkspaces,
 	adConversions, adConversionsOldest,
-	reviewReads, reviewsFound, socialReads, linkReads, linkPageChecks, archiveLookups,
+	reviewReads, reviewsFound, socialReads, syncRuns, linkReads, linkPageChecks, archiveLookups, linkPitches, linkReplies, linkLiveChecks,
 	socialPublishes,
-	partnerClicks, partnerConversions, partnerRewards, partnerRewardsOverdue, partnerImports, partnerImportObjects,
-	newsRuns, newsFound,
+	partnerClicks, partnerConversions, partnerRewards, partnerRewardsOverdue, partnerImports, partnerImportObjects, partnerPostbacks,
+	newsRuns, newsFound, newsReads,
 	buildInfo,
 }
 
@@ -576,6 +597,12 @@ func HookEvent(connector, result string, lag time.Duration) {
 	}
 }
 
+// SyncRun records one run of a connection's scheduled sync and its
+// outcome: success or the error code.
+func SyncRun(module, outcome string) {
+	syncRuns.WithLabelValues(module, outcome).Inc()
+}
+
 // SocialAccountRead records one read of a social account and its outcome.
 func SocialAccountRead(channel, outcome string) {
 	socialReads.WithLabelValues(channel, outcome).Inc()
@@ -583,6 +610,19 @@ func SocialAccountRead(channel, outcome string) {
 
 // LinkRead records one read of who links to a page or domain.
 func LinkRead(reason, outcome string) { linkReads.WithLabelValues(reason, outcome).Inc() }
+
+func linkCounter(name, help, label string) *prometheus.CounterVec {
+	return prometheus.NewCounterVec(prometheus.CounterOpts{Namespace: namespace, Subsystem: "seo", Name: name, Help: help}, []string{label})
+}
+
+// LinkPitchWritten records one opener the AI wrote, or why it didn't.
+func LinkPitchWritten(outcome string) { linkPitches.WithLabelValues(outcome).Inc() }
+
+// LinkReplyRead records one reply to a pitch the AI read.
+func LinkReplyRead(kind string) { linkReplies.WithLabelValues(kind).Inc() }
+
+// LinkLiveCheck records one check of an agreed or live link.
+func LinkLiveCheck(outcome string) { linkLiveChecks.WithLabelValues(outcome).Inc() }
 
 // LinkPageCheck records one check of a link prospect's page.
 func LinkPageCheck(status string) { linkPageChecks.WithLabelValues(status).Inc() }
@@ -609,6 +649,11 @@ func NewsSearchRun(purpose, outcome string, articles, coverage int) {
 	if coverage > 0 {
 		newsFound.WithLabelValues("coverage").Add(float64(coverage))
 	}
+}
+
+// NewsArticleRead records one read of an article's page.
+func NewsArticleRead(status string, journalist bool) {
+	newsReads.WithLabelValues(status, strconv.FormatBool(journalist)).Inc()
 }
 
 // SocialPublished records one try of the publish job.
@@ -648,6 +693,9 @@ func PartnerRewards(kind, event string, n int) {
 		partnerRewards.WithLabelValues(kind, event).Add(float64(n))
 	}
 }
+
+// PartnerPostback counts a postback to a partner's tracker by outcome.
+func PartnerPostback(outcome string) { partnerPostbacks.WithLabelValues(outcome).Inc() }
 
 // PartnerImport counts a finished partner import.
 func PartnerImport(connector, outcome string) {

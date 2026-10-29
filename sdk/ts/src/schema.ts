@@ -6512,6 +6512,215 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/workspaces/{ws}/link-prospects/{prospect}/pitches": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                prospect: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Pitch a link prospect
+         * @description Scope: sequences.manage. Starts a pitch of a prospect to pitch, to one
+         *     of its contacts (`record_id`, default the surest with an email
+         *     address), through one of Outflare's own sequences (not a sequencer's
+         *     campaign). The workspace's AI writes an opener for the page (tool
+         *     link_pitches); the sequence's step uses it as `{{custom.opener}}`.
+         *     The pitch then waits as a draft for a person to approve, unless the
+         *     sequence's pitches skip approval (PATCH .../link-building/sequences/{id}),
+         *     when it is enrolled once the opener is written. Without AI it waits
+         *     with no opener for a person to write one. The prospect may have one
+         *     open pitch at a time.
+         */
+        post: operations["startLinkPitch"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/workspaces/{ws}/link-pitches": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+            };
+            cookie?: never;
+        };
+        /**
+         * List link pitches
+         * @description Scope: sequences.read. Pitches of link prospects, newest first: `draft` ones wait for a person to approve them.
+         */
+        get: operations["listLinkPitches"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/workspaces/{ws}/link-pitches/{pitch}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                pitch: string;
+            };
+            cookie?: never;
+        };
+        /**
+         * Get a link pitch
+         * @description Scope: sequences.read.
+         */
+        get: operations["getLinkPitch"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Edit a draft pitch's opener
+         * @description Scope: sequences.manage. Only a draft's opener changes. Never offer payment for a link.
+         */
+        patch: operations["editLinkPitch"];
+        trace?: never;
+    };
+    "/v1/workspaces/{ws}/link-pitches/{pitch}/approve": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                pitch: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Approve a pitch, sending it
+         * @description Scope: sequences.manage. The opener (edited when `opener` is sent)
+         *     goes on the contact's lead as `custom.opener`, made from their person
+         *     record, and the lead is enrolled in the sequence, whose own checks
+         *     (policy, suppressions, sending windows, limits) apply to every send.
+         *     The prospect moves to pitched. 409 `site_in_outreach` while another
+         *     prospect on the website is in outreach or in its cool-down, and 409
+         *     `conflict` when the website or contact is suppressed or the prospect
+         *     isn't to pitch any more.
+         */
+        post: operations["approveLinkPitch"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/workspaces/{ws}/link-pitches/{pitch}/reject": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                pitch: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Reject a draft pitch
+         * @description Scope: sequences.manage. The prospect can then be pitched again, another way.
+         */
+        post: operations["rejectLinkPitch"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/workspaces/{ws}/link-building/sequences": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+            };
+            cookie?: never;
+        };
+        /**
+         * List sequences for link pitches
+         * @description Scope: sequences.read. Outflare's own sequences that aren't archived, which pitches can go through, with whether their pitches wait for approval and whether a step uses `{{custom.opener}}`.
+         */
+        get: operations["listLinkSequences"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/workspaces/{ws}/link-building/sequences/{sequence}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                sequence: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Turn approval of a sequence's link pitches on or off
+         * @description Scope: sequences.manage. On (the default), each pitch waits for a person to approve it; off, a pitch is enrolled once its opener is written.
+         */
+        patch: operations["updateLinkSequence"];
+        trace?: never;
+    };
+    "/v1/workspaces/{ws}/link-prospects/results": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+            };
+            cookie?: never;
+        };
+        /**
+         * Link building results by method
+         * @description Scope: seo.read. Prospects found in the last `days` (default 90, excluded ones left out), by method: how many were pitched, replied, agreed, went live, declined or had their link removed. `win_rate` is live links per pitch. Cost per live link is in the Outcomes report, by sequence.
+         */
+        get: operations["getLinkResults"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/workspaces/{ws}/link-prospects/{prospect}": {
         parameters: {
             query?: never;
@@ -6666,6 +6875,35 @@ export interface paths {
          *     costs nothing.
          */
         get: operations["listNewsArticles"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/workspaces/{ws}/journalists": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+            };
+            cookie?: never;
+        };
+        /**
+         * List journalists
+         * @description Scope: seo.read. The authors of news articles the news watch read
+         *     whose address the free email finder found at the outlet. Each is a
+         *     person record on the outlet's company, listed with how many of the
+         *     articles in view they wrote, their latest, their outlets and the
+         *     searches (topics) their articles came up in; most articles first.
+         *     To make a media list, add their records to a list. Reads only what
+         *     is stored, so it costs nothing.
+         */
+        get: operations["listJournalists"];
         put?: never;
         post?: never;
         delete?: never;
@@ -13810,6 +14048,35 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/workspaces/{ws}/ab-tests/{test}/breakdown": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                test: string;
+            };
+            cookie?: never;
+        };
+        /**
+         * Break an A/B test's results down
+         * @description Scope: analytics.read. The first goal's results within groups of visitors, by the visit they first saw their
+         *     version in: device (desktop, mobile, tablet), source (its utm_source, else the referring site, else direct),
+         *     country, or visitor (new or returning). Visitors whose visit isn't known, such as exposures sent by a server,
+         *     are "unknown". The largest 8 groups are shown, the rest added up as "other". Every comparison is corrected for
+         *     every version in every group, since each is another chance of a lucky difference: use it to learn where a
+         *     change works, not to pick a winner. Counted up to now, or to when the test ended. 409 for a draft.
+         */
+        get: operations["getABTestBreakdown"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/workspaces/{ws}/customer-events": {
         parameters: {
             query?: never;
@@ -16846,6 +17113,30 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/workspaces/{ws}/partners/{id}/postbacks": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        /**
+         * List a partner's postbacks to their tracker
+         * @description Scope: partners.read. The last 50 calls to the partner's postback URL, newest first: queued, sent, or failed with the tracker's answer. A tracker that is down is tried 5 times; one that refuses (4xx) isn't tried again.
+         */
+        get: operations["listPartnerPostbacks"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/workspaces/{ws}/partners/{id}/impersonate": {
         parameters: {
             query?: never;
@@ -17207,6 +17498,32 @@ export interface paths {
          * @description Scope: partners.conversions. After partner_reward.approved told your system to grant something (credit, a free month), call this so the ledger shows it done.
          */
         post: operations["fulfilPartnerReward"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/workspaces/{ws}/partner-payouts/export": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+            };
+            cookie?: never;
+        };
+        /**
+         * Download payouts as CSV, with payout details
+         * @description Scope: partners.manage, because the file holds each partner's payout details. Columns: payout_id, program,
+         *     partner_id, partner_code, partner_name, partner_email, payout_method, amount (a decimal), currency, status, reference,
+         *     created_at, paid_at. Due payouts unless status says otherwise; at most 10,000 rows. Pay them from your own account or
+         *     upload the file to a payout tool, then mark each one paid. Recorded in the audit log (partner_payouts.exported).
+         */
+        get: operations["exportPartnerPayouts"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -19876,6 +20193,74 @@ export interface webhooks {
         patch?: never;
         trace?: never;
     };
+    "link_pitch.drafted": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** A link pitch's opener was written (or couldn't be, data.reason) and it waits for a person to approve it. data has prospect_id, sequence_id and opener_written. */
+        post: operations["webhook_link_pitch_drafted"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "link_pitch.approved": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** A link pitch was approved (data.approved, or sent on its own when its sequence skips approval) and its contact enrolled. data has prospect_id, sequence_id, lead_id, record_id and edited. */
+        post: operations["webhook_link_pitch_approved"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "link_pitch.rejected": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** A draft link pitch was rejected. data.prospect_id. */
+        post: operations["webhook_link_pitch_rejected"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "link_prospect.overdue": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** An agreed link isn't on the page 14 days after the site agreed; time to nudge them. data has site_id, record_id, method and days_since_agreed. */
+        post: operations["webhook_link_prospect_overdue"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "link_prospect.found": {
         parameters: {
             query?: never;
@@ -20795,7 +21180,7 @@ export interface components {
              */
             id: string;
             /** @enum {string} */
-            type: "lead.replied" | "lead.unsubscribed" | "inbox.replied" | "inbox.updated" | "inbox.classified" | "lead.bounced" | "mailbox.auto_paused" | "lead.created" | "lead.updated" | "lead.deleted" | "leads.imported" | "suppressions.added" | "suppression.removed" | "lead_list.created" | "lead_list.leads_added" | "lead_list.run_started" | "lead_list.build_done" | "lead_list.build_failed" | "lead_list.refresh_done" | "lead_list.refresh_failed" | "lead_list.enrich_done" | "lead_list.enrich_failed" | "import.done" | "import.failed" | "sequence.created" | "sequence.updated" | "sequence.activated" | "sequence.paused" | "sequence.archived" | "sequence.deleted" | "sequence.steps_updated" | "sequence.leads_enrolled" | "enrollment.stopped" | "mailbox.imported" | "mailbox.updated" | "mailbox.paused" | "mailbox.resumed" | "mailbox.stage_changed" | "mailbox.deleted" | "domain.added" | "domain.paused" | "domain.resumed" | "domain.removed" | "email.queued" | "email.sent" | "email.delivered" | "email.bounced" | "email.complained" | "email.failed" | "email.suppressed" | "email.cancelled" | "email.unsubscribed" | "email.opened" | "email.clicked" | "email.preferences_changed" | "email_domain.verified" | "email_domain.verification_failed" | "email_provider.events_failed" | "email_template.published" | "meeting.created" | "meeting.updated" | "meeting.deleted" | "deal.created" | "deal.updated" | "deal.deleted" | "spend.recorded" | "integration.connected" | "integration.updated" | "integration.disconnected" | "connect_request.created" | "deploy.detected" | "deploy.failed" | "digest.ready" | "ai_budget.warned" | "ai_budget.reached" | "connection_limit.warned" | "connection_limit.reached" | "experiment.started" | "experiment.concluded" | "project.created" | "project.updated" | "project.deleted" | "mission.created" | "mission.updated" | "mission.submitted" | "mission.approved" | "mission.paused" | "mission.resumed" | "mission.stopped" | "mission.completed" | "mission.action_held" | "mission.action_approved" | "mission.action_rejected" | "infra.plan_created" | "infra.plan_approved" | "infra.ordered" | "infra.order_failed" | "infra.domains_bought" | "infra.mailbox_joined" | "infra.plan_warming" | "infra.plan_ready" | "infra.plan_cancelled" | "fix.found" | "fix.updated" | "fix.started" | "fix.verify_requested" | "fix.confirmed" | "fix.reopened" | "record.created" | "record.bulk_created" | "record.bulk_updated" | "record.updated" | "record.merged" | "identity.verified" | "identity.closed" | "relationship.added" | "relationship.ended" | "consent.granted" | "consent.withdrawn" | "consent.bulk_withdrawn" | "brand.created" | "brand.updated" | "email_broadcast.created" | "email_broadcast.started" | "email_broadcast.sent" | "email_broadcast.failed" | "email_broadcast.cancelled" | "journey.created" | "journey.updated" | "journey_run.entered" | "journey_run.exited" | "rule.created" | "rule.updated" | "rule.activated" | "rule.paused" | "rule.archived" | "rule.fired" | "brand_setup.installed" | "brand_setup.install_failed" | "install.issue_opened" | "install.issue_resolved" | "seo_site.created" | "seo_site.verified" | "seo_site.unverified" | "seo_site.deleted" | "crawl.started" | "crawl.stopped" | "crawl.done" | "backlink.new" | "backlink.lost" | "backlink.regained" | "competitor.page_removed" | "link_prospect.found" | "link_prospect.checked" | "link_prospect.excluded" | "link_prospect.pitched" | "link_prospect.replied" | "link_prospect.agreed" | "link_prospect.live" | "link_prospect.declined" | "link_prospect.removed" | "link_prospect.reopened" | "link_prospect.updated" | "link_prospect.deleted" | "social_action.drafted" | "social_action.approved" | "social_action.rejected" | "social_action.done" | "social_action.failed" | "review.posted" | "review.replied" | "review.reply_drafted" | "review_momentum.changed" | "alert.raised" | "visitor.became_hot" | "partner_program.created" | "partner_program.updated" | "partner_program.rules_updated" | "partner.created" | "partner.updated" | "partner_referral.created" | "partner_conversion.created" | "partner_reward.created" | "partner_reward.approved" | "partner_reward.rejected" | "partner_reward.reversed" | "partner_reward.fulfilled" | "partner_payout.created" | "partner_payout.paid" | "partner_payout.canceled" | "workspace.updated" | "webhook.test";
+            type: "lead.replied" | "lead.unsubscribed" | "inbox.replied" | "inbox.updated" | "inbox.classified" | "lead.bounced" | "mailbox.auto_paused" | "lead.created" | "lead.updated" | "lead.deleted" | "leads.imported" | "suppressions.added" | "suppression.removed" | "lead_list.created" | "lead_list.leads_added" | "lead_list.run_started" | "lead_list.build_done" | "lead_list.build_failed" | "lead_list.refresh_done" | "lead_list.refresh_failed" | "lead_list.enrich_done" | "lead_list.enrich_failed" | "import.done" | "import.failed" | "sequence.created" | "sequence.updated" | "sequence.activated" | "sequence.paused" | "sequence.archived" | "sequence.deleted" | "sequence.steps_updated" | "sequence.leads_enrolled" | "enrollment.stopped" | "mailbox.imported" | "mailbox.updated" | "mailbox.paused" | "mailbox.resumed" | "mailbox.stage_changed" | "mailbox.deleted" | "domain.added" | "domain.paused" | "domain.resumed" | "domain.removed" | "email.queued" | "email.sent" | "email.delivered" | "email.bounced" | "email.complained" | "email.failed" | "email.suppressed" | "email.cancelled" | "email.unsubscribed" | "email.opened" | "email.clicked" | "email.preferences_changed" | "email_domain.verified" | "email_domain.verification_failed" | "email_provider.events_failed" | "email_template.published" | "meeting.created" | "meeting.updated" | "meeting.deleted" | "deal.created" | "deal.updated" | "deal.deleted" | "spend.recorded" | "integration.connected" | "integration.updated" | "integration.disconnected" | "connect_request.created" | "deploy.detected" | "deploy.failed" | "digest.ready" | "ai_budget.warned" | "ai_budget.reached" | "connection_limit.warned" | "connection_limit.reached" | "experiment.started" | "experiment.concluded" | "project.created" | "project.updated" | "project.deleted" | "mission.created" | "mission.updated" | "mission.submitted" | "mission.approved" | "mission.paused" | "mission.resumed" | "mission.stopped" | "mission.completed" | "mission.action_held" | "mission.action_approved" | "mission.action_rejected" | "infra.plan_created" | "infra.plan_approved" | "infra.ordered" | "infra.order_failed" | "infra.domains_bought" | "infra.mailbox_joined" | "infra.plan_warming" | "infra.plan_ready" | "infra.plan_cancelled" | "fix.found" | "fix.updated" | "fix.started" | "fix.verify_requested" | "fix.confirmed" | "fix.reopened" | "record.created" | "record.bulk_created" | "record.bulk_updated" | "record.updated" | "record.merged" | "identity.verified" | "identity.closed" | "relationship.added" | "relationship.ended" | "consent.granted" | "consent.withdrawn" | "consent.bulk_withdrawn" | "brand.created" | "brand.updated" | "email_broadcast.created" | "email_broadcast.started" | "email_broadcast.sent" | "email_broadcast.failed" | "email_broadcast.cancelled" | "journey.created" | "journey.updated" | "journey_run.entered" | "journey_run.exited" | "rule.created" | "rule.updated" | "rule.activated" | "rule.paused" | "rule.archived" | "rule.fired" | "brand_setup.installed" | "brand_setup.install_failed" | "install.issue_opened" | "install.issue_resolved" | "seo_site.created" | "seo_site.verified" | "seo_site.unverified" | "seo_site.deleted" | "crawl.started" | "crawl.stopped" | "crawl.done" | "link_pitch.drafted" | "link_pitch.approved" | "link_pitch.rejected" | "link_prospect.overdue" | "backlink.new" | "backlink.lost" | "backlink.regained" | "competitor.page_removed" | "link_prospect.found" | "link_prospect.checked" | "link_prospect.excluded" | "link_prospect.pitched" | "link_prospect.replied" | "link_prospect.agreed" | "link_prospect.live" | "link_prospect.declined" | "link_prospect.removed" | "link_prospect.reopened" | "link_prospect.updated" | "link_prospect.deleted" | "social_action.drafted" | "social_action.approved" | "social_action.rejected" | "social_action.done" | "social_action.failed" | "review.posted" | "review.replied" | "review.reply_drafted" | "review_momentum.changed" | "alert.raised" | "visitor.became_hot" | "partner_program.created" | "partner_program.updated" | "partner_program.rules_updated" | "partner.created" | "partner.updated" | "partner_referral.created" | "partner_conversion.created" | "partner_reward.created" | "partner_reward.approved" | "partner_reward.rejected" | "partner_reward.reversed" | "partner_reward.fulfilled" | "partner_payout.created" | "partner_payout.paid" | "partner_payout.canceled" | "workspace.updated" | "webhook.test";
             /** Format: date-time */
             created_at: string;
             /** Format: uuid */
@@ -21944,6 +22329,22 @@ export interface components {
             /** @description Approved action rewards your system hasn't fulfilled. */
             pending_actions: number;
         };
+        PartnerPostbackSend: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            conversion_id: string;
+            /** @enum {string} */
+            status: "queued" | "sent" | "failed";
+            /** @description The tracker's answer to the last try. */
+            http_status: number | null;
+            error: string;
+            attempts: number;
+            /** Format: date-time */
+            sent_at: string | null;
+            /** Format: date-time */
+            created_at: string;
+        };
         Partner: {
             /**
              * Format: uuid
@@ -21979,6 +22380,8 @@ export interface components {
             promo_codes: components["schemas"]["PartnerPromoCode"][];
             /** @description Free text, such as "PayPal: ana@example.com", stored sealed. Never bank details. */
             payout_method: string;
+            /** @description The partner's own tracker, called (GET) once for each conversion credited to them and each refund of one, with placeholders filled in: {sub_id}, {click_id}, {conversion_id}, {type}, {event_name}, {amount}, {amount_cents}, {currency}, {commission}, {commission_cents}, {status}, {code} and {program} (pending, approved or reversed). Empty for none. */
+            postback_url: string;
             note: string;
             /** @enum {string} */
             source: "manual" | "api" | "signup" | "import";
@@ -22024,6 +22427,8 @@ export interface components {
             /** @description A group of the program; "" for none. */
             group_id?: string | null;
             payout_method?: string;
+            /** @description An https address with placeholders (see Partner.postback_url); "" removes it. */
+            postback_url?: string;
             note?: string;
         };
         PartnerLedgerInput: {
@@ -23864,6 +24269,32 @@ export interface components {
                 corrected_for: number;
                 /** Format: date-time */
                 computed_at: string;
+            };
+        };
+        ABTestBreakdown: {
+            /** Format: uuid */
+            test_id: string;
+            /** @enum {string} */
+            status: "running" | "done";
+            control: string;
+            /** Format: date-time */
+            computed_at: string;
+            breakdown: {
+                /** @enum {string} */
+                dimension: "device" | "source" | "country" | "visitor";
+                goal: components["schemas"]["ABTestGoal"];
+                /** @enum {string} */
+                metric: "conversion" | "count" | "value";
+                /** @description Comparisons the p-values and ranges are corrected for: every version in every group. */
+                corrected_for: number;
+                /** @description Largest first; "other" adds up the rest. */
+                segments: {
+                    /** @description The group, such as mobile, direct, DE, new; "unknown" or "other". */
+                    key: string;
+                    /** @description Control first. */
+                    arms: components["schemas"]["ABTestArm"][];
+                    comparisons: components["schemas"]["ABTestComparison"][] | null;
+                }[];
             };
         };
         SiteKeyInput: {
@@ -27189,6 +27620,64 @@ export interface components {
             /** Format: date-time */
             checked_at: string;
         };
+        LinkPitch: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            prospect_id: string;
+            /** Format: uuid */
+            sequence_id: string;
+            sequence_name: string;
+            brand_id: string | null;
+            /**
+             * Format: uuid
+             * @description The contact's person record.
+             */
+            record_id: string;
+            contact_name: string;
+            contact_email: string | null;
+            /**
+             * Format: uuid
+             * @description The contact's lead, once enrolled.
+             */
+            lead_id: string | null;
+            page_url: string;
+            domain: string;
+            /** @description Our page to offer. */
+            target_url: string;
+            stage: components["schemas"]["LinkProspectStage"];
+            /** @enum {string} */
+            status: "writing" | "draft" | "enrolled" | "rejected" | "failed";
+            /** @description The step's {{custom.opener}}. */
+            opener: string;
+            /** @description Why a draft has no opener (no_ai, ai_unavailable, ai_failed), why it couldn't go out on its own (site_in_outreach, opted_out), or why it was rejected. */
+            reason: string;
+            /**
+             * @description What the AI read the latest reply as.
+             * @enum {string|null}
+             */
+            reply_kind: "agreed" | "declined" | "wants_payment" | "wants_content" | "other" | null;
+            /** Format: date-time */
+            replied_at: string | null;
+            /** Format: date-time */
+            approved_at: string | null;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            updated_at: string;
+        };
+        LinkResultRow: {
+            /** @description A method, or all for the totals. */
+            method: string;
+            found: number;
+            pitched: number;
+            replied: number;
+            agreed: number;
+            live: number;
+            declined: number;
+            removed: number;
+            win_rate: number | null;
+        };
         /**
          * @description How it was found: links competitors have (competitor_gap), a broken link on the page (broken_link), a lost link or a link to our broken page (reclaim), a link to a competitor's dead page (competitor_dead_page), a resource page, promoting a piece of content (asset), a mention without a link (unlinked_mention), a partner or customer, or by hand.
          * @enum {string}
@@ -27254,6 +27743,11 @@ export interface components {
             agreed_at: string | null;
             /** Format: date-time */
             live_at: string | null;
+            /**
+             * Format: date-time
+             * @description When an agreed link was still not on the page 14 days after the site agreed (link_prospect.overdue).
+             */
+            overdue_at: string | null;
             /**
              * Format: date-time
              * @description When it was declined.
@@ -27335,6 +27829,50 @@ export interface components {
             first_seen_at: string;
             /** Format: date-time */
             last_seen_at: string;
+            /** @description The byline as the page gives it; empty when it names none or hasn't been read. */
+            author: string;
+            /**
+             * Format: date-time
+             * @description When the page says it was published.
+             */
+            published_at: string | null;
+            /**
+             * @description How OutflareBot's read of the page went; null until read.
+             * @enum {string|null}
+             */
+            read_status: "up" | "gone" | "blocked" | "opted_out" | "unreachable" | "failed" | null;
+            /** @description The person records of its authors, when their address was found. */
+            journalist_ids: string[];
+        };
+        Journalist: {
+            /**
+             * Format: uuid
+             * @description Their person record.
+             */
+            record_id: string;
+            name: string;
+            /** @description Their address on the record. */
+            email: string | null;
+            /** @description How sure the email finder was that the address reaches them. */
+            confidence: number;
+            /** @description The websites of the articles they wrote, without www. */
+            outlets: string[];
+            /** @description Articles in view they wrote. */
+            articles: number;
+            latest_article: {
+                /** Format: uuid */
+                id: string;
+                url: string;
+                title: string;
+                /** Format: date-time */
+                published_at: string | null;
+            };
+            /** @description The news searches their articles came up in. */
+            topics: {
+                /** Format: uuid */
+                search_id: string;
+                name: string;
+            }[];
         };
         Coverage: {
             /** Format: uuid */
@@ -27667,7 +28205,7 @@ export interface components {
             /** @description Each task the AI model does and the model it uses now. */
             tasks: {
                 /** @enum {string} */
-                task: "plan" | "turn" | "check_in" | "reply_labelling" | "classify_domain" | "ai_visibility" | "social_replies" | "social_posts" | "email_verification" | "fix_tickets" | "review_replies" | "link_page_reading" | "ab_tests";
+                task: "plan" | "turn" | "check_in" | "reply_labelling" | "classify_domain" | "ai_visibility" | "social_replies" | "social_posts" | "email_verification" | "fix_tickets" | "review_replies" | "link_page_reading" | "ab_tests" | "link_pitches";
                 name: string;
                 description: string;
                 /** @description Null when no model can run yet. */
@@ -28463,6 +29001,9 @@ export interface components {
             cost_per_held_meeting_cents: number | null;
             cost_per_deal_cents: number | null;
             cost_per_won_deal_cents: number | null;
+            /** @description Links pitched through the row's sequences (link building) that went live in the period. */
+            live_links: number;
+            cost_per_live_link_cents: number | null;
             /** @description Won revenue per unit of spend. */
             roi: number | null;
         };
@@ -29412,19 +29953,26 @@ export interface components {
         /**
          * @description One test a person must pass. Set one of attribute (a field on their customer record, such as plan or
          *     address.country), event (whether they did this customer event: exists, or not_exists; within_days limits it
-         *     to the last that many days) or in_list (whether they are a lead in this lead list: exists, or not_exists).
+         *     to the last that many days), in_list (whether they are a lead in this lead list: exists, or not_exists) or
+         *     news_search (whether they wrote an article this news search found: exists, or not_exists; within_days limits it
+         *     to articles from the last that many days), which makes a media list of the journalists covering a topic.
          *     Attributes compare as journeys compare them: numbers as numbers, text ignoring case, dates as text.
          */
         SmartListRule: {
             attribute?: string;
             event?: string;
-            /** @description event: only the last this many days; 0 or left out is ever. */
+            /** @description event and news_search: only the last this many days; 0 or left out is ever. */
             within_days?: number;
             /**
              * Format: uuid
              * @description A lead list's id.
              */
             in_list?: string;
+            /**
+             * Format: uuid
+             * @description A news search's id.
+             */
+            news_search?: string;
             /** @enum {string} */
             op: "eq" | "neq" | "gt" | "lt" | "contains" | "exists" | "not_exists";
             /** @description What eq, neq, gt, lt and contains compare with: text, a number or true or false. */
@@ -45318,6 +45866,382 @@ export interface operations {
             default: components["responses"]["Error"];
         };
     };
+    startLinkPitch: {
+        parameters: {
+            query?: never;
+            header?: {
+                /**
+                 * @description Makes the write safe to retry. A repeat with the same key from the same caller within 24 hours gets the first
+                 *     answer back (with `Idempotent-Replayed: true`) instead of running again. The same key for a different request
+                 *     is refused with 422 `idempotency_key_reused`; while the first is still running, 409 `idempotency_in_progress`.
+                 *     Use a new random key, such as a UUID, for each distinct write.
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                prospect: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** Format: uuid */
+                    sequence_id: string;
+                    /**
+                     * Format: uuid
+                     * @description One of the prospect's contacts.
+                     */
+                    record_id?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The pitch, while its opener is written. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LinkPitch"];
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            400: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    listLinkPitches: {
+        parameters: {
+            query?: {
+                /** @description Only records of this brand: its id or handle, none for records shared by every brand, or all (the default). */
+                brand?: components["parameters"]["Brand"];
+                status?: "writing" | "draft" | "enrolled" | "rejected" | "failed";
+                sequence_id?: string;
+                prospect_id?: string;
+                limit?: number;
+                offset?: number;
+                /**
+                 * @description Only these fields of each item, comma separated (fields=id,email,status); id always comes back.
+                 *     Paging fields stay. A field the items don't have answers 400 naming the ones they do. Any GET takes it.
+                 */
+                fields?: components["parameters"]["Fields"];
+                /**
+                 * @description next_cursor from the previous page, unchanged. Every paged list takes it, so one loop pages them all:
+                 *     call, then call again with cursor=next_cursor until next_cursor is null. Cursors are opaque; don't build them.
+                 */
+                cursor?: components["parameters"]["Cursor"];
+            };
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Pitches. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["LinkPitch"][];
+                        next_offset: number | null;
+                        next_cursor: components["schemas"]["NextCursor"];
+                    };
+                };
+            };
+            400: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    getLinkPitch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                pitch: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The pitch. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LinkPitch"];
+                };
+            };
+            404: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    editLinkPitch: {
+        parameters: {
+            query?: never;
+            header?: {
+                /**
+                 * @description Makes the write safe to retry. A repeat with the same key from the same caller within 24 hours gets the first
+                 *     answer back (with `Idempotent-Replayed: true`) instead of running again. The same key for a different request
+                 *     is refused with 422 `idempotency_key_reused`; while the first is still running, 409 `idempotency_in_progress`.
+                 *     Use a new random key, such as a UUID, for each distinct write.
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                pitch: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    opener: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The pitch. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LinkPitch"];
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            400: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    approveLinkPitch: {
+        parameters: {
+            query?: never;
+            header?: {
+                /**
+                 * @description Makes the write safe to retry. A repeat with the same key from the same caller within 24 hours gets the first
+                 *     answer back (with `Idempotent-Replayed: true`) instead of running again. The same key for a different request
+                 *     is refused with 422 `idempotency_key_reused`; while the first is still running, 409 `idempotency_in_progress`.
+                 *     Use a new random key, such as a UUID, for each distinct write.
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                pitch: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": {
+                    opener?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The pitch. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LinkPitch"];
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            400: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    rejectLinkPitch: {
+        parameters: {
+            query?: never;
+            header?: {
+                /**
+                 * @description Makes the write safe to retry. A repeat with the same key from the same caller within 24 hours gets the first
+                 *     answer back (with `Idempotent-Replayed: true`) instead of running again. The same key for a different request
+                 *     is refused with 422 `idempotency_key_reused`; while the first is still running, 409 `idempotency_in_progress`.
+                 *     Use a new random key, such as a UUID, for each distinct write.
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                pitch: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": {
+                    reason?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The pitch. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LinkPitch"];
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    listLinkSequences: {
+        parameters: {
+            query?: {
+                /** @description Only records of this brand: its id or handle, none for records shared by every brand, or all (the default). */
+                brand?: components["parameters"]["Brand"];
+            };
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Sequences. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: {
+                            /** Format: uuid */
+                            sequence_id: string;
+                            name: string;
+                            status: string;
+                            brand_id: string | null;
+                            approve_pitches: boolean;
+                            uses_opener: boolean;
+                            pitches: number;
+                        }[];
+                    };
+                };
+            };
+            404: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    updateLinkSequence: {
+        parameters: {
+            query?: never;
+            header?: {
+                /**
+                 * @description Makes the write safe to retry. A repeat with the same key from the same caller within 24 hours gets the first
+                 *     answer back (with `Idempotent-Replayed: true`) instead of running again. The same key for a different request
+                 *     is refused with 422 `idempotency_key_reused`; while the first is still running, 409 `idempotency_in_progress`.
+                 *     Use a new random key, such as a UUID, for each distinct write.
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                sequence: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    approve_pitches: boolean;
+                };
+            };
+        };
+        responses: {
+            /** @description The setting. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** Format: uuid */
+                        sequence_id: string;
+                        approve_pitches: boolean;
+                    };
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            400: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    getLinkResults: {
+        parameters: {
+            query?: {
+                /** @description Only records of this brand: its id or handle, none for records shared by every brand, or all (the default). */
+                brand?: components["parameters"]["Brand"];
+                site_id?: string;
+                days?: number;
+            };
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Results. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        days: number;
+                        totals: components["schemas"]["LinkResultRow"];
+                        data: components["schemas"]["LinkResultRow"][];
+                    };
+                };
+            };
+            400: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
     getLinkProspect: {
         parameters: {
             query?: never;
@@ -45666,6 +46590,8 @@ export interface operations {
                 search_id?: string;
                 /** @description Only articles first seen at or after this time. */
                 since?: string;
+                /** @description A journalist's person record: the articles they wrote. */
+                journalist_id?: string;
                 limit?: number;
                 offset?: number;
                 /**
@@ -45696,6 +46622,56 @@ export interface operations {
                 content: {
                     "application/json": {
                         data: components["schemas"]["NewsArticle"][];
+                        total: number;
+                        next_offset: number | null;
+                        next_cursor: components["schemas"]["NextCursor"];
+                    };
+                };
+            };
+            400: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    listJournalists: {
+        parameters: {
+            query?: {
+                /** @description Only records of this brand: its id or handle, none for records shared by every brand, or all (the default). */
+                brand?: components["parameters"]["Brand"];
+                /** @description Only journalists whose articles this search found. */
+                search_id?: string;
+                /** @description Only articles published (or first seen) at or after this time. */
+                since?: string;
+                limit?: number;
+                offset?: number;
+                /**
+                 * @description Only these fields of each item, comma separated (fields=id,email,status); id always comes back.
+                 *     Paging fields stay. A field the items don't have answers 400 naming the ones they do. Any GET takes it.
+                 */
+                fields?: components["parameters"]["Fields"];
+                /**
+                 * @description next_cursor from the previous page, unchanged. Every paged list takes it, so one loop pages them all:
+                 *     call, then call again with cursor=next_cursor until next_cursor is null. Cursors are opaque; don't build them.
+                 */
+                cursor?: components["parameters"]["Cursor"];
+            };
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Journalists. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["Journalist"][];
                         total: number;
                         next_offset: number | null;
                         next_cursor: components["schemas"]["NextCursor"];
@@ -58084,6 +59060,33 @@ export interface operations {
             default: components["responses"]["Error"];
         };
     };
+    getABTestBreakdown: {
+        parameters: {
+            query: {
+                by: "device" | "source" | "country" | "visitor";
+            };
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                test: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The breakdown. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ABTestBreakdown"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
     listCustomerEvents: {
         parameters: {
             query?: {
@@ -63624,6 +64627,34 @@ export interface operations {
             default: components["responses"]["Error"];
         };
     };
+    listPartnerPostbacks: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The calls. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["PartnerPostbackSend"][];
+                    };
+                };
+            };
+            404: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
     impersonatePartner: {
         parameters: {
             query?: never;
@@ -64389,6 +65420,37 @@ export interface operations {
             202: components["responses"]["MissionHeld"];
             400: components["responses"]["Error"];
             404: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    exportPartnerPayouts: {
+        parameters: {
+            query?: {
+                /** @description Only records of this brand: its id or handle, none for records shared by every brand, or all (the default). */
+                brand?: components["parameters"]["Brand"];
+                status?: "due" | "paid" | "canceled" | "all";
+                /** @description A program's id or slug. */
+                program?: string;
+            };
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The file. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/csv": string;
+                };
+            };
+            400: components["responses"]["Error"];
             default: components["responses"]["Error"];
         };
     };
@@ -67897,6 +68959,94 @@ export interface operations {
         };
     };
     webhook_competitor_page_removed: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["WebhookEvent"];
+            };
+        };
+        responses: {
+            /** @description Any 2xx answer means received; anything else is retried. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    webhook_link_pitch_drafted: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["WebhookEvent"];
+            };
+        };
+        responses: {
+            /** @description Any 2xx answer means received; anything else is retried. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    webhook_link_pitch_approved: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["WebhookEvent"];
+            };
+        };
+        responses: {
+            /** @description Any 2xx answer means received; anything else is retried. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    webhook_link_pitch_rejected: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["WebhookEvent"];
+            };
+        };
+        responses: {
+            /** @description Any 2xx answer means received; anything else is retried. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    webhook_link_prospect_overdue: {
         parameters: {
             query?: never;
             header?: never;

@@ -25,6 +25,8 @@ import (
 
 	"github.com/outflareai/outflare/engine/internal/connectors"
 	"github.com/outflareai/outflare/engine/internal/jobs"
+	"github.com/outflareai/outflare/engine/internal/metrics"
+	"github.com/outflareai/outflare/engine/internal/retry"
 	"github.com/outflareai/outflare/engine/internal/track"
 )
 
@@ -83,7 +85,7 @@ func (s *Syncer) Run(ctx context.Context) {
 	t := time.NewTicker(5 * time.Minute)
 	defer t.Stop()
 	for {
-		if err := s.tick(ctx); err != nil && ctx.Err() == nil {
+		if err := s.QueueDue(ctx); err != nil && ctx.Err() == nil {
 			s.Log.Error("ads: schedule syncs", "err", err)
 		}
 		select {
@@ -94,22 +96,31 @@ func (s *Syncer) Run(ctx context.Context) {
 	}
 }
 
-func (s *Syncer) tick(ctx context.Context) error {
+// QueueDue queues a sync of each connection that is due, or whose last
+// run failed and is due a retry (retry.After).
+func (s *Syncer) QueueDue(ctx context.Context) error {
+	// A connection is due after the interval, or sooner while its last
+	// runs failed (retry.After), so a failed sync is tried again soon.
 	rows, err := s.Pool.Query(ctx, `
-		SELECT i.id, i.workspace_id FROM integrations i
+		SELECT i.id, i.workspace_id, COALESCE(a.failures, 0), COALESCE(extract(epoch FROM a.last_run_at)::bigint, 0) FROM integrations i
 		LEFT JOIN ad_syncs a ON a.integration_id = i.id
 		WHERE i.connector = ANY($1) AND i.status = 'connected'
 		  AND NOT COALESCE((i.config->>'sync_paused')::boolean, false)
-		  AND COALESCE(a.last_run_at, '-infinity') < now() - $2::interval`,
+		  AND (COALESCE(a.last_run_at, '-infinity') < now() - $2::interval
+		   OR (a.failures > 0 AND a.last_run_at < now() - `+retry.SQL("a.failures")+`))`,
 		Connectors(s.Store.Registry), fmt.Sprintf("%d seconds", int(interval.Seconds())))
 	if err != nil {
 		return err
 	}
-	type due struct{ id, ws string }
+	type due struct {
+		id, ws   string
+		failures int
+		lastRun  int64
+	}
 	var list []due
 	for rows.Next() {
 		var d due
-		if err := rows.Scan(&d.id, &d.ws); err != nil {
+		if err := rows.Scan(&d.id, &d.ws, &d.failures, &d.lastRun); err != nil {
 			rows.Close()
 			return err
 		}
@@ -121,7 +132,12 @@ func (s *Syncer) tick(ctx context.Context) error {
 	}
 	slot := s.now().Truncate(interval).Unix()
 	for _, d := range list {
-		if _, err := Enqueue(ctx, s.Pool, d.ws, d.id, fmt.Sprintf("%s:%d", d.id, slot)); err != nil {
+		key := fmt.Sprintf("%s:%d", d.id, slot)
+		if d.failures > 0 {
+			// Each retry after a failed run is a job of its own.
+			key = fmt.Sprintf("%s:retry:%d", d.id, d.lastRun)
+		}
+		if _, err := Enqueue(ctx, s.Pool, d.ws, d.id, key); err != nil {
 			return err
 		}
 	}
@@ -248,19 +264,27 @@ func (s *Syncer) SyncOnce(ctx context.Context, ws, integrationID string) (Result
 }
 
 func (s *Syncer) finish(ctx context.Context, ws, integrationID string, full bool, res Result, runErr error) {
-	var msg *string
+	var msg, code *string
+	outcome := "success"
 	if runErr != nil {
-		m := runErr.Error()
-		msg = &m
+		m, c := runErr.Error(), "connector_"+connectors.KindOf(runErr)
+		var db dbError
+		if errors.As(runErr, &db) {
+			c = "internal"
+		}
+		msg, code, outcome = &m, &c, c
 	}
+	metrics.SyncRun("ads", outcome)
 	_, err := s.Pool.Exec(ctx, `
-		INSERT INTO ad_syncs (integration_id, workspace_id, last_run_at, last_ok_at, last_full_at, last_error, last_rows)
-		VALUES ($1, $2, $3::timestamptz, CASE WHEN $4::text IS NULL THEN $3::timestamptz END, CASE WHEN $5::boolean THEN $3::timestamptz END, $4::text, $6::integer)
+		INSERT INTO ad_syncs (integration_id, workspace_id, last_run_at, last_ok_at, last_full_at, last_error, last_rows, failures, last_error_code)
+		VALUES ($1, $2, $3::timestamptz, CASE WHEN $4::text IS NULL THEN $3::timestamptz END, CASE WHEN $5::boolean THEN $3::timestamptz END, $4::text, $6::integer,
+			CASE WHEN $4::text IS NULL THEN 0 ELSE 1 END, $7::text)
 		ON CONFLICT (integration_id) DO UPDATE SET last_run_at = EXCLUDED.last_run_at,
 			last_ok_at = COALESCE(EXCLUDED.last_ok_at, ad_syncs.last_ok_at),
 			last_full_at = COALESCE(EXCLUDED.last_full_at, ad_syncs.last_full_at),
-			last_error = EXCLUDED.last_error, last_rows = EXCLUDED.last_rows`,
-		integrationID, ws, s.now(), msg, full, res.Rows)
+			last_error = EXCLUDED.last_error, last_rows = EXCLUDED.last_rows, last_error_code = EXCLUDED.last_error_code,
+			failures = CASE WHEN EXCLUDED.last_error IS NULL THEN 0 ELSE ad_syncs.failures + 1 END`,
+		integrationID, ws, s.now(), msg, full, res.Rows, code)
 	if err != nil && s.Log != nil {
 		s.Log.Error("ads: record sync", "integration", integrationID, "err", err)
 	}

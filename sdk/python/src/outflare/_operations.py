@@ -1125,6 +1125,38 @@ class Operations(_Mixin):
             idempotency_key=idempotency_key,
         )
 
+    def approve_link_pitch(
+        self,
+        pitch: str,
+        *,
+        ws: str | None = None,
+        opener: str | None = None,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Approve a pitch, sending it.
+
+        Scope: sequences.manage. The opener (edited when `opener` is sent)
+        goes on the contact's lead as `custom.opener`, made from their person
+        record, and the lead is enrolled in the sequence, whose own checks
+        (policy, suppressions, sending windows, limits) apply to every send.
+        The prospect moves to pitched. 409 `site_in_outreach` while another
+        prospect on the website is in outreach or in its cool-down, and 409
+        `conflict` when the website or contact is suppressed or the prospect
+        isn't to pitch any more.
+
+        Needs: the sequences.manage scope.
+        POST /v1/workspaces/{ws}/link-pitches/{pitch}/approve
+        """
+        return self._call(
+            "POST",
+            "/v1/workspaces/{ws}/link-pitches/{pitch}/approve",
+            path={"pitch": pitch, "ws": ws},
+            body={"opener": opener},
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
     def approve_mission(
         self,
         id: str,
@@ -3509,6 +3541,7 @@ class Operations(_Mixin):
         name: str | None = None,
         note: str | None = None,
         payout_method: str | None = None,
+        postback_url: str | None = None,
         program: str | None = None,
         record_id: str | None = None,
         status: Literal["pending", "active", "suspended", "rejected"] | None = None,
@@ -3536,6 +3569,7 @@ class Operations(_Mixin):
                 "name": name,
                 "note": note,
                 "payout_method": payout_method,
+                "postback_url": postback_url,
                 "program": program,
                 "record_id": record_id,
                 "status": status,
@@ -5713,6 +5747,31 @@ class Operations(_Mixin):
             idempotency_key=idempotency_key,
         )
 
+    def edit_link_pitch(
+        self,
+        pitch: str,
+        *,
+        ws: str | None = None,
+        opener: str,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Edit a draft pitch's opener.
+
+        Scope: sequences.manage. Only a draft's opener changes. Never offer payment for a link.
+
+        Needs: the sequences.manage scope.
+        PATCH /v1/workspaces/{ws}/link-pitches/{pitch}
+        """
+        return self._call(
+            "PATCH",
+            "/v1/workspaces/{ws}/link-pitches/{pitch}",
+            path={"pitch": pitch, "ws": ws},
+            body={"opener": opener},
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
     def email_finder_find(
         self,
         *,
@@ -6028,6 +6087,31 @@ class Operations(_Mixin):
             },
         )
 
+    def export_partner_payouts(
+        self,
+        *,
+        ws: str | None = None,
+        brand: str | None = None,
+        status: Literal["due", "paid", "canceled", "all"] | None = None,
+        program: str | None = None,
+    ) -> Any:
+        """Download payouts as CSV, with payout details.
+
+        Scope: partners.manage, because the file holds each partner's payout details. Columns: payout_id, program,
+        partner_id, partner_code, partner_name, partner_email, payout_method, amount (a decimal), currency, status, reference,
+        created_at, paid_at. Due payouts unless status says otherwise; at most 10,000 rows. Pay them from your own account or
+        upload the file to a payout tool, then mark each one paid. Recorded in the audit log (partner_payouts.exported).
+
+        Needs: the partners.manage scope.
+        GET /v1/workspaces/{ws}/partner-payouts/export
+        """
+        return self._call(
+            "GET",
+            "/v1/workspaces/{ws}/partner-payouts/export",
+            path={"ws": ws},
+            query={"brand": brand, "status": status, "program": program},
+        )
+
     def fulfil_partner_reward(
         self,
         id: str,
@@ -6089,6 +6173,32 @@ class Operations(_Mixin):
             "GET",
             "/v1/workspaces/{ws}/ab-test-ai-runs/{run}",
             path={"run": run, "ws": ws},
+        )
+
+    def get_ab_test_breakdown(
+        self,
+        test: str,
+        *,
+        ws: str | None = None,
+        by: Literal["device", "source", "country", "visitor"],
+    ) -> Any:
+        """Break an A/B test's results down.
+
+        Scope: analytics.read. The first goal's results within groups of visitors, by the visit they first saw their
+        version in: device (desktop, mobile, tablet), source (its utm_source, else the referring site, else direct),
+        country, or visitor (new or returning). Visitors whose visit isn't known, such as exposures sent by a server,
+        are "unknown". The largest 8 groups are shown, the rest added up as "other". Every comparison is corrected for
+        every version in every group, since each is another chance of a lucky difference: use it to learn where a
+        change works, not to pick a winner. Counted up to now, or to when the test ended. 409 for a draft.
+
+        Needs: the analytics.read scope.
+        GET /v1/workspaces/{ws}/ab-tests/{test}/breakdown
+        """
+        return self._call(
+            "GET",
+            "/v1/workspaces/{ws}/ab-tests/{test}/breakdown",
+            path={"test": test, "ws": ws},
+            query={"by": by},
         )
 
     def get_ab_test_results(
@@ -7970,6 +8080,25 @@ class Operations(_Mixin):
             path={"ws": ws},
         )
 
+    def get_link_pitch(
+        self,
+        pitch: str,
+        *,
+        ws: str | None = None,
+    ) -> Any:
+        """Get a link pitch.
+
+        Scope: sequences.read.
+
+        Needs: the sequences.read scope.
+        GET /v1/workspaces/{ws}/link-pitches/{pitch}
+        """
+        return self._call(
+            "GET",
+            "/v1/workspaces/{ws}/link-pitches/{pitch}",
+            path={"pitch": pitch, "ws": ws},
+        )
+
     def get_link_prospect(
         self,
         prospect: str,
@@ -8006,6 +8135,28 @@ class Operations(_Mixin):
             "GET",
             "/v1/workspaces/{ws}/link-reads/{read}",
             path={"read": read, "ws": ws},
+        )
+
+    def get_link_results(
+        self,
+        *,
+        ws: str | None = None,
+        brand: str | None = None,
+        site_id: str | None = None,
+        days: int | None = None,
+    ) -> Any:
+        """Link building results by method.
+
+        Scope: seo.read. Prospects found in the last `days` (default 90, excluded ones left out), by method: how many were pitched, replied, agreed, went live, declined or had their link removed. `win_rate` is live links per pitch. Cost per live link is in the Outcomes report, by sequence.
+
+        Needs: the seo.read scope.
+        GET /v1/workspaces/{ws}/link-prospects/results
+        """
+        return self._call(
+            "GET",
+            "/v1/workspaces/{ws}/link-prospects/results",
+            path={"ws": ws},
+            query={"brand": brand, "site_id": site_id, "days": days},
         )
 
     def get_list_run(
@@ -12250,6 +12401,46 @@ class Operations(_Mixin):
             },
         )
 
+    def list_journalists(
+        self,
+        *,
+        ws: str | None = None,
+        brand: str | None = None,
+        search_id: str | None = None,
+        since: str | None = None,
+        limit: int | None = None,
+        offset: int | None = None,
+        fields: list[str] | None = None,
+        cursor: str | None = None,
+    ) -> Any:
+        """List journalists.
+
+        Scope: seo.read. The authors of news articles the news watch read
+        whose address the free email finder found at the outlet. Each is a
+        person record on the outlet's company, listed with how many of the
+        articles in view they wrote, their latest, their outlets and the
+        searches (topics) their articles came up in; most articles first.
+        To make a media list, add their records to a list. Reads only what
+        is stored, so it costs nothing.
+
+        Needs: the seo.read scope.
+        GET /v1/workspaces/{ws}/journalists
+        """
+        return self._call(
+            "GET",
+            "/v1/workspaces/{ws}/journalists",
+            path={"ws": ws},
+            query={
+                "brand": brand,
+                "search_id": search_id,
+                "since": since,
+                "limit": limit,
+                "offset": offset,
+                "fields": fields,
+                "cursor": cursor,
+            },
+        )
+
     def list_journey_runs(
         self,
         id: str,
@@ -12460,6 +12651,42 @@ class Operations(_Mixin):
             },
         )
 
+    def list_link_pitches(
+        self,
+        *,
+        ws: str | None = None,
+        brand: str | None = None,
+        status: Literal["writing", "draft", "enrolled", "rejected", "failed"] | None = None,
+        sequence_id: str | None = None,
+        prospect_id: str | None = None,
+        limit: int | None = None,
+        offset: int | None = None,
+        fields: list[str] | None = None,
+        cursor: str | None = None,
+    ) -> Any:
+        """List link pitches.
+
+        Scope: sequences.read. Pitches of link prospects, newest first: `draft` ones wait for a person to approve them.
+
+        Needs: the sequences.read scope.
+        GET /v1/workspaces/{ws}/link-pitches
+        """
+        return self._call(
+            "GET",
+            "/v1/workspaces/{ws}/link-pitches",
+            path={"ws": ws},
+            query={
+                "brand": brand,
+                "status": status,
+                "sequence_id": sequence_id,
+                "prospect_id": prospect_id,
+                "limit": limit,
+                "offset": offset,
+                "fields": fields,
+                "cursor": cursor,
+            },
+        )
+
     def list_link_prospects(
         self,
         *,
@@ -12540,6 +12767,26 @@ class Operations(_Mixin):
                 "fields": fields,
                 "cursor": cursor,
             },
+        )
+
+    def list_link_sequences(
+        self,
+        *,
+        ws: str | None = None,
+        brand: str | None = None,
+    ) -> Any:
+        """List sequences for link pitches.
+
+        Scope: sequences.read. Outflare's own sequences that aren't archived, which pitches can go through, with whether their pitches wait for approval and whether a step uses `{{custom.opener}}`.
+
+        Needs: the sequences.read scope.
+        GET /v1/workspaces/{ws}/link-building/sequences
+        """
+        return self._call(
+            "GET",
+            "/v1/workspaces/{ws}/link-building/sequences",
+            path={"ws": ws},
+            query={"brand": brand},
         )
 
     def list_list_runs(
@@ -12930,6 +13177,7 @@ class Operations(_Mixin):
         brand: str | None = None,
         search_id: str | None = None,
         since: str | None = None,
+        journalist_id: str | None = None,
         limit: int | None = None,
         offset: int | None = None,
         fields: list[str] | None = None,
@@ -12953,6 +13201,7 @@ class Operations(_Mixin):
                 "brand": brand,
                 "search_id": search_id,
                 "since": since,
+                "journalist_id": journalist_id,
                 "limit": limit,
                 "offset": offset,
                 "fields": fields,
@@ -13165,6 +13414,25 @@ class Operations(_Mixin):
                 "cursor": cursor,
                 "fields": fields,
             },
+        )
+
+    def list_partner_postbacks(
+        self,
+        id: str,
+        *,
+        ws: str | None = None,
+    ) -> Any:
+        """List a partner's postbacks to their tracker.
+
+        Scope: partners.read. The last 50 calls to the partner's postback URL, newest first: queued, sent, or failed with the tracker's answer. A tracker that is down is tried 5 times; one that refuses (4xx) isn't tried again.
+
+        Needs: the partners.read scope.
+        GET /v1/workspaces/{ws}/partners/{id}/postbacks
+        """
+        return self._call(
+            "GET",
+            "/v1/workspaces/{ws}/partners/{id}/postbacks",
+            path={"id": id, "ws": ws},
         )
 
     def list_partner_programs(
@@ -16131,6 +16399,31 @@ class Operations(_Mixin):
             idempotency_key=idempotency_key,
         )
 
+    def reject_link_pitch(
+        self,
+        pitch: str,
+        *,
+        ws: str | None = None,
+        reason: str | None = None,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Reject a draft pitch.
+
+        Scope: sequences.manage. The prospect can then be pitched again, another way.
+
+        Needs: the sequences.manage scope.
+        POST /v1/workspaces/{ws}/link-pitches/{pitch}/reject
+        """
+        return self._call(
+            "POST",
+            "/v1/workspaces/{ws}/link-pitches/{pitch}/reject",
+            path={"pitch": pitch, "ws": ws},
+            body={"reason": reason},
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
     def reject_mission_action(
         self,
         id: str,
@@ -18441,6 +18734,41 @@ class Operations(_Mixin):
             "/v1/workspaces/{ws}/integrations/{id}/imports",
             path={"id": id, "ws": ws},
             body={"campaign_ids": campaign_ids, "leads": leads, "mailboxes": mailboxes},
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
+    def start_link_pitch(
+        self,
+        prospect: str,
+        *,
+        ws: str | None = None,
+        record_id: str | None = None,
+        sequence_id: str,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Pitch a link prospect.
+
+        Scope: sequences.manage. Starts a pitch of a prospect to pitch, to one
+        of its contacts (`record_id`, default the surest with an email
+        address), through one of Outflare's own sequences (not a sequencer's
+        campaign). The workspace's AI writes an opener for the page (tool
+        link_pitches); the sequence's step uses it as `{{custom.opener}}`.
+        The pitch then waits as a draft for a person to approve, unless the
+        sequence's pitches skip approval (PATCH .../link-building/sequences/{id}),
+        when it is enrolled once the opener is written. Without AI it waits
+        with no opener for a person to write one. The prospect may have one
+        open pitch at a time.
+
+        Needs: the sequences.manage scope.
+        POST /v1/workspaces/{ws}/link-prospects/{prospect}/pitches
+        """
+        return self._call(
+            "POST",
+            "/v1/workspaces/{ws}/link-prospects/{prospect}/pitches",
+            path={"prospect": prospect, "ws": ws},
+            body={"record_id": record_id, "sequence_id": sequence_id},
             extra_body=extra_body,
             idempotency_key=idempotency_key,
         )
@@ -21074,6 +21402,31 @@ class Operations(_Mixin):
             idempotency_key=idempotency_key,
         )
 
+    def update_link_sequence(
+        self,
+        sequence: str,
+        *,
+        ws: str | None = None,
+        approve_pitches: bool,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Turn approval of a sequence's link pitches on or off.
+
+        Scope: sequences.manage. On (the default), each pitch waits for a person to approve it; off, a pitch is enrolled once its opener is written.
+
+        Needs: the sequences.manage scope.
+        PATCH /v1/workspaces/{ws}/link-building/sequences/{sequence}
+        """
+        return self._call(
+            "PATCH",
+            "/v1/workspaces/{ws}/link-building/sequences/{sequence}",
+            path={"sequence": sequence, "ws": ws},
+            body={"approve_pitches": approve_pitches},
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
     def update_mailbox(
         self,
         id: str,
@@ -21433,6 +21786,7 @@ class Operations(_Mixin):
         name: str | None = None,
         note: str | None = None,
         payout_method: str | None = None,
+        postback_url: str | None = None,
         program: str | None = None,
         record_id: str | None = None,
         status: Literal["pending", "active", "suspended", "rejected"] | None = None,
@@ -21457,6 +21811,7 @@ class Operations(_Mixin):
                 "name": name,
                 "note": note,
                 "payout_method": payout_method,
+                "postback_url": postback_url,
                 "program": program,
                 "record_id": record_id,
                 "status": status,

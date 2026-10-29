@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import type { Coverage, NewsArticle, NewsSearch } from "@outflare/sdk";
+import type { Coverage, Journalist, NewsArticle, NewsSearch } from "@outflare/sdk";
 import { useBrand } from "@/lib/brand";
 import { DataTable } from "@/components/data-table";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -11,11 +11,13 @@ import type { Tab } from "../App";
 // News watch: saved searches that run on a schedule through the
 // workspace's own web search connection (Geonode), the articles they find,
 // and coverage: articles about a brand, each on its outlet's company
-// record, to confirm or dismiss. The first part of digital PR.
+// record, to confirm or dismiss; and journalists: the articles' authors
+// whose address was found, as person records, and media lists of them
+// (smart lists with a news search rule). The first part of digital PR.
 
-type Props = { ws: string; canManage: boolean; go: (tab: Tab, item?: string) => void };
+type Props = { ws: string; canManage: boolean; canLists: boolean; go: (tab: Tab, item?: string) => void };
 type Tone = keyof typeof tones;
-type Section = "coverage" | "articles" | "searches";
+type Section = "coverage" | "articles" | "journalists" | "searches";
 type CoverageStatus = Coverage["status"];
 
 const statusLabel: Record<CoverageStatus, string> = { new: "New", confirmed: "Confirmed", dismissed: "Dismissed" };
@@ -27,6 +29,7 @@ const errorLabel: Record<string, string> = {
   connector_unavailable: "Geonode didn't answer; it tries again",
   connector_auth: "Geonode refused the key",
 };
+const day = (t: string) => new Date(t).toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" });
 const path = (u: string) => {
   try {
     const x = new URL(u);
@@ -36,7 +39,7 @@ const path = (u: string) => {
   }
 };
 
-export function News({ ws, canManage, go }: Props) {
+export function News({ ws, canManage, canLists, go }: Props) {
   const [section, setSection] = useState<Section>("coverage");
   const brandKey = useBrand(ws).query.brand ?? "";
   const brand = brandKey ? { brand: brandKey } : {};
@@ -50,11 +53,13 @@ export function News({ ws, canManage, go }: Props) {
         <TabsList className="h-8">
           <TabsTrigger value="coverage" className="px-3 text-[12px]">Coverage</TabsTrigger>
           <TabsTrigger value="articles" className="px-3 text-[12px]">Articles</TabsTrigger>
+          <TabsTrigger value="journalists" className="px-3 text-[12px]">Journalists</TabsTrigger>
           <TabsTrigger value="searches" className="px-3 text-[12px]">Searches</TabsTrigger>
         </TabsList>
       </Tabs>
       {section === "coverage" && <CoverageList ws={ws} canManage={canManage} brand={brand} />}
       {section === "articles" && <Articles ws={ws} brand={brand} />}
+      {section === "journalists" && <Journalists ws={ws} canLists={canLists} brand={brand} />}
       {section === "searches" && <Searches ws={ws} canManage={canManage} brand={brand} go={go} />}
     </div>
   );
@@ -242,6 +247,9 @@ function Articles({ ws, brand }: { ws: string; brand: { brand?: string } }) {
             cell: ({ row: { original: a } }) => (
               <div className="min-w-0 space-y-0.5">
                 <a className="block max-w-96 truncate font-medium underline-offset-2 hover:underline" href={a.url} target="_blank" rel="noreferrer noopener nofollow" title={a.title || a.url}>{a.title || path(a.url)}</a>
+                {(a.author || a.published_at) && (
+                  <div className="text-[12px] text-muted-foreground">{[a.author && `By ${a.author}`, a.published_at && day(a.published_at)].filter(Boolean).join(" · ")}</div>
+                )}
                 {a.snippet && <div className="max-w-96 truncate text-[12px] text-muted-foreground" title={a.snippet}>{a.snippet}</div>}
               </div>
             ),
@@ -249,6 +257,105 @@ function Articles({ ws, brand }: { ws: string; brand: { brand?: string } }) {
           { id: "outlet", header: "Outlet", accessorFn: (a) => a.domain, cell: ({ row }) => <span className="text-[12px] whitespace-nowrap">{row.original.domain}</span> },
           { id: "found", header: "Found by", accessorFn: (a) => a.search_ids.map(name).join(", "), cell: ({ row }) => <span className="text-[12px]">{row.original.search_ids.map(name).filter(Boolean).join(", ")}</span> },
           { id: "seen", header: "First seen", accessorFn: (a) => a.first_seen_at, cell: ({ row }) => <span className="text-[12px] whitespace-nowrap">{ago(row.original.first_seen_at)}</span> },
+        ]}
+      />
+    </div>
+  );
+}
+
+function Journalists({ ws, canLists, brand }: { ws: string; canLists: boolean; brand: { brand?: string } }) {
+  const [list, setList] = useState<Journalist[] | null>(null);
+  const [searches, setSearches] = useState<NewsSearch[]>([]);
+  const [search, setSearch] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  useEffect(() => {
+    api.GET("/v1/workspaces/{ws}/news-searches", { params: { path: { ws }, query: brand } }).then(({ data }) => setSearches(data?.data ?? []));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ws, brand.brand]);
+  useEffect(() => {
+    setList(null);
+    api.GET("/v1/workspaces/{ws}/journalists", { params: { path: { ws }, query: { ...brand, ...(search ? { search_id: search } : {}), limit: 200 } } })
+      .then(({ data, error }) => {
+        if (error || !data) return setError(errorMessage(error));
+        setError("");
+        setList(data.data);
+      });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ws, search, brand.brand]);
+
+  // A media list is a smart list of whoever wrote about the search's topic
+  // in the last year; it keeps itself up to date.
+  const mediaList = async () => {
+    const s = searches.find((x) => x.id === search);
+    if (!s) return;
+    setBusy(true);
+    const { error } = await api.POST("/v1/workspaces/{ws}/smart-lists", {
+      params: { path: { ws } },
+      body: { name: `Journalists: ${s.name}`.slice(0, 200), description: `People who wrote an article the "${s.name}" news search found in the last year.`.slice(0, 2000),
+        rules: [{ news_search: s.id, op: "exists", within_days: 365 }] },
+    });
+    setBusy(false);
+    if (error) return setError(errorMessage(error));
+    toast("Media list made. It's under Lists and keeps itself up to date.");
+  };
+  if (!list) return error ? <ErrorText>{error}</ErrorText> : <Loading />;
+  return (
+    <div className="space-y-2">
+      {error && <ErrorText>{error}</ErrorText>}
+      <p className="text-[12px] text-muted-foreground">
+        The authors of the articles your searches found, once the free email finder found their address at the outlet. Each is a person record on the outlet's company.
+      </p>
+      <DataTable
+        data={list}
+        rowId={(j) => j.record_id}
+        searchPlaceholder="Search journalists"
+        toolbar={
+          searches.length > 0 && (
+            <div className="flex flex-wrap items-center gap-2">
+              <select className={field} aria-label="Topic" value={search} onChange={(e) => setSearch(e.target.value)}>
+                <option value="">Every topic</option>
+                {searches.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+              </select>
+              {canLists && search && <Button variant="ghost" disabled={busy} onClick={mediaList}>Make a media list</Button>}
+            </div>
+          )
+        }
+        empty={searches.length === 0 ? "No journalists yet. Save a search under Searches; its articles' authors show here once their addresses are found." :
+          "No journalists yet. They show once a search's articles have been read and their authors' addresses found."}
+        mobile={(j) => (
+          <div className="space-y-1">
+            <div className="font-medium">{j.name || j.email}</div>
+            <div className="text-xs text-muted-foreground">{[j.outlets.join(", "), `${j.articles} article${j.articles === 1 ? "" : "s"}`].join(" · ")}</div>
+            <div className="text-[12px]">{j.latest_article.title}</div>
+          </div>
+        )}
+        columns={[
+          {
+            id: "name",
+            header: "Journalist",
+            accessorFn: (j) => `${j.name} ${j.email ?? ""}`,
+            cell: ({ row: { original: j } }) => (
+              <div className="min-w-0 space-y-0.5">
+                <div className="font-medium">{j.name || j.email}</div>
+                {j.email && <div className="font-mono text-[12px] text-muted-foreground" title={`The email finder was ${j.confidence}% sure`}>{j.email}</div>}
+              </div>
+            ),
+          },
+          { id: "outlets", header: "Writes for", accessorFn: (j) => j.outlets.join(", "), cell: ({ row }) => <span className="text-[12px]">{row.original.outlets.join(", ")}</span> },
+          { id: "articles", header: "Articles", accessorFn: (j) => j.articles, meta: { align: "right", mono: true }, cell: ({ row }) => row.original.articles },
+          {
+            id: "latest",
+            header: "Latest",
+            accessorFn: (j) => j.latest_article.published_at ?? "",
+            cell: ({ row: { original: j } }) => (
+              <div className="min-w-0 space-y-0.5">
+                <a className="block max-w-80 truncate text-[13px] underline-offset-2 hover:underline" href={j.latest_article.url} target="_blank" rel="noreferrer noopener nofollow" title={j.latest_article.title}>{j.latest_article.title || path(j.latest_article.url)}</a>
+                {j.latest_article.published_at && <div className="text-[11px] text-muted-foreground">{day(j.latest_article.published_at)}</div>}
+              </div>
+            ),
+          },
+          { id: "topics", header: "Topics", accessorFn: (j) => j.topics.map((t) => t.name).join(", "), cell: ({ row }) => <span className="text-[12px]">{row.original.topics.map((t) => t.name).join(", ")}</span> },
         ]}
       />
     </div>

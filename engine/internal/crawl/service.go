@@ -30,6 +30,7 @@ import (
 
 	"github.com/outflareai/outflare/engine/internal/audit"
 	"github.com/outflareai/outflare/engine/internal/jobs"
+	"github.com/outflareai/outflare/engine/internal/retry"
 	"github.com/outflareai/outflare/engine/internal/track"
 	"github.com/outflareai/outflare/engine/internal/usagelimits"
 )
@@ -1128,18 +1129,26 @@ func (s *Service) Run(ctx context.Context) {
 
 // Schedule starts the crawls that are due now.
 func (s *Service) Schedule(ctx context.Context) error {
+	// A crawl that failed (the site down, robots.txt unreachable, an error
+	// of Outflare's) doesn't hold the schedule for its whole period: it is
+	// tried again after retry.After the failed runs since the last that
+	// didn't fail, at any hour, so the day (or week) still gets its audit.
 	rows, err := s.Pool.Query(ctx, `
 		SELECT s.id, s.workspace_id FROM seo_sites s
+		LEFT JOIN LATERAL (SELECT count(*) AS n, max(r.finished_at) AS at FROM crawl_runs r WHERE r.site_id = s.id AND r.status = 'failed'
+			AND r.created_at > COALESCE((SELECT max(g.created_at) FROM crawl_runs g WHERE g.site_id = s.id AND g.status <> 'failed'), '-infinity')) f ON true
 		WHERE s.schedule <> 'off' AND s.status = 'active'
-		  -- At the hour (and weekly, the day) the site asked for, when it did.
-		  AND (s.schedule_hour IS NULL OR (extract(hour FROM now() AT TIME ZONE s.schedule_tz) = s.schedule_hour
+		  -- At the hour (and weekly, the day) the site asked for, when it did,
+		  -- or a retry of a failed crawl.
+		  AND (f.n > 0 OR s.schedule_hour IS NULL OR (extract(hour FROM now() AT TIME ZONE s.schedule_tz) = s.schedule_hour
 		       AND (s.schedule <> 'weekly' OR s.schedule_day IS NULL OR extract(dow FROM now() AT TIME ZONE s.schedule_tz) = s.schedule_day)))
 		  AND NOT EXISTS (SELECT 1 FROM crawl_runs r WHERE r.site_id = s.id
 		      AND (r.status IN ('queued', 'running')
-		           OR r.created_at > now() - CASE
+		           OR (r.status <> 'failed' AND r.created_at > now() - CASE
 		               WHEN s.schedule_hour IS NOT NULL AND s.schedule = 'daily' THEN interval '20 hours'
 		               WHEN s.schedule_hour IS NOT NULL THEN interval '6 days'
-		               WHEN s.schedule = 'daily' THEN interval '23 hours' ELSE interval '167 hours' END))
+		               WHEN s.schedule = 'daily' THEN interval '23 hours' ELSE interval '167 hours' END)))
+		  AND (f.n = 0 OR f.at IS NULL OR f.at < now() - `+retry.SQL("f.n")+`)
 		ORDER BY s.created_at LIMIT 100`)
 	if err != nil {
 		return err

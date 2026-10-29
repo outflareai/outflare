@@ -77,14 +77,27 @@ For each goal and each version against the control:
 - **Chance to beat the control**: the chance the version's true rate (or mean) is above the control's (Bayesian, with a flat prior for a rate; the normal approximation for a mean). "97% likely to beat Control" means what it says.
 - **Lift**: the relative change of its rate (or mean) over the control's, with a 95% range (`+18%, range +4% to +33%`). The range comes from the same sequential test as the p-value, so it stays honest however often you look, and it leaves out zero exactly when the result is safe to stop.
 - **p-value**: an *always-valid* p-value (a mixture sequential test, tuned by the test's smallest change worth finding and the goal's recorded rate). A classic p-value turns up false winners when people look every day and stop at the first good-looking result; this one stays honest however often you look. Below 0.05 it is **safe to stop**. It is the lowest over the test's daily looks, so a version that was safe to stop stays so. That honesty costs traffic: it needs two to three times the visitors of a classic test that is only looked at once.
-- **Day by day**: each version's rate (or mean), cumulative, for the first goal (`days` in the results).
+- **Day by day**: each version's rate (or mean), cumulative, for the first goal (`days` in the results), and on the page a second chart of each version's lift over the control, to see whether a lead is steady or still settling.
 - **Several versions**: when two or more versions compete with the control, each comparison is another chance of a false winner. The results correct for it (Bonferroni): `p_value` is the raw always-valid p-value (`raw_p_value`) times the number of versions, and the range is widened to match, so it still leaves out zero exactly when the result is safe to stop. `corrected_for` says how many versions that is.
 - **Exploratory goals**: every goal after the first is marked `exploratory`. Checking many goals turns up chance differences, so they are for learning, and never decide the winner.
 - **Sample ratio check**: if the split between versions is far from the flag's weights (a chance under 0.001 of happening by luck), something is losing or double-counting visitors, such as a redirect, a cache or bots. The results then shouldn't be trusted, and there is no winner.
 
 The **winner** is a version at least 95% likely to beat the control with a p-value under 0.05 on the first goal; or the control, when every other version is at most 5% likely to beat it with the same proof; otherwise none yet. The maths is exact, with no sampling, so every reload gives the same numbers. A simulation in the engine's tests (identical versions, results checked every day, stopping at the first winner, at 1–5% base rates and 200–5,000 visitors a day) finds false winners well under 5% of the time; so does one for revenue per visitor (few buyers, skewed amounts, one to three versions against the control).
 
-Variance reduction (CUPED), breakdowns by device and source, and guardrail metrics are planned.
+## Breakdowns
+
+**Breakdown** on a test (`GET .../ab-tests/{id}/breakdown?by=device`, MCP `get_ab_test_breakdown`) shows the first goal within groups of visitors:
+
+- `device`: desktop, mobile or tablet;
+- `source`: the visit's `utm_source`, else the site it came from, else direct;
+- `country`: from the browser's time zone;
+- `visitor`: new, or returning (they had visited before).
+
+Each visitor is grouped by the visit they first saw their version in, so their group never changes. Visitors whose visit isn't known, such as exposures sent by a server, are "unknown". The largest 8 groups are shown, the rest added up as "other".
+
+Every group is another chance of a lucky difference, so each comparison is corrected for every version in every group (`corrected_for`), and a group needs more visitors to be safe to stop than the whole test. Use breakdowns to learn where a change works, such as on mobile only; the winner is always decided on everyone.
+
+Variance reduction (CUPED) and guardrail metrics are planned.
 
 ## AI help
 

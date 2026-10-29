@@ -2,9 +2,13 @@ package api_test
 
 import (
 	"context"
+	"io"
+	"log/slog"
 	"testing"
 	"time"
 
+	"github.com/outflareai/outflare/engine/internal/jobs"
+	"github.com/outflareai/outflare/engine/internal/seosync"
 	"github.com/outflareai/outflare/engine/internal/track"
 )
 
@@ -95,6 +99,40 @@ func TestLinkReadsReportsAndSettings(t *testing.T) {
 		l[0].(map[string]any)["competitor_id"] != rival || l[0].(map[string]any)["target"] != "https://rival.example/gone-unread" {
 		t.Fatalf("weekly reads: %v", l)
 	}
+	// Had that read failed, it is read again soon by a job of its own,
+	// not at next week's snapshot.
+	if _, err := e.pool.Exec(ctx, `UPDATE link_reads SET status = 'failed', error_code = 'provider_error', created_at = now() - interval '20 minutes'
+		WHERE workspace_id = $1 AND reason = 'dead_page'`, ws); err != nil {
+		t.Fatal(err)
+	}
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	seo := &seosync.Syncer{Pool: e.pool, Store: e.integrations, Log: log}
+	if err := seo.QueueDue(ctx); err != nil {
+		t.Fatal(err)
+	}
+	q := jobs.New(e.pool, log)
+	q.PollInterval = 20 * time.Millisecond
+	seo.Register(q)
+	qctx, stop := context.WithCancel(ctx)
+	done := make(chan struct{})
+	go func() { q.Run(qctx, 1); close(done) }() //nolint:errcheck
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		var read int
+		e.pool.QueryRow(ctx, `SELECT count(*) FROM link_reads WHERE workspace_id = $1 AND reason = 'dead_page' AND status = 'done'`, ws).Scan(&read)
+		if read == 1 {
+			break
+		}
+		if time.Now().After(deadline) {
+			stop()
+			<-done
+			t.Fatal("the failed dead page read was not tried again")
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	stop()
+	<-done
+
 	// Turned off, it reads nothing.
 	owner.must(200, "PATCH", base+"/link-building/settings", map[string]any{"weekly_reads": false})
 	if _, err := e.pool.Exec(ctx, `INSERT INTO competitor_pages (competitor_id, workspace_id, url, gone_at) VALUES ($1, $2, 'https://rival.example/third', now())`,

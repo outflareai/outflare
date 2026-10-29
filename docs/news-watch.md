@@ -2,7 +2,7 @@
 
 The news watch reads the news for you. Save a search, and Outflare runs it on a schedule through your own web search connection and keeps every article it finds. A **topic** search follows a subject, such as "residential proxies", so you can see what is being written and who writes it. A **coverage** search looks for a brand, such as "Northpeak", and keeps each article about it as that brand's **coverage**.
 
-It is the first part of digital PR in Outflare: finding a story only your brand can tell, getting it to the journalists who cover the topic, and counting the coverage it wins. Journalists as records, stories and pitching come next.
+It is the first part of digital PR in Outflare: finding a story only your brand can tell, getting it to the journalists who cover the topic, and counting the coverage it wins. It also finds the journalists who write the articles and makes media lists of them. Stories and pitching come next.
 
 ## What it needs
 
@@ -32,14 +32,26 @@ A coverage search keeps an article as the brand's coverage when its title or sni
 
 New items wait for a person: **Confirm** or **Dismiss** (`PATCH /v1/workspaces/{ws}/coverage/{coverage}`). Add an article the watch missed with `POST /v1/workspaces/{ws}/coverage`. `linked` says whether the article links to the brand's site; it is empty until someone checks.
 
+## Journalists
+
+OutflareBot reads each new article once, up to 20 from each run, for its byline and the date it was published: from the page's author tags or its structured data (JSON-LD). It obeys robots.txt and sites that opted out of crawling, and costs nothing. The byline shows on the article as the page gives it.
+
+When the byline is one person's name, the free email finder looks for their address at the outlet's own domain. When it is fairly sure (a confidence of 40 or more), the author becomes a **journalist**: a person record on the outlet's company record, like any contact, with the articles they wrote. Outflare never buys journalist data; a paid database can be connected later on your own account.
+
+The **Journalists** list (`GET /v1/workspaces/{ws}/journalists`, MCP `list_journalists`) shows each one with how many articles they wrote, their latest, their outlets and the searches their articles came up in, most articles first. Narrow it to one search to see who covers that topic. `GET /v1/workspaces/{ws}/news-articles?journalist_id=` lists what one journalist wrote.
+
+### Media lists
+
+A media list is a [smart list](lists.md#smart-lists) with a news search rule: "wrote an article this search found", ever or in the last so many days. It keeps itself up to date as the news watch finds new articles, and can be used like any other list. **Make a media list** on the Journalists tab creates one for a search; or create it through the API with the rule `{"news_search": "<search id>", "op": "exists", "within_days": 90}`.
+
 ## Permissions
 
 Reading searches, articles and coverage needs `seo.read`; saving, changing and running searches, and confirming or adding coverage, need `seo.manage`. A member limited to some brands sees and changes only their brands' searches and coverage, and the shared topics.
 
 ## Events
 
-Saving, changing and deleting a search are `news_search.created`, `.updated` and `.deleted`. Each run is `news_search.ran`, with `results`, `kept`, `new_articles` and `new_coverage`, or `news_search.run_failed` with its error code. Each new coverage item is `mention.found`; confirming or dismissing it is `coverage.confirmed` or `coverage.dismissed`.
+Saving, changing and deleting a search are `news_search.created`, `.updated` and `.deleted`. Each run is `news_search.ran`, with `results`, `kept`, `new_articles` and `new_coverage`, or `news_search.run_failed` with its error code. Each new coverage item is `mention.found`; confirming or dismissing it is `coverage.confirmed` or `coverage.dismissed`. Each article read is `news_article.read`, with its `status` and whether it found a byline and a journalist, and each new journalist is `journalist.found`.
 
 ## Monitoring
 
-The Grafana dashboard's **News watch** row shows runs by outcome, active searches and what they find, and the most overdue search. Alerts fire when a search is over an hour past its time, or when over half of runs fail with a provider or internal error ([monitoring](monitoring.md)).
+The Grafana dashboard's **News watch** row shows runs by outcome, active searches and what they find, the most overdue search, and article reads. Alerts fire when a search is over an hour past its time, when over half of runs fail with a provider or internal error, or when over half of article reads can't reach the page ([monitoring](monitoring.md)).

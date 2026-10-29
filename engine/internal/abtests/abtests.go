@@ -335,17 +335,45 @@ func goalArgs(g Goal) (arg, window, prop, capv any) {
 // the running total. Visitors of a variant the flag no longer has are left
 // out of the comparison.
 func count(ctx context.Context, q Querier, ws string, s Spec, g Goal, order []string) ([]Day, error) {
+	by, err := tally(ctx, q, ws, s, g, order, "")
+	return by[""], err
+}
+
+// segmentSQL is the segment of a visitor, by dimension, from the visit
+// (site_sessions ss) they first saw their version in; "unknown" when that
+// visit isn't known (an exposure sent by a server).
+var segmentSQL = map[string]string{
+	"device":  `coalesce(nullif(ss.device, ''), 'unknown')`,
+	"country": `coalesce(nullif(ss.country, ''), 'unknown')`,
+	"source": `CASE WHEN ss.id IS NULL THEN 'unknown' WHEN ss.utm_source <> '' THEN lower(ss.utm_source)
+		WHEN ss.referrer_host <> '' THEN lower(ss.referrer_host) ELSE 'direct' END`,
+	"visitor": `CASE WHEN ss.id IS NULL THEN 'unknown'
+		WHEN EXISTS (SELECT 1 FROM site_sessions p WHERE p.workspace_id = $1 AND p.anonymous_id = e.anonymous_id AND p.started_at < ss.started_at) THEN 'returning'
+		ELSE 'new' END`,
+}
+
+// tally is count for every segment of dim ("" for none): the cumulative
+// arms per day, by segment.
+func tally(ctx context.Context, q Querier, ws string, s Spec, g Goal, order []string, dim string) (map[string][]Day, error) {
 	hits := hitsSQL(g, "$1", "($4::timestamptz[])[2]", "$5", "$6", "$7")
 	arg, window, prop, capv := goalArgs(g)
+	// A visitor's segment rides along with their variant, after a unit
+	// separator, through every step below.
+	seg, join := "''", ""
+	if dim != "" {
+		seg = segmentSQL[dim]
+		join = `LEFT JOIN site_sessions ss ON ss.workspace_id = $1
+				AND ss.id = CASE WHEN e.context->>'sessionId' ~ '^[0-9a-fA-F-]{36}$' THEN (e.context->>'sessionId')::uuid END`
+	}
 	// params gives every placeholder a type, used by the goal or not.
 	rows, err := q.Query(ctx, `
 		WITH params AS (SELECT $5::text, $6::int, $7::text, $8::float8), seen AS (
-			SELECT DISTINCT ON (anonymous_id) anonymous_id, properties->>'variant' AS variant, occurred_at
-			FROM customer_events
-			WHERE workspace_id = $1 AND name = $2 AND properties->>'flag' = $3
-				AND occurred_at >= ($4::timestamptz[])[1] AND occurred_at < ($4::timestamptz[])[2]
-				AND anonymous_id IS NOT NULL AND properties->>'variant' IS NOT NULL
-			ORDER BY anonymous_id, occurred_at
+			SELECT DISTINCT ON (e.anonymous_id) e.anonymous_id, (e.properties->>'variant') || chr(31) || `+seg+` AS variant, e.occurred_at
+			FROM customer_events e `+join+`
+			WHERE e.workspace_id = $1 AND e.name = $2 AND e.properties->>'flag' = $3
+				AND e.occurred_at >= ($4::timestamptz[])[1] AND e.occurred_at < ($4::timestamptz[])[2]
+				AND e.anonymous_id IS NOT NULL AND e.properties->>'variant' IS NOT NULL
+			ORDER BY e.anonymous_id, e.occurred_at
 		), hits AS (`+hits+`
 		), daily AS (
 			SELECT anonymous_id, variant, to_char(at AT TIME ZONE 'UTC', 'YYYY-MM-DD') AS day, sum(val) AS dv
@@ -368,18 +396,24 @@ func count(ctx context.Context, q Querier, ws string, s Spec, g Goal, order []st
 	for i, v := range order {
 		idx[v] = i
 	}
-	byDay := map[string][]Arm{}
+	bySeg := map[string]map[string][]Arm{}
 	for rows.Next() {
-		var variant, day string
+		var key, day string
 		var visitors, conversions int64
 		var sum, sq float64
-		if err := rows.Scan(&variant, &day, &visitors, &conversions, &sum, &sq); err != nil {
+		if err := rows.Scan(&key, &day, &visitors, &conversions, &sum, &sq); err != nil {
 			rows.Close()
 			return nil, err
 		}
+		variant, segment, _ := strings.Cut(key, "\x1f")
 		i, ok := idx[variant]
 		if !ok {
 			continue
+		}
+		byDay := bySeg[segment]
+		if byDay == nil {
+			byDay = map[string][]Arm{}
+			bySeg[segment] = byDay
 		}
 		st := byDay[day]
 		if st == nil {
@@ -394,6 +428,16 @@ func count(ctx context.Context, q Querier, ws string, s Spec, g Goal, order []st
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
+	out := map[string][]Day{}
+	for segment, byDay := range bySeg {
+		out[segment] = cumulative(byDay, order, g.MetricOf() != MetricConversion)
+	}
+	return out, nil
+}
+
+// cumulative turns each day's arms into running totals, one Day per date
+// in order.
+func cumulative(byDay map[string][]Arm, order []string, measured bool) []Day {
 	dates := make([]string, 0, len(byDay))
 	for d := range byDay {
 		dates = append(dates, d)
@@ -404,7 +448,6 @@ func count(ctx context.Context, q Querier, ws string, s Spec, g Goal, order []st
 	for i, v := range order {
 		total[i].Variant = v
 	}
-	measured := g.MetricOf() != MetricConversion
 	for j, d := range dates {
 		for i := range order {
 			total[i].Visitors += byDay[d][i].Visitors
@@ -419,7 +462,7 @@ func count(ctx context.Context, q Querier, ws string, s Spec, g Goal, order []st
 		}
 		out[j] = Day{Date: d, Arms: slices.Clone(total)}
 	}
-	return out, nil
+	return out
 }
 
 // Winner is the variant the results favour, or "" while none is clear: a

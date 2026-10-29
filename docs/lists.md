@@ -92,6 +92,7 @@ Each rule tests one thing about a person:
 - **A field** on their record, such as `billing_plan` or `country`: is, is not, is more than, is less than, contains, is set or is not set. Numbers compare as numbers, text ignoring case, and dates as text (so `2026-01-01` style dates sort). For a field that holds a list, contains checks its items.
 - **An event** they did, such as `payment_succeeded`: did or didn't, ever or in the last N days. Events from the website tracker don't count, because anyone with the site key can send them.
 - **A lead list** they are in, or aren't: a fixed list can feed a smart list.
+- **A news search** they wrote an article for, or didn't, ever or in the last so many days: a media list of the [journalists](news-watch.md#journalists) who cover a topic.
 
 A person must pass all the rules, or any of them (`match`). With no rules a list holds everyone.
 

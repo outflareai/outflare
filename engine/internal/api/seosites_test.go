@@ -696,4 +696,23 @@ func TestSEOSiteCrawlSettings(t *testing.T) {
 	if n := scheduled(); n != 1 {
 		t.Fatalf("not started at the hour: %d", n)
 	}
+
+	// A scheduled crawl that failed is tried again the same day, at any
+	// hour, after a wait that grows with each failure.
+	owner.must(200, "PATCH", base+"/seo-sites/"+other, map[string]any{"schedule_hour": (now + 12) % 24})
+	fail := func() {
+		t.Helper()
+		if _, err := e.pool.Exec(context.Background(), `UPDATE crawl_runs SET status = 'failed', reason = 'site_errors', finished_at = now() - interval '20 minutes'
+			WHERE site_id = $1 AND status IN ('queued', 'running')`, other); err != nil {
+			t.Fatal(err)
+		}
+	}
+	fail()
+	if n := scheduled(); n != 2 {
+		t.Fatalf("retry after a failed crawl: %d", n)
+	}
+	fail()
+	if n := scheduled(); n != 2 {
+		t.Fatalf("retried before the second wait: %d", n)
+	}
 }

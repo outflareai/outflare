@@ -42,6 +42,7 @@ func (s *Server) routesABTests(mux *http.ServeMux) {
 	mux.HandleFunc("POST /v1/workspaces/{ws}/ab-tests/{test}/start", s.inWorkspace(manage, s.startABTest))
 	mux.HandleFunc("POST /v1/workspaces/{ws}/ab-tests/{test}/end", s.inWorkspace(manage, s.endABTest))
 	mux.HandleFunc("GET /v1/workspaces/{ws}/ab-tests/{test}/results", s.inWorkspace(read, s.abTestResults))
+	mux.HandleFunc("GET /v1/workspaces/{ws}/ab-tests/{test}/breakdown", s.inWorkspace(read, s.abTestBreakdown))
 }
 
 type abTestView struct {
@@ -553,6 +554,53 @@ func (s *Server) abTestResults(w http.ResponseWriter, r *http.Request) {
 		"test_id": t.ID, "status": t.Status, "control": t.Control,
 		"winner": abtests.Winner(res, t.Control), "result": res,
 	})
+}
+
+// abTestBreakdown splits a started test's first goal by a dimension of its
+// visitors (device, source, country, new or returning), up to its end.
+func (s *Server) abTestBreakdown(w http.ResponseWriter, r *http.Request) {
+	a := accessFrom(r.Context())
+	by := r.URL.Query().Get("by")
+	if !slices.Contains(abtests.Dimensions, by) {
+		writeError(w, r, http.StatusBadRequest, "invalid_request", "by is "+strings.Join(abtests.Dimensions, ", "))
+		return
+	}
+	t, ok := s.oneABTest(w, r)
+	if !ok {
+		return
+	}
+	if t.Status == "draft" || t.StartedAt == nil {
+		writeError(w, r, http.StatusConflict, "conflict", "this test hasn't started: start it to measure")
+		return
+	}
+	f, err := s.abFlag(r.Context(), nil, a.WorkspaceID, t.FlagID)
+	if err != nil {
+		s.internal(w, r, err)
+		return
+	}
+	to := time.Now()
+	if t.EndedAt != nil {
+		to = *t.EndedAt
+	}
+	start := time.Now()
+	ctx, cancel := context.WithTimeout(r.Context(), abResultsTimeout)
+	defer cancel()
+	spec := abtests.Spec{FlagKey: f.Key, Control: t.Control, Goals: t.Goals, MinEffect: t.MinEffect, From: *t.StartedAt, To: to}
+	for _, v := range f.Variants {
+		spec.Variants = append(spec.Variants, v.Key)
+		spec.Weights = append(spec.Weights, v.Weight)
+	}
+	b, err := abtests.Breakdown(ctx, s.pool, a.WorkspaceID, spec, by)
+	outcome := "ok"
+	if err != nil {
+		outcome = "error"
+	}
+	metrics.ABResults(outcome, time.Since(start))
+	if err != nil {
+		s.internal(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"test_id": t.ID, "status": t.Status, "control": t.Control, "breakdown": b, "computed_at": time.Now().UTC()})
 }
 
 // planABTest says how long a test of a flag is likely to take, from the

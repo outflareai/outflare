@@ -17,6 +17,7 @@ import (
 	"net/url"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -66,7 +67,11 @@ type Service struct {
 }
 
 // Register adds the job handler.
-func (s *Service) Register(q *jobs.Queue) { q.Handle(JobCheck, s.check) }
+func (s *Service) Register(q *jobs.Queue) {
+	q.Handle(JobCheck, s.check)
+	q.Handle(JobWriteOpener, s.writeOpener)
+	q.Handle(JobReadReply, s.readReply)
+}
 
 type checkPayload struct {
 	ProspectID string `json:"prospect_id"`
@@ -76,13 +81,20 @@ type checkPayload struct {
 // not when it was checked in the last hour or a check is already queued
 // this hour. It reports whether a new check was queued.
 func StartCheck(ctx context.Context, q jobs.Querier, ws, prospectID string, now time.Time) (bool, error) {
-	var recent bool
-	if err := q.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM link_page_checks WHERE prospect_id = $1 AND workspace_id = $2 AND checked_at > $3)`,
-		prospectID, ws, now.Add(-time.Hour)).Scan(&recent); err != nil || recent {
+	var last *time.Time
+	if err := q.QueryRow(ctx, `SELECT max(checked_at) FROM link_page_checks WHERE prospect_id = $1 AND workspace_id = $2`, prospectID, ws).Scan(&last); err != nil {
 		return false, err
 	}
+	if last != nil && last.After(now.Add(-time.Hour)) {
+		return false, nil
+	}
+	// One check an hour, and a finished check never holds back the next.
+	key := "link_check:" + prospectID + ":" + now.UTC().Format("2006-01-02T15")
+	if last != nil {
+		key += ":" + strconv.FormatInt(last.UnixMicro(), 10)
+	}
 	id, err := jobs.Enqueue(ctx, q, jobs.NewJob{Kind: JobCheck, Payload: checkPayload{ProspectID: prospectID}, WorkspaceID: &ws,
-		MaxAttempts: 3, IdempotencyKey: "link_check:" + prospectID + ":" + now.UTC().Format("2006-01-02T15")})
+		MaxAttempts: 3, IdempotencyKey: key})
 	return id != 0, err
 }
 
@@ -111,6 +123,9 @@ type Check struct {
 	ErrorCode       *string      `json:"error_code"`
 	CheckedAt       time.Time    `json:"checked_at"`
 	contacts        []contact
+	// liveOnly: a check of an agreed or live link, which keeps the earlier
+	// check's read of the page.
+	liveOnly bool
 }
 
 // OurLink is a link from the page to the site.
@@ -234,6 +249,10 @@ func (s *Service) read(ctx context.Context, pr prospect) Check {
 		}
 	}
 	c.Outbound = len(outbound)
+	// An agreed or live link only needs to know whether it is there.
+	if c.liveOnly = pr.stage == "agreed" || pr.stage == "live"; c.liveOnly {
+		return c
+	}
 	// Broken outbound links, and what the archive kept of them.
 	check := outbound[:min(len(outbound), maxLinkChecks)]
 	urls := make([]string, len(check))
@@ -278,7 +297,17 @@ func (s *Service) store(ctx context.Context, id string, pr prospect, c Check) er
 	our, _ := json.Marshal(c.OurLinks)
 	broken, _ := json.Marshal(c.Broken)
 	return pgx.BeginFunc(ctx, s.Pool, func(tx pgx.Tx) error {
-		if _, err := tx.Exec(ctx, `
+		if c.liveOnly {
+			if _, err := tx.Exec(ctx, `
+				INSERT INTO link_page_checks (prospect_id, workspace_id, status, http_status, final_url, redirect_to, links_to_us, our_links, error_code, checked_at)
+				VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+				ON CONFLICT (prospect_id) DO UPDATE SET status = EXCLUDED.status, http_status = EXCLUDED.http_status, final_url = EXCLUDED.final_url,
+					redirect_to = EXCLUDED.redirect_to, links_to_us = EXCLUDED.links_to_us, our_links = EXCLUDED.our_links,
+					error_code = EXCLUDED.error_code, checked_at = EXCLUDED.checked_at`,
+				id, pr.ws, c.Status, c.HTTPStatus, clip(c.FinalURL, 2048), clip(c.RedirectTo, 2048), c.LinksToUs, our, c.ErrorCode, c.CheckedAt); err != nil {
+				return err
+			}
+		} else if _, err := tx.Exec(ctx, `
 			INSERT INTO link_page_checks (prospect_id, workspace_id, status, http_status, final_url, redirect_to, title, author, lang, noindex,
 				word_count, links_to_us, our_links, outbound, broken, page_kind, topic, fit, fit_reason, ai_error, suggested_target,
 				suggested_reason, error_code, checked_at)
@@ -307,15 +336,48 @@ func (s *Service) store(ctx context.Context, id string, pr prospect, c Check) er
 		}
 		score, factors := seosync.ProspectScore(pr.method, pr.rating, pr.traffic, pr.spam, c.Fit)
 		fb, _ := json.Marshal(factors)
-		if _, err := tx.Exec(ctx, `UPDATE link_prospects SET score = $3, score_factors = $4,
-				target_url = CASE WHEN target_url = '' THEN $5 ELSE target_url END,
-				stage = CASE WHEN $6::text IS NULL THEN stage ELSE 'excluded' END,
-				excluded_reason = COALESCE($6, excluded_reason),
-				stage_changed_at = CASE WHEN $6::text IS NULL THEN stage_changed_at ELSE now() END, updated_at = now()
-			WHERE id = $1 AND workspace_id = $2`, id, pr.ws, score, fb, c.SuggestedTarget, reason); err != nil {
-			return err
+		// A live check leaves the score as the full check left it.
+		if !c.liveOnly {
+			if _, err := tx.Exec(ctx, `UPDATE link_prospects SET score = $3, score_factors = $4,
+					target_url = CASE WHEN target_url = '' THEN $5 ELSE target_url END,
+					stage = CASE WHEN $6::text IS NULL THEN stage ELSE 'excluded' END,
+					excluded_reason = COALESCE($6, excluded_reason),
+					stage_changed_at = CASE WHEN $6::text IS NULL THEN stage_changed_at ELSE now() END, updated_at = now()
+				WHERE id = $1 AND workspace_id = $2`, id, pr.ws, score, fb, c.SuggestedTarget, reason); err != nil {
+				return err
+			}
 		}
 		rec := seosync.SystemRecorder(pr.ws)
+		// The live check: an agreed link now on the page is live; a live
+		// one gone from a page that is up, or from a page that is gone, is
+		// removed.
+		move, live := "", ""
+		switch {
+		case pr.stage == "agreed" && c.Status == "up" && c.LinksToUs:
+			move, live = "live", "live"
+		case pr.stage == "agreed":
+			live = map[bool]string{true: "not_yet", false: "unreachable"}[c.Status == "up"]
+		case pr.stage == "live" && ((c.Status == "up" && !c.LinksToUs) || c.Status == "gone"):
+			move, live = "removed", "removed"
+		case pr.stage == "live":
+			live = map[bool]string{true: "still_live", false: "unreachable"}[c.Status == "up"]
+		}
+		if live != "" {
+			metrics.LinkLiveCheck(live)
+		}
+		if move != "" {
+			stamp := map[string]string{"live": ", live_at = now()", "removed": ""}[move]
+			if _, err := tx.Exec(ctx, `UPDATE link_prospects SET stage = $2, stage_changed_at = now(), updated_at = now()`+stamp+`
+				WHERE id = $1`, id, move); err != nil {
+				return err
+			}
+			data := map[string]any{"site_id": pr.siteID, "brand_id": pr.brandID, "record_id": pr.recordID, "method": pr.method, "stage": move,
+				"was": pr.stage, "by": "live_check", "links": c.OurLinks}
+			if err := rec(ctx, tx, "link_prospect."+move, id, data, map[string]any{"site_id": pr.siteID, "method": pr.method, "stage": move,
+				"was": pr.stage}); err != nil {
+				return err
+			}
+		}
 		if reason != nil {
 			if err := rec(ctx, tx, "link_prospect.excluded", id, map[string]any{"site_id": pr.siteID, "brand_id": pr.brandID, "record_id": pr.recordID,
 				"method": pr.method, "stage": "excluded", "was": pr.stage, "excluded_reason": *reason, "by": "page_check"},

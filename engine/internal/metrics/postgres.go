@@ -77,6 +77,7 @@ var (
 	reviewPages     = desc("reviews", "pages", "Review pages being read, by platform and state (ok, failing: the last read failed).", "platform", "state")
 	reviewStuck     = desc("reviews", "stuck_pages", "Active review pages whose last 3 or more reads failed, retries included, by platform and the last error code.", "platform", "code")
 	socialStuck     = desc("social", "stuck_accounts", "Active social accounts whose last 3 or more reads failed, retries included, by channel and the last error code.", "channel", "code")
+	syncStuck       = desc("sync", "stuck", "Scheduled syncs of connected connections whose last 3 or more runs failed, retries included, by module and the last error code.", "module", "code")
 	reviewOldest    = desc("reviews", "oldest_read_seconds", "How long since the least recently read active review page was read (or added, if never read), by platform.", "platform")
 	socialScheduled = desc("social", "publications_scheduled", "Approved posts waiting to go out, by channel and state (due: its time has come, later: scheduled ahead).", "channel", "state")
 	socialOverdue   = desc("social", "publication_overdue_seconds", "How long past its time the most overdue approved post is, by channel. Posts go out within a minute or two of their time.", "channel")
@@ -84,7 +85,7 @@ var (
 	scrapeDuration  = desc("metrics", "scrape_duration_seconds", "Time the last database scrape took.")
 	newsSearches    = desc("news", "searches", "Active news searches, by state (ok, failing: the last run failed).", "state")
 	newsOverdue     = desc("news", "search_overdue_seconds", "How long past its time the most overdue active news search is. Searches are queued every few minutes, so this stays near 0.")
-	allDescs        = []*prometheus.Desc{poolAcquired, poolIdle, poolTotal, poolMax, poolAcquires, poolWaits, poolWaitSeconds, poolAcquireSecs, poolCanceled, queued, scheduled, oldestDue, running, dbBackends, dbMaxConns, dbLongestXact, dbLockWaits, dbSize, dbCommits, dbRollbacks, dbBlocksHit, dbBlocksRead, dbDeadlocks, dbTempBytes, tableBytes, tableDeadRows, tableSeqScans, pipeItems, pipeOldest, pipeRuns, pipeBreakers, inboxPending, inboxOldest, inboxFailed, smartLists, smartOldest, smartFailing, rulesActive, rulesTimersDue, rulesOldestDue, reviewPages, reviewStuck, socialStuck, reviewOldest, newsSearches, newsOverdue, socialScheduled, socialOverdue, scrapeErrors, scrapeDuration}
+	allDescs        = []*prometheus.Desc{poolAcquired, poolIdle, poolTotal, poolMax, poolAcquires, poolWaits, poolWaitSeconds, poolAcquireSecs, poolCanceled, queued, scheduled, oldestDue, running, dbBackends, dbMaxConns, dbLongestXact, dbLockWaits, dbSize, dbCommits, dbRollbacks, dbBlocksHit, dbBlocksRead, dbDeadlocks, dbTempBytes, tableBytes, tableDeadRows, tableSeqScans, pipeItems, pipeOldest, pipeRuns, pipeBreakers, inboxPending, inboxOldest, inboxFailed, smartLists, smartOldest, smartFailing, rulesActive, rulesTimersDue, rulesOldestDue, reviewPages, reviewStuck, socialStuck, syncStuck, reviewOldest, newsSearches, newsOverdue, socialScheduled, socialOverdue, scrapeErrors, scrapeDuration}
 	gauge, counter  = prometheus.GaugeValue, prometheus.CounterValue
 )
 
@@ -304,6 +305,25 @@ func (p *Postgres) query() []prometheus.Metric {
 		}
 		for platform, age := range oldest {
 			add(reviewOldest, gauge, age, platform)
+		}
+		return nil
+	})
+	run("syncs_stuck", `
+		SELECT x.module, coalesce(x.code, 'unknown'), count(*) FROM (
+			SELECT 'analytics' AS module, a.last_error_code AS code, a.integration_id FROM analytics_syncs a WHERE a.failures >= 3
+			UNION ALL SELECT 'search_console', y.last_error_code, y.integration_id FROM search_syncs y WHERE y.failures >= 3
+			UNION ALL SELECT 'page_conversions', c.last_error_code, c.integration_id FROM page_conversion_syncs c WHERE c.failures >= 3
+			UNION ALL SELECT 'ads', d.last_error_code, d.integration_id FROM ad_syncs d WHERE d.failures >= 3
+			UNION ALL SELECT 'seo', e.last_error_code, e.integration_id FROM seo_syncs e WHERE e.failures >= 3
+		) x JOIN integrations i ON i.id = x.integration_id AND i.status = 'connected'
+		GROUP BY 1, 2`, func(r rowser) error {
+		for r.Next() {
+			var module, code string
+			var n int64
+			if err := r.Scan(&module, &code, &n); err != nil {
+				return err
+			}
+			add(syncStuck, gauge, float64(n), module, code)
 		}
 		return nil
 	})

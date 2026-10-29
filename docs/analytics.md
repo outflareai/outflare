@@ -110,6 +110,11 @@ unless it is switched off, up to 20 per connection; past 20, sites sync once
 switched on. Switching a site off deletes what was stored for it. Clarity syncs once a day and traffic
 only, because its API allows ten calls a day and three days of history.
 
+A sync that fails (the tool down, a refused key, Outflare's own error) is
+tried again soon rather than after its whole interval: after 15 minutes, then 1 and 2 hours, then every 4 hours until one works.
+This includes the Search Console and conversions parts of the sync. Each
+sync shows why its last run failed, and **Sync now** runs it straight away.
+
 - **First sync:** 90 days of traffic, and 7 days of pages, sources, search
   queries and events (the top 50 per day). It starts within a few minutes of
   connecting.

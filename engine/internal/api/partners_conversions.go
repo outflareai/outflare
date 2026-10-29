@@ -659,6 +659,9 @@ func (c *conversionRun) leadOrSale(ctx context.Context) error {
 			return err
 		}
 	}
+	if err := enqueuePartnerPostback(ctx, tx, c.ws, m.id, conv); err != nil {
+		return err
+	}
 	return c.finish(ctx, conv)
 }
 
@@ -805,6 +808,9 @@ func (c *conversionRun) refund(ctx context.Context) error {
 			AND s.amount_cents > COALESCE((SELECT sum(r.amount_cents) FROM partner_conversions r WHERE r.refund_of = s.id), 0))`, sale.ReferralID); err != nil {
 			return err
 		}
+	}
+	if err := enqueuePartnerPostback(ctx, tx, c.ws, m.id, conv); err != nil {
+		return err
 	}
 	return c.finish(ctx, conv)
 }

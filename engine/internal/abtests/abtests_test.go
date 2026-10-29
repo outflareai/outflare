@@ -304,3 +304,113 @@ func TestResultsMetrics(t *testing.T) {
 		t.Errorf("2 visitors is too few for a baseline, got %v", b)
 	}
 }
+
+// TestBreakdown groups visitors by the visit they first saw their version
+// in: device, source and new or returning, "unknown" without a visit, and
+// the smaller groups as "other"; every comparison is corrected for every
+// version in every group.
+func TestBreakdown(t *testing.T) {
+	url := os.Getenv("TEST_DATABASE_URL")
+	if url == "" {
+		t.Skip("TEST_DATABASE_URL not set")
+	}
+	ctx := context.Background()
+	pool, err := db.Connect(ctx, url)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(pool.Close)
+	if _, err := db.Migrate(ctx, pool); err != nil {
+		t.Fatal(err)
+	}
+	var ws string
+	if err := pool.QueryRow(ctx, `INSERT INTO workspaces (name, slug) VALUES ('AB', 'ab-' || substr(gen_random_uuid()::text, 1, 8)) RETURNING id::text`).Scan(&ws); err != nil {
+		t.Fatal(err)
+	}
+	start := time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC)
+	at := func(h int) time.Time { return start.Add(time.Duration(h) * time.Hour) }
+	session := func(anon, device, utm, referrer, country string, h int) string {
+		t.Helper()
+		var id string
+		if err := pool.QueryRow(ctx, `INSERT INTO site_sessions (workspace_id, anonymous_id, started_at, last_seen_at, device, utm_source, referrer_host, country)
+			VALUES ($1, $2, $3, $3, $4, $5, $6, $7) RETURNING id::text`, ws, anon, at(h), device, utm, referrer, country).Scan(&id); err != nil {
+			t.Fatal(err)
+		}
+		return id
+	}
+	add := func(anon, name string, h int, props, context string) {
+		t.Helper()
+		if _, err := pool.Exec(ctx, `INSERT INTO customer_events (workspace_id, kind, name, anonymous_id, properties, context, occurred_at) VALUES ($1, 'track', $2, $3, $4, $5, $6)`,
+			ws, name, anon, props, context, at(h)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	type visitor struct {
+		anon, variant, device, utm, referrer, country string
+		before, signup                                bool
+	}
+	visitors := []visitor{
+		{"a", "control", "mobile", "newsletter", "", "DE", true, true},
+		{"b", "control", "desktop", "", "news.example", "FR", false, false},
+		{"c", "new", "mobile", "", "", "DE", false, true},
+		{"d", "new", "mobile", "", "", "US", false, true},
+		{"e", "new", "desktop", "Newsletter", "", "GB", false, false},
+	}
+	for i, v := range visitors {
+		if v.before {
+			session(v.anon, v.device, "", "", v.country, 0)
+		}
+		id := session(v.anon, v.device, v.utm, v.referrer, v.country, 1)
+		add(v.anon, abtests.ExposureEvent, 1, fmt.Sprintf(`{"flag": "hero", "variant": %q}`, v.variant), fmt.Sprintf(`{"sessionId": %q}`, id))
+		if v.signup {
+			add(v.anon, "signup_started", 2+i, `{}`, `{}`)
+		}
+	}
+	// A server-sent exposure has no visit.
+	add("srv", abtests.ExposureEvent, 1, `{"flag": "hero", "variant": "new"}`, `{}`)
+	// Nine more countries, one control visitor each, to fold into "other".
+	for i, c := range []string{"AT", "BE", "CH", "DK", "ES", "FI", "IE", "IT", "NL"} {
+		anon := fmt.Sprint("x", i)
+		id := session(anon, "desktop", "", "", c, 1)
+		add(anon, abtests.ExposureEvent, 1, `{"flag": "hero", "variant": "control"}`, fmt.Sprintf(`{"sessionId": %q}`, id))
+	}
+
+	spec := abtests.Spec{FlagKey: "hero", Variants: []string{"control", "new"}, Weights: []int{50, 50}, Control: "control",
+		Goals: []abtests.Goal{{Kind: "event", Name: "signup_started"}}, From: start, To: at(48)}
+	seg := func(b abtests.BreakdownResult) map[string][]abtests.Arm {
+		m := map[string][]abtests.Arm{}
+		for _, s := range b.Segments {
+			m[s.Key] = s.Arms
+		}
+		return m
+	}
+	check := func(dim string, want map[string][4]int64) abtests.BreakdownResult {
+		t.Helper()
+		b, err := abtests.Breakdown(ctx, pool, ws, spec, dim)
+		if err != nil {
+			t.Fatal(err)
+		}
+		got := seg(b)
+		for key, w := range want {
+			a := got[key]
+			if len(a) != 2 || a[0].Visitors != w[0] || a[0].Conversions != w[1] || a[1].Visitors != w[2] || a[1].Conversions != w[3] {
+				t.Errorf("%s %s = %+v, want control %d/%d, new %d/%d", dim, key, a, w[1], w[0], w[3], w[2])
+			}
+		}
+		return b
+	}
+	dev := check("device", map[string][4]int64{"mobile": {1, 1, 2, 2}, "desktop": {10, 0, 1, 0}, "unknown": {0, 0, 1, 0}})
+	if dev.CorrectedFor != 3 || len(dev.Segments) != 3 || dev.Segments[0].Key != "desktop" || dev.Segments[0].Comparisons == nil {
+		t.Errorf("device breakdown: %+v", dev)
+	}
+	check("source", map[string][4]int64{"newsletter": {1, 1, 1, 0}, "news.example": {1, 0, 0, 0}, "direct": {9, 0, 2, 2}})
+	check("visitor", map[string][4]int64{"returning": {1, 1, 0, 0}, "new": {10, 0, 3, 2}, "unknown": {0, 0, 1, 0}})
+	// 14 countries plus unknown: the largest 7, then the rest as other.
+	country := check("country", map[string][4]int64{"DE": {1, 1, 1, 1}})
+	if n := len(country.Segments); n != abtests.MaxSegments || country.Segments[n-1].Key != "other" || country.CorrectedFor != abtests.MaxSegments {
+		t.Errorf("country breakdown: %d segments, last %q, corrected for %d", n, country.Segments[n-1].Key, country.CorrectedFor)
+	}
+	if b, err := abtests.Breakdown(ctx, pool, ws, spec, "browser"); err != nil || len(b.Segments) != 0 {
+		t.Errorf("unknown dimension: %+v, %v", b, err)
+	}
+}

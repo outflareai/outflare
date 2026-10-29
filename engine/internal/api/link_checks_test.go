@@ -26,11 +26,12 @@ func readLinkPage(w http.ResponseWriter) {
 	})
 }
 
-// runLinkChecks runs the link prospect check jobs.
-func (e *env) runLinkChecks(t *testing.T) {
+// runLinkChecks runs the link building jobs: page checks, pitch openers
+// and reading replies.
+func (e *env) runLinkChecks(t *testing.T) *linkbuild.Service {
 	q := jobs.New(e.pool, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	q.PollInterval = 20 * time.Millisecond
-	q.Only = []string{linkbuild.JobCheck}
+	q.Only = []string{linkbuild.JobCheck, linkbuild.JobWriteOpener, linkbuild.JobReadReply}
 	svc := &linkbuild.Service{Pool: e.pool, Log: slog.New(slog.NewTextHandler(io.Discard, nil)), Crawl: e.crawl, Models: e.srv.AIModels(),
 		Emails: &emailfind.Service{Pool: e.pool, Resolver: e.dns}}
 	svc.Register(q)
@@ -38,6 +39,7 @@ func (e *env) runLinkChecks(t *testing.T) {
 	done := make(chan struct{})
 	go func() { q.Run(ctx, 2); close(done) }() //nolint:errcheck
 	t.Cleanup(func() { cancel(); <-done })
+	return svc
 }
 
 func TestLinkProspectPageChecks(t *testing.T) {
@@ -134,4 +136,14 @@ func TestLinkProspectPageChecks(t *testing.T) {
 			t.Errorf("no %s event", name)
 		}
 	}
+}
+
+// answerJSON is a fake Claude answer whose text is v as JSON.
+func answerJSON(w http.ResponseWriter, v any) {
+	text, _ := json.Marshal(v)
+	json.NewEncoder(w).Encode(map[string]any{
+		"id": "msg_j", "type": "message", "role": "assistant", "model": "claude-haiku-5-5",
+		"content":     []any{map[string]any{"type": "text", "text": string(text)}},
+		"stop_reason": "end_turn", "usage": map[string]any{"input_tokens": 800, "output_tokens": 80},
+	})
 }

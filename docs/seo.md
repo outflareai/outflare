@@ -80,6 +80,11 @@ a few minutes after you connect it, and a domain it starts following (a new
 brand's website, say) is read within the hour instead of at the next weekly
 snapshot.
 
+A domain whose snapshot fails (the provider down, a spent budget, a refused
+key) is read again soon instead of at next week's snapshot, so the weekly
+series has no gaps: after 15 minutes, then 1 and 2 hours, then every 4 hours until one works. Only the domains that failed are read
+again, so the domains that worked cost nothing more.
+
 - **Domains:** the connection's `domains` setting, or else up to five of
   your websites: your brands' websites first (only the brands the connection
   serves), then the sites you audit, then the ones your analytics tools
@@ -333,10 +338,10 @@ nothing: numbers come from what is stored.
   opts out is never pitched, even when it was added earlier, and an excluded
   prospect goes back to `prospect` before it can be pitched.
 
-The **Link building** page under Outreach shows the list, competitors' dead
-pages (add their linking sites as prospects in one click), a domain's most
-linked pages and the settings. Outflare never offers or agrees to pay for a
-link.
+The **Link building** page under Outreach shows the list, the pitches
+waiting for approval, results by method, competitors' dead pages (add their
+linking sites as prospects in one click), a domain's most linked pages and
+the settings. Outflare never offers or agrees to pay for a link.
 
 ### Checking prospects
 
@@ -369,6 +374,53 @@ A page to pitch that already links, or is gone, is excluded (`links_to_us`,
 prospects, with the page they linked to as the page to offer. It's free;
 check them next to see which pages are still up and who to ask.
 
+### Pitching
+
+A pitch goes out through one of your own Outflare sequences (`POST
+/link-prospects/{id}/pitches` with `sequence_id`, MCP `start_link_pitch`), to
+one of the prospect's contacts (`record_id`, by default the surest with an
+email address). Make a sequence for link pitches and put
+`{{custom.opener}}` in its first step: the workspace's AI (the tool "Link
+pitches" on the AI usage page, with its own limit) writes that opener for
+each page, from what the page check found: its topic, its author, a broken
+link it has, and your page to offer. It never offers payment, and the page
+is read as data, never as instructions. `GET /link-building/sequences` lists
+your sequences with `uses_opener`.
+
+- **Approval, on by default.** The pitch waits as a draft under **Pitches**
+  (`GET /link-pitches?status=draft`) for a person to read the opener, edit
+  it and approve it (`POST /link-pitches/{id}/approve`) or reject it. Turn
+  approval off per sequence (`PATCH /link-building/sequences/{id}` with
+  `approve_pitches: false`, or in the settings) and pitches through it go
+  out as soon as their opener is written. A pitch without AI waits for a
+  person to write the opener.
+- **Sending.** Approving makes the contact a lead from their person record,
+  puts the opener on it (`custom.opener`, plus `custom.link_page`) and
+  enrolls it in the sequence, whose own checks apply to every send: the
+  email policy, suppressions, sending windows and mailbox limits. The
+  prospect moves to `pitched`. One pitch per website still holds: approving
+  answers `409 site_in_outreach` while another page there is in outreach or
+  cooling down.
+- **Replies.** Any reply moves the prospect to `replied`, then the AI reads
+  it: agreed, declined, asks for payment, wants content first, or other.
+  When it is sure, agreed moves the prospect to `agreed` and declined to
+  `declined`. The reply gets an inbox tag (`link: agreed`, `link: wants
+  payment`, and so on), and asks for payment or content are flagged for a
+  person. Without AI, move the prospect yourself.
+- **Live.** Every hour, agreed links due a look are checked (each at most
+  daily, live ones weekly). A link found on the page moves the prospect to
+  `live`; a live link gone from its page, or a page that's gone, to
+  `removed`. An agreed link still not there after 14 days is announced once
+  (`link_prospect.overdue`), a cue to nudge the site.
+- **Results.** `GET /link-prospects/results` (MCP `get_link_results`)
+  counts the prospects found in the last 90 days by method: pitched,
+  replied, agreed, live, declined, removed, and live links per pitch. The
+  Outcomes report grouped by sequence has `live_links` and
+  `cost_per_live_link_cents`.
+
+Pitches started by events, and an autopilot that pitches on its own, are
+part of Outflare Cloud.
+
 ### Link reads
 
 Who links to a page or domain that isn't yours: a competitor's page that
@@ -393,7 +445,10 @@ Every read is kept, so these reports cost nothing:
 
 **The weekly read.** The weekly SEO snapshot also reads who links to pages
 that went from tracked competitors' sitemaps in the last 8 days (at most 20
-a site, each page once). It spends at most a share of the connection's
+a site, each page once). A page whose read fails is read again soon, on its
+own, rather than at next week's snapshot: after 15 minutes, then 1 and 2
+hours, then every 4 hours, while it is still among the last 8 days' pages
+and until a read of it works. It spends at most a share of the connection's
 monthly budget a month on this: 10% by default. Change it, or turn it off,
 in the link building settings (`PATCH /link-building/settings`, MCP
 `update_link_building_settings`), which also hold the pitch cool-down

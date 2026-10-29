@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState, type FormEvent } from "react";
-import type { LeadList, SmartList, SmartListPerson, SmartListRule } from "@outflare/sdk";
+import type { LeadList, NewsSearch, SmartList, SmartListPerson, SmartListRule } from "@outflare/sdk";
 import { useBrand } from "@/lib/brand";
 import { BrandBadge } from "@/components/brand-badge";
 import { DataTable } from "@/components/data-table";
@@ -15,11 +15,13 @@ import { ago, plural } from "../format";
 type Field = { key: string; label: string };
 
 // useRuleChoices loads what rules can pick from: the person fields and
-// approved events in the catalog, and the workspace's lead lists.
+// approved events in the catalog, the workspace's lead lists, and its news
+// searches (for media lists; empty without seo.read).
 function useRuleChoices(ws: string) {
   const [fields, setFields] = useState<Field[]>([]);
   const [events, setEvents] = useState<string[]>([]);
   const [leadLists, setLeadLists] = useState<LeadList[]>([]);
+  const [newsSearches, setNewsSearches] = useState<NewsSearch[]>([]);
   useEffect(() => {
     api.GET("/v1/workspaces/{ws}/catalog", { params: { path: { ws } } }).then(({ data }) => {
       const person = data?.types.find((t) => t.key === "person");
@@ -27,14 +29,16 @@ function useRuleChoices(ws: string) {
       setEvents((data?.events ?? []).filter((e) => e.status === "approved").map((e) => e.name));
     });
     api.GET("/v1/workspaces/{ws}/lead-lists", { params: { path: { ws } } }).then(({ data }) => setLeadLists(data?.data ?? []));
+    api.GET("/v1/workspaces/{ws}/news-searches", { params: { path: { ws } } }).then(({ data }) => setNewsSearches(data?.data ?? []));
   }, [ws]);
-  return { fields, events, leadLists };
+  return { fields, events, leadLists, newsSearches };
 }
 
 const opText: Record<SmartListRule["op"], string> = { eq: "is", neq: "is not", gt: "is more than", lt: "is less than", contains: "contains", exists: "is set", not_exists: "is not set" };
 
-type Test = "attribute" | "event" | "in_list";
-const testOf = (r: SmartListRule): Test => (r.event !== undefined ? "event" : r.in_list !== undefined ? "in_list" : "attribute");
+type Test = "attribute" | "event" | "in_list" | "news_search";
+const testOf = (r: SmartListRule): Test =>
+  r.event !== undefined ? "event" : r.in_list !== undefined ? "in_list" : r.news_search !== undefined ? "news_search" : "attribute";
 
 function parseValue(v: string): unknown {
   if (v === "true" || v === "false") return v === "true";
@@ -52,6 +56,10 @@ export function ruleText(r: SmartListRule, fieldLabel: (k: string) => string, li
     }
     case "in_list":
       return `${r.op === "exists" ? "is" : "isn't"} in ${listName(r.in_list ?? "")}`;
+    case "news_search": {
+      const when = r.within_days ? ` in the last ${plural(r.within_days, "day")}` : "";
+      return `${r.op === "exists" ? "wrote" : "didn't write"} about ${listName(r.news_search ?? "")}${when}`;
+    }
   }
   const value = r.op === "exists" || r.op === "not_exists" ? "" : ` ${String(r.value)}`;
   return `${fieldLabel(r.attribute ?? "")} ${opText[r.op]}${value}`;
@@ -62,7 +70,9 @@ export function rulesText(l: Pick<SmartList, "rules" | "match">, fieldLabel: (k:
   return l.rules.map((r) => ruleText(r, fieldLabel, listName)).join(l.match === "any" ? ", or " : ", and ");
 }
 
-function Rules({ rules, onChange, fields, events, leadLists }: { rules: SmartListRule[]; onChange: (r: SmartListRule[]) => void; fields: Field[]; events: string[]; leadLists: LeadList[] }) {
+function Rules({ rules, onChange, fields, events, leadLists, newsSearches }: {
+  rules: SmartListRule[]; onChange: (r: SmartListRule[]) => void; fields: Field[]; events: string[]; leadLists: LeadList[]; newsSearches: NewsSearch[];
+}) {
   const set = (i: number, r: SmartListRule) => onChange(rules.map((x, k) => (k === i ? r : x)));
   return (
     <div className="space-y-2">
@@ -72,11 +82,13 @@ function Rules({ rules, onChange, fields, events, leadLists }: { rules: SmartLis
           <div key={i} className="flex flex-wrap items-center gap-2 rounded-md border p-2">
             <select aria-label="Test" className={field} value={t} onChange={(e) => {
               const v = e.target.value as Test;
-              set(i, v === "event" ? { event: "", op: "exists" } : v === "in_list" ? { in_list: leadLists[0]?.id ?? "", op: "exists" } : { attribute: "", op: "eq", value: "" });
+              set(i, v === "event" ? { event: "", op: "exists" } : v === "in_list" ? { in_list: leadLists[0]?.id ?? "", op: "exists" }
+                : v === "news_search" ? { news_search: newsSearches[0]?.id ?? "", op: "exists" } : { attribute: "", op: "eq", value: "" });
             }}>
               <option value="attribute">Their field</option>
               <option value="event">They did an event</option>
               {leadLists.length > 0 && <option value="in_list">They're in a lead list</option>}
+              {newsSearches.length > 0 && <option value="news_search">They wrote about a news topic</option>}
             </select>
             {t === "attribute" && (
               <>
@@ -124,6 +136,23 @@ function Rules({ rules, onChange, fields, events, leadLists }: { rules: SmartLis
                 </select>
               </>
             )}
+            {t === "news_search" && (
+              <>
+                <select aria-label="Wrote" className={field} value={r.op} onChange={(e) => set(i, { ...r, op: e.target.value as SmartListRule["op"] })}>
+                  <option value="exists">wrote about</option>
+                  <option value="not_exists">didn't write about</option>
+                </select>
+                <select aria-label="News search" className={field} value={r.news_search ?? ""} onChange={(e) => set(i, { ...r, news_search: e.target.value })}>
+                  {newsSearches.map((n) => <option key={n.id} value={n.id}>{n.name}</option>)}
+                </select>
+                <select aria-label="When" className={field} value={r.within_days ?? 0} onChange={(e) => set(i, { ...r, within_days: Number(e.target.value) || undefined })}>
+                  <option value={0}>ever</option>
+                  <option value={30}>in the last 30 days</option>
+                  <option value={90}>in the last 90 days</option>
+                  <option value={365}>in the last year</option>
+                </select>
+              </>
+            )}
             <Button type="button" variant="ghost" className="ml-auto" onClick={() => onChange(rules.filter((_, k) => k !== i))}>Remove</Button>
           </div>
         );
@@ -136,11 +165,21 @@ function Rules({ rules, onChange, fields, events, leadLists }: { rules: SmartLis
 
 // ready reports whether every rule is filled in enough to count.
 const ready = (rules: SmartListRule[]) =>
-  rules.every((r) => (testOf(r) === "event" ? !!r.event : testOf(r) === "in_list" ? !!r.in_list : !!r.attribute && (r.op === "exists" || r.op === "not_exists" || (r.value !== undefined && r.value !== ""))));
+  rules.every((r) => {
+    switch (testOf(r)) {
+      case "event":
+        return !!r.event;
+      case "in_list":
+        return !!r.in_list;
+      case "news_search":
+        return !!r.news_search;
+    }
+    return !!r.attribute && (r.op === "exists" || r.op === "not_exists" || (r.value !== undefined && r.value !== ""));
+  });
 
 export function SmartListSheet({ ws, list, onClose, onSaved }: { ws: string; list: SmartList | null; onClose: () => void; onSaved: (l: SmartList) => void }) {
   const { brand, active } = useBrand(ws);
-  const { fields, events, leadLists } = useRuleChoices(ws);
+  const { fields, events, leadLists, newsSearches } = useRuleChoices(ws);
   const [name, setName] = useState(list?.name ?? "");
   const [description, setDescription] = useState(list?.description ?? "");
   const [brandID, setBrandID] = useState<string>(list ? list.brand_id ?? "" : brand?.id ?? "");
@@ -219,7 +258,7 @@ export function SmartListSheet({ ws, list, onClose, onSaved }: { ws: string; lis
               </select>
               of these rules
             </div>
-            <Rules rules={rules} onChange={setRules} fields={fields} events={events} leadLists={leadLists} />
+            <Rules rules={rules} onChange={setRules} fields={fields} events={events} leadLists={leadLists} newsSearches={newsSearches} />
           </div>
 
           <div aria-live="polite" className="rounded-md border bg-muted/40 p-3">
@@ -249,7 +288,7 @@ export function SmartListSheet({ ws, list, onClose, onSaved }: { ws: string; lis
 }
 
 export function SmartListDetail({ ws, list: initial, canManage, onBack, onEdit, onChanged }: { ws: string; list: SmartList; canManage: boolean; onBack: () => void; onEdit: (l: SmartList) => void; onChanged: () => void }) {
-  const { fields, leadLists } = useRuleChoices(ws);
+  const { fields, leadLists, newsSearches } = useRuleChoices(ws);
   const [list, setList] = useState(initial);
   const [people, setPeople] = useState<SmartListPerson[] | null>(null);
   const [next, setNext] = useState<string | null>(null);
@@ -311,7 +350,7 @@ export function SmartListDetail({ ws, list: initial, canManage, onBack, onEdit, 
   }
 
   const fieldLabel = (k: string) => fields.find((f) => f.key === k)?.label ?? k;
-  const listName = (id: string) => leadLists.find((l) => l.id === id)?.name ?? "a lead list";
+  const listName = (id: string) => leadLists.find((l) => l.id === id)?.name ?? newsSearches.find((n) => n.id === id)?.name ?? "a list";
 
   return (
     <div className="space-y-6">

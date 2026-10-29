@@ -8995,6 +8995,291 @@ paths:
         "403": { $ref: "#/components/responses/Error" }
         "404": { $ref: "#/components/responses/Error" }
         default: { $ref: "#/components/responses/Error" }
+  /v1/workspaces/{ws}/link-prospects/{prospect}/pitches:
+    parameters:
+      - { $ref: "#/components/parameters/Workspace" }
+      - { name: prospect, in: path, required: true, schema: { type: string, format: uuid } }
+    post:
+      operationId: startLinkPitch
+      x-outflare-access: { scope: sequences.manage, brand_limited: true }
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      summary: Pitch a link prospect
+      description: |
+        Scope: sequences.manage. Starts a pitch of a prospect to pitch, to one
+        of its contacts (`record_id`, default the surest with an email
+        address), through one of Outflare's own sequences (not a sequencer's
+        campaign). The workspace's AI writes an opener for the page (tool
+        link_pitches); the sequence's step uses it as `{{custom.opener}}`.
+        The pitch then waits as a draft for a person to approve, unless the
+        sequence's pitches skip approval (PATCH .../link-building/sequences/{id}),
+        when it is enrolled once the opener is written. Without AI it waits
+        with no opener for a person to write one. The prospect may have one
+        open pitch at a time.
+      tags: [seo]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [sequence_id]
+              properties:
+                sequence_id: { type: string, format: uuid }
+                record_id: { type: string, format: uuid, description: "One of the prospect's contacts." }
+      responses:
+        "201":
+          description: The pitch, while its opener is written.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/LinkPitch" }
+        "400": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        "202": { $ref: "#/components/responses/MissionHeld" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/workspaces/{ws}/link-pitches:
+    parameters: [{ $ref: "#/components/parameters/Workspace" }]
+    get:
+      operationId: listLinkPitches
+      x-outflare-access: { scope: sequences.read, brand_limited: true }
+      summary: List link pitches
+      description: "Scope: sequences.read. Pitches of link prospects, newest first: `draft` ones wait for a person to approve them."
+      tags: [seo]
+      parameters:
+        - { $ref: "#/components/parameters/Brand" }
+        - { name: status, in: query, schema: { type: string, enum: [writing, draft, enrolled, rejected, failed] } }
+        - { name: sequence_id, in: query, schema: { type: string, format: uuid } }
+        - { name: prospect_id, in: query, schema: { type: string, format: uuid } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 500, default: 100 } }
+        - { name: offset, in: query, schema: { type: integer, minimum: 0 } }
+        - { $ref: "#/components/parameters/Fields" }
+        - { $ref: "#/components/parameters/Cursor" }
+      responses:
+        "200":
+          description: Pitches.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, next_offset, next_cursor]
+                properties:
+                  data: { type: array, items: { $ref: "#/components/schemas/LinkPitch" } }
+                  next_offset: { type: [integer, "null"] }
+                  next_cursor: { $ref: "#/components/schemas/NextCursor" }
+        "400": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/workspaces/{ws}/link-pitches/{pitch}:
+    parameters:
+      - { $ref: "#/components/parameters/Workspace" }
+      - { name: pitch, in: path, required: true, schema: { type: string, format: uuid } }
+    get:
+      operationId: getLinkPitch
+      x-outflare-access: { scope: sequences.read, brand_limited: true }
+      summary: Get a link pitch
+      description: "Scope: sequences.read."
+      tags: [seo]
+      responses:
+        "200":
+          description: The pitch.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/LinkPitch" }
+        "404": { $ref: "#/components/responses/Error" }
+        default: { $ref: "#/components/responses/Error" }
+    patch:
+      operationId: editLinkPitch
+      x-outflare-access: { scope: sequences.manage, brand_limited: true }
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      summary: Edit a draft pitch's opener
+      description: "Scope: sequences.manage. Only a draft's opener changes. Never offer payment for a link."
+      tags: [seo]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [opener]
+              properties:
+                opener: { type: string, minLength: 1, maxLength: 2000 }
+      responses:
+        "200":
+          description: The pitch.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/LinkPitch" }
+        "400": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        "202": { $ref: "#/components/responses/MissionHeld" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/workspaces/{ws}/link-pitches/{pitch}/approve:
+    parameters:
+      - { $ref: "#/components/parameters/Workspace" }
+      - { name: pitch, in: path, required: true, schema: { type: string, format: uuid } }
+    post:
+      operationId: approveLinkPitch
+      x-outflare-access: { scope: sequences.manage, brand_limited: true }
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      summary: Approve a pitch, sending it
+      description: |
+        Scope: sequences.manage. The opener (edited when `opener` is sent)
+        goes on the contact's lead as `custom.opener`, made from their person
+        record, and the lead is enrolled in the sequence, whose own checks
+        (policy, suppressions, sending windows, limits) apply to every send.
+        The prospect moves to pitched. 409 `site_in_outreach` while another
+        prospect on the website is in outreach or in its cool-down, and 409
+        `conflict` when the website or contact is suppressed or the prospect
+        isn't to pitch any more.
+      tags: [seo]
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                opener: { type: string, maxLength: 2000 }
+      responses:
+        "200":
+          description: The pitch.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/LinkPitch" }
+        "400": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        "202": { $ref: "#/components/responses/MissionHeld" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/workspaces/{ws}/link-pitches/{pitch}/reject:
+    parameters:
+      - { $ref: "#/components/parameters/Workspace" }
+      - { name: pitch, in: path, required: true, schema: { type: string, format: uuid } }
+    post:
+      operationId: rejectLinkPitch
+      x-outflare-access: { scope: sequences.manage, brand_limited: true }
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      summary: Reject a draft pitch
+      description: "Scope: sequences.manage. The prospect can then be pitched again, another way."
+      tags: [seo]
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                reason: { type: string, maxLength: 500 }
+      responses:
+        "200":
+          description: The pitch.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/LinkPitch" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        "202": { $ref: "#/components/responses/MissionHeld" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/workspaces/{ws}/link-building/sequences:
+    parameters: [{ $ref: "#/components/parameters/Workspace" }]
+    get:
+      operationId: listLinkSequences
+      x-outflare-access: { scope: sequences.read, brand_limited: true }
+      summary: List sequences for link pitches
+      description: "Scope: sequences.read. Outflare's own sequences that aren't archived, which pitches can go through, with whether their pitches wait for approval and whether a step uses `{{custom.opener}}`."
+      tags: [seo]
+      parameters:
+        - { $ref: "#/components/parameters/Brand" }
+      responses:
+        "200":
+          description: Sequences.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data:
+                    type: array
+                    items:
+                      type: object
+                      required: [sequence_id, name, status, brand_id, approve_pitches, uses_opener, pitches]
+                      properties:
+                        sequence_id: { type: string, format: uuid }
+                        name: { type: string }
+                        status: { type: string }
+                        brand_id: { type: [string, "null"] }
+                        approve_pitches: { type: boolean }
+                        uses_opener: { type: boolean }
+                        pitches: { type: integer }
+        "404": { $ref: "#/components/responses/Error" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/workspaces/{ws}/link-building/sequences/{sequence}:
+    parameters:
+      - { $ref: "#/components/parameters/Workspace" }
+      - { name: sequence, in: path, required: true, schema: { type: string, format: uuid } }
+    patch:
+      operationId: updateLinkSequence
+      x-outflare-access: { scope: sequences.manage, brand_limited: true }
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      summary: Turn approval of a sequence's link pitches on or off
+      description: "Scope: sequences.manage. On (the default), each pitch waits for a person to approve it; off, a pitch is enrolled once its opener is written."
+      tags: [seo]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [approve_pitches]
+              properties:
+                approve_pitches: { type: boolean }
+      responses:
+        "200":
+          description: The setting.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [sequence_id, approve_pitches]
+                properties:
+                  sequence_id: { type: string, format: uuid }
+                  approve_pitches: { type: boolean }
+        "400": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "202": { $ref: "#/components/responses/MissionHeld" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/workspaces/{ws}/link-prospects/results:
+    parameters: [{ $ref: "#/components/parameters/Workspace" }]
+    get:
+      operationId: getLinkResults
+      x-outflare-access: { scope: seo.read, brand_limited: true }
+      summary: Link building results by method
+      description: "Scope: seo.read. Prospects found in the last `days` (default 90, excluded ones left out), by method: how many were pitched, replied, agreed, went live, declined or had their link removed. `win_rate` is live links per pitch. Cost per live link is in the Outcomes report, by sequence."
+      tags: [seo]
+      parameters:
+        - { $ref: "#/components/parameters/Brand" }
+        - { name: site_id, in: query, schema: { type: string, format: uuid } }
+        - { name: days, in: query, schema: { type: integer, minimum: 1, maximum: 730, default: 90 } }
+      responses:
+        "200":
+          description: Results.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [days, totals, data]
+                properties:
+                  days: { type: integer }
+                  totals: { $ref: "#/components/schemas/LinkResultRow" }
+                  data: { type: array, items: { $ref: "#/components/schemas/LinkResultRow" } }
+        "400": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        default: { $ref: "#/components/responses/Error" }
   /v1/workspaces/{ws}/link-prospects/{prospect}:
     parameters:
       - { $ref: "#/components/parameters/Workspace" }
@@ -9244,6 +9529,7 @@ paths:
         - { $ref: "#/components/parameters/Brand" }
         - { name: search_id, in: query, schema: { type: string, format: uuid } }
         - { name: since, in: query, description: "Only articles first seen at or after this time.", schema: { type: string, format: date-time } }
+        - { name: journalist_id, in: query, description: "A journalist's person record: the articles they wrote.", schema: { type: string, format: uuid } }
         - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 200, default: 50 } }
         - { name: offset, in: query, schema: { type: integer, minimum: 0 } }
         - { $ref: "#/components/parameters/Fields" }
@@ -9258,6 +9544,45 @@ paths:
                 required: [data, total, next_offset, next_cursor]
                 properties:
                   data: { type: array, items: { $ref: "#/components/schemas/NewsArticle" } }
+                  total: { type: integer }
+                  next_offset: { type: [integer, "null"] }
+                  next_cursor: { $ref: "#/components/schemas/NextCursor" }
+        "400": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/workspaces/{ws}/journalists:
+    parameters: [{ $ref: "#/components/parameters/Workspace" }]
+    get:
+      operationId: listJournalists
+      x-outflare-access: { scope: seo.read, brand_limited: true }
+      summary: List journalists
+      description: |
+        Scope: seo.read. The authors of news articles the news watch read
+        whose address the free email finder found at the outlet. Each is a
+        person record on the outlet's company, listed with how many of the
+        articles in view they wrote, their latest, their outlets and the
+        searches (topics) their articles came up in; most articles first.
+        To make a media list, add their records to a list. Reads only what
+        is stored, so it costs nothing.
+      tags: [seo]
+      parameters:
+        - { $ref: "#/components/parameters/Brand" }
+        - { name: search_id, in: query, description: "Only journalists whose articles this search found.", schema: { type: string, format: uuid } }
+        - { name: since, in: query, description: "Only articles published (or first seen) at or after this time.", schema: { type: string, format: date-time } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 200, default: 50 } }
+        - { name: offset, in: query, schema: { type: integer, minimum: 0 } }
+        - { $ref: "#/components/parameters/Fields" }
+        - { $ref: "#/components/parameters/Cursor" }
+      responses:
+        "200":
+          description: Journalists.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, total, next_offset, next_cursor]
+                properties:
+                  data: { type: array, items: { $ref: "#/components/schemas/Journalist" } }
                   total: { type: integer }
                   next_offset: { type: [integer, "null"] }
                   next_cursor: { $ref: "#/components/schemas/NextCursor" }
@@ -18366,6 +18691,31 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/ABTestResults" }
         default: { $ref: "#/components/responses/Error" }
+  /v1/workspaces/{ws}/ab-tests/{test}/breakdown:
+    parameters:
+      - { $ref: "#/components/parameters/Workspace" }
+      - { name: test, in: path, required: true, schema: { type: string, format: uuid } }
+    get:
+      operationId: getABTestBreakdown
+      x-outflare-access: { scope: analytics.read }
+      summary: Break an A/B test's results down
+      description: |
+        Scope: analytics.read. The first goal's results within groups of visitors, by the visit they first saw their
+        version in: device (desktop, mobile, tablet), source (its utm_source, else the referring site, else direct),
+        country, or visitor (new or returning). Visitors whose visit isn't known, such as exposures sent by a server,
+        are "unknown". The largest 8 groups are shown, the rest added up as "other". Every comparison is corrected for
+        every version in every group, since each is another chance of a lucky difference: use it to learn where a
+        change works, not to pick a winner. Counted up to now, or to when the test ended. 409 for a draft.
+      tags: [ab-tests]
+      parameters:
+        - { name: by, in: query, required: true, schema: { type: string, enum: [device, source, country, visitor] } }
+      responses:
+        "200":
+          description: The breakdown.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ABTestBreakdown" }
+        default: { $ref: "#/components/responses/Error" }
   /v1/workspaces/{ws}/customer-events:
     parameters: [{ $ref: "#/components/parameters/Workspace" }]
     get:
@@ -22212,6 +22562,28 @@ paths:
         "404": { $ref: "#/components/responses/Error" }
         "202": { $ref: "#/components/responses/MissionHeld" }
         default: { $ref: "#/components/responses/Error" }
+  /v1/workspaces/{ws}/partners/{id}/postbacks:
+    parameters:
+      - { $ref: "#/components/parameters/Workspace" }
+      - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+    get:
+      operationId: listPartnerPostbacks
+      x-outflare-access: { scope: partners.read }
+      summary: List a partner's postbacks to their tracker
+      description: "Scope: partners.read. The last 50 calls to the partner's postback URL, newest first: queued, sent, or failed with the tracker's answer. A tracker that is down is tried 5 times; one that refuses (4xx) isn't tried again."
+      tags: [partners]
+      responses:
+        "200":
+          description: The calls.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data: { type: array, items: { $ref: "#/components/schemas/PartnerPostbackSend" } }
+        "404": { $ref: "#/components/responses/Error" }
+        default: { $ref: "#/components/responses/Error" }
   /v1/workspaces/{ws}/partners/{id}/impersonate:
     parameters:
       - { $ref: "#/components/parameters/Workspace" }
@@ -22720,6 +23092,29 @@ paths:
         "400": { $ref: "#/components/responses/Error" }
         "404": { $ref: "#/components/responses/Error" }
         "202": { $ref: "#/components/responses/MissionHeld" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/workspaces/{ws}/partner-payouts/export:
+    parameters: [{ $ref: "#/components/parameters/Workspace" }]
+    get:
+      operationId: exportPartnerPayouts
+      x-outflare-access: { scope: partners.manage }
+      summary: Download payouts as CSV, with payout details
+      description: |
+        Scope: partners.manage, because the file holds each partner's payout details. Columns: payout_id, program,
+        partner_id, partner_code, partner_name, partner_email, payout_method, amount (a decimal), currency, status, reference,
+        created_at, paid_at. Due payouts unless status says otherwise; at most 10,000 rows. Pay them from your own account or
+        upload the file to a payout tool, then mark each one paid. Recorded in the audit log (partner_payouts.exported).
+      tags: [partners]
+      parameters:
+        - { $ref: "#/components/parameters/Brand" }
+        - { name: status, in: query, schema: { type: string, enum: [due, paid, canceled, all], default: due } }
+        - { name: program, in: query, description: "A program's id or slug.", schema: { type: string } }
+      responses:
+        "200":
+          description: The file.
+          content:
+            text/csv: { schema: { type: string } }
+        "400": { $ref: "#/components/responses/Error" }
         default: { $ref: "#/components/responses/Error" }
   /v1/workspaces/{ws}/partner-payouts:
     parameters: [{ $ref: "#/components/parameters/Workspace" }]
@@ -24665,6 +25060,54 @@ webhooks:
             schema: { $ref: "#/components/schemas/WebhookEvent" }
       responses:
         "200": { description: Any 2xx answer means received; anything else is retried. }
+  link_pitch.drafted:
+    post:
+      operationId: webhook_link_pitch_drafted
+      summary: "A link pitch's opener was written (or couldn't be, data.reason) and it waits for a person to approve it. data has prospect_id, sequence_id and opener_written."
+      tags: [webhooks]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/WebhookEvent" }
+      responses:
+        "200": { description: Any 2xx answer means received; anything else is retried. }
+  link_pitch.approved:
+    post:
+      operationId: webhook_link_pitch_approved
+      summary: "A link pitch was approved (data.approved, or sent on its own when its sequence skips approval) and its contact enrolled. data has prospect_id, sequence_id, lead_id, record_id and edited."
+      tags: [webhooks]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/WebhookEvent" }
+      responses:
+        "200": { description: Any 2xx answer means received; anything else is retried. }
+  link_pitch.rejected:
+    post:
+      operationId: webhook_link_pitch_rejected
+      summary: "A draft link pitch was rejected. data.prospect_id."
+      tags: [webhooks]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/WebhookEvent" }
+      responses:
+        "200": { description: Any 2xx answer means received; anything else is retried. }
+  link_prospect.overdue:
+    post:
+      operationId: webhook_link_prospect_overdue
+      summary: "An agreed link isn't on the page 14 days after the site agreed; time to nudge them. data has site_id, record_id, method and days_since_agreed."
+      tags: [webhooks]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/WebhookEvent" }
+      responses:
+        "200": { description: Any 2xx answer means received; anything else is retried. }
   link_prospect.found:
     post:
       operationId: webhook_link_prospect_found
@@ -25528,7 +25971,7 @@ components:
       required: [id, type, created_at, workspace_id, actor, target, request_id, data]
       properties:
         id: { type: string, description: "Unique per event, and the webhook-id header. Use it to ignore repeats.", example: evt_48213 }
-        type: { type: string, enum: [lead.replied, lead.unsubscribed, inbox.replied, inbox.updated, inbox.classified, lead.bounced, mailbox.auto_paused, lead.created, lead.updated, lead.deleted, leads.imported, suppressions.added, suppression.removed, lead_list.created, lead_list.leads_added, lead_list.run_started, lead_list.build_done, lead_list.build_failed, lead_list.refresh_done, lead_list.refresh_failed, lead_list.enrich_done, lead_list.enrich_failed, import.done, import.failed, sequence.created, sequence.updated, sequence.activated, sequence.paused, sequence.archived, sequence.deleted, sequence.steps_updated, sequence.leads_enrolled, enrollment.stopped, mailbox.imported, mailbox.updated, mailbox.paused, mailbox.resumed, mailbox.stage_changed, mailbox.deleted, domain.added, domain.paused, domain.resumed, domain.removed, email.queued, email.sent, email.delivered, email.bounced, email.complained, email.failed, email.suppressed, email.cancelled, email.unsubscribed, email.opened, email.clicked, email.preferences_changed, email_domain.verified, email_domain.verification_failed, email_provider.events_failed, email_template.published, meeting.created, meeting.updated, meeting.deleted, deal.created, deal.updated, deal.deleted, spend.recorded, integration.connected, integration.updated, integration.disconnected, connect_request.created, deploy.detected, deploy.failed, digest.ready, ai_budget.warned, ai_budget.reached, connection_limit.warned, connection_limit.reached, experiment.started, experiment.concluded, project.created, project.updated, project.deleted, mission.created, mission.updated, mission.submitted, mission.approved, mission.paused, mission.resumed, mission.stopped, mission.completed, mission.action_held, mission.action_approved, mission.action_rejected, infra.plan_created, infra.plan_approved, infra.ordered, infra.order_failed, infra.domains_bought, infra.mailbox_joined, infra.plan_warming, infra.plan_ready, infra.plan_cancelled, fix.found, fix.updated, fix.started, fix.verify_requested, fix.confirmed, fix.reopened, record.created, record.bulk_created, record.bulk_updated, record.updated, record.merged, identity.verified, identity.closed, relationship.added, relationship.ended, consent.granted, consent.withdrawn, consent.bulk_withdrawn, brand.created, brand.updated, email_broadcast.created, email_broadcast.started, email_broadcast.sent, email_broadcast.failed, email_broadcast.cancelled, journey.created, journey.updated, journey_run.entered, journey_run.exited, rule.created, rule.updated, rule.activated, rule.paused, rule.archived, rule.fired, brand_setup.installed, brand_setup.install_failed, install.issue_opened, install.issue_resolved, seo_site.created, seo_site.verified, seo_site.unverified, seo_site.deleted, crawl.started, crawl.stopped, crawl.done, backlink.new, backlink.lost, backlink.regained, competitor.page_removed, link_prospect.found, link_prospect.checked, link_prospect.excluded, link_prospect.pitched, link_prospect.replied, link_prospect.agreed, link_prospect.live, link_prospect.declined, link_prospect.removed, link_prospect.reopened, link_prospect.updated, link_prospect.deleted, social_action.drafted, social_action.approved, social_action.rejected, social_action.done, social_action.failed, review.posted, review.replied, review.reply_drafted, review_momentum.changed, alert.raised, visitor.became_hot, partner_program.created, partner_program.updated, partner_program.rules_updated, partner.created, partner.updated, partner_referral.created, partner_conversion.created, partner_reward.created, partner_reward.approved, partner_reward.rejected, partner_reward.reversed, partner_reward.fulfilled, partner_payout.created, partner_payout.paid, partner_payout.canceled, workspace.updated, webhook.test] }
+        type: { type: string, enum: [lead.replied, lead.unsubscribed, inbox.replied, inbox.updated, inbox.classified, lead.bounced, mailbox.auto_paused, lead.created, lead.updated, lead.deleted, leads.imported, suppressions.added, suppression.removed, lead_list.created, lead_list.leads_added, lead_list.run_started, lead_list.build_done, lead_list.build_failed, lead_list.refresh_done, lead_list.refresh_failed, lead_list.enrich_done, lead_list.enrich_failed, import.done, import.failed, sequence.created, sequence.updated, sequence.activated, sequence.paused, sequence.archived, sequence.deleted, sequence.steps_updated, sequence.leads_enrolled, enrollment.stopped, mailbox.imported, mailbox.updated, mailbox.paused, mailbox.resumed, mailbox.stage_changed, mailbox.deleted, domain.added, domain.paused, domain.resumed, domain.removed, email.queued, email.sent, email.delivered, email.bounced, email.complained, email.failed, email.suppressed, email.cancelled, email.unsubscribed, email.opened, email.clicked, email.preferences_changed, email_domain.verified, email_domain.verification_failed, email_provider.events_failed, email_template.published, meeting.created, meeting.updated, meeting.deleted, deal.created, deal.updated, deal.deleted, spend.recorded, integration.connected, integration.updated, integration.disconnected, connect_request.created, deploy.detected, deploy.failed, digest.ready, ai_budget.warned, ai_budget.reached, connection_limit.warned, connection_limit.reached, experiment.started, experiment.concluded, project.created, project.updated, project.deleted, mission.created, mission.updated, mission.submitted, mission.approved, mission.paused, mission.resumed, mission.stopped, mission.completed, mission.action_held, mission.action_approved, mission.action_rejected, infra.plan_created, infra.plan_approved, infra.ordered, infra.order_failed, infra.domains_bought, infra.mailbox_joined, infra.plan_warming, infra.plan_ready, infra.plan_cancelled, fix.found, fix.updated, fix.started, fix.verify_requested, fix.confirmed, fix.reopened, record.created, record.bulk_created, record.bulk_updated, record.updated, record.merged, identity.verified, identity.closed, relationship.added, relationship.ended, consent.granted, consent.withdrawn, consent.bulk_withdrawn, brand.created, brand.updated, email_broadcast.created, email_broadcast.started, email_broadcast.sent, email_broadcast.failed, email_broadcast.cancelled, journey.created, journey.updated, journey_run.entered, journey_run.exited, rule.created, rule.updated, rule.activated, rule.paused, rule.archived, rule.fired, brand_setup.installed, brand_setup.install_failed, install.issue_opened, install.issue_resolved, seo_site.created, seo_site.verified, seo_site.unverified, seo_site.deleted, crawl.started, crawl.stopped, crawl.done, link_pitch.drafted, link_pitch.approved, link_pitch.rejected, link_prospect.overdue, backlink.new, backlink.lost, backlink.regained, competitor.page_removed, link_prospect.found, link_prospect.checked, link_prospect.excluded, link_prospect.pitched, link_prospect.replied, link_prospect.agreed, link_prospect.live, link_prospect.declined, link_prospect.removed, link_prospect.reopened, link_prospect.updated, link_prospect.deleted, social_action.drafted, social_action.approved, social_action.rejected, social_action.done, social_action.failed, review.posted, review.replied, review.reply_drafted, review_momentum.changed, alert.raised, visitor.became_hot, partner_program.created, partner_program.updated, partner_program.rules_updated, partner.created, partner.updated, partner_referral.created, partner_conversion.created, partner_reward.created, partner_reward.approved, partner_reward.rejected, partner_reward.reversed, partner_reward.fulfilled, partner_payout.created, partner_payout.paid, partner_payout.canceled, workspace.updated, webhook.test] }
         created_at: { type: string, format: date-time }
         workspace_id: { type: string, format: uuid }
         actor: { $ref: "#/components/schemas/WebhookRef" }
@@ -26458,10 +26901,22 @@ components:
         paid_cents: { type: integer, format: int64 }
         balance_cents: { type: integer, format: int64, description: "Approved, not yet in a payout: what the next payout gathers." }
         pending_actions: { type: integer, description: Approved action rewards your system hasn't fulfilled. }
+    PartnerPostbackSend:
+      type: object
+      required: [id, conversion_id, status, http_status, error, attempts, sent_at, created_at]
+      properties:
+        id: { type: string, format: uuid }
+        conversion_id: { type: string, format: uuid }
+        status: { type: string, enum: [queued, sent, failed] }
+        http_status: { type: [integer, "null"], description: "The tracker's answer to the last try." }
+        error: { type: string }
+        attempts: { type: integer }
+        sent_at: { type: [string, "null"], format: date-time }
+        created_at: { type: string, format: date-time }
     Partner:
       type: object
       required: [id, program_id, program, record_id, name, email, code, status, group_id, campaign_id, link, campaign_link, promo_codes,
-        payout_method, note, source, currency, stats, created_at, updated_at]
+        payout_method, postback_url, note, source, currency, stats, created_at, updated_at]
       properties:
         id: { type: string, format: uuid, description: The membership's id. }
         program_id: { type: string, format: uuid }
@@ -26477,6 +26932,7 @@ components:
         campaign_link: { type: string, description: "The landing page tagged with their campaign and ref, with no redirect; '' without a landing page." }
         promo_codes: { type: array, items: { $ref: "#/components/schemas/PartnerPromoCode" } }
         payout_method: { type: string, description: "Free text, such as \"PayPal: ana@example.com\", stored sealed. Never bank details." }
+        postback_url: { type: string, description: "The partner's own tracker, called (GET) once for each conversion credited to them and each refund of one, with placeholders filled in: {sub_id}, {click_id}, {conversion_id}, {type}, {event_name}, {amount}, {amount_cents}, {currency}, {commission}, {commission_cents}, {status}, {code} and {program} (pending, approved or reversed). Empty for none." }
         note: { type: string }
         source: { type: string, enum: [manual, api, signup, import] }
         currency: { type: string }
@@ -26502,6 +26958,7 @@ components:
         status: { type: string, enum: [pending, active, suspended, rejected], description: "active when left out." }
         group_id: { type: [string, "null"], description: "A group of the program; \"\" for none." }
         payout_method: { type: string, maxLength: 500 }
+        postback_url: { type: string, maxLength: 2000, description: "An https address with placeholders (see Partner.postback_url); \"\" removes it." }
         note: { type: string, maxLength: 2000 }
     PartnerLedgerInput:
       type: object
@@ -27864,6 +28321,32 @@ components:
             min_effect: { type: number, description: The smallest change the p-values were tuned to detect. }
             corrected_for: { type: integer, description: "Versions compared with the control. Past one, every p_value and range is corrected for that many chances of a false winner." }
             computed_at: { type: string, format: date-time }
+    ABTestBreakdown:
+      type: object
+      required: [test_id, status, control, breakdown, computed_at]
+      properties:
+        test_id: { type: string, format: uuid }
+        status: { type: string, enum: [running, done] }
+        control: { type: string }
+        computed_at: { type: string, format: date-time }
+        breakdown:
+          type: object
+          required: [dimension, goal, metric, segments, corrected_for]
+          properties:
+            dimension: { type: string, enum: [device, source, country, visitor] }
+            goal: { $ref: "#/components/schemas/ABTestGoal" }
+            metric: { type: string, enum: [conversion, count, value] }
+            corrected_for: { type: integer, description: "Comparisons the p-values and ranges are corrected for: every version in every group." }
+            segments:
+              type: array
+              description: Largest first; "other" adds up the rest.
+              items:
+                type: object
+                required: [key, arms, comparisons]
+                properties:
+                  key: { type: string, description: 'The group, such as mobile, direct, DE, new; "unknown" or "other".' }
+                  arms: { type: array, items: { $ref: "#/components/schemas/ABTestArm" }, description: Control first. }
+                  comparisons: { type: [array, "null"], items: { $ref: "#/components/schemas/ABTestComparison" } }
     SiteKeyInput:
       type: object
       additionalProperties: false
@@ -30559,6 +31042,44 @@ components:
         suggested_reason: { type: string }
         error_code: { type: [string, "null"], description: "crawl_opted_out, robots_disallowed, site_unreachable or internal." }
         checked_at: { type: string, format: date-time }
+    LinkPitch:
+      type: object
+      required: [id, prospect_id, sequence_id, sequence_name, brand_id, record_id, contact_name, contact_email, lead_id, page_url, domain, target_url, stage, status, opener, reason, reply_kind, replied_at, approved_at, created_at, updated_at]
+      properties:
+        id: { type: string, format: uuid }
+        prospect_id: { type: string, format: uuid }
+        sequence_id: { type: string, format: uuid }
+        sequence_name: { type: string }
+        brand_id: { type: [string, "null"] }
+        record_id: { type: string, format: uuid, description: "The contact's person record." }
+        contact_name: { type: string }
+        contact_email: { type: [string, "null"] }
+        lead_id: { type: [string, "null"], format: uuid, description: "The contact's lead, once enrolled." }
+        page_url: { type: string }
+        domain: { type: string }
+        target_url: { type: string, description: "Our page to offer." }
+        stage: { $ref: "#/components/schemas/LinkProspectStage" }
+        status: { type: string, enum: [writing, draft, enrolled, rejected, failed] }
+        opener: { type: string, description: "The step's {{custom.opener}}." }
+        reason: { type: string, description: "Why a draft has no opener (no_ai, ai_unavailable, ai_failed), why it couldn't go out on its own (site_in_outreach, opted_out), or why it was rejected." }
+        reply_kind: { type: [string, "null"], enum: [agreed, declined, wants_payment, wants_content, other, null], description: "What the AI read the latest reply as." }
+        replied_at: { type: [string, "null"], format: date-time }
+        approved_at: { type: [string, "null"], format: date-time }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    LinkResultRow:
+      type: object
+      required: [method, found, pitched, replied, agreed, live, declined, removed, win_rate]
+      properties:
+        method: { type: string, description: "A method, or all for the totals." }
+        found: { type: integer }
+        pitched: { type: integer }
+        replied: { type: integer }
+        agreed: { type: integer }
+        live: { type: integer }
+        declined: { type: integer }
+        removed: { type: integer }
+        win_rate: { type: [number, "null"] }
     LinkProspectMethod:
       type: string
       enum: [competitor_gap, broken_link, reclaim, competitor_dead_page, resource_page, asset, unlinked_mention, partner, manual]
@@ -30571,7 +31092,7 @@ components:
       enum: [links_to_us, competitor, customer, partner, opted_out, spam, page_gone]
     LinkProspect:
       type: object
-      required: [id, site_id, brand_id, record_id, page_url, domain, method, target_url, evidence, domain_rating, traffic, spam_score, score, score_factors, stage, excluded_reason, stage_changed_at, pitched_at, agreed_at, live_at, ended_at, source, note, created_at, updated_at, check, contacts]
+      required: [id, site_id, brand_id, record_id, page_url, domain, method, target_url, evidence, domain_rating, traffic, spam_score, score, score_factors, stage, excluded_reason, stage_changed_at, pitched_at, agreed_at, live_at, overdue_at, ended_at, source, note, created_at, updated_at, check, contacts]
       properties:
         id: { type: string, format: uuid }
         site_id: { type: string, format: uuid, description: "The SEO site that would get the link." }
@@ -30601,6 +31122,7 @@ components:
         pitched_at: { type: [string, "null"], format: date-time }
         agreed_at: { type: [string, "null"], format: date-time }
         live_at: { type: [string, "null"], format: date-time }
+        overdue_at: { type: [string, "null"], format: date-time, description: "When an agreed link was still not on the page 14 days after the site agreed (link_prospect.overdue)." }
         ended_at: { type: [string, "null"], format: date-time, description: "When it was declined." }
         source: { type: string, description: "Who found it: manual, api, or a playbook or feature." }
         note: { type: string }
@@ -30658,7 +31180,7 @@ components:
         updated_at: { type: string, format: date-time }
     NewsArticle:
       type: object
-      required: [id, url, domain, title, snippet, search_ids, first_seen_at, last_seen_at]
+      required: [id, url, domain, title, snippet, search_ids, first_seen_at, last_seen_at, author, published_at, read_status, journalist_ids]
       properties:
         id: { type: string, format: uuid }
         url: { type: string }
@@ -30668,6 +31190,37 @@ components:
         search_ids: { type: array, items: { type: string, format: uuid }, description: "The searches that found it, first first." }
         first_seen_at: { type: string, format: date-time }
         last_seen_at: { type: string, format: date-time }
+        author: { type: string, description: "The byline as the page gives it; empty when it names none or hasn't been read." }
+        published_at: { type: [string, "null"], format: date-time, description: "When the page says it was published." }
+        read_status: { type: [string, "null"], enum: [up, gone, blocked, opted_out, unreachable, failed, null], description: "How OutflareBot's read of the page went; null until read." }
+        journalist_ids: { type: array, items: { type: string, format: uuid }, description: "The person records of its authors, when their address was found." }
+    Journalist:
+      type: object
+      required: [record_id, name, email, confidence, outlets, articles, latest_article, topics]
+      properties:
+        record_id: { type: string, format: uuid, description: "Their person record." }
+        name: { type: string }
+        email: { type: [string, "null"], description: "Their address on the record." }
+        confidence: { type: integer, minimum: 0, maximum: 100, description: "How sure the email finder was that the address reaches them." }
+        outlets: { type: array, items: { type: string }, description: "The websites of the articles they wrote, without www." }
+        articles: { type: integer, description: "Articles in view they wrote." }
+        latest_article:
+          type: object
+          required: [id, url, title, published_at]
+          properties:
+            id: { type: string, format: uuid }
+            url: { type: string }
+            title: { type: string }
+            published_at: { type: [string, "null"], format: date-time }
+        topics:
+          type: array
+          description: The news searches their articles came up in.
+          items:
+            type: object
+            required: [search_id, name]
+            properties:
+              search_id: { type: string, format: uuid }
+              name: { type: string }
     Coverage:
       type: object
       required: [id, brand_id, article_id, url, domain, title, snippet, record_id, search_id, status, linked, source, found_at, status_changed_at, updated_at]
@@ -30985,7 +31538,7 @@ components:
             type: object
             required: [task, name, description, model, price, price_source, custom]
             properties:
-              task: { type: string, enum: [plan, turn, check_in, reply_labelling, classify_domain, ai_visibility, social_replies, social_posts, email_verification, fix_tickets, review_replies, link_page_reading, ab_tests] }
+              task: { type: string, enum: [plan, turn, check_in, reply_labelling, classify_domain, ai_visibility, social_replies, social_posts, email_verification, fix_tickets, review_replies, link_page_reading, ab_tests, link_pitches] }
               name: { type: string }
               description: { type: string }
               model: { type: [string, "null"], description: Null when no model can run yet. }
@@ -31633,7 +32186,7 @@ components:
         by_category: { type: object, additionalProperties: { type: integer } }
     OutcomeRow:
       type: object
-      required: [key, name, sent, replies, reply_rate, meetings, held, no_shows, qualified, deals, won, pipeline_cents, won_cents, spend, cost_per_reply_cents, cost_per_meeting_cents, cost_per_held_meeting_cents, cost_per_deal_cents, cost_per_won_deal_cents, roi]
+      required: [key, name, sent, replies, reply_rate, meetings, held, no_shows, qualified, deals, won, pipeline_cents, won_cents, spend, cost_per_reply_cents, cost_per_meeting_cents, cost_per_held_meeting_cents, cost_per_deal_cents, cost_per_won_deal_cents, live_links, cost_per_live_link_cents, roi]
       properties:
         key: { type: string, description: "The project or sequence id; empty for outcomes in no group; all for the workspace." }
         name: { type: string }
@@ -31654,6 +32207,8 @@ components:
         cost_per_held_meeting_cents: { type: [integer, "null"] }
         cost_per_deal_cents: { type: [integer, "null"] }
         cost_per_won_deal_cents: { type: [integer, "null"] }
+        live_links: { type: integer, description: "Links pitched through the row's sequences (link building) that went live in the period." }
+        cost_per_live_link_cents: { type: [integer, "null"] }
         roi: { type: [number, "null"], description: Won revenue per unit of spend. }
     OutcomesReport:
       type: object
@@ -32355,13 +32910,16 @@ components:
       description: |
         One test a person must pass. Set one of attribute (a field on their customer record, such as plan or
         address.country), event (whether they did this customer event: exists, or not_exists; within_days limits it
-        to the last that many days) or in_list (whether they are a lead in this lead list: exists, or not_exists).
+        to the last that many days), in_list (whether they are a lead in this lead list: exists, or not_exists) or
+        news_search (whether they wrote an article this news search found: exists, or not_exists; within_days limits it
+        to articles from the last that many days), which makes a media list of the journalists covering a topic.
         Attributes compare as journeys compare them: numbers as numbers, text ignoring case, dates as text.
       properties:
         attribute: { type: string, maxLength: 200 }
         event: { type: string, maxLength: 100 }
-        within_days: { type: integer, minimum: 0, maximum: 3650, description: "event: only the last this many days; 0 or left out is ever." }
+        within_days: { type: integer, minimum: 0, maximum: 3650, description: "event and news_search: only the last this many days; 0 or left out is ever." }
         in_list: { type: string, format: uuid, description: A lead list's id. }
+        news_search: { type: string, format: uuid, description: A news search's id. }
         op: { type: string, enum: [eq, neq, gt, lt, contains, exists, not_exists] }
         value: { description: "What eq, neq, gt, lt and contains compare with: text, a number or true or false." }
     SmartListInput:

@@ -26,6 +26,8 @@ import (
 
 	"github.com/outflareai/outflare/engine/internal/connectors"
 	"github.com/outflareai/outflare/engine/internal/jobs"
+	"github.com/outflareai/outflare/engine/internal/metrics"
+	"github.com/outflareai/outflare/engine/internal/retry"
 )
 
 const (
@@ -71,7 +73,7 @@ func (s *Syncer) Run(ctx context.Context) {
 	t := time.NewTicker(5 * time.Minute)
 	defer t.Stop()
 	for {
-		if err := s.tick(ctx); err != nil && ctx.Err() == nil {
+		if err := s.QueueDue(ctx); err != nil && ctx.Err() == nil {
 			s.Log.Error("analytics: schedule syncs", "err", err)
 		}
 		select {
@@ -101,7 +103,9 @@ func (s *Syncer) readers() (fast, slow []string) {
 	return fast, slow
 }
 
-func (s *Syncer) tick(ctx context.Context) error {
+// QueueDue queues a sync of each connection that is due, or whose last
+// run failed and is due a retry (retry.After).
+func (s *Syncer) QueueDue(ctx context.Context) error {
 	fast, slow := s.readers()
 	for _, group := range []struct {
 		ids   []string
@@ -110,22 +114,40 @@ func (s *Syncer) tick(ctx context.Context) error {
 		if len(group.ids) == 0 {
 			continue
 		}
+		// A connection is due after its interval, or sooner while its last
+		// runs failed (retry.After), so a failed sync is tried again the
+		// same day. failures is the most runs in a row that failed of its
+		// analytics, Search Console and conversions syncs.
 		rows, err := s.Pool.Query(ctx, `
-			SELECT i.id, i.workspace_id FROM integrations i
-			WHERE i.connector = ANY($1) AND i.status = 'connected'
-			  AND NOT COALESCE((i.config->>'sync_paused')::boolean, false)
-			  AND COALESCE((SELECT max(a.last_run_at) FROM analytics_syncs a WHERE a.integration_id = i.id), '-infinity') < now() - $2::interval`,
+			SELECT d.id, d.workspace_id, d.failures, extract(epoch FROM d.last_run)::bigint FROM (
+				SELECT i.id, i.workspace_id,
+					COALESCE((SELECT max(a.last_run_at) FROM analytics_syncs a WHERE a.integration_id = i.id), '-infinity') AS last_run,
+					GREATEST((SELECT max(a.failures) FROM analytics_syncs a WHERE a.integration_id = i.id),
+						(SELECT max(y.failures) FROM search_syncs y WHERE y.integration_id = i.id),
+						(SELECT max(c.failures) FROM page_conversion_syncs c WHERE c.integration_id = i.id), 0) AS failures
+				FROM integrations i
+				WHERE i.connector = ANY($1) AND i.status = 'connected'
+				  AND NOT COALESCE((i.config->>'sync_paused')::boolean, false)) d
+			WHERE d.last_run < now() - $2::interval OR (d.failures > 0 AND d.last_run < now() - `+retry.SQL("d.failures")+`)`,
 			group.ids, fmt.Sprintf("%d seconds", int(group.every.Seconds())))
 		if err != nil {
 			return err
 		}
-		type due struct{ id, ws string }
+		type due struct {
+			id, ws   string
+			failures int
+			lastRun  int64
+		}
 		var list []due
 		for rows.Next() {
 			var d due
-			if err := rows.Scan(&d.id, &d.ws); err != nil {
+			var last *int64
+			if err := rows.Scan(&d.id, &d.ws, &d.failures, &last); err != nil {
 				rows.Close()
 				return err
+			}
+			if last != nil {
+				d.lastRun = *last
 			}
 			list = append(list, d)
 		}
@@ -135,7 +157,12 @@ func (s *Syncer) tick(ctx context.Context) error {
 		}
 		slot := s.now().Truncate(group.every).Unix()
 		for _, d := range list {
-			if _, err := Enqueue(ctx, s.Pool, d.ws, d.id, fmt.Sprintf("%s:%d", d.id, slot)); err != nil {
+			key := fmt.Sprintf("%s:%d", d.id, slot)
+			if d.failures > 0 {
+				// Each retry after a failed run is a job of its own.
+				key = fmt.Sprintf("%s:retry:%d", d.id, d.lastRun)
+			}
+			if _, err := Enqueue(ctx, s.Pool, d.ws, d.id, key); err != nil {
 				return err
 			}
 		}
@@ -341,6 +368,29 @@ func (s *Syncer) SyncOnce(ctx context.Context, ws, integrationID string) (Result
 // dbError is Outflare's own database failing, which stops the run.
 type dbError struct{ error }
 
+// failed is a run's error message and code, nil when it worked: internal
+// for Outflare's own database, else the connector's kind.
+func failed(err error) (msg, code *string) {
+	if err == nil {
+		return nil, nil
+	}
+	m, c := err.Error(), "connector_"+connectors.KindOf(err)
+	var db dbError
+	if errors.As(err, &db) {
+		c = "internal"
+	}
+	return &m, &c
+}
+
+// syncRun counts one run of a sync for its metrics.
+func syncRun(module string, code *string) {
+	if code == nil {
+		metrics.SyncRun(module, "success")
+		return
+	}
+	metrics.SyncRun(module, *code)
+}
+
 // syncSite stores one site's numbers.
 func (s *Syncer) syncSite(ctx context.Context, o *connectors.Opened, reader connectors.AnalyticsReader, p SitePlan, res *Result) error {
 	ws, integrationID := o.WorkspaceID, o.ID
@@ -444,14 +494,12 @@ func (s *Syncer) report(ctx context.Context, o *connectors.Opened, reader connec
 }
 
 func (s *Syncer) finish(ctx context.Context, ws, id, site, host, name string, res Result, runErr error) {
-	var msg *string
-	if runErr != nil {
-		m := runErr.Error()
-		msg = &m
-	}
+	msg, code := failed(runErr)
 	_, err := s.Pool.Exec(ctx, `
-		INSERT INTO analytics_syncs (integration_id, workspace_id, site, host, site_name, first_day, last_day, backfilled, last_run_at, last_ok_at, last_error, last_calls)
-		SELECT $1, $2, $3, $4, $7, d.first, d.last, $5::text IS NULL AND $3 <> '', now(), CASE WHEN $5::text IS NULL THEN now() END, $5, $6
+		INSERT INTO analytics_syncs (integration_id, workspace_id, site, host, site_name, first_day, last_day, backfilled, last_run_at, last_ok_at, last_error, last_calls,
+			failures, last_error_code)
+		SELECT $1, $2, $3, $4, $7, d.first, d.last, $5::text IS NULL AND $3 <> '', now(), CASE WHEN $5::text IS NULL THEN now() END, $5, $6,
+			CASE WHEN $5::text IS NULL THEN 0 ELSE 1 END, $8
 		FROM (SELECT min(day) AS first, max(day) AS last FROM analytics_daily WHERE integration_id = $1 AND site = $3) d
 		ON CONFLICT (integration_id, site) DO UPDATE SET
 			host = $4, site_name = $7,
@@ -460,8 +508,10 @@ func (s *Syncer) finish(ctx context.Context, ws, id, site, host, name string, re
 			backfilled = analytics_syncs.backfilled OR EXCLUDED.backfilled,
 			last_run_at = now(),
 			last_ok_at = COALESCE(EXCLUDED.last_ok_at, analytics_syncs.last_ok_at),
-			last_error = $5, last_calls = $6`,
-		id, ws, site, host, msg, res.Calls, name)
+			last_error = $5, last_calls = $6, last_error_code = $8,
+			failures = CASE WHEN $5::text IS NULL THEN 0 ELSE analytics_syncs.failures + 1 END`,
+		id, ws, site, host, msg, res.Calls, name, code)
+	syncRun("analytics", code)
 	if err == nil && site != "" && runErr == nil {
 		// A site read fine, so an earlier failure to list sites is over.
 		_, err = s.Pool.Exec(ctx, `DELETE FROM analytics_syncs WHERE integration_id = $1 AND site = ''`, id)

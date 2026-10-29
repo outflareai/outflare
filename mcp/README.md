@@ -141,7 +141,7 @@ Read (always available):
 | `list_lead_list_members` | A list's leads with their ICP fit score and reasons, best first |
 | `list_smart_lists`, `get_smart_list`, `list_smart_list_members`, `preview_smart_list` | Smart lists: people on customer records who match rules now (a field, an event in the last N days, being in a lead list), who is in each, and how many a set of rules would pick |
 | `list_flags`, `get_flag`, `evaluate_flags` | Feature flags: switches and splits (A/B tests) the website script and servers read, and which version a given visitor gets and why |
-| `list_ab_tests`, `get_ab_test`, `get_ab_test_results` | A/B tests of feature flags, and how each version is doing on conversion, count or revenue per visitor: chance to beat the control, lift with its range, whether it is safe to stop, and the winner |
+| `list_ab_tests`, `get_ab_test`, `get_ab_test_results`, `get_ab_test_breakdown` | A/B tests of feature flags, and how each version is doing on conversion, count or revenue per visitor: chance to beat the control, lift with its range, whether it is safe to stop, the winner, and the results by device, source, country or new and returning visitors |
 | `plan_ab_test`, `get_ab_test_ai_run` | How long a test would take from the site's real traffic, and the answer of an AI run |
 | `list_data_providers` | Connected data providers that search, find emails or enrich, and the filters each understands |
 | `list_list_runs`, `get_list_run` | Builds, refreshes and enrichments: found, added, skipped by reason, credits spent |
@@ -216,6 +216,7 @@ Read (always available):
 | `list_partner_conversions`, `list_partner_referrals` | Leads, sales and refunds credited to partners, and each referred customer with how they were credited |
 | `list_partner_rewards`, `list_partner_payouts` | The reward ledger (cash, fees, actions, adjustments) and payouts |
 | `list_partner_assets` | Banners, copy and links a program shows partners on its portal |
+| `list_partner_postbacks`, `export_partner_payouts` | A partner's postbacks to their own tracker, and payouts as CSV with payout details for paying them |
 | `list_partner_imports`, `get_partner_import` | A program's imports from Tolt: status, counts per kind and issues |
 
 Write (left out when `OUTFLARE_MCP_READ_ONLY=1`):
@@ -342,7 +343,7 @@ Write (left out when `OUTFLARE_MCP_READ_ONLY=1`):
 | `update_supplier_sync` | Auto-import new mailboxes, Google app passwords on or off, daily cap for imported mailboxes, push on or off |
 | `create_partner_program`, `update_partner_program` | Start a referral, affiliate or influencer program from its preset, or change, pause or archive one |
 | `set_partner_rules`, `create_partner_group` | Replace a program's stackable reward rules (cash, fixed, action, two-sided, tiers), or add a group with its own rates |
-| `add_partner`, `update_partner`, `add_partner_promo_code` | Add a customer record as a partner, approve, suspend or move them, and tie promo codes to them |
+| `add_partner`, `update_partner`, `add_partner_promo_code` | Add a customer record as a partner, approve, suspend or move them, set their postback URL, and tie promo codes to them |
 | `log_partner_fee`, `adjust_partner_balance` | Log a fixed fee (an influencer's post) or correct what a partner is owed |
 | `report_partner_conversion` | Report a lead, sale or refund the way the workspace's backend does |
 | `approve_partner_reward`, `reject_partner_reward`, `fulfil_partner_reward` | Approve or reject a held reward, or mark an action reward done |
@@ -386,8 +387,10 @@ Write (left out when `OUTFLARE_MCP_READ_ONLY=1`):
 | `get_seo_competitor_gaps` | Keywords tracked competitors rank for that the site doesn't (or ranks well below), and domains that link to them but not to the site, from stored snapshots |
 | `list_link_prospects`, `add_link_prospects`, `update_link_prospect`, `delete_link_prospect` | One list of pages that could link to an SEO site, from every way of earning links: scored, kept out when the website already links or opted out, and followed from pitched to live, one pitch per website at a time |
 | `list_news_searches`, `create_news_search`, `update_news_search`, `delete_news_search`, `run_news_search` | The news watch: saved searches that run on a schedule through the workspace's own web search connection, following a topic or looking for a brand |
+| `list_journalists` | Journalists: authors of the news watch's articles whose address was found, as person records on their outlet, with what they wrote and the topics they cover |
 | `list_news_articles`, `list_coverage`, `add_coverage`, `update_coverage` | What the news watch found, and coverage: articles about a brand on the outlet's company record, to confirm or dismiss |
 | `reclaim_link_prospects`, `check_link_prospects`, `check_link_prospect` | Lost links as prospects to win back, and OutflareBot's check of prospects' pages: up or gone, already linking, broken outbound links with archive snapshots, the AI's read (with the workspace's own key) and who to contact |
+| `list_link_sequences`, `update_link_sequence`, `start_link_pitch`, `list_link_pitches`, `edit_link_pitch`, `approve_link_pitch`, `reject_link_pitch`, `get_link_results` | Pitch a prospect through an Outflare sequence with an opener the workspace's AI wrote for the page, approve or edit it (approval is on by default, per sequence), and see results by method: replies read as agreed, declined or asking for payment, links checked until live |
 | `read_links`, `list_link_reads`, `get_link_read`, `list_dead_pages`, `list_top_linked_pages` | Who links to any page or domain, from the workspace's own Ahrefs or DataForSEO (paid; estimate first), and free reports over earlier reads: competitors' dead pages with links, a domain's most linked pages |
 | `get_link_building_settings`, `update_link_building_settings` | The pitch cool-down and the weekly read of competitors' dead pages, with its share of the budget |
 | `get_site_search`, `get_site_search_history`, `get_site_indexing`, `get_site_sitemaps` | A site's Google Search Console data stored by Outflare: clicks, impressions, CTR and position by page and query for 16 months, day by day history, how Google indexed each page (URL Inspection) and the sitemaps it read |

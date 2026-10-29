@@ -82,6 +82,18 @@ export function registerABTestTools(
   );
 
   server.registerTool(
+    "get_ab_test_breakdown",
+    {
+      title: "Break an A/B test's results down",
+      description:
+        "The first goal's results within groups of visitors, by the visit they first saw their version in: device, source (utm_source, else the referring site, else direct), country, or visitor (new or returning). The largest 8 groups, the rest as other; every comparison is corrected for every version in every group. For learning where a change works, not for picking a winner.",
+      inputSchema: { test: testRef, by: z.enum(["device", "source", "country", "visitor"]).describe("What to group visitors by.") },
+      annotations: read,
+    },
+    ({ test, by }) => call(() => gtm.GET("/v1/workspaces/{ws}/ab-tests/{test}/breakdown", { params: { path: { ...path(), test }, query: { by } } })),
+  );
+
+  server.registerTool(
     "plan_ab_test",
     {
       title: "Plan an A/B test",

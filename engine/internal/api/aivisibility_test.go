@@ -224,6 +224,29 @@ func TestAIVisibility(t *testing.T) {
 	if n := len(owner.must(200, "GET", base+"/ai-runs?cohort_id="+cid, nil)["data"].([]any)); n != 3 {
 		t.Fatalf("runs: %d", n)
 	}
+	// A daily run that failed is tried again the same day, after a wait,
+	// rather than the next day; one a person stopped is not.
+	owner.must(200, "PATCH", base+"/ai-cohorts/"+cid, map[string]any{"schedule": "daily"})
+	runs := func() int {
+		t.Helper()
+		if err := svc.Schedule(ctx); err != nil {
+			t.Fatal(err)
+		}
+		return len(owner.must(200, "GET", base+"/ai-runs?cohort_id="+cid, nil)["data"].([]any))
+	}
+	if n := runs(); n != 3 {
+		t.Fatalf("scheduled after today's runs: %d", n)
+	}
+	e.pool.Exec(ctx, `UPDATE ai_runs SET created_at = now() - interval '2 days' WHERE cohort_id = $1`, cid)
+	e.pool.Exec(ctx, `UPDATE ai_runs SET status = 'failed', created_at = now() - interval '30 minutes', finished_at = now() - interval '20 minutes'
+		WHERE id = (SELECT id FROM ai_runs WHERE cohort_id = $1 ORDER BY started_at DESC NULLS LAST LIMIT 1)`, cid)
+	if n := runs(); n != 4 {
+		t.Fatalf("retry after a failed run: %d", n)
+	}
+	e.pool.Exec(ctx, `UPDATE ai_runs SET status = 'failed', finished_at = now() - interval '20 minutes' WHERE cohort_id = $1 AND status = 'queued'`, cid)
+	if n := runs(); n != 4 {
+		t.Fatalf("retried before the second wait: %d", n)
+	}
 	owner.must(200, "PATCH", base+"/ai-cohorts/"+cid, map[string]any{"schedule": "weekly", "aliases": []string{"Acme Proxies"}})
 	owner.must(204, "DELETE", base+"/ai-cohorts/"+cid, nil)
 	owner.must(404, "GET", base+"/ai-cohorts/"+cid, nil)

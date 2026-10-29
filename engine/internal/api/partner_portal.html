@@ -232,21 +232,34 @@ code, .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-
   function settings() {
     var method = el("textarea", { rows: "2", maxlength: "500", placeholder: "PayPal: you@example.com" });
     method.value = me.payout_method || "";
+    var postback = el("input", { type: "url", maxlength: "2000", placeholder: "https://tracker.example/postback?clickid={sub_id}&payout={commission}" });
+    postback.value = me.postback_url || "";
+    var affiliate = program.kind === "affiliate" || !!me.postback_url;
     var conv = el("input", { type: "checkbox", style: "width:auto" }), pay = el("input", { type: "checkbox", style: "width:auto" });
     conv.checked = me.notify.conversions !== false; pay.checked = me.notify.payouts !== false;
     var note = el("p", {});
+    var sends = el("div", {});
     render([el("div", { "class": "card" }, [el("form", { onsubmit: function (e) {
       e.preventDefault();
-      api("PATCH", "me", { payout_method: method.value, notify: { conversions: conv.checked, payouts: pay.checked } }).then(function (r) {
+      var body = { payout_method: method.value, notify: { conversions: conv.checked, payouts: pay.checked } };
+      if (affiliate) body.postback_url = postback.value;
+      api("PATCH", "me", body).then(function (r) {
         me = r; note.className = "banner ok"; note.textContent = "Saved.";
       }, function (err) { note.className = "err"; note.textContent = err.message; });
     } }, [
       el("label", { text: "How you'd like to be paid" }), method,
       el("p", { "class": "muted", text: "Free text, kept encrypted. Never put bank account numbers here." }),
+      affiliate ? el("label", { text: "Postback URL (your own tracker)" }) : null,
+      affiliate ? postback : null,
+      affiliate ? el("p", { "class": "muted", text: "Called once for each conversion credited to you, and again if it's refunded. Placeholders: {sub_id} (the sub on your link, such as your click id), {click_id}, {conversion_id}, {type}, {event_name}, {amount}, {amount_cents}, {currency}, {commission}, {commission_cents}, {status} (pending, approved or reversed), {code}, {program}. Must start with https://." }) : null,
       el("label", { style: "font-weight:400" }, [conv, " Email me about new conversions"]),
       el("label", { style: "font-weight:400" }, [pay, " Email me about payouts"]),
       el("p", {}, [el("button", { text: "Save", disabled: me.read_only ? "" : null })]), note
-    ])])]);
+    ])]), affiliate ? el("div", { "class": "card" }, [el("h2", { text: "Recent postbacks", style: "font-size:15px;margin:0 0 8px" }), sends]) : null]);
+    if (affiliate) api("GET", "postbacks").then(function (r) {
+      sends.appendChild(table([["When", function (x) { return date(x.created_at); }], ["Status", function (x) { return el("span", { "class": "pill", text: x.status }); }],
+        ["Answer", function (x) { return x.http_status ? String(x.http_status) : ""; }], ["Note", function (x) { return x.error; }]], r.data, "None yet."));
+    }, function () {});
   }
   function fail(err) {
     if (err.status === 401) { me = null; return route(); }

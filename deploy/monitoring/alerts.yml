@@ -375,6 +375,19 @@ groups:
         annotations:
           summary: "Partner link clicks aren't being stored (visitors still land); check the engine log for 'partners: store click'."
 
+      - alert: OutflarePartnerPostbacksFailing
+        # Partners' own trackers are often down; most failing at once more
+        # likely means this server can't reach the internet.
+        expr: |
+          sum(increase(outflare_partners_postbacks_total{outcome=~"unreachable|retried"}[1h])) > 10
+          and
+          sum(increase(outflare_partners_postbacks_total{outcome=~"unreachable|retried"}[1h]))
+            > sum(increase(outflare_partners_postbacks_total{outcome="sent"}[1h]))
+        for: 30m
+        labels: { severity: info }
+        annotations:
+          summary: "Over half of partner postbacks have failed or been retried for an hour; check partner.postback_failed events and whether this server can reach outside addresses (egress, DNS)."
+
       - alert: OutflarePartnerImportsFailing
         # Imports run around a workspace's switch-over day; several failing
         # at once is more than one workspace's key or program.
@@ -451,12 +464,43 @@ groups:
         annotations:
           summary: "Social accounts on {{ $labels.channel }} keep failing ({{ $labels.code }}) after retries; check the social_account.sync_failed events and the engine log for that channel, then fix the profile parser (engine/internal/sociallinks) or how the page is read."
 
+      - alert: OutflareSyncsStuck
+        # A connection's scheduled sync (analytics, Search Console, page
+        # conversions, ads, SEO snapshots) failed 3 runs in a row, retries
+        # included, with an error that isn't the workspace's to fix:
+        # Outflare's own (internal), or the provider failing for hours.
+        # Refused keys, spent quotas and budgets show on the connection
+        # instead and don't alert.
+        expr: sum by (module, code) (outflare_sync_stuck{code=~"internal|connector_unavailable|unknown"}) > 0
+        for: 1h
+        labels: { severity: warning }
+        annotations:
+          summary: "{{ $labels.module }} syncs keep failing ({{ $labels.code }}) after retries; check the engine log and the sync_failed events for that module (internal is Outflare's own bug)."
+
+      - alert: OutflareSyncRunsBroken
+        # A sync run failed on Outflare's side: a bug, not the provider.
+        expr: sum by (module) (increase(outflare_sync_runs_total{outcome="internal"}[1h])) > 0
+        for: 5m
+        labels: { severity: warning }
+        annotations:
+          summary: "{{ $labels.module }} sync runs failed on Outflare's side in the last hour; search the engine log for that module's sync errors with error_code internal."
+
       - alert: OutflareSocialReadsFailing
         expr: sum(rate(outflare_social_account_reads_total{outcome!="success"}[6h])) / sum(rate(outflare_social_account_reads_total[6h])) > 0.5 and sum(increase(outflare_social_account_reads_total[6h])) > 20
         for: 1h
         labels: { severity: warning }
         annotations:
           summary: "Over half of social account reads fail: a channel may have changed its profile page or started blocking reads; check the social_account.sync_failed events by channel and error code."
+
+      - alert: OutflareNewsArticleReadsFailing
+        # Sites saying no (blocked, opted_out) and gone pages are normal;
+        # unreachable and failed reads climbing mean OutflareBot or its
+        # network is in trouble.
+        expr: sum(rate(outflare_news_article_reads_total{status=~"unreachable|failed"}[6h])) / sum(rate(outflare_news_article_reads_total[6h])) > 0.5 and sum(increase(outflare_news_article_reads_total[6h])) > 20
+        for: 1h
+        labels: { severity: warning }
+        annotations:
+          summary: "Over half of news article reads fail to reach the page; check the news_article.read events by error code and OutflareBot's crawl metrics."
 
       - alert: OutflareSocialPostsOverdue
         # Approved posts go out within a minute or two of their time; one
@@ -499,3 +543,26 @@ groups:
         labels: { severity: info }
         annotations:
           summary: "Over half of Internet Archive lookups fail: archive.org may be down or refusing; page checks go on without snapshots."
+
+      - alert: OutflareLinkPitchOpenersFailing
+        # no_ai and ai_unavailable are workspaces without AI or over their
+        # limit; ai_failed is the model's answer breaking.
+        expr: sum(rate(outflare_seo_link_pitches_written_total{outcome="ai_failed"}[6h])) / sum(rate(outflare_seo_link_pitches_written_total[6h])) > 0.5 and sum(increase(outflare_seo_link_pitches_written_total[6h])) > 10
+        for: 1h
+        labels: { severity: warning }
+        annotations:
+          summary: "Over half of link pitch openers fail to be written: check the link_pitches.write jobs and the AI usage page's link_pitches tool for a model or prompt change."
+
+      - alert: OutflareLinkRepliesFailing
+        expr: sum(rate(outflare_seo_link_replies_read_total{kind="ai_failed"}[6h])) / sum(rate(outflare_seo_link_replies_read_total[6h])) > 0.5 and sum(increase(outflare_seo_link_replies_read_total[6h])) > 10
+        for: 1h
+        labels: { severity: warning }
+        annotations:
+          summary: "Over half of replies to link pitches can't be read by the AI: prospects stay at replied for a person to move; check the link_pitches.read_reply jobs."
+
+      - alert: OutflareLinkLiveChecksUnreachable
+        expr: sum(rate(outflare_seo_link_live_checks_total{outcome="unreachable"}[6h])) / sum(rate(outflare_seo_link_live_checks_total[6h])) > 0.5 and sum(increase(outflare_seo_link_live_checks_total[6h])) > 20
+        for: 2h
+        labels: { severity: info }
+        annotations:
+          summary: "Over half of checks of agreed and live links can't reach the page: OutflareBot may be blocked or the page checks broken; check link_prospect.check_failed and link_live.schedule_failed in the engine log."

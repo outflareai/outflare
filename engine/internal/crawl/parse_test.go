@@ -282,3 +282,17 @@ func TestSitemapLastmod(t *testing.T) {
 		t.Fatalf("%v %+v", err, pages)
 	}
 }
+
+func TestArticleInfo(t *testing.T) {
+	for _, c := range []struct{ raw, author, published string }{
+		{`{"@type":"NewsArticle","author":{"@type":"Person","name":" Sam  Okafor "},"datePublished":"2026-10-27"}`, "Sam Okafor", "2026-10-27"},
+		{`{"@graph":[{"@type":"WebPage"},{"@type":["BlogPosting"],"author":[{"name":"Jo Rivers"},{"name":"Ann Lee"}]}]}`, "Jo Rivers", ""},
+		{`{"@type":"Organization","name":"Acme"}`, "", ""},
+		{`not json`, "", ""},
+	} {
+		a, p := articleInfo(c.raw)
+		if a != c.author || p != c.published {
+			t.Errorf("articleInfo(%s) = %q, %q", c.raw, a, p)
+		}
+	}
+}

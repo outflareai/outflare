@@ -43,6 +43,14 @@ func (fakeClaude) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		draftReviewAnswer(w, string(body))
 		return
 	}
+	if strings.Contains(string(body), "You write the opening lines of a short, friendly email asking a website to link") {
+		answerJSON(w, map[string]any{"opener": "Your hiking pricing page lists tools, and one of its links is broken; our pack guide covers the same ground."})
+		return
+	}
+	if strings.Contains(string(body), "You read a reply to an email that asked a website to link") {
+		answerJSON(w, map[string]any{"kind": "agreed", "confidence": 0.95})
+		return
+	}
 	if strings.Contains(string(body), "proposing A/B tests") || strings.Contains(string(body), "You write versions of website copy") ||
 		strings.Contains(string(body), "You explain an A/B test's results") {
 		answerABTestAI(w, string(body))

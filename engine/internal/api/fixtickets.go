@@ -37,6 +37,8 @@ const (
 	taskFixTickets = "fix_tickets"
 	// taskLinkPages is the link building page reader's AI task.
 	taskLinkPages = linkbuild.PageReadTask
+	// taskLinkPitches writes link pitch openers and reads their replies.
+	taskLinkPitches = linkbuild.PitchTask
 	// fixTicketEstimateCents is what one brief may cost, for the budget
 	// check before it is written.
 	fixTicketEstimateCents = 10

@@ -31,6 +31,7 @@ import (
 	"github.com/outflareai/outflare/engine/internal/audit"
 	"github.com/outflareai/outflare/engine/internal/jobs"
 	"github.com/outflareai/outflare/engine/internal/llm"
+	"github.com/outflareai/outflare/engine/internal/retry"
 	"github.com/outflareai/outflare/engine/internal/track"
 )
 
@@ -252,14 +253,24 @@ func (s *Service) Run(ctx context.Context) {
 
 // Schedule starts the runs that are due now.
 func (s *Service) Schedule(ctx context.Context) error {
+	// A run that failed, or got no answer at all, doesn't hold the schedule
+	// for its whole period: it is tried again after retry.After the failed
+	// runs since the last that worked, so the day still gets its answers.
+	// A run a person stopped, or one the AI budget stopped, still holds it.
 	rows, err := s.Pool.Query(ctx, `
 		SELECT c.id, c.workspace_id FROM ai_cohorts c
 		JOIN ai_visibility_settings v ON v.workspace_id = c.workspace_id AND jsonb_array_length(v.models) > 0
+		LEFT JOIN LATERAL (SELECT count(*) AS n, max(r.finished_at) AS at FROM ai_runs r WHERE r.cohort_id = c.id
+			AND (r.status = 'failed' OR (r.status = 'done' AND r.samples_done = 0 AND r.samples_failed > 0))
+			AND r.created_at > COALESCE((SELECT max(g.created_at) FROM ai_runs g WHERE g.cohort_id = c.id
+				AND NOT (g.status = 'failed' OR (g.status = 'done' AND g.samples_done = 0 AND g.samples_failed > 0))), '-infinity')) f ON true
 		WHERE c.schedule <> 'off' AND c.status = 'active'
 		  AND EXISTS (SELECT 1 FROM ai_prompts p WHERE p.cohort_id = c.id AND p.status = 'active')
 		  AND NOT EXISTS (SELECT 1 FROM ai_runs r WHERE r.cohort_id = c.id
 		      AND (r.status IN ('queued', 'running')
-		           OR r.created_at > now() - CASE c.schedule WHEN 'daily' THEN interval '23 hours' ELSE interval '167 hours' END))
+		           OR (NOT (r.status = 'failed' OR (r.status = 'done' AND r.samples_done = 0 AND r.samples_failed > 0))
+		               AND r.created_at > now() - CASE c.schedule WHEN 'daily' THEN interval '23 hours' ELSE interval '167 hours' END)))
+		  AND (f.n = 0 OR f.at IS NULL OR f.at < now() - `+retry.SQL("f.n")+`)
 		ORDER BY c.created_at LIMIT 100`)
 	if err != nil {
 		return err

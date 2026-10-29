@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"net/http"
 	"time"
 )
 
@@ -20,3 +21,12 @@ func (s *Server) SyncPayments(ctx context.Context, ws, id string) error {
 
 // SchedulePayments queues the payment syncs that are due, as the loop would.
 func (s *Server) SchedulePayments(ctx context.Context) error { return s.schedulePayments(ctx) }
+
+// SetPartnerPostbackClient swaps the client postbacks to partners'
+// trackers use (the real one only reaches public addresses). It returns
+// the undo.
+func SetPartnerPostbackClient(c *http.Client) func() {
+	old := partnerPostbackClient
+	partnerPostbackClient = c
+	return func() { partnerPostbackClient = old }
+}

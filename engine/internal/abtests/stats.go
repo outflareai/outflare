@@ -113,12 +113,21 @@ func Compare(arms []Arm, minEffect float64) []Comparison {
 // separate chance of a false winner, so the p-values and ranges are
 // corrected for their number (Bonferroni): together they keep to Alpha.
 func CompareSeries(looks [][]Arm, metric string, minEffect, baseline float64) []Comparison {
+	if len(looks) == 0 {
+		return nil
+	}
+	return compareSeries(looks, metric, minEffect, baseline, len(looks[len(looks)-1])-1)
+}
+
+// compareSeries is CompareSeries corrected for tests comparisons in all,
+// such as every version in every segment of a breakdown.
+func compareSeries(looks [][]Arm, metric string, minEffect, baseline float64, tests int) []Comparison {
 	if len(looks) == 0 || len(looks[len(looks)-1]) < 2 {
 		return nil
 	}
 	last := looks[len(looks)-1]
 	c := last[0]
-	versions := float64(len(last) - 1)
+	versions := float64(max(1, tests))
 	alpha := Alpha / versions
 	out := make([]Comparison, 0, len(last)-1)
 	for i, a := range last[1:] {

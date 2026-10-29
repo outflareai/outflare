@@ -41,6 +41,7 @@ func (s *Server) routesNews(mux *http.ServeMux) {
 	mux.HandleFunc("DELETE /v1/workspaces/{ws}/news-searches/{search}", s.inBrand(manage, s.deleteNewsSearch))
 	mux.HandleFunc("POST /v1/workspaces/{ws}/news-searches/{search}/run", s.inBrand(manage, s.runNewsSearch))
 	mux.HandleFunc("GET /v1/workspaces/{ws}/news-articles", s.inBrand(read, s.listNewsArticles))
+	mux.HandleFunc("GET /v1/workspaces/{ws}/journalists", s.inBrand(read, s.listJournalists))
 	mux.HandleFunc("GET /v1/workspaces/{ws}/coverage", s.inBrand(read, s.listCoverage))
 	mux.HandleFunc("POST /v1/workspaces/{ws}/coverage", s.inBrand(manage, s.addCoverage))
 	mux.HandleFunc("PATCH /v1/workspaces/{ws}/coverage/{coverage}", s.inBrand(manage, s.updateCoverage))
@@ -387,6 +388,12 @@ type newsArticleView struct {
 	SearchIDs   []string  `json:"search_ids"`
 	FirstSeenAt time.Time `json:"first_seen_at"`
 	LastSeenAt  time.Time `json:"last_seen_at"`
+	// The byline as the page gives it, when it says it was published,
+	// how the read went (null until read), and the journalists' records.
+	Author        string     `json:"author"`
+	PublishedAt   *time.Time `json:"published_at"`
+	ReadStatus    *string    `json:"read_status"`
+	JournalistIDs []string   `json:"journalist_ids"`
 }
 
 func (s *Server) listNewsArticles(w http.ResponseWriter, r *http.Request) {
@@ -420,6 +427,13 @@ func (s *Server) listNewsArticles(w http.ResponseWriter, r *http.Request) {
 		}
 		where += ` AND x.first_seen_at >= ` + arg(t)
 	}
+	if v := q.Get("journalist_id"); v != "" {
+		if !validUUID(v) {
+			writeError(w, r, http.StatusBadRequest, "invalid_request", "journalist_id is a journalist's person record id")
+			return
+		}
+		where += ` AND EXISTS (SELECT 1 FROM news_article_authors aa WHERE aa.article_id = x.id AND aa.record_id = ` + arg(v) + `::uuid)`
+	}
 	limit, err := limitParam(r, 50, 200)
 	if s.allocError(w, r, err) {
 		return
@@ -435,7 +449,9 @@ func (s *Server) listNewsArticles(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	rows, err := s.pool.Query(ctx, `SELECT x.id::text, x.url, x.title, x.snippet,
-			ARRAY(SELECT h.search_id::text FROM news_hits h WHERE h.article_id = x.id ORDER BY h.found_at), x.first_seen_at, x.last_seen_at
+			ARRAY(SELECT h.search_id::text FROM news_hits h WHERE h.article_id = x.id ORDER BY h.found_at), x.first_seen_at, x.last_seen_at,
+			x.author, x.published_at, x.read_status,
+			ARRAY(SELECT DISTINCT aa.record_id::text FROM news_article_authors aa WHERE aa.article_id = x.id)
 		FROM news_articles x WHERE `+where+` ORDER BY x.first_seen_at DESC, x.id LIMIT `+arg(limit)+` OFFSET `+arg(offset), args...)
 	if err != nil {
 		s.internal(w, r, err)
@@ -443,7 +459,8 @@ func (s *Server) listNewsArticles(w http.ResponseWriter, r *http.Request) {
 	}
 	list, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (newsArticleView, error) {
 		var v newsArticleView
-		err := row.Scan(&v.ID, &v.URL, &v.Title, &v.Snippet, &v.SearchIDs, &v.FirstSeenAt, &v.LastSeenAt)
+		err := row.Scan(&v.ID, &v.URL, &v.Title, &v.Snippet, &v.SearchIDs, &v.FirstSeenAt, &v.LastSeenAt, &v.Author, &v.PublishedAt, &v.ReadStatus,
+			&v.JournalistIDs)
 		_, v.Domain = news.ArticleURL(v.URL)
 		return v, err
 	})
@@ -671,7 +688,10 @@ func (s *Server) addCoverage(w http.ResponseWriter, r *http.Request) {
 	var articles []string
 	err = pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
 		_, articles, err = keepCoverage(ctx, tx, &a.principal, a.WorkspaceID, brand, []newCoverage{{URL: u, Domain: d, Title: req.Title, Source: "manual"}})
-		return err
+		if err != nil {
+			return err
+		}
+		return news.StartRead(ctx, tx, a.WorkspaceID, articles[0])
 	})
 	if s.allocError(w, r, err) {
 		return
@@ -898,6 +918,12 @@ func (s *Server) RunNewsSearch(ctx context.Context, ws, searchID string) error {
 			}
 			if inserted {
 				newArticles++
+				// Read its byline, once; the first few of each run.
+				if newArticles <= news.MaxReadsPerRun {
+					if err := news.StartRead(ctx, tx, ws, article); err != nil {
+						return err
+					}
+				}
 			}
 			if _, err := tx.Exec(ctx, `INSERT INTO news_hits (search_id, article_id, workspace_id, position) VALUES ($1, $2, $3, $4)
 				ON CONFLICT DO NOTHING`, searchID, article, ws, i+1); err != nil {

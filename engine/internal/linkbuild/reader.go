@@ -97,7 +97,7 @@ func (s *Service) readWithAI(ctx context.Context, pr prospect, rd *crawl.Read, c
 	}
 	choice, err := s.Models.ForTask(ctx, pr.ws, PageReadTask, aiCents)
 	if err != nil {
-		if errors.Is(err, llm.ErrNoKey) || errors.Is(err, llm.ErrAuth) {
+		if noAI(err) {
 			setErr("no_ai")
 		} else {
 			setErr("ai_unavailable")
@@ -193,4 +193,16 @@ func contains(list []string, v string) bool {
 		}
 	}
 	return false
+}
+
+// noAI reports whether a model couldn't be opened because the workspace
+// has no usable AI: none connected, no model chosen, or a key the provider
+// refused. Anything else (a spend limit, a provider outage) is
+// ai_unavailable.
+func noAI(err error) bool {
+	if errors.Is(err, llm.ErrNoKey) || errors.Is(err, llm.ErrAuth) {
+		return true
+	}
+	var c interface{ Code() string }
+	return errors.As(err, &c) && (c.Code() == "connector_needed" || c.Code() == "ai_model_needed")
 }

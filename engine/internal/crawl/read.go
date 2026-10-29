@@ -32,11 +32,14 @@ type Read struct {
 	Title       string
 	Description string
 	Author      string
-	H1          []string
-	Lang        string
-	Noindex     bool
-	WordCount   int
-	Links       []Link
+	// Published is when the page says it was published, as written
+	// (article:published_time, or its JSON-LD article), or "".
+	Published string
+	H1        []string
+	Lang      string
+	Noindex   bool
+	WordCount int
+	Links     []Link
 	// Emails are the addresses its mailto links show, lowercase.
 	Emails []string
 	// Text is the start of its visible text, for the AI page reader.
@@ -129,6 +132,20 @@ func ReadPage(ctx context.Context, f Fetcher, wait func(context.Context, time.Du
 		if resp.Status == 200 && readable(resp.ContentType()) {
 			pg := ParsePage(cur, resp.Body)
 			read.Title, read.Description, read.Author = clip(pg.Title, 300), clip(pg.Description, 500), clip(pg.Meta["author"], 200)
+			// News sites name the author in other tags; a profile URL isn't a
+			// name.
+			for _, a := range []string{pg.Meta["article:author"], pg.Meta["parsely-author"], pg.Meta["sailthru.author"], pg.Meta["dc.creator"], pg.ArticleAuthor} {
+				if read.Author != "" {
+					break
+				}
+				if a = strings.TrimSpace(a); !strings.Contains(a, "://") {
+					read.Author = clip(a, 200)
+				}
+			}
+			read.Published = clip(strings.TrimSpace(pg.Meta["article:published_time"]), 40)
+			if read.Published == "" {
+				read.Published = pg.ArticlePublished
+			}
 			read.H1, read.Lang, read.Noindex, read.WordCount, read.Links = pg.H1, pg.Lang, pg.Noindex, pg.WordCount, pg.Links
 			seen := map[string]bool{}
 			for _, m := range mailto.FindAllSubmatch(resp.Body, -1) {

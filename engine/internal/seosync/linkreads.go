@@ -291,3 +291,26 @@ func (s *Syncer) readDeadPages(ctx context.Context, o *connectors.Opened, r conn
 	}
 	return runs
 }
+
+// retryDeadPages reads again who links to competitors' dead pages whose
+// weekly read failed, for every SEO site, without a whole snapshot. Pages
+// that read fine are left out by ReadDeadPages itself.
+func (s *Syncer) retryDeadPages(ctx context.Context, ws, integrationID string) error {
+	o, err := s.Store.Open(ctx, s.Pool, ws, integrationID)
+	if errors.Is(err, connectors.ErrNotFound) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	r, ok := o.Connector.(connectors.SEOReader)
+	if !ok || !connectors.SupportsSEO(r, connectors.SEOLinks) {
+		return nil
+	}
+	sites, err := LinkSites(ctx, s.Pool, ws)
+	if err != nil || len(sites) == 0 {
+		return err
+	}
+	s.readDeadPages(ctx, o, r, sites)
+	return nil
+}

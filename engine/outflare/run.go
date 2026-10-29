@@ -67,6 +67,7 @@ import (
 	"github.com/outflareai/outflare/engine/internal/mcphost"
 	"github.com/outflareai/outflare/engine/internal/metrics"
 	"github.com/outflareai/outflare/engine/internal/netguard"
+	"github.com/outflareai/outflare/engine/internal/news"
 	"github.com/outflareai/outflare/engine/internal/oauth"
 	"github.com/outflareai/outflare/engine/internal/outcomes"
 	"github.com/outflareai/outflare/engine/internal/ownkeys"
@@ -300,6 +301,8 @@ func Run(ctx context.Context, log *slog.Logger, cmd string, exts ...Extension) e
 	// Link building: OutflareBot's checks of link prospects' pages.
 	linkChecker := &linkbuild.Service{Pool: pool, Log: log, Crawl: crawler, Emails: emailFinder}
 	linkChecker.Register(queue)
+	// The news watch: OutflareBot reads each new article for its byline.
+	(&news.Reader{Pool: pool, Log: log, Crawl: crawler, Emails: emailFinder}).Register(queue)
 	// Production deploys of the websites a workspace watches on GitHub or
 	// Vercel, which fix re-checks and experiments start from.
 	deployWatch := &deploys.Service{Pool: pool, Store: integrations, Log: log}
@@ -629,6 +632,11 @@ func Run(ctx context.Context, log *slog.Logger, cmd string, exts ...Extension) e
 		go func() {
 			defer wg.Done()
 			rankChecks.Run(ctx)
+		}()
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			linkChecker.Run(ctx)
 		}()
 		wg.Add(1)
 		go func() {

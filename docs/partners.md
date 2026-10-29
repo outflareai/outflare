@@ -98,6 +98,26 @@ https://outflare.example.com/v1/partner-postbacks/ofb_...?type=sale&ref=ana&user
 
 Anyone with the URL can report conversions to the program, so treat it like a password.
 
+### Postbacks to your partners' trackers
+
+Affiliates who run their own tracker (Voluum, RedTrack, Binom and the like) want each conversion sent back to it. A partner's `postback_url` is that tracker's address, set by the partner on the portal (Settings) or by your team (`PATCH .../partners/{id}`, or Postback URL in the partner's menu). It must start with `https://` and can carry these placeholders:
+
+| Placeholder | Value |
+| --- | --- |
+| `{sub_id}` | The sub on the partner's link (`/r/ana?sub=...`), usually their own click id |
+| `{click_id}` | Outflare's click id |
+| `{conversion_id}`, `{type}`, `{event_name}` | The conversion: `signup`, `sale`, `refund` or `custom` and its event name |
+| `{amount}`, `{amount_cents}`, `{currency}` | The sale's amount (`49.90`), in cents, and its currency |
+| `{commission}`, `{commission_cents}` | The partner's cash for it (negative for a refund's reversal) |
+| `{status}` | `pending` (on hold), `approved`, or `reversed` for a refund |
+| `{code}`, `{program}` | The partner's code and the program's slug |
+
+```
+https://tracker.example/postback?clickid={sub_id}&payout={commission}&status={status}
+```
+
+Each conversion credited to the partner, and each refund of one, calls it once (GET), from a background job. A tracker that answers 5xx or 429, or doesn't answer, is tried again up to 5 times; one that answers 4xx isn't. Calls only go to public internet addresses and never follow a redirect. The last 50 calls, with the tracker's answer, are on the portal and at `GET .../partners/{id}/postbacks`.
+
 ## Credit rule
 
 Each program keeps its own credit rule. It never follows the workspace's [attribution](attribution.md) settings, so changing how the CMO view credits channels never changes what partners earn.
@@ -144,6 +164,8 @@ Rewards are an append-only ledger: an amount never changes once written.
 `POST .../partner-payouts` makes one payout per partner whose approved, unpaid balance reaches the program's minimum. It can run for one partner, one program or all of them. Each payout fires `partner_payout.created`, so a payout tool can pick it up.
 
 Pay it from your own account, then mark it paid with a note and the payment's reference: `POST .../partner-payouts/{id}/paid`. That fires `partner_payout.paid`. Canceling a due payout puts its rewards back into the balance.
+
+To pay them in bulk, download the due payouts as CSV: Payouts → Download CSV, or `GET .../partner-payouts/export` (`status` `due` by default, or `paid`, `canceled`, `all`; `program`). Each row has the partner's code, name, email, payout details, the amount as a decimal and the currency, ready for your payout tool's bulk upload. The file holds payout details, so it needs `partners.manage` and each download is in the audit log (`partner_payouts.exported`).
 
 Outflare has no PayPal, Wise or crypto integration and never stores bank details. A partner's `payout_method` is free text, such as "PayPal: ana@example.com", stored sealed like connector keys. Structured payout fields and tax forms may come later.
 
@@ -235,6 +257,7 @@ Operators get all three. Viewers get `partners.read`.
 | `POST .../partner-rewards/{id}/approve`, `.../reject` | manage |
 | `POST .../partner-rewards/{id}/fulfil` | conversions |
 | `POST .../partner-payouts`, `.../{id}/paid`, `.../{id}/cancel` | manage |
+| `GET .../partners/{id}/postbacks` / `GET .../partner-payouts/export` | read / manage |
 | `POST .../partner-programs/{id}/imports` / `GET .../imports`, `.../imports/{import}` | manage / read |
 | `GET`/`POST /v1/partner-postbacks/{token}` | the postback secret |
 

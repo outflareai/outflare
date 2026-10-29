@@ -144,6 +144,15 @@ func TestABTests(t *testing.T) {
 		t.Fatalf("winner: %v", res)
 	}
 
+	// A breakdown by device: these visitors came through the API, with no
+	// visit, so they are all "unknown".
+	owner.must(400, "GET", base+"/ab-tests/"+id+"/breakdown?by=browser", nil)
+	owner.must(409, "GET", base+"/ab-tests/"+again["id"].(string)+"/breakdown?by=device", nil)
+	bd := owner.must(200, "GET", base+"/ab-tests/"+id+"/breakdown?by=device", nil)["breakdown"].(map[string]any)
+	if segs := bd["segments"].([]any); len(segs) != 1 || segs[0].(map[string]any)["key"] != "unknown" || bd["corrected_for"] != 1.0 {
+		t.Fatalf("breakdown: %v", bd)
+	}
+
 	// Ending keeps the results and the choice; the flag stays as it is.
 	owner.must(400, "POST", base+"/ab-tests/"+id+"/end", map[string]any{"decision": "slower"})
 	owner.must(400, "POST", base+"/ab-tests/"+id+"/end", map[string]any{})

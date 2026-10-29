@@ -152,18 +152,19 @@ func (s *Syncer) syncSearch(ctx context.Context, o *connectors.Opened, r connect
 			runErr = err
 		}
 	}
-	var msg *string
-	if runErr != nil {
-		m := runErr.Error()
-		msg = &m
-	}
+	msg, code := failed(runErr)
 	_, err = s.Pool.Exec(ctx, `
-		INSERT INTO search_syncs (integration_id, site, workspace_id, host, oldest_day, newest_day, backfilled_at, sitemaps_at, inspected_at, last_run_at, last_error)
-		VALUES ($1, $2, $3, $4, $5, $6, CASE WHEN $7 THEN now() END, $8, CASE WHEN $9 > 0 THEN now() END, now(), $10)
+		INSERT INTO search_syncs (integration_id, site, workspace_id, host, oldest_day, newest_day, backfilled_at, sitemaps_at, inspected_at, last_run_at, last_error,
+			failures, last_error_code)
+		VALUES ($1, $2, $3, $4, $5, $6, CASE WHEN $7 THEN now() END, $8, CASE WHEN $9 > 0 THEN now() END, now(), $10,
+			CASE WHEN $10::text IS NULL THEN 0 ELSE 1 END, $11)
 		ON CONFLICT (integration_id, site) DO UPDATE SET host = EXCLUDED.host, oldest_day = EXCLUDED.oldest_day, newest_day = EXCLUDED.newest_day,
 			backfilled_at = COALESCE(search_syncs.backfilled_at, EXCLUDED.backfilled_at), sitemaps_at = EXCLUDED.sitemaps_at,
-			inspected_at = COALESCE(EXCLUDED.inspected_at, search_syncs.inspected_at), last_run_at = now(), last_error = EXCLUDED.last_error`,
-		id, site, ws, host, oldest, newest, backfilled, sitemapsAt, out.Inspected, msg)
+			inspected_at = COALESCE(EXCLUDED.inspected_at, search_syncs.inspected_at), last_run_at = now(), last_error = EXCLUDED.last_error,
+			last_error_code = EXCLUDED.last_error_code,
+			failures = CASE WHEN EXCLUDED.last_error IS NULL THEN 0 ELSE search_syncs.failures + 1 END`,
+		id, site, ws, host, oldest, newest, backfilled, sitemapsAt, out.Inspected, msg, code)
+	syncRun("search_console", code)
 	if err != nil {
 		return out, dbError{err}
 	}

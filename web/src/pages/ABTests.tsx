@@ -4,7 +4,7 @@
 // version wins, in plain words.
 
 import { useCallback, useEffect, useState, type FormEvent } from "react";
-import type { ABTest, ABTestComparison, ABTestGoal, ABTestResults, Flag } from "@outflare/sdk";
+import type { ABTest, ABTestBreakdown, ABTestComparison, ABTestGoal, ABTestResults, Flag } from "@outflare/sdk";
 import { api, errorMessage } from "../api";
 import { Badge, Button, Card, confirmAction, Empty, ErrorText, field, Loading, PageHeader, toast, type tones } from "../ui";
 import { ago } from "../format";
@@ -13,7 +13,7 @@ import { BrandBadge } from "@/components/brand-badge";
 import { DataTable } from "@/components/data-table";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import type { Tab } from "@/lib/paths";
-import { DayChart, measured, perVisitor, PlanPanel, SuggestPanel, SummaryPanel, VersionsPanel } from "./ABTestsAI";
+import { DayChart, LiftChart, measured, perVisitor, PlanPanel, SuggestPanel, SummaryPanel, VersionsPanel } from "./ABTestsAI";
 
 type Props = { ws: string; canManage: boolean; go: (t: Tab) => void };
 
@@ -457,11 +457,17 @@ function TestSheet({ ws, test, flag, canManage, onClose, onChanged, onFlagChange
                   <DayChart days={results.result.goals[0].days} control={test.control} goal={results.result.goals[0].goal} />
                 </Card>
               )}
+              {results.result.goals[0]?.days && results.result.goals[0].days.length > 1 && (
+                <Card title="Lift over the control, day by day">
+                  <LiftChart days={results.result.goals[0].days} control={test.control} goal={results.result.goals[0].goal} />
+                </Card>
+              )}
               {results.result.goals.map((g, gi) => (
                 <Card key={gi} title={gi === 0 ? `Judged on ${goalText(g.goal)}` : `${goalText(g.goal)} · exploratory`}>
                   <GoalTable goal={g.goal} arms={g.arms} comparisons={g.comparisons ?? []} control={test.control} names={names} />
                 </Card>
               ))}
+              <BreakdownPanel ws={ws} testID={test.id} control={test.control} names={names} />
               <p className="text-[12px] text-muted-foreground">
                 Visitors split {results.result.arms.map((a) => `${a.variant} ${a.visitors.toLocaleString()}`).join(" · ")}
                 {results.result.sample_ratio_mismatch ? " — further from the flag's weights than luck explains." : " — in line with the flag's weights."}{" "}
@@ -536,3 +542,70 @@ function GoalTable({ goal, arms, comparisons, control, names }: { goal: ABTestGo
     </div>
   );
 }
+
+const dimensions = [
+  { value: "device", label: "Device" },
+  { value: "source", label: "Source" },
+  { value: "country", label: "Country" },
+  { value: "visitor", label: "New or returning" },
+] as const;
+
+// BreakdownPanel shows the first goal group by group, on demand: where a
+// change works, corrected so a lucky group doesn't mislead.
+function BreakdownPanel({ ws, testID, control, names }: { ws: string; testID: string; control: string; names: (v: string) => string }) {
+  const [by, setBy] = useState<(typeof dimensions)[number]["value"] | "">("");
+  const [data, setData] = useState<ABTestBreakdown | null>(null);
+  const [error, setError] = useState("");
+  useEffect(() => {
+    if (!by) return setData(null);
+    let live = true;
+    setData(null);
+    api.GET("/v1/workspaces/{ws}/ab-tests/{test}/breakdown", { params: { path: { ws, test: testID }, query: { by } } }).then(({ data, error }) => {
+      if (!live) return;
+      setError(error ? errorMessage(error) : "");
+      setData(data ?? null);
+    });
+    return () => {
+      live = false;
+    };
+  }, [ws, testID, by]);
+  const b = data?.breakdown;
+  return (
+    <Card title="Breakdown">
+      <div className="space-y-3">
+        <label className="flex items-center gap-2">
+          <span>By</span>
+          <select className={field} value={by} onChange={(e) => setBy(e.target.value as typeof by)}>
+            <option value="">Choose…</option>
+            {dimensions.map((d) => <option key={d.value} value={d.value}>{d.label}</option>)}
+          </select>
+        </label>
+        {error && <ErrorText>{error}</ErrorText>}
+        {by && !b && !error && <Loading />}
+        {b && (
+          <>
+            <p className="text-[12px] text-muted-foreground">
+              Each group is another chance of a lucky difference, so these are corrected for {b.corrected_for} comparisons and need more visitors to be safe to stop. Use them to learn where the change works; the winner is decided on everyone.
+            </p>
+            {b.segments.length === 0 && <p className="text-[12px] text-muted-foreground">No visitors yet.</p>}
+            {b.segments.map((sg) => (
+              <div key={sg.key} className="space-y-1">
+                <div className="font-medium">{segmentLabel(by, sg.key)}</div>
+                <GoalTable goal={b.goal} arms={sg.arms} comparisons={sg.comparisons ?? []} control={control} names={names} />
+              </div>
+            ))}
+          </>
+        )}
+      </div>
+    </Card>
+  );
+}
+
+function segmentLabel(by: string, key: string): string {
+  if (key === "unknown") return by === "visitor" ? "Unknown (no visit recorded)" : "Unknown";
+  if (key === "other") return "Everything else";
+  if (by === "visitor" || by === "device") return key.charAt(0).toUpperCase() + key.slice(1);
+  if (by === "source" && key === "direct") return "Direct";
+  return key;
+}
+

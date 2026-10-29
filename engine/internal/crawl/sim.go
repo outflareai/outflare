@@ -34,6 +34,12 @@ var simPages = map[string]struct {
 		`<a href="/contact">Contact us</a> <a href="mailto:jo@{host}">Email Jo</a></body></html>`, "text/html"},
 	"/links": {200, `<html lang="en"><head><title>Hiking pricing links</title></head><body><h1>Hiking pricing</h1>` +
 		`<a href="https://tools.example/old-tool">Old tool</a> <a href="/contact">Contact us</a></body></html>`, "text/html"},
+	// For the news watch: an article whose byline is only in its JSON-LD.
+	"/news/northpeak-seed": {200, `<html lang="en"><head><title>Northpeak raises a seed round</title>` +
+		`<meta property="article:published_time" content="2026-10-27T09:00:00Z">` +
+		`<script type="application/ld+json">{"@context":"https://schema.org","@type":"NewsArticle","headline":"Northpeak raises a seed round",` +
+		`"author":[{"@type":"Person","name":"Sam Okafor"}],"datePublished":"2026-10-27T09:00:00Z"}</script></head>` +
+		`<body><h1>Northpeak raises a seed round</h1><p>The proxy firm said...</p></body></html>`, "text/html"},
 	"/contact": {200, `<html><head><title>Contact</title></head><body><a href="mailto:editor@{host}">Editor</a> <a href="mailto:someone@elsewhere.example">Elsewhere</a></body></html>`, "text/html"},
 }
 

@@ -51,7 +51,7 @@ The check runs while you wait, and answers `409 verification_failed` with the pr
 
 `POST .../seo-sites/{site}/crawls` queues a crawl (`202`). It reads robots.txt, then the sitemaps robots.txt lists (or `/sitemap.xml`), then the start page, and follows links breadth first until nothing is left (`done`) or `max_pages` were read (`limit`). Sitemaps may be gzipped, sitemap indexes or plain text; up to ten sitemap files are read. A crawl queues at most three times its page limit of URLs.
 
-One crawl per site runs at a time (`409 crawl_running`). Follow it with `GET .../crawls/{crawl}`, and stop it with `POST .../crawls/{crawl}/stop`. A site with `schedule: daily` or `weekly` is crawled that often by itself.
+One crawl per site runs at a time (`409 crawl_running`). Follow it with `GET .../crawls/{crawl}`, and stop it with `POST .../crawls/{crawl}/stop`. A site with `schedule: daily` or `weekly` is crawled that often by itself. A scheduled crawl that fails (the site down, robots.txt unreachable, an error of Outflare's) is tried again soon, at any hour, rather than at the next scheduled time: after 15 minutes, then 1 and 2 hours, then every 4 hours, until one works.
 
 ### Crawl settings
 

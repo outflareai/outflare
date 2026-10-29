@@ -167,6 +167,28 @@ function PartnerList({ ws, program, canManage }: { ws: string; program: PartnerP
     load();
   }
 
+  async function postback(p: Partner) {
+    const { data } = await api.GET("/v1/workspaces/{ws}/partners/{id}/postbacks", { params: { path: { ws, id: p.id } } });
+    const sends = data?.data ?? [];
+    const last = sends.slice(0, 5).map((s) => `${ago(s.created_at)}: ${s.status}${s.http_status ? ` (${s.http_status})` : ""}${s.error ? `, ${s.error}` : ""}`);
+    const r = await ask({
+      title: "Postback URL",
+      body: (
+        <span className="space-y-2">
+          <span className="block">The partner's own tracker, called once for each conversion credited to them and again if it's refunded. Placeholders: {"{sub_id}"} (the sub on their link, usually their click id), {"{click_id}"}, {"{conversion_id}"}, {"{type}"}, {"{amount}"}, {"{currency}"}, {"{commission}"}, {"{status}"} and more (see the docs). Partners can set it on the portal too. Empty turns it off.</span>
+          {last.length > 0 && <span className="block text-muted-foreground">Recent: {last.join(" · ")}</span>}
+        </span>
+      ),
+      input: { label: "https address", value: p.postback_url, placeholder: "https://tracker.example/postback?clickid={sub_id}&payout={commission}", maxLength: 2000, optional: true },
+      choices: [{ label: "Cancel", value: "cancel", variant: "ghost" }, { label: "Save", value: "ok" }],
+    });
+    if (r?.choice !== "ok") return;
+    const { error } = await api.PATCH("/v1/workspaces/{ws}/partners/{id}", { params: { path: { ws, id: p.id } }, body: { postback_url: r.value.trim() } });
+    if (error) return toast(errorMessage(error), "error");
+    toast(r.value.trim() ? "Postback URL saved." : "Postbacks turned off.");
+    load();
+  }
+
   async function viewAs(p: Partner) {
     const { data, error } = await api.POST("/v1/workspaces/{ws}/partners/{id}/impersonate", { params: { path: { ws, id: p.id } } });
     if (error || !data) return toast(errorMessage(error), "error");
@@ -204,6 +226,7 @@ function PartnerList({ ws, program, canManage }: { ws: string; program: PartnerP
               { label: "Add promo code", onClick: () => addCode(p) },
               { label: "Log a fee", onClick: () => ledger(p, "fees") },
               { label: "Correct balance", onClick: () => ledger(p, "adjustments") },
+              { label: "Postback URL", onClick: () => postback(p) },
               { label: "View as partner", onClick: () => viewAs(p) },
             ]} />
           )}
@@ -401,6 +424,20 @@ function Payouts({ ws, program, canManage }: { ws: string; program: PartnerProgr
     toast(n ? `${plural(n, "payout")} due. Pay them from your own account, then mark each paid.` : `Nobody's balance has reached the ${money(program.min_payout_cents, program.currency)} minimum yet.`);
     load();
   }
+  // download saves the due payouts, with each partner's payout details, as
+  // CSV for paying them from your own account or a payout tool.
+  async function download() {
+    const { data, error, response } = await api.GET("/v1/workspaces/{ws}/partner-payouts/export", {
+      params: { path: { ws }, query: { program: program.id, status: "due" } }, parseAs: "text",
+    });
+    if (error || typeof data !== "string") return toast(errorMessage(error), "error");
+    const url = URL.createObjectURL(new Blob([data], { type: response.headers.get("Content-Type") ?? "text/csv" }));
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `${program.slug}-due-payouts.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }
   async function paid(o: PartnerPayout) {
     const r = await ask({ title: `Mark ${money(o.amount_cents, o.currency)} paid`, body: "Only once you've paid it. The reference is the payment's id, such as a PayPal or Wise transfer id.", input: { label: "Reference", maxLength: 200, optional: true }, choices: [{ label: "Cancel", value: "cancel", variant: "ghost" }, { label: "Mark paid", value: "ok" }] });
     if (r?.choice !== "ok") return;
@@ -437,7 +474,12 @@ function Payouts({ ws, program, canManage }: { ws: string; program: PartnerProgr
         data={list}
         rowId={(o) => o.id}
         searchPlaceholder="Search payouts"
-        toolbar={canManage && <Button onClick={makeDue}>Make due payouts</Button>}
+        toolbar={canManage && (
+          <span className="flex gap-2">
+            <Button onClick={makeDue}>Make due payouts</Button>
+            <Button variant="ghost" onClick={download}>Download CSV</Button>
+          </span>
+        )}
         empty="No payouts yet."
       />
     </div>

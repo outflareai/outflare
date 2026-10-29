@@ -44,6 +44,10 @@ type Page struct {
 	ViewportMissing bool
 	// OGTitle and OGImage are the Open Graph tags link previews use.
 	OGTitle, OGImage string
+	// ArticleAuthor and ArticlePublished come from the page's JSON-LD
+	// article (Article, NewsArticle, BlogPosting...): its first author's
+	// name and when it was published, as written.
+	ArticleAuthor, ArticlePublished string
 	// InsecureResources counts what a https page loads over plain http:
 	// scripts, styles, icons, images, media and frames.
 	InsecureResources int
@@ -133,6 +137,9 @@ func ParsePage(base *url.URL, body []byte) Page {
 							schemaSn[t] = true
 							p.SchemaTypes = append(p.SchemaTypes, t)
 						}
+					}
+					if p.ArticleAuthor == "" && p.ArticlePublished == "" {
+						p.ArticleAuthor, p.ArticlePublished = articleInfo(jsonLD.String())
 					}
 					jsonLD = nil
 				}
@@ -347,6 +354,73 @@ func RobotsDirectives(v string) (noindex, nofollow bool) {
 
 // schemaTypes lists the @type values in a JSON-LD block, including those
 // in @graph and nested objects.
+// articleTypes are the schema.org types of an article.
+var articleTypes = map[string]bool{"Article": true, "NewsArticle": true, "BlogPosting": true, "ReportageNewsArticle": true,
+	"AnalysisNewsArticle": true, "OpinionNewsArticle": true, "TechArticle": true, "ScholarlyArticle": true, "Report": true}
+
+// articleInfo is the first article's first author's name and its
+// datePublished in a JSON-LD block, or "".
+func articleInfo(raw string) (author, published string) {
+	var v any
+	if json.Unmarshal([]byte(strings.TrimSpace(raw)), &v) != nil {
+		return "", ""
+	}
+	isArticle := func(m map[string]any) bool {
+		switch ty := m["@type"].(type) {
+		case string:
+			return articleTypes[ty]
+		case []any:
+			for _, e := range ty {
+				if s, ok := e.(string); ok && articleTypes[s] {
+					return true
+				}
+			}
+		}
+		return false
+	}
+	name := func(a any) string {
+		if l, ok := a.([]any); ok && len(l) > 0 {
+			a = l[0]
+		}
+		switch t := a.(type) {
+		case string:
+			return t
+		case map[string]any:
+			if n, ok := t["name"].(string); ok {
+				return n
+			}
+		}
+		return ""
+	}
+	var walk func(any, int) bool
+	walk = func(v any, depth int) bool {
+		if depth > 6 {
+			return false
+		}
+		switch t := v.(type) {
+		case []any:
+			for _, e := range t {
+				if walk(e, depth+1) {
+					return true
+				}
+			}
+		case map[string]any:
+			if isArticle(t) {
+				author = clip(squash(name(t["author"])), 200)
+				published, _ = t["datePublished"].(string)
+				published = clip(strings.TrimSpace(published), 40)
+				return true
+			}
+			if g, ok := t["@graph"]; ok {
+				return walk(g, depth+1)
+			}
+		}
+		return false
+	}
+	walk(v, 0)
+	return author, published
+}
+
 func schemaTypes(raw string) []string {
 	var v any
 	if json.Unmarshal([]byte(strings.TrimSpace(raw)), &v) != nil {

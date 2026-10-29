@@ -26,7 +26,9 @@ import (
 	"github.com/outflareai/outflare/engine/internal/analyticsync"
 	"github.com/outflareai/outflare/engine/internal/connectors"
 	"github.com/outflareai/outflare/engine/internal/jobs"
+	"github.com/outflareai/outflare/engine/internal/metrics"
 	"github.com/outflareai/outflare/engine/internal/outcomes"
+	"github.com/outflareai/outflare/engine/internal/retry"
 	"github.com/outflareai/outflare/engine/internal/track"
 	"github.com/outflareai/outflare/engine/internal/usagelimits"
 )
@@ -325,6 +327,9 @@ type payload struct {
 	// Retry also reads again the domains whose last read failed, after
 	// settings changed (a raised budget, say).
 	Retry bool `json:"retry,omitempty"`
+	// DeadPages only reads again who links to competitors' dead pages
+	// whose weekly read failed, and nothing else.
+	DeadPages bool `json:"dead_pages,omitempty"`
 }
 
 // Register adds the job handler.
@@ -335,7 +340,7 @@ func (s *Syncer) Run(ctx context.Context) {
 	t := time.NewTicker(time.Hour)
 	defer t.Stop()
 	for {
-		if err := s.tick(ctx); err != nil && ctx.Err() == nil {
+		if err := s.QueueDue(ctx); err != nil && ctx.Err() == nil {
 			s.Log.Error("seo: schedule snapshots", "err", err)
 		}
 		select {
@@ -358,7 +363,9 @@ func (s *Syncer) readers() []string {
 	return ids
 }
 
-func (s *Syncer) tick(ctx context.Context) error {
+// QueueDue queues a sync of each connection that is due, or whose last
+// run failed and is due a retry (retry.After).
+func (s *Syncer) QueueDue(ctx context.Context) error {
 	ids := s.readers()
 	if len(ids) == 0 {
 		return nil
@@ -395,7 +402,7 @@ func (s *Syncer) tick(ctx context.Context) error {
 }
 
 // tickNew reads, within the hour, a domain a connection follows but has
-// never read (a brand's website added since its weekly snapshot), so new
+// never read, and soon again one whose last read failed (a brand's website added since its weekly snapshot), so new
 // websites don't wait a week. That includes a connection that has never
 // read anything because it had no domains when this week's snapshot ran:
 // the weekly job's key is already used for the week.
@@ -437,6 +444,36 @@ func (s *Syncer) tickNew(ctx context.Context, ids []string) error {
 		}
 		if unread {
 			if _, err := enqueue(ctx, s.Pool, i.WorkspaceID, payload{Integration: id, NewOnly: true}, fmt.Sprintf("%s:new:%d", id, slot)); err != nil {
+				return err
+			}
+		}
+		// A domain whose snapshot failed is read again soon (retry.After),
+		// not at next week's snapshot; each retry is a job of its own.
+		var failedAt int64
+		if err := s.Pool.QueryRow(ctx, `SELECT COALESCE(max(extract(epoch FROM y.last_run_at))::bigint, 0) FROM seo_syncs y
+			WHERE y.integration_id = $1 AND y.host = ANY($2) AND y.failures > 0
+			  AND y.last_run_at < now() - `+retry.SQL("y.failures"), id, domains).Scan(&failedAt); err != nil {
+			return err
+		}
+		if failedAt > 0 {
+			if _, err := enqueue(ctx, s.Pool, i.WorkspaceID, payload{Integration: id, NewOnly: true, Retry: true}, fmt.Sprintf("%s:failed:%d", id, failedAt)); err != nil {
+				return err
+			}
+		}
+		// So is a competitor's dead page whose weekly read of who links to
+		// it failed and that no read has got since, while it is still
+		// fresh (ReadDeadPages reads pages gone in the last 8 days).
+		var deadFailedAt int64
+		if err := s.Pool.QueryRow(ctx, `SELECT COALESCE(max(extract(epoch FROM t.at))::bigint, 0) FROM (
+				SELECT x.target, count(*) AS n, max(x.created_at) AS at FROM link_reads x
+				WHERE x.integration_id = $1 AND x.reason = 'dead_page' AND x.status = 'failed' AND x.created_at > now() - interval '8 days'
+				  AND NOT EXISTS (SELECT 1 FROM link_reads d WHERE d.workspace_id = x.workspace_id AND d.target = x.target AND d.scope = 'page' AND d.status = 'done')
+				GROUP BY x.target) t
+			WHERE t.at < now() - `+retry.SQL("t.n"), id).Scan(&deadFailedAt); err != nil {
+			return err
+		}
+		if deadFailedAt > 0 {
+			if _, err := enqueue(ctx, s.Pool, i.WorkspaceID, payload{Integration: id, DeadPages: true}, fmt.Sprintf("%s:dead_pages:%d", id, deadFailedAt)); err != nil {
 				return err
 			}
 		}
@@ -484,6 +521,9 @@ func (s *Syncer) job(ctx context.Context, job jobs.Job) error {
 	var p payload
 	if err := json.Unmarshal(job.Payload, &p); err != nil || job.WorkspaceID == nil {
 		return nil
+	}
+	if p.DeadPages {
+		return s.retryDeadPages(ctx, *job.WorkspaceID, p.Integration)
 	}
 	res, err := s.sync(ctx, *job.WorkspaceID, p.Integration, p.NewOnly, p.Retry)
 	s.report(ctx, *job.WorkspaceID, p.Integration, res, err)
@@ -751,17 +791,24 @@ func (s *Syncer) store(ctx context.Context, ws string, o *connectors.Opened, hos
 }
 
 func (s *Syncer) finish(ctx context.Context, ws, id, host string, cost float64, runErr error) {
-	var msg *string
+	var msg, code *string
+	outcome := "success"
 	if runErr != nil {
-		m := runErr.Error()
-		msg = &m
+		m, c := runErr.Error(), "connector_"+connectors.KindOf(runErr)
+		var be *BudgetError
+		if errors.As(runErr, &be) {
+			c = "budget_reached"
+		}
+		msg, code, outcome = &m, &c, c
 	}
+	metrics.SyncRun("seo", outcome)
 	_, err := s.Pool.Exec(ctx, `
-		INSERT INTO seo_syncs (integration_id, host, workspace_id, last_run_at, last_ok_at, last_error, last_cost)
-		VALUES ($1, $2, $3, now(), CASE WHEN $4::text IS NULL THEN now() END, $4, $5)
+		INSERT INTO seo_syncs (integration_id, host, workspace_id, last_run_at, last_ok_at, last_error, last_cost, failures, last_error_code)
+		VALUES ($1, $2, $3, now(), CASE WHEN $4::text IS NULL THEN now() END, $4, $5, CASE WHEN $4::text IS NULL THEN 0 ELSE 1 END, $6)
 		ON CONFLICT (integration_id, host) DO UPDATE SET last_run_at = now(),
-			last_ok_at = COALESCE(EXCLUDED.last_ok_at, seo_syncs.last_ok_at), last_error = $4, last_cost = $5`,
-		id, host, ws, msg, cost)
+			last_ok_at = COALESCE(EXCLUDED.last_ok_at, seo_syncs.last_ok_at), last_error = $4, last_cost = $5, last_error_code = $6,
+			failures = CASE WHEN $4::text IS NULL THEN 0 ELSE seo_syncs.failures + 1 END`,
+		id, host, ws, msg, cost, code)
 	if err != nil {
 		s.Log.Warn("seo: record snapshot", "integration", id, "host", host, "err", err)
 	}

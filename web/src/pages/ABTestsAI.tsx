@@ -273,3 +273,47 @@ export function DayChart({ days, control, goal }: { days: NonNullable<ABTestResu
     </div>
   );
 }
+
+// LiftChart shows each version's lift over the control, cumulative, day by
+// day: whether a lead is steady or still settling.
+export function LiftChart({ days, control, goal }: { days: NonNullable<ABTestResults["result"]["goals"][number]["days"]>; control: string; goal: ABTestGoal }) {
+  if (days.length < 2) return null;
+  const W = 560, H = 160, pad = { l: 40, r: 8, t: 8, b: 20 };
+  const mean = measured(goal);
+  const value = (a?: { visitors: number; conversions: number; mean?: number }) => (!a ? 0 : mean ? a.mean ?? 0 : a.visitors ? a.conversions / a.visitors : 0);
+  const variants = days[days.length - 1].arms.map((a) => a.variant);
+  const ci = variants.indexOf(control);
+  const lift = (d: (typeof days)[number], vi: number) => {
+    const c = value(d.arms[ci]);
+    return c > 0 ? value(d.arms[vi]) / c - 1 : null;
+  };
+  const all = days.flatMap((d) => variants.map((_, vi) => (vi === ci ? 0 : lift(d, vi) ?? 0)));
+  const top = Math.max(0.05, ...all) * 1.1, bottom = Math.min(-0.05, ...all) * 1.1;
+  const x = (i: number) => pad.l + (i / (days.length - 1)) * (W - pad.l - pad.r);
+  const y = (v: number) => pad.t + ((top - v) / (top - bottom)) * (H - pad.t - pad.b);
+  const pctText = (v: number) => `${v >= 0 ? "+" : "−"}${Math.abs(Math.round(v * 100))}%`;
+  return (
+    <div className="space-y-1">
+      <svg viewBox={`0 0 ${W} ${H}`} className="w-full" role="img" aria-label="Lift over the control by day, cumulative">
+        {[top, 0, bottom].map((v) => (
+          <g key={v} className="text-muted-foreground">
+            <line x1={pad.l} x2={W - pad.r} y1={y(v)} y2={y(v)} stroke="currentColor" strokeOpacity={v === 0 ? 0.5 : 0.15} strokeDasharray={v === 0 ? "4 3" : undefined} />
+            <text x={pad.l - 4} y={y(v) + 3} textAnchor="end" fontSize="9" fill="currentColor">{v === 0 ? control : pctText(v)}</text>
+          </g>
+        ))}
+        <text x={pad.l} y={H - 4} fontSize="9" className="text-muted-foreground" fill="currentColor">{days[0].date}</text>
+        <text x={W - pad.r} y={H - 4} fontSize="9" textAnchor="end" className="text-muted-foreground" fill="currentColor">{days[days.length - 1].date}</text>
+        {variants.map((v, vi) =>
+          vi === ci ? null : (
+            <polyline key={v} className={lineColors[vi % lineColors.length]} fill="none" stroke="currentColor" strokeWidth={2}
+              points={days.flatMap((d, i) => { const l = lift(d, vi); return l === null ? [] : [`${x(i)},${y(l)}`]; }).join(" ")} />
+          ),
+        )}
+      </svg>
+      <div className="flex flex-wrap gap-3 text-[12px]">
+        {variants.map((v, vi) => (vi === ci ? null : <span key={v} className={lineColors[vi % lineColors.length]}>— <span className="text-foreground font-mono">{v}</span></span>))}
+      </div>
+    </div>
+  );
+}
+

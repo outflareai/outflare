@@ -299,8 +299,9 @@ var Follows = []Ref{
 	{"journey_runs", "record_id"}, {"payment_subscriptions", "record_id"}, {"seo_competitors", "record_id"},
 	{"site_sessions", "record_id"}, {"site_visitors", "record_id"}, {"site_visitors", "account_id"},
 	{"ad_conversion_sends", "record_id"}, {"attribution_conversions", "record_id"}, {"link_prospects", "record_id"},
-	{"rule_firings", "record_id"}, {"coverage", "record_id"},
+	{"rule_firings", "record_id"}, {"coverage", "record_id"}, {"news_article_authors", "record_id"},
 	{"link_prospect_contacts", "record_id"},
+	{"link_pitches", "record_id"},
 	{"partner_memberships", "record_id"}, {"partner_referrals", "record_id"}, {"partner_conversions", "record_id"},
 	{"partner_rewards", "recipient_id"}, {"partner_sign_in_links", "record_id"}, {"partner_sessions", "record_id"},
 }

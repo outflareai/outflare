@@ -56,26 +56,29 @@ type partnerStats struct {
 }
 
 type partnerView struct {
-	ID             string             `json:"id"`
-	ProgramID      string             `json:"program_id"`
-	Program        string             `json:"program"`
-	RecordID       string             `json:"record_id"`
-	Name           string             `json:"name"`
-	Email          string             `json:"email"`
-	Code           string             `json:"code"`
-	Status         string             `json:"status"`
-	GroupID        *string            `json:"group_id"`
-	CampaignID     *string            `json:"campaign_id"`
-	Link           string             `json:"link"`
-	CampaignLink   string             `json:"campaign_link"`
-	PromoCodes     []partnerPromoCode `json:"promo_codes"`
-	PayoutMethod   string             `json:"payout_method"`
-	Note           string             `json:"note"`
-	Source         string             `json:"source"`
-	Currency       string             `json:"currency"`
-	Stats          partnerStats       `json:"stats"`
-	CreatedAt      time.Time          `json:"created_at"`
-	UpdatedAt      time.Time          `json:"updated_at"`
+	ID           string             `json:"id"`
+	ProgramID    string             `json:"program_id"`
+	Program      string             `json:"program"`
+	RecordID     string             `json:"record_id"`
+	Name         string             `json:"name"`
+	Email        string             `json:"email"`
+	Code         string             `json:"code"`
+	Status       string             `json:"status"`
+	GroupID      *string            `json:"group_id"`
+	CampaignID   *string            `json:"campaign_id"`
+	Link         string             `json:"link"`
+	CampaignLink string             `json:"campaign_link"`
+	PromoCodes   []partnerPromoCode `json:"promo_codes"`
+	PayoutMethod string             `json:"payout_method"`
+	// PostbackURL is the partner's own tracker, called on each conversion
+	// credited to them ({placeholders} filled in); "" for none.
+	PostbackURL    string       `json:"postback_url"`
+	Note           string       `json:"note"`
+	Source         string       `json:"source"`
+	Currency       string       `json:"currency"`
+	Stats          partnerStats `json:"stats"`
+	CreatedAt      time.Time    `json:"created_at"`
+	UpdatedAt      time.Time    `json:"updated_at"`
 	landing        string
 	payoutSealed   []byte
 	campaignSlug   string
@@ -90,7 +93,7 @@ const partnerSelect = `
 	SELECT m.id::text, m.program_id::text, p.slug, m.record_id::text, COALESCE(r.name, ''),
 	       COALESCE((SELECT i.value FROM record_identities i WHERE i.record_id = m.record_id AND i.namespace = 'email' AND i.valid_to IS NULL
 	                 ORDER BY i.verified DESC, i.valid_from LIMIT 1), ''),
-	       m.code, m.status, m.group_id::text, m.campaign_id::text, m.payout_method, m.note, m.source, p.currency, p.landing_url,
+	       m.code, m.status, m.group_id::text, m.campaign_id::text, m.payout_method, m.postback_url, m.note, m.source, p.currency, p.landing_url,
 	       COALESCE(c.slug, ''), COALESCE(c.code, ''), COALESCE(c.source, ''), COALESCE(c.medium, ''),
 	       COALESCE((SELECT json_agg(json_build_object('code', pc.code, 'coupon', pc.coupon, 'status', pc.sync_status, 'error', pc.sync_error)
 	                 ORDER BY pc.created_at) FROM partner_promo_codes pc WHERE pc.membership_id = m.id), '[]'),
@@ -119,7 +122,7 @@ func scanPartner(row pgx.Row) (partnerView, error) {
 	var v partnerView
 	st := &v.Stats
 	err := row.Scan(&v.ID, &v.ProgramID, &v.Program, &v.RecordID, &v.Name, &v.Email, &v.Code, &v.Status, &v.GroupID, &v.CampaignID,
-		&v.payoutSealed, &v.Note, &v.Source, &v.Currency, &v.landing, &v.campaignSlug, &v.campaignCode, &v.campaignSrc, &v.campaignMedium,
+		&v.payoutSealed, &v.PostbackURL, &v.Note, &v.Source, &v.Currency, &v.landing, &v.campaignSlug, &v.campaignCode, &v.campaignSrc, &v.campaignMedium,
 		&v.PromoCodes, &st.Clicks, &st.Referrals, &st.Customers, &st.SalesCents, &st.PendingCents, &st.ApprovedCents, &st.PaidCents,
 		&st.BalanceCents, &st.PendingActions, &v.CreatedAt, &v.UpdatedAt)
 	return v, err
@@ -274,6 +277,7 @@ type partnerInput struct {
 	Status       *string `json:"status"`
 	GroupID      *string `json:"group_id"`
 	PayoutMethod *string `json:"payout_method"`
+	PostbackURL  *string `json:"postback_url"`
 	Note         *string `json:"note"`
 }
 
@@ -287,6 +291,8 @@ func (in partnerInput) check() error {
 		return errInvalid("payout_method is at most 500 characters; never store bank details here")
 	case in.Note != nil && len(*in.Note) > 2000:
 		return errInvalid("note is at most 2,000 characters")
+	case in.PostbackURL != nil && checkPostbackURL(*in.PostbackURL) != nil:
+		return checkPostbackURL(*in.PostbackURL)
 	case in.Name != nil && len(*in.Name) > 200:
 		return errInvalid("name is at most 200 characters")
 	}
@@ -560,8 +566,8 @@ func (s *Server) updatePartner(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		if _, err := tx.Exec(ctx, `UPDATE partner_memberships SET status = COALESCE($3, status), group_id = $4,
-			note = COALESCE($5, note), updated_at = now()
-			WHERE workspace_id = $1 AND id = $2`, a.WorkspaceID, cur.ID, in.Status, group, in.Note); err != nil {
+			note = COALESCE($5, note), postback_url = COALESCE($6, postback_url), updated_at = now()
+			WHERE workspace_id = $1 AND id = $2`, a.WorkspaceID, cur.ID, in.Status, group, in.Note, trimPtr(in.PostbackURL)); err != nil {
 			return err
 		}
 		data := map[string]any{"program_id": cur.ProgramID, "record_id": cur.RecordID, "status": coalesce(in.Status, cur.Status),

@@ -190,6 +190,7 @@ func (s *Server) portalBase(ctx context.Context, program string, subdomain *stri
 // ---- Admin: the portal's settings, assets and impersonation ----
 
 func (s *Server) routesPartnerPortal(mux *http.ServeMux) {
+	s.routesPartnerPostbacks(mux)
 	s.routesPartnerImports(mux)
 	read, manage := auth.ScopePartnersRead, auth.ScopePartnersManage
 	mux.HandleFunc("PUT /v1/workspaces/{ws}/partner-programs/{id}/portal", s.inWorkspace(manage, s.setPartnerPortal))
@@ -982,6 +983,7 @@ type portalMeView struct {
 	CampaignLink   string           `json:"campaign_link"`
 	PromoCodes     []string         `json:"promo_codes"`
 	PayoutMethod   string           `json:"payout_method"`
+	PostbackURL    string           `json:"postback_url"`
 	Notify         map[string]bool  `json:"notify"`
 	Currency       string           `json:"currency"`
 	Stats          partnerStats     `json:"stats"`
@@ -1001,7 +1003,7 @@ func (s *Server) portalMe(w http.ResponseWriter, r *http.Request, c *portalCalle
 	}
 	_ = json.Unmarshal(raw, &notify)
 	writeJSON(w, http.StatusOK, portalMeView{Name: v.Name, Email: v.Email, Code: v.Code, Status: v.Status, Link: v.Link, CampaignLink: v.CampaignLink,
-		PromoCodes: promoCodeNames(v.PromoCodes), PayoutMethod: v.PayoutMethod, Notify: notify, Currency: v.Currency, Stats: v.Stats,
+		PromoCodes: promoCodeNames(v.PromoCodes), PayoutMethod: v.PayoutMethod, PostbackURL: v.PostbackURL, Notify: notify, Currency: v.Currency, Stats: v.Stats,
 		MinPayoutCents: c.program.minPayout, HoldDays: c.program.holdDays, ReadOnly: c.readOnly, Program: c.program.public()})
 }
 
@@ -1024,6 +1026,7 @@ func (s *Server) portalUpdateMe(w http.ResponseWriter, r *http.Request, c *porta
 	}
 	var in struct {
 		PayoutMethod *string         `json:"payout_method"`
+		PostbackURL  *string         `json:"postback_url"`
 		Notify       map[string]bool `json:"notify"`
 	}
 	if !decode(w, r, &in) {
@@ -1032,6 +1035,12 @@ func (s *Server) portalUpdateMe(w http.ResponseWriter, r *http.Request, c *porta
 	if in.PayoutMethod != nil && len(*in.PayoutMethod) > 500 {
 		writeError(w, r, http.StatusBadRequest, "invalid_request", "payout_method is at most 500 characters; never put bank details here")
 		return
+	}
+	if in.PostbackURL != nil {
+		if err := checkPostbackURL(*in.PostbackURL); err != nil {
+			writeError(w, r, http.StatusBadRequest, "invalid_request", err.Error())
+			return
+		}
 	}
 	for k := range in.Notify {
 		if k != "conversions" && k != "payouts" {
@@ -1047,6 +1056,12 @@ func (s *Server) portalUpdateMe(w http.ResponseWriter, r *http.Request, c *porta
 				return err
 			}
 		}
+		if in.PostbackURL != nil {
+			if _, err := tx.Exec(ctx, `UPDATE partner_memberships SET postback_url = $2, updated_at = now() WHERE id = $1`,
+				c.partner.ID, strings.TrimSpace(*in.PostbackURL)); err != nil {
+				return err
+			}
+		}
 		if in.Notify != nil {
 			raw, _ := json.Marshal(in.Notify)
 			if _, err := tx.Exec(ctx, `UPDATE partner_memberships SET notify = notify || $2::jsonb, updated_at = now() WHERE id = $1`, c.partner.ID, raw); err != nil {
@@ -1054,7 +1069,7 @@ func (s *Server) portalUpdateMe(w http.ResponseWriter, r *http.Request, c *porta
 			}
 		}
 		return partnerRecord(ctx, tx, nil, c.program.ws, "partner.portal_updated", "partner", c.partner.ID,
-			map[string]any{"program_id": c.program.id, "payout_method": in.PayoutMethod != nil, "notify": in.Notify != nil})
+			map[string]any{"program_id": c.program.id, "payout_method": in.PayoutMethod != nil, "postback_url": in.PostbackURL != nil, "notify": in.Notify != nil})
 	})
 	if err != nil {
 		s.internal(w, r, err)

@@ -6,6 +6,23 @@ Each pull request that changes what Outflare does adds a change note in [changes
 
 ## [Unreleased]
 
+## [0.25.0] - 2026-10-29
+
+### Added
+
+- Journalists: the news watch now reads each new article's byline, finds the author's address at the outlet with the free email finder, and keeps them as a person record with what they wrote. Make a media list of the journalists who cover a topic as a smart list that keeps itself up to date.
+- Pitch link prospects from Outflare: your own AI writes an opener for each page, you approve it, and the contact goes into one of your sequences. Replies are read for you, agreed links are checked until they're live, and results show live links per pitch.
+
+### Changed
+
+- Partners: affiliates can get each conversion sent to their own tracker with a postback URL (set on the portal or by your team), and due payouts download as CSV with each partner's payout details for your payout tool.
+- A/B tests: break results down by device, source, country, or new and returning visitors, corrected so a lucky group doesn't mislead, and see each version's lift over the original day by day.
+- Analytics, Search Console, conversions, ads and SEO snapshot syncs, weekly dead-page link reads, scheduled crawls and AI visibility runs that fail are now tried again within minutes to hours (15 minutes, then 1, 2 and every 4 hours), instead of at their next scheduled time.
+
+### Upgrading
+
+- runs migration 0256.
+
 ## [0.24.0] - 2026-10-29
 
 ### Added

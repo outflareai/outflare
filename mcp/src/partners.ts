@@ -162,6 +162,30 @@ export function registerPartnerTools(server: McpServer, gtm: MissionClient, work
   );
 
   server.registerTool(
+    "list_partner_postbacks",
+    {
+      title: "List a partner's postbacks to their tracker",
+      description: "The last 50 calls to the partner's postback URL: queued, sent, or failed with the tracker's answer.",
+      inputSchema: { partner_id: partner },
+      annotations: read,
+    },
+    ({ partner_id }) => call(() => gtm.GET("/v1/workspaces/{ws}/partners/{id}/postbacks", { params: { path: { ws: workspace(), id: partner_id } } })),
+  );
+
+  server.registerTool(
+    "export_partner_payouts",
+    {
+      title: "Export partner payouts as CSV",
+      description:
+        "Due payouts (or paid, canceled, all) as CSV, with each partner's payout details, for paying them from the workspace's own account " +
+        "or a payout tool. Needs partners.manage; the export is recorded in the audit log. Never paste the payout details anywhere public.",
+      inputSchema: { status: z.enum(["due", "paid", "canceled", "all"]).optional(), program: z.string().max(100).optional() },
+      annotations: read,
+    },
+    (query) => call(() => gtm.GET("/v1/workspaces/{ws}/partner-payouts/export", { params: { path: path(), query }, parseAs: "text" })),
+  );
+
+  server.registerTool(
     "list_partner_assets",
     { title: "List a program's assets for partners", description: "Banners, copy and links shown on the portal.", inputSchema: { program }, annotations: read },
     ({ program }) => call(() => gtm.GET("/v1/workspaces/{ws}/partner-programs/{id}/assets", { params: { path: { ws: workspace(), id: program } } })),
@@ -279,6 +303,9 @@ export function registerPartnerTools(server: McpServer, gtm: MissionClient, work
         status: z.enum(["pending", "active", "suspended", "rejected"]).optional(),
         group_id: z.string().optional().describe('A group of the program; "" for none.'),
         payout_method: z.string().max(500).optional(),
+        postback_url: z.string().max(2000).optional().describe(
+          "The partner's own tracker (https), called once per conversion credited to them and per refund, with placeholders such as {sub_id}, {commission}, {status}, {type}, {amount} and {currency}; \"\" turns it off.",
+        ),
         note: z.string().max(2000).optional(),
       },
       annotations: write,

@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import type { LinkBuildingSettings, LinkProspect, LinkRead, SEOSite } from "@outflare/sdk";
+import type { LinkBuildingSettings, LinkPitch, LinkProspect, LinkRead, LinkResultRow, SEOSite } from "@outflare/sdk";
 import { useBrand } from "@/lib/brand";
 import { DataTable } from "@/components/data-table";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -14,11 +14,16 @@ import type { Tab } from "../App";
 // website is pitched at a time. Dead pages and Top pages read who links to
 // competitors' pages from the workspace's own Ahrefs or DataForSEO (paid:
 // the cost is shown and confirmed first), and their linking pages can be
-// added to the list. Pitches are sent from sequences.
+// added to the list. A pitch goes out through one of Outflare's own
+// sequences, with an opener the workspace's AI wrote for the page as the
+// step's {{custom.opener}}; it waits for a person to approve it unless the
+// sequence skips approval. Replies and a daily check of the page move the
+// prospect on to a live link.
 
 type Props = { ws: string; canManage: boolean; go: (tab: Tab, item?: string) => void };
 type Tone = keyof typeof tones;
-type Section = "prospects" | "dead" | "top" | "settings";
+type Section = "prospects" | "pitches" | "results" | "dead" | "top" | "settings";
+type LinkSequence = { sequence_id: string; name: string; status: string; brand_id: string | null; approve_pitches: boolean; uses_opener: boolean; pitches: number };
 type Stage = LinkProspect["stage"];
 type Method = LinkProspect["method"];
 type Show = "open" | "outreach" | "live" | "ended" | "excluded";
@@ -63,6 +68,19 @@ const moves: Partial<Record<Stage, Stage[]>> = {
 const moveLabel: Record<Stage, string> = {
   prospect: "Back to the list", excluded: "Exclude", pitched: "Mark pitched", replied: "Mark replied", agreed: "Mark agreed", live: "Mark live",
   declined: "Mark declined", removed: "Mark link removed",
+};
+type PitchStatus = LinkPitch["status"];
+const pitchLabel: Record<PitchStatus, string> = { writing: "Writing", draft: "To approve", enrolled: "Sent", rejected: "Rejected", failed: "Failed" };
+const pitchTone: Record<PitchStatus, Tone> = { writing: "grey", draft: "amber", enrolled: "green", rejected: "grey", failed: "red" };
+const replyLabel: Record<NonNullable<LinkPitch["reply_kind"]>, string> = {
+  agreed: "Agreed", declined: "Declined", wants_payment: "Asks for payment", wants_content: "Wants content first", other: "Replied",
+};
+const draftReason: Record<string, string> = {
+  no_ai: "Connect your AI model to have it write openers; until then, write one yourself.",
+  ai_unavailable: "Your AI model couldn't be used (its limit may be reached). Write the opener yourself.",
+  ai_failed: "The AI couldn't write an opener for this page. Write it yourself.",
+  site_in_outreach: "Another page on this website is in outreach or cooling down, so it waits for you.",
+  opted_out: "The contact or website is suppressed.",
 };
 const num = (v: number | null | undefined) => (v === null || v === undefined ? "–" : v.toLocaleString(undefined, { maximumFractionDigits: 0 }));
 const cost = (unit: string, v: number) => (unit === "USD" ? `$${v.toFixed(2)}` : `${Math.round(v).toLocaleString()} API units`);
@@ -126,15 +144,19 @@ export function LinkBuilding({ ws, canManage, go }: Props) {
       <Tabs value={section} onValueChange={(v) => setSection(v as Section)} className="max-w-full overflow-x-auto">
         <TabsList className="h-8">
           <TabsTrigger value="prospects" className="px-3 text-[12px]">Prospects</TabsTrigger>
+          <TabsTrigger value="pitches" className="px-3 text-[12px]">Pitches</TabsTrigger>
+          <TabsTrigger value="results" className="px-3 text-[12px]">Results</TabsTrigger>
           <TabsTrigger value="dead" className="px-3 text-[12px]">Competitors' dead pages</TabsTrigger>
           <TabsTrigger value="top" className="px-3 text-[12px]">Most linked pages</TabsTrigger>
           <TabsTrigger value="settings" className="px-3 text-[12px]">Settings</TabsTrigger>
         </TabsList>
       </Tabs>
       {section === "prospects" && <Prospects ws={ws} site={current} canManage={canManage} brand={brand} />}
+      {section === "pitches" && <Pitches ws={ws} canManage={canManage} brand={brand} />}
+      {section === "results" && <Results ws={ws} site={current} brand={brand} />}
       {section === "dead" && <DeadPages ws={ws} site={current} canManage={canManage} brand={brand} go={go} />}
       {section === "top" && <TopPages ws={ws} site={current} canManage={canManage} />}
-      {section === "settings" && <Settings ws={ws} canManage={canManage} />}
+      {section === "settings" && <Settings ws={ws} canManage={canManage} brand={brand} go={go} />}
     </div>
   );
 }
@@ -285,13 +307,13 @@ function Prospects({ ws, site, canManage, brand }: { ws: string; site: SEOSite; 
   const actions = (p: LinkProspect) =>
     canManage && (
       <div className="flex items-center justify-end gap-1">
-        {p.stage === "prospect" && <Button variant="ghost" disabled={busy === p.id} onClick={() => move(p, "pitched")}>Mark pitched</Button>}
+        {p.stage === "prospect" && <Button variant="ghost" disabled={busy === p.id} onClick={() => setOpen(p)}>Pitch</Button>}
         <Menu
           aria={`More for ${p.page_url}`}
           items={[
             { label: "Details", onClick: () => setOpen(p) },
             { label: p.check ? "Check the page again" : "Check the page", onClick: () => checkOne(p) },
-            ...(moves[p.stage] ?? []).filter((s) => !(p.stage === "prospect" && s === "pitched")).map((s) => ({ label: moveLabel[s], onClick: () => move(p, s) })),
+            ...(moves[p.stage] ?? []).map((s) => ({ label: moveLabel[s], onClick: () => move(p, s) })),
             p.stage !== "excluded" && { label: "Exclude", onClick: () => move(p, "excluded") },
             { label: p.target_url ? "Change your page to offer" : "Choose your page to offer", onClick: () => offer(p) },
             { label: "Delete", onClick: () => remove(p), danger: true },
@@ -376,6 +398,7 @@ function Prospects({ ws, site, canManage, brand }: { ws: string; site: SEOSite; 
                 <div className="space-y-0.5">
                   <Badge tone={stageTone[p.stage]} title={p.excluded_reason ? reasonLabel[p.excluded_reason] : undefined}>{stageLabel[p.stage]}</Badge>
                   <div className="text-[11px] text-muted-foreground">{p.excluded_reason ? reasonLabel[p.excluded_reason] : ago(p.stage_changed_at)}</div>
+                  {p.stage === "agreed" && p.overdue_at && <div className="text-[11px] text-amber-600 dark:text-amber-400">Not live yet: nudge them</div>}
                 </div>
               ),
             },
@@ -481,10 +504,214 @@ function ProspectSheet({ ws, prospect: p, canManage, onClose, onChanged }: { ws:
               </ul>
             )}
           </section>
+          <PitchSection ws={ws} prospect={p} canManage={canManage} onChanged={onChanged} />
           {canManage && <Button variant="ghost" onClick={check}>{c ? "Check again" : "Check the page"}</Button>}
         </div>
       </SheetContent>
     </Sheet>
+  );
+}
+
+// PitchSection starts a pitch of a prospect to pitch, or shows its latest.
+function PitchSection({ ws, prospect: p, canManage, onChanged }: { ws: string; prospect: LinkProspect; canManage: boolean; onChanged: () => void }) {
+  const [pitches, setPitches] = useState<LinkPitch[] | null>(null);
+  const [seqs, setSeqs] = useState<LinkSequence[] | null>(null);
+  const [seq, setSeq] = useState("");
+  const emailed = p.contacts.filter((k) => k.email);
+  const [contact, setContact] = useState(emailed[0]?.record_id ?? "");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  useEffect(() => {
+    api.GET("/v1/workspaces/{ws}/link-pitches", { params: { path: { ws }, query: { prospect_id: p.id, limit: 5 } } }).then(({ data, error }) => {
+      if (error || !data) return setError(errorMessage(error));
+      setPitches(data.data);
+    });
+    if (canManage && p.stage === "prospect")
+      api.GET("/v1/workspaces/{ws}/link-building/sequences", { params: { path: { ws } } }).then(({ data, error }) => {
+        if (error || !data) return setError(errorMessage(error));
+        setSeqs(data.data);
+        setSeq(data.data.find((x) => x.uses_opener)?.sequence_id ?? data.data[0]?.sequence_id ?? "");
+      });
+  }, [ws, p.id, p.stage, canManage]);
+  const start = async () => {
+    setBusy(true);
+    const { error } = await api.POST("/v1/workspaces/{ws}/link-prospects/{prospect}/pitches", {
+      params: { path: { ws, prospect: p.id } },
+      body: { sequence_id: seq, ...(contact ? { record_id: contact } : {}) },
+    });
+    setBusy(false);
+    if (error) return setError(errorMessage(error));
+    const s = seqs?.find((x) => x.sequence_id === seq);
+    toast(s?.approve_pitches === false ? "Writing the opener. It goes out once written." : "Writing the opener. Approve it under Pitches.");
+    onChanged();
+  };
+  const latest = pitches?.[0];
+  const open = latest && (latest.status === "writing" || latest.status === "draft");
+  const chosen = seqs?.find((x) => x.sequence_id === seq);
+  return (
+    <section className="space-y-1.5">
+      <h3 className="font-medium">Pitch</h3>
+      {error && <ErrorText>{error}</ErrorText>}
+      {latest && (
+        <p>
+          <Badge tone={pitchTone[latest.status]}>{pitchLabel[latest.status]}</Badge>{" "}
+          to {latest.contact_email ?? latest.contact_name} through {latest.sequence_name}
+          {latest.reply_kind && <span className="text-muted-foreground"> · {replyLabel[latest.reply_kind]}</span>}
+        </p>
+      )}
+      {canManage && p.stage === "prospect" && !open && (
+        emailed.length === 0 ? (
+          <p className="text-muted-foreground">No contact with an email address yet. Check the page to find who to write to.</p>
+        ) : !seqs ? (
+          <Loading />
+        ) : seqs.length === 0 ? (
+          <p className="text-muted-foreground">Make a sequence for link pitches first, with {"{{custom.opener}}"} in its first step.</p>
+        ) : (
+          <div className="space-y-2">
+            <div className="flex flex-wrap gap-2">
+              <select className={field} aria-label="Contact" value={contact} onChange={(e) => setContact(e.target.value)}>
+                {emailed.map((k) => <option key={k.record_id} value={k.record_id}>{k.email}</option>)}
+              </select>
+              <select className={field} aria-label="Sequence" value={seq} onChange={(e) => setSeq(e.target.value)}>
+                {seqs.map((x) => <option key={x.sequence_id} value={x.sequence_id}>{x.name}</option>)}
+              </select>
+            </div>
+            {chosen && !chosen.uses_opener && <p className="text-[12px] text-amber-600 dark:text-amber-400">This sequence doesn't use {"{{custom.opener}}"}, so the AI's opener won't be in the email.</p>}
+            <p className="text-[12px] text-muted-foreground">Your AI writes an opener for this page{chosen?.approve_pitches === false ? "; it goes out as soon as it's written." : " for you to approve."} It never offers payment for a link.</p>
+            <Button disabled={busy || !seq} onClick={start}>Write a pitch</Button>
+          </div>
+        )
+      )}
+    </section>
+  );
+}
+
+function Pitches({ ws, canManage, brand }: { ws: string; canManage: boolean; brand: { brand?: string } }) {
+  const [status, setStatus] = useState<PitchStatus | "">("draft");
+  const [list, setList] = useState<LinkPitch[] | null>(null);
+  const [edits, setEdits] = useState<Record<string, string>>({});
+  const [busy, setBusy] = useState("");
+  const [error, setError] = useState("");
+  const [reload, setReload] = useState(0);
+  useEffect(() => {
+    setList(null);
+    api.GET("/v1/workspaces/{ws}/link-pitches", { params: { path: { ws }, query: { ...brand, ...(status ? { status } : {}), limit: 200 } } }).then(({ data, error }) => {
+      if (error || !data) return setError(errorMessage(error));
+      setList(data.data);
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ws, status, reload, brand.brand]);
+  const approve = async (k: LinkPitch) => {
+    const opener = (edits[k.id] ?? k.opener).trim();
+    if (!opener) return setError("Write an opener first.");
+    if (!(await confirmAction(`Send the pitch to ${k.contact_email ?? k.contact_name}?`, `They are enrolled in ${k.sequence_name}, whose sending limits and checks apply.`, "Send"))) return;
+    setBusy(k.id);
+    const { error } = await api.POST("/v1/workspaces/{ws}/link-pitches/{pitch}/approve", { params: { path: { ws, pitch: k.id } }, body: { opener } });
+    setBusy("");
+    if (error) return setError(errorMessage(error));
+    setError("");
+    toast(`Pitch to ${k.domain} approved.`);
+    setReload((n) => n + 1);
+  };
+  const reject = async (k: LinkPitch) => {
+    setBusy(k.id);
+    const { error } = await api.POST("/v1/workspaces/{ws}/link-pitches/{pitch}/reject", { params: { path: { ws, pitch: k.id } }, body: {} });
+    setBusy("");
+    if (error) return setError(errorMessage(error));
+    setError("");
+    setReload((n) => n + 1);
+  };
+  return (
+    <div className="space-y-4">
+      {error && <ErrorText>{error}</ErrorText>}
+      <select className={field} aria-label="Show" value={status} onChange={(e) => setStatus(e.target.value as PitchStatus | "")}>
+        <option value="draft">To approve</option>
+        <option value="enrolled">Sent</option>
+        <option value="writing">Being written</option>
+        <option value="rejected">Rejected</option>
+        <option value="">All</option>
+      </select>
+      {!list ? (
+        <Loading />
+      ) : list.length === 0 ? (
+        <Empty title={status === "draft" ? "Nothing to approve" : "No pitches"}>Pitch a prospect from its details under Prospects.</Empty>
+      ) : (
+        <ul className="space-y-3">
+          {list.map((k) => (
+            <li key={k.id} className="space-y-2 rounded-md border p-3 text-[13px]">
+              <div className="flex flex-wrap items-center gap-2">
+                <a className="font-medium underline-offset-2 hover:underline" href={k.page_url} target="_blank" rel="noreferrer noopener nofollow">{k.domain}</a>
+                <Badge tone={pitchTone[k.status]}>{pitchLabel[k.status]}</Badge>
+                {k.reply_kind && <Badge tone={k.reply_kind === "agreed" ? "green" : k.reply_kind === "declined" ? "grey" : "amber"}>{replyLabel[k.reply_kind]}</Badge>}
+                <span className="text-[12px] text-muted-foreground">to {k.contact_email ?? k.contact_name} · {k.sequence_name} · {ago(k.updated_at)}</span>
+              </div>
+              <div className="font-mono text-[12px] break-all text-muted-foreground">{path(k.page_url)}{k.target_url && ` → offer ${path(k.target_url)}`}</div>
+              {k.reason && draftReason[k.reason] && <p className="text-[12px] text-muted-foreground">{draftReason[k.reason]}</p>}
+              {k.status === "draft" && canManage ? (
+                <>
+                  <textarea
+                    className={`${field} h-auto min-h-20 w-full py-2`}
+                    aria-label={`Opener for ${k.domain}`}
+                    maxLength={2000}
+                    value={edits[k.id] ?? k.opener}
+                    onChange={(e) => setEdits({ ...edits, [k.id]: e.target.value })}
+                  />
+                  <div className="flex gap-2">
+                    <Button disabled={busy === k.id} onClick={() => approve(k)}>Approve and send</Button>
+                    <Button variant="ghost" disabled={busy === k.id} onClick={() => reject(k)}>Reject</Button>
+                  </div>
+                </>
+              ) : (
+                k.opener && <p className="whitespace-pre-wrap">{k.opener}</p>
+              )}
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
+function Results({ ws, site, brand }: { ws: string; site: SEOSite; brand: { brand?: string } }) {
+  const [days, setDays] = useState(90);
+  const [res, setRes] = useState<{ totals: LinkResultRow; data: LinkResultRow[] } | null>(null);
+  const [error, setError] = useState("");
+  useEffect(() => {
+    setRes(null);
+    api.GET("/v1/workspaces/{ws}/link-prospects/results", { params: { path: { ws }, query: { ...brand, site_id: site.id, days } } }).then(({ data, error }) => {
+      if (error || !data) return setError(errorMessage(error));
+      setRes(data);
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ws, site.id, days, brand.brand]);
+  const pct = (v: number | null) => (v == null ? "–" : `${Math.round(v * 100)}%`);
+  const label = (m: string) => (m === "all" ? "All methods" : (methodLabel[m as Method] ?? m));
+  return (
+    <div className="space-y-4">
+      {error && <ErrorText>{error}</ErrorText>}
+      <div className="flex flex-wrap items-center gap-2">
+        <select className={field} aria-label="Period" value={days} onChange={(e) => setDays(Number(e.target.value))}>
+          {[30, 90, 180, 365].map((d) => <option key={d} value={d}>Found in the last {d} days</option>)}
+        </select>
+        <span className="text-[12px] text-muted-foreground">Cost per live link is in the Outcomes report, by sequence.</span>
+      </div>
+      {!res ? (
+        <Loading />
+      ) : (
+        <DataTable
+          data={[...res.data, res.totals]}
+          rowId={(r) => r.method}
+          empty="No prospects found in this period."
+          columns={[
+            { id: "method", header: "Found by", accessorFn: (r) => r.method, cell: ({ row }) => <span className={row.original.method === "all" ? "font-medium" : ""}>{label(row.original.method)}</span> },
+            ...(["found", "pitched", "replied", "agreed", "live", "declined", "removed"] as const).map((k) => ({
+              id: k, header: k[0].toUpperCase() + k.slice(1), accessorFn: (r: LinkResultRow) => r[k], meta: { align: "right" as const, mono: true },
+            })),
+            { id: "win", header: "Live per pitch", accessorFn: (r) => r.win_rate ?? -1, meta: { align: "right", mono: true }, cell: ({ row }) => pct(row.original.win_rate) },
+          ]}
+        />
+      )}
+    </div>
   );
 }
 
@@ -644,7 +871,7 @@ function TopPages({ ws, site, canManage }: { ws: string; site: SEOSite; canManag
   );
 }
 
-function Settings({ ws, canManage }: { ws: string; canManage: boolean }) {
+function Settings({ ws, canManage, brand, go }: { ws: string; canManage: boolean; brand: { brand?: string }; go: (tab: Tab, item?: string) => void }) {
   const [set, setSet] = useState<LinkBuildingSettings | null>(null);
   const [draft, setDraft] = useState({ cooldown: "60", weekly: true, percent: "10" });
   const [error, setError] = useState("");
@@ -693,6 +920,52 @@ function Settings({ ws, canManage }: { ws: string; canManage: boolean }) {
         </span>
       </label>
       {canManage && <Button type="submit" disabled={busy}>Save</Button>}
+      <PitchSequences ws={ws} canManage={canManage} brand={brand} go={go} />
     </form>
+  );
+}
+
+// PitchSequences turns approval of each sequence's link pitches on or off.
+function PitchSequences({ ws, canManage, brand, go }: { ws: string; canManage: boolean; brand: { brand?: string }; go: (tab: Tab, item?: string) => void }) {
+  const [list, setList] = useState<LinkSequence[] | null>(null);
+  const [error, setError] = useState("");
+  useEffect(() => {
+    api.GET("/v1/workspaces/{ws}/link-building/sequences", { params: { path: { ws }, query: brand } }).then(({ data, error }) => {
+      if (error || !data) return setError(errorMessage(error));
+      setList(data.data);
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ws, brand.brand]);
+  const toggle = async (q: LinkSequence, on: boolean) => {
+    if (!on && !(await confirmAction(`Send ${q.name}'s pitches without approval?`, "Each pitch goes out as soon as your AI writes its opener, without a person reading it first.", "Send without approval"))) return;
+    const { error } = await api.PATCH("/v1/workspaces/{ws}/link-building/sequences/{sequence}", { params: { path: { ws, sequence: q.sequence_id } }, body: { approve_pitches: on } });
+    if (error) return setError(errorMessage(error));
+    setError("");
+    setList((l) => l?.map((x) => (x.sequence_id === q.sequence_id ? { ...x, approve_pitches: on } : x)) ?? null);
+  };
+  return (
+    <section className="space-y-2 border-t pt-4">
+      <h3 className="text-[13px] font-medium">Approving pitches</h3>
+      <p className="text-[12px] text-muted-foreground">Pitches go out through your sequences, with your AI's opener as {"{{custom.opener}}"} in the first step. Each waits for approval unless you turn that off for its sequence.</p>
+      {error && <ErrorText>{error}</ErrorText>}
+      {!list ? (
+        <Loading />
+      ) : list.length === 0 ? (
+        <p className="text-[12px] text-muted-foreground">No sequences yet.</p>
+      ) : (
+        <ul className="space-y-1.5">
+          {list.map((q) => (
+            <li key={q.sequence_id} className="flex flex-wrap items-center gap-2 text-[13px]">
+              <label className="flex items-center gap-2">
+                <input type="checkbox" checked={q.approve_pitches} disabled={!canManage} onChange={(e) => toggle(q, e.target.checked)} />
+                <span>Approve each pitch through</span>
+              </label>
+              <button type="button" className="underline-offset-2 hover:underline" onClick={() => go("sequences", q.sequence_id)}>{q.name}</button>
+              {!q.uses_opener && <span className="text-[12px] text-muted-foreground">(no {"{{custom.opener}}"} in its steps)</span>}
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
   );
 }

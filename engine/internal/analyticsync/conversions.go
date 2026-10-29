@@ -54,24 +54,23 @@ func (s *Syncer) syncConversions(ctx context.Context, o *connectors.Opened, r co
 		out.Rows, out.Days = n, int(yesterday.Sub(from).Hours()/24)+1
 		res.Rows += n
 	}
-	var msg *string
-	if runErr != nil {
-		m := runErr.Error()
-		msg = &m
-	}
+	msg, code := failed(runErr)
 	if events == nil {
 		events = []string{}
 	}
 	_, err = s.Pool.Exec(ctx, `
-		INSERT INTO page_conversion_syncs (integration_id, site, workspace_id, events, oldest_day, newest_day, backfilled_at, last_run_at, last_error)
-		SELECT $1, $2, $3, $4, d.oldest, d.newest, CASE WHEN $5 THEN now() END, now(), $6
+		INSERT INTO page_conversion_syncs (integration_id, site, workspace_id, events, oldest_day, newest_day, backfilled_at, last_run_at, last_error,
+			failures, last_error_code)
+		SELECT $1, $2, $3, $4, d.oldest, d.newest, CASE WHEN $5 THEN now() END, now(), $6, CASE WHEN $6::text IS NULL THEN 0 ELSE 1 END, $7
 		FROM (SELECT min(day) AS oldest, max(day) AS newest FROM page_conversions WHERE integration_id = $1 AND site = $2) d
 		ON CONFLICT (integration_id, site) DO UPDATE SET
 			events = CASE WHEN $5 THEN EXCLUDED.events ELSE page_conversion_syncs.events END,
 			oldest_day = EXCLUDED.oldest_day, newest_day = EXCLUDED.newest_day,
 			backfilled_at = CASE WHEN $5 THEN now() ELSE page_conversion_syncs.backfilled_at END,
-			last_run_at = now(), last_error = EXCLUDED.last_error`,
-		id, site, ws, events, runErr == nil && backfill, msg)
+			last_run_at = now(), last_error = EXCLUDED.last_error, last_error_code = EXCLUDED.last_error_code,
+			failures = CASE WHEN EXCLUDED.last_error IS NULL THEN 0 ELSE page_conversion_syncs.failures + 1 END`,
+		id, site, ws, events, runErr == nil && backfill, msg, code)
+	syncRun("page_conversions", code)
 	if err != nil {
 		return out, dbError{err}
 	}

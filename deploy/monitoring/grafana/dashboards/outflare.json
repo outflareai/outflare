@@ -5234,6 +5234,119 @@
     },
     {
       "type": "row",
+      "title": "Scheduled syncs (analytics, Search Console, ads, SEO)",
+      "id": 122,
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 359
+      },
+      "panels": []
+    },
+    {
+      "type": "timeseries",
+      "title": "Sync runs by outcome",
+      "description": "Scheduled sync runs of connections, by module and outcome. Normal: mostly success. A failed run is tried again soon (15 minutes, then 1, 2 and every 4 hours) instead of after its whole interval. internal: Outflare's own bug; connector_auth or connector_quota: the workspace's key or plan; connector_unavailable: the provider failed; budget_reached: an SEO budget doing its job.",
+      "id": 123,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 360
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (module, outcome) (rate(outflare_sync_runs_total{job=\"$job\"}[1h]))",
+          "legendFormat": "{{module}} {{outcome}}",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps",
+          "custom": {
+            "fillOpacity": 10
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "mean",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Syncs stuck failing",
+      "description": "Syncs of connected connections whose last 3 or more runs failed, retries included, by module and error code. Normal: none, or a few connector_auth (a workspace's expired key). internal, connector_unavailable and unknown alert.",
+      "id": 124,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 360
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (module, code) (outflare_sync_stuck{job=\"$job\"})",
+          "legendFormat": "{{module}} {{code}}",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "fillOpacity": 10
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "mean",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "type": "row",
       "title": "Social publishing (the brand's own posts)",
       "id": 109,
       "collapsed": false,
@@ -5241,7 +5354,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 359
+        "y": 368
       },
       "panels": []
     },
@@ -5258,7 +5371,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 360
+        "y": 369
       },
       "targets": [
         {
@@ -5308,7 +5421,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 360
+        "y": 369
       },
       "targets": [
         {
@@ -5358,7 +5471,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 368
+        "y": 377
       },
       "targets": [
         {
@@ -5404,7 +5517,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 376
+        "y": 385
       },
       "panels": []
     },
@@ -5421,7 +5534,7 @@
         "h": 8,
         "w": 24,
         "x": 0,
-        "y": 377
+        "y": 386
       },
       "targets": [
         {
@@ -5471,7 +5584,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 385
+        "y": 394
       },
       "targets": [
         {
@@ -5521,12 +5634,162 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 385
+        "y": 394
       },
       "targets": [
         {
           "refId": "A",
           "expr": "sum by (outcome) (rate(outflare_seo_archive_lookups_total{job=\"$job\"}[1h]))",
+          "legendFormat": "{{outcome}}",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps",
+          "custom": {
+            "fillOpacity": 10
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "mean",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Link pitch openers written, by outcome",
+      "description": "Openers the workspaces' own AI wrote for link pitches, per hour. Normal: mostly written; no_ai and ai_unavailable are workspaces without AI connected or over their limit. ai_failed rising means the model's answers broke: check link_pitches.write jobs.",
+      "id": 119,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 0,
+        "y": 385
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (outcome) (rate(outflare_seo_link_pitches_written_total{job=\"$job\"}[1h]))",
+          "legendFormat": "{{outcome}}",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps",
+          "custom": {
+            "fillOpacity": 10
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "mean",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Link pitch replies read, by kind",
+      "description": "Replies to link pitches the workspaces' AI read, per hour, by what they say. Normal: a mix of other, declined and agreed, with few wants_payment. ai_failed rising means reading broke: check link_pitches.read_reply jobs.",
+      "id": 120,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 8,
+        "y": 385
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (kind) (rate(outflare_seo_link_replies_read_total{job=\"$job\"}[1h]))",
+          "legendFormat": "{{kind}}",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps",
+          "custom": {
+            "fillOpacity": 10
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "mean",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Agreed and live link checks, by outcome",
+      "description": "Checks of links sites agreed to add, and of live ones, per hour. Normal: mostly not_yet and still_live, some live; removed is a site taking a link down. unreachable high for hours means OutflareBot can't reach pages: check link_live.schedule_failed in the log.",
+      "id": 121,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 385
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (outcome) (rate(outflare_seo_link_live_checks_total{job=\"$job\"}[1h]))",
           "legendFormat": "{{outcome}}",
           "datasource": {
             "type": "prometheus",
@@ -5566,7 +5829,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 393
+        "y": 402
       },
       "collapsed": false,
       "panels": []
@@ -5584,7 +5847,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 394
+        "y": 403
       },
       "targets": [
         {
@@ -5634,7 +5897,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 394
+        "y": 403
       },
       "targets": [
         {
@@ -5693,7 +5956,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 402
+        "y": 411
       },
       "targets": [
         {
@@ -5709,6 +5972,65 @@
       "fieldConfig": {
         "defaults": {
           "unit": "s",
+          "custom": {
+            "fillOpacity": 10
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "mean",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "News article reads",
+      "description": "OutflareBot's reads of new news articles for their byline, by status, and how many found a new journalist. Normal: mostly up; blocked and opted_out are sites saying no, unreachable and failed are worth a look when they climb.",
+      "id": 129,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 402
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (status) (rate(outflare_news_article_reads_total{job=\"$job\"}[1h]))",
+          "legendFormat": "{{status}}",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          }
+        },
+        {
+          "refId": "B",
+          "expr": "sum(rate(outflare_news_article_reads_total{job=\"$job\",journalist=\"true\"}[1h]))",
+          "legendFormat": "new journalist",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps",
           "custom": {
             "fillOpacity": 10
           }
@@ -6025,6 +6347,59 @@
           "refId": "A",
           "expr": "sum by (kind, result) (rate(outflare_partners_import_objects_total{job=\"$job\"}[5m])) * 60",
           "legendFormat": "{{kind}} {{result}}",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "fillOpacity": 10,
+            "stacking": {
+              "mode": "normal"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "mean",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Postbacks to partners' trackers, by outcome",
+      "description": "Calls to affiliates' own trackers per hour. sent is normal; retried and unreachable are a tracker that is down (theirs) or this server unable to reach outside addresses; rejected is a tracker that refused the URL (the partner's template).",
+      "id": 129,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 435
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (outcome) (increase(outflare_partners_postbacks_total{job=\"$job\"}[1h]))",
+          "legendFormat": "{{outcome}}",
           "datasource": {
             "type": "prometheus",
             "uid": "${datasource}"

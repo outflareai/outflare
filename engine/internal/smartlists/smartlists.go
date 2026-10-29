@@ -47,11 +47,15 @@ const (
 //     (not_exists), ever or in the last within_days days.
 //   - in_list: whether they are a lead in this lead list (exists) or not
 //     (not_exists).
+//   - news_search: whether they wrote an article this news search found
+//     (exists) or not (not_exists), ever or in the last within_days days:
+//     a media list of the journalists who cover a topic.
 type Rule struct {
 	Attribute  string `json:"attribute,omitempty"`
 	Event      string `json:"event,omitempty"`
 	WithinDays int    `json:"within_days,omitempty"`
 	InList     string `json:"in_list,omitempty"`
+	NewsSearch string `json:"news_search,omitempty"`
 	Op         string `json:"op"`
 	Value      any    `json:"value,omitempty"`
 }
@@ -82,13 +86,13 @@ func Check(rules []Rule, match string) string {
 
 func checkRule(r Rule) string {
 	set := 0
-	for _, v := range []string{r.Attribute, r.Event, r.InList} {
+	for _, v := range []string{r.Attribute, r.Event, r.InList, r.NewsSearch} {
 		if v != "" {
 			set++
 		}
 	}
 	if set != 1 {
-		return "each rule tests one of attribute, event or in_list"
+		return "each rule tests one of attribute, event, in_list or news_search"
 	}
 	if !ops[r.Op] {
 		return "op is eq, neq, gt, lt, contains, exists or not_exists"
@@ -100,10 +104,12 @@ func checkRule(r Rule) string {
 		return "event is an event name such as order_completed"
 	case r.InList != "" && !uuidRE.MatchString(r.InList):
 		return "in_list is a lead list's id"
-	case (r.Event != "" || r.InList != "") && r.Op != "exists" && r.Op != "not_exists":
-		return "event and in_list rules use exists (did, is in) or not_exists (didn't, isn't)"
-	case r.WithinDays != 0 && r.Event == "":
-		return "within_days is only for event rules"
+	case r.NewsSearch != "" && !uuidRE.MatchString(r.NewsSearch):
+		return "news_search is a news search's id"
+	case (r.Event != "" || r.InList != "" || r.NewsSearch != "") && r.Op != "exists" && r.Op != "not_exists":
+		return "event, in_list and news_search rules use exists (did, is in) or not_exists (didn't, isn't)"
+	case r.WithinDays != 0 && r.Event == "" && r.NewsSearch == "":
+		return "within_days is only for event and news_search rules"
 	case r.WithinDays < 0 || r.WithinDays > 3650:
 		return "within_days is 1 to 3650, or 0 for ever"
 	case r.Op != "exists" && r.Op != "not_exists" && r.Value == nil:
@@ -132,6 +138,18 @@ func InLists(rules []Rule) []string {
 	for _, r := range rules {
 		if r.InList != "" {
 			out = append(out, r.InList)
+		}
+	}
+	return out
+}
+
+// NewsSearches is every news search the rules name, for the caller to
+// check they belong to the workspace.
+func NewsSearches(rules []Rule) []string {
+	out := []string{}
+	for _, r := range rules {
+		if r.NewsSearch != "" {
+			out = append(out, r.NewsSearch)
 		}
 	}
 	return out
@@ -226,6 +244,18 @@ func (b *builder) rule(r Rule, eventBrand string) string {
 			` AND e.source <> 'browser'` + eventBrand
 		if r.WithinDays > 0 {
 			sql += ` AND e.occurred_at >= now() - make_interval(days => ` + b.arg(r.WithinDays) + `::int)`
+		}
+		sql += `)`
+		if r.Op == "not_exists" {
+			return `NOT ` + sql
+		}
+		return sql
+	case r.NewsSearch != "":
+		sql := `EXISTS (SELECT 1 FROM news_article_authors aa JOIN news_hits h ON h.article_id = aa.article_id
+			JOIN news_articles x ON x.id = aa.article_id
+			WHERE aa.workspace_id = $1 AND aa.record_id = r.id AND h.search_id = ` + b.arg(r.NewsSearch) + `::uuid`
+		if r.WithinDays > 0 {
+			sql += ` AND coalesce(x.published_at, x.first_seen_at) >= now() - make_interval(days => ` + b.arg(r.WithinDays) + `::int)`
 		}
 		sql += `)`
 		if r.Op == "not_exists" {

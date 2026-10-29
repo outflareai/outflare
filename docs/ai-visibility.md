@@ -31,7 +31,7 @@ Northpeak". Each cohort has:
   first, and a run counts at most 25. `tracked_competitors` on the cohort
   lists the tracked ones it counts;
 - a locale (`en-US`) that each question mentions, so answers suit that market;
-- a schedule: `off` (run by hand), `daily` or `weekly`.
+- a schedule: `off` (run by hand), `daily` or `weekly`. A scheduled run that fails, or gets no answer from any model, is tried again after 15 minutes, then 1 and 2 hours, then every 4 hours, so the day (or week) still has answers; a run a person stopped, or one the AI budget stopped, waits for the next scheduled time.
 
 Add prompts in bulk (up to 100 at a time) with an optional intent:
 `discovery`, `comparison`, `problem` or `brand`.

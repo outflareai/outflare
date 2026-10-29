@@ -579,8 +579,9 @@ export function createServer({ client: gtm, workspace, agency, readOnly = false,
   const smartRule = z.object({
     attribute: z.string().optional().describe("A field on the person's customer record, such as plan or address.country."),
     event: z.string().optional().describe("Whether they did this customer event: op exists (did) or not_exists (didn't)."),
-    within_days: z.number().int().min(0).max(3650).optional().describe("event: only the last this many days; 0 or left out is ever."),
+    within_days: z.number().int().min(0).max(3650).optional().describe("event and news_search: only the last this many days; 0 or left out is ever."),
     in_list: z.string().uuid().optional().describe("Whether they are a lead in this lead list: op exists or not_exists."),
+    news_search: z.string().uuid().optional().describe("Whether they wrote an article this news search found (a media list): op exists or not_exists."),
     op: z.enum(["eq", "neq", "gt", "lt", "contains", "exists", "not_exists"]),
     value: z.unknown().optional().describe("What eq, neq, gt, lt and contains compare with."),
   });
@@ -588,7 +589,7 @@ export function createServer({ client: gtm, workspace, agency, readOnly = false,
     name: z.string().min(1).max(200).optional(),
     description: z.string().max(2000).optional(),
     brand_id: z.string().nullable().optional().describe("A brand's handle or id: only that brand's people and the shared ones. null for every brand."),
-    rules: z.array(smartRule).max(20).optional().describe("The tests a person must pass. Set one of attribute, event or in_list in each."),
+    rules: z.array(smartRule).max(20).optional().describe("The tests a person must pass. Set one of attribute, event, in_list or news_search in each."),
     match: z.enum(["all", "any"]).optional().describe("all (default): every rule must hold. any: one is enough."),
   };
 
@@ -4334,10 +4335,13 @@ export function createServer({ client: gtm, workspace, agency, readOnly = false,
     "list_news_articles",
     {
       title: "List news articles",
-      description: "Articles the news searches found, newest first, each once with the searches that found it. Reads what is stored, so it costs nothing.",
+      description:
+        "Articles the news searches found, newest first, each once with the searches that found it, its byline (author), published_at, and its authors' person records (journalist_ids). " +
+        "Reads what is stored, so it costs nothing.",
       inputSchema: {
         search_id: id.optional(),
         since: z.string().optional().describe("Only articles first seen at or after this time, like 2026-10-28T00:00:00Z."),
+        journalist_id: id.optional().describe("A journalist's person record: the articles they wrote."),
         brand: z.string().max(100).optional().describe("A brand's id or handle: articles its searches found."),
         limit: z.number().int().min(1).max(200).optional(),
         cursor: z.string().optional().describe("next_cursor from the previous page."),
@@ -4345,6 +4349,26 @@ export function createServer({ client: gtm, workspace, agency, readOnly = false,
       annotations: read,
     },
     (query) => call(() => gtm.GET("/v1/workspaces/{ws}/news-articles", { params: { path: { ws }, query } })),
+  );
+
+  server.registerTool(
+    "list_journalists",
+    {
+      title: "List journalists",
+      description:
+        "Authors of news articles the news watch read whose address the free email finder found at the outlet: each a person record on the outlet's company, " +
+        "with how many articles they wrote, their latest, their outlets and the news searches (topics) their articles came up in; most articles first. " +
+        "For a media list, create a smart list with the rule { news_search: <search id>, op: exists }. Reads what is stored, so it costs nothing.",
+      inputSchema: {
+        search_id: id.optional().describe("Only journalists whose articles this news search found."),
+        since: z.string().optional().describe("Only articles published at or after this time, like 2026-10-01T00:00:00Z."),
+        brand: z.string().max(100).optional().describe("A brand's id or handle."),
+        limit: z.number().int().min(1).max(200).optional(),
+        cursor: z.string().optional().describe("next_cursor from the previous page."),
+      },
+      annotations: read,
+    },
+    (query) => call(() => gtm.GET("/v1/workspaces/{ws}/journalists", { params: { path: { ws }, query } })),
   );
 
   server.registerTool(
@@ -4433,6 +4457,118 @@ export function createServer({ client: gtm, workspace, agency, readOnly = false,
     },
     ({ prospect_id }) =>
       call(() => gtm.POST("/v1/workspaces/{ws}/link-prospects/{prospect}/check", { params: { path: { ws, prospect: prospect_id } } })),
+  );
+
+  server.registerTool(
+    "list_link_sequences",
+    {
+      title: "List sequences link pitches can use",
+      description:
+        "Outflare's own sequences (not archived) a link pitch can go through, with whether their pitches wait for a person's approval (approve_pitches, on by default) " +
+        "and whether a step uses {{custom.opener}}, the opener the AI writes for each page. A sequence for pitches should put {{custom.opener}} in its first step.",
+      inputSchema: { brand: z.string().max(100).optional().describe("A brand's id or handle, or none for shared ones.") },
+      annotations: read,
+    },
+    (query) => call(() => gtm.GET("/v1/workspaces/{ws}/link-building/sequences", { params: { path: { ws }, query } })),
+  );
+
+  server.registerTool(
+    "update_link_sequence",
+    {
+      title: "Turn approval of a sequence's link pitches on or off",
+      description:
+        "approve_pitches true (the default) makes each pitch through the sequence wait for a person to approve it; false enrolls a pitch as soon as its opener is written. " +
+        "Ask the person before turning approval off.",
+      inputSchema: { sequence_id: id, approve_pitches: z.boolean() },
+      annotations: { ...write, idempotentHint: true },
+    },
+    ({ sequence_id, ...body }) =>
+      call(() => gtm.PATCH("/v1/workspaces/{ws}/link-building/sequences/{sequence}", { params: { path: { ws, sequence: sequence_id } }, body })),
+  );
+
+  server.registerTool(
+    "start_link_pitch",
+    {
+      title: "Pitch a link prospect",
+      description:
+        "Starts a pitch of a prospect to pitch through one of Outflare's own sequences, to one of its contacts (record_id; default the surest with an email address). " +
+        "The workspace's AI writes an opener for the page; the pitch then waits as a draft for approval (approve_link_pitch) unless the sequence skips approval. " +
+        "Fails with conflict when the prospect already has an open pitch or has no contact with an email address, and with site_in_outreach when another prospect on the website is in outreach. " +
+        "Never offer payment for a link.",
+      inputSchema: { prospect_id: id, sequence_id: id, record_id: id.optional() },
+      annotations: write,
+    },
+    ({ prospect_id, ...body }) =>
+      call(() => gtm.POST("/v1/workspaces/{ws}/link-prospects/{prospect}/pitches", { params: { path: { ws, prospect: prospect_id } }, body })),
+  );
+
+  server.registerTool(
+    "list_link_pitches",
+    {
+      title: "List link pitches",
+      description: "Pitches of link prospects, newest first, with the contact, the page, the opener and the reply's kind. status draft are waiting for a person to approve them.",
+      inputSchema: {
+        status: z.enum(["writing", "draft", "enrolled", "rejected", "failed"]).optional(),
+        sequence_id: id.optional(),
+        prospect_id: id.optional(),
+        brand: z.string().max(100).optional().describe("A brand's id or handle, or none for shared sites."),
+        limit: z.number().int().min(1).max(500).optional(),
+        offset: z.number().int().min(0).optional(),
+      },
+      annotations: read,
+    },
+    (query) => call(() => gtm.GET("/v1/workspaces/{ws}/link-pitches", { params: { path: { ws }, query } })),
+  );
+
+  server.registerTool(
+    "edit_link_pitch",
+    {
+      title: "Edit a draft pitch's opener",
+      description: "Changes the opener of a draft pitch. Never offer payment for a link.",
+      inputSchema: { pitch_id: id, opener: z.string().min(1).max(2000) },
+      annotations: { ...write, idempotentHint: true },
+    },
+    ({ pitch_id, ...body }) =>
+      call(() => gtm.PATCH("/v1/workspaces/{ws}/link-pitches/{pitch}", { params: { path: { ws, pitch: pitch_id } }, body })),
+  );
+
+  server.registerTool(
+    "approve_link_pitch",
+    {
+      title: "Approve a link pitch, sending it",
+      description:
+        "Sends a draft pitch: its opener (or the one given) goes on the contact's lead and the lead is enrolled in the sequence, whose policy checks, suppressions and limits apply. " +
+        "Sends real email, so only when the person asked for it or approved this pitch. Fails with site_in_outreach while the website is in outreach or cooling down, and conflict when it is suppressed.",
+      inputSchema: { pitch_id: id, opener: z.string().max(2000).optional() },
+      annotations: { ...write, openWorldHint: true },
+    },
+    ({ pitch_id, ...body }) =>
+      call(() => gtm.POST("/v1/workspaces/{ws}/link-pitches/{pitch}/approve", { params: { path: { ws, pitch: pitch_id } }, body })),
+  );
+
+  server.registerTool(
+    "reject_link_pitch",
+    {
+      title: "Reject a draft link pitch",
+      description: "Drops a draft pitch; the prospect can be pitched again another way.",
+      inputSchema: { pitch_id: id, reason: z.string().max(500).optional() },
+      annotations: write,
+    },
+    ({ pitch_id, ...body }) =>
+      call(() => gtm.POST("/v1/workspaces/{ws}/link-pitches/{pitch}/reject", { params: { path: { ws, pitch: pitch_id } }, body })),
+  );
+
+  server.registerTool(
+    "get_link_results",
+    {
+      title: "Link building results by method",
+      description:
+        "Prospects found in the last days (default 90), by method: pitched, replied, agreed, live, declined, removed, and win_rate (live links per pitch). " +
+        "Cost per live link is in the Outcomes report grouped by sequence (cost_per_live_link_cents).",
+      inputSchema: { site_id: id.optional(), brand: z.string().max(100).optional().describe("A brand's id or handle, or none for shared sites."), days: z.number().int().min(1).max(730).optional() },
+      annotations: read,
+    },
+    (query) => call(() => gtm.GET("/v1/workspaces/{ws}/link-prospects/results", { params: { path: { ws }, query } })),
   );
 
   server.registerTool(

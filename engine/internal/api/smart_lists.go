@@ -174,6 +174,16 @@ func (s *Server) checkSmartRules(r *http.Request, a *access, rules []smartlists.
 			return errInvalid("in_list names a lead list that isn't in this workspace")
 		}
 	}
+	if ids := smartlists.NewsSearches(rules); len(ids) > 0 {
+		var n int
+		if err := s.pool.QueryRow(r.Context(), `SELECT count(DISTINCT id)::int FROM news_searches WHERE workspace_id = $1 AND id = ANY($2::uuid[])`,
+			a.WorkspaceID, ids).Scan(&n); err != nil {
+			return err
+		}
+		if n != len(uniq(ids)) {
+			return errInvalid("news_search names a news search that isn't in this workspace")
+		}
+	}
 	return nil
 }
 
