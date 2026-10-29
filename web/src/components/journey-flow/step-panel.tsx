@@ -207,15 +207,70 @@ function SchemaFields({ schema, step, onChange, disabled }: { schema: SettingsSc
             </label>
           );
         }
+        // A list of words (an ai step's choices): typed with commas between.
+        if (type === "array" && p.items?.type === "string") {
+          const list = Array.isArray(v) ? (v as string[]) : [];
+          return (
+            <Input key={key} label={title} hint={`${p.description ?? ""} Separate them with commas.`} disabled={disabled} value={list.join(", ")}
+              onChange={(e) => {
+                const next = e.target.value.split(",").map((x) => x.trimStart());
+                onChange({ ...step, [key]: next.some((x) => x.trim()) ? next : undefined });
+              }}
+              onBlur={() => list.length && onChange({ ...step, [key]: list.map((x) => x.trim()).filter(Boolean) })} />
+          );
+        }
+        // Long text (an ai step's prompt) gets room to write.
+        if (type === "string" && (p.maxLength ?? 0) > 500) {
+          return (
+            <label key={key} className="block text-sm">
+              <span className="mb-1.5 block text-[13px] font-medium">{title}</span>
+              <textarea className={`${field} w-full`} rows={5} maxLength={p.maxLength} disabled={disabled} value={v === undefined ? "" : String(v)}
+                onChange={(e) => onChange({ ...step, [key]: e.target.value })} />
+              {p.description && <span className="mt-1 block text-[12px] text-muted-foreground">{p.description}</span>}
+            </label>
+          );
+        }
         if (type === "string" || type === "number" || type === "integer") {
           return (
             <Input key={key} label={title} hint={p.description} type={type === "string" ? "text" : "number"} min={p.minimum} max={p.maximum} disabled={disabled}
               value={v === undefined ? "" : String(v)} onChange={(e) => onChange({ ...step, [key]: type === "string" ? e.target.value : e.target.value === "" ? undefined : Number(e.target.value) })} />
           );
         }
+        if (type === "object" && typeof p.additionalProperties === "object" && p.additionalProperties.type === "string") {
+          return <NamedValues key={key} label={title} hint={p.description} value={(v ?? {}) as Record<string, string>} disabled={disabled}
+            onChange={(m) => onChange({ ...step, [key]: Object.keys(m).length ? m : undefined })} />;
+        }
         return <p key={key} className="text-[12px] text-muted-foreground">{title}: set through the API for now.</p>;
       })}
     </>
+  );
+}
+
+// NamedValues edits a map of names to text, such as a sequencer
+// campaign's variables.
+function NamedValues({ label, hint, value, onChange, disabled }: {
+  label: string; hint?: string; value: Record<string, string>; onChange: (m: Record<string, string>) => void; disabled: boolean;
+}) {
+  const [rows, setRows] = useState<[string, string][]>(() => Object.entries(value));
+  const set = (next: [string, string][]) => {
+    setRows(next);
+    onChange(Object.fromEntries(next.filter(([n]) => n.trim() !== "")));
+  };
+  return (
+    <Row label={label} hint={hint}>
+      <div className="space-y-1.5">
+        {rows.map(([n, v], i) => (
+          <div key={i} className="flex gap-1.5">
+            <input className={`${field} w-2/5`} aria-label="Name" placeholder="name" value={n} disabled={disabled}
+              onChange={(e) => set(rows.map((r, k) => (k === i ? [e.target.value, r[1]] : r)))} />
+            <input className={`${field} flex-1`} aria-label="Value" placeholder="{{person.plan}}" value={v} disabled={disabled}
+              onChange={(e) => set(rows.map((r, k) => (k === i ? [r[0], e.target.value] : r)))} />
+            {!disabled && <Button type="button" variant="ghost" onClick={() => set(rows.filter((_, k) => k !== i))}>Remove</Button>}
+          </div>
+        ))}
+        {!disabled && rows.length < 20 && <Button type="button" variant="ghost" onClick={() => setRows([...rows, ["", ""]])}>Add</Button>}
+      </div>
+    </Row>
   );
 }
 

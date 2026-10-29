@@ -24,7 +24,10 @@ export type SettingsSchema = {
   default?: unknown;
   minimum?: number;
   maximum?: number;
+  maxLength?: number;
+  items?: SettingsSchema;
   properties?: Record<string, SettingsSchema>;
+  additionalProperties?: SettingsSchema | boolean;
   required?: string[];
 };
 

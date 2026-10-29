@@ -166,3 +166,37 @@ func TestChecks(t *testing.T) {
 		t.Errorf("good rules refused: %s", msg)
 	}
 }
+
+// A version's visual changes are checked: one thing each, safe addresses,
+// a selector that can't break out of a style rule.
+func TestCheckChanges(t *testing.T) {
+	ok := []string{
+		`{"headline": "x"}`,
+		`{"changes": [{"selector": "h1.hero", "text": "Ship today"}, {"selector": ".old", "hide": true}, {"selector": "a.cta", "href": "/signup"},
+			{"selector": "img.hero", "src": "https://cdn.example.com/a.png", "alt": "A team"}]}`,
+		`{"changes": []}`,
+	}
+	for _, p := range ok {
+		if msg := CheckChanges(json.RawMessage(p)); msg != "" {
+			t.Errorf("%s: %s", p, msg)
+		}
+	}
+	bad := []string{
+		`{"changes": "h1"}`,
+		`{"changes": [{"selector": "", "text": "x"}]}`,
+		`{"changes": [{"selector": "h1", "text": "x", "hide": true}]}`,
+		`{"changes": [{"selector": "h1"}]}`,
+		`{"changes": [{"selector": "a", "href": "javascript:alert(1)"}]}`,
+		`{"changes": [{"selector": "a", "href": "//evil.example"}]}`,
+		`{"changes": [{"selector": "img", "src": "data:text/html,x"}]}`,
+		`{"changes": [{"selector": "h1 } body { color: red", "text": "x"}]}`,
+	}
+	for _, p := range bad {
+		if CheckChanges(json.RawMessage(p)) == "" {
+			t.Errorf("%s passed", p)
+		}
+	}
+	if msg := CheckVariants([]Variant{{Key: "control", Weight: 50}, {Key: "new", Weight: 50, Payload: json.RawMessage(`{"changes": [{"selector": "a", "href": "javascript:x"}]}`)}}); msg == "" {
+		t.Error("CheckVariants let a javascript: link through")
+	}
+}

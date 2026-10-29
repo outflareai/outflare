@@ -61,6 +61,10 @@ func (fakeClaude) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		answerKnowledgeQuestion(w, string(body))
 		return
 	}
+	if strings.Contains(string(body), "You answer one question about a person or company for a marketing automation") {
+		answerJourneyAI(w, string(body))
+		return
+	}
 	if strings.Contains(string(body), "You read one web page for a link building team") {
 		readLinkPage(w)
 		return

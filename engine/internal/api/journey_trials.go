@@ -50,7 +50,7 @@ func (s *Server) testJourney(w http.ResponseWriter, r *http.Request) {
 	// A journey not yet activated is edited in place, so its draft is the
 	// journey itself.
 	draft := req.Version == "draft" && cur.Status != "draft"
-	svc := &journeys.Service{Pool: s.pool, Emails: s.emails, Log: s.log, Fields: s, Deals: s}
+	svc := &journeys.Service{Pool: s.pool, Emails: s.emails, Log: s.log, Fields: s, Deals: s, AI: s.JourneyAI()}
 	res, err := svc.Test(r.Context(), a.WorkspaceID, cur.ID, journeys.TestInput{RecordID: req.RecordID, Draft: draft, Event: req.Event, Paths: req.Paths})
 	switch {
 	case errors.Is(err, journeys.ErrNoDraft):

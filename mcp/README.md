@@ -210,6 +210,7 @@ Read (always available):
 | `list_infra_plans`, `get_infra_plan` | Infrastructure plans, and every domain and mailbox in one with what is left to do |
 | `list_supplier_mailboxes` | Every mailbox a connected supplier (Cheap Inboxes) holds, and where each import stands |
 | `list_partner_programs`, `get_partner_program` | Referral, affiliate and influencer programs with their credit rule, hold, minimum payout, reward rules and groups |
+| `get_partner_settings` | Whether erasing a partner's record also clears their payouts' notes and references, for every program |
 | `get_partner_program_stats` | A program's totals across all its partners: partners by status, clicks, referred customers, sales, and rewards on hold, due and paid |
 | `list_partners`, `get_partner` | Partners with their ref code, short link, campaign link, promo codes and totals (clicks, referrals, customers, sales, cash pending, approved, paid and due) |
 | `list_partner_conversions`, `list_partner_referrals` | Leads, sales and refunds credited to partners, and each referred customer with how they were credited |
@@ -341,6 +342,7 @@ Write (left out when `OUTFLARE_MCP_READ_ONLY=1`):
 | `sync_supplier_mailboxes` | Read the supplier's mailboxes again now, e.g. right after ordering more |
 | `update_supplier_sync` | Auto-import new mailboxes, Google app passwords on or off, daily cap for imported mailboxes, push on or off |
 | `create_partner_program`, `update_partner_program` | Start a referral, affiliate or influencer program from its preset, or change, pause or archive one |
+| `update_partner_settings` | Choose whether erasing a partner's record also clears their payouts' notes and references (every program) |
 | `set_partner_rules`, `create_partner_group`, `update_partner_group`, `assign_partner_group`, `delete_partner_group` | Replace a program's reward rules (cash, fixed, action, two-sided, tiers), and manage its groups: add, rename, make default, move partners in bulk, remove |
 | `add_partner`, `update_partner`, `add_partner_promo_code` | Add a customer record as a partner, approve, suspend or move them, set their postback URL, and tie promo codes to them |
 | `log_partner_fee`, `adjust_partner_balance` | Log a fixed fee (an influencer's post) or correct what a partner is owed |

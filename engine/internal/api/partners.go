@@ -34,6 +34,8 @@ const (
 
 func (s *Server) routesPartners(mux *http.ServeMux) {
 	read, manage, conv := auth.ScopePartnersRead, auth.ScopePartnersManage, auth.ScopePartnersConversions
+	mux.HandleFunc("GET /v1/workspaces/{ws}/partner-settings", s.inWorkspace(read, s.getPartnerSettings))
+	mux.HandleFunc("PATCH /v1/workspaces/{ws}/partner-settings", s.inWorkspace(manage, s.updatePartnerSettings))
 	mux.HandleFunc("GET /v1/workspaces/{ws}/partner-programs", s.inBrand(read, s.listPartnerPrograms))
 	mux.HandleFunc("POST /v1/workspaces/{ws}/partner-programs", s.inBrand(manage, s.createPartnerProgram))
 	mux.HandleFunc("GET /v1/workspaces/{ws}/partner-programs/{id}", s.inBrand(read, s.getPartnerProgram))

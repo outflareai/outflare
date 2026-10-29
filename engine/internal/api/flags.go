@@ -45,6 +45,12 @@ func (s *Server) routesFlags(mux *http.ServeMux) {
 	// Public: the site key in the body is the authority.
 	mux.HandleFunc("POST /v1/site/flags", s.siteFlags)
 	mux.HandleFunc("OPTIONS /v1/site/flags", s.siteEventsPreflight)
+	// The visual editor: the signed edit token is the authority.
+	mux.HandleFunc("POST /v1/workspaces/{ws}/flags/{flag}/edit-link", s.inWorkspace(manage, s.createFlagEditLink))
+	mux.HandleFunc("GET /v1/site/flags/edits", s.siteFlagEdits)
+	mux.HandleFunc("POST /v1/site/flags/edits", s.siteFlagEdits)
+	mux.HandleFunc("OPTIONS /v1/site/flags/edits", s.siteEventsPreflight)
+	mux.HandleFunc("GET /v1/site/editor.js", s.editorJS)
 }
 
 type flagView struct {

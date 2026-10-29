@@ -374,3 +374,76 @@ func TestSiteFlagsBootstrap(t *testing.T) {
 		t.Fatalf("unchecked bootstrap values: %+v", got)
 	}
 }
+
+// A version's visual changes go onto the page for its visitors only: text
+// as text, hidden elements, and links and images only to safe addresses.
+// Making them counts as showing the version.
+func TestSiteFlagsVisualChanges(t *testing.T) {
+	node, err := exec.LookPath("node")
+	if err != nil {
+		t.Skip("node not installed")
+	}
+	type el struct {
+		Text    string
+		Attrs   map[string]string
+		Display string
+	}
+	run := func(opts map[string]any) (got struct {
+		Tracked []struct {
+			Event      string
+			Properties map[string]any
+		}
+		Elements map[string][]el
+		Href     string
+		Stored   map[string]string
+	}) {
+		t.Helper()
+		b, _ := json.Marshal(opts)
+		out, err := exec.Command(node, "testdata/run_site.mjs", "site.js", string(b)).CombinedOutput()
+		if err != nil {
+			t.Fatalf("%v: %s", err, out)
+		}
+		if err := json.Unmarshal(out, &got); err != nil {
+			t.Fatalf("%v: %s", err, out)
+		}
+		return got
+	}
+	changes := []map[string]any{
+		{"selector": "h1", "text": "<b>Ship faster</b>"},
+		{"selector": ".promo", "hide": true},
+		{"selector": "a.cta", "href": "javascript:alert(1)"},
+		{"selector": "img.hero", "src": "https://cdn.example.com/new.png", "alt": "New"},
+		{"selector": "[[[", "text": "bad selector"},
+	}
+	elements := map[string]int{"h1": 1, ".promo": 2, "a.cta": 1, "img.hero": 1}
+	flags := map[string]any{"flags": map[string]any{"hero": "faster"}, "payloads": map[string]any{"hero": map[string]any{"changes": changes}}}
+
+	got := run(map[string]any{"href": "https://northpeak.example/", "flags": flags, "quiet": true, "loaded": true, "elements": elements})
+	e := got.Elements
+	if e["h1"][0].Text != "<b>Ship faster</b>" || e[".promo"][0].Display != "none" || e[".promo"][1].Display != "none" {
+		t.Fatalf("changes not applied: %+v", e)
+	}
+	if e["a.cta"][0].Attrs["href"] != "" {
+		t.Fatalf("unsafe link set: %+v", e["a.cta"])
+	}
+	if e["img.hero"][0].Attrs["src"] != "https://cdn.example.com/new.png" || e["img.hero"][0].Attrs["alt"] != "New" {
+		t.Fatalf("image: %+v", e["img.hero"])
+	}
+	if len(got.Tracked) != 1 || got.Tracked[0].Event != "Experiment Viewed" || got.Tracked[0].Properties["variant"] != "faster" {
+		t.Fatalf("exposure: %+v", got.Tracked)
+	}
+
+	// The control (off) changes nothing.
+	off := map[string]any{"flags": map[string]any{"hero": false}, "payloads": map[string]any{"hero": map[string]any{"changes": changes}}}
+	got = run(map[string]any{"href": "https://northpeak.example/", "flags": off, "quiet": true, "loaded": true, "elements": elements})
+	if got.Elements["h1"][0].Text != "old" || got.Elements[".promo"][0].Display != "" {
+		t.Fatalf("applied without the version: %+v", got.Elements)
+	}
+
+	// An edit link's token is kept for the visit and taken out of the address.
+	tok := "eyJ3IjoiYWJjIn0.c2lnbmF0dXJlLW5vdC1yZWFs"
+	got = run(map[string]any{"href": "https://northpeak.example/?of_flag=hero:faster&of_edit=" + tok, "flags": flags, "quiet": true, "loaded": true})
+	if strings.Contains(got.Href, "of_edit") || got.Stored["of_edit"] != tok {
+		t.Fatalf("edit token: %s %v", got.Href, got.Stored)
+	}
+}

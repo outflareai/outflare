@@ -117,9 +117,12 @@ const erasedPartner = "Erased partner"
 // commission totals and payout history still add up once the person is
 // gone, as deals and payments do. Their foreign keys cascade, so leaving
 // them on the record would delete them with it. The memberships are
-// suspended and lose their payout details, notes and sign-up answers.
+// suspended and lose their payout details, notes and sign-up answers, but
+// keep their codes so the partner's links still lead to the site. Their
+// payouts lose their notes and references too, unless the workspace's
+// erase_partner_payout_notes is off.
 func keepPartnerLedger(ctx context.Context, tx pgx.Tx, workspaceID string, ids []string) error {
-	for _, table := range []string{"partner_memberships", "partner_rewards"} {
+	for _, table := range []string{"partner_memberships", "partner_rewards", "partner_payouts"} {
 		if ok, err := tableExists(ctx, tx, table); err != nil || !ok {
 			return err
 		}
@@ -159,6 +162,14 @@ func keepPartnerLedger(ctx context.Context, tx pgx.Tx, workspaceID string, ids [
 			if _, err := tx.Exec(ctx, q, workspaceID, p.id, standIn); err != nil {
 				return err
 			}
+		}
+		// A payout's note and reference can name them; the workspace says
+		// whether they go. The amounts, dates and status stay.
+		if _, err := tx.Exec(ctx, `UPDATE partner_payouts y SET note = '', reference = '', updated_at = now()
+			FROM partner_memberships m, workspaces w
+			WHERE y.workspace_id = $1 AND y.membership_id = m.id AND m.workspace_id = $1 AND m.record_id = $2
+				AND w.id = $1 AND w.erase_partner_payout_notes`, workspaceID, standIn); err != nil {
+			return err
 		}
 	}
 	return nil

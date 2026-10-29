@@ -58,8 +58,13 @@ export function useStepKinds(ws: string): StepKind[] {
     ]).then(([k, i]) => {
       if (!live || !k.data) return;
       // A requirement named after a connector (slack) is met when it is
-      // connected; others (an email provider) aren't checked here.
-      const connectors = i.data ? new Set(i.data.data.filter((x) => x.status === "connected").map((x) => x.connector)) : null;
+      // connected, ai_model when any AI model is, and sequencer when a
+      // connection can add people to its campaigns; others (an email
+      // provider) aren't checked here.
+      const on = i.data?.data.filter((x) => x.status === "connected") ?? [];
+      const connectors = i.data ? new Set(on.map((x) => x.connector)) : null;
+      if (connectors && on.some((x) => x.category === "model")) connectors.add("ai_model");
+      if (connectors && on.some((x) => x.capabilities.includes("push.leads"))) connectors.add("sequencer");
       setKinds((k.data.data as StepKind[]).map((kind) => ({
         ...kind,
         requires: kind.requires.map((r) => (connectors && r.connection !== "email_provider" ? { ...r, connected: connectors.has(r.connection) } : r)),

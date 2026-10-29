@@ -6,6 +6,16 @@ Each pull request that changes what Outflare does adds a change note in [changes
 
 ## [Unreleased]
 
+## [0.39.0] - 2026-10-29
+
+### Added
+
+- Journeys can add people to a Smartlead, Instantly or EmailBison campaign, with their name, company and campaign variables. People who are suppressed, already in the campaign or left out by the sequencer are skipped, and the run history says why.
+
+### Changed
+
+- New partner setting, for every program: "Clear payout notes when a partner is deleted" (Partners → Payouts, on by default). When a partner's record is deleted for good, their payouts stay, but each payout's note and reference, which can hold their name or email, are cleared too. A deleted partner's links keep leading to your site.
+
 ## [0.38.0] - 2026-10-29
 
 ### Added

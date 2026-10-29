@@ -72,6 +72,11 @@ const localStorage = {
   get length() { return local.size; },
 };
 const tags = (opt.tags || []).map((t) => ({ tagName: t.tag.toUpperCase(), getAttribute: (k) => (k === "src" ? t.src : null) }));
+// Elements the visual editor's changes find, by selector.
+const elements = Object.fromEntries(Object.entries(opt.elements || {}).map(([sel, n]) => [sel, Array.from({ length: n }, () => {
+  const e = { textContent: "old", attrs: {}, display: "", setAttribute(k, v) { e.attrs[k] = v; }, style: { setProperty(k, v) { e.display = v; } } };
+  return e;
+})]));
 const spots = Array.from({ length: opt.policySpots || 0 }, () => ({ innerHTML: "", querySelector: () => null }));
 const document = {
   readyState: opt.loaded ? "complete" : "loading",
@@ -94,6 +99,7 @@ const document = {
     q.includes("data-category") ? held.filter((h) => h.getAttribute("type") === "text/plain" && h.getAttribute("data-of-loaded") === null)
     : q.includes("cookie-policy") ? spots
     : q.startsWith("script[src]") ? tags
+    : elements[q] ? elements[q]
     : [],
   createElement: () => {
     const n = { attrs: {}, setAttribute(k, v) { n.attrs[k] = v; } };
@@ -167,4 +173,5 @@ for (let i = 0; i < 10; i++) {
 }
 console.log(JSON.stringify({ anon: window.outflare.anonymousId(), href, posts, flagAsks, got, classes: [...classes].sort(), tracked, stored: Object.fromEntries(storage),
   choices, bannerAsks, cookieReports, policy: spots.map((s) => s.innerHTML), local: Object.fromEntries(local), state, consent: window.outflare.consent(), dataLayer: (window.dataLayer || []).map((a) => [...a]), uetq: window.uetq || null, fbq, ran,
-  cookies: Object.fromEntries(jar), bodies }));
+  cookies: Object.fromEntries(jar), bodies,
+  elements: Object.fromEntries(Object.entries(elements).map(([k, els]) => [k, els.map((e) => ({ text: e.textContent, attrs: e.attrs, display: e.display }))])) }));

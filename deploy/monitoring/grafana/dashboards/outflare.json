@@ -6971,7 +6971,7 @@
     },
     {
       "type": "row",
-      "title": "Journey webhooks and Slack",
+      "title": "Journey webhooks, Slack, sequencers and AI steps",
       "collapsed": false,
       "gridPos": {
         "h": 1,
@@ -6985,7 +6985,7 @@
     {
       "type": "timeseries",
       "title": "Journey calls",
-      "description": "Calls made by journeys' webhook and Slack steps, per minute, by kind and outcome. Normal: mostly done. retried is a try that will be tried again (the receiver answered 5xx or 429, or didn't answer); failed is a call that gave up or was refused (4xx, or Slack refused the channel). A rise in failed for one kind usually means a receiver changed or a key expired: the run's history says which step.",
+      "description": "Calls made by journeys' webhook, Slack, push_to_sequencer and AI steps, per minute, by kind and outcome. Normal: mostly done; skipped is a call with nothing to do (a person already in the campaign). retried is a try that will be tried again (the receiver answered 5xx or 429, or didn't answer); failed is a call that gave up or was refused (4xx, or Slack refused the channel). A rise in failed for one kind usually means a receiver changed or a key expired: the run's history says which step.",
       "id": 188,
       "datasource": {
         "type": "prometheus",
@@ -7056,6 +7056,55 @@
       "fieldConfig": {
         "defaults": {
           "unit": "s",
+          "custom": {
+            "fillOpacity": 10,
+            "stacking": {
+              "mode": "none"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "mean",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "People added to sequencer campaigns",
+      "description": "People journeys' push_to_sequencer steps added to Smartlead, Instantly and EmailBison campaigns, per minute, by connector and outcome. Normal: mostly added, some already_in (a person who was already there) and refused (the sequencer left them out: in another campaign, unsubscribed or blocked there). error is the sequencer failing or refusing the workspace's key; a run's history says which journey.",
+      "id": 190,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 522
+      },
+      "targets": [
+        {
+          "expr": "sum by (connector, outcome) (rate(outflare_sequencers_leads_pushed_total{job=\"$job\"}[5m])) * 60",
+          "legendFormat": "{{connector}} {{outcome}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
           "custom": {
             "fillOpacity": 10,
             "stacking": {

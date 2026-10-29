@@ -13399,7 +13399,8 @@ export interface paths {
          *     lifecycle email sent to them alone, product events, website visits, journey runs, partner referrals and
          *     partner portal sign-ins. Deals, payments and opt-outs stay, unlinked; a partner's memberships, rewards and
          *     payouts stay on a new archived record named "Erased partner" with no name or identities, suspended and
-         *     without payout details or notes, so commission totals still add up; a company's people stay, unlinked from it. erased counts the rows removed, by
+         *     without payout details or notes, so commission totals still add up, and keep their codes so their links still lead
+         *     to the site; their payouts' notes and references are cleared unless partner settings' erase_payout_notes is off; a company's people stay, unlinked from it. erased counts the rows removed, by
          *     table. A deal is deleted with DELETE .../deals/{deal}.
          */
         delete: operations["deleteRecord"];
@@ -14271,6 +14272,61 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/site/flags/edits": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Read a version's visual changes with an edit link
+         * @description Public: the signed edit token from an edit link is the authority (createFlagEditLink). What the visual editor reads
+         *     when it opens over the page: the version's flag and its visual changes. 401 once the link has expired (2 hours) or
+         *     its person can no longer manage analytics; 404 once the flag is archived.
+         */
+        get: operations["getSiteFlagEdits"];
+        put?: never;
+        /**
+         * Save a version's visual changes with an edit link
+         * @description Public: the signed edit token is the authority, and its person must still manage analytics on every brand. The
+         *     changes replace the version's payload `changes`; the rest of its payload stays. Each change has a CSS selector and
+         *     one action: text (set as text, never HTML), hide, href, or src and alt. Links and images go only to https://, http://
+         *     or a path on the site. Up to 50 changes, within the version's 4 KB payload. Send the JSON as text/plain to skip the
+         *     CORS preflight. Recorded as flag.updated, by the link's person.
+         */
+        post: operations["saveSiteFlagEdits"];
+        delete?: never;
+        /**
+         * CORS preflight for the visual editor
+         * @description Public. Any origin may ask; the token, not the page, is checked.
+         */
+        options: operations["getSiteFlagEditsPreflight"];
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/site/editor.js": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get the visual editor script
+         * @description Public. The visual editor the website script (/site.js, version 8 and later) loads over the page when it opens with
+         *     an edit link (?of_edit=). It draws in a shadow root and only reads and saves with the link's token.
+         */
+        get: operations["getSiteEditorScript"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/site/consent": {
         parameters: {
             query?: never;
@@ -14451,6 +14507,35 @@ export interface paths {
          *     near the boundaries it shifts, and growing a rollout only adds visitors. Reaches visitors within 10 seconds.
          */
         patch: operations["updateFlag"];
+        trace?: never;
+    };
+    "/v1/workspaces/{ws}/flags/{flag}/edit-link": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                /** @description The flag's id or key. */
+                flag: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Make a visual editor link for a version
+         * @description Scope: analytics.manage, for a person signed in to Outflare (API tokens and connected apps can't). A link to a page of
+         *     your site that previews the version (?of_flag=) and opens the visual editor over it (?of_edit=), where you pick
+         *     elements and change their text, hide them, or change a link or image. The page needs the website script, version 8 or
+         *     later, and data-flags on its tag. The link works for 2 hours, and only while you can manage analytics; it changes only
+         *     this version's visual changes. Nothing changes until you save in the editor.
+         */
+        post: operations["createFlagEditLink"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
         trace?: never;
     };
     "/v1/workspaces/{ws}/ab-tests": {
@@ -17840,6 +17925,33 @@ export interface paths {
         options?: never;
         head?: never;
         patch?: never;
+        trace?: never;
+    };
+    "/v1/workspaces/{ws}/partner-settings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+            };
+            cookie?: never;
+        };
+        /**
+         * Partner settings for every program
+         * @description Scope: partners.read. The partner rules that hold for every program in the workspace.
+         */
+        get: operations["getPartnerSettings"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Change the partner settings for every program
+         * @description Scope: partners.manage, for every brand. Recorded as partner_settings.updated.
+         */
+        patch: operations["updatePartnerSettings"];
         trace?: never;
     };
     "/v1/workspaces/{ws}/partner-programs": {
@@ -24547,7 +24659,7 @@ export interface components {
         JourneyStep: {
             id: string;
             /** @enum {string} */
-            kind: "email" | "wait" | "branch" | "exit" | "set_field" | "add_tag" | "remove_tag" | "add_to_list" | "remove_from_list" | "enter_journey" | "exit_journey" | "enroll_in_sequence" | "stop_sequences" | "suppress" | "unsubscribe_topic" | "alert" | "transactional_email" | "set_consent" | "assign_owner" | "move_deal" | "slack" | "webhook";
+            kind: "email" | "wait" | "branch" | "exit" | "set_field" | "add_tag" | "remove_tag" | "add_to_list" | "remove_from_list" | "enter_journey" | "exit_journey" | "enroll_in_sequence" | "stop_sequences" | "suppress" | "unsubscribe_topic" | "alert" | "transactional_email" | "set_consent" | "assign_owner" | "move_deal" | "slack" | "webhook" | "push_to_sequencer" | "ai";
             name?: string;
             /** @description email: a lifecycle template's handle or id. transactional_email: a transactional one's. */
             template?: string;
@@ -24591,7 +24703,7 @@ export interface components {
             journey_id?: string;
             /**
              * Format: uuid
-             * @description enroll_in_sequence, stop_sequences (scope sequence): the sequence.
+             * @description enroll_in_sequence, stop_sequences (scope sequence): the sequence. push_to_sequencer: a sequence linked to a campaign in a connected sequencer.
              */
             sequence_id?: string;
             /**
@@ -24599,8 +24711,12 @@ export interface components {
              * @enum {string}
              */
             scope?: "journey" | "others" | "sequence" | "all" | "company";
-            /** @description enroll_in_sequence: enroll even when active in another sequence. */
+            /** @description enroll_in_sequence: enroll even when active in another sequence. push_to_sequencer: add them even when they are in another of the sequencer's campaigns (Smartlead, Instantly). */
             allow_elsewhere?: boolean;
+            /** @description push_to_sequencer: the campaign's own variables, by their name there, with {{person.x}}, {{event.x}} and {{vars.x}} filled in. */
+            variables?: {
+                [key: string]: string;
+            };
             /**
              * @description suppress: their email addresses (the default) or their work domain.
              * @enum {string}
@@ -24656,8 +24772,14 @@ export interface components {
             /** @description webhook: the JSON body. Strings are filled in; a string that is only {{x}} becomes the value itself (a number stays a number). */
             body?: unknown;
             auth?: components["schemas"]["JourneyWebhookAuth"];
-            /** @description webhook: keep the answer in the run's vars under this name, as {status, body}, for later steps. */
+            /** @description webhook: keep the answer in the run's vars under this name, as {status, body}, for later steps. ai: as {answer}. */
             save_as?: string;
+            /** @description ai: what to ask the workspace's own AI model about the person; {{person.x}}, {{event.x}} and {{vars.x}} fill in. Needs a connected AI model; it uses the workspace's own key and AI spend limits (the Journey AI steps tool). */
+            prompt?: string;
+            /** @description ai: the only answers allowed, to sort people (hot, warm, cold). Leave out for a written answer. */
+            choices?: string[];
+            /** @description ai: for a written answer, at most this many words (100 when left out). */
+            max_words?: number;
             /** @description slack: the channel's id. */
             channel?: string;
             /**
@@ -24872,7 +24994,7 @@ export interface components {
             steps: {
                 step: string;
                 kind: string;
-                /** @description What the step would do, in a run step's words: sent, skipped, waited, yes, no, done, failed, exited; not_called for a webhook or Slack step, which a test never calls. */
+                /** @description What the step would do, in a run step's words: sent, skipped, waited, yes, no, done, failed, exited; not_called for a webhook, Slack or ai step, which a test never calls. */
                 outcome: string;
                 /** @description Why it was skipped or failed. */
                 detail?: string;
@@ -25805,7 +25927,7 @@ export interface components {
             key: string;
             /** @description Its share is its weight over the total of all weights. */
             weight: number;
-            /** @description Any JSON the page or server reads with the variant, such as a headline; null for none. At most 4 KB. */
+            /** @description Any JSON the page or server reads with the variant, such as a headline; null for none. At most 4 KB. An object payload's `changes` are the version's visual changes (FlagChange), made in the visual editor and applied by the website script. */
             payload?: unknown;
         };
         FlagRule: {
@@ -25830,6 +25952,32 @@ export interface components {
             rollout?: number;
             rules?: components["schemas"]["FlagRule"][];
             on_site?: boolean;
+        };
+        /** @description One visual change: a CSS selector and exactly one action (src and alt may go together). */
+        FlagChange: {
+            /** @example #hero > h1 */
+            selector: string;
+            /** @description Replaces the elements' text, as text. */
+            text?: string;
+            /** @description Hides the elements. */
+            hide?: boolean;
+            /** @description A link's address: https://, http:// or a path. */
+            href?: string;
+            /** @description An image's address: https://, http:// or a path. */
+            src?: string;
+            /** @description An image's alt text. */
+            alt?: string;
+        };
+        FlagEdits: {
+            flag_key: string;
+            flag_name: string;
+            variant: string;
+            changes: components["schemas"]["FlagChange"][];
+            /**
+             * Format: date-time
+             * @description When the edit link stops working.
+             */
+            expires_at: string;
         };
         FlagDecisions: {
             /**
@@ -30202,7 +30350,7 @@ export interface components {
             /** @description Each task the AI model does and the model it uses now. */
             tasks: {
                 /** @enum {string} */
-                task: "plan" | "turn" | "check_in" | "reply_labelling" | "classify_domain" | "ai_visibility" | "social_replies" | "social_posts" | "email_verification" | "fix_tickets" | "review_replies" | "link_page_reading" | "ab_tests" | "link_pitches" | "knowledge_answers";
+                task: "plan" | "turn" | "check_in" | "reply_labelling" | "classify_domain" | "ai_visibility" | "social_replies" | "social_posts" | "email_verification" | "fix_tickets" | "review_replies" | "link_page_reading" | "ab_tests" | "link_pitches" | "knowledge_answers" | "journeys";
                 name: string;
                 description: string;
                 /** @description Null when no model can run yet. */
@@ -32224,6 +32372,10 @@ export interface components {
             pushed_count: number;
             last_error: string | null;
             error_code: string | null;
+        };
+        PartnerSettings: {
+            /** @description When a partner's record is erased (DELETE .../records/{record}), also clear the note and reference on their payouts, which can hold their name or email. The payouts' amounts, dates and status always stay, and their links keep working. On by default. */
+            erase_payout_notes: boolean;
         };
         ContactRules: {
             /**
@@ -61793,6 +61945,99 @@ export interface operations {
             default: components["responses"]["Error"];
         };
     };
+    getSiteFlagEdits: {
+        parameters: {
+            query: {
+                /** @description The of_edit value from the edit link. */
+                token: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The version and its changes. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FlagEdits"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    saveSiteFlagEdits: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "text/plain": string;
+                "application/json": {
+                    token: string;
+                    changes: components["schemas"]["FlagChange"][];
+                };
+            };
+        };
+        responses: {
+            /** @description The version and its saved changes. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FlagEdits"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    getSiteFlagEditsPreflight: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Allowed. */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    getSiteEditorScript: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The script. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/javascript": string;
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
     getSiteConsentBanner: {
         parameters: {
             query: {
@@ -62168,6 +62413,49 @@ export interface operations {
                 };
             };
             202: components["responses"]["MissionHeld"];
+            default: components["responses"]["Error"];
+        };
+    };
+    createFlagEditLink: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                /** @description The flag's id or key. */
+                flag: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @description The version's key. */
+                    variant: string;
+                    /**
+                     * @description A page of your site, http(s).
+                     * @example https://northpeak.example/pricing
+                     */
+                    url: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The link. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @description Open it in your browser. It carries a secret token: don't share it. */
+                        url: string;
+                        /** Format: date-time */
+                        expires_at: string;
+                    };
+                };
+            };
             default: components["responses"]["Error"];
         };
     };
@@ -68000,6 +68288,68 @@ export interface operations {
             };
             400: components["responses"]["Error"];
             404: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    getPartnerSettings: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The settings. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PartnerSettings"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    updatePartnerSettings: {
+        parameters: {
+            query?: never;
+            header?: {
+                /**
+                 * @description Makes the write safe to retry. A repeat with the same key from the same caller within 24 hours gets the first
+                 *     answer back (with `Idempotent-Replayed: true`) instead of running again. The same key for a different request
+                 *     is refused with 422 `idempotency_key_reused`; while the first is still running, 409 `idempotency_in_progress`.
+                 *     Use a new random key, such as a UUID, for each distinct write.
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PartnerSettings"];
+            };
+        };
+        responses: {
+            /** @description The settings. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PartnerSettings"];
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            400: components["responses"]["Error"];
             default: components["responses"]["Error"];
         };
     };

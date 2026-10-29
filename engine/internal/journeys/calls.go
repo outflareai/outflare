@@ -43,7 +43,8 @@ const JobCall = "journey.call"
 // callHold is how long a run waits for its step's call.
 const callHold = 3 * time.Hour
 
-// callResult is what a call did: done or failed, with a line saying how;
+// callResult is what a call did: done, skipped (nothing to do, such as
+// a person already in the campaign) or failed, with a line saying how;
 // retry when another try could work (it fails when no tries are left).
 type callResult struct {
 	outcome, detail string
@@ -52,6 +53,9 @@ type callResult struct {
 	code string
 	// saved is what save_as keeps, for a step that saves.
 	saved any
+	// record writes what a done call changed (its audit event), in the
+	// transaction that moves the run on.
+	record func(ctx context.Context, tx pgx.Tx) error
 }
 
 // call is one call step being made for one person.
@@ -145,8 +149,9 @@ func (s *Service) callJob(ctx context.Context, job jobs.Job) error {
 	ev := track.Event{Name: "journey_step.called", WorkspaceID: ws, ActorType: "system", Surface: "job",
 		Props: map[string]any{"kind": c.st.Kind, "journey_id": c.j.id, "attempt": job.Attempt, "duration_ms": time.Since(started).Milliseconds()}}
 	switch {
-	case res.outcome == "done":
-		metrics.JourneyCalled(c.st.Kind, "done", time.Since(started))
+	case res.outcome == "done" || res.outcome == "skipped":
+		metrics.JourneyCalled(c.st.Kind, res.outcome, time.Since(started))
+		ev.Props["result"] = res.outcome
 		track.Emit(ctx, ev)
 	case res.retry && !last:
 		metrics.JourneyCalled(c.st.Kind, "retried", time.Since(started))
@@ -169,6 +174,11 @@ func (s *Service) callJob(ctx context.Context, job jobs.Job) error {
 				raw, _ = json.Marshal(map[string]any{"status": res.saved.(map[string]any)["status"], "body": nil, "truncated": true})
 			}
 			if _, err := tx.Exec(ctx, `UPDATE journey_runs SET vars = jsonb_set(vars, ARRAY[$2::text], $3::jsonb) WHERE id = $1`, r.id, c.st.SaveAs, raw); err != nil {
+				return err
+			}
+		}
+		if res.record != nil && res.outcome == "done" {
+			if err := res.record(ctx, tx); err != nil {
 				return err
 			}
 		}

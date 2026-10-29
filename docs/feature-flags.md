@@ -89,6 +89,28 @@ Within a visit, the next page starts with the last answer at once. The [A/B test
 
 Add `?of_flag=pricing-headline:faster` to any page's address to see that version yourself, with its content, even before the flag is turned on. Several go in one parameter (`?of_flag=pricing-headline:faster,chat-widget:on`), and `off` shows a flag as off. The choice lasts for the rest of your visit, applies only to your browser and is taken off the address straight away.
 
+### Change a page without code
+
+For a version of a split, open the flag under **Analytics → Feature flags**, enter a page of your site under **Page to edit on**, and choose **Edit visually** next to the version. The page opens in a new tab with that version previewed and an editor over it: click anything to change its text, hide it, or change a link or an image (its address and alt text). **Save** in the editor, and visitors who get that version see the changes, within a minute. The page needs the website script (version 8 or later) with `data-flags`.
+
+The changes are kept in the version's content, as `changes`, beside anything else it has:
+
+```json
+{ "headline": "Ship faster", "changes": [
+  { "selector": "#hero > h1", "text": "Ship faster" },
+  { "selector": ".promo-banner", "hide": true },
+  { "selector": "a.cta", "href": "/signup?plan=pro" },
+  { "selector": "img.hero", "src": "https://cdn.example.com/hero-b.png", "alt": "The dashboard" }
+] }
+```
+
+- Each change has a CSS selector and one action. It applies to every element the selector finds.
+- Text is set as text, never HTML. Links and images only go to `https://`, `http://` or a path on your site.
+- The script applies them when the flags arrive, again once the page has loaded and a moment later for content that loads late. Making one counts as showing the version, so the [A/B test](ab-tests.md) counts the visitor.
+- A version has up to 50 changes, within its 4 KB of content. You can also write them by hand in the version's content, or with `PATCH .../flags/{flag}`.
+
+The edit link (`POST .../flags/{flag}/edit-link`, `analytics.manage`) is for a person signed in to Outflare, not an API token. It works for 2 hours, only on that version, and only while you can still manage analytics. It carries a secret token, kept for your visit in the tab: don't share it. The editor reads and saves with it (`GET/POST /v1/site/flags/edits`).
+
 ## On your servers
 
 `POST /v1/workspaces/{ws}/flags/evaluate` with a token that has `analytics.read` (MCP `evaluate_flags`):

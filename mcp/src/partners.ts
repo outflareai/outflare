@@ -70,6 +70,17 @@ export function registerPartnerTools(server: McpServer, gtm: MissionClient, work
   );
 
   server.registerTool(
+    "get_partner_settings",
+    {
+      title: "Get partner settings",
+      description: "The partner rules for every program in the workspace: whether erasing a partner's record also clears their payouts' notes and references.",
+      inputSchema: {},
+      annotations: read,
+    },
+    () => call(() => gtm.GET("/v1/workspaces/{ws}/partner-settings", { params: { path: path() } })),
+  );
+
+  server.registerTool(
     "get_partner_program_stats",
     {
       title: "Get a partner program's totals",
@@ -271,6 +282,17 @@ export function registerPartnerTools(server: McpServer, gtm: MissionClient, work
       annotations: write,
     },
     ({ program, ...body }) => call(() => gtm.PATCH("/v1/workspaces/{ws}/partner-programs/{id}", { params: { path: { ws: workspace(), id: program } }, body })),
+  );
+
+  server.registerTool(
+    "update_partner_settings",
+    {
+      title: "Change partner settings",
+      description: "For every program: whether erasing a partner's record also clears the note and reference on their payouts, which can hold their name or email. Payouts and links always stay.",
+      inputSchema: { erase_payout_notes: z.boolean() },
+      annotations: write,
+    },
+    (body) => call(() => gtm.PATCH("/v1/workspaces/{ws}/partner-settings", { params: { path: path() }, body })),
   );
 
   server.registerTool(

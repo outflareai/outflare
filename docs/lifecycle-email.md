@@ -269,7 +269,7 @@ with the rule's dry run. On a phone the flow is read-only.
   - **Other campaigns.**
     - `enter_journey` starts another journey.
     - `exit_journey` ends their run in another journey (`scope` `journey`) or in every other journey (`others`).
-    - `enroll_in_sequence` adds them to a cold-email sequence through their lead, which it makes from their verified email if they have none. Suppressed people are skipped, and so are people already active elsewhere unless `allow_elsewhere` is on.
+    - `enroll_in_sequence` adds them to a cold-email sequence that sends through Outflare, through their lead, which it makes from their verified email if they have none. Suppressed people are skipped, and so are people already active elsewhere unless `allow_elsewhere` is on.
     - `stop_sequences` stops their cold email: in one sequence, in every sequence (`all`, the default), or for everyone at their company (`company`).
     - `suppress` adds their addresses, or their work domain, to the suppression list.
     - `unsubscribe_topic` withdraws their consent to a topic, or to all marketing email.
@@ -277,7 +277,10 @@ with the rule's dry run. On a phone the flow is read-only.
   - **Notify.**
     - `alert` raises an alert (`title`, `text`) to the record's `owner` or to the owners and admins. It is emailed or sent to Slack as alert settings say.
     - `slack` posts `text` (with an optional bold `title`) to a `channel` in the workspace's own Slack connection (the first one, or `connection_id`). It is tried again for about a minute when Slack is busy.
-  - **Integrations.** `webhook` calls any URL: your own system, Zapier, n8n or another tool's API. See [Webhook steps](#webhook-steps).
+  - **Integrations.**
+    - `webhook` calls any URL: your own system, Zapier, n8n or another tool's API. See [Webhook steps](#webhook-steps).
+    - `push_to_sequencer` adds them to the Smartlead, Instantly or EmailBison campaign a sequence (`sequence_id`) is linked to, through the workspace's own connection, and the sequencer sends from there. It sends their verified email, name, company and company domain, plus the campaign's own `variables` by their name there (`{"plan": "{{person.plan}}"}`; EmailBison needs them made there first). Suppressed people, people the sequence's exclusion leaves out (see [Exclusions](#exclusions)), people without a verified email, people already in the campaign and people the sequencer leaves out (in another of its campaigns, unless `allow_elsewhere` is on, or unsubscribed or blocked there) are `skipped` with why. It is tried again for about 40 minutes when the sequencer is busy; a refused key fails the step. A sequence that sends through Outflare itself takes `enroll_in_sequence` instead, and one linked to a sequencer takes this step. Each person added records `sequence.lead_pushed`.
+  - **AI.** `ai` asks the workspace's own AI model to sort the person into choices or write a short text, kept for later steps. See [AI steps](#ai-steps).
 
   Each action is done, `skipped` with why, or `failed`. A failed step does what its `on_error` says: `stop` (the default) fails the run, `continue` goes on to `next`, and a step id goes there. `GET .../journeys/step-kinds` (MCP `list_journey_step_kinds`) lists every kind with its settings as JSON Schema and the fields that name the next step. The flow builder's step picker reads it.
 - **Run variables.** A step can save something for later steps: a webhook's answer is kept as `vars.<save_as>`. Templates, webhook and Slack text and `set_field` values read it as `{{vars.x}}`, and a branch tests it with a `var` condition (`{"var": "billing.status", "op": "eq", "value": 200}`). One run shows its `vars`.
@@ -351,6 +354,21 @@ A `webhook` step makes one HTTP call per person:
 - **Where it can call.** Only public `https` addresses, unless the server sets `WEBHOOKS_ALLOW_PRIVATE` (self-hosted receivers on the same network).
 
 The run's history shows each call as `calling`, then `done` with the status and time (`200 in 184 ms`), or `failed` with why.
+
+### AI steps
+
+An `ai` step asks the workspace's own AI model one question about the person, and keeps the answer for later steps:
+
+- **The question.** `prompt` is up to 4,000 characters. `{{person.x}}`, `{{event.x}}` and `{{vars.x}}` fill it in, for example: `Is {{person.company}} a good fit? {{person.job_title}}, {{person.company_size}} staff.`
+- **Classify or write.** With `choices` (2 to 20, such as `hot`, `warm`, `cold`), the model answers with exactly one of them. A reply that isn't one of them is tried again. Without `choices`, it writes plain text of at most `max_words` words (100 by default).
+- **The answer.** It is kept as `vars.<save_as>`: `{answer}`. A branch can then check `vars.<save_as>.answer` (a `var` condition such as `fit.answer` eq `hot`), and emails, webhooks and `set_field` can use `{{vars.<save_as>.answer}}`.
+- **Whose model.** The step uses the model and key chosen under Settings, AI model, as the **Journey AI steps** tool. That tool gets a cheaper model by default. The workspace's monthly AI limit and the tool's own limit apply, and every answer is in the AI usage log ([ai-usage.md](ai-usage.md)).
+  - With no AI model connected, or a limit reached, the step fails and says why, and `on_error` decides what happens next.
+  - The model being down or slow is tried again, 5 times.
+- **Safety.** The model is told that everything in the question is data, never instructions. Its answer is only kept as data, and it has no tools, so it can't act on its own.
+- **Test mode** doesn't ask the model. The step shows `not_called`.
+
+The run's history shows `calling`, then `done` with the start of the answer, or `failed` with why.
 
 ## Exclusions
 

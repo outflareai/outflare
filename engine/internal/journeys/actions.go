@@ -310,6 +310,31 @@ var Actions = []actionDef{
 		check:    checkWebhook,
 		call:     webhookCall,
 		attempts: 10},
+	{StepKind: StepKind{Kind: "push_to_sequencer", Group: "integrations", Label: "Add to a sequencer campaign",
+		Description: "Add the person to the Smartlead, Instantly or EmailBison campaign a sequence is linked to, through the workspace's own connection; the sequencer sends from there. Someone suppressed, without a verified email, already in the campaign or left out by the sequencer is skipped and goes on. Tried again for about 40 minutes when the sequencer is busy.",
+		Requires:    []Requirement{{Connection: "sequencer", Label: "Smartlead, Instantly or EmailBison, with a campaign linked to the sequence (Settings, Connections)"}},
+		Settings: schema(map[string]any{
+			"sequence_id":     ref("sequence", "A sequence linked to a campaign in a connected sequencer."),
+			"allow_elsewhere": map[string]any{"type": "boolean", "description": "Add them even when they are in another of the sequencer's campaigns (Smartlead and Instantly); off by default."},
+			"variables": map[string]any{"type": "object", "maxProperties": 20, "additionalProperties": map[string]any{"type": "string"},
+				"description": "The campaign's own variables, by their name there, such as {\"plan\": \"{{person.plan}}\"}. EmailBison needs them made there first."},
+		}, "sequence_id")},
+		check:    checkPush,
+		call:     pushCall,
+		attempts: 10},
+	{StepKind: StepKind{Kind: "ai", Group: "ai", Label: "Ask AI",
+		Description: "Ask your workspace's own AI model about the person: pick one of a few choices (to sort them) or write a short text. {{person.x}}, {{event.x}} and {{vars.x}} fill in the prompt. The answer is kept in vars.<save_as>.answer for a branch, an email or a webhook. Uses your own key and AI spend limits.",
+		Requires:    []Requirement{{Connection: "ai_model", Label: "An AI model (Settings, AI model)"}},
+		Settings: schema(map[string]any{
+			"prompt": map[string]any{"type": "string", "maxLength": maxPrompt,
+				"description": "What to ask, such as: Is {{person.company}} a good fit for our product? {{person.job_title}} at a {{person.company_size}} company."},
+			"choices":   map[string]any{"type": "array", "minItems": 2, "maxItems": 20, "items": map[string]any{"type": "string", "maxLength": 100}, "description": "The only answers allowed, to sort people (such as hot, warm, cold). Leave out for a written answer."},
+			"max_words": map[string]any{"type": "integer", "minimum": 1, "maximum": 300, "description": "For a written answer: at most this many words (100 when left out)."},
+			"save_as":   str("Keep the answer in vars.<save_as> as {answer}: lowercase letters, digits and _."),
+		}, "prompt", "save_as")},
+		check:    checkAI,
+		call:     aiCall,
+		attempts: 5},
 }
 
 func init() {
@@ -507,7 +532,7 @@ func enrollInSequence(ctx context.Context, x *act) (string, string, error) {
 	case status == "archived":
 		return "failed", "the sequence is archived", nil
 	case linked:
-		return "failed", "the sequence runs in a connected sequencer; add people there", nil
+		return "failed", "the sequence runs in a connected sequencer; use a push_to_sequencer step", nil
 	}
 	leadID, why, err := personLead(ctx, x.tx, x.ws, x.r.recordID)
 	if err != nil || why != "" {

@@ -68,6 +68,15 @@ type Step struct {
 	// first when empty). The message is text, with title in bold above it.
 	Channel      string `json:"channel,omitempty"`
 	ConnectionID string `json:"connection_id,omitempty"`
+	// ai: what to ask the workspace's AI model, with {{…}} filled in; the
+	// only answers allowed (choices, to classify), or at most how many
+	// words to write. The answer is kept in vars.<save_as>.
+	Prompt   string   `json:"prompt,omitempty"`
+	Choices  []string `json:"choices,omitempty"`
+	MaxWords int      `json:"max_words,omitempty"`
+	// push_to_sequencer: the campaign's own variables, by their name
+	// there, with {{person.x}}, {{event.x}} and {{vars.x}} filled in.
+	Variables map[string]string `json:"variables,omitempty"`
 	// What a failed action does: stop (the default: the run fails),
 	// continue (go on to next) or a step id to go to.
 	// set_consent: granted or withdrawn, for topic (empty: all marketing

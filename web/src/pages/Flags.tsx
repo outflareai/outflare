@@ -200,6 +200,27 @@ function FlagSheet({ ws, flag, onClose, onSaved }: { ws: string; flag: Flag | nu
   const [onSite, setOnSite] = useState(flag?.on_site ?? true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [editPage, setEditPage] = useState("");
+
+  // The visual editor opens on a page of the site in a new tab. The sheet
+  // closes, so saving it later can't undo what was saved in the editor.
+  async function editVisually(variant: string) {
+    if (!flag) return;
+    setError("");
+    if (!/^https?:\/\/[^/\s]+/i.test(editPage.trim())) return setError("Enter the address of a page on your site to edit, starting with https://.");
+    const win = window.open("about:blank", "_blank");
+    const { data, error } = await api.POST("/v1/workspaces/{ws}/flags/{flag}/edit-link", { params: { path: { ws, flag: flag.id } }, body: { variant, url: editPage.trim() } });
+    if (error || !data) {
+      win?.close();
+      return setError(errorMessage(error));
+    }
+    if (win) {
+      win.opener = null;
+      win.location.href = data.url;
+    } else window.location.href = data.url;
+    toast(`The editor is open on your page for ${variant}. Save there; visitors in it see the changes.`);
+    onClose();
+  }
 
   const setVariant = (i: number, v: Partial<FlagVariant>) => setVariants((vs) => vs.map((x, k) => (k === i ? { ...x, ...v } : x)));
   const setRule = (i: number, r: Partial<FlagRule>) => setRules((rs) => rs.map((x, k) => (k === i ? { ...x, ...r } : x)));
@@ -277,10 +298,20 @@ function FlagSheet({ ws, flag, onClose, onSaved }: { ws: string; flag: Flag | nu
                       <span className="text-muted-foreground tabular-nums">{Math.round((v.weight / total) * 100)}% of visitors</span>
                       {variants.length > 2 && <Button type="button" variant="ghost" className="ml-auto" onClick={() => { setVariants((vs) => vs.filter((_, k) => k !== i)); setPayloads((ps) => ps.filter((_, k) => k !== i)); }}>Remove</Button>}
                     </div>
+                    {flag?.variants.some((x) => x.key === v.key) && flag.status !== "archived" && (
+                      <Button type="button" variant="ghost" disabled={busy} onClick={() => editVisually(v.key)}>Edit visually</Button>
+                    )}
                     <textarea aria-label="Content" className={`${field} w-full font-mono text-[12px]`} rows={2} placeholder='Content for this version (optional JSON), e.g. {"headline": "Ship faster"}' value={payloads[i] ?? ""} onChange={(e) => setPayloads((ps) => { const n = [...ps]; n[i] = e.target.value; return n; })} />
                   </div>
                 ))}
                 {variants.length < 10 && <Button type="button" variant="ghost" onClick={() => setVariants((vs) => [...vs, { key: `test-${vs.length}`, weight: 50 }])}>Add a version</Button>}
+                {flag && isSplit(flag) && (
+                  <label className="block">
+                    <span className="mb-1 block font-medium">Page to edit on</span>
+                    <input className={`${field} w-full`} type="url" placeholder="https://northpeak.example/pricing" value={editPage} onChange={(e) => setEditPage(e.target.value)} />
+                    <span className="mt-1 block text-[12px] text-muted-foreground">Edit visually opens this page with the version and an editor over it: click anything to change its text, hide it, or change a link or image. The page needs the website script with data-flags. The link works for 2 hours.</span>
+                  </label>
+                )}
                 {flag && flag.status === "on" && <p className="text-[12px] text-muted-foreground">Changing the split while it's on moves some visitors to another version.</p>}
               </div>
             )}

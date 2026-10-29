@@ -47,7 +47,7 @@ func (EmailBison) Definition() c.Definition {
 			{Name: "base_url", Label: "Instance URL", Placeholder: "https://send.youragency-com.example", Help: "The address you open EmailBison at."},
 			{Name: "api_key", Label: "API key", Secret: true, Help: "Create one under Settings > API."},
 		},
-		Capabilities: []string{c.CapObserveMailboxes, c.CapControlMailboxes, c.CapControlWarmup, c.CapReadReplies, c.CapBlocklist},
+		Capabilities: []string{c.CapObserveMailboxes, c.CapControlMailboxes, c.CapControlWarmup, c.CapReadReplies, c.CapBlocklist, c.CapPushLeads},
 	}
 }
 

@@ -180,6 +180,12 @@ Outflare has no PayPal, Wise or crypto integration and never stores bank details
 
 **Partners without payout details.** The portal's dashboard asks a partner with no payout details to add them in Settings. On the Partners tab, "No payout details (N)" lists them (`GET .../partners?payout_details=missing`; the program's `stats` count them as `partners.missing_payout_details`). A partner brought in by an import whose platform didn't give their details (Tolt's API has none) gets no payout until they add them: "Make due payouts" leaves their balance as it is and counts them in `waiting_for_details`, and their next payout includes it. Partners added in Outflare are paid as before, details or not.
 
+### When a partner's record is deleted
+
+Deleting a partner's person record for good (`DELETE .../records/{record}`, for an erasure request) keeps what they earned and were paid, so commission totals and payout history still add up. Their memberships, rewards and payouts move to a new archived record named "Erased partner", with no name, email or identities. The membership is suspended and loses its payout method, note, sign-up answers and postback URL, but keeps its code and promo codes: the partner's links still lead to the program's landing page, without crediting anyone. Their referrals, conversions and portal sign-ins are erased.
+
+A payout's note and reference can hold the partner's name or email, so they are cleared too, unless the workspace's partner setting is off (Partners → Payouts → "Clear payout notes when a partner is deleted", or `PATCH .../partner-settings` with `erase_payout_notes`; on by default, and the same for every program). The payout's amount, dates and status always stay.
+
 ## Partner portal
 
 Each program can have a hosted portal where partners apply, sign in and see how they're doing. It is off until you open it (Partners → program → Settings, or `PUT .../partner-programs/{id}/portal`).

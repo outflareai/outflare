@@ -714,7 +714,37 @@ function Payouts({ ws, program, canManage }: { ws: string; program: PartnerProgr
       />
       <ErrorText>{listError}</ErrorText>
       <LoadMore next={next} onMore={more} shown={list.length} />
+      <ErasePayoutNotes ws={ws} canManage={canManage} />
     </div>
+  );
+}
+
+// ErasePayoutNotes is the workspace's one partner setting: whether deleting
+// a partner's record for good also clears their payouts' notes and
+// references. It holds for every program, so it says so.
+function ErasePayoutNotes({ ws, canManage }: { ws: string; canManage: boolean }) {
+  const [on, setOn] = useState<boolean | null>(null);
+  useEffect(() => {
+    api.GET("/v1/workspaces/{ws}/partner-settings", { params: { path: { ws } } }).then(({ data }) => setOn(data?.erase_payout_notes ?? null));
+  }, [ws]);
+  async function change(v: boolean) {
+    setOn(v);
+    const { error } = await api.PATCH("/v1/workspaces/{ws}/partner-settings", { params: { path: { ws } }, body: { erase_payout_notes: v } });
+    if (error) {
+      setOn(!v);
+      return toast(errorMessage(error), "error");
+    }
+    toast(v ? "Deleting a partner now clears their payout notes too." : "Deleting a partner now keeps their payout notes.");
+  }
+  if (on === null) return null;
+  return (
+    <label className="flex items-start gap-2 border-t pt-3 text-[13px]">
+      <input type="checkbox" className="mt-0.5" checked={on} disabled={!canManage} onChange={(e) => change(e.target.checked)} />
+      <span>
+        Clear payout notes when a partner is deleted <span className="text-muted-foreground">(every program)</span>
+        <span className="block text-xs text-muted-foreground">Deleting a partner for good always keeps their payouts and their links. This also clears each payout's note and reference, which can hold their name or email.</span>
+      </span>
+    </label>
   );
 }
 

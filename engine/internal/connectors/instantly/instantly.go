@@ -29,7 +29,7 @@ func (Instantly) Definition() c.Definition {
 		Website:     "https://instantly.ai", DocsURL: "https://developer.instantly.ai/",
 		KeyURL: "https://app.instantly.ai/app/settings/integrations", Auth: c.AuthAPIKey,
 		Fields:       []c.Field{{Name: "api_key", Label: "API key (v2)", Secret: true, Help: "Settings → Integrations → API keys. Give it all read scopes."}},
-		Capabilities: []string{c.CapImportCampaigns, c.CapImportLeads, c.CapImportMailboxes, c.CapObserveMailboxes, c.CapControlMailboxes, c.CapControlWarmup, c.CapBlocklist},
+		Capabilities: []string{c.CapImportCampaigns, c.CapImportLeads, c.CapImportMailboxes, c.CapObserveMailboxes, c.CapControlMailboxes, c.CapControlWarmup, c.CapBlocklist, c.CapPushLeads},
 		Status:       c.Available,
 		Pricing:      "Included in Instantly's Hypergrowth plan and above",
 	}

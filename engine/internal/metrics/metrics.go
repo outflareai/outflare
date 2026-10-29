@@ -225,8 +225,12 @@ var (
 	// Journey webhook and Slack steps: calls out of a run, with retries.
 	journeyCalls = prometheus.NewCounterVec(prometheus.CounterOpts{
 		Namespace: namespace, Subsystem: "journeys", Name: "calls_total",
-		Help: "Calls journey steps made, by step kind (webhook, slack) and outcome (done; retried, for a try that will be tried again; failed).",
+		Help: "Calls journey steps made, by step kind (webhook, slack, push_to_sequencer, ai) and outcome (done; skipped, nothing to do; retried, for a try that will be tried again; failed).",
 	}, []string{"kind", "outcome"})
+	sequencerPushes = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Namespace: namespace, Subsystem: "sequencers", Name: "leads_pushed_total",
+		Help: "People journeys added to sequencer campaigns, by connector (smartlead, instantly, emailbison) and outcome (added, already_in, refused by the sequencer, error).",
+	}, []string{"connector", "outcome"})
 	journeyCallDuration = prometheus.NewHistogramVec(prometheus.HistogramOpts{
 		Namespace: namespace, Subsystem: "journeys", Name: "call_duration_seconds",
 		Help: "Time one try of a journey step's call took, by step kind.", Buckets: requestBuckets,
@@ -419,7 +423,7 @@ var own = []prometheus.Collector{
 	hooksReceived, hookEvents, hookLag,
 	domainConnectLookups, domainConnectDuration,
 	queryRuns, queryDuration, queryRows,
-	ruleEvaluations, journeyCalls, journeyCallDuration, excluded,
+	ruleEvaluations, journeyCalls, journeyCallDuration, excluded, sequencerPushes,
 	semanticRuns, semanticItems, semanticDuration, semanticAvailable, semanticWorkspaces, knowledgeAsks, knowledgeAskDuration,
 	adConversions, adConversionsOldest,
 	meetingEvents, meetingEventsPending,
@@ -582,6 +586,13 @@ func RuleEvaluated(trigger, outcome string) { ruleEvaluations.WithLabelValues(tr
 func JourneyCalled(kind, outcome string, d time.Duration) {
 	journeyCalls.WithLabelValues(kind, outcome).Inc()
 	journeyCallDuration.WithLabelValues(kind).Observe(d.Seconds())
+}
+
+// SequencerPushed records one try at adding a person to a sequencer
+// campaign: the connector, and what happened (added, already_in, refused,
+// error).
+func SequencerPushed(connector, outcome string) {
+	sequencerPushes.WithLabelValues(connector, outcome).Inc()
 }
 
 // Excluded records people an exclusion left out of a journey, a

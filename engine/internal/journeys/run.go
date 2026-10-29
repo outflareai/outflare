@@ -35,6 +35,9 @@ type Service struct {
 	// Fields writes record fields for set_field and tag steps (the API
 	// server). Without it those steps fail.
 	Fields FieldWriter
+	// AI asks the workspace's own AI model, for ai steps (the API server).
+	// Without it those steps fail.
+	AI AI
 	// Store opens the workspace's own Slack connection for slack steps, and
 	// Box opens webhook keys and the signing secret. Without them those
 	// steps fail.

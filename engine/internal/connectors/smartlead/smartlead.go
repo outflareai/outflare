@@ -28,7 +28,7 @@ func (Smartlead) Definition() c.Definition {
 		Website:     "https://www.smartlead.ai", DocsURL: "https://api.smartlead.ai/reference/welcome",
 		KeyURL: "https://app.smartlead.ai/app/settings/profile", Auth: c.AuthAPIKey,
 		Fields:       []c.Field{{Name: "api_key", Label: "API key", Secret: true, Help: "Settings → Profile → API key."}},
-		Capabilities: []string{c.CapImportCampaigns, c.CapImportLeads, c.CapImportMailboxes, c.CapObserveMailboxes, c.CapControlMailboxes, c.CapControlWarmup, c.CapBlocklist},
+		Capabilities: []string{c.CapImportCampaigns, c.CapImportLeads, c.CapImportMailboxes, c.CapObserveMailboxes, c.CapControlMailboxes, c.CapControlWarmup, c.CapBlocklist, c.CapPushLeads},
 		Status:       c.Available,
 	}
 }

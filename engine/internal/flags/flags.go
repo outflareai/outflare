@@ -228,11 +228,104 @@ func CheckVariants(vs []Variant) string {
 		if len(v.Payload) > 0 && !json.Valid(v.Payload) {
 			return "a variant's payload must be JSON"
 		}
+		if msg := CheckChanges(v.Payload); msg != "" {
+			return "variant " + v.Key + ": " + msg
+		}
 	}
 	if total == 0 {
 		return "give at least one variant a weight above 0"
 	}
 	return ""
+}
+
+// Change is one edit the website script makes to the page for a version,
+// from the visual editor or written by hand in its payload's "changes":
+// the elements matching Selector get Text as their text, are hidden, or
+// get Href, Src or Alt. Text is set as text, never as HTML.
+type Change struct {
+	Selector string  `json:"selector"`
+	Text     *string `json:"text,omitempty"`
+	Hide     bool    `json:"hide,omitempty"`
+	Href     *string `json:"href,omitempty"`
+	Src      *string `json:"src,omitempty"`
+	Alt      *string `json:"alt,omitempty"`
+}
+
+// MaxChanges is how many edits one version may make.
+const MaxChanges = 50
+
+// Changes reads a payload's "changes", or nil when it has none.
+func Changes(payload json.RawMessage) ([]Change, bool) {
+	var p struct {
+		Changes *json.RawMessage `json:"changes"`
+	}
+	if len(payload) == 0 || payload[0] != '{' || json.Unmarshal(payload, &p) != nil || p.Changes == nil {
+		return nil, false
+	}
+	var cs []Change
+	if json.Unmarshal(*p.Changes, &cs) != nil {
+		return nil, true
+	}
+	return cs, true
+}
+
+// CheckChanges says what is wrong with a payload's "changes", or "".
+func CheckChanges(payload json.RawMessage) string {
+	cs, has := Changes(payload)
+	if !has {
+		return ""
+	}
+	if cs == nil && string(payload) != "" {
+		var raw struct {
+			Changes json.RawMessage `json:"changes"`
+		}
+		_ = json.Unmarshal(payload, &raw)
+		if string(raw.Changes) != "null" && string(raw.Changes) != "[]" {
+			return "changes is a list of {selector, and text, hide, href, src or alt}"
+		}
+	}
+	if len(cs) > MaxChanges {
+		return fmt.Sprintf("at most %d changes", MaxChanges)
+	}
+	for _, c := range cs {
+		if c.Selector == "" || len(c.Selector) > 300 || strings.ContainsAny(c.Selector, "<{}") {
+			return "each change needs a CSS selector of up to 300 characters, such as h1.hero"
+		}
+		n := 0
+		for _, set := range []bool{c.Text != nil, c.Hide, c.Href != nil, c.Src != nil || c.Alt != nil} {
+			if set {
+				n++
+			}
+		}
+		if n != 1 {
+			return "each change does one thing: text, hide, href, or src and alt"
+		}
+		if c.Text != nil && len(*c.Text) > 2000 {
+			return "a change's text is at most 2,000 characters"
+		}
+		for _, u := range []*string{c.Href, c.Src} {
+			if u != nil && !SafeURL(*u) {
+				return "a link or image is an http(s) address or a path on the site, such as /pricing"
+			}
+		}
+		if c.Alt != nil && len(*c.Alt) > 500 {
+			return "alt text is at most 500 characters"
+		}
+	}
+	return ""
+}
+
+// SafeURL is an address the website script may put in a link or image:
+// http(s), or a path on the same site (not //host).
+func SafeURL(u string) bool {
+	if len(u) > 2000 || strings.ContainsAny(u, " \t\n\r") {
+		return false
+	}
+	if strings.HasPrefix(u, "/") {
+		return !strings.HasPrefix(u, "//")
+	}
+	p, err := url.Parse(u)
+	return err == nil && (p.Scheme == "https" || p.Scheme == "http") && p.Host != ""
 }
 
 // CheckRules says what is wrong with a flag's rules, or "".

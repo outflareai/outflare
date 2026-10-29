@@ -3277,6 +3277,36 @@ class Operations(_Mixin):
             idempotency_key=idempotency_key,
         )
 
+    def create_flag_edit_link(
+        self,
+        flag: str,
+        *,
+        ws: str | None = None,
+        url: str,
+        variant: str,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Make a visual editor link for a version.
+
+        Scope: analytics.manage, for a person signed in to Outflare (API tokens and connected apps can't). A link to a page of
+        your site that previews the version (?of_flag=) and opens the visual editor over it (?of_edit=), where you pick
+        elements and change their text, hide them, or change a link or image. The page needs the website script, version 8 or
+        later, and data-flags on its tag. The link works for 2 hours, and only while you can manage analytics; it changes only
+        this version's visual changes. Nothing changes until you save in the editor.
+
+        Needs: the analytics.manage scope.
+        POST /v1/workspaces/{ws}/flags/{flag}/edit-link
+        """
+        return self._call(
+            "POST",
+            "/v1/workspaces/{ws}/flags/{flag}/edit-link",
+            path={"flag": flag, "ws": ws},
+            body={"url": url, "variant": variant},
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
     def create_inbox_tag(
         self,
         *,
@@ -5802,7 +5832,8 @@ class Operations(_Mixin):
         lifecycle email sent to them alone, product events, website visits, journey runs, partner referrals and
         partner portal sign-ins. Deals, payments and opt-outs stay, unlinked; a partner's memberships, rewards and
         payouts stay on a new archived record named "Erased partner" with no name or identities, suspended and
-        without payout details or notes, so commission totals still add up; a company's people stay, unlinked from it. erased counts the rows removed, by
+        without payout details or notes, so commission totals still add up, and keep their codes so their links still lead
+        to the site; their payouts' notes and references are cleared unless partner settings' erase_payout_notes is off; a company's people stay, unlinked from it. erased counts the rows removed, by
         table. A deal is deleted with DELETE .../deals/{deal}.
 
         Needs: the customers.manage scope.
@@ -9460,6 +9491,24 @@ class Operations(_Mixin):
             path={"id": id, "ws": ws},
         )
 
+    def get_partner_settings(
+        self,
+        *,
+        ws: str | None = None,
+    ) -> Any:
+        """Partner settings for every program.
+
+        Scope: partners.read. The partner rules that hold for every program in the workspace.
+
+        Needs: the partners.read scope.
+        GET /v1/workspaces/{ws}/partner-settings
+        """
+        return self._call(
+            "GET",
+            "/v1/workspaces/{ws}/partner-settings",
+            path={"ws": ws},
+        )
+
     def get_payment_sync(
         self,
         id: str,
@@ -10162,6 +10211,21 @@ class Operations(_Mixin):
             query={"key": key, "format": format},
         )
 
+    def get_site_editor_script(
+        self,
+    ) -> Any:
+        """Get the visual editor script.
+
+        Public. The visual editor the website script (/site.js, version 8 and later) loads over the page when it opens with
+        an edit link (?of_edit=). It draws in a shadow root and only reads and saves with the link's token.
+
+        GET /v1/site/editor.js
+        """
+        return self._call(
+            "GET",
+            "/v1/site/editor.js",
+        )
+
     def get_site_fix_autonomy(
         self,
         site: str,
@@ -10179,6 +10243,25 @@ class Operations(_Mixin):
             "GET",
             "/v1/workspaces/{ws}/seo-sites/{site}/fix-autonomy",
             path={"site": site, "ws": ws},
+        )
+
+    def get_site_flag_edits(
+        self,
+        *,
+        token: str,
+    ) -> Any:
+        """Read a version's visual changes with an edit link.
+
+        Public: the signed edit token from an edit link is the authority (createFlagEditLink). What the visual editor reads
+        when it opens over the page: the version's flag and its visual changes. 401 once the link has expired (2 hours) or
+        its person can no longer manage analytics; 404 once the flag is archived.
+
+        GET /v1/site/flags/edits
+        """
+        return self._call(
+            "GET",
+            "/v1/site/flags/edits",
+            query={"token": token},
         )
 
     def get_site_flags(
@@ -18834,6 +18917,32 @@ class Operations(_Mixin):
             idempotency_key=idempotency_key,
         )
 
+    def save_site_flag_edits(
+        self,
+        *,
+        changes: list[dict[str, Any]],
+        token: str,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Save a version's visual changes with an edit link.
+
+        Public: the signed edit token is the authority, and its person must still manage analytics on every brand. The
+        changes replace the version's payload `changes`; the rest of its payload stays. Each change has a CSS selector and
+        one action: text (set as text, never HTML), hide, href, or src and alt. Links and images go only to https://, http://
+        or a path on the site. Up to 50 changes, within the version's 4 KB payload. Send the JSON as text/plain to skip the
+        CORS preflight. Recorded as flag.updated, by the link's person.
+
+        POST /v1/site/flags/edits
+        """
+        return self._call(
+            "POST",
+            "/v1/site/flags/edits",
+            body={"changes": changes, "token": token},
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
     def search_workspace(
         self,
         *,
@@ -23386,6 +23495,30 @@ class Operations(_Mixin):
                 "status": status,
                 "terms_url": terms_url,
             },
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
+    def update_partner_settings(
+        self,
+        *,
+        ws: str | None = None,
+        erase_payout_notes: bool,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Change the partner settings for every program.
+
+        Scope: partners.manage, for every brand. Recorded as partner_settings.updated.
+
+        Needs: the partners.manage scope.
+        PATCH /v1/workspaces/{ws}/partner-settings
+        """
+        return self._call(
+            "PATCH",
+            "/v1/workspaces/{ws}/partner-settings",
+            path={"ws": ws},
+            body={"erase_payout_notes": erase_payout_notes},
             extra_body=extra_body,
             idempotency_key=idempotency_key,
         )

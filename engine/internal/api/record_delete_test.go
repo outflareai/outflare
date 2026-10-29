@@ -2,6 +2,7 @@ package api_test
 
 import (
 	"context"
+	"net/http"
 	"strconv"
 	"testing"
 
@@ -92,18 +93,50 @@ func TestDeleteRecordKeepsPartnerLedger(t *testing.T) {
 	base := "/v1/workspaces/" + ws
 	ctx := context.Background()
 
-	owner.must(201, "POST", base+"/partner-programs", map[string]any{"name": "Affiliates", "kind": "affiliate", "landing_url": "https://northpeak.example/"})
+	// Payout notes are cleared on erasure by default.
+	if v := owner.must(200, "GET", base+"/partner-settings", nil); v["erase_payout_notes"] != true {
+		t.Fatalf("partner settings = %v", v)
+	}
+	owner.must(201, "POST", base+"/partner-programs", map[string]any{"name": "Affiliates", "kind": "affiliate",
+		"landing_url": "https://northpeak.example/", "min_payout_cents": 0, "hold_days": 0})
 	ana := owner.must(201, "POST", base+"/partners", map[string]any{"program": "affiliates", "email": "ana@example.com", "name": "Ana Lima", "code": "ana",
 		"payout_method": "PayPal: ana@example.com", "note": "Met at a conference"})
 	member, anaRec := ana["id"].(string), ana["record_id"].(string)
-	sale := owner.must(201, "POST", base+"/partner-conversions", map[string]any{"type": "sale", "customer_id": "u-1", "email": "bo@example.com",
-		"ref": "ana", "amount_cents": 10000, "external_id": "ch_1"})
-	rewards := sale["rewards"].([]any)
-	if sale["credited"] != true || len(rewards) != 1 {
-		t.Fatalf("sale = %v", sale)
+	cy := owner.must(201, "POST", base+"/partners", map[string]any{"program": "affiliates", "email": "cy@example.com", "name": "Cy Moss", "code": "cy"})
+	sell := func(ref, customer, order string) string {
+		sale := owner.must(201, "POST", base+"/partner-conversions", map[string]any{"type": "sale", "customer_id": customer,
+			"email": customer + "@example.com", "ref": ref, "amount_cents": 10000, "external_id": order})
+		rewards := sale["rewards"].([]any)
+		if sale["credited"] != true || len(rewards) == 0 {
+			t.Fatalf("sale = %v", sale)
+		}
+		rw := rewards[0].(map[string]any)
+		if rw["status"] == "pending" {
+			owner.must(200, "POST", base+"/partner-rewards/"+rw["id"].(string)+"/approve", map[string]any{})
+		}
+		return rw["id"].(string)
 	}
-	reward := rewards[0].(map[string]any)["id"].(string)
-	owner.must(200, "POST", base+"/partner-rewards/"+reward+"/approve", map[string]any{})
+	reward := sell("ana", "u-1", "ch_1")
+	sell("cy", "u-2", "ch_2")
+	payouts := map[string]string{}
+	for _, made := range owner.must(200, "POST", base+"/partner-payouts", map[string]any{"program": "affiliates"})["data"].([]any) {
+		o := made.(map[string]any)
+		payouts[o["partner_id"].(string)] = o["id"].(string)
+		owner.must(200, "POST", base+"/partner-payouts/"+o["id"].(string)+"/paid", map[string]any{"note": "Paid by PayPal", "reference": "PP-1001"})
+	}
+	if len(payouts) != 2 {
+		t.Fatalf("payouts = %v", payouts)
+	}
+	payoutAfter := func(partner string) (note, ref string) {
+		t.Helper()
+		var status string
+		var cents int64
+		if err := e.pool.QueryRow(ctx, `SELECT note, reference, status, amount_cents FROM partner_payouts WHERE id = $1`, payouts[partner]).
+			Scan(&note, &ref, &status, &cents); err != nil || status != "paid" || cents == 0 {
+			t.Fatalf("payout after erasing: %s %d, %v", status, cents, err)
+		}
+		return note, ref
+	}
 
 	owner.must(200, "DELETE", base+"/records/"+anaRec+"?suppress=true", nil)
 	owner.must(404, "GET", base+"/records/"+anaRec, nil)
@@ -126,6 +159,24 @@ func TestDeleteRecordKeepsPartnerLedger(t *testing.T) {
 	}
 	owner.must(200, "GET", base+"/partners", nil)
 	owner.must(200, "GET", base+"/partner-rewards", nil)
+
+	// The payout stays without its note and reference.
+	if note, ref := payoutAfter(member); note != "" || ref != "" {
+		t.Fatalf("payout note %q reference %q, want both cleared", note, ref)
+	}
+	// With the setting off, the next erasure keeps them.
+	owner.must(400, "PATCH", base+"/partner-settings", map[string]any{})
+	owner.must(200, "PATCH", base+"/partner-settings", map[string]any{"erase_payout_notes": false})
+	owner.must(200, "DELETE", base+"/records/"+cy["record_id"].(string), nil)
+	if note, ref := payoutAfter(cy["id"].(string)); note != "Paid by PayPal" || ref != "PP-1001" {
+		t.Fatalf("payout note %q reference %q, want both kept", note, ref)
+	}
+
+	// Their link still leads to the site, without credit.
+	anon := &client{t: t, h: e.h}
+	if code, loc := anon.rawUA("GET", "/r/"+ws+"/ana", "Mozilla/5.0"); code != http.StatusFound || loc != "https://northpeak.example/" {
+		t.Fatalf("erased partner's link = %d %q", code, loc)
+	}
 
 	// The customer they referred is erased; the partner's reward stays.
 	var bo string

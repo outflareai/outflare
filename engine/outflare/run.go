@@ -385,6 +385,7 @@ func Run(ctx context.Context, log *slog.Logger, cmd string, exts ...Extension) e
 	// Journey steps that change fields write through the API's checks.
 	journeyRuns.Fields = apiServer
 	journeyRuns.Deals = apiServer
+	journeyRuns.AI = apiServer.JourneyAI()
 	host.server = apiServer
 	researcher.Models = apiServer.AIModels()
 	labeller.Models = apiServer.AIModels()

@@ -74,7 +74,7 @@
   if (!script) return;
   var key = script.getAttribute("data-key") || "";
   // Sent with every batch, so Outflare can tell a site running an old copy.
-  var VERSION = "7";
+  var VERSION = "8";
   // Events go where the script came from: a path the site forwards keeps
   // its prefix.
   var src = new URL(script.src, location.href);
@@ -254,6 +254,28 @@
       history.replaceState(history.state, "", asked.pathname + asked.search + asked.hash);
     }
   } catch (e) {}
+  // The visual editor: a link from Outflare carries ?of_edit=<token>, kept
+  // for the visit, and the editor loads from Outflare over the page. The
+  // token lets it change one version of one flag, for a short while.
+  var editToken = "";
+  try {
+    editToken = sessionStorage.getItem("of_edit") || "";
+    var editURL = new URL(location.href), et = editURL.searchParams.get("of_edit");
+    if (et && /^[A-Za-z0-9_.-]{20,2000}$/.test(et)) {
+      editToken = et;
+      try { sessionStorage.setItem("of_edit", et); } catch (e) {}
+      editURL.searchParams.delete("of_edit");
+      history.replaceState(history.state, "", editURL.pathname + editURL.search + editURL.hash);
+    }
+  } catch (e) {}
+  if (editToken && d.createElement) {
+    var ed = d.createElement("script");
+    ed.src = api + "/v1/site/editor.js";
+    ed.async = true;
+    ed.setAttribute("data-token", editToken);
+    ed.setAttribute("data-api", api);
+    (d.head || d.documentElement).appendChild && (d.head || d.documentElement).appendChild(ed);
+  }
 
   function campaign(q) {
     var c = {}, any = false;
@@ -383,11 +405,49 @@
     cls.forEach(function (c) { root.classList.add(c); });
     flagClasses = cls;
     if (classFlags) for (k in state.flags) exposed(k);
+    applyChanges();
     root.classList.remove("of-wait");
     var waiting = flagWaiters;
     flagWaiters = [];
     waiting.forEach(function (fn) { try { fn(flagMap()); } catch (e) {} });
   }
+  // Visual changes: a version's payload can list edits to make to the page
+  // ({"changes": [{"selector", "text" | "hide" | "href" | "src" and "alt"}]},
+  // from the visual editor). They apply when the flags arrive, again once
+  // the page has loaded and a moment later for content that comes late,
+  // and making them counts as showing the version. Text goes in as text,
+  // never HTML, and links and images only to http(s) or a path.
+  function safeURL(u) {
+    return typeof u === "string" && u.length <= 2000 && !/\s/.test(u) && (/^\/(?!\/)/.test(u) || /^https?:\/\/[^/]/i.test(u));
+  }
+  function applyChanges() {
+    if (!flagState || !flagState.payloads) return;
+    for (var k in flagState.payloads) {
+      var p = flagState.payloads[k], cs = p && p.changes;
+      if (!variant(k) || !cs || !cs.length) continue;
+      var applied = false;
+      for (var i = 0; i < cs.length && i < 50; i++) {
+        var c = cs[i], els = [];
+        if (!c || typeof c.selector !== "string") continue;
+        try { els = d.querySelectorAll(c.selector); } catch (e) { continue; }
+        for (var j = 0; j < els.length; j++) {
+          var el = els[j];
+          if (typeof c.text === "string") el.textContent = c.text;
+          else if (c.hide) el.style.setProperty("display", "none", "important");
+          else if (safeURL(c.href)) el.setAttribute("href", c.href);
+          else if (c.src !== undefined || c.alt !== undefined) {
+            if (safeURL(c.src)) el.setAttribute("src", c.src);
+            if (typeof c.alt === "string") el.setAttribute("alt", c.alt);
+          }
+          applied = true;
+        }
+      }
+      if (applied) exposed(k);
+    }
+  }
+  if (d.readyState === "loading") d.addEventListener("DOMContentLoaded", function () { applyChanges(); });
+  w.setTimeout && w.setTimeout(function () { applyChanges(); }, 1500);
+
   function variant(k) {
     if (Object.prototype.hasOwnProperty.call(preview, k)) return preview[k];
     return flagState && flagState.flags[k] ? flagState.flags[k] : false;
