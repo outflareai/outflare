@@ -247,6 +247,7 @@ function MoveMenu({ ws, m, onDone }: { ws: string; m: Mailbox; onDone: () => voi
 
 type Form = {
   name: string;
+  // Kept as it was on an existing plan until projects are removed.
   project_id: string;
   supplier: string;
   provider: "google" | "microsoft";
@@ -304,18 +305,6 @@ function body(f: Form): InfraPlanInput {
   };
 }
 
-// Projects come from the Projects API when this server has it.
-function useProjects(ws: string) {
-  const [projects, setProjects] = useState<{ id: string; name: string }[]>([]);
-  useEffect(() => {
-    api.GET("/v1/meta")
-      .then(({ data }) => (data?.capabilities?.includes("projects") ? fetch(`/v1/workspaces/${ws}/projects`, { credentials: "same-origin" }).then((r) => (r.ok ? r.json() : { data: [] })) : { data: [] }))
-      .then((j) => setProjects((j.data ?? []).filter((p: { status?: string }) => p.status !== "archived")))
-      .catch(() => setProjects([]));
-  }, [ws]);
-  return projects;
-}
-
 function NewPlan({ ws, onOpen }: Props) {
   return (
     <div className="space-y-6">
@@ -336,7 +325,6 @@ function PlanForm({ ws, plan, onSaved, onCancel }: { ws: string; plan?: InfraPla
   const [advanced, setAdvanced] = useState(false);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
-  const projects = useProjects(ws);
   const set = <K extends keyof Form>(k: K, v: Form[K]) => setF((x) => ({ ...x, [k]: v }));
 
   useEffect(() => {
@@ -379,16 +367,6 @@ function PlanForm({ ws, plan, onSaved, onCancel }: { ws: string; plan?: InfraPla
               <span className={label}>Name</span>
               <input className={`${field} w-full`} value={f.name} onChange={(e) => set("name", e.target.value)} placeholder="Q4 founders outbound" required maxLength={200} />
             </label>
-            {projects.length > 0 && (
-              <label className="block sm:col-span-2">
-                <span className={label}>Project</span>
-                <select className={`${field} w-full`} value={f.project_id} onChange={(e) => set("project_id", e.target.value)}>
-                  <option value="">Shared by the whole workspace</option>
-                  {projects.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
-                </select>
-                <span className={hint}>The domains and mailboxes will belong to this project.</span>
-              </label>
-            )}
             <label className="block">
               <span className={label}>Domains</span>
               <input type="number" min={1} max={200} className={`${field} w-full`} value={f.domain_count} onChange={num("domain_count")} />

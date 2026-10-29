@@ -62,7 +62,9 @@ type sequenceView struct {
 	SendStart     string  `json:"send_start"`
 	SendEnd       string  `json:"send_end"`
 	DailyNewLimit *int    `json:"daily_new_limit"`
-	StopOnReply   bool    `json:"stop_on_reply"`
+	// Most sends in 24 hours from every step together.
+	DailySendLimit *int `json:"daily_send_limit"`
+	StopOnReply    bool `json:"stop_on_reply"`
 	// Mailbox allocation.
 	TeamID             *string         `json:"team_id"`
 	Priority           string          `json:"priority"`
@@ -106,7 +108,7 @@ func (s *Server) loadSequences(ctx context.Context, ws string, id *string, proje
 	}
 	rows, err := s.pool.Query(ctx, `
 		SELECT id, name, status, project_id::text, sequences.brand_id::text, pool_id, timezone, send_days::int[], to_char(send_start, 'HH24:MI'), to_char(send_end, 'HH24:MI'),
-		       daily_new_limit, stop_on_reply, created_at, updated_at,
+		       daily_new_limit, daily_send_limit, stop_on_reply, created_at, updated_at,
 		       team_id, priority, target_daily, min_daily, allocation_mode,
 		       EXISTS (SELECT 1 FROM actors ac WHERE ac.id = sequences.created_by AND ac.type = 'api_token'),
 		       COALESCE(st.active_daily, 0), st.needed_daily, COALESCE(st.note, ''), to_char(st.planned_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"'),
@@ -124,7 +126,7 @@ func (s *Server) loadSequences(ctx context.Context, ws string, id *string, proje
 		var v sequenceView
 		var prio int16
 		err := r.Scan(&v.ID, &v.Name, &v.Status, &v.ProjectID, &v.BrandID, &v.PoolID, &v.Timezone, &v.SendDays, &v.SendStart, &v.SendEnd,
-			&v.DailyNewLimit, &v.StopOnReply, &v.CreatedAt, &v.UpdatedAt,
+			&v.DailyNewLimit, &v.DailySendLimit, &v.StopOnReply, &v.CreatedAt, &v.UpdatedAt,
 			&v.TeamID, &prio, &v.TargetDaily, &v.MinDaily, &v.AllocationMode, &v.StartedByAgent,
 			&v.Allocation.ActiveDaily, &v.Allocation.NeededDaily, &v.Allocation.Note, &v.Allocation.PlannedAt,
 			&v.Allocation.Mailboxes, &v.PreferredSenderIDs, &v.MissionID)
@@ -266,6 +268,8 @@ type sequenceSettings struct {
 	SendEnd       *string          `json:"send_end"`
 	DailyNewLimit optional[int]    `json:"daily_new_limit"`
 	StopOnReply   *bool            `json:"stop_on_reply"`
+	// Most sends in 24 hours, every step counted; null for no cap.
+	DailySendLimit optional[int] `json:"daily_send_limit"`
 
 	TeamID             optional[string] `json:"team_id"`
 	Priority           *string          `json:"priority"`
@@ -278,14 +282,15 @@ type sequenceSettings struct {
 	UnsubscribeHeader *bool `json:"unsubscribe_header"`
 }
 
-// saveLinkSettings applies the optional link settings, kept apart from the
-// main insert and update so they stay simple.
+// saveLinkSettings applies the optional link settings and the daily send
+// limit, kept apart from the main insert and update so they stay simple.
 func saveLinkSettings(ctx context.Context, tx pgx.Tx, id string, q *sequenceSettings) error {
-	if q.TrackClicks == nil && q.UnsubscribeHeader == nil {
+	if q.TrackClicks == nil && q.UnsubscribeHeader == nil && !q.DailySendLimit.Set {
 		return nil
 	}
-	_, err := tx.Exec(ctx, `UPDATE sequences SET track_clicks = COALESCE($2, track_clicks), unsubscribe_header = COALESCE($3, unsubscribe_header) WHERE id = $1`,
-		id, q.TrackClicks, q.UnsubscribeHeader)
+	_, err := tx.Exec(ctx, `UPDATE sequences SET track_clicks = COALESCE($2, track_clicks), unsubscribe_header = COALESCE($3, unsubscribe_header),
+		daily_send_limit = CASE WHEN $4 THEN $5::int ELSE daily_send_limit END WHERE id = $1`,
+		id, q.TrackClicks, q.UnsubscribeHeader, q.DailySendLimit.Set, q.DailySendLimit.Value)
 	return err
 }
 
@@ -343,6 +348,9 @@ func (q *sequenceSettings) validate() error {
 	}
 	if q.DailyNewLimit.Value != nil && (*q.DailyNewLimit.Value < 1 || *q.DailyNewLimit.Value > 100000) {
 		return errInvalid("daily_new_limit must be 1 to 100000, or null for no limit")
+	}
+	if q.DailySendLimit.Value != nil && (*q.DailySendLimit.Value < 1 || *q.DailySendLimit.Value > 1000000) {
+		return errInvalid("daily_send_limit must be 1 to 1000000, or null for no limit")
 	}
 	if q.TeamID.Value != nil && !validUUID(*q.TeamID.Value) {
 		return errInvalid("team not found")

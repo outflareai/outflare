@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState, type FormEvent, type ReactNode } from "react";
-import type { Deal, Meeting, MeetingStatus, OutcomeRow, OutcomeSync, OutcomesReport, Project, RecurringSpend, Sequence, SpendCategory, SpendEntry, SpendRate } from "@outflare/sdk";
+import type { Deal, Meeting, MeetingStatus, OutcomeRow, OutcomeSync, OutcomesReport, RecurringSpend, Sequence, SpendCategory, SpendEntry, SpendRate } from "@outflare/sdk";
 import { api, errorMessage } from "../api";
 import { Badge, Button, Card, confirmAction, Empty, ErrorText, field, Loading, Menu, PageHeader, Stat, Stats, Status, toast } from "../ui";
 import { ago, plural } from "../format";
@@ -12,7 +12,7 @@ import { useBrand } from "@/lib/brand";
 import { connection } from "@/lib/status";
 
 // Outcomes: what outreach produced (meetings, deals) and what it cost, so
-// every project and sequence has a cost per meeting.
+// every sequence and brand has a cost per meeting.
 
 type Period = "7d" | "30d" | "90d" | "month" | "last_month" | "quarter";
 const periods: { id: Period; label: string }[] = [
@@ -91,11 +91,11 @@ const sourceLabel: Record<string, string> = {
 const attributionHelp: Record<string, string> = {
   lead: "An attendee is a lead you emailed.",
   company: "An attendee works at a company you emailed.",
-  manual: "Someone chose the sequence or project.",
+  manual: "Someone chose the sequence.",
   none: "Not tied to outreach, so not counted.",
 };
 
-type Group = "sequence" | "project" | "brand" | "none";
+type Group = "sequence" | "brand" | "none";
 
 export function Outcomes({ ws, canManage, go }: { ws: string; canManage: boolean; go: (t: Tab, item?: string) => void }) {
   const [period, setPeriod] = useState<Period>("30d");
@@ -104,7 +104,6 @@ export function Outcomes({ ws, canManage, go }: { ws: string; canManage: boolean
   const [report, setReport] = useState<OutcomesReport | null>(null);
   const [error, setError] = useState("");
   const [sequences, setSequences] = useState<Sequence[]>([]);
-  const [projects, setProjects] = useState<Project[]>([]);
   const [syncs, setSyncs] = useState<OutcomeSync[] | null>(null);
   const [view, setView] = useState("breakdown");
   const [version, setVersion] = useState(0);
@@ -129,7 +128,6 @@ export function Outcomes({ ws, canManage, go }: { ws: string; canManage: boolean
 
   useEffect(() => {
     api.GET("/v1/workspaces/{ws}/sequences", { params: { path: { ws } } }).then(({ data }) => data && setSequences(data.data));
-    api.GET("/v1/workspaces/{ws}/projects", { params: { path: { ws } } }).then(({ data }) => data && setProjects(data.data));
     api.GET("/v1/workspaces/{ws}/outcomes/syncs", { params: { path: { ws } } }).then(({ data }) => setSyncs(data?.data ?? []));
   }, [ws, version]);
 
@@ -151,7 +149,6 @@ export function Outcomes({ ws, canManage, go }: { ws: string; canManage: boolean
         </select>
         <select aria-label="Group by" className={field} value={group} onChange={(e) => setGroup(e.target.value as Group)}>
           <option value="sequence">By sequence</option>
-          <option value="project">By project</option>
           {brands.length > 1 && <option value="brand">By brand</option>}
           <option value="none">Whole workspace</option>
         </select>
@@ -180,7 +177,7 @@ export function Outcomes({ ws, canManage, go }: { ws: string; canManage: boolean
 
       <Tabs value={view} onValueChange={setView}>
         <TabsList>
-          <TabsTrigger value="breakdown">{group === "project" ? "By project" : group === "sequence" ? "By sequence" : group === "brand" ? "By brand" : "Summary"}</TabsTrigger>
+          <TabsTrigger value="breakdown">{group === "sequence" ? "By sequence" : group === "brand" ? "By brand" : "Summary"}</TabsTrigger>
           <TabsTrigger value="meetings">Meetings</TabsTrigger>
           <TabsTrigger value="deals">Deals</TabsTrigger>
           <TabsTrigger value="spend">Spend</TabsTrigger>
@@ -190,13 +187,13 @@ export function Outcomes({ ws, canManage, go }: { ws: string; canManage: boolean
           {report && <Breakdown report={report} group={group} go={go} />}
         </TabsContent>
         <TabsContent value="meetings" className="mt-4">
-          <Meetings ws={ws} from={from} to={to} canManage={canManage} sequences={sequences} projects={projects} onChange={refresh} />
+          <Meetings ws={ws} from={from} to={to} canManage={canManage} sequences={sequences} onChange={refresh} />
         </TabsContent>
         <TabsContent value="deals" className="mt-4">
           <Deals ws={ws} from={from} to={to} canManage={canManage} currency={currency} connected={(syncs ?? []).some((s) => s.connector.startsWith("hubspot"))} onChange={refresh} go={go} />
         </TabsContent>
         <TabsContent value="spend" className="mt-4">
-          <Spend ws={ws} from={from} to={to} canManage={canManage} currency={currency} sequences={sequences} projects={projects} onChange={refresh} />
+          <Spend ws={ws} from={from} to={to} canManage={canManage} currency={currency} sequences={sequences} onChange={refresh} />
         </TabsContent>
         <TabsContent value="sources" className="mt-4">
           <Sources ws={ws} syncs={syncs} canManage={canManage} go={go} onChange={refresh} />
@@ -220,7 +217,7 @@ function GetStarted({ connected, canManage, go, onRecord }: { connected: boolean
       body: "Mailbox seats and subscriptions as recurring costs; data and verification credits as they're spent. Agents record their own spend through the API.",
       action: canManage ? <Button variant="ghost" onClick={onRecord}>Add costs</Button> : undefined,
     },
-    { done: false, title: "Read cost per meeting", body: "Every project and sequence gets one, updated as meetings are booked and costs come in." },
+    { done: false, title: "Read cost per meeting", body: "Every sequence gets one, updated as meetings are booked and costs come in." },
   ];
   return (
     <Card title="Set up cost per meeting" description="Three steps. Nothing here sends email or changes your calendar.">
@@ -284,14 +281,14 @@ function Breakdown({ report, group, go }: { report: OutcomesReport; group: Group
   }
   const open = (r: OutcomeRow) => {
     if (!r.key || r.key === "all") return;
-    go(group === "project" ? "projects" : group === "brand" ? "brands" : "sequences", r.key);
+    go(group === "brand" ? "brands" : "sequences", r.key);
   };
   return (
     <DataTable
       data={rows}
       rowId={(r) => r.key || "none"}
       onRowClick={group === "none" ? undefined : open}
-      searchPlaceholder={group === "none" ? undefined : `Search ${group === "project" ? "projects" : group === "brand" ? "brands" : "sequences"}`}
+      searchPlaceholder={group === "none" ? undefined : `Search ${group === "brand" ? "brands" : "sequences"}`}
       hidden={["replies", "deals", "cost_reply"]}
       mobile={(r) => (
         <div className="space-y-1">
@@ -306,7 +303,7 @@ function Breakdown({ report, group, go }: { report: OutcomesReport; group: Group
       )}
       initialSort={[{ id: "meetings", desc: true }]}
       columns={[
-        { id: "name", header: group === "project" ? "Project" : group === "sequence" ? "Sequence" : group === "brand" ? "Brand" : "", accessorFn: (r) => r.name, cell: ({ row: { original: r } }) => <span className={r.key ? "font-medium" : "text-muted-foreground"} title={r.key ? undefined : "Outcomes and costs that belong to no " + group}>{r.name}</span> },
+        { id: "name", header: group === "sequence" ? "Sequence" : group === "brand" ? "Brand" : "", accessorFn: (r) => r.name, cell: ({ row: { original: r } }) => <span className={r.key ? "font-medium" : "text-muted-foreground"} title={r.key ? undefined : "Outcomes and costs that belong to no " + group}>{r.name}</span> },
         { id: "sent", header: "Sent", accessorFn: (r) => r.sent, meta: { align: "right" }, cell: ({ getValue }) => <span className="font-mono tabular-nums">{(getValue() as number).toLocaleString()}</span> },
         {
           id: "replies",
@@ -351,7 +348,7 @@ function Breakdown({ report, group, go }: { report: OutcomesReport; group: Group
 
 // ---- Meetings ----
 
-function Meetings({ ws, from, to, canManage, sequences, projects, onChange }: { ws: string; from: string; to: string; canManage: boolean; sequences: Sequence[]; projects: Project[]; onChange: () => void }) {
+function Meetings({ ws, from, to, canManage, sequences, onChange }: { ws: string; from: string; to: string; canManage: boolean; sequences: Sequence[]; onChange: () => void }) {
   const [list, setList] = useState<Meeting[] | null>(null);
   const [status, setStatus] = useState<MeetingStatus | "">("");
   const [adding, setAdding] = useState(false);
@@ -429,14 +426,13 @@ function Meetings({ ws, from, to, canManage, sequences, projects, onChange }: { 
           {
             id: "credit",
             header: "Counts for",
-            accessorFn: (m) => m.sequence_name ?? m.project_name ?? "",
+            accessorFn: (m) => m.sequence_name ?? "",
             cell: ({ row: { original: m } }) =>
               m.attribution === "none" ? (
                 <span className="text-muted-foreground" title={attributionHelp.none}>Not from outreach</span>
               ) : (
                 <span title={attributionHelp[m.attribution]}>
                   {m.sequence_name ?? <span className="text-muted-foreground">No sequence</span>}
-                  {m.project_name && <span className="text-muted-foreground"> · {m.project_name}</span>}
                   {m.attribution === "company" && <Badge title={attributionHelp.company}>Colleague</Badge>}
                 </span>
               ),
@@ -452,8 +448,8 @@ function Meetings({ ws, from, to, canManage, sequences, projects, onChange }: { 
           },
         ]}
       />
-      {adding && <LogMeeting ws={ws} sequences={sequences} projects={projects} onClose={() => setAdding(false)} onDone={() => { load(); onChange(); }} />}
-      {moving && <MoveMeeting m={moving} sequences={sequences} projects={projects} onClose={() => setMoving(null)} onSave={(body) => patch(moving, body, "Attribution updated. Syncs won't change it.")} />}
+      {adding && <LogMeeting ws={ws} sequences={sequences} onClose={() => setAdding(false)} onDone={() => { load(); onChange(); }} />}
+      {moving && <MoveMeeting m={moving} sequences={sequences} onClose={() => setMoving(null)} onSave={(body) => patch(moving, body, "Attribution updated. Syncs won't change it.")} />}
     </div>
   );
 }
@@ -475,9 +471,8 @@ function MeetingActions({ m, patch, remove, onMove }: { m: Meeting; patch: (m: M
   );
 }
 
-function MoveMeeting({ m, sequences, projects, onClose, onSave }: { m: Meeting; sequences: Sequence[]; projects: Project[]; onClose: () => void; onSave: (body: Record<string, unknown>) => void }) {
+function MoveMeeting({ m, sequences, onClose, onSave }: { m: Meeting; sequences: Sequence[]; onClose: () => void; onSave: (body: Record<string, unknown>) => void }) {
   const [seq, setSeq] = useState(m.sequence_id ?? "");
-  const [project, setProject] = useState(m.project_id ?? "");
   return (
     <Dialog open onOpenChange={(o) => !o && onClose()}>
       <DialogContent className="sm:max-w-md">
@@ -485,30 +480,21 @@ function MoveMeeting({ m, sequences, projects, onClose, onSave }: { m: Meeting; 
           className="space-y-4"
           onSubmit={(e) => {
             e.preventDefault();
-            onSave(seq ? { sequence_id: seq } : project ? { project_id: project } : { unattributed: true });
+            onSave(seq ? { sequence_id: seq } : { unattributed: true });
             onClose();
           }}
         >
           <DialogHeader className="text-left">
             <DialogTitle className="text-[15px]">What does this meeting count for?</DialogTitle>
-            <DialogDescription className="text-[13px]">Choosing a sequence also sets its project. Syncs never change a choice made here.</DialogDescription>
+            <DialogDescription className="text-[13px]">Syncs never change a choice made here.</DialogDescription>
           </DialogHeader>
           <label className="block text-sm">
             <span className="mb-1 block font-medium">Sequence</span>
             <select className={`${field} w-full`} value={seq} onChange={(e) => setSeq(e.target.value)}>
-              <option value="">No sequence</option>
+              <option value="">Not from outreach</option>
               {sequences.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
             </select>
           </label>
-          {!seq && (
-            <label className="block text-sm">
-              <span className="mb-1 block font-medium">Project</span>
-              <select className={`${field} w-full`} value={project} onChange={(e) => setProject(e.target.value)}>
-                <option value="">Not from outreach</option>
-                {projects.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
-              </select>
-            </label>
-          )}
           <DialogFooter className="flex-row justify-end gap-2">
             <Button type="button" variant="ghost" onClick={onClose}>Cancel</Button>
             <Button>Save</Button>
@@ -519,13 +505,12 @@ function MoveMeeting({ m, sequences, projects, onClose, onSave }: { m: Meeting; 
   );
 }
 
-function LogMeeting({ ws, sequences, projects, onClose, onDone }: { ws: string; sequences: Sequence[]; projects: Project[]; onClose: () => void; onDone: () => void }) {
+function LogMeeting({ ws, sequences, onClose, onDone }: { ws: string; sequences: Sequence[]; onClose: () => void; onDone: () => void }) {
   const [email, setEmail] = useState("");
   const [name, setName] = useState("");
   const [when, setWhen] = useState("");
   const [title, setTitle] = useState("");
   const [seq, setSeq] = useState("");
-  const [project, setProject] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
 
@@ -540,7 +525,6 @@ function LogMeeting({ ws, sequences, projects, onClose, onDone }: { ws: string; 
         ...(name ? { attendee_name: name } : {}),
         ...(title ? { title } : {}),
         ...(seq ? { sequence_id: seq } : {}),
-        ...(!seq && project ? { project_id: project } : {}),
       },
     });
     setBusy(false);
@@ -583,15 +567,6 @@ function LogMeeting({ ws, sequences, projects, onClose, onDone }: { ws: string; 
               {sequences.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
             </select>
           </label>
-          {!seq && projects.length > 0 && (
-            <label className="block">
-              <span className="mb-1 block font-medium">Project <span className="font-normal text-muted-foreground">(optional)</span></span>
-              <select className={`${field} w-full`} value={project} onChange={(e) => setProject(e.target.value)}>
-                <option value="">Follow the sequence</option>
-                {projects.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
-              </select>
-            </label>
-          )}
           <ErrorText>{error}</ErrorText>
           <DialogFooter className="flex-row justify-end gap-2">
             <Button type="button" variant="ghost" onClick={onClose}>Cancel</Button>
@@ -655,7 +630,7 @@ function Deals({ ws, from, to, canManage, currency, connected, onChange, go }: {
             { id: "name", header: "Deal", accessorFn: (d) => `${d.name} ${d.lead_email ?? ""}`, cell: ({ row: { original: d } }) => <div className="min-w-0"><div className="truncate font-medium">{d.name}</div>{d.lead_email && <div className="truncate text-xs text-muted-foreground">{d.lead_email}</div>}</div> },
             { id: "stage", header: "Stage", accessorFn: (d) => d.stage, cell: ({ row: { original: d } }) => <span className="flex items-center gap-1.5"><Status tone={stateTone[d.state]}>{d.state === "open" ? "Open" : d.state === "won" ? "Won" : "Lost"}</Status><span className="text-muted-foreground">{d.stage}</span></span> },
             { id: "amount", header: "Amount", accessorFn: (d) => d.amount_cents ?? 0, meta: { align: "right" }, cell: ({ row: { original: d } }) => <span className={`font-mono tabular-nums ${d.currency !== currency ? "text-muted-foreground" : ""}`} title={d.currency !== currency ? `In ${d.currency}, left out of the ${currency} report` : undefined}>{money(d.amount_cents, d.currency)}</span> },
-            { id: "credit", header: "Counts for", accessorFn: (d) => d.sequence_name ?? "", cell: ({ row: { original: d } }) => (d.attribution === "none" ? <span className="text-muted-foreground">Not from outreach</span> : <span>{d.sequence_name ?? <span className="text-muted-foreground">No sequence</span>}{d.project_name && <span className="text-muted-foreground"> · {d.project_name}</span>}</span>) },
+            { id: "credit", header: "Counts for", accessorFn: (d) => d.sequence_name ?? "", cell: ({ row: { original: d } }) => (d.attribution === "none" ? <span className="text-muted-foreground">Not from outreach</span> : <span>{d.sequence_name ?? <span className="text-muted-foreground">No sequence</span>}</span>) },
             { id: "opened", header: "Opened", accessorFn: (d) => d.opened_at, cell: ({ row: { original: d } }) => <span className="text-muted-foreground" title={new Date(d.opened_at).toLocaleString()}>{ago(d.opened_at)}</span> },
             { id: "source", header: "From", accessorFn: (d) => sourceLabel[d.source] ?? d.source, cell: ({ getValue }) => <span className="text-muted-foreground">{getValue() as string}</span> },
           ]}
@@ -733,14 +708,13 @@ function LogDeal({ ws, currency, onClose, onDone }: { ws: string; currency: stri
 
 // ---- Spend ----
 
-function Spend({ ws, from, to, canManage, currency, sequences, projects, onChange }: { ws: string; from: string; to: string; canManage: boolean; currency: string; sequences: Sequence[]; projects: Project[]; onChange: () => void }) {
+function Spend({ ws, from, to, canManage, currency, sequences, onChange }: { ws: string; from: string; to: string; canManage: boolean; currency: string; sequences: Sequence[]; onChange: () => void }) {
   const [entries, setEntries] = useState<SpendEntry[] | null>(null);
   const [recurring, setRecurring] = useState<RecurringSpend[] | null>(null);
   const [rates, setRates] = useState<SpendRate[] | null>(null);
   const [adding, setAdding] = useState<"" | "once" | "recurring">("");
   const [editing, setEditing] = useState<RecurringSpend | null>(null);
   const seqName = useMemo(() => Object.fromEntries(sequences.map((s) => [s.id, s.name])), [sequences]);
-  const projectName = useMemo(() => Object.fromEntries(projects.map((p) => [p.id, p.name])), [projects]);
 
   const load = useCallback(async () => {
     const [e, r, x] = await Promise.all([
@@ -809,7 +783,7 @@ function Spend({ ws, from, to, canManage, currency, sequences, projects, onChang
                     <div className={`truncate font-medium ${ended ? "text-muted-foreground line-through" : ""}`}>{r.name}</div>
                     <div className="truncate text-xs text-muted-foreground">
                       {categoryLabel[r.category]}
-                      {r.sequence_id ? ` · ${seqName[r.sequence_id] ?? "a sequence"}` : r.project_id ? ` · ${projectName[r.project_id] ?? "a project"}` : " · whole workspace"}
+                      {r.sequence_id ? ` · ${seqName[r.sequence_id] ?? "a sequence"}` : " · whole workspace"}
                       {` · since ${r.starts_on}`}
                       {r.ends_on && ` · until ${r.ends_on}`}
                     </div>
@@ -865,7 +839,7 @@ function Spend({ ws, from, to, canManage, currency, sequences, projects, onChang
                   <span className="font-mono tabular-nums text-muted-foreground" title="Priced with the unit rate in reports">{e.units?.toLocaleString()} {unitWord(e.units ?? 0, e.unit_name)}</span>
                 ),
             },
-            { id: "credit", header: "Counts for", accessorFn: (e) => (e.sequence_id ? seqName[e.sequence_id] : e.project_id ? projectName[e.project_id] : "") ?? "", cell: ({ row: { original: e } }) => <span className={e.sequence_id || e.project_id ? "" : "text-muted-foreground"}>{e.sequence_id ? seqName[e.sequence_id] ?? "A sequence" : e.project_id ? projectName[e.project_id] ?? "A project" : e.domain ? `Sequences sending from ${e.domain}` : e.mailbox_id ? "Sequences sending from this mailbox" : "Shared"}</span> },
+            { id: "credit", header: "Counts for", accessorFn: (e) => (e.sequence_id ? seqName[e.sequence_id] : "") ?? "", cell: ({ row: { original: e } }) => <span className={e.sequence_id ? "" : "text-muted-foreground"}>{e.sequence_id ? seqName[e.sequence_id] ?? "A sequence" : e.domain ? `Sequences sending from ${e.domain}` : e.mailbox_id ? "Sequences sending from this mailbox" : "Shared"}</span> },
             { id: "when", header: "When", accessorFn: (e) => e.occurred_at, cell: ({ row: { original: e } }) => <span className="text-muted-foreground">{shortDate(e.occurred_at)}</span> },
             { id: "source", header: "Source", accessorFn: (e) => e.source, cell: ({ row: { original: e } }) => <span className="text-muted-foreground">{e.source === "auto" ? "Connector" : e.source === "import" ? "Import" : "Manual or API"}</span> },
             {
@@ -880,8 +854,8 @@ function Spend({ ws, from, to, canManage, currency, sequences, projects, onChang
         />
       </div>
 
-      {adding === "once" && <RecordSpend ws={ws} currency={currency} sequences={sequences} projects={projects} onClose={() => setAdding("")} onDone={changed} />}
-      {(adding === "recurring" || editing) && <RecurringForm ws={ws} currency={currency} sequences={sequences} projects={projects} editing={editing} onClose={() => { setAdding(""); setEditing(null); }} onDone={changed} />}
+      {adding === "once" && <RecordSpend ws={ws} currency={currency} sequences={sequences} onClose={() => setAdding("")} onDone={changed} />}
+      {(adding === "recurring" || editing) && <RecurringForm ws={ws} currency={currency} sequences={sequences} editing={editing} onClose={() => { setAdding(""); setEditing(null); }} onDone={changed} />}
     </div>
   );
 }
@@ -936,28 +910,19 @@ function PriceUnits({ ws, rates, canManage, currency, onDone }: { ws: string; ra
   );
 }
 
-function CountsFor({ sequences, projects, seq, setSeq, project, setProject }: { sequences: Sequence[]; projects: Project[]; seq: string; setSeq: (v: string) => void; project: string; setProject: (v: string) => void }) {
+function CountsFor({ sequences, seq, setSeq }: { sequences: Sequence[]; seq: string; setSeq: (v: string) => void }) {
   return (
-    <div className="grid gap-3 sm:grid-cols-2">
-      <label className="block">
+    <label className="block">
         <span className="mb-1 block font-medium">Sequence <span className="font-normal text-muted-foreground">(optional)</span></span>
         <select className={`${field} w-full`} value={seq} onChange={(e) => setSeq(e.target.value)}>
-          <option value="">Not one sequence</option>
+          <option value="">Shared by the workspace</option>
           {sequences.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
         </select>
-      </label>
-      <label className="block">
-        <span className="mb-1 block font-medium">Project <span className="font-normal text-muted-foreground">(optional)</span></span>
-        <select className={`${field} w-full`} value={seq ? "" : project} disabled={!!seq} onChange={(e) => setProject(e.target.value)} title={seq ? "Set by the sequence" : undefined}>
-          <option value="">{seq ? "The sequence's project" : "Shared by the workspace"}</option>
-          {projects.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
-        </select>
-      </label>
-    </div>
+    </label>
   );
 }
 
-function RecordSpend({ ws, currency, sequences, projects, onClose, onDone }: { ws: string; currency: string; sequences: Sequence[]; projects: Project[]; onClose: () => void; onDone: () => void }) {
+function RecordSpend({ ws, currency, sequences, onClose, onDone }: { ws: string; currency: string; sequences: Sequence[]; onClose: () => void; onDone: () => void }) {
   const [category, setCategory] = useState<SpendCategory>("data");
   const [provider, setProvider] = useState("");
   const [mode, setMode] = useState<"money" | "units">("money");
@@ -967,7 +932,6 @@ function RecordSpend({ ws, currency, sequences, projects, onClose, onDone }: { w
   const [cur, setCur] = useState(currency);
   const [date, setDate] = useState(day(new Date()));
   const [seq, setSeq] = useState("");
-  const [project, setProject] = useState("");
   const [note, setNote] = useState("");
   const [error, setError] = useState("");
 
@@ -983,7 +947,7 @@ function RecordSpend({ ws, currency, sequences, projects, onClose, onDone }: { w
         currency: cur,
         occurred_at: new Date(`${date}T12:00:00Z`).toISOString(),
         ...(mode === "money" ? { amount_cents: Math.round(value * 100) } : { units: value, unit_name: unit }),
-        ...(seq ? { sequence_id: seq } : project ? { project_id: project } : {}),
+        ...(seq ? { sequence_id: seq } : {}),
         ...(note ? { note } : {}),
       },
     });
@@ -1038,7 +1002,7 @@ function RecordSpend({ ws, currency, sequences, projects, onClose, onDone }: { w
             <span className="mb-1 block font-medium">Date</span>
             <input type="date" required className={`${field} w-full`} max={day(new Date())} value={date} onChange={(e) => setDate(e.target.value)} />
           </label>
-          <CountsFor sequences={sequences} projects={projects} seq={seq} setSeq={setSeq} project={project} setProject={setProject} />
+          <CountsFor sequences={sequences} seq={seq} setSeq={setSeq} />
           <label className="block">
             <span className="mb-1 block font-medium">Note <span className="font-normal text-muted-foreground">(optional)</span></span>
             <input className={`${field} w-full`} maxLength={2000} value={note} onChange={(e) => setNote(e.target.value)} />
@@ -1054,7 +1018,7 @@ function RecordSpend({ ws, currency, sequences, projects, onClose, onDone }: { w
   );
 }
 
-function RecurringForm({ ws, currency, sequences, projects, editing, onClose, onDone }: { ws: string; currency: string; sequences: Sequence[]; projects: Project[]; editing: RecurringSpend | null; onClose: () => void; onDone: () => void }) {
+function RecurringForm({ ws, currency, sequences, editing, onClose, onDone }: { ws: string; currency: string; sequences: Sequence[]; editing: RecurringSpend | null; onClose: () => void; onDone: () => void }) {
   const [name, setName] = useState(editing?.name ?? "");
   const [category, setCategory] = useState<SpendCategory>(editing?.category ?? "mailboxes");
   const [amount, setAmount] = useState(editing ? String(editing.amount_cents / 100) : "");
@@ -1063,7 +1027,8 @@ function RecurringForm({ ws, currency, sequences, projects, editing, onClose, on
   const [starts, setStarts] = useState(editing?.starts_on ?? day(new Date()));
   const [ends, setEnds] = useState(editing?.ends_on ?? "");
   const [seq, setSeq] = useState(editing?.sequence_id ?? "");
-  const [project, setProject] = useState(editing?.project_id ?? "");
+  // Kept as it was until projects are removed; no longer picked here.
+  const project = editing?.project_id ?? "";
   const [error, setError] = useState("");
 
   async function submit(e: FormEvent) {
@@ -1135,7 +1100,7 @@ function RecurringForm({ ws, currency, sequences, projects, editing, onClose, on
               <input type="date" className={`${field} w-full`} min={starts} value={ends} onChange={(e) => setEnds(e.target.value)} />
             </label>
           </div>
-          <CountsFor sequences={sequences} projects={projects} seq={seq} setSeq={setSeq} project={project} setProject={setProject} />
+          <CountsFor sequences={sequences} seq={seq} setSeq={setSeq} />
           <ErrorText>{error}</ErrorText>
           <DialogFooter className="flex-row justify-end gap-2">
             <Button type="button" variant="ghost" onClick={onClose}>Cancel</Button>

@@ -292,7 +292,7 @@ function FirstMission({ ws, canManage, onCreate }: { ws: string; canManage: bool
         title="No missions yet"
         action={canManage && <Button onClick={onCreate}>New mission</Button>}
       >
-        Give an agent a goal, like "book 10 meetings with fintech CFOs in Australia by 30 November". Type it in the box above and your AI model drafts the plan, or let your own agent start one over MCP. Either way it reads the project brief, rehearses in a dry run, waits for your approval, and works within the limits you set.
+        Give an agent a goal, like "book 10 meetings with fintech CFOs in Australia by 30 November". Type it in the box above and your AI model drafts the plan, or let your own agent start one over MCP. Either way it reads your company and brand context, rehearses in a dry run, waits for your approval, and works within the limits you set.
       </Empty>
       <div className="grid gap-4 lg:grid-cols-2">
         <Snippet
@@ -388,7 +388,7 @@ function MissionForm({ ws, mission, canApprove = true, onClose, onSaved }: { ws:
               </select>
             </div>
           </Labeled>
-          <Labeled label="Instructions" hint="On top of the project brief: what to avoid, who to exclude, tone. Markdown.">
+          <Labeled label="Instructions" hint="On top of your company and brand context: what to avoid, who to exclude, tone. Markdown.">
             <textarea className={`${field} w-full font-mono text-[12px]`} rows={4} value={instructions} onChange={(e) => setInstructions(e.target.value)} placeholder="- Skip anyone we emailed in the last 90 days&#10;- No more than 3 steps" />
           </Labeled>
           <fieldset className="space-y-3 rounded-lg border p-3" disabled={limitsLocked}>
@@ -626,8 +626,8 @@ function MissionDetail({ ws, id, canManage, onBack }: { ws: string; id: string; 
               {m.plan ? <Prose text={m.plan} /> : <p className="text-[13px] text-muted-foreground">An agent submits its plan with submit_mission_plan before you approve.</p>}
             </Card>
             {m.instructions && <Card title="Instructions"><Prose text={m.instructions} /></Card>}
-            <Card title="Project brief" description={d.brief ? `${d.brief.name}, version ${d.brief.version}` : undefined}>
-              {d.brief ? (
+            {d.brief && (
+              <Card title="Brief" description={`From the ${d.brief.name} project, version ${d.brief.version}. Projects are being removed; briefs now live in brand context.`}>
                 <div className="space-y-3 text-[13px]">
                   {d.brief.changed_since_approval && <p className="rounded border border-amber-500/30 bg-amber-500/10 px-2 py-1 text-amber-800 dark:text-amber-300">The brief changed after this mission was approved (approved against version {m.brief_version}).</p>}
                   {([["Offer", d.brief.offer], ["Audience", d.brief.audience], ["Market", d.brief.market]] as const).filter(([, v]) => v).map(([k, v]) => (
@@ -635,10 +635,8 @@ function MissionDetail({ ws, id, canManage, onBack }: { ws: string; id: string; 
                   ))}
                   {d.brief.brief && <Prose text={d.brief.brief} />}
                 </div>
-              ) : (
-                <p className="text-[13px] text-muted-foreground">No project is set, so the agent works from the goal and instructions only.</p>
-              )}
-            </Card>
+              </Card>
+            )}
           </TabsContent>
           <TabsContent value="calls" className="mt-4">
             <Calls ws={ws} id={id} refresh={refresh} />

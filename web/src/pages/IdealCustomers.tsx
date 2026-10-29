@@ -1,7 +1,6 @@
 // Ideal customers: who the workspace sells to, kept once. Each profile is a
 // description in words plus filters in the same vocabulary as lead
-// searches. Projects, lead list fit scores and the lead finder read it, and
-// a project's customer filters are its profile's.
+// searches. Lead list fit scores and the lead finder read it.
 
 import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
 import type { Brand, CustomerProfile, ICP } from "@outflare/sdk";
@@ -10,7 +9,7 @@ import { Badge, Button, Empty, ErrorText, field, Input, Loading, Menu, PageHeade
 import { ago, plural } from "../format";
 import { DataTable, type ColumnDef } from "@/components/data-table";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { emptyICP, icpFields, TagInput } from "./Projects";
+import { emptyICP, icpFields, TagInput } from "@/components/icp";
 
 type Props = { ws: string; canManage: boolean };
 
@@ -39,7 +38,7 @@ export function IdealCustomers({ ws, canManage }: Props) {
   async function setArchived(p: CustomerProfile, archived: boolean) {
     const { error } = await api.PATCH("/v1/workspaces/{ws}/ideal-customer-profiles/{id}", { params: { path: { ws, id: p.id } }, body: { status: archived ? "archived" : "active" } });
     if (error) return toast(errorMessage(error), "error");
-    toast(archived ? `Archived ${p.name}. Projects that use it keep their filters.` : `Restored ${p.name}.`);
+    toast(archived ? `Archived ${p.name}. Lists that use it keep scoring against it.` : `Restored ${p.name}.`);
     load();
   }
 
@@ -54,7 +53,6 @@ export function IdealCustomers({ ws, canManage }: Props) {
       ),
     },
     { id: "filters", header: "Filters", accessorFn: (p) => filterCount(p.filters) },
-    { id: "projects", header: "Projects", accessorFn: (p) => p.project_ids.length },
     { id: "brand", header: "Brand", accessorFn: (p) => (p.brand_id ? brandName[p.brand_id] ?? "" : ""), cell: ({ getValue }) => (getValue() as string) || <span className="text-muted-foreground">All</span> },
     { id: "updated", header: "Changed", accessorFn: (p) => p.updated_at, cell: ({ row: { original: p } }) => ago(p.updated_at) },
   ];
@@ -65,13 +63,13 @@ export function IdealCustomers({ ws, canManage }: Props) {
     <div className="space-y-6">
       <PageHeader
         title="Ideal customers"
-        description="Describe who you sell to once. Projects, lead list fit scores and the lead finder all use the same profile, and a project's customer filters are its profile's."
+        description="Describe who you sell to once. Lead list fit scores and the lead finder use the same profile."
         action={canManage && <Button onClick={() => setEditing("new")}>New profile</Button>}
       />
       <ErrorText>{error}</ErrorText>
       {none ? (
         <Empty title="No ideal customer profiles yet" action={canManage && <Button onClick={() => setEditing("new")}>New profile</Button>}>
-          Say who buys from you in a sentence, then add the job titles, industries, company sizes and places that fit. A project with customer filters gets a profile of its own automatically.
+          Say who buys from you in a sentence, then add the job titles, industries, company sizes and places that fit.
         </Empty>
       ) : (
         <DataTable
@@ -98,7 +96,7 @@ export function IdealCustomers({ ws, canManage }: Props) {
           mobile={(p) => (
             <span className="block min-w-0">
               <span className="block truncate text-[13px] font-medium">{p.name}</span>
-              <span className="block truncate text-[12px] text-muted-foreground">{plural(filterCount(p.filters), "filter")} · {plural(p.project_ids.length, "project")}</span>
+              <span className="block truncate text-[12px] text-muted-foreground">{plural(filterCount(p.filters), "filter")}</span>
             </span>
           )}
         />
@@ -129,7 +127,7 @@ function ProfileDialog({ ws, profile, brands, readOnly, onClose, onSaved }: { ws
       : await api.POST("/v1/workspaces/{ws}/ideal-customer-profiles", { params: { path: { ws } }, body });
     setBusy(false);
     if (error) return setError(errorMessage(error));
-    toast(profile ? (profile.project_ids.length ? `Saved ${body.name} and its ${plural(profile.project_ids.length, "project")}.` : `Saved ${body.name}.`) : `Made ${body.name}.`);
+    toast(profile ? `Saved ${body.name}.` : `Made ${body.name}.`);
     onSaved();
   }
 
@@ -139,8 +137,8 @@ function ProfileDialog({ ws, profile, brands, readOnly, onClose, onSaved }: { ws
         <DialogHeader>
           <DialogTitle>{profile ? profile.name : "New ideal customer profile"}</DialogTitle>
           <DialogDescription>
-            {profile?.project_ids.length
-              ? <>Used by {plural(profile.project_ids.length, "project")}. Changes here change their customer filters too. <Badge tone="grey">v{profile.version}</Badge></>
+            {profile
+              ? <>Lists that use it score against the changes on their next run. <Badge tone="grey">v{profile.version}</Badge></>
               : "Who you sell to, in words and as filters lead searches can run."}
           </DialogDescription>
         </DialogHeader>

@@ -14,7 +14,7 @@ type Kind = "project_ids" | "domains" | "mailbox_ids" | "lead_list_ids" | "seque
 type Row = { key: string; name: string; sub?: string };
 
 const kinds: { kind: Kind; label: string; one: string; many: string }[] = [
-  { kind: "project_ids", label: "Projects", one: "project", many: "projects" },
+  { kind: "project_ids", label: "Projects (being removed)", one: "project", many: "projects" },
   { kind: "domains", label: "Sending domains", one: "domain", many: "domains" },
   { kind: "mailbox_ids", label: "Mailboxes", one: "mailbox", many: "mailboxes" },
   { kind: "lead_list_ids", label: "Lead lists", one: "lead list", many: "lead lists" },
@@ -72,7 +72,7 @@ export function NotInABrand({ ws, brands, canEdit, onMoved }: { ws: string; bran
   return (
     <Card
       title={`Not in a brand · ${total}`}
-      description="These count for no brand, so they don't show when one brand is picked in the sidebar. Tick what belongs to a brand and move it there. A domain brings its mailboxes, and a project brings everything in it."
+      description="These count for no brand, so they don't show when one brand is picked in the sidebar. Tick what belongs to a brand and move it there. A domain brings its mailboxes. Projects are being removed; until then, a project's domains, mailboxes, lists and sequences move with it."
     >
       <div className="space-y-2">
         {kinds.filter((k) => rows[k.kind].length > 0).map((k) => {

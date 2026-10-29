@@ -46,6 +46,7 @@ type listView struct {
 	Description          string                  `json:"description"`
 	ProjectID            *string                 `json:"project_id"`
 	BrandID              *string                 `json:"brand_id"`
+	ProfileID            *string                 `json:"profile_id"`
 	Kind                 string                  `json:"kind"`
 	Leads                int                     `json:"leads"`
 	SearchIntegrationID  *string                 `json:"search_integration_id"`
@@ -66,7 +67,7 @@ type listView struct {
 }
 
 const listSelect = `
-	SELECT l.id, l.name, l.description, l.project_id, l.brand_id, l.kind,
+	SELECT l.id, l.name, l.description, l.project_id, l.brand_id, l.profile_id, l.kind,
 	       (SELECT count(*)::int FROM lead_list_members m WHERE m.list_id = l.id),
 	       l.search_integration_id, l.filters, l.enrich_integration_ids::text[], l.max_leads, l.credit_cap::float8,
 	       l.verify, l.verified_emails_only, l.skip_contacted_days, l.skip_in_sequences, l.min_score,
@@ -86,7 +87,7 @@ func (s *Server) loadLists(ctx context.Context, where string, args ...any) ([]li
 		var v listView
 		var filters []byte
 		var lastRun *string
-		if err := rows.Scan(&v.ID, &v.Name, &v.Description, &v.ProjectID, &v.BrandID, &v.Kind, &v.Leads, &v.SearchIntegrationID, &filters,
+		if err := rows.Scan(&v.ID, &v.Name, &v.Description, &v.ProjectID, &v.BrandID, &v.ProfileID, &v.Kind, &v.Leads, &v.SearchIntegrationID, &filters,
 			&v.EnrichIntegrationIDs, &v.MaxLeads, &v.CreditCap, &v.Verify, &v.VerifiedEmailsOnly, &v.SkipContactedDays,
 			&v.SkipInSequences, &v.MinScore, &v.RefreshEveryDays, &v.NextRefreshAt, &v.CreatedAt, &v.UpdatedAt, &lastRun); err != nil {
 			rows.Close()
@@ -228,6 +229,7 @@ type listInput struct {
 	Name                 *string                  `json:"name"`
 	Description          *string                  `json:"description"`
 	ProjectID            optional[string]         `json:"project_id"`
+	ProfileID            optional[string]         `json:"profile_id"`
 	SearchIntegrationID  optional[string]         `json:"search_integration_id"`
 	Filters              *connectors.PeopleFilter `json:"filters"`
 	EnrichIntegrationIDs *[]string                `json:"enrich_integration_ids"`
@@ -286,6 +288,20 @@ func (s *Server) applyList(ctx context.Context, a *access, in *listInput, v *lis
 	}
 	if a.ProjectID != nil {
 		v.ProjectID = a.ProjectID
+	}
+	if in.ProfileID.Set {
+		if p := in.ProfileID.Value; p != nil {
+			var ok bool
+			if validUUID(*p) {
+				if err := s.pool.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM ideal_customer_profiles WHERE workspace_id = $1 AND id = $2)`, a.WorkspaceID, *p).Scan(&ok); err != nil {
+					return err
+				}
+			}
+			if !ok {
+				return errInvalid("profile_id is not an ideal customer profile in this workspace")
+			}
+		}
+		v.ProfileID = in.ProfileID.Value
 	}
 	integration := func(id, capability, field string) (connectors.Definition, error) {
 		if !validUUID(id) || s.integrations == nil {
@@ -449,12 +465,12 @@ func (s *Server) createLeadList(w http.ResponseWriter, r *http.Request) {
 		if err := tx.QueryRow(ctx, `
 			INSERT INTO lead_lists (workspace_id, name, description, project_id, kind, search_integration_id, filters,
 				enrich_integration_ids, max_leads, credit_cap, verify, verified_emails_only, skip_contacted_days,
-				skip_in_sequences, min_score, refresh_every_days, next_refresh_at, created_by, brand_id)
-			VALUES ($1, $2, $3, $4, $5, $6, $7, $8::uuid[], $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)
+				skip_in_sequences, min_score, refresh_every_days, next_refresh_at, created_by, brand_id, profile_id)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8::uuid[], $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20)
 			RETURNING id`,
 			a.WorkspaceID, v.Name, v.Description, v.ProjectID, v.Kind, v.SearchIntegrationID, filters, v.EnrichIntegrationIDs,
 			v.MaxLeads, v.CreditCap, v.Verify, v.VerifiedEmailsOnly, v.SkipContactedDays, v.SkipInSequences, v.MinScore,
-			v.RefreshEveryDays, v.NextRefreshAt, nullIfEmpty(a.ActorID), brand).Scan(&v.ID); err != nil {
+			v.RefreshEveryDays, v.NextRefreshAt, nullIfEmpty(a.ActorID), brand, v.ProfileID).Scan(&v.ID); err != nil {
 			return err
 		}
 		if err := record(ctx, tx, &a.principal, a.WorkspaceID, "lead_list.created", "lead_list", v.ID,
@@ -534,11 +550,11 @@ func (s *Server) updateLeadList(w http.ResponseWriter, r *http.Request) {
 			UPDATE lead_lists SET name = $3, description = $4, project_id = $5, kind = $6, search_integration_id = $7,
 				filters = $8, enrich_integration_ids = $9::uuid[], max_leads = $10, credit_cap = $11, verify = $12,
 				verified_emails_only = $13, skip_contacted_days = $14, skip_in_sequences = $15, min_score = $16,
-				refresh_every_days = $17, next_refresh_at = $18, updated_at = now()
+				refresh_every_days = $17, next_refresh_at = $18, profile_id = $19, updated_at = now()
 			WHERE workspace_id = $1 AND id = $2`,
 			a.WorkspaceID, v.ID, v.Name, v.Description, v.ProjectID, v.Kind, v.SearchIntegrationID, filters, v.EnrichIntegrationIDs,
 			v.MaxLeads, v.CreditCap, v.Verify, v.VerifiedEmailsOnly, v.SkipContactedDays, v.SkipInSequences, v.MinScore,
-			v.RefreshEveryDays, v.NextRefreshAt); err != nil {
+			v.RefreshEveryDays, v.NextRefreshAt, v.ProfileID); err != nil {
 			return err
 		}
 		return record(ctx, tx, &a.principal, a.WorkspaceID, "lead_list.updated", "lead_list", v.ID, map[string]any{"name": v.Name})
@@ -928,6 +944,7 @@ func (s *Server) previewLeadList(w http.ResponseWriter, r *http.Request) {
 		SearchIntegrationID string                  `json:"search_integration_id"`
 		Filters             connectors.PeopleFilter `json:"filters"`
 		ProjectID           *string                 `json:"project_id"`
+		ProfileID           *string                 `json:"profile_id"`
 	}
 	if !decode(w, r, &req) {
 		return
@@ -936,6 +953,9 @@ func (s *Server) previewLeadList(w http.ResponseWriter, r *http.Request) {
 	in := listInput{SearchIntegrationID: optional[string]{Set: true, Value: &req.SearchIntegrationID}, Filters: &req.Filters}
 	if req.ProjectID != nil && a.ProjectID == nil {
 		in.ProjectID = optional[string]{Set: true, Value: req.ProjectID}
+	}
+	if req.ProfileID != nil {
+		in.ProfileID = optional[string]{Set: true, Value: req.ProfileID}
 	}
 	v := listView{}
 	if err := s.applyList(ctx, a, &in, &v); err != nil {
@@ -951,9 +971,10 @@ func (s *Server) previewLeadList(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var icp connectors.PeopleFilter
-	if v.ProjectID != nil {
+	if v.ProfileID != nil || v.ProjectID != nil {
 		var raw []byte
-		if err := s.pool.QueryRow(ctx, `SELECT icp FROM projects WHERE id = $1`, *v.ProjectID).Scan(&raw); err == nil {
+		if err := s.pool.QueryRow(ctx, `SELECT COALESCE((SELECT filters FROM ideal_customer_profiles WHERE id = $1), (SELECT icp FROM projects WHERE id = $2), '{}')`,
+			v.ProfileID, v.ProjectID).Scan(&raw); err == nil {
 			_ = json.Unmarshal(raw, &icp)
 		}
 	}

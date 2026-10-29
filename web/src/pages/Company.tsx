@@ -212,7 +212,7 @@ function ContextCard({ ws, context: c, canManage, onSaved }: { ws: string; conte
   return (
     <Card
       title="About the company"
-      description={<>True for every project. Offers, audiences and markets live on each project's brief. {c.updated_at ? <>Version {c.version}, updated {ago(c.updated_at)}{c.updated_by ? ` by ${c.updated_by}` : ""}.</> : null}</>}
+      description={<>True for every brand. Each brand's own audience, offer and market go in its context on the Brands page. {c.updated_at ? <>Version {c.version}, updated {ago(c.updated_at)}{c.updated_by ? ` by ${c.updated_by}` : ""}.</> : null}</>}
     >
       <form onSubmit={save} className="space-y-4">
         {c.ask_for_missing && !ro && (

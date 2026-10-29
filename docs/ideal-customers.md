@@ -1,13 +1,13 @@
 # Ideal customers
 
-An ideal customer profile says who you sell to, once. Projects, lead list fit scores and the lead finder all use the same profile, so the same customer is never typed twice in different words.
+An ideal customer profile says who you sell to, once. Lead list fit scores and the lead finder use the same profile, so the same customer is never typed twice in different words.
 
 A profile has:
 
 - a **name**, such as "Series A fintech, AU";
 - a **description** in words: who they are and why they buy. AI steps read it;
 - **filters** in the same vocabulary as lead searches: job titles, seniority, industries, company size (employee ranges), locations and keywords;
-- an optional **brand**, when it describes one brand's customers. A brand's profile can only be used by that brand's projects; a profile without a brand fits every project.
+- an optional **brand**, when it describes one brand's customers. A profile without a brand fits every brand.
 
 Find them under **Company → Ideal customers**, at `/v1/workspaces/{ws}/ideal-customer-profiles`, or with the MCP tools `list_ideal_customer_profiles`, `get_ideal_customer_profile`, `create_ideal_customer_profile` and `update_ideal_customer_profile`. Reading needs `projects.read`; making and changing them needs `projects.manage`.
 

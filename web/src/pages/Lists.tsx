@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
-import type { DataPerson, DataProvider, LeadList, LeadListMember, ListRun, PeopleFilter, Schemas, SmartList } from "@outflare/sdk";
+import type { CustomerProfile, DataPerson, DataProvider, LeadList, LeadListMember, ListRun, PeopleFilter, SmartList } from "@outflare/sdk";
 import { ArrowDown, ArrowUp, Search, X } from "lucide-react";
 import { useBrand } from "@/lib/brand";
 import { BrandBadge } from "@/components/brand-badge";
@@ -12,8 +12,6 @@ import { ago, plural } from "../format";
 import type { Tab } from "../App";
 import { ConnectorLogo } from "@/components/connector-logo";
 import { SmartListDetail, SmartListSheet } from "./SmartLists";
-
-type Project = Schemas["Project"];
 
 // One row of the Lists page: a lead list or a smart list.
 type Row = { id: string; name: string; description?: string | null; brand_id?: string | null; lead?: LeadList; smart?: SmartList };
@@ -87,10 +85,9 @@ export function Lists({ ws, canManage, open, setOpen, go }: { ws: string; canMan
   const [editingSmart, setEditingSmart] = useState<SmartList | "new" | null>(null);
   const [choosing, setChoosing] = useState(false);
   const [providers, setProviders] = useState<DataProvider[]>([]);
-  const [projects, setProjects] = useState<Project[]>([]);
+  const [profiles, setProfiles] = useState<CustomerProfile[]>([]);
   const [editing, setEditing] = useState<LeadList | "new" | null>(null);
   const [connecting, setConnecting] = useState<DataProvider | null>(null);
-  const [project, setProject] = useState("");
   const [error, setError] = useState("");
 
   const brand = useBrand(ws).brand?.handle;
@@ -99,13 +96,13 @@ export function Lists({ ws, canManage, open, setOpen, go }: { ws: string; canMan
       api.GET("/v1/workspaces/{ws}/lead-lists", { params: { path: { ws }, query: { ...(brand ? { brand } : {}) } } }),
       api.GET("/v1/workspaces/{ws}/smart-lists", { params: { path: { ws }, query: { ...(brand ? { brand } : {}) } } }),
       api.GET("/v1/workspaces/{ws}/data-providers", { params: { path: { ws } } }),
-      api.GET("/v1/workspaces/{ws}/projects", { params: { path: { ws } } }),
+      api.GET("/v1/workspaces/{ws}/ideal-customer-profiles", { params: { path: { ws } } }),
     ]);
     if (l.data) setLists(l.data.data);
     else setError(errorMessage(l.error));
     setSmart(sl.data?.data ?? []);
     if (p.data) setProviders(p.data.data);
-    if (pr.data) setProjects(pr.data.data);
+    if (pr.data) setProfiles(pr.data.data);
   }, [ws, brand]);
 
   useEffect(() => {
@@ -123,7 +120,6 @@ export function Lists({ ws, canManage, open, setOpen, go }: { ws: string; canMan
   const connected = providers.flatMap((p) => p.integrations.map((i) => ({ ...i, provider: p })));
   const connectedSearch = connected.filter((i) => i.provider.capabilities.includes("data.search_people"));
   const integrationName = (id?: string | null) => connected.find((i) => i.id === id)?.provider.name;
-  const projectName = (id?: string | null) => projects.find((p) => p.id === id)?.name;
 
   const sheet = (
     <>
@@ -132,8 +128,7 @@ export function Lists({ ws, canManage, open, setOpen, go }: { ws: string; canMan
           ws={ws}
           list={editing === "new" ? null : editing}
           providers={providers}
-          projects={projects}
-          defaultProject={project && project !== "none" ? project : undefined}
+          profiles={profiles}
           onConnect={setConnecting}
           onClose={() => setEditing(null)}
           onSaved={(l) => {
@@ -196,7 +191,6 @@ export function Lists({ ws, canManage, open, setOpen, go }: { ws: string; canMan
           id={open}
           canManage={canManage}
           integrationName={integrationName}
-          projectName={projectName}
           onBack={() => setOpen(undefined)}
           onEdit={(l) => setEditing(l)}
           onChanged={load}
@@ -207,10 +201,9 @@ export function Lists({ ws, canManage, open, setOpen, go }: { ws: string; canMan
     );
   }
 
-  // Smart lists belong to no project, so a project filter hides them.
   const rows: Row[] = [
-    ...(lists ?? []).filter((l) => !project || (project === "none" ? !l.project_id : l.project_id === project)).map((l) => ({ id: l.id, name: l.name, description: l.description, brand_id: l.brand_id, lead: l })),
-    ...(project && project !== "none" ? [] : (smart ?? []).map((l) => ({ id: l.id, name: l.name, description: l.description, brand_id: l.brand_id, smart: l }))),
+    ...(lists ?? []).map((l) => ({ id: l.id, name: l.name, description: l.description, brand_id: l.brand_id, lead: l })),
+    ...(smart ?? []).map((l) => ({ id: l.id, name: l.name, description: l.description, brand_id: l.brand_id, smart: l })),
   ];
   const total = (lists?.length ?? 0) + (smart?.length ?? 0);
   const noProvider = connectedSearch.length === 0;
@@ -265,23 +258,13 @@ export function Lists({ ws, canManage, open, setOpen, go }: { ws: string; canMan
           rowId={(l) => l.id}
           onRowClick={(l) => setOpen(l.id)}
           searchPlaceholder="Search lists"
-          toolbar={
-            projects.length > 0 && (
-              <select aria-label="Project" className={field} value={project} onChange={(e) => setProject(e.target.value)}>
-                <option value="">All projects</option>
-                <option value="none">Shared (no project)</option>
-                {projects.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
-              </select>
-            )
-          }
-          empty={<>No lists in this project. <button className="underline" onClick={() => setProject("")}>Show all</button></>}
           mobile={({ lead: l, smart: s, name, brand_id }) => (
             <div className="space-y-1">
               <div className="flex items-start justify-between gap-2">
                 <span className="flex flex-wrap items-center gap-1.5 font-medium">{name} <BrandBadge id={brand_id} /></span>
                 <span className="font-mono text-[12px] tabular-nums">{s ? plural(s.members, "person", "people") : plural(l!.leads, "lead")}</span>
               </div>
-              <div className="text-[12px] text-muted-foreground">{s ? "Smart list" : l!.kind === "search" ? `${integrationName(l!.search_integration_id) ?? "Search"} search` : "Manual"}{l?.project_id ? ` · ${projectName(l.project_id) ?? "Project"}` : ""}</div>
+              <div className="text-[12px] text-muted-foreground">{s ? "Smart list" : l!.kind === "search" ? `${integrationName(l!.search_integration_id) ?? "Search"} search` : "Manual"}</div>
               {l?.last_run && <RunLine run={l.last_run} />}
               {s && <SmartLine list={s} />}
             </div>
@@ -311,7 +294,6 @@ export function Lists({ ws, canManage, open, setOpen, go }: { ws: string; canMan
                   <span className="text-muted-foreground">Manual</span>
                 ),
             },
-            ...(projects.length > 0 ? [{ id: "project", header: "Project", accessorFn: (r: Row) => projectName(r.lead?.project_id) ?? "", cell: ({ getValue }: { getValue: () => unknown }) => (getValue() as string) || <span className="text-muted-foreground">Shared</span> }] : []),
             { id: "leads", header: "People", accessorFn: (r) => r.smart?.members ?? r.lead!.leads, meta: { align: "right" }, cell: ({ getValue }) => <span className="font-mono tabular-nums">{(getValue() as number).toLocaleString()}</span> },
             {
               id: "last",
@@ -378,9 +360,9 @@ function RunLine({ run }: { run: ListRun }) {
 // ---- One list ----
 
 function ListDetail({
-  ws, id, canManage, integrationName, projectName, onBack, onEdit, onChanged, go,
+  ws, id, canManage, integrationName, onBack, onEdit, onChanged, go,
 }: {
-  ws: string; id: string; canManage: boolean; integrationName: (id?: string | null) => string | undefined; projectName: (id?: string | null) => string | undefined;
+  ws: string; id: string; canManage: boolean; integrationName: (id?: string | null) => string | undefined;
   onBack: () => void; onEdit: (l: LeadList) => void; onChanged: () => void; go: (t: Tab) => void;
 }) {
   const [list, setList] = useState<LeadList | null>(null);
@@ -473,7 +455,7 @@ function ListDetail({
     <div className="space-y-6">
       <PageHeader
         back={{ label: "Lists", onClick: onBack }}
-        title={<>{list.name}<Badge tone={isSearch ? "blue" : "grey"}>{isSearch ? `${integrationName(list.search_integration_id) ?? "search"}` : "manual"}</Badge>{list.project_id && <Badge>{projectName(list.project_id) ?? "project"}</Badge>}</>}
+        title={<>{list.name}<Badge tone={isSearch ? "blue" : "grey"}>{isSearch ? `${integrationName(list.search_integration_id) ?? "search"}` : "manual"}</Badge></>}
         description={list.description || (isSearch ? "Built from a search. Refresh to add people who match now and weren't found before." : "Add leads by importing a CSV, through the API, or from an agent.")}
         action={
           canManage && (
@@ -624,7 +606,7 @@ function ListDetail({
 }
 
 function Score({ member: m }: { member: LeadListMember }) {
-  if (m.score == null) return <span className="text-muted-foreground" title="No ideal customer profile to score against. Add filters, or set the project's ICP.">–</span>;
+  if (m.score == null) return <span className="text-muted-foreground" title="No ideal customer profile to score against. Add filters, or pick an ideal customer profile in the list's settings.">–</span>;
   const tone = m.score >= 75 ? "green" : m.score >= 40 ? "amber" : "grey";
   const why = m.score_reasons.map((r) => (r.startsWith("+") ? `matches ${r.slice(2)}` : `doesn't match ${r.slice(2)}`)).join("\n");
   return <Badge tone={tone} title={why}>{m.score}</Badge>;
@@ -672,7 +654,7 @@ function RunCard({ run, canManage, onCancel }: { run: ListRun; canManage: boolea
 type Draft = {
   name: string;
   description: string;
-  project_id: string;
+  profile_id: string;
   source: "search" | "manual";
   search_integration_id: string;
   filters: PeopleFilter;
@@ -687,11 +669,11 @@ type Draft = {
   refresh: string;
 };
 
-function draftFrom(l: LeadList | null, searchId: string, project?: string): Draft {
+function draftFrom(l: LeadList | null, searchId: string): Draft {
   return {
     name: l?.name ?? "",
     description: l?.description ?? "",
-    project_id: l?.project_id ?? project ?? "",
+    profile_id: l?.profile_id ?? "",
     source: l ? (l.kind === "search" ? "search" : "manual") : searchId ? "search" : "manual",
     search_integration_id: l?.search_integration_id ?? searchId,
     filters: l?.filters ?? {},
@@ -708,15 +690,15 @@ function draftFrom(l: LeadList | null, searchId: string, project?: string): Draf
 }
 
 function ListSheet({
-  ws, list, providers, projects, defaultProject, onConnect, onClose, onSaved,
+  ws, list, providers, profiles, onConnect, onClose, onSaved,
 }: {
-  ws: string; list: LeadList | null; providers: DataProvider[]; projects: Project[]; defaultProject?: string;
+  ws: string; list: LeadList | null; providers: DataProvider[]; profiles: CustomerProfile[];
   onConnect: (p: DataProvider) => void; onClose: () => void; onSaved: (l: LeadList) => void;
 }) {
   const connected = providers.flatMap((p) => p.integrations.map((i) => ({ ...i, provider: p })));
   const searchers = connected.filter((i) => i.provider.capabilities.includes("data.search_people"));
   const finders = connected.filter((i) => i.provider.capabilities.includes("data.enrich_person") || i.provider.capabilities.includes("data.find_email"));
-  const [d, setD] = useState<Draft>(() => draftFrom(list, searchers[0]?.id ?? "", defaultProject));
+  const [d, setD] = useState<Draft>(() => draftFrom(list, searchers[0]?.id ?? ""));
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [preview, setPreview] = useState<ListRun | null>(null);
@@ -724,8 +706,8 @@ function ListSheet({
   const set = <K extends keyof Draft>(k: K, v: Draft[K]) => setD((x) => ({ ...x, [k]: v }));
   const searcher = searchers.find((s) => s.id === d.search_integration_id);
   const supported = searcher?.provider.filters ?? [];
-  const project = projects.find((p) => p.id === d.project_id);
-  const icpKeys = project ? (Object.keys(project.icp ?? {}) as FilterKey[]).filter((k) => ((project.icp as PeopleFilter)[k]?.length ?? 0) > 0) : [];
+  const profile = profiles.find((p) => p.id === d.profile_id);
+  const icpKeys = profile ? (Object.keys(profile.filters ?? {}) as FilterKey[]).filter((k) => ((profile.filters as PeopleFilter)[k]?.length ?? 0) > 0) : [];
   const hasFilters = Object.values(d.filters).some((v) => (v?.length ?? 0) > 0);
 
   function setFilter(k: FilterKey, v: string[]) {
@@ -734,8 +716,8 @@ function ListSheet({
   }
 
   function useICP() {
-    if (!project) return;
-    const icp = project.icp as PeopleFilter;
+    if (!profile) return;
+    const icp = profile.filters as PeopleFilter;
     const next: PeopleFilter = { ...d.filters };
     for (const k of icpKeys) if (supported.includes(k)) (next as Record<string, string[] | undefined>)[k] = icp[k];
     setD((x) => ({ ...x, filters: next }));
@@ -758,7 +740,7 @@ function ListSheet({
     setError("");
     const { data, error } = await api.POST("/v1/workspaces/{ws}/lead-lists/preview", {
       params: { path: { ws } },
-      body: { search_integration_id: d.search_integration_id, filters: clean(d.filters), project_id: d.project_id || null },
+      body: { search_integration_id: d.search_integration_id, filters: clean(d.filters), profile_id: d.profile_id || null },
     });
     if (error) {
       setPreviewing(false);
@@ -775,7 +757,7 @@ function ListSheet({
     const body = {
       name: d.name,
       description: d.description,
-      ...(list?.project_id !== (d.project_id || null) || !list ? { project_id: d.project_id || null } : {}),
+      profile_id: d.profile_id || null,
       search_integration_id: search ? d.search_integration_id || null : null,
       ...(search ? { filters: clean(d.filters), enrich_integration_ids: d.enrich } : {}),
       max_leads: d.max_leads,
@@ -817,14 +799,14 @@ function ListSheet({
               <span className="mb-1 block font-medium">Description <span className="font-normal text-muted-foreground">(optional)</span></span>
               <input className={`${field} w-full`} maxLength={2000} value={d.description} onChange={(e) => set("description", e.target.value)} />
             </label>
-            {projects.length > 0 && (
+            {profiles.length > 0 && (
               <label className="block">
-                <span className="mb-1 block font-medium">Project</span>
-                <select className={`${field} w-full`} value={d.project_id} onChange={(e) => set("project_id", e.target.value)}>
-                  <option value="">Shared with the whole workspace</option>
-                  {projects.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+                <span className="mb-1 block font-medium">Ideal customer profile</span>
+                <select className={`${field} w-full`} value={d.profile_id} onChange={(e) => set("profile_id", e.target.value)}>
+                  <option value="">None</option>
+                  {profiles.filter((p) => p.status === "active" || p.id === d.profile_id).map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
                 </select>
-                <span className="mt-1 block text-[12px] text-muted-foreground">{d.project_id ? "Leads are scored against this project's ideal customer profile." : "Pick a project to score leads against its ideal customer profile."}</span>
+                <span className="mt-1 block text-[12px] text-muted-foreground">{d.profile_id ? "Leads are scored against this profile." : "Pick a profile to score leads against it."}</span>
               </label>
             )}
           </div>
@@ -860,7 +842,7 @@ function ListSheet({
               <div className="space-y-3 rounded-md border p-3">
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <span className="font-medium">Who to find</span>
-                  {project && icpKeys.length > 0 && <Button type="button" variant="ghost" onClick={useICP}>Use the project's ICP</Button>}
+                  {profile && icpKeys.length > 0 && <Button type="button" variant="ghost" onClick={useICP}>Use the profile's filters</Button>}
                 </div>
                 {supported.includes("titles") && <Chips label={filterLabels.titles} hint={filterHints.titles} values={d.filters.titles ?? []} onChange={(v) => setFilter("titles", v)} />}
                 {supported.includes("seniorities") && <Toggles label={filterLabels.seniorities} options={Object.keys(seniorityLabels)} labels={seniorityLabels} values={d.filters.seniorities ?? []} onChange={(v) => setFilter("seniorities", v)} />}

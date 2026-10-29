@@ -735,7 +735,7 @@ function RulesDialog({ ws, onClose }: { ws: string; onClose: () => void }) {
                 </>
               )}
             </div>
-            {overrides > 0 && <p className="text-[12px] text-muted-foreground">{overrides === 1 ? "A project or sequence has" : `${overrides} projects or sequences have`} its own rules too, set through the API or MCP, and those win for their replies.</p>}
+            {overrides > 0 && <p className="text-[12px] text-muted-foreground">{overrides === 1 ? "A sequence has" : `${overrides} sequences have`} its own rules too, set through the API or MCP, and those win for their replies.</p>}
             <ErrorText>{error}</ErrorText>
             <div className="flex justify-end gap-2">
               <Button type="button" variant="ghost" onClick={onClose}>Cancel</Button>

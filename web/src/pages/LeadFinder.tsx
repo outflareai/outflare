@@ -14,7 +14,7 @@ import { DataTable, type ColumnDef } from "@/components/data-table";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Switch } from "@/components/ui/switch";
-import { TagInput } from "./Projects";
+import { TagInput } from "@/components/icp";
 
 type Props = { ws: string; canManage: boolean; onConnectors: () => void; onProfiles: () => void };
 

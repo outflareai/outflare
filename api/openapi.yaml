@@ -3126,7 +3126,8 @@ paths:
               properties:
                 search_integration_id: { type: string, format: uuid }
                 filters: { $ref: "#/components/schemas/PeopleFilter" }
-                project_id: { type: [string, "null"], format: uuid, description: Score the sample against this project's ICP. }
+                project_id: { type: [string, "null"], format: uuid, deprecated: true, description: "Projects are being removed; use profile_id." }
+                profile_id: { type: [string, "null"], format: uuid, description: Score the sample against this ideal customer profile. }
       responses:
         "202":
           description: "Queued. Inside a mission, a MissionHeld answer when the call was held for approval or dry-run instead."
@@ -33498,7 +33499,8 @@ components:
       properties:
         name: { type: string, minLength: 1, maxLength: 100 }
         description: { type: string, maxLength: 2000 }
-        project_id: { type: [string, "null"], format: uuid, description: Null shares the list with the whole workspace. }
+        project_id: { type: [string, "null"], format: uuid, deprecated: true, description: "Projects are being removed; leave it out. Null shares the list with the whole workspace." }
+        profile_id: { type: [string, "null"], format: uuid, description: "The ideal customer profile people are scored against, under the list's own filters. Null scores against the filters alone." }
         search_integration_id: { type: [string, "null"], format: uuid, description: The connected provider that searches. Null makes a manual list. }
         filters: { $ref: "#/components/schemas/PeopleFilter" }
         enrich_integration_ids:
@@ -33578,15 +33580,16 @@ components:
         entered_at: { type: string, format: date-time, description: "members: when they joined the list." }
     LeadList:
       type: object
-      required: [id, name, description, project_id, brand_id, kind, leads, search_integration_id, filters, enrich_integration_ids, max_leads,
+      required: [id, name, description, project_id, brand_id, profile_id, kind, leads, search_integration_id, filters, enrich_integration_ids, max_leads,
         credit_cap, verify, verified_emails_only, skip_contacted_days, skip_in_sequences, min_score, refresh_every_days,
         next_refresh_at, last_run, created_at, updated_at]
       properties:
         id: { type: string, format: uuid }
         name: { type: string }
         description: { type: string }
-        project_id: { type: [string, "null"], format: uuid }
+        project_id: { type: [string, "null"], format: uuid, deprecated: true }
         brand_id: { type: [string, "null"], format: uuid, description: "The brand that owns it, or null when shared by every brand. In a project it is the project's brand." }
+        profile_id: { type: [string, "null"], format: uuid, description: "The ideal customer profile people are scored against, or null." }
         kind: { type: string, enum: [manual, search] }
         leads: { type: integer }
         search_integration_id: { type: [string, "null"], format: uuid }
@@ -35473,7 +35476,7 @@ components:
       type: object
       properties:
         name: { type: string, maxLength: 200 }
-        project_id: { type: [string, "null"], format: uuid, description: "The project the sequence belongs to. Only that project's mailboxes and shared ones send for it. Null: shared." }
+        project_id: { type: [string, "null"], format: uuid, deprecated: true, description: "Projects are being removed; leave it out. The project the sequence belongs to. Null: shared." }
         pool_id: { type: [string, "null"], format: uuid, description: "Restrict allocation to mailboxes in this pool. Null allows any mailbox." }
         timezone: { type: string, example: Australia/Sydney, description: IANA time zone for the sending window. }
         send_days:
@@ -35483,6 +35486,7 @@ components:
         send_start: { type: string, example: "09:00" }
         send_end: { type: string, example: "17:00" }
         daily_new_limit: { type: [integer, "null"], minimum: 1, description: Most leads started per day. Null is no cap. }
+        daily_send_limit: { type: [integer, "null"], minimum: 1, maximum: 1000000, description: "Most emails sent in 24 hours, every step counted, on top of mailbox and domain limits. Null is no cap." }
         stop_on_reply: { type: boolean }
         track_clicks: { type: boolean, description: "Rewrite links so clicks are counted. Off by default: rewritten links can hurt deliverability, so use it with a verified tracking domain." }
         unsubscribe_header: { type: boolean, description: "Add List-Unsubscribe and one-click headers. On by default; Gmail and Yahoo expect them from bulk senders." }
@@ -35511,12 +35515,12 @@ components:
         body: { type: string }
     Sequence:
       type: object
-      required: [id, name, status, pool_id, timezone, send_days, send_start, send_end, daily_new_limit, stop_on_reply, track_clicks, unsubscribe_header, team_id, priority, target_daily, min_daily, allocation_mode, preferred_sender_ids, started_by_agent, allocation, links, steps, stats, created_at, updated_at]
+      required: [id, name, status, pool_id, timezone, send_days, send_start, send_end, daily_new_limit, daily_send_limit, stop_on_reply, track_clicks, unsubscribe_header, team_id, priority, target_daily, min_daily, allocation_mode, preferred_sender_ids, started_by_agent, allocation, links, steps, stats, created_at, updated_at]
       properties:
         id: { type: string, format: uuid }
         name: { type: string }
         status: { type: string, enum: [draft, active, paused, archived] }
-        project_id: { type: [string, "null"], format: uuid }
+        project_id: { type: [string, "null"], format: uuid, deprecated: true }
         brand_id: { type: [string, "null"], format: uuid, description: "The brand that owns it, or null when shared by every brand. In a project it is the project's brand." }
         pool_id: { type: [string, "null"], format: uuid }
         timezone: { type: string }
@@ -35526,6 +35530,7 @@ components:
         send_start: { type: string }
         send_end: { type: string }
         daily_new_limit: { type: [integer, "null"] }
+        daily_send_limit: { type: [integer, "null"], description: "Most emails sent in 24 hours, every step counted. Null is no cap." }
         stop_on_reply: { type: boolean }
         track_clicks: { type: boolean }
         unsubscribe_header: { type: boolean }
@@ -35596,7 +35601,7 @@ components:
         status: { $ref: "#/components/schemas/EnrollmentStatus" }
         status_reason:
           type: [string, "null"]
-          description: "Why it is waiting or ended, e.g. outside_sending_window, mailbox_daily_limit, domain_paused, domain_daily_limit, server_paused, server_daily_limit, sequence_daily_new_limit, no_mailbox_allocated, sender_mailbox_gone (its mailbox was removed; resolve with orphaned-follow-ups), token_daily_budget, project_paused, project_daily_limit, missing_variable: first_name, suppressed_email:bounced."
+          description: "Why it is waiting or ended, e.g. outside_sending_window, mailbox_daily_limit, domain_paused, domain_daily_limit, server_paused, server_daily_limit, sequence_daily_new_limit, sequence_daily_send_limit, no_mailbox_allocated, sender_mailbox_gone (its mailbox was removed; resolve with orphaned-follow-ups), token_daily_budget, project_paused, project_daily_limit, missing_variable: first_name, suppressed_email:bounced."
         next_step: { type: integer }
         next_send_at: { type: [string, "null"], format: date-time }
         mailbox_email: { type: [string, "null"], description: The mailbox this lead's thread is sent from. }

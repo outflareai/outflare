@@ -70,7 +70,6 @@ export const tabNames: Record<Tab, string> = {
   missions: "Missions",
   playbooks: "Playbooks",
   outcomes: "Outcomes",
-  projects: "Projects",
   sequences: "Sequences",
   people: "People",
   leads: "Leads",
@@ -122,7 +121,6 @@ export const tabBlurbs: Record<Tab, string> = {
   inbox: "Replies from every mailbox in one place, with the ones that need an answer first.",
   playbooks: "Ready-made recipes for growth, from welcoming new sign-ups to getting named in AI answers. Copy the prompt or start one as a mission.",
   missions: "Goals your agents work toward, such as 10 meetings by a date. Approve the plan, see every call, stop it any time.",
-  projects: "The brief for each motion: offer, ideal customer, tone and budget. People and agents work from it.",
   sequences: "The emails and follow-ups each lead gets, the schedule they send on, and who is in them.",
   people: "Every person and company Outflare knows: their fields, timeline, consent and duplicates.",
   leads: "Everyone you can contact, where they came from, and what has been sent to them.",
@@ -174,7 +172,7 @@ export const tabBlurbs: Record<Tab, string> = {
   knowledge: "Articles and quick answers your team writes once: products, prices, policies and stock answers. Your team and every AI in Outflare answer from them.",
   company: "What Outflare knows about your company, so people and agents never have to repeat it.",
   brands: "The businesses you market from this workspace, each with its own website, context, links and mailboxes.",
-  "ideal-customers": "Who you sell to, described once for projects, lead lists and the lead finder.",
+  "ideal-customers": "Who you sell to, described once for lead lists and the lead finder.",
   workspace: "The workspace's name and its address in the app.",
   members: "Who is in this workspace, and what each person can do.",
   alerts: "What needs someone now, such as hot replies and hot website visitors, and who hears about it by email.",
@@ -199,7 +197,6 @@ export const tabDocs: Partial<Record<Tab, string>> = {
   inbox: "/docs/guides/inbox/",
   missions: "/docs/agents/missions/",
   playbooks: "/playbooks/",
-  projects: "/docs/guides/projects/",
   sequences: "/docs/guides/sequences/",
   people: "/docs/guides/customer-records/",
   leads: "/docs/guides/import-leads/",
@@ -257,7 +254,7 @@ export const tabDocs: Partial<Record<Tab, string>> = {
 };
 
 // "g" then this key opens the page.
-export const shortcuts: Partial<Record<Tab, string>> = { overview: "o", tools: "t", reports: "r", analytics: "w", inbox: "i", missions: "a", outcomes: "c", projects: "p", sequences: "s", people: "h", leads: "l", suppression: "x", mailboxes: "m", domains: "d", infrastructure: "f", warmup: "u", seo: "e", fixes: "k", connectors: "n" };
+export const shortcuts: Partial<Record<Tab, string>> = { overview: "o", tools: "t", reports: "r", analytics: "w", inbox: "i", missions: "a", outcomes: "c", sequences: "s", people: "h", leads: "l", suppression: "x", mailboxes: "m", domains: "d", infrastructure: "f", warmup: "u", seo: "e", fixes: "k", connectors: "n" };
 
 export type NavGroup = { label?: string; tabs: Tab[] };
 
@@ -266,7 +263,7 @@ export type NavGroup = { label?: string; tabs: Tab[] };
 // tool joins its module; a new module is one more entry here, in this
 // order: CRM, Visitors, Outreach, Deliverability, Lifecycle, SEO, Social, Reviews, Paid ads,
 // Partners, Analytics, Playbooks. A module with no pages yet is left out.
-export const everyday: Tab[] = ["overview", "inbox", "missions", "projects"];
+export const everyday: Tab[] = ["overview", "inbox", "missions"];
 
 export type Module = { id: string; label: string; icon: IconName; tabs: Tab[] };
 export const modules: Module[] = [
@@ -294,7 +291,7 @@ const allModules = modules;
 
 // Pages that work for someone kept to some brands. The others need every
 // brand (the API answers 403), so they are hidden from them.
-const brandTabs: readonly Tab[] = ["overview", "seo-overview", "audits", "fixes", "experiments", "keywords", "ai-visibility", "backlinks", "competitors", "link-building", "news", "reddit", "social", "reviews", "ads", "visitors", "tracking", "flags", "ab-tests", "inbox", "projects", "sequences", "people", "leads", "lists", "rules", "lead-finder", "suppression", "mailboxes", "domains", "knowledge", "company", "brands", "setup", "ideal-customers", "members", "account", "instance"];
+const brandTabs: readonly Tab[] = ["overview", "seo-overview", "audits", "fixes", "experiments", "keywords", "ai-visibility", "backlinks", "competitors", "link-building", "news", "reddit", "social", "reviews", "ads", "visitors", "tracking", "flags", "ab-tests", "inbox", "sequences", "people", "leads", "lists", "rules", "lead-finder", "suppression", "mailboxes", "domains", "knowledge", "company", "brands", "setup", "ideal-customers", "members", "account", "instance"];
 export const canOpen = (ws: Workspace | undefined, t: Tab) => !ws?.brand_ids?.length || brandTabs.includes(t);
 
 // The sidebar keeps two things. Pins are kept in this browser for the
@@ -949,10 +946,6 @@ function callFor(tab: Tab, ws: string, item?: string): Call {
         : { title: "Missions", path: "/v1/workspaces/{ws}/missions", params: base, mcp: "list_missions", ask: "Start a mission to book 10 meetings with fintech CFOs in Australia by 30 November.", scope: "missions.read" };
     case "outcomes":
       return { title: "Cost per meeting", path: "/v1/workspaces/{ws}/outcomes/report", params: base, query: { group_by: "sequence" }, mcp: "get_outcomes_report", ask: "Which sequences have the lowest cost per meeting this month?", scope: "outcomes.read" };
-    case "projects":
-      return item
-        ? { title: "A project's brief", path: "/v1/workspaces/{ws}/projects/{id}/brief", params: { ...base, id: item }, mcp: "get_project_brief", ask: "Read this project's brief and draft a first email for it.", scope: "projects.read" }
-        : { title: "All projects", path: "/v1/workspaces/{ws}/projects", params: base, mcp: "list_projects", ask: "Which projects are sending, and which briefs are incomplete?", scope: "projects.read" };
     case "sequences":
       return item
         ? { title: "One sequence", path: "/v1/workspaces/{ws}/sequences/{id}", params: { ...base, id: item }, mcp: "get_sequence", ask: "How is this sequence performing by step?", scope: "sequences.read" }
@@ -984,7 +977,7 @@ function callFor(tab: Tab, ws: string, item?: string): Call {
     case "infrastructure":
       return item && item !== "new"
         ? { title: "One plan", path: "/v1/workspaces/{ws}/infra-plans/{id}", params: { ...base, id: item }, mcp: "get_infra_plan", ask: "What is left to do on this plan, and when will it be ready?", scope: "infrastructure.read" }
-        : { title: "Infrastructure", path: "/v1/workspaces/{ws}/infrastructure", params: base, mcp: "get_infrastructure", ask: "Plan 10 domains and 30 mailboxes for this project, ready by the 14th.", scope: "infrastructure.read" };
+        : { title: "Infrastructure", path: "/v1/workspaces/{ws}/infrastructure", params: base, mcp: "get_infrastructure", ask: "Plan 10 domains and 30 mailboxes for this brand, ready by the 14th.", scope: "infrastructure.read" };
     case "allocation":
       return { title: "Allocation needing a person", path: "/v1/workspaces/{ws}/allocation/attention", params: base, mcp: "get_allocation_attention", ask: "Which sequences are short of mailboxes, and why?", scope: "sequences.read" };
     case "senders":
@@ -1026,7 +1019,7 @@ function callFor(tab: Tab, ws: string, item?: string): Call {
         ? { title: "A brand's context", path: "/v1/workspaces/{ws}/brands/{brand}/context", params: { ...base, brand: item }, mcp: "get_brand_context", ask: "Read this brand's website and fill in what it is, who it's for and how it sounds.", scope: "workspace.read" }
         : { title: "Brands", path: "/v1/workspaces/{ws}/brands", params: base, mcp: "list_brands", ask: "Which brands do we market, and what belongs to each?", scope: "workspace.read" };
     case "ideal-customers":
-      return { title: "Ideal customer profiles", path: "/v1/workspaces/{ws}/ideal-customer-profiles", params: base, mcp: "list_ideal_customer_profiles", ask: "Write an ideal customer profile from our best customers and link it to the AU project.", scope: "projects.read" };
+      return { title: "Ideal customer profiles", path: "/v1/workspaces/{ws}/ideal-customer-profiles", params: base, mcp: "list_ideal_customer_profiles", ask: "Write an ideal customer profile from our best customers and use it for the AU lead list.", scope: "projects.read" };
     case "workspace":
       return { title: "The workspace", path: "/v1/workspaces/{ws}", params: base, scope: "workspace.read" };
     case "members":

@@ -35,7 +35,7 @@ export const tryAsking = [
   "What does Outflare know about my company, and what's blocking my outreach?",
   "Which replies need an answer today? Draft answers for the interested ones.",
   "Import the leads in this file, check them against my suppression list and show me what's left.",
-  "Write a three-step sequence for my main project and preview it for a real lead.",
+  "Write a three-step sequence for my main brand and preview it for a real lead.",
 ];
 
 function Steps({ children }: { children: ReactNode[] }) {

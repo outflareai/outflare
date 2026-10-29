@@ -175,13 +175,14 @@ const sends = { readOnlyHint: false, destructiveHint: false, openWorldHint: true
 
 const settings = {
   name: z.string().max(200).optional(),
-  project_id: id.nullable().optional().describe("The project this sequence belongs to; read its brief first. Only the project's mailboxes and shared ones send for it. A project token's sequences always go to its project."),
+  project_id: id.nullable().optional().describe("Deprecated: projects are being removed; leave it out. A project token's sequences always go to its project."),
   pool_id: id.nullable().optional().describe("Restrict mailbox allocation to this pool. Null allows any mailbox."),
   timezone: z.string().optional().describe("IANA time zone for the sending window, e.g. Australia/Sydney."),
   send_days: z.array(z.number().int().min(1).max(7)).optional().describe("ISO weekdays, 1 (Monday) to 7 (Sunday)."),
   send_start: z.string().optional().describe('Start of the sending window, e.g. "09:00".'),
   send_end: z.string().optional().describe('End of the sending window, e.g. "17:00".'),
   daily_new_limit: z.number().int().min(1).nullable().optional().describe("Most leads started per day. Null is no cap."),
+  daily_send_limit: z.number().int().min(1).max(1000000).nullable().optional().describe("Most emails sent in 24 hours, every step counted, on top of mailbox and domain limits. Null is no cap."),
   stop_on_reply: z.boolean().optional(),
   track_clicks: z.boolean().optional().describe("Rewrite links so clicks are counted. Off by default; rewritten links can hurt deliverability, so pair it with a verified tracking domain."),
   unsubscribe_header: z.boolean().optional().describe("Add List-Unsubscribe and one-click headers. On by default; Gmail and Yahoo expect them from bulk senders."),
@@ -5581,7 +5582,8 @@ export function createServer({ client: gtm, workspace, readOnly = false, mission
   const listSettings = {
     name: z.string().min(1).max(100).optional(),
     description: z.string().max(2000).optional(),
-    project_id: id.nullable().optional().describe("The project the list belongs to. Its ICP is used for scoring. A project token's lists always go to its project."),
+    project_id: id.nullable().optional().describe("Deprecated: projects are being removed; leave it out. A project token's lists always go to its project."),
+    profile_id: id.nullable().optional().describe("The ideal customer profile leads are scored against (see list_ideal_customer_profiles). Null scores against the search alone."),
     search_integration_id: id.nullable().optional().describe("The connected data provider that searches (see list_data_providers). Null makes a manual list."),
     filters: peopleFilter.optional().describe("The search. Fields are ANDed; values within a field are ORed. Replaces the whole filter."),
     enrich_integration_ids: z.array(id).max(10).optional().describe("Providers that find missing emails, tried in order until one finds it. Empty uses the search provider if it can."),
@@ -5601,7 +5603,7 @@ export function createServer({ client: gtm, workspace, readOnly = false, mission
       title: "Preview a people search",
       description:
         "Runs one page (10 people) of a search at a data provider and saves nothing, to check filters before building a list. Returns a run; poll get_list_run for the sample and total matches. Reveals no emails.",
-      inputSchema: { search_integration_id: id, filters: peopleFilter, project_id: id.nullable().optional() },
+      inputSchema: { search_integration_id: id, filters: peopleFilter, profile_id: id.nullable().optional().describe("Score the sample against this ideal customer profile.") },
       annotations: { ...write, openWorldHint: true },
     },
     (body) => call(() => gtm.POST("/v1/workspaces/{ws}/lead-lists/preview", { params: { path }, body })),

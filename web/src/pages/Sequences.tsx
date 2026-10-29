@@ -243,7 +243,7 @@ function SaveBar({ dirty, onSave, msg, label = "Save" }: { dirty: boolean; onSav
 
 function Settings({ ws, seq, canManage, onChange, markDirty, go }: { ws: string; seq: Sequence; canManage: boolean; onChange: () => void; markDirty: (p: string, d: boolean) => void; go: (t: Tab) => void }) {
   const initial = {
-    name: seq.name, pool_id: seq.pool_id, timezone: seq.timezone, send_days: seq.send_days, send_start: seq.send_start, send_end: seq.send_end, daily_new_limit: seq.daily_new_limit, stop_on_reply: seq.stop_on_reply,
+    name: seq.name, pool_id: seq.pool_id, timezone: seq.timezone, send_days: seq.send_days, send_start: seq.send_start, send_end: seq.send_end, daily_new_limit: seq.daily_new_limit, daily_send_limit: seq.daily_send_limit, stop_on_reply: seq.stop_on_reply,
     team_id: seq.team_id, priority: seq.priority, target_daily: seq.target_daily, min_daily: seq.min_daily, allocation_mode: seq.allocation_mode, preferred_sender_ids: seq.preferred_sender_ids,
     track_clicks: seq.track_clicks, unsubscribe_header: seq.unsubscribe_header,
   };
@@ -327,6 +327,11 @@ function Settings({ ws, seq, canManage, onChange, markDirty, go }: { ws: string;
               <input type="number" min={1} className={`${field} w-full`} placeholder={s.daily_new_limit ? `${(s.daily_new_limit * Math.max(1, seq.steps.length)).toLocaleString()} (from new leads × steps)` : "Not set"} value={s.target_daily ?? ""} onChange={(e) => setS({ ...s, target_daily: e.target.value ? Number(e.target.value) : null })} />
               <span className="mt-1 block text-xs text-muted-foreground">{linked ? "Emails a day the campaign sends, follow-ups included. Nothing is allocated until you set it." : "Emails a day, follow-ups included, to allocate mailboxes for."}</span>
             </label>
+            {!linked && <label className="block">
+              <span className="mb-1 block font-medium">Daily send limit</span>
+              <input type="number" min={1} max={1000000} className={`${field} w-full`} placeholder="No limit" value={s.daily_send_limit ?? ""} onChange={(e) => setS({ ...s, daily_send_limit: e.target.value ? Number(e.target.value) : null })} />
+              <span className="mt-1 block text-xs text-muted-foreground">Most emails in 24 hours, follow-ups included. Sending waits once it is reached, on top of mailbox and domain limits.</span>
+            </label>}
           </div>
           <details className="rounded-lg border" open={!!(s.team_id || s.priority !== "normal" || s.min_daily || s.allocation_mode || s.pool_id || s.preferred_sender_ids.length)}>
             <summary className="cursor-pointer px-3 py-2 font-medium">Mailbox allocation <span className="font-normal text-muted-foreground">· team, priority, preferred senders</span></summary>
@@ -602,6 +607,7 @@ const reasonText: Record<string, string> = {
   mailbox_daily_limit: "waiting: mailboxes hit their daily limit",
   mailbox_min_gap: "waiting: spacing out sends",
   sequence_daily_new_limit: "waiting: new-leads-per-day limit reached",
+  sequence_daily_send_limit: "waiting: daily send limit reached",
   no_mailbox_allocated: "waiting: no mailbox allocated to this sequence",
   sender_mailbox_gone: "waiting: its mailbox was removed, decide under Allocation",
   token_daily_budget: "waiting: the agent's daily send budget is used up",

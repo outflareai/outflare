@@ -40,7 +40,6 @@ import { Overview } from "./pages/Overview";
 import { GetStarted } from "./pages/GetStarted";
 import { Domains } from "./pages/Domains";
 import { Outcomes } from "./pages/Outcomes";
-import { Projects } from "./pages/Projects";
 import { Allocation } from "./pages/Allocation";
 import { Senders } from "./pages/Senders";
 import { Servers } from "./pages/Servers";
@@ -562,7 +561,6 @@ function Shell({ me, onSignOut, onReload }: { me: Me; onSignOut: () => void; onR
         {ready && ws && tab === "playbooks" && <Playbooks key={ws.id} ws={ws.id} canManage={writer} go={setTab} />}
         {ready && ws && tab === "missions" && <Missions key={ws.id} ws={ws.id} canManage={writer} open={item} setOpen={setItem} />}
         {ready && ws && tab === "outcomes" && <Outcomes key={ws.id} ws={ws.id} canManage={writer} go={setTab} />}
-        {ready && ws && tab === "projects" && <Projects key={ws.id} ws={ws.id} canManage={writer} isAdmin={isAdmin} open={item} setOpen={setItem} go={setTab} />}
         {ready && ws && tab === "sequences" && <Sequences key={ws.id} ws={ws.id} canManage={writer} open={item} setOpen={setItem} go={setTab} />}
         {ready && ws && tab === "infrastructure" && <Infrastructure key={ws.id} ws={ws.id} canManage={writer} canApprove={isAdmin} open={item ?? ""} onOpen={(it) => setItem(it || undefined)} go={setTab} />}
         {ready && ws && tab === "mailboxes" && <Mailboxes key={ws.id} ws={ws.id} canManage={writer} openOAuth={!!outcome.ws} go={setTab} />}

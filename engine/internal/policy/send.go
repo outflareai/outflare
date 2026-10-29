@@ -88,6 +88,7 @@ const (
 	DailyLimit      = "mailbox_daily_limit"
 	MailboxGap      = "mailbox_min_gap"
 	NewLeadLimit    = "sequence_daily_new_limit"
+	SequenceLimit   = "sequence_daily_send_limit"
 	DomainPaused    = "domain_paused"
 	DomainLimit     = "domain_daily_limit"
 	ServerPaused    = "server_paused"

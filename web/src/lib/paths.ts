@@ -9,7 +9,7 @@
 // Older links still open: /w/{workspace id}/{tab} is rewritten to the slug,
 // and /{workspace}/{tab}?brand=repocket to /{workspace}/repocket/{tab}.
 
-export const appTabs = ["overview", "get-started", "setup", "ai", "ai-usage", "tools", "reports", "channels", "analytics", "tracking", "flags", "ab-tests", "links", "seo", "seo-overview", "audits", "fixes", "experiments", "keywords", "ai-visibility", "backlinks", "competitors", "reddit", "social", "reviews", "ads", "partners", "visitors", "inbox", "missions", "playbooks", "outcomes", "projects", "sequences", "link-building", "news", "infrastructure", "mailboxes", "domains", "warmup", "servers", "allocation", "lifecycle", "emails", "broadcasts", "journeys", "rules", "templates", "topics", "providers", "people", "leads", "lists", "lead-finder", "email-finder", "suppression", "knowledge", "company", "brands", "ideal-customers", "workspace", "members", "alerts", "digests", "senders", "connectors", "webhooks", "tokens", "logs", "audit", "instance", "account"] as const;
+export const appTabs = ["overview", "get-started", "setup", "ai", "ai-usage", "tools", "reports", "channels", "analytics", "tracking", "flags", "ab-tests", "links", "seo", "seo-overview", "audits", "fixes", "experiments", "keywords", "ai-visibility", "backlinks", "competitors", "reddit", "social", "reviews", "ads", "partners", "visitors", "inbox", "missions", "playbooks", "outcomes", "sequences", "link-building", "news", "infrastructure", "mailboxes", "domains", "warmup", "servers", "allocation", "lifecycle", "emails", "broadcasts", "journeys", "rules", "templates", "topics", "providers", "people", "leads", "lists", "lead-finder", "email-finder", "suppression", "knowledge", "company", "brands", "ideal-customers", "workspace", "members", "alerts", "digests", "senders", "connectors", "webhooks", "tokens", "logs", "audit", "instance", "account"] as const;
 export type Tab = (typeof appTabs)[number];
 
 export const isTab = (t?: string): t is Tab => !!t && (appTabs as readonly string[]).includes(t);
@@ -81,8 +81,8 @@ export function anonymousPath(path: string): string {
 // (/acme/sequences/q3-founders) rather than its ID. A connection's slug is
 // its connector (/acme/connectors/posthog, then posthog-2). GET
 // .../links/{kind}/{ref} turns either into the other; old ID links still open.
-export type ItemKind = "sequence" | "project" | "list" | "mission" | "server" | "plan" | "connection" | "token" | "webhook";
-export const itemKinds: Partial<Record<Tab, ItemKind>> = { sequences: "sequence", projects: "project", lists: "list", missions: "mission", servers: "server", infrastructure: "plan", connectors: "connection", tokens: "token", webhooks: "webhook" };
+export type ItemKind = "sequence" | "list" | "mission" | "server" | "plan" | "connection" | "token" | "webhook";
+export const itemKinds: Partial<Record<Tab, ItemKind>> = { sequences: "sequence", lists: "list", missions: "mission", servers: "server", infrastructure: "plan", connectors: "connection", tokens: "token", webhooks: "webhook" };
 
 // Tabs whose item part can also name something that is not an item, so a
 // slug that finds nothing goes to the page as it is: /acme/connectors/posthog

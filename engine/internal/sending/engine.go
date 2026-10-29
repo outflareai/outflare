@@ -182,6 +182,7 @@ type enrollment struct {
 	SendDays                            []int16
 	SendStart, SendEnd                  pgtype.Time
 	DailyNewLimit                       *int
+	DailySendLimit                      *int
 	// The actor that created the sequence, and its daily send budget when
 	// that actor is an API token with one.
 	CreatedBy   *string
@@ -239,7 +240,7 @@ func (e *Engine) prepare(ctx context.Context, tx pgx.Tx, enrollmentID string, sk
 	err := tx.QueryRow(ctx, `
 		SELECT en.id, en.workspace_id, en.sequence_id, en.lead_id, en.mailbox_id, en.status, en.next_step,
 		       en.thread_subject, en.last_message_id, en.references_ids, en.handoff,
-		       s.status, s.timezone, s.send_days, s.send_start, s.send_end, s.daily_new_limit,
+		       s.status, s.timezone, s.send_days, s.send_start, s.send_end, s.daily_new_limit, s.daily_send_limit,
 		       s.created_by, t.daily_send_budget, s.project_id, p.status, p.daily_send_limit, s.mission_id,
 		       s.brand_id::text, w.cross_brand_days
 		FROM enrollments en JOIN sequences s ON s.id = en.sequence_id JOIN workspaces w ON w.id = en.workspace_id
@@ -248,7 +249,7 @@ func (e *Engine) prepare(ctx context.Context, tx pgx.Tx, enrollmentID string, sk
 		WHERE en.id = $1 FOR UPDATE OF en`, enrollmentID,
 	).Scan(&en.ID, &en.WorkspaceID, &en.SequenceID, &en.LeadID, &en.MailboxID, &en.Status, &en.NextStep,
 		&en.ThreadSubject, &en.LastMessageID, &en.References, &en.Handoff,
-		&en.SeqStatus, &en.Timezone, &en.SendDays, &en.SendStart, &en.SendEnd, &en.DailyNewLimit,
+		&en.SeqStatus, &en.Timezone, &en.SendDays, &en.SendStart, &en.SendEnd, &en.DailyNewLimit, &en.DailySendLimit,
 		&en.CreatedBy, &en.TokenBudget, &en.ProjectID, &en.ProjectStatus, &en.ProjectLimit, &en.MissionID,
 		&en.BrandID, &en.CrossBrandDays)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -392,6 +393,24 @@ func (e *Engine) prepare(ctx context.Context, tx pgx.Tx, enrollmentID string, sk
 		}
 		if started >= *en.DailyNewLimit {
 			return defer_(win.Next(dayStart.AddDate(0, 0, 1)).Add(policy.Jitter(time.Hour)), policy.NewLeadLimit)
+		}
+	}
+
+	// 3a. Sequence budget: every step of the sequence together sends at
+	// most its daily send limit.
+	if en.DailySendLimit != nil {
+		// Serialise sends of one sequence so two jobs cannot both see room.
+		if _, err := tx.Exec(ctx, `SELECT 1 FROM sequences WHERE id = $1 FOR NO KEY UPDATE`, en.SequenceID); err != nil {
+			return nil, en, err
+		}
+		var sent int
+		if err := tx.QueryRow(ctx, `
+			SELECT count(*) FROM messages WHERE sequence_id = $1 AND status IN ('sending', 'sent', 'unknown')
+			AND created_at > $2::timestamptz - interval '24 hours'`, en.SequenceID, now).Scan(&sent); err != nil {
+			return nil, en, err
+		}
+		if sent >= *en.DailySendLimit {
+			return defer_(now.Add(time.Hour), policy.SequenceLimit)
 		}
 	}
 

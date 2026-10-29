@@ -30526,9 +30526,15 @@ export interface components {
             description?: string;
             /**
              * Format: uuid
-             * @description Null shares the list with the whole workspace.
+             * @deprecated
+             * @description Projects are being removed; leave it out. Null shares the list with the whole workspace.
              */
             project_id?: string | null;
+            /**
+             * Format: uuid
+             * @description The ideal customer profile people are scored against, under the list's own filters. Null scores against the filters alone.
+             */
+            profile_id?: string | null;
             /**
              * Format: uuid
              * @description The connected provider that searches. Null makes a manual list.
@@ -30660,13 +30666,21 @@ export interface components {
             id: string;
             name: string;
             description: string;
-            /** Format: uuid */
+            /**
+             * Format: uuid
+             * @deprecated
+             */
             project_id: string | null;
             /**
              * Format: uuid
              * @description The brand that owns it, or null when shared by every brand. In a project it is the project's brand.
              */
             brand_id: string | null;
+            /**
+             * Format: uuid
+             * @description The ideal customer profile people are scored against, or null.
+             */
+            profile_id: string | null;
             /** @enum {string} */
             kind: "manual" | "search";
             leads: number;
@@ -33138,7 +33152,8 @@ export interface components {
             name?: string;
             /**
              * Format: uuid
-             * @description The project the sequence belongs to. Only that project's mailboxes and shared ones send for it. Null: shared.
+             * @deprecated
+             * @description Projects are being removed; leave it out. The project the sequence belongs to. Null: shared.
              */
             project_id?: string | null;
             /**
@@ -33159,6 +33174,8 @@ export interface components {
             send_end?: string;
             /** @description Most leads started per day. Null is no cap. */
             daily_new_limit?: number | null;
+            /** @description Most emails sent in 24 hours, every step counted, on top of mailbox and domain limits. Null is no cap. */
+            daily_send_limit?: number | null;
             stop_on_reply?: boolean;
             /** @description Rewrite links so clicks are counted. Off by default: rewritten links can hurt deliverability, so use it with a verified tracking domain. */
             track_clicks?: boolean;
@@ -33207,7 +33224,10 @@ export interface components {
             name: string;
             /** @enum {string} */
             status: "draft" | "active" | "paused" | "archived";
-            /** Format: uuid */
+            /**
+             * Format: uuid
+             * @deprecated
+             */
             project_id?: string | null;
             /**
              * Format: uuid
@@ -33221,6 +33241,8 @@ export interface components {
             send_start: string;
             send_end: string;
             daily_new_limit: number | null;
+            /** @description Most emails sent in 24 hours, every step counted. Null is no cap. */
+            daily_send_limit: number | null;
             stop_on_reply: boolean;
             track_clicks: boolean;
             unsubscribe_header: boolean;
@@ -33312,7 +33334,7 @@ export interface components {
             name: string;
             company: string;
             status: components["schemas"]["EnrollmentStatus"];
-            /** @description Why it is waiting or ended, e.g. outside_sending_window, mailbox_daily_limit, domain_paused, domain_daily_limit, server_paused, server_daily_limit, sequence_daily_new_limit, no_mailbox_allocated, sender_mailbox_gone (its mailbox was removed; resolve with orphaned-follow-ups), token_daily_budget, project_paused, project_daily_limit, missing_variable: first_name, suppressed_email:bounced. */
+            /** @description Why it is waiting or ended, e.g. outside_sending_window, mailbox_daily_limit, domain_paused, domain_daily_limit, server_paused, server_daily_limit, sequence_daily_new_limit, sequence_daily_send_limit, no_mailbox_allocated, sender_mailbox_gone (its mailbox was removed; resolve with orphaned-follow-ups), token_daily_budget, project_paused, project_daily_limit, missing_variable: first_name, suppressed_email:bounced. */
             status_reason: string | null;
             next_step: number;
             /** Format: date-time */
@@ -38677,9 +38699,15 @@ export interface operations {
                     filters: components["schemas"]["PeopleFilter"];
                     /**
                      * Format: uuid
-                     * @description Score the sample against this project's ICP.
+                     * @deprecated
+                     * @description Projects are being removed; use profile_id.
                      */
                     project_id?: string | null;
+                    /**
+                     * Format: uuid
+                     * @description Score the sample against this ideal customer profile.
+                     */
+                    profile_id?: string | null;
                 };
             };
         };

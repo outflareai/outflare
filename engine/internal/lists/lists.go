@@ -90,7 +90,7 @@ type Params struct {
 	SearchIntegrationID string         `json:"search_integration_id,omitempty"`
 	Filters             c.PeopleFilter `json:"filters"`
 	// Profile the run scores people against: the list's filters on top of
-	// its project's ICP.
+	// its ideal customer profile.
 	ICP                  c.PeopleFilter `json:"icp"`
 	EnrichIntegrationIDs []string       `json:"enrich_integration_ids"`
 	MaxLeads             int            `json:"max_leads"`
@@ -213,8 +213,8 @@ func CleanFilter(f c.PeopleFilter) (c.PeopleFilter, error) {
 	return f, nil
 }
 
-// MergeICP lays a list's filters over its project's ICP: a dimension the
-// list sets replaces the project's.
+// MergeICP lays a list's filters over its ideal customer profile: a
+// dimension the list sets replaces the profile's.
 func MergeICP(project, list c.PeopleFilter) c.PeopleFilter {
 	out := project
 	pick := func(dst *[]string, v []string) {
@@ -250,17 +250,18 @@ func parseRange(r string) (lo, hi int, ok bool) {
 }
 
 // ParamsForList builds a run's params from the list's settings and its
-// project's ICP.
+// ideal customer profile (its project's ICP when it has none).
 func ParamsForList(ctx context.Context, q c.Querier, ws, listID string) (Params, *string, error) {
 	var p Params
 	var projectID, search *string
 	var filters, icp []byte
 	var cap *float64
 	err := q.QueryRow(ctx, `
-		SELECT l.project_id, l.search_integration_id, l.filters, COALESCE(pr.icp, '{}'),
+		SELECT l.project_id, l.search_integration_id, l.filters, COALESCE(icp.filters, pr.icp, '{}'),
 		       l.enrich_integration_ids::text[], l.max_leads, l.credit_cap::float8, l.verify, l.verified_emails_only,
 		       l.skip_contacted_days, l.skip_in_sequences, l.min_score
 		FROM lead_lists l LEFT JOIN projects pr ON pr.id = l.project_id
+		LEFT JOIN ideal_customer_profiles icp ON icp.id = l.profile_id AND icp.workspace_id = l.workspace_id
 		WHERE l.workspace_id = $1 AND l.id = $2`, ws, listID).
 		Scan(&projectID, &search, &filters, &icp, &p.EnrichIntegrationIDs, &p.MaxLeads, &cap, &p.Verify,
 			&p.VerifiedEmailsOnly, &p.SkipContactedDays, &p.SkipInSequences, &p.MinScore)

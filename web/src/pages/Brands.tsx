@@ -80,7 +80,7 @@ export function Brands({ ws, canManage, canEdit, open, setOpen, go }: { ws: stri
     <div className="max-w-4xl space-y-6">
       <PageHeader
         title="Brands"
-        description="The businesses you market from this workspace, each with its own website. Connectors, people and leads are shared by every brand, so nothing needs reconnecting; each brand keeps its own context, projects and sending."
+        description="The businesses you market from this workspace, each with its own website. Connectors, people and leads are shared by every brand, so nothing needs reconnecting; each brand keeps its own context, sequences and sending."
         action={canManage && <Button onClick={() => setAdding(true)}>Add a brand</Button>}
       />
       {active.length === 0 ? (
@@ -156,7 +156,7 @@ function BrandCard({ brand: b, onOpen }: { brand: Brand; onOpen: () => void }) {
         )}
         {b.links.length > 0 && <span className="truncate text-xs text-muted-foreground">Also on {b.links.map(linkName).join(", ")}</span>}
         <span className="text-xs text-muted-foreground">
-          {[plural(c.projects, "project"), plural(c.domains, "domain"), plural(c.mailboxes, "mailbox", "mailboxes"), `${c.active_sequences} sending`].join(" · ")}
+          {[plural(c.domains, "domain"), plural(c.mailboxes, "mailbox", "mailboxes"), `${c.active_sequences} sending`].join(" · ")}
         </span>
       </button>
     </li>
@@ -178,7 +178,7 @@ function BrandTable({ brands, onOpen }: { brands: Brand[]; onOpen: (b: Brand) =>
             <span className="font-medium">{b.name}</span>
             <span className="truncate font-mono text-xs text-muted-foreground">{b.website}</span>
           </div>
-          <div className="text-xs text-muted-foreground">{plural(b.counts.projects, "project")} · {b.counts.active_sequences} sending</div>
+          <div className="text-xs text-muted-foreground">{plural(b.counts.domains, "domain")} · {b.counts.active_sequences} sending</div>
         </div>
       )}
       columns={[
@@ -192,7 +192,6 @@ function BrandTable({ brands, onOpen }: { brands: Brand[]; onOpen: (b: Brand) =>
           cell: ({ row: { original: b } }) => <span className="text-[13px]">{b.platforms.map((p) => platformNames[p]).join(", ") || "–"}</span>,
         },
         { id: "links", header: "Links", accessorFn: (b) => b.links.length, meta: { mono: true }, cell: ({ row: { original: b } }) => <span title={b.links.map(linkName).join(", ")}>{b.links.length}</span> },
-        num("Projects", (b) => b.counts.projects),
         num("Domains", (b) => b.counts.domains),
         num("Mailboxes", (b) => b.counts.mailboxes),
         num("Sending", (b) => b.counts.active_sequences),
@@ -429,8 +428,9 @@ function BrandContextCard({ ws, brand: b, canEdit }: { ws: string; brand: Brand;
   );
 }
 
-// Members moves projects and sending domains in and out of the brand. A
-// project brings everything in it; a domain brings its mailboxes.
+// Members moves sending domains in and out of the brand; a domain brings its
+// mailboxes. Until projects are removed, a project still moves everything
+// in it, so the ones left are listed too.
 function Members({ ws, brand: b, canEdit, onChanged }: { ws: string; brand: Brand; canEdit: boolean; onChanged: () => void }) {
   const { byId } = useBrand(ws);
   const [projects, setProjects] = useState<Project[] | null>(null);
@@ -452,7 +452,7 @@ function Members({ ws, brand: b, canEdit, onChanged }: { ws: string; brand: Bran
     const { data, error } = await api.POST(call, { params: { path: { ws, brand: b.id } }, body });
     setBusy("");
     if (error || !data || !("moved" in data)) return toast(errorMessage(error), "error");
-    if (data.moved.in_project > 0) toast("That domain is in a project, so it follows the project's brand. Move the project instead.", "error");
+    if (data.moved.in_project > 0) toast("That domain is in a project, so it follows the project's brand. Move the project above instead.", "error");
     load();
     onChanged();
   }
@@ -478,19 +478,17 @@ function Members({ ws, brand: b, canEdit, onChanged }: { ws: string; brand: Bran
         <Loading />
       ) : (
         <div className="space-y-5">
-          <section>
-            <h3 className="mb-2 text-[13px] font-medium">Projects <span className="font-normal text-muted-foreground">(with their lists, sequences and domains)</span></h3>
-            {projects.length === 0 ? (
-              <p className="text-sm text-muted-foreground">No projects yet.</p>
-            ) : (
+          {projects.length > 0 && (
+            <section>
+              <h3 className="mb-2 text-[13px] font-medium">Projects <span className="font-normal text-muted-foreground">(being removed; each moves with its lists, sequences and domains)</span></h3>
               <ul className="divide-y divide-border rounded-lg border">
                 {projects.map((p) => {
                   const other = where(p.brand_id);
                   return row(`p:${p.id}`, p.name, other ? `In ${other}` : p.brand_id ? undefined : "Shared", p.brand_id === b.id, undefined, (on) => move(`p:${p.id}`, on, { project_ids: [p.id] }));
                 })}
               </ul>
-            )}
-          </section>
+            </section>
+          )}
           <section>
             <h3 className="mb-2 text-[13px] font-medium">Sending domains <span className="font-normal text-muted-foreground">(with their mailboxes)</span></h3>
             {domains.length === 0 ? (
