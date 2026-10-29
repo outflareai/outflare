@@ -3,7 +3,7 @@
 A conversion is whatever a workspace counts as one: a sign-up, a payment, a booked or held call, a qualified lead, an order. Outflare defines conversions once, on the customer events stream ([customers.md](customers.md#product-events)), and never per integration. A call is a conversion because a `call.completed` or `meeting.held` event says so, whichever tool sent it. Modules read the same definitions:
 
 - [Attribution](attribution.md) credits channels with them.
-- Each definition also carries every ad network's own name for the conversion, for sending it back ([paid media](paid-media.md#sending-conversions-back) still sends by its own conversion rules today).
+- Each definition also carries every ad network's own name for the conversion. A [send-back rule](paid-media.md#sending-conversions-back) that names the definition sends only the events that meet it, worth what it says, under that name.
 - Modules in the engine, such as partner programs, read them through `engine/internal/conversions`.
 
 Nothing here is particular to a kind of business. Presets are starting points a workspace copies and changes.

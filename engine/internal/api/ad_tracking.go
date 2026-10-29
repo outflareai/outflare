@@ -12,6 +12,7 @@ import (
 
 func (s *Server) routesAdTracking(mux *http.ServeMux) {
 	mux.HandleFunc("GET /v1/workspaces/{ws}/ads/tracking-templates", s.inWorkspace(auth.ScopeAnalyticsRead, s.listAdTrackingTemplates))
+	mux.HandleFunc("GET /v1/workspaces/{ws}/ads/tracking-health", s.inWorkspace(auth.ScopeAnalyticsRead, s.adTrackingHealth))
 }
 
 type adTrackingTemplateView struct {

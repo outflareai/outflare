@@ -31,6 +31,16 @@ type fakeTolt struct {
 	// unlisted partners are left out of /partners, as Tolt leaves out
 	// partners who haven't onboarded, but read at /partners/{id}.
 	unlisted map[string]map[string]any
+	// capAt stops a list walked by cursor after that many objects, saying
+	// there are no more, as a list with a hard cap would; asking after a
+	// plain object id goes on from there.
+	capAt int
+	// hidden adds to the active partners' total_count: partners the list
+	// never gives.
+	hidden int
+	// wholeTotal gives the whole partner list's total_count whatever the
+	// status asked.
+	wholeTotal bool
 }
 
 func (f *fakeTolt) set(path string, objs ...map[string]any) {
@@ -81,13 +91,31 @@ func (f *fakeTolt) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		objs = only
 	}
-	start := 0
-	if after := strings.TrimPrefix(r.URL.Query().Get("starting_after"), "cur_"); after != "" && !f.ignoreCursor {
+	// A cursor is cur_<last id>~<where its walk began>, so a capped walk
+	// stops capAt objects after it began.
+	start, origin := 0, 0
+	raw := r.URL.Query().Get("starting_after")
+	after, from, _ := strings.Cut(strings.TrimPrefix(raw, "cur_"), "~")
+	if after != "" && !f.ignoreCursor {
 		for i, o := range objs {
 			if o["id"] == after {
 				start = i + 1
 			}
 		}
+		origin, _ = strconv.Atoi(from)
+		if !strings.HasPrefix(raw, "cur_") {
+			origin = start
+		}
+	}
+	total := len(objs)
+	switch {
+	case r.URL.Path == "/partners" && f.wholeTotal:
+		total = len(f.data["/partners"]) + f.hidden
+	case r.URL.Path == "/partners" && r.URL.Query().Get("status") == "active":
+		total += f.hidden
+	}
+	if f.capAt > 0 {
+		objs = objs[:min(len(objs), origin+f.capAt)]
 	}
 	size := 2
 	if n, err := strconv.Atoi(r.URL.Query().Get("limit")); f.fullPages && err == nil {
@@ -96,7 +124,7 @@ func (f *fakeTolt) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	end := min(start+size, len(objs))
 	next := ""
 	if end < len(objs) && end > 0 {
-		next = "cur_" + objs[end-1]["id"].(string)
+		next = "cur_" + objs[end-1]["id"].(string) + "~" + strconv.Itoa(origin)
 	}
 	switch {
 	case f.html[r.URL.Path]:
@@ -106,7 +134,8 @@ func (f *fakeTolt) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		json.NewEncoder(w).Encode(map[string]any{"success": true, "total_count": len(objs), //nolint:errcheck
 			"data": map[string]any{"data": objs[start:end]}, "has_more": strconv.FormatBool(end < len(objs)), "next_cursor": next})
 	default:
-		json.NewEncoder(w).Encode(map[string]any{"success": true, "data": objs[start:end], "has_more": end < len(objs), "next_cursor": next}) //nolint:errcheck
+		json.NewEncoder(w).Encode(map[string]any{"success": true, "data": objs[start:end], "has_more": end < len(objs), "next_cursor": next, //nolint:errcheck
+			"total_count": total})
 	}
 }
 

@@ -30,6 +30,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/outflareai/outflare/engine/internal/connectors"
+	"github.com/outflareai/outflare/engine/internal/conversions"
 	"github.com/outflareai/outflare/engine/internal/jobs"
 	"github.com/outflareai/outflare/engine/internal/metrics"
 	"github.com/outflareai/outflare/engine/internal/track"
@@ -48,6 +49,11 @@ const (
 	batch = 500
 	// maxAttempts is how often a platform that cannot be reached is tried.
 	maxAttempts = 5
+	// settle is how old an event must be before a rule checks it against
+	// its definition's conditions, so one still being written is not
+	// passed over; filterBatch is the most events checked per rule a tick.
+	settle      = time.Minute
+	filterBatch = 5000
 )
 
 // Consent modes.
@@ -144,25 +150,132 @@ func (s *Sender) Tick(ctx context.Context) error {
 }
 
 // Match queues the events rules match that have not been queued yet: the
-// event's name is the rule's, it arrived after the rule was made and in
-// the last week, and its brand is the account's (or either is shared).
-// ws "" matches every workspace.
-func Match(ctx context.Context, q jobs.Querier, ws string) (int64, error) {
+// event's name is the rule's (or its conversion definition's), it arrived
+// after the rule was made and in the last week, and its brand is the
+// account's (or either is shared). A rule whose definition has conditions
+// queues only the events that meet them (matchFiltered); one whose
+// definition is archived queues nothing. ws "" matches every workspace.
+func Match(ctx context.Context, q conversions.Querier, ws string) (int64, error) {
 	tag, err := q.Exec(ctx, `
 		INSERT INTO ad_conversion_sends (workspace_id, rule_id, event_row_id, record_id, event_id, occurred_at)
 		SELECT r.workspace_id, r.id, e.id, e.record_id, COALESCE(NULLIF(e.message_id, ''), e.id::text), e.occurred_at
 		FROM ad_conversion_rules r
 		JOIN ad_accounts a ON a.id = r.ad_account_id AND a.status = 'active'
-		JOIN customer_events e ON e.workspace_id = r.workspace_id AND e.name = r.event_name
+		LEFT JOIN conversion_definitions d ON d.id = r.conversion_id
+		JOIN customer_events e ON e.workspace_id = r.workspace_id AND e.name = COALESCE(d.event_name, r.event_name)
 			AND e.occurred_at > now() - interval '30 days'
 			AND e.received_at >= r.created_at AND e.received_at > now() - $2::interval
 		WHERE r.enabled AND ($1 = '' OR r.workspace_id::text = $1)
+		  AND (r.conversion_id IS NULL OR (d.archived_at IS NULL AND d.filters = '[]'::jsonb))
 		  AND (e.brand_id IS NULL OR a.brand_id IS NULL OR e.brand_id = a.brand_id)
 		ON CONFLICT (rule_id, event_row_id) DO NOTHING`, ws, fmt.Sprintf("%d seconds", int(window.Seconds())))
 	if err != nil {
 		return 0, err
 	}
-	return tag.RowsAffected(), nil
+	n, err := matchFiltered(ctx, q, ws)
+	return tag.RowsAffected() + n, err
+}
+
+// matchFiltered queues, for each rule whose conversion definition has
+// conditions, the events that meet them. Conditions are checked here, not
+// in SQL, the same way attribution checks them (conversions.Definition
+// Match). Each rule remembers how far it has checked (matched_until), so an
+// event that doesn't qualify is looked at once and never logged as a send.
+func matchFiltered(ctx context.Context, q conversions.Querier, ws string) (int64, error) {
+	type pending struct {
+		id, ws, key string
+		from        time.Time
+		brand       *string
+	}
+	rows, err := q.Query(ctx, `
+		SELECT r.id::text, r.workspace_id::text, d.key, COALESCE(r.matched_until, r.created_at), a.brand_id::text
+		FROM ad_conversion_rules r
+		JOIN ad_accounts a ON a.id = r.ad_account_id AND a.status = 'active'
+		JOIN conversion_definitions d ON d.id = r.conversion_id AND d.archived_at IS NULL AND d.filters <> '[]'::jsonb
+		WHERE r.enabled AND ($1 = '' OR r.workspace_id::text = $1)`, ws)
+	if err != nil {
+		return 0, err
+	}
+	var list []pending
+	for rows.Next() {
+		var p pending
+		if err := rows.Scan(&p.id, &p.ws, &p.key, &p.from, &p.brand); err != nil {
+			rows.Close()
+			return 0, err
+		}
+		list = append(list, p)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return 0, err
+	}
+	var queued int64
+	for _, p := range list {
+		d, err := conversions.Get(ctx, q, p.ws, p.key)
+		if err != nil {
+			return queued, err
+		}
+		var cutoff time.Time
+		if err := q.QueryRow(ctx, `SELECT now() - $1::interval`, fmt.Sprintf("%d seconds", int(settle.Seconds()))).Scan(&cutoff); err != nil {
+			return queued, err
+		}
+		if floor := cutoff.Add(-window); p.from.Before(floor) {
+			p.from = floor
+		}
+		ev, err := q.Query(ctx, `SELECT id::text, record_id::text, COALESCE(NULLIF(message_id, ''), id::text), occurred_at, properties, received_at
+			FROM customer_events
+			WHERE workspace_id = $1 AND name = $2 AND received_at > $3 AND received_at <= $4 AND occurred_at > now() - interval '30 days'
+			  AND (brand_id IS NULL OR $5::uuid IS NULL OR brand_id = $5::uuid)
+			ORDER BY received_at, id LIMIT $6`, p.ws, d.Event, p.from, cutoff, p.brand, filterBatch)
+		if err != nil {
+			return queued, err
+		}
+		type hit struct {
+			row, eventID string
+			record       *string
+			at           time.Time
+		}
+		var hits []hit
+		var last time.Time
+		n := 0
+		for ev.Next() {
+			var h hit
+			var props []byte
+			if err := ev.Scan(&h.row, &h.record, &h.eventID, &h.at, &props, &last); err != nil {
+				ev.Close()
+				return queued, err
+			}
+			n++
+			var m map[string]any
+			_ = json.Unmarshal(props, &m)
+			if d.Match(m) {
+				hits = append(hits, h)
+			}
+		}
+		ev.Close()
+		if err := ev.Err(); err != nil {
+			return queued, err
+		}
+		for _, h := range hits {
+			tag, err := q.Exec(ctx, `INSERT INTO ad_conversion_sends (workspace_id, rule_id, event_row_id, record_id, event_id, occurred_at)
+				VALUES ($1, $2, $3, $4, $5, $6) ON CONFLICT (rule_id, event_row_id) DO NOTHING`, p.ws, p.id, h.row, h.record, h.eventID, h.at)
+			if err != nil {
+				return queued, err
+			}
+			queued += tag.RowsAffected()
+		}
+		// A full batch may have stopped inside a run of events that share
+		// a time: start the next one just before it, so none is passed over
+		// (an event already queued is not queued twice).
+		until := cutoff
+		if n == filterBatch {
+			until = last.Add(-time.Microsecond)
+		}
+		if _, err := q.Exec(ctx, `UPDATE ad_conversion_rules SET matched_until = $2 WHERE id = $1`, p.id, until); err != nil {
+			return queued, err
+		}
+	}
+	return queued, nil
 }
 
 // Enqueue asks for a send of one rule's waiting conversions.
@@ -221,6 +334,8 @@ type rule struct {
 	valueProperty, valueUnit, currency                                string
 	fixed                                                             *int64
 	acct                                                              connectors.AdAccount
+	// def is the conversion definition the rule sends, if it names one.
+	def *conversions.Definition
 }
 
 type queued struct {
@@ -347,15 +462,17 @@ func (s *Sender) SendRule(ctx context.Context, ws, ruleID string) (Result, error
 func (s *Sender) loadRule(ctx context.Context, ws, id string) (rule, error) {
 	var r rule
 	var meta []byte
+	var defKey *string
 	err := s.Pool.QueryRow(ctx, `
 		SELECT r.id, r.workspace_id, a.integration_id, a.connector, r.event_type, r.target_id, r.target_name,
 			r.value_property, r.value_unit, r.currency, r.fixed_value_micros,
-			a.external_id, a.name, a.currency, a.time_zone, a.meta
+			a.external_id, a.name, a.currency, a.time_zone, a.meta, d.key
 		FROM ad_conversion_rules r JOIN ad_accounts a ON a.id = r.ad_account_id
+		LEFT JOIN conversion_definitions d ON d.id = r.conversion_id
 		WHERE r.workspace_id = $1 AND r.id = $2 AND r.enabled`, ws, id).Scan(
 		&r.id, &r.ws, &r.integrationID, &r.connector, &r.eventType, &r.targetID, &r.targetName,
 		&r.valueProperty, &r.valueUnit, &r.currency, &r.fixed,
-		&r.acct.ID, &r.acct.Name, &r.acct.Currency, &r.acct.TimeZone, &meta)
+		&r.acct.ID, &r.acct.Name, &r.acct.Currency, &r.acct.TimeZone, &meta, &defKey)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return r, connectors.ErrNotFound
 	}
@@ -363,6 +480,13 @@ func (s *Sender) loadRule(ctx context.Context, ws, id string) (rule, error) {
 		return r, dbError{err}
 	}
 	_ = json.Unmarshal(meta, &r.acct.Meta)
+	if defKey != nil {
+		d, err := conversions.Get(ctx, s.Pool, ws, *defKey)
+		if err != nil {
+			return r, dbError{err}
+		}
+		r.def = &d
+	}
 	return r, nil
 }
 
@@ -401,6 +525,16 @@ func (s *Sender) loadQueued(ctx context.Context, ws, ruleID string) ([]queued, e
 // build gathers what one conversion carries, or the reason it is not sent.
 func (s *Sender) build(ctx context.Context, ws string, r rule, mode string, q queued) (connectors.AdConversion, string, error) {
 	cv := connectors.AdConversion{EventID: q.eventID, Time: q.occurred, EventType: r.eventType, ClickIDs: map[string]string{}}
+	// The definition may have changed, or been archived, since the event
+	// was queued: what it says now decides.
+	if r.def != nil {
+		if r.def.ArchivedAt != nil {
+			return cv, fmt.Sprintf("the conversion %s is archived", r.def.Name), nil
+		}
+		if !r.def.Match(q.props) {
+			return cv, fmt.Sprintf("it doesn't meet the conditions of %s", r.def.Name), nil
+		}
+	}
 	send, granted, reason, err := Consent(ctx, s.Pool, ws, q.recordID, q.anonID, mode)
 	if err != nil || !send {
 		return cv, reason, err
@@ -517,8 +651,21 @@ func Consent(ctx context.Context, q jobs.Querier, ws string, recordID, anonID *s
 	return true, false, "", nil
 }
 
-// value is the conversion's value in micros and its currency, or nil.
+// value is the conversion's value in micros and its currency, or nil: the
+// rule's own value when it sets one, otherwise its conversion
+// definition's.
 func value(r rule, props map[string]any) (*int64, string) {
+	if r.def != nil && r.valueProperty == "" && r.fixed == nil {
+		minor, cur := r.def.Value(props)
+		if minor == nil {
+			return nil, ""
+		}
+		if cur == "" {
+			cur = r.acct.Currency
+		}
+		m := *minor * 10_000
+		return &m, cur
+	}
 	cur := r.currency
 	if cur == "" {
 		if c, ok := props["currency"].(string); ok && len(strings.TrimSpace(c)) == 3 {

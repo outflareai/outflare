@@ -67,10 +67,13 @@ type abTestView struct {
 	EndedAt    *time.Time     `json:"ended_at"`
 	Decision   string         `json:"decision"`
 	// Learning is what a finished test taught, when the AI wrote it.
-	Learning  *abLearning     `json:"learning"`
-	CreatedAt time.Time       `json:"created_at"`
-	UpdatedAt time.Time       `json:"updated_at"`
-	result    json.RawMessage // the snapshot kept when it ended
+	Learning *abLearning `json:"learning"`
+	// Registration is what the test set out to show, kept as it was when
+	// it started; null for a draft.
+	Registration *abRegistration `json:"registration"`
+	CreatedAt    time.Time       `json:"created_at"`
+	UpdatedAt    time.Time       `json:"updated_at"`
+	result       json.RawMessage // the snapshot kept when it ended
 }
 
 type abTestInput struct {
@@ -84,7 +87,7 @@ type abTestInput struct {
 }
 
 const abTestCols = `t.id::text, t.flag_id::text, f.key, t.brand_id::text, t.name, t.hypothesis, t.status, t.control, t.goals, t.guardrails, t.min_effect, t.baselines,
-	t.started_at, t.frozen_at, t.ended_at, t.decision, t.learning, t.created_at, t.updated_at, t.result`
+	t.started_at, t.frozen_at, t.ended_at, t.decision, t.learning, t.registration, t.created_at, t.updated_at, t.result`
 
 func loadABTests(ctx context.Context, q abtests.Querier, ws, where string, args ...any) ([]abTestView, error) {
 	rows, err := q.Query(ctx, `SELECT `+abTestCols+` FROM ab_tests t JOIN flags f ON f.id = t.flag_id AND f.workspace_id = t.workspace_id
@@ -96,7 +99,7 @@ func loadABTests(ctx context.Context, q abtests.Querier, ws, where string, args 
 		var v abTestView
 		var goals, guardrails []byte
 		if err := row.Scan(&v.ID, &v.FlagID, &v.FlagKey, &v.BrandID, &v.Name, &v.Hypothesis, &v.Status, &v.Control, &goals, &guardrails, &v.MinEffect, &v.Baselines,
-			&v.StartedAt, &v.FrozenAt, &v.EndedAt, &v.Decision, &v.Learning, &v.CreatedAt, &v.UpdatedAt, &v.result); err != nil {
+			&v.StartedAt, &v.FrozenAt, &v.EndedAt, &v.Decision, &v.Learning, &v.Registration, &v.CreatedAt, &v.UpdatedAt, &v.result); err != nil {
 			return v, err
 		}
 		if err := json.Unmarshal(guardrails, &v.Guardrails); err != nil {
@@ -239,7 +242,11 @@ func applyABInput(t *abTestView, f flagView, in abTestInput) error {
 		return errInvalid("name is at most 200 characters")
 	}
 	if in.Hypothesis != nil {
-		t.Hypothesis = strings.TrimSpace(*in.Hypothesis)
+		h := strings.TrimSpace(*in.Hypothesis)
+		if h != t.Hypothesis && t.Status != "draft" {
+			return errABConflict("the hypothesis is fixed once a test starts, as it was registered; start a new test (or duplicate this one) to test another idea")
+		}
+		t.Hypothesis = h
 	}
 	if len(t.Hypothesis) > maxABHypothesis {
 		return errInvalid("hypothesis is at most 2,000 characters")
@@ -464,8 +471,14 @@ func (s *Server) startABTest(w http.ResponseWriter, r *http.Request) {
 		if recorded > 0 {
 			stored, _ = json.Marshal(baselines)
 		}
-		if _, err := tx.Exec(ctx, `UPDATE ab_tests SET status = 'running', started_at = now(), baselines = $3, next_check_at = now() + interval '1 hour', updated_at = now() WHERE id = $1 AND workspace_id = $2`,
-			t.ID, a.WorkspaceID, stored); err != nil {
+		// Register what the test sets out to show, as it is now.
+		reg, err := abRegister(ctx, tx, a.WorkspaceID, *t, f, now)
+		if err != nil {
+			return err
+		}
+		regJSON, _ := json.Marshal(reg)
+		if _, err := tx.Exec(ctx, `UPDATE ab_tests SET status = 'running', started_at = now(), baselines = $3, registration = $4, next_check_at = now() + interval '1 hour', updated_at = now() WHERE id = $1 AND workspace_id = $2`,
+			t.ID, a.WorkspaceID, stored, regJSON); err != nil {
 			return err
 		}
 		t.Status = "running"
@@ -536,6 +549,7 @@ func (s *Server) abResults(ctx context.Context, q abtests.Querier, ws string, t 
 		return abtests.Result{}, err
 	}
 	res, err := abtests.Results(ctx, q, ws, spec)
+	res.FlagChanged = abFlagChanges(t.Registration, f, t.Status == "running")
 	outcome := "ok"
 	if err != nil {
 		outcome = "error"
@@ -559,6 +573,8 @@ func abSpec(ctx context.Context, q abtests.Querier, ws string, t abTestView, f f
 		spec.Variants = append(spec.Variants, v.Key)
 		spec.Weights = append(spec.Weights, v.Weight)
 	}
+	// The split is checked against the weights the test started with.
+	spec.Weights = registeredWeights(t.Registration, spec.Variants, spec.Weights)
 	err := q.QueryRow(ctx, `SELECT coalesce((SELECT exclude_domains FROM visitor_settings WHERE workspace_id = $1), '{}')`, ws).Scan(&spec.ExcludeDomains)
 	return spec, err
 }

@@ -5064,6 +5064,33 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/workspaces/{ws}/ads/tracking-health": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+            };
+            cookie?: never;
+        };
+        /**
+         * Whether paid traffic is tracked, and what to fix
+         * @description Scope: analytics.read. Over the last `days` (7 by default): paid visits per ad network and how each was tracked (its
+         *     click id, only the ad ids a tracking template adds, or neither); synced campaigns that spent with no tracked visit,
+         *     which usually lack the tracking template; and conversions sent back per platform, with the commonest failure. `issues`
+         *     lists what needs fixing, worst first, each with what to do: a network whose paid visits are often untracked, campaigns
+         *     spending without visits, or a platform refusing conversions.
+         */
+        get: operations["getAdTrackingHealth"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/workspaces/{ws}/ads/accounts": {
         parameters: {
             query?: never;
@@ -5241,7 +5268,9 @@ export interface paths {
          *     outcomes. Events from before the rule are never sent. The event id
          *     is the one the browser pixel sends, so the platform counts each
          *     conversion once. Consent follows GET .../ads/settings. The target is
-         *     checked with the platform first.
+         *     checked with the platform first. Name a conversion definition (conversion) instead of an event to send only the
+         *     events that meet its conditions, worth what it says unless the rule sets a value, as the event type it names for
+         *     this network when the target offers it.
          */
         post: operations["createAdConversionRule"];
         delete?: never;
@@ -5273,7 +5302,7 @@ export interface paths {
         head?: never;
         /**
          * Change or switch off a conversion rule
-         * @description Scope: integrations.manage. Change the event, the value or the currency, or switch the rule off (what was waiting is skipped, not sent later). The account and conversion are fixed: add a new rule instead.
+         * @description Scope: integrations.manage. Change the event or the conversion definition it sends (conversion, or '' to go back to the bare event), the value or the currency, or switch the rule off (what was waiting is skipped, not sent later). The account and the platform's conversion are fixed: add a new rule instead.
          */
         patch: operations["updateAdConversionRule"];
         trace?: never;
@@ -14885,8 +14914,8 @@ export interface paths {
         head?: never;
         /**
          * Change an A/B test
-         * @description Scope: analytics.manage. Its name and hypothesis at any time; its control, goals and min_effect only while it is a draft,
-         *     so results can't be reshaped after the fact. The flag can't change.
+         * @description Scope: analytics.manage. Its name at any time; its hypothesis, control, goals, guardrails and min_effect only while it
+         *     is a draft, so results can't be reshaped after the fact (starting registers them). The flag can't change.
          */
         patch: operations["updateABTest"];
         trace?: never;
@@ -23724,6 +23753,51 @@ export interface components {
             data: components["schemas"]["AttributionChannelRow"][];
             unallocated_cost: components["schemas"]["Money"][];
         };
+        AdTrackingHealth: {
+            days: number;
+            /** @description Paid visits per network, most first. other is paid traffic from a source no network claims. */
+            networks: {
+                /** @example meta */
+                network: string;
+                label: string;
+                visits: number;
+                /** @description Visits that carried the network's click id. */
+                click_id: number;
+                /** @description Visits with only the ad ids a tracking template adds (of_campaign and the rest). */
+                ad_ids_only: number;
+                /** @description Visits with neither */
+                untracked: number;
+            }[];
+            /** @description Synced campaigns that spent in the range with no visit naming them, most spend first, at most 50. */
+            campaigns_without_visits: {
+                /** Format: uuid */
+                ad_entity_id: string;
+                connector: string;
+                name: string;
+                external_id: string;
+                spend: components["schemas"]["Money"][];
+            }[];
+            /** @description Conversions sent back per ad connector. */
+            sends: {
+                connector: string;
+                sent: number;
+                skipped: number;
+                failed: number;
+                /** @description The commonest reason a send failed; '' with none. */
+                top_failure: string;
+            }[];
+            /** @description What needs fixing, worst first. */
+            issues: {
+                /** @enum {string} */
+                code: "untracked_clicks" | "campaigns_without_visits" | "sends_failing";
+                /** @enum {string} */
+                severity: "critical" | "warning";
+                /** @description The network or ad connector it is about. */
+                subject: string;
+                message: string;
+                fix: string;
+            }[];
+        };
         AttributionCampaignRow: {
             channel: string;
             label: string;
@@ -24013,6 +24087,12 @@ export interface components {
                     unchanged: number;
                     /** @description Couldn't come over; see issues. */
                     skipped: number;
+                    /** @description How many the platform said its list holds, when it says: compare with seen. */
+                    reported?: number;
+                    /** @description reported per part, when the platform lists the kind in parts (Tolt's partners, by status). */
+                    reported_by?: {
+                        [key: string]: number;
+                    };
                 }[];
                 /** @description The first 100 things to look at, by the platform's id and a reason, never names or addresses. */
                 issues: {
@@ -24022,7 +24102,10 @@ export interface components {
                      * @description incomplete, no_email, link_param (a link's parameter isn't ref or via, which the website script reads),
                      *     extra_link (a partner's second link: their code is the first), code_changed (the partner got a new
                      *     code), partner_missing, partner_unavailable (a partner other objects name that the platform couldn't
-                     *     give by id either), customer_missing, promo_code_invalid, promo_code_taken, already_referred
+                     *     give by id either; message has the HTTP status), partner_id_missing (a promo code names no partner
+                     *     under a field the import reads; message lists its fields), partners_unlisted (the platform reported
+                     *     more partners than came over; message has the counts and whether any of the others has referrals),
+                     *     customer_missing, promo_code_invalid, promo_code_taken, already_referred
                      *     (another partner has the customer here), status_conflict (rejected there after it was approved here),
                      *     unreadable (the platform's answer for the whole kind couldn't be read, or it refused the request; the
                      *     import read the other kinds, and message says why).
@@ -26261,6 +26344,28 @@ export interface components {
             ended_at: string | null;
             /** @description The variant chosen when it ended; "" for none. */
             decision: string;
+            /** @description What the test set out to show, kept as it was when it started: the hypothesis, control, goals, guardrails, smallest change, the plan, and the flag's versions (weights and a fingerprint of their content) and rollout. Null for a draft, and for tests started before registration. */
+            registration?: {
+                hypothesis: string;
+                control: string;
+                goals: components["schemas"]["ABTestGoal"][];
+                guardrails: components["schemas"]["ABTestGoal"][] | null;
+                min_effect: number;
+                rollout: number;
+                versions: {
+                    key: string;
+                    weight: number;
+                    content_hash: string;
+                }[];
+                plan: {
+                    /** @description Weeks it was likely to need at min_effect; 0 when it couldn't be planned. */
+                    weeks: number;
+                    weekly_per_version: number;
+                    visitors_per_version: number;
+                } | null;
+                /** Format: date-time */
+                registered_at: string;
+            } | null;
             /** Format: date-time */
             created_at: string;
             /** Format: date-time */
@@ -26438,6 +26543,8 @@ export interface components {
                 min_effect: number;
                 /** @description Versions compared with the control. Past one, every p_value and range is corrected for that many chances of a false winner. */
                 corrected_for: number;
+                /** @description How the flag changed since the test started, in sentences (its split, content, rollout or versions, or it was turned off). Results that mix before and after need care. Null for tests started before registration. */
+                flag_changed?: string[] | null;
                 /** Format: date-time */
                 computed_at: string;
             };
@@ -27011,6 +27118,9 @@ export interface components {
             connector: string;
             /** @example order_completed */
             event_name: string;
+            /** @description The conversion definition it sends, by key; null for a bare event. */
+            conversion: string | null;
+            conversion_name: string | null;
             target_id: string;
             target_name: string;
             /** @example Purchase */
@@ -45587,6 +45697,35 @@ export interface operations {
             default: components["responses"]["Error"];
         };
     };
+    getAdTrackingHealth: {
+        parameters: {
+            query?: {
+                days?: number;
+                /** @description Only records of this brand: its id or handle, none for records shared by every brand, or all (the default). */
+                brand?: components["parameters"]["Brand"];
+            };
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The health of the workspace's ad tracking. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdTrackingHealth"];
+                };
+            };
+            400: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
     listAdAccounts: {
         parameters: {
             query?: {
@@ -45869,12 +46008,20 @@ export interface operations {
                 "application/json": {
                     /** Format: uuid */
                     account_id: string;
-                    /** @example order_completed */
-                    event_name: string;
+                    /**
+                     * @description The customer event; required without conversion.
+                     * @example order_completed
+                     */
+                    event_name?: string;
+                    /**
+                     * @description A conversion definition's key (GET .../conversion-definitions), instead of event_name.
+                     * @example qualified_call
+                     */
+                    conversion?: string;
                     /** @description From GET .../ads/conversion-targets. */
                     target_id: string;
                     /**
-                     * @description One of the target's event_types; default the first.
+                     * @description One of the target's event_types; default the conversion definition's name for this network when offered, otherwise the first.
                      * @example Purchase
                      */
                     event_type?: string;
@@ -45975,6 +46122,8 @@ export interface operations {
             content: {
                 "application/json": {
                     event_name?: string;
+                    /** @description A conversion definition's key, or '' for none. */
+                    conversion?: string;
                     value_property?: string;
                     /** @enum {string} */
                     value_unit?: "major" | "minor";

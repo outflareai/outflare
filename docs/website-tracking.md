@@ -68,6 +68,18 @@ The script reads click ids and `of_` parameters on any page, and the pixel cooki
 
 Every landing page from a paid ad (a paid `utm_medium` such as `cpc` or `paid_social`) is counted by how well it was tracked: with the network's own click id, with only the template's ad ids, or with neither. Neither means the ad has no tracking template, so the visit can be credited only by its UTM tags. A template value that arrives as the macro itself (`{{ad.id}}`, `__CID__`) is dropped and counted too, because it means the network didn't fill it in. Operators see both on the **Ad tracking health** row of the Grafana dashboard, with an alert for each ([monitoring.md](monitoring.md)). The counts carry the network only, never the workspace or the visit.
 
+Each workspace sees its own under **Paid ads → Tracking health** (and `GET /v1/workspaces/{ws}/ads/tracking-health`, MCP `get_ad_tracking_health`). It covers the last `days` (7 by default) and shows:
+
+- **Paid visits per network:** the share with the click id, with only the ad ids, or untracked.
+- **Synced campaigns that spent with no tracked visit:** these usually lack the template.
+- **Conversions sent back per platform:** with the commonest reason one was refused.
+
+A list of issues comes first, worst first, each with what to do. An issue is raised when:
+
+- a network has at least 20 paid visits and a fifth or more of them are untracked;
+- any campaign spent without a tracked visit;
+- a platform refused a tenth or more of the conversions sent to it.
+
 ## Serve it from your own domain
 
 Ad blockers drop scripts and requests to analytics hosts, and Safari keeps a cookie a script writes for only seven days. Forward a path on your own site to Outflare, and load the snippet from it:

@@ -238,8 +238,12 @@ type Result struct {
 	MinEffect float64 `json:"min_effect"`
 	// CorrectedFor is how many versions are compared with the control; past
 	// one, every p-value and range is corrected for that many chances.
-	CorrectedFor int       `json:"corrected_for"`
-	ComputedAt   time.Time `json:"computed_at"`
+	CorrectedFor int `json:"corrected_for"`
+	// FlagChanged says how the flag changed since the test started (its
+	// split, content, rollout or versions): results that mix the before
+	// and after need care.
+	FlagChanged []string  `json:"flag_changed"`
+	ComputedAt  time.Time `json:"computed_at"`
 }
 
 // Results counts each variant's visitors and conversions for every goal,

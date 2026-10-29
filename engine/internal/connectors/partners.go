@@ -88,6 +88,13 @@ type PartnerProgram struct {
 
 // PartnerObjects is one page; only the slice for the kind read is set.
 type PartnerObjects struct {
+	// Reported is how many objects the platform says the list holds, from
+	// the first page of a list (nil when it doesn't say), to reconcile with
+	// how many an import read.
+	Reported *int
+	// ReportedFor names the part of the list Reported counts, when the
+	// platform lists a kind in parts (partners by status).
+	ReportedFor  string
 	Partners     []ImportPartner
 	Links        []ImportLink
 	PromoCodes   []ImportPromoCode
@@ -125,6 +132,10 @@ type ImportPromoCode struct {
 	ID        string
 	PartnerID string
 	Code      string
+	// Keys, when PartnerID is empty, are the object's top-level keys and
+	// their types (never values), so the field naming its partner can be
+	// found.
+	Keys string
 }
 
 // ImportCustomer is someone a partner referred.

@@ -200,6 +200,7 @@ export type ReviewGuide = Schemas["ReviewGuide"];
 export type AdStatus = Schemas["AdStatus"];
 export type AdConnection = Schemas["AdConnection"];
 export type AdTrackingTemplate = Schemas["AdTrackingTemplate"];
+export type AdTrackingHealth = Schemas["AdTrackingHealth"];
 export type ConversionDefinition = Schemas["ConversionDefinition"];
 export type ConversionPreset = Schemas["ConversionPreset"];
 export type AdAccount = Schemas["AdAccount"];

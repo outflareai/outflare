@@ -8,7 +8,7 @@ import { Badge, Button, Card, ErrorText, Input, Loading, PageHeader, Stat, Stats
 import { ago } from "../format";
 import type { Tab } from "../App";
 import { AdConversions } from "./AdConversions";
-import { AdTrackingTemplates } from "./AdTracking";
+import { AdTrackingHealthCard, AdTrackingTemplates } from "./AdTracking";
 import { AdResults } from "./AdResults";
 
 // Paid ads: spend, clicks and what each platform says it brought in, read
@@ -240,6 +240,7 @@ export function Ads({ ws, canManage, go }: Props) {
         />
       </Card>
 
+      <AdTrackingHealthCard ws={ws} brand={brandKey || undefined} />
       <AdTrackingTemplates ws={ws} />
 
       <Card title="Connections" description="Your ad platform sign-ins. Add or remove one under Connectors.">

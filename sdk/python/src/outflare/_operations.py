@@ -2485,9 +2485,10 @@ class Operations(_Mixin):
         *,
         ws: str | None = None,
         account_id: str,
+        conversion: str | None = None,
         currency: str | None = None,
         enabled: bool | None = None,
-        event_name: str,
+        event_name: str | None = None,
         event_type: str | None = None,
         fixed_value_micros: int | None = None,
         target_id: str,
@@ -2505,7 +2506,9 @@ class Operations(_Mixin):
         outcomes. Events from before the rule are never sent. The event id
         is the one the browser pixel sends, so the platform counts each
         conversion once. Consent follows GET .../ads/settings. The target is
-        checked with the platform first.
+        checked with the platform first. Name a conversion definition (conversion) instead of an event to send only the
+        events that meet its conditions, worth what it says unless the rule sets a value, as the event type it names for
+        this network when the target offers it.
 
         Needs: the integrations.manage scope.
         POST /v1/workspaces/{ws}/ads/conversion-rules
@@ -2516,6 +2519,7 @@ class Operations(_Mixin):
             path={"ws": ws},
             body={
                 "account_id": account_id,
+                "conversion": conversion,
                 "currency": currency,
                 "enabled": enabled,
                 "event_name": event_name,
@@ -7161,6 +7165,31 @@ class Operations(_Mixin):
             "GET",
             "/v1/workspaces/{ws}/ads/settings",
             path={"ws": ws},
+        )
+
+    def get_ad_tracking_health(
+        self,
+        *,
+        ws: str | None = None,
+        days: int | None = None,
+        brand: str | None = None,
+    ) -> Any:
+        """Whether paid traffic is tracked, and what to fix.
+
+        Scope: analytics.read. Over the last `days` (7 by default): paid visits per ad network and how each was tracked (its
+        click id, only the ad ids a tracking template adds, or neither); synced campaigns that spent with no tracked visit,
+        which usually lack the tracking template; and conversions sent back per platform, with the commonest failure. `issues`
+        lists what needs fixing, worst first, each with what to do: a network whose paid visits are often untracked, campaigns
+        spending without visits, or a platform refusing conversions.
+
+        Needs: the analytics.read scope.
+        GET /v1/workspaces/{ws}/ads/tracking-health
+        """
+        return self._call(
+            "GET",
+            "/v1/workspaces/{ws}/ads/tracking-health",
+            path={"ws": ws},
+            query={"days": days, "brand": brand},
         )
 
     def get_ads_summary(
@@ -21191,8 +21220,8 @@ class Operations(_Mixin):
     ) -> Any:
         """Change an A/B test.
 
-        Scope: analytics.manage. Its name and hypothesis at any time; its control, goals and min_effect only while it is a draft,
-        so results can't be reshaped after the fact. The flag can't change.
+        Scope: analytics.manage. Its name at any time; its hypothesis, control, goals, guardrails and min_effect only while it
+        is a draft, so results can't be reshaped after the fact (starting registers them). The flag can't change.
 
         Needs: the analytics.manage scope.
         PATCH /v1/workspaces/{ws}/ab-tests/{test}
@@ -21245,6 +21274,7 @@ class Operations(_Mixin):
         id: str,
         *,
         ws: str | None = None,
+        conversion: str | None = None,
         currency: str | None = None,
         enabled: bool | None = None,
         event_name: str | None = None,
@@ -21256,7 +21286,7 @@ class Operations(_Mixin):
     ) -> Any:
         """Change or switch off a conversion rule.
 
-        Scope: integrations.manage. Change the event, the value or the currency, or switch the rule off (what was waiting is skipped, not sent later). The account and conversion are fixed: add a new rule instead.
+        Scope: integrations.manage. Change the event or the conversion definition it sends (conversion, or '' to go back to the bare event), the value or the currency, or switch the rule off (what was waiting is skipped, not sent later). The account and the platform's conversion are fixed: add a new rule instead.
 
         Needs: the integrations.manage scope.
         PATCH /v1/workspaces/{ws}/ads/conversion-rules/{id}
@@ -21266,6 +21296,7 @@ class Operations(_Mixin):
             "/v1/workspaces/{ws}/ads/conversion-rules/{id}",
             path={"id": id, "ws": ws},
             body={
+                "conversion": conversion,
                 "currency": currency,
                 "enabled": enabled,
                 "event_name": event_name,

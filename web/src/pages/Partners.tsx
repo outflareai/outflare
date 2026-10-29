@@ -978,6 +978,8 @@ const importReasons: Record<string, string> = {
   already_referred: "another partner already has this customer here",
   status_conflict: "rejected in Tolt after it was approved here",
   unreadable: "Tolt's answer couldn't be read, so this kind didn't come over; the others did",
+  partner_id_missing: "a promo code that names no partner where Outflare reads it: send us the fields below",
+  partners_unlisted: "Tolt reported more partners than came over",
 };
 
 type ImportSource = { id: string; name: string; currency: string; status: string };
@@ -1066,7 +1068,7 @@ function ImportSection({ ws, program: p, canManage }: { ws: string; program: Par
           </div>
           {r.error && <p className="text-destructive">{r.error}</p>}
           <p className="text-muted-foreground">
-            {r.summary.kinds.filter((k) => k.kind !== "links" && k.seen > 0).map((k) => `${k.kind.replace("_", " ")}: ${k.created} new, ${k.updated} updated${k.skipped ? `, ${k.skipped} skipped` : ""}`).join(" · ") || "Nothing read yet."}
+            {r.summary.kinds.filter((k) => k.kind !== "links" && (k.seen > 0 || k.reported)).map((k) => `${k.kind.replace("_", " ")}: ${k.seen} read${k.reported ? ` of ${k.reported} Tolt reports` : ""}, ${k.created} new, ${k.updated} updated${k.skipped ? `, ${k.skipped} skipped` : ""}`).join(" · ") || "Nothing read yet."}
           </p>
           {r.summary.issues.length > 0 && (
             <details>

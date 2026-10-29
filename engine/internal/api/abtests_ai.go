@@ -839,6 +839,9 @@ func (s *Server) abSummaryPrompt(ctx context.Context, ws string, run abAIRun) (s
 // writeABResults writes a test's results as prompt data: the split, the
 // correction, each goal's arms and comparisons, and the guardrails.
 func writeABResults(b *strings.Builder, t abTestView, res abtests.Result) {
+	for _, c := range res.FlagChanged {
+		fmt.Fprintf(b, "Since the test started: %s\n", c)
+	}
 	if res.SampleRatio {
 		fmt.Fprintf(b, "The split between versions is broken (chance by luck %.4f).\n", res.SampleRatioP)
 	}

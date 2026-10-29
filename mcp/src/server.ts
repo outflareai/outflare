@@ -2566,6 +2566,18 @@ export function createServer({ client: gtm, workspace, readOnly = false, mission
   );
 
   server.registerTool(
+    "get_ad_tracking_health",
+    {
+      title: "Ad tracking health",
+      description:
+        "Whether the workspace's paid traffic is tracked: paid visits per network with or without click ids and ad ids, synced campaigns that spent with no tracked visit (usually a missing tracking template), conversions sent back per platform, and a list of issues with what to fix.",
+      inputSchema: { days: z.number().int().min(1).max(90).optional().describe("How far back, 7 by default."), brand: z.string().optional() },
+      annotations: read,
+    },
+    (q) => call(() => gtm.GET("/v1/workspaces/{ws}/ads/tracking-health", { params: { path, query: q } })),
+  );
+
+  server.registerTool(
     "sync_ads",
     {
       title: "Sync ad platforms now",
@@ -2606,12 +2618,14 @@ export function createServer({ client: gtm, workspace, readOnly = false, mission
       title: "Send a customer event to an ad platform as a conversion",
       description:
         "From now on each time the event happens, the platform hears about it server to server with the ad click id and the hashed email and phone, so its bidding learns from real outcomes. " +
-        "Pick target_id and event_type from list_ad_conversion_targets. Earlier events are never sent. Consent follows get_ad_settings.",
+        "Pick target_id and event_type from list_ad_conversion_targets. Give a conversion definition's key (list_conversion_definitions) instead of event_name to send only the events that meet its conditions, worth what it says. " +
+        "Earlier events are never sent. Consent follows get_ad_settings.",
       inputSchema: {
         account_id: id,
-        event_name: z.string().min(1).max(100).describe("A customer event name, such as signed_up or order_completed."),
+        event_name: z.string().min(1).max(100).optional().describe("A customer event name, such as signed_up or order_completed. Required without conversion."),
+        conversion: z.string().max(40).optional().describe("A conversion definition's key, such as qualified_call, instead of event_name."),
         target_id: z.string().min(1).max(200),
-        event_type: z.string().max(60).optional().describe("One of the target's event_types, such as Purchase. Default the first."),
+        event_type: z.string().max(60).optional().describe("One of the target's event_types, such as Purchase. Default the conversion definition's name for this network when offered, otherwise the first."),
         value_property: z.string().max(100).optional().describe("The event property that holds the value."),
         value_unit: z.enum(["major", "minor"]).optional().describe("major: 12.50; minor: 1250 (cents). Default major."),
         fixed_value_micros: z.number().int().min(0).optional().describe("A value for every conversion when there is no value property."),
@@ -2627,10 +2641,11 @@ export function createServer({ client: gtm, workspace, readOnly = false, mission
     "update_ad_conversion_rule",
     {
       title: "Change or switch off a conversion rule",
-      description: "Change the event, value or currency, or set enabled false (what waits is skipped, not sent later). The account and conversion are fixed.",
+      description: "Change the event, the conversion definition it sends ('' for none), value or currency, or set enabled false (what waits is skipped, not sent later). The account and the platform's conversion are fixed.",
       inputSchema: {
         id,
         event_name: z.string().min(1).max(100).optional(),
+        conversion: z.string().max(40).optional(),
         value_property: z.string().max(100).optional(),
         value_unit: z.enum(["major", "minor"]).optional(),
         fixed_value_micros: z.number().int().min(0).optional(),

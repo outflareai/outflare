@@ -117,7 +117,20 @@ with first-party numbers but no name or spend.
 
 A conversion rule sends one customer event (such as `signed_up` or
 `order_completed`, from the website snippet, the API or a connected tool) to one
-conversion on one ad account:
+conversion on one ad account.
+
+A rule can also name one of the workspace's
+[conversion definitions](conversions.md) (`"conversion": "qualified_call"`)
+instead of a bare event. It then sends only the events that meet the
+definition's conditions, such as a call over a minute, and each one is worth
+what the definition says unless the rule sets its own value. The event type
+defaults to the definition's name for that network (`network_events`) when the
+platform offers it.
+
+Each event is checked against the conditions once, a minute after it arrives.
+One that doesn't qualify is never sent and never appears in the send log.
+Archiving the definition stops the rule. In the app, **Add a rule** offers the
+definitions first.
 
 | Platform | Where it goes | Matched on | Also needs |
 | --- | --- | --- | --- |

@@ -374,6 +374,7 @@ Write (left out when `OUTFLARE_MCP_READ_ONLY=1`):
 | `list_ad_campaigns` | Campaigns ranked by spend, with platform-reported results |
 | `get_ads_summary` | Ad spend and results grouped by platform, brand, account or day |
 | `list_ad_tracking_templates` | The tracking template to paste into each ad network, with its click ids and macros |
+| `get_ad_tracking_health` | Whether paid traffic is tracked per network, campaigns spending without tracked visits, send-back failures, and what to fix |
 | `sync_ads` | Sync ad platforms now instead of within six hours |
 | `list_ad_conversion_targets` | Where an ad account's conversions can go (conversion actions, pixels, goals) |
 | `list_ad_conversion_rules`, `create_ad_conversion_rule`, `update_ad_conversion_rule`, `delete_ad_conversion_rule` | Send a customer event to an ad platform as a conversion |

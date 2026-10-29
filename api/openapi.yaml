@@ -6914,6 +6914,31 @@ paths:
                 properties:
                   data: { type: array, items: { $ref: "#/components/schemas/AdTrackingTemplate" } }
         default: { $ref: "#/components/responses/Error" }
+  /v1/workspaces/{ws}/ads/tracking-health:
+    parameters:
+      - { $ref: "#/components/parameters/Workspace" }
+    get:
+      operationId: getAdTrackingHealth
+      x-outflare-access: { scope: analytics.read }
+      summary: Whether paid traffic is tracked, and what to fix
+      description: |
+        Scope: analytics.read. Over the last `days` (7 by default): paid visits per ad network and how each was tracked (its
+        click id, only the ad ids a tracking template adds, or neither); synced campaigns that spent with no tracked visit,
+        which usually lack the tracking template; and conversions sent back per platform, with the commonest failure. `issues`
+        lists what needs fixing, worst first, each with what to do: a network whose paid visits are often untracked, campaigns
+        spending without visits, or a platform refusing conversions.
+      tags: [ads]
+      parameters:
+        - { name: days, in: query, required: false, schema: { type: integer, minimum: 1, maximum: 90, default: 7 } }
+        - { $ref: "#/components/parameters/Brand" }
+      responses:
+        "200":
+          description: The health of the workspace's ad tracking.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AdTrackingHealth" }
+        "400": { $ref: "#/components/responses/Error" }
+        default: { $ref: "#/components/responses/Error" }
   /v1/workspaces/{ws}/ads/accounts:
     parameters:
       - { $ref: "#/components/parameters/Workspace" }
@@ -7127,7 +7152,9 @@ paths:
         outcomes. Events from before the rule are never sent. The event id
         is the one the browser pixel sends, so the platform counts each
         conversion once. Consent follows GET .../ads/settings. The target is
-        checked with the platform first.
+        checked with the platform first. Name a conversion definition (conversion) instead of an event to send only the
+        events that meet its conditions, worth what it says unless the rule sets a value, as the event type it names for
+        this network when the target offers it.
       tags: [ads]
       requestBody:
         required: true
@@ -7135,12 +7162,13 @@ paths:
           application/json:
             schema:
               type: object
-              required: [account_id, event_name, target_id]
+              required: [account_id, target_id]
               properties:
                 account_id: { type: string, format: uuid }
-                event_name: { type: string, example: order_completed }
+                event_name: { type: string, example: order_completed, description: "The customer event; required without conversion." }
+                conversion: { type: string, example: qualified_call, description: "A conversion definition's key (GET .../conversion-definitions), instead of event_name." }
                 target_id: { type: string, description: "From GET .../ads/conversion-targets." }
-                event_type: { type: string, example: Purchase, description: "One of the target's event_types; default the first." }
+                event_type: { type: string, example: Purchase, description: "One of the target's event_types; default the conversion definition's name for this network when offered, otherwise the first." }
                 value_property: { type: string, example: total, description: "The event property that holds the value." }
                 value_unit: { type: string, enum: [major, minor], description: "major: 12.50; minor: 1250 (cents). Default major." }
                 fixed_value_micros: { type: integer, format: int64, minimum: 0, description: "A value for every conversion, used when value_property is empty or missing." }
@@ -7166,7 +7194,7 @@ paths:
       x-outflare-access: { scope: integrations.manage }
       parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
       summary: Change or switch off a conversion rule
-      description: "Scope: integrations.manage. Change the event, the value or the currency, or switch the rule off (what was waiting is skipped, not sent later). The account and conversion are fixed: add a new rule instead."
+      description: "Scope: integrations.manage. Change the event or the conversion definition it sends (conversion, or '' to go back to the bare event), the value or the currency, or switch the rule off (what was waiting is skipped, not sent later). The account and the platform's conversion are fixed: add a new rule instead."
       tags: [ads]
       requestBody:
         required: true
@@ -7176,6 +7204,7 @@ paths:
               type: object
               properties:
                 event_name: { type: string }
+                conversion: { type: string, description: "A conversion definition's key, or '' for none." }
                 value_property: { type: string }
                 value_unit: { type: string, enum: [major, minor] }
                 fixed_value_micros: { type: integer, format: int64, minimum: 0 }
@@ -19926,8 +19955,8 @@ paths:
       x-outflare-access: { scope: analytics.manage }
       summary: Change an A/B test
       description: |
-        Scope: analytics.manage. Its name and hypothesis at any time; its control, goals and min_effect only while it is a draft,
-        so results can't be reshaped after the fact. The flag can't change.
+        Scope: analytics.manage. Its name at any time; its hypothesis, control, goals, guardrails and min_effect only while it
+        is a draft, so results can't be reshaped after the fact (starting registers them). The flag can't change.
       tags: [ab-tests]
       requestBody:
         required: true
@@ -28822,6 +28851,60 @@ components:
         pending_visits: { type: integer }
         data: { type: array, items: { $ref: "#/components/schemas/AttributionChannelRow" } }
         unallocated_cost: { type: array, items: { $ref: "#/components/schemas/Money" } }
+    AdTrackingHealth:
+      type: object
+      required: [days, networks, campaigns_without_visits, sends, issues]
+      properties:
+        days: { type: integer }
+        networks:
+          type: array
+          description: Paid visits per network, most first. other is paid traffic from a source no network claims.
+          items:
+            type: object
+            required: [network, label, visits, click_id, ad_ids_only, untracked]
+            properties:
+              network: { type: string, example: meta }
+              label: { type: string }
+              visits: { type: integer }
+              click_id: { type: integer, description: Visits that carried the network's click id. }
+              ad_ids_only: { type: integer, description: "Visits with only the ad ids a tracking template adds (of_campaign and the rest)." }
+              untracked: { type: integer, description: Visits with neither, which can't be tied to an ad. }
+        campaigns_without_visits:
+          type: array
+          description: Synced campaigns that spent in the range with no visit naming them, most spend first, at most 50.
+          items:
+            type: object
+            required: [ad_entity_id, connector, name, external_id, spend]
+            properties:
+              ad_entity_id: { type: string, format: uuid }
+              connector: { type: string }
+              name: { type: string }
+              external_id: { type: string }
+              spend: { type: array, items: { $ref: "#/components/schemas/Money" } }
+        sends:
+          type: array
+          description: Conversions sent back per ad connector.
+          items:
+            type: object
+            required: [connector, sent, skipped, failed, top_failure]
+            properties:
+              connector: { type: string }
+              sent: { type: integer }
+              skipped: { type: integer }
+              failed: { type: integer }
+              top_failure: { type: string, description: "The commonest reason a send failed; '' with none." }
+        issues:
+          type: array
+          description: What needs fixing, worst first.
+          items:
+            type: object
+            required: [code, severity, subject, message, fix]
+            properties:
+              code: { type: string, enum: [untracked_clicks, campaigns_without_visits, sends_failing] }
+              severity: { type: string, enum: [critical, warning] }
+              subject: { type: string, description: "The network or ad connector it is about." }
+              message: { type: string }
+              fix: { type: string }
     AttributionCampaignRow:
       type: object
       required: [channel, label, source, campaign, tracking_campaign_id, campaign_name, visits, conversions, by_event, revenue]
@@ -29003,6 +29086,11 @@ components:
                   updated: { type: integer, description: A status brought over, or a refund added. }
                   unchanged: { type: integer, description: Here already. }
                   skipped: { type: integer, description: Couldn't come over; see issues. }
+                  reported: { type: integer, description: "How many the platform said its list holds, when it says: compare with seen." }
+                  reported_by:
+                    type: object
+                    additionalProperties: { type: integer }
+                    description: "reported per part, when the platform lists the kind in parts (Tolt's partners, by status)."
             issues:
               type: array
               description: The first 100 things to look at, by the platform's id and a reason, never names or addresses.
@@ -29018,7 +29106,10 @@ components:
                       incomplete, no_email, link_param (a link's parameter isn't ref or via, which the website script reads),
                       extra_link (a partner's second link: their code is the first), code_changed (the partner got a new
                       code), partner_missing, partner_unavailable (a partner other objects name that the platform couldn't
-                      give by id either), customer_missing, promo_code_invalid, promo_code_taken, already_referred
+                      give by id either; message has the HTTP status), partner_id_missing (a promo code names no partner
+                      under a field the import reads; message lists its fields), partners_unlisted (the platform reported
+                      more partners than came over; message has the counts and whether any of the others has referrals),
+                      customer_missing, promo_code_invalid, promo_code_taken, already_referred
                       (another partner has the customer here), status_conflict (rejected there after it was approved here),
                       unreadable (the platform's answer for the whole kind couldn't be read, or it refused the request; the
                       import read the other kinds, and message says why).
@@ -30593,6 +30684,38 @@ components:
         started_at: { type: [string, "null"], format: date-time }
         ended_at: { type: [string, "null"], format: date-time }
         decision: { type: string, description: 'The variant chosen when it ended; "" for none.' }
+        registration:
+          description: "What the test set out to show, kept as it was when it started: the hypothesis, control, goals, guardrails, smallest change, the plan, and the flag's versions (weights and a fingerprint of their content) and rollout. Null for a draft, and for tests started before registration."
+          oneOf:
+            - type: object
+              required: [hypothesis, control, goals, guardrails, min_effect, rollout, versions, plan, registered_at]
+              properties:
+                hypothesis: { type: string }
+                control: { type: string }
+                goals: { type: array, items: { $ref: "#/components/schemas/ABTestGoal" } }
+                guardrails: { type: [array, "null"], items: { $ref: "#/components/schemas/ABTestGoal" } }
+                min_effect: { type: number }
+                rollout: { type: integer }
+                versions:
+                  type: array
+                  items:
+                    type: object
+                    required: [key, weight, content_hash]
+                    properties:
+                      key: { type: string }
+                      weight: { type: integer }
+                      content_hash: { type: string }
+                plan:
+                  oneOf:
+                    - type: object
+                      required: [weeks, weekly_per_version, visitors_per_version]
+                      properties:
+                        weeks: { type: number, description: "Weeks it was likely to need at min_effect; 0 when it couldn't be planned." }
+                        weekly_per_version: { type: number }
+                        visitors_per_version: { type: integer }
+                    - type: "null"
+                registered_at: { type: string, format: date-time }
+            - type: "null"
         created_at: { type: string, format: date-time }
         updated_at: { type: string, format: date-time }
     ABTestInput:
@@ -30745,6 +30868,10 @@ components:
             sample_ratio_mismatch: { type: boolean, description: "True when sample_ratio_p is under 0.001: something (a redirect, a cache, bots) is breaking the split, so there is no winner." }
             min_effect: { type: number, description: The smallest change the p-values were tuned to detect. }
             corrected_for: { type: integer, description: "Versions compared with the control. Past one, every p_value and range is corrected for that many chances of a false winner." }
+            flag_changed:
+              type: [array, "null"]
+              items: { type: string }
+              description: "How the flag changed since the test started, in sentences (its split, content, rollout or versions, or it was turned off). Results that mix before and after need care. Null for tests started before registration."
             computed_at: { type: string, format: date-time }
     ABTestBreakdown:
       type: object
@@ -31197,12 +31324,14 @@ components:
         event_types: { type: array, items: { type: string }, description: "What the target takes as event_type; empty when the target is the event." }
     AdConversionRule:
       type: object
-      required: [id, ad_account_id, connector, event_name, target_id, target_name, event_type, value_property, value_unit, fixed_value_micros, currency, enabled, sent_30d, skipped_30d, failed_30d, queued, last_sent_at, created_at, updated_at]
+      required: [id, ad_account_id, connector, event_name, conversion, conversion_name, target_id, target_name, event_type, value_property, value_unit, fixed_value_micros, currency, enabled, sent_30d, skipped_30d, failed_30d, queued, last_sent_at, created_at, updated_at]
       properties:
         id: { type: string, format: uuid }
         ad_account_id: { type: string, format: uuid }
         connector: { type: string, example: google_ads }
         event_name: { type: string, example: order_completed }
+        conversion: { type: [string, "null"], description: "The conversion definition it sends, by key; null for a bare event." }
+        conversion_name: { type: [string, "null"] }
         target_id: { type: string }
         target_name: { type: string }
         event_type: { type: string, example: Purchase }

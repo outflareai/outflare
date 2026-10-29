@@ -13,8 +13,10 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/outflareai/outflare/engine/internal/adconv"
+	"github.com/outflareai/outflare/engine/internal/adtrack"
 	"github.com/outflareai/outflare/engine/internal/auth"
 	"github.com/outflareai/outflare/engine/internal/connectors"
+	"github.com/outflareai/outflare/engine/internal/conversions"
 )
 
 // Sending conversions back: rules that map a customer event to a
@@ -131,10 +133,14 @@ func (s *Server) listAdConversionTargets(w http.ResponseWriter, r *http.Request)
 }
 
 type adConversionRule struct {
-	ID               string     `json:"id"`
-	AdAccountID      string     `json:"ad_account_id"`
-	Connector        string     `json:"connector"`
-	EventName        string     `json:"event_name"`
+	ID          string `json:"id"`
+	AdAccountID string `json:"ad_account_id"`
+	Connector   string `json:"connector"`
+	EventName   string `json:"event_name"`
+	// Conversion is the key of the conversion definition the rule sends,
+	// nil for a rule on a bare event.
+	Conversion       *string    `json:"conversion"`
+	ConversionName   *string    `json:"conversion_name"`
 	TargetID         string     `json:"target_id"`
 	TargetName       string     `json:"target_name"`
 	EventType        string     `json:"event_type"`
@@ -152,11 +158,12 @@ type adConversionRule struct {
 	UpdatedAt        time.Time  `json:"updated_at"`
 }
 
-const adRuleSelect = `SELECT r.id, r.ad_account_id, a.connector, r.event_name, r.target_id, r.target_name, r.event_type,
+const adRuleSelect = `SELECT r.id, r.ad_account_id, a.connector, COALESCE(d.event_name, r.event_name), d.key, d.name, r.target_id, r.target_name, r.event_type,
 		r.value_property, r.value_unit, r.fixed_value_micros, r.currency, r.enabled,
 		COALESCE(st.sent, 0), COALESCE(st.skipped, 0), COALESCE(st.failed, 0), COALESCE(st.queued, 0), st.last_sent_at,
 		r.created_at, r.updated_at
 	FROM ad_conversion_rules r JOIN ad_accounts a ON a.id = r.ad_account_id
+	LEFT JOIN conversion_definitions d ON d.id = r.conversion_id
 	LEFT JOIN LATERAL (
 		SELECT count(*) FILTER (WHERE status = 'sent' AND created_at > now() - interval '30 days') AS sent,
 			count(*) FILTER (WHERE status = 'skipped' AND created_at > now() - interval '30 days') AS skipped,
@@ -168,7 +175,7 @@ const adRuleSelect = `SELECT r.id, r.ad_account_id, a.connector, r.event_name, r
 
 func scanAdRule(row pgx.Row) (adConversionRule, error) {
 	var x adConversionRule
-	err := row.Scan(&x.ID, &x.AdAccountID, &x.Connector, &x.EventName, &x.TargetID, &x.TargetName, &x.EventType,
+	err := row.Scan(&x.ID, &x.AdAccountID, &x.Connector, &x.EventName, &x.Conversion, &x.ConversionName, &x.TargetID, &x.TargetName, &x.EventType,
 		&x.ValueProperty, &x.ValueUnit, &x.FixedValueMicros, &x.Currency, &x.Enabled,
 		&x.Sent30d, &x.Skipped30d, &x.Failed30d, &x.Queued, &x.LastSentAt, &x.CreatedAt, &x.UpdatedAt)
 	return x, err
@@ -212,6 +219,7 @@ func (s *Server) listAdConversionRules(w http.ResponseWriter, r *http.Request) {
 type adRuleInput struct {
 	AccountID        *string `json:"account_id"`
 	EventName        *string `json:"event_name"`
+	Conversion       *string `json:"conversion"`
 	TargetID         *string `json:"target_id"`
 	EventType        *string `json:"event_type"`
 	ValueProperty    *string `json:"value_property"`
@@ -233,6 +241,13 @@ func (in *adRuleInput) check(w http.ResponseWriter, r *http.Request) bool {
 			return bad("event_name is a customer event's name, such as signed_up or order_completed")
 		}
 		in.EventName = &v
+	}
+	if in.Conversion != nil {
+		v := strings.TrimSpace(*in.Conversion)
+		if v != "" && !conversions.KeyRE.MatchString(v) {
+			return bad("conversion is the key of one of the workspace's conversion definitions (GET .../conversion-definitions)")
+		}
+		in.Conversion = &v
 	}
 	if in.ValueProperty != nil {
 		v := strings.TrimSpace(*in.ValueProperty)
@@ -258,33 +273,62 @@ func (in *adRuleInput) check(w http.ResponseWriter, r *http.Request) bool {
 }
 
 // target finds the rule's conversion on the platform, so a rule never
-// points at something the platform doesn't have.
-func (s *Server) adRuleTarget(w http.ResponseWriter, r *http.Request, ws, accountID, targetID, eventType string) (connectors.ConversionTarget, bool) {
+// points at something the platform doesn't have. Without an event type it
+// takes the one the conversion definition names for this network
+// (networkEvents), when the platform offers it, or else the first.
+func (s *Server) adRuleTarget(w http.ResponseWriter, r *http.Request, ws, accountID, targetID, eventType string, networkEvents map[string]string) (connectors.ConversionTarget, string, bool) {
 	o, sender, acct, ok := s.adConversionAccount(w, r, ws, accountID)
 	if !ok {
-		return connectors.ConversionTarget{}, false
+		return connectors.ConversionTarget{}, "", false
+	}
+	prefer := ""
+	for _, n := range adtrack.Networks {
+		if n.Connector != "" && n.Connector == o.Connector.Definition().ID {
+			prefer = networkEvents[n.ID]
+		}
 	}
 	list, err := sender.ConversionTargets(r.Context(), o.Client, o.Creds, acct)
 	if err != nil {
 		s.connectorFailed(w, r, err)
-		return connectors.ConversionTarget{}, false
+		return connectors.ConversionTarget{}, "", false
 	}
 	for _, t := range list {
 		if t.ID != targetID {
 			continue
 		}
+		if eventType == "" && len(t.EventTypes) > 0 {
+			eventType = t.EventTypes[0]
+			if slices.Contains(t.EventTypes, prefer) {
+				eventType = prefer
+			}
+		}
 		if len(t.EventTypes) > 0 && !slices.Contains(t.EventTypes, eventType) {
 			writeError(w, r, http.StatusBadRequest, "invalid_request", "event_type is one of "+strings.Join(t.EventTypes, ", "))
-			return t, false
+			return t, "", false
 		}
 		if len(t.EventTypes) == 0 && eventType != "" {
 			writeError(w, r, http.StatusBadRequest, "invalid_request", "this conversion takes no event_type")
-			return t, false
+			return t, "", false
 		}
-		return t, true
+		return t, eventType, true
 	}
 	writeError(w, r, http.StatusBadRequest, "invalid_request", "target_id is not a conversion this ad account has: list them with GET .../ads/conversion-targets")
-	return connectors.ConversionTarget{}, false
+	return connectors.ConversionTarget{}, "", false
+}
+
+// adRuleDefinition reads the conversion definition a rule names, answering
+// the error itself.
+func (s *Server) adRuleDefinition(w http.ResponseWriter, r *http.Request, ws, key string) (conversions.Definition, bool) {
+	d, err := conversions.Get(r.Context(), s.pool, ws, key)
+	if errors.Is(err, conversions.ErrNotFound) || (err == nil && d.ArchivedAt != nil) {
+		writeError(w, r, http.StatusBadRequest, "invalid_request", "conversion is the key of one of the workspace's conversion definitions that isn't archived (GET .../conversion-definitions)")
+		return d, false
+	}
+	if err != nil {
+		s.internal(w, r, err)
+		return d, false
+	}
+	return d, true
 }
 
 func (s *Server) createAdConversionRule(w http.ResponseWriter, r *http.Request) {
@@ -296,20 +340,39 @@ func (s *Server) createAdConversionRule(w http.ResponseWriter, r *http.Request) 
 	if !decode(w, r, &in) || !in.check(w, r) {
 		return
 	}
-	if in.AccountID == nil || in.EventName == nil || in.TargetID == nil {
-		writeError(w, r, http.StatusBadRequest, "invalid_request", "account_id, event_name and target_id are required")
+	hasConversion := in.Conversion != nil && *in.Conversion != ""
+	if in.AccountID == nil || in.TargetID == nil || (in.EventName == nil && !hasConversion) {
+		writeError(w, r, http.StatusBadRequest, "invalid_request", "account_id, target_id, and event_name or conversion are required")
 		return
+	}
+	var def *conversions.Definition
+	networkEvents := map[string]string{}
+	eventName := ""
+	if in.EventName != nil {
+		eventName = *in.EventName
+	}
+	if hasConversion {
+		d, ok := s.adRuleDefinition(w, r, a.WorkspaceID, *in.Conversion)
+		if !ok {
+			return
+		}
+		if eventName != "" && eventName != d.Event {
+			writeError(w, r, http.StatusBadRequest, "invalid_request", "the conversion "+d.Key+" is a "+d.Event+" event: leave event_name out")
+			return
+		}
+		def, networkEvents, eventName = &d, d.NetworkEvents, d.Event
 	}
 	eventType := ""
 	if in.EventType != nil {
 		eventType = strings.TrimSpace(*in.EventType)
 	}
-	t, ok := s.adRuleTarget(w, r, a.WorkspaceID, *in.AccountID, *in.TargetID, eventType)
+	t, eventType, ok := s.adRuleTarget(w, r, a.WorkspaceID, *in.AccountID, *in.TargetID, eventType, networkEvents)
 	if !ok {
 		return
 	}
-	if eventType == "" && len(t.EventTypes) > 0 {
-		eventType = t.EventTypes[0]
+	var conversionID *string
+	if def != nil {
+		conversionID = &def.ID
 	}
 	str := func(p *string, def string) string {
 		if p == nil {
@@ -326,10 +389,10 @@ func (s *Server) createAdConversionRule(w http.ResponseWriter, r *http.Request) 
 	err := pgx.BeginFunc(r.Context(), s.pool, func(tx pgx.Tx) error {
 		var id string
 		err := tx.QueryRow(r.Context(), `INSERT INTO ad_conversion_rules (workspace_id, ad_account_id, event_name, target_id, target_name, event_type,
-				value_property, value_unit, fixed_value_micros, currency, enabled, created_by)
-			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12) RETURNING id`,
-			a.WorkspaceID, *in.AccountID, *in.EventName, t.ID, trimTo(t.Name, 300), eventType,
-			str(in.ValueProperty, ""), str(in.ValueUnit, "major"), in.FixedValueMicros, str(in.Currency, ""), enabled, createdBy).Scan(&id)
+				value_property, value_unit, fixed_value_micros, currency, enabled, created_by, conversion_id)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13) RETURNING id`,
+			a.WorkspaceID, *in.AccountID, eventName, t.ID, trimTo(t.Name, 300), eventType,
+			str(in.ValueProperty, ""), str(in.ValueUnit, "major"), in.FixedValueMicros, str(in.Currency, ""), enabled, createdBy, conversionID).Scan(&id)
 		if err != nil {
 			return err
 		}
@@ -337,7 +400,8 @@ func (s *Server) createAdConversionRule(w http.ResponseWriter, r *http.Request) 
 			return err
 		}
 		return record(r.Context(), tx, &a.principal, a.WorkspaceID, "ad_conversion_rule.created", "ad_conversion_rule", id,
-			map[string]any{"connector": out.Connector, "ad_account_id": out.AdAccountID, "event_type": eventType, "has_value": out.ValueProperty != "" || out.FixedValueMicros != nil})
+			map[string]any{"connector": out.Connector, "ad_account_id": out.AdAccountID, "event_type": eventType, "has_value": out.ValueProperty != "" || out.FixedValueMicros != nil,
+				"from_definition": def != nil})
 	})
 	if isUnique(err) {
 		writeError(w, r, http.StatusConflict, "conflict", "this ad account already sends that event to that conversion")
@@ -365,14 +429,31 @@ func (s *Server) updateAdConversionRule(w http.ResponseWriter, r *http.Request) 
 		writeError(w, r, http.StatusBadRequest, "invalid_request", "a rule's account, conversion and event type are fixed: add a new rule instead")
 		return
 	}
+	// A conversion replaces the event: the rule then sends what the
+	// definition counts; "" goes back to the bare event it had.
+	var conversionID *string
+	clear := false
+	if in.Conversion != nil {
+		if *in.Conversion == "" {
+			clear = true
+		} else {
+			d, ok := s.adRuleDefinition(w, r, a.WorkspaceID, *in.Conversion)
+			if !ok {
+				return
+			}
+			conversionID, in.EventName = &d.ID, &d.Event
+		}
+	}
 	var out adConversionRule
 	err := pgx.BeginFunc(r.Context(), s.pool, func(tx pgx.Tx) error {
 		tag, err := tx.Exec(r.Context(), `UPDATE ad_conversion_rules SET event_name = COALESCE($3, event_name),
+				conversion_id = CASE WHEN $10 THEN NULL ELSE COALESCE($9::uuid, conversion_id) END,
+				matched_until = CASE WHEN $9::uuid IS NOT NULL OR $10 THEN now() ELSE matched_until END,
 				value_property = COALESCE($4, value_property), value_unit = COALESCE($5, value_unit),
 				fixed_value_micros = COALESCE($6, fixed_value_micros), currency = COALESCE($7, currency),
 				enabled = COALESCE($8, enabled), updated_at = now()
 			WHERE workspace_id = $1 AND id = $2`,
-			a.WorkspaceID, id, in.EventName, in.ValueProperty, in.ValueUnit, in.FixedValueMicros, in.Currency, in.Enabled)
+			a.WorkspaceID, id, in.EventName, in.ValueProperty, in.ValueUnit, in.FixedValueMicros, in.Currency, in.Enabled, conversionID, clear)
 		if err != nil {
 			return err
 		}

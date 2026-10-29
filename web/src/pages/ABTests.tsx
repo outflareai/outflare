@@ -523,6 +523,16 @@ function TestSheet({ ws, test, flag, canManage, onClose, onChanged, onFlagChange
           ) : (
             <>
               {v && v.text && <div className={`rounded-md border px-3 py-2 ${toneClass[v.tone]}`}>{v.text}</div>}
+              {results.result.flag_changed && results.result.flag_changed.length > 0 && (
+                <div className={`space-y-1 rounded-md border px-3 py-2 ${toneClass.amber}`}>
+                  <span className="block font-medium">The flag changed after the test started</span>
+                  {results.result.flag_changed.map((c) => (
+                    <p key={c}>{c}</p>
+                  ))}
+                  <p>Results now mix visitors from before and after. To measure the new setup cleanly, end this test and duplicate it.</p>
+                </div>
+              )}
+              {test.registration && <RegistrationCard reg={test.registration} />}
               {test.learning && (
                 <Card title="What it taught">
                   <p className="font-medium">{test.learning.headline}</p>
@@ -706,6 +716,29 @@ function segmentLabel(by: string, key: string): string {
 }
 
 const checkTone = { ok: "green", warn: "amber", fail: "red" } as const;
+
+// RegistrationCard shows what the test set out to show when it started.
+function RegistrationCard({ reg }: { reg: NonNullable<ABTest["registration"]> }) {
+  return (
+    <details className="rounded-md border px-3 py-2 text-[12px]">
+      <summary className="cursor-pointer font-medium">Registered when it started, {ago(reg.registered_at)}</summary>
+      <div className="mt-2 space-y-1">
+        {reg.hypothesis && <p className="italic">{reg.hypothesis}</p>}
+        <p>
+          Control <span className="font-mono">{reg.control}</span>; tuned to find changes of {signed(reg.min_effect)} or more; rollout {reg.rollout}%.
+        </p>
+        <p>
+          Versions: {reg.versions.map((v) => `${v.key} (${v.weight})`).join(", ")}.
+        </p>
+        {reg.plan && reg.plan.weeks > 0 && (
+          <p>
+            Planned: about {Math.ceil(reg.plan.weeks)} week(s), {reg.plan.visitors_per_version.toLocaleString()} visitors per version.
+          </p>
+        )}
+      </div>
+    </details>
+  );
+}
 
 // ChecklistPanel says what would stop a draft measuring anything useful,
 // read fresh when its goals change (the saved test's; deps only re-reads).

@@ -6,6 +6,12 @@ Each pull request that changes what Outflare does adds a change note in [changes
 
 ## [Unreleased]
 
+## [0.41.0] - 2026-10-29
+
+### Changed
+
+- Send a conversion you've defined back to an ad platform, not only a raw event: only the events that meet its conditions go (a call over a minute, an order over $100), worth what it says and named as that network expects.
+
 ## [0.40.0] - 2026-10-29
 
 ### Changed

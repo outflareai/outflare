@@ -5,6 +5,7 @@ package partnerapps
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -136,6 +137,11 @@ func (Tolt) fetch(ctx context.Context, cl *c.Client, creds c.Creds, what, path s
 // partner list left out (Tolt lists onboarded partners only).
 func (t Tolt) PartnerByID(ctx context.Context, cl *c.Client, creds c.Creds, program, id string) (c.ImportPartner, error) {
 	status, ctype, body, err := t.fetch(ctx, cl, creds, "a partner", "/partners/"+url.PathEscape(id), url.Values{"program_id": {program}})
+	if err != nil && c.KindOf(err) == c.ErrInvalid {
+		// Gone, or refused for this one partner: the status only, never
+		// the answer's text.
+		return c.ImportPartner{}, &c.UnreadableError{Message: fmt.Sprintf("Tolt answered HTTP %d for this partner", status)}
+	}
 	if err != nil {
 		return c.ImportPartner{}, err
 	}
@@ -359,24 +365,37 @@ func (t Tolt) PartnerPage(ctx context.Context, cl *c.Client, creds c.Creds, prog
 	}
 	q := url.Values{"program_id": {program}, "limit": {strconv.Itoa(toltPage)}}
 	// Partners are read one status at a time, since Tolt's list filters by
-	// status: the cursor is "<status index>:<Tolt's cursor>".
-	st := 0
+	// status: the cursor is "<status index>:<Tolt's cursor>". A cursor with
+	// "!" in place of the ":" (or before it, for other kinds) is one asked
+	// past where Tolt said the list ended (see below).
+	st, probed := 0, false
 	if kind == c.PartnerKindPartners {
-		if i, rest, ok := strings.Cut(after, ":"); ok {
-			if n, err := strconv.Atoi(i); err == nil && n >= 0 && n < len(toltPartnerStatuses) {
-				st, after = n, rest
+		if i := strings.IndexAny(after, ":!"); i > 0 {
+			if n, err := strconv.Atoi(after[:i]); err == nil && n >= 0 && n < len(toltPartnerStatuses) {
+				st, probed, after = n, after[i] == '!', after[i+1:]
 			}
 		}
 		q.Set("status", toltPartnerStatuses[st])
+	} else if rest, ok := strings.CutPrefix(after, "!"); ok {
+		probed, after = true, rest
 	}
 	if after != "" {
 		q.Set("starting_after", after)
 	}
 	l, err := t.get(ctx, cl, creds, strings.ReplaceAll(kind, "_", " "), path, q)
+	if err != nil && probed && (c.KindOf(err) == c.ErrInvalid || errors.As(err, new(*c.UnreadableError))) {
+		// Tolt refused the extra ask: the list did end there.
+		if kind == c.PartnerKindPartners && st+1 < len(toltPartnerStatuses) {
+			return page, strconv.Itoa(st+1) + ":", nil
+		}
+		return page, "", nil
+	}
 	if err != nil {
 		return page, "", err
 	}
 	if after == "" && l.Total != nil {
+		n := *l.Total
+		page.Reported, page.ReportedFor = &n, q.Get("status")
 		// How many Tolt says there are, to compare with what an import read.
 		slog.Info("tolt list", "kind", kind, "status", q.Get("status"), "total_count", *l.Total, "first_page", len(l.Data), "has_more", l.HasMore != nil && *l.HasMore)
 	}
@@ -388,8 +407,11 @@ func (t Tolt) PartnerPage(ctx context.Context, cl *c.Client, creds c.Creds, prog
 			page.Links = append(page.Links, c.ImportLink{ID: str(o, "id"), PartnerID: ref(o, "partner_id", "partner"),
 				Param: str(o, "param"), Value: str(o, "value"), Created: when(o, "created_at", "created")})
 		case c.PartnerKindPromoCodes:
-			page.PromoCodes = append(page.PromoCodes, c.ImportPromoCode{ID: str(o, "id"), PartnerID: ref(o, "partner_id", "partner"),
-				Code: str(o, "code", "name")})
+			pc := c.ImportPromoCode{ID: str(o, "id"), PartnerID: ref(o, "partner_id", "partner"), Code: str(o, "code", "name")}
+			if pc.PartnerID == "" {
+				pc.Keys = toltShape(any(o))
+			}
+			page.PromoCodes = append(page.PromoCodes, pc)
 		case c.PartnerKindCustomers:
 			page.Customers = append(page.Customers, c.ImportCustomer{ID: str(o, "id"), PartnerID: ref(o, "partner_id", "partner"),
 				Email: str(o, "email"), CustomerID: str(o, "customer_id", "external_id"), Created: when(o, "lead_at", "created_at", "created"),
@@ -415,13 +437,25 @@ func (t Tolt) PartnerPage(ctx context.Context, cl *c.Client, creds c.Creds, prog
 			next = str(l.Data[len(l.Data)-1], "id")
 		}
 	}
-	if kind == c.PartnerKindPartners {
-		switch {
-		case next != "":
-			next = strconv.Itoa(st) + ":" + next
-		case st+1 < len(toltPartnerStatuses):
-			next = strconv.Itoa(st+1) + ":"
+	// Tolt said there are no more right after a full page. In case its
+	// list stops at a cap rather than at the end, ask once more, after the
+	// last object's id; a list that really ended answers with nothing.
+	if next == "" && !probed && len(l.Data) == toltPage {
+		next, probed = str(l.Data[len(l.Data)-1], "id"), true
+	}
+	sep := ":"
+	if probed {
+		sep = "!"
+	}
+	switch {
+	case kind != c.PartnerKindPartners:
+		if next != "" && probed {
+			next = "!" + next
 		}
+	case next != "":
+		next = strconv.Itoa(st) + sep + next
+	case st+1 < len(toltPartnerStatuses):
+		next = strconv.Itoa(st+1) + ":"
 	}
 	return page, next, nil
 }

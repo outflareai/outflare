@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import type { AdAccount, AdConnection, AdConversionRule, AdConversionSend, AdConversionTarget, AdSettings } from "@outflare/sdk";
+import type { AdAccount, AdConnection, AdConversionRule, AdConversionSend, AdConversionTarget, AdSettings, ConversionDefinition } from "@outflare/sdk";
 import { DataTable } from "@/components/data-table";
 import { api, errorMessage } from "../api";
 import { Badge, Button, Card, Input, confirmAction, field, toast } from "../ui";
@@ -86,8 +86,11 @@ export function AdConversions({ ws, canManage, accounts }: { ws: string; canMana
                 accessorFn: (r) => r.event_name,
                 cell: ({ row: { original: r } }) => (
                   <div className="space-y-0.5">
-                    <div className="font-mono text-[13px]">{r.event_name}</div>
-                    <div className="text-[12px] text-muted-foreground">{r.value_property ? `Value from ${r.value_property}` : r.fixed_value_micros !== null ? "Fixed value" : "No value"}</div>
+                    <div className="text-[13px]">{r.conversion_name ? <span className="font-medium">{r.conversion_name}</span> : <span className="font-mono">{r.event_name}</span>}</div>
+                    <div className="text-[12px] text-muted-foreground">
+                      {r.conversion_name && <span className="font-mono">{r.event_name} · </span>}
+                      {r.value_property ? `Value from ${r.value_property}` : r.fixed_value_micros !== null ? "Fixed value" : r.conversion ? "Value from the conversion" : "No value"}
+                    </div>
                   </div>
                 ),
               },
@@ -180,6 +183,9 @@ function NewRule({ ws, accounts, cancel, done }: { ws: string; accounts: AdAccou
   const [target, setTarget] = useState("");
   const [eventType, setEventType] = useState("");
   const [eventName, setEventName] = useState("");
+  // The conversion definitions the rule can send instead of a bare event.
+  const [definitions, setDefinitions] = useState<ConversionDefinition[]>([]);
+  const [conversion, setConversion] = useState("");
   const [valueProperty, setValueProperty] = useState("");
   const [unit, setUnit] = useState<"major" | "minor">("major");
   const [busy, setBusy] = useState(false);
@@ -202,8 +208,22 @@ function NewRule({ ws, accounts, cancel, done }: { ws: string; accounts: AdAccou
   useEffect(() => {
     loadTargets();
   }, [loadTargets]);
+  useEffect(() => {
+    api.GET("/v1/workspaces/{ws}/conversion-definitions", { params: { path: { ws } } }).then(({ data }) => {
+      const list = data?.data ?? [];
+      setDefinitions(list);
+      if (list.length > 0) setConversion(list[0].key ?? "");
+    });
+  }, [ws]);
 
   const chosen = targets?.find((t) => t.id === target);
+  // A conversion's own name for this network (meta for meta_ads) is the
+  // event type to send, when the platform offers it.
+  const network = accounts.find((a) => a.id === account)?.connector.replace(/_ads$/, "") ?? "";
+  const named = definitions.find((d) => d.key === conversion)?.network_events?.[network];
+  useEffect(() => {
+    if (named && chosen?.event_types.includes(named)) setEventType(named);
+  }, [named, chosen]);
 
   async function saveSetup() {
     if (!setup) return;
@@ -219,7 +239,9 @@ function NewRule({ ws, accounts, cancel, done }: { ws: string; accounts: AdAccou
     setBusy(true);
     const { error } = await api.POST("/v1/workspaces/{ws}/ads/conversion-rules", {
       params: { path: { ws } },
-      body: { account_id: account, event_name: eventName.trim(), target_id: target, event_type: eventType || undefined, value_property: valueProperty.trim() || undefined, value_unit: unit },
+      body: conversion
+        ? { account_id: account, conversion, target_id: target, event_type: eventType || undefined }
+        : { account_id: account, event_name: eventName.trim(), target_id: target, event_type: eventType || undefined, value_property: valueProperty.trim() || undefined, value_unit: unit },
     });
     setBusy(false);
     if (error) return toast(errorMessage(error), "error");
@@ -272,8 +294,18 @@ function NewRule({ ws, accounts, cancel, done }: { ws: string; accounts: AdAccou
               </label>
             )}
           </div>
-          <Input label="When this event happens" hint="The customer event's name, as your website or app sends it, such as signed_up or order_completed." placeholder="order_completed" required value={eventName} onChange={(e) => setEventName(e.target.value)} />
-          <div className="grid gap-3 sm:grid-cols-2">
+          {definitions.length > 0 && (
+            <label className="flex flex-col gap-1 text-[13px]">
+              <span className="font-medium">What to send</span>
+              <select className={field} value={conversion} onChange={(e) => setConversion(e.target.value)}>
+                {definitions.map((d) => <option key={d.key} value={d.key}>{d.name}</option>)}
+                <option value="">A customer event…</option>
+              </select>
+              <span className="text-[12px] text-muted-foreground">A conversion sends only the events that meet its conditions, worth what it says. Define them under Analytics → Channels.</span>
+            </label>
+          )}
+          {!conversion && <Input label="When this event happens" hint="The customer event's name, as your website or app sends it, such as signed_up or order_completed." placeholder="order_completed" required value={eventName} onChange={(e) => setEventName(e.target.value)} />}
+          {!conversion && <div className="grid gap-3 sm:grid-cols-2">
             <Input label="Value property (optional)" hint="The event property with the amount, such as total." value={valueProperty} onChange={(e) => setValueProperty(e.target.value)} />
             <label className="flex flex-col gap-1 text-[13px]">
               <span className="font-medium">The amount is in</span>
@@ -282,9 +314,9 @@ function NewRule({ ws, accounts, cancel, done }: { ws: string; accounts: AdAccou
                 <option value="minor">Cents (1250)</option>
               </select>
             </label>
-          </div>
+          </div>}
           <div className="flex gap-2">
-            <Button type="submit" disabled={busy || !eventName.trim()}>Add rule</Button>
+            <Button type="submit" disabled={busy || (!conversion && !eventName.trim())}>Add rule</Button>
             <Button type="button" variant="ghost" onClick={cancel}>Cancel</Button>
           </div>
         </form>

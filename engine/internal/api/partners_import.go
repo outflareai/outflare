@@ -81,6 +81,12 @@ type partnerImportCount struct {
 	Updated   int    `json:"updated"`
 	Unchanged int    `json:"unchanged"`
 	Skipped   int    `json:"skipped"`
+	// Reported is how many the platform said its lists hold, when it says,
+	// to reconcile with Seen.
+	Reported int `json:"reported,omitempty"`
+	// ReportedBy is Reported by part, when the platform lists the kind in
+	// parts (Tolt's partners, by status).
+	ReportedBy map[string]int `json:"reported_by,omitempty"`
 }
 
 // partnerImportIssue is an object that couldn't come over as it was. Only
@@ -101,6 +107,9 @@ type partnerImportProgress struct {
 	// Codes is each partner's code, from their first link, until the
 	// partners are read.
 	Codes map[string]string `json:"codes,omitempty"`
+	// Listed is each partner the platform's list gave, to reconcile with
+	// how many it said there are.
+	Listed map[string]bool `json:"listed,omitempty"`
 }
 
 func (v *partnerImportSummary) normalize() {
@@ -568,7 +577,10 @@ func (r *partnerImportRun) finish(ctx context.Context, runErr error) error {
 			Props: map[string]any{"import_id": r.id, "connector": r.connector}}, code, runErr)
 	}
 	metrics.PartnerImport(r.connector, status)
-	r.progress.Codes = nil
+	if runErr == nil {
+		r.reconcilePartners()
+	}
+	r.progress.Codes, r.progress.Listed = nil, nil
 	data := map[string]any{"connector": r.connector, "status": status, "issues": len(r.sum.Issues) + r.sum.MoreIssues}
 	if r.prog != nil {
 		data["program_id"], data["program_kind"] = r.prog.ID, r.prog.Kind
@@ -589,6 +601,55 @@ func (r *partnerImportRun) finish(ctx context.Context, runErr error) error {
 	})
 }
 
+// reportedTotal adds up what the platform reported for each part of a
+// list. When every part reported the same number, that number is the
+// whole list's count, which the platform gave whatever the filter.
+func reportedTotal(by map[string]int) int {
+	sum, same, first := 0, true, -1
+	for _, n := range by {
+		sum += n
+		if first >= 0 && n != first {
+			same = false
+		}
+		first = n
+	}
+	if same && len(by) > 1 && first > 0 {
+		return first
+	}
+	return sum
+}
+
+// reconcilePartners notes when the platform reported more partners than
+// its list gave (Tolt's list has left out partners who haven't finished
+// onboarding), and whether any of those has referrals here: a customer,
+// commission or promo code that names a partner who didn't come over.
+func (r *partnerImportRun) reconcilePartners() {
+	reported := r.sum.count(connectors.PartnerKindPartners).Reported
+	if reported == 0 {
+		return
+	}
+	listed := len(r.progress.Listed)
+	if listed >= reported {
+		return
+	}
+	named := 0
+	for _, i := range r.sum.Issues {
+		if i.Kind != connectors.PartnerKindPartners && (i.Reason == "partner_missing" || i.Reason == "partner_id_missing") ||
+			i.Reason == "partner_unavailable" {
+			named++
+		}
+	}
+	msg := fmt.Sprintf("%s reports %d partners and its partner list gave %d, so it left out %d.",
+		r.o.Connector.Definition().Name, reported, listed, reported-listed)
+	if named == 0 {
+		msg += " Every customer, commission and promo code names a partner who came over, so none of the others has referrals."
+	} else {
+		msg += fmt.Sprintf(" %d customers, commissions or promo codes name a partner who didn't come over: see their issues.", named)
+	}
+	// Kept whatever the cap, like an unreadable kind: it is what to look at first.
+	r.sum.Issues = append(r.sum.Issues, partnerImportIssue{Kind: connectors.PartnerKindPartners, Reason: "partners_unlisted", Message: msg})
+}
+
 // issue notes an object that couldn't come over.
 func (r *partnerImportRun) issue(kind, external, reason string) {
 	r.sum.count(kind).Skipped++
@@ -599,11 +660,17 @@ func (r *partnerImportRun) issue(kind, external, reason string) {
 // warn notes something about an object that came over all the same (a
 // code that had to change, a customer another partner already had).
 func (r *partnerImportRun) warn(kind, external, reason string) {
+	r.warnWhy(kind, external, reason, "")
+}
+
+// warnWhy is warn with a message: ids, counts, statuses and field names,
+// never values from the platform's answer.
+func (r *partnerImportRun) warnWhy(kind, external, reason, message string) {
 	if len(r.sum.Issues) >= partnerImportIssues {
 		r.sum.MoreIssues++
 		return
 	}
-	r.sum.Issues = append(r.sum.Issues, partnerImportIssue{Kind: kind, ExternalID: cutUTF8(external, 200), Reason: reason})
+	r.sum.Issues = append(r.sum.Issues, partnerImportIssue{Kind: kind, ExternalID: cutUTF8(external, 200), Reason: reason, Message: cutUTF8(message, 500)})
 }
 
 // note counts one object's result: created, updated or unchanged.
@@ -659,7 +726,12 @@ func (r *partnerImportRun) missingPartners(ctx context.Context, page connectors.
 		switch {
 		case errors.As(err, new(*connectors.UnreadableError)) || connectors.KindOf(err) == connectors.ErrInvalid:
 			// Gone there, or not readable: what names it is skipped.
-			r.warn(connectors.PartnerKindPartners, id, "partner_unavailable")
+			why := "the platform refused the request"
+			var u *connectors.UnreadableError
+			if errors.As(err, &u) {
+				why = u.Message
+			}
+			r.warnWhy(connectors.PartnerKindPartners, id, "partner_unavailable", why)
 			continue
 		case err != nil:
 			return err
@@ -676,6 +748,24 @@ func (r *partnerImportRun) missingPartners(ctx context.Context, page connectors.
 // can't come over never holds up the rest.
 func (r *partnerImportRun) page(ctx context.Context, kind string, page connectors.PartnerObjects) error {
 	r.sum.count(kind).Seen += page.Len()
+	for _, p := range page.Partners {
+		if r.progress.Listed == nil {
+			r.progress.Listed = map[string]bool{}
+		}
+		r.progress.Listed[p.ID] = true
+	}
+	if page.Reported != nil {
+		c := r.sum.count(kind)
+		if page.ReportedFor == "" {
+			c.Reported += *page.Reported
+		} else {
+			if c.ReportedBy == nil {
+				c.ReportedBy = map[string]int{}
+			}
+			c.ReportedBy[page.ReportedFor] = *page.Reported
+			c.Reported = reportedTotal(c.ReportedBy)
+		}
+	}
 	oneOf := func(kind string, f func(tx pgx.Tx) (string, error), external string) error {
 		var result string
 		err := pgx.BeginFunc(ctx, r.s.pool, func(tx pgx.Tx) error {
@@ -711,6 +801,14 @@ func (r *partnerImportRun) page(ctx context.Context, kind string, page connector
 		}
 	case connectors.PartnerKindPromoCodes:
 		for _, c := range page.PromoCodes {
+			if c.PartnerID == "" && c.ID != "" {
+				// Its partner is under a field the import doesn't read yet:
+				// the message names the fields there are.
+				r.sum.count(kind).Skipped++
+				metrics.PartnerImportObjects(kind, "skipped", 1)
+				r.warnWhy(kind, c.ID, "partner_id_missing", "no partner id in the promo code; its fields: "+c.Keys)
+				continue
+			}
 			if err := one(func(tx pgx.Tx) (string, error) { return r.promoCode(ctx, tx, c) }, c.ID); err != nil {
 				return err
 			}
