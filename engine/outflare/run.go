@@ -333,7 +333,7 @@ func Run(ctx context.Context, log *slog.Logger, cmd string, exts ...Extension) e
 	lifecycle.Register(sendQueue)
 	// Journeys start runs from customer events and move them through their
 	// steps, sending with the lifecycle service.
-	journeyRuns := &journeys.Service{Pool: pool, Emails: lifecycle, Log: log}
+	journeyRuns := &journeys.Service{Pool: pool, Emails: lifecycle, Log: log, Store: integrations, Box: box, AllowPrivate: cfg.WebhooksAllowPrivate}
 	journeyRuns.Register(queue)
 	// Smart lists keep their members up to date from their rules.
 	smart := &smartlists.Service{Pool: pool, Log: log}

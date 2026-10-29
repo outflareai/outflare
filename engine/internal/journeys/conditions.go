@@ -19,6 +19,7 @@ type subject struct {
 	ws, runID, recordID string
 	attributes          map[string]any
 	context             map[string]any
+	vars                map[string]any
 	entered             time.Time
 }
 
@@ -47,6 +48,9 @@ func test(ctx context.Context, q jobs.Querier, s subject, c Condition) (bool, er
 		return compare(v, ok, c.Op, c.Value), nil
 	case c.Property != "":
 		v, ok := lookup(s.context, c.Property)
+		return compare(v, ok, c.Op, c.Value), nil
+	case c.Var != "":
+		v, ok := lookup(s.vars, c.Var)
 		return compare(v, ok, c.Op, c.Value), nil
 	case c.Event != "":
 		var did bool

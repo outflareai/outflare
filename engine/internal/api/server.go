@@ -534,6 +534,7 @@ func (s *Server) buildHandler() http.Handler {
 	if s.emails != nil {
 		s.routesEmails(mux)
 		s.routesJourneys(mux)
+		s.routesJourneySecrets(mux)
 	}
 	if s.routes != nil {
 		s.routes(mux)

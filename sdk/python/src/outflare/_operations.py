@@ -1609,6 +1609,32 @@ class Operations(_Mixin):
             idempotency_key=idempotency_key,
         )
 
+    def assign_partner_group(
+        self,
+        id: str,
+        group: str,
+        *,
+        ws: str | None = None,
+        partner_ids: list[str],
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Move partners into a group.
+
+        Scope: partners.manage. A partner is in one group at a time; its rules (group_id) apply to them. Partners of other programs are left alone.
+
+        Needs: the partners.manage scope.
+        POST /v1/workspaces/{ws}/partner-programs/{id}/groups/{group}/partners
+        """
+        return self._call(
+            "POST",
+            "/v1/workspaces/{ws}/partner-programs/{id}/groups/{group}/partners",
+            path={"id": id, "group": group, "ws": ws},
+            body={"partner_ids": partner_ids},
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
     def authorize_integration(
         self,
         connector: str,
@@ -4101,6 +4127,7 @@ class Operations(_Mixin):
         id: str,
         *,
         ws: str | None = None,
+        default: bool | None = None,
         name: str,
         extra_body: dict[str, Any] | None = None,
         idempotency_key: str | None = None,
@@ -4116,7 +4143,7 @@ class Operations(_Mixin):
             "POST",
             "/v1/workspaces/{ws}/partner-programs/{id}/groups",
             path={"id": id, "ws": ws},
-            body={"name": name},
+            body={"default": default, "name": name},
             extra_body=extra_body,
             idempotency_key=idempotency_key,
         )
@@ -5408,6 +5435,28 @@ class Operations(_Mixin):
             "DELETE",
             "/v1/workspaces/{ws}/integrations/{id}",
             path={"id": id, "ws": ws},
+            idempotency_key=idempotency_key,
+        )
+
+    def delete_journey_step_secret(
+        self,
+        id: str,
+        step: str,
+        *,
+        ws: str | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Remove a webhook step's key.
+
+        Scope: emails.manage. The step then sends no key until one is set again.
+
+        Needs: the emails.manage scope.
+        DELETE /v1/workspaces/{ws}/journeys/{id}/step-secrets/{step}
+        """
+        return self._call(
+            "DELETE",
+            "/v1/workspaces/{ws}/journeys/{id}/step-secrets/{step}",
+            path={"id": id, "step": step, "ws": ws},
             idempotency_key=idempotency_key,
         )
 
@@ -8860,6 +8909,26 @@ class Operations(_Mixin):
             "GET",
             "/v1/workspaces/{ws}/journeys/{id}/runs/{run}",
             path={"id": id, "run": run, "ws": ws},
+        )
+
+    def get_journey_signing_secret(
+        self,
+        *,
+        ws: str | None = None,
+    ) -> Any:
+        """The signing secret for journey webhooks.
+
+        Scope: emails.manage. The secret that signs every webhook step's call, made the first time it is asked for.
+        Receivers check the webhook-signature header with it, using any Standard Webhooks library. Showing it is
+        recorded in the audit log.
+
+        Needs: the emails.manage scope.
+        GET /v1/workspaces/{ws}/journeys/signing-secret
+        """
+        return self._call(
+            "GET",
+            "/v1/workspaces/{ws}/journeys/signing-secret",
+            path={"ws": ws},
         )
 
     def get_kit_catalog(
@@ -13421,6 +13490,25 @@ class Operations(_Mixin):
             "GET",
             "/v1/workspaces/{ws}/journeys/step-kinds",
             path={"ws": ws},
+        )
+
+    def list_journey_step_secrets(
+        self,
+        id: str,
+        *,
+        ws: str | None = None,
+    ) -> Any:
+        """Which webhook steps have their key set.
+
+        Scope: emails.read. The steps whose key is set, never the keys.
+
+        Needs: the emails.read scope.
+        GET /v1/workspaces/{ws}/journeys/{id}/step-secrets
+        """
+        return self._call(
+            "GET",
+            "/v1/workspaces/{ws}/journeys/{id}/step-secrets",
+            path={"id": id, "ws": ws},
         )
 
     def list_journey_versions(
@@ -18534,6 +18622,31 @@ class Operations(_Mixin):
             idempotency_key=idempotency_key,
         )
 
+    def rotate_journey_signing_secret(
+        self,
+        *,
+        ws: str | None = None,
+        expire_now: bool | None = None,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Rotate the signing secret for journey webhooks.
+
+        Scope: emails.manage. Makes a new signing secret. The old one keeps signing beside it for 24 hours, so receivers
+        can switch without missing a call; expire_now drops it at once, for a leaked secret.
+
+        Needs: the emails.manage scope.
+        POST /v1/workspaces/{ws}/journeys/signing-secret/rotate
+        """
+        return self._call(
+            "POST",
+            "/v1/workspaces/{ws}/journeys/signing-secret/rotate",
+            path={"ws": ws},
+            body={"expire_now": expire_now},
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
     def rotate_partner_postback(
         self,
         id: str,
@@ -19269,6 +19382,35 @@ class Operations(_Mixin):
             "/v1/workspaces/{ws}/email-providers/{id}/signing-secret",
             path={"id": id, "ws": ws},
             body={"secret": secret},
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
+    def set_journey_step_secret(
+        self,
+        id: str,
+        step: str,
+        *,
+        ws: str | None = None,
+        value: str,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Set a webhook step's key.
+
+        Scope: emails.manage. Sets the key a webhook step sends, in place of any earlier one: the header's value (auth
+        header, such as "Bearer sk_..."), the password (auth basic) or the URL parameter's value (auth query). Set the
+        step's auth first. The key is sealed and never shown again. A journey can't go live until every step that sends
+        a key has one.
+
+        Needs: the emails.manage scope.
+        PUT /v1/workspaces/{ws}/journeys/{id}/step-secrets/{step}
+        """
+        return self._call(
+            "PUT",
+            "/v1/workspaces/{ws}/journeys/{id}/step-secrets/{step}",
+            path={"id": id, "step": step, "ws": ws},
+            body={"value": value},
             extra_body=extra_body,
             idempotency_key=idempotency_key,
         )
@@ -23158,6 +23300,33 @@ class Operations(_Mixin):
                 "record_id": record_id,
                 "status": status,
             },
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
+    def update_partner_group(
+        self,
+        id: str,
+        group: str,
+        *,
+        ws: str | None = None,
+        default: bool | None = None,
+        name: str | None = None,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Rename a partner group or make it the default.
+
+        Scope: partners.manage. default: true makes it the group new partners join (when none is given); false stops that. Returns the program.
+
+        Needs: the partners.manage scope.
+        PATCH /v1/workspaces/{ws}/partner-programs/{id}/groups/{group}
+        """
+        return self._call(
+            "PATCH",
+            "/v1/workspaces/{ws}/partner-programs/{id}/groups/{group}",
+            path={"id": id, "group": group, "ws": ws},
+            body={"default": default, "name": name},
             extra_body=extra_body,
             idempotency_key=idempotency_key,
         )

@@ -425,7 +425,7 @@ func (s *Server) joinPartner(ctx context.Context, tx pgx.Tx, ws string, p *princ
 	}
 	var id string
 	err := tx.QueryRow(ctx, `INSERT INTO partner_memberships (workspace_id, program_id, record_id, code, status, group_id, note, source, created_by,
-		application, terms_accepted_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11) ON CONFLICT (program_id, record_id) DO NOTHING RETURNING id::text`,
+		application, terms_accepted_at) VALUES ($1, $2, $3, $4, $5, COALESCE($6::uuid, (SELECT default_group_id FROM partner_programs WHERE id = $2)), $7, $8, $9, $10, $11) ON CONFLICT (program_id, record_id) DO NOTHING RETURNING id::text`,
 		ws, prog.ID, rec, code, status, j.group, j.note, source, nullIfEmpty(actor), j.application, j.termsAt).Scan(&id)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return "", errPartnerExists

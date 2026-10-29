@@ -17292,6 +17292,55 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/workspaces/{ws}/journeys/signing-secret": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+            };
+            cookie?: never;
+        };
+        /**
+         * The signing secret for journey webhooks
+         * @description Scope: emails.manage. The secret that signs every webhook step's call, made the first time it is asked for.
+         *     Receivers check the webhook-signature header with it, using any Standard Webhooks library. Showing it is
+         *     recorded in the audit log.
+         */
+        get: operations["getJourneySigningSecret"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/workspaces/{ws}/journeys/signing-secret/rotate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Rotate the signing secret for journey webhooks
+         * @description Scope: emails.manage. Makes a new signing secret. The old one keeps signing beside it for 24 hours, so receivers
+         *     can switch without missing a call; expire_now drops it at once, for a leaked secret.
+         */
+        post: operations["rotateJourneySigningSecret"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/workspaces/{ws}/journeys/{id}": {
         parameters: {
             query?: never;
@@ -17565,6 +17614,62 @@ export interface paths {
         put?: never;
         post?: never;
         delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/workspaces/{ws}/journeys/{id}/step-secrets": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        /**
+         * Which webhook steps have their key set
+         * @description Scope: emails.read. The steps whose key is set, never the keys.
+         */
+        get: operations["listJourneyStepSecrets"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/workspaces/{ws}/journeys/{id}/step-secrets/{step}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                id: string;
+                step: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Set a webhook step's key
+         * @description Scope: emails.manage. Sets the key a webhook step sends, in place of any earlier one: the header's value (auth
+         *     header, such as "Bearer sk_..."), the password (auth basic) or the URL parameter's value (auth query). Set the
+         *     step's auth first. The key is sealed and never shown again. A journey can't go live until every step that sends
+         *     a key has one.
+         */
+        put: operations["setJourneyStepSecret"];
+        post?: never;
+        /**
+         * Remove a webhook step's key
+         * @description Scope: emails.manage. The step then sends no key until one is set again.
+         */
+        delete: operations["deleteJourneyStepSecret"];
         options?: never;
         head?: never;
         patch?: never;
@@ -17897,6 +18002,37 @@ export interface paths {
          * @description Scope: partners.manage. Its own rules go with it; its partners move to no group.
          */
         delete: operations["deletePartnerGroup"];
+        options?: never;
+        head?: never;
+        /**
+         * Rename a partner group or make it the default
+         * @description Scope: partners.manage. default: true makes it the group new partners join (when none is given); false stops that. Returns the program.
+         */
+        patch: operations["updatePartnerGroup"];
+        trace?: never;
+    };
+    "/v1/workspaces/{ws}/partner-programs/{id}/groups/{group}/partners": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                /** @description The program's id or slug. */
+                id: string;
+                /** @description The group's id, or none to take partners out of every group. */
+                group: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Move partners into a group
+         * @description Scope: partners.manage. A partner is in one group at a time; its rules (group_id) apply to them. Partners of other programs are left alone.
+         */
+        post: operations["assignPartnerGroup"];
+        delete?: never;
         options?: never;
         head?: never;
         patch?: never;
@@ -23466,6 +23602,10 @@ export interface components {
             /** Format: uuid */
             id: string;
             name: string;
+            /** @description How many partners are in it. */
+            partners: number;
+            /** @description New partners join this group. */
+            default: boolean;
         };
         PartnerProgram: {
             /** Format: uuid */
@@ -23517,6 +23657,11 @@ export interface components {
             rules: components["schemas"]["PartnerRule"][];
             /** @description Empty in lists; GET the program for them. */
             groups: components["schemas"]["PartnerGroup"][];
+            /**
+             * Format: uuid
+             * @description The group new partners join (when none is given); null is none.
+             */
+            default_group_id?: string | null;
             partners: number;
             /** Format: date-time */
             created_at: string;
@@ -24376,7 +24521,8 @@ export interface components {
         /**
          * @description One test. Set one of attribute (a field on the person's customer record), property (a property of the event
          *     that started the run), event (whether they did this event since the run started) or email with step (whether
-         *     the email from that step was delivered, opened or clicked). event and email use exists or not_exists.
+         *     the email from that step was delivered, opened or clicked), or, in a branch, var (something an earlier step saved
+         *     in the run). event and email use exists or not_exists.
          */
         JourneyCondition: {
             attribute?: string;
@@ -24384,6 +24530,8 @@ export interface components {
             event?: string;
             /** @enum {string} */
             email?: "delivered" | "opened" | "clicked";
+            /** @description branch only: something an earlier step saved in the run, such as billing.status for a webhook's answer saved as billing. */
+            var?: string;
             /** @description The email step an email condition is about. */
             step?: string;
             /** @enum {string} */
@@ -24399,7 +24547,7 @@ export interface components {
         JourneyStep: {
             id: string;
             /** @enum {string} */
-            kind: "email" | "wait" | "branch" | "exit" | "set_field" | "add_tag" | "remove_tag" | "add_to_list" | "remove_from_list" | "enter_journey" | "exit_journey" | "enroll_in_sequence" | "stop_sequences" | "suppress" | "unsubscribe_topic" | "alert" | "transactional_email" | "set_consent" | "assign_owner" | "move_deal";
+            kind: "email" | "wait" | "branch" | "exit" | "set_field" | "add_tag" | "remove_tag" | "add_to_list" | "remove_from_list" | "enter_journey" | "exit_journey" | "enroll_in_sequence" | "stop_sequences" | "suppress" | "unsubscribe_topic" | "alert" | "transactional_email" | "set_consent" | "assign_owner" | "move_deal" | "slack" | "webhook";
             name?: string;
             /** @description email: a lifecycle template's handle or id. transactional_email: a transactional one's. */
             template?: string;
@@ -24425,7 +24573,7 @@ export interface components {
              * @enum {string}
              */
             change?: "set" | "clear" | "increment";
-            /** @description set_field: the value, or {{event.x}} / {{person.x}} to copy one. */
+            /** @description set_field: the value, or {{event.x}}, {{person.x}} or {{vars.x}} to copy one. */
             value?: unknown;
             /** @description set_field: overwrite a value a person set by hand. Off by default: the step is then skipped. */
             overwrite_manual?: boolean;
@@ -24460,9 +24608,9 @@ export interface components {
             target?: "email" | "domain";
             /** @description unsubscribe_topic: an email topic's key; empty for all marketing email. */
             topic?: string;
-            /** @description alert: what it says. */
+            /** @description alert: what it says. slack: a bold line above the message (optional). */
             title?: string;
-            /** @description alert: a line of detail. */
+            /** @description alert: a line of detail, up to 500 characters. slack: the message, with {{person.x}}, {{event.x}} and {{vars.x}} filled in. */
             text?: string;
             /**
              * @description alert: the record's owner (the default) or the owners and admins.
@@ -24494,8 +24642,69 @@ export interface components {
                 /** @description Final stages (won, lost): a deal in one is never moved, and a new one is opened instead. */
                 closed?: string[];
             };
+            /**
+             * @description webhook: POST by default.
+             * @enum {string}
+             */
+            method?: "POST" | "GET" | "PUT" | "PATCH" | "DELETE";
+            /** @description webhook: an http(s) URL; {{person.x}}, {{event.x}} and {{vars.x}} fill its path and query (escaped), never its host. */
+            url?: string;
+            /** @description webhook: headers, filled in like the URL. Anyone who can read the journey sees them: put keys in auth. */
+            headers?: {
+                [key: string]: string;
+            };
+            /** @description webhook: the JSON body. Strings are filled in; a string that is only {{x}} becomes the value itself (a number stays a number). */
+            body?: unknown;
+            auth?: components["schemas"]["JourneyWebhookAuth"];
+            /** @description webhook: keep the answer in the run's vars under this name, as {status, body}, for later steps. */
+            save_as?: string;
+            /** @description slack: the channel's id. */
+            channel?: string;
+            /**
+             * Format: uuid
+             * @description slack: which Slack connection; the workspace's first when left out.
+             */
+            connection_id?: string;
             /** @description Action steps: stop (the default: the run fails), continue, or a step id to go to. */
             on_error?: string;
+        };
+        /**
+         * @description webhook: how the call proves it may call the receiver, besides the signature every call carries. The key itself
+         *     is set apart with PUT .../journeys/{id}/step-secrets/{step}, sealed, and never shown again.
+         */
+        JourneyWebhookAuth: {
+            /**
+             * @description none (the default); header: the key is a header's value; basic: the key is the password; query: the key is a URL parameter.
+             * @enum {string}
+             */
+            type: "none" | "header" | "basic" | "query";
+            /** @description header: the header, such as Authorization. query: the parameter, such as api_key. */
+            name?: string;
+            /** @description basic: the user name. */
+            username?: string;
+        };
+        /**
+         * @description The secret that signs every webhook step's call, the Standard Webhooks way (webhook-id, webhook-timestamp and
+         *     webhook-signature headers), so a receiver can check a call came from this workspace.
+         */
+        JourneySigningSecret: {
+            /** @description whsec_ followed by the key, as Standard Webhooks libraries take it. */
+            secret: string;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            rotated_at: string | null;
+            /**
+             * Format: date-time
+             * @description Until then the secret before the last rotation signs too.
+             */
+            previous_expires_at: string | null;
+        };
+        /** @description A webhook step with its key set. The key is never shown. */
+        JourneyStepSecret: {
+            step: string;
+            /** Format: date-time */
+            updated_at: string;
         };
         JourneyTrigger: {
             /** @enum {string} */
@@ -24663,7 +24872,7 @@ export interface components {
             steps: {
                 step: string;
                 kind: string;
-                /** @description What the step would do, in a run step's words: sent, skipped, waited, yes, no, done, failed, exited. */
+                /** @description What the step would do, in a run step's words: sent, skipped, waited, yes, no, done, failed, exited; not_called for a webhook or Slack step, which a test never calls. */
                 outcome: string;
                 /** @description Why it was skipped or failed. */
                 detail?: string;
@@ -24744,6 +24953,10 @@ export interface components {
             context: {
                 [key: string]: unknown;
             };
+            /** @description What its steps saved for later steps, such as a webhook's answer under its save_as; templates see it as vars.*. */
+            vars: {
+                [key: string]: unknown;
+            };
             /** Format: date-time */
             entered_at: string;
             /** Format: date-time */
@@ -24753,6 +24966,7 @@ export interface components {
                 step: string;
                 /** @description The step's kind, as in JourneyStep. */
                 kind: string;
+                /** @description sent, skipped, waiting, waited, yes, no, done, failed, exited, or calling while a webhook or Slack step's call is under way. */
                 outcome: string;
                 /** Format: uuid */
                 email_id: string | null;
@@ -66806,6 +67020,69 @@ export interface operations {
             default: components["responses"]["Error"];
         };
     };
+    getJourneySigningSecret: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The secret. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["JourneySigningSecret"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    rotateJourneySigningSecret: {
+        parameters: {
+            query?: never;
+            header?: {
+                /**
+                 * @description Makes the write safe to retry. A repeat with the same key from the same caller within 24 hours gets the first
+                 *     answer back (with `Idempotent-Replayed: true`) instead of running again. The same key for a different request
+                 *     is refused with 422 `idempotency_key_reused`; while the first is still running, 409 `idempotency_in_progress`.
+                 *     Use a new random key, such as a UUID, for each distinct write.
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": {
+                    expire_now?: boolean;
+                };
+            };
+        };
+        responses: {
+            /** @description The new secret. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["JourneySigningSecret"];
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            default: components["responses"]["Error"];
+        };
+    };
     getJourney: {
         parameters: {
             query?: never;
@@ -67370,6 +67647,96 @@ export interface operations {
             default: components["responses"]["Error"];
         };
     };
+    listJourneyStepSecrets: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Steps with a key. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["JourneyStepSecret"][];
+                    };
+                };
+            };
+            404: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    setJourneyStepSecret: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                id: string;
+                step: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @description The key */
+                    value: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The key is set. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["JourneyStepSecret"];
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            400: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    deleteJourneyStepSecret: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                id: string;
+                step: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            202: components["responses"]["MissionHeld"];
+            /** @description Removed. */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            404: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
     exitJourneyRun: {
         parameters: {
             query?: never;
@@ -67878,6 +68245,8 @@ export interface operations {
             content: {
                 "application/json": {
                     name: string;
+                    /** @description New partners join this group. */
+                    default?: boolean;
                 };
             };
         };
@@ -67929,6 +68298,99 @@ export interface operations {
                 };
                 content?: never;
             };
+            404: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    updatePartnerGroup: {
+        parameters: {
+            query?: never;
+            header?: {
+                /**
+                 * @description Makes the write safe to retry. A repeat with the same key from the same caller within 24 hours gets the first
+                 *     answer back (with `Idempotent-Replayed: true`) instead of running again. The same key for a different request
+                 *     is refused with 422 `idempotency_key_reused`; while the first is still running, 409 `idempotency_in_progress`.
+                 *     Use a new random key, such as a UUID, for each distinct write.
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                /** @description The program's id or slug. */
+                id: string;
+                group: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    name?: string;
+                    default?: boolean;
+                };
+            };
+        };
+        responses: {
+            /** @description The program, with its groups. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PartnerProgram"];
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            400: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    assignPartnerGroup: {
+        parameters: {
+            query?: never;
+            header?: {
+                /**
+                 * @description Makes the write safe to retry. A repeat with the same key from the same caller within 24 hours gets the first
+                 *     answer back (with `Idempotent-Replayed: true`) instead of running again. The same key for a different request
+                 *     is refused with 422 `idempotency_key_reused`; while the first is still running, 409 `idempotency_in_progress`.
+                 *     Use a new random key, such as a UUID, for each distinct write.
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                /** @description The program's id or slug. */
+                id: string;
+                /** @description The group's id, or none to take partners out of every group. */
+                group: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    partner_ids: string[];
+                };
+            };
+        };
+        responses: {
+            /** @description How many moved. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        moved: number;
+                    };
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            400: components["responses"]["Error"];
             404: components["responses"]["Error"];
             default: components["responses"]["Error"];
         };

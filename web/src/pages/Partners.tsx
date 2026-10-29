@@ -7,7 +7,7 @@
 import { useCallback, useEffect, useState, type FormEvent, type ReactNode } from "react";
 import { appPath } from "@/lib/paths";
 import { track } from "@/lib/analytics";
-import type { Partner, PartnerAsset, PartnerStats, PartnerConversion, PartnerImport, PartnerPayout, PartnerProgram, PartnerReferral, PartnerReward, PartnerRuleInput } from "@outflare/sdk";
+import type { Partner, PartnerAsset, PartnerGroup, PartnerStats, PartnerConversion, PartnerImport, PartnerPayout, PartnerProgram, PartnerReferral, PartnerReward, PartnerRuleInput } from "@outflare/sdk";
 import { api, errorMessage } from "../api";
 import { useBrand } from "@/lib/brand";
 import { Badge, Button, CopyButton, Empty, ErrorText, field, Input, Loading, Menu, PageHeader, Stat, Stats, ask, toast } from "../ui";
@@ -19,7 +19,7 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 
 type Props = { ws: string; canManage: boolean };
-type Section = "partners" | "conversions" | "rewards" | "payouts";
+type Section = "partners" | "groups" | "conversions" | "rewards" | "payouts";
 type Kind = PartnerProgram["kind"];
 
 const kinds: { id: Kind; label: string; blurb: string }[] = [
@@ -87,12 +87,14 @@ export function Partners({ ws, canManage }: Props) {
           <Tabs value={section} onValueChange={(v) => setSection(v as Section)}>
             <TabsList>
               <TabsTrigger value="partners" className="px-3 text-[12px]">Partners</TabsTrigger>
+              <TabsTrigger value="groups" className="px-3 text-[12px]">Groups</TabsTrigger>
               <TabsTrigger value="conversions" className="px-3 text-[12px]">Conversions</TabsTrigger>
               <TabsTrigger value="rewards" className="px-3 text-[12px]">Rewards</TabsTrigger>
               <TabsTrigger value="payouts" className="px-3 text-[12px]">Payouts</TabsTrigger>
             </TabsList>
           </Tabs>
           {section === "partners" && <PartnerList key={current.id} ws={ws} program={current} canManage={canManage} />}
+          {section === "groups" && <Groups key={current.id} ws={ws} program={current} canManage={canManage} onChanged={load} />}
           {section === "conversions" && <Conversions key={current.id} ws={ws} program={current} />}
           {section === "rewards" && <Rewards key={current.id} ws={ws} program={current} canManage={canManage} />}
           {section === "payouts" && <Payouts key={current.id} ws={ws} program={current} canManage={canManage} />}
@@ -113,10 +115,12 @@ function ruleText(r: PartnerProgram["rules"][number], currency: string): string 
 }
 
 function rulesSummary(p: PartnerProgram): string {
-  const all = p.rules.filter((r) => !r.partner_id);
+  const all = p.rules.filter((r) => !r.partner_id && !r.group_id);
   const own = new Set(p.rules.filter((r) => r.partner_id).map((r) => r.partner_id)).size;
+  const groups = new Set(p.rules.filter((r) => r.group_id && !r.partner_id).map((r) => r.group_id)).size;
+  const extra = [groups > 0 && `${plural(groups, "group has its own rate", "groups have their own rates")}`, own > 0 && `${plural(own, "partner has their own rate", "partners have their own rates")}`].filter(Boolean);
   const text = all.length === 0 ? "Track only" : all.map((r) => ruleText(r, p.currency)).join(" + ");
-  return own > 0 ? `${text}; ${plural(own, "partner has", "partners have")} their own rate` : text;
+  return [text, ...extra].join("; ");
 }
 
 // toRuleInput is a saved rule as PUT .../rules takes it back.
@@ -176,6 +180,8 @@ const pageSize = 100;
 
 function PartnerList({ ws, program, canManage }: { ws: string; program: PartnerProgram; canManage: boolean }) {
   const [rules, setRules] = useState(program.rules);
+  const [groups, setGroups] = useState<PartnerGroup[]>([]);
+  const [picked, setPicked] = useState<Set<string>>(new Set());
   const [adding, setAdding] = useState(false);
   const [totals, setTotals] = useState<PartnerProgramStats | null>(null);
   // Only partners who haven't given payout details (imported ones re-enter them on the portal).
@@ -190,10 +196,36 @@ function PartnerList({ ws, program, canManage }: { ws: string; program: PartnerP
   const { list, next, error, reload, more } = usePages(get);
   // The tiles count every partner, not just the loaded page.
   const load = useCallback(async () => {
-    await reload();
-    const { data } = await api.GET("/v1/workspaces/{ws}/partner-programs/{id}/stats", { params: { path: { ws, id: program.id } } });
-    setTotals(data ?? null);
+    const [, stats, prog] = await Promise.all([
+      reload(),
+      api.GET("/v1/workspaces/{ws}/partner-programs/{id}/stats", { params: { path: { ws, id: program.id } } }),
+      api.GET("/v1/workspaces/{ws}/partner-programs/{id}", { params: { path: { ws, id: program.id } } }),
+    ]);
+    setTotals(stats.data ?? null);
+    if (prog.data) {
+      setGroups(prog.data.groups);
+      setRules(prog.data.rules);
+    }
+    setPicked(new Set());
   }, [reload, ws, program.id]);
+
+  // move puts the picked partners in a group, or in none.
+  async function move(group: string) {
+    const ids = [...picked];
+    const { data, error } = await api.POST("/v1/workspaces/{ws}/partner-programs/{id}/groups/{group}/partners", {
+      params: { path: { ws, id: program.id, group } },
+      body: { partner_ids: ids },
+    });
+    if (error || !data) return toast(errorMessage(error), "error");
+    const name = groups.find((g) => g.id === group)?.name;
+    toast(`Moved ${plural(data.moved, "partner")} ${name ? `to ${name}` : "out of their group"}.`);
+    load();
+  }
+  const toggle = (id: string) => setPicked((cur) => {
+    const next = new Set(cur);
+    if (!next.delete(id)) next.add(id);
+    return next;
+  });
   useEffect(() => {
     load();
   }, [load]);
@@ -289,7 +321,18 @@ function PartnerList({ ws, program, canManage }: { ws: string; program: PartnerP
   }
 
   const c = program.currency;
+  const groupName = (id: string | null) => groups.find((g) => g.id === id)?.name ?? "";
   const columns: ColumnDef<Partner>[] = [
+    ...(canManage && groups.length > 0 ? [{
+      id: "pick", enableSorting: false,
+      header: () => list && list.length > 0 && (
+        <input type="checkbox" aria-label="Pick every partner" checked={picked.size > 0 && picked.size === list.length}
+          onChange={(e) => setPicked(e.target.checked ? new Set(list.map((p) => p.id)) : new Set())} />
+      ),
+      cell: ({ row: { original: p } }: { row: { original: Partner } }) => (
+        <input type="checkbox" aria-label={`Pick ${p.code}`} checked={picked.has(p.id)} onChange={() => toggle(p.id)} />
+      ),
+    } as ColumnDef<Partner>] : []),
     {
       id: "name", header: "Partner", accessorFn: (p) => `${p.name} ${p.email} ${p.code}`,
       cell: ({ row: { original: p } }) => (
@@ -300,6 +343,7 @@ function PartnerList({ ws, program, canManage }: { ws: string; program: PartnerP
       ),
     },
     { id: "status", header: "Status", accessorFn: (p) => p.status, cell: ({ row: { original: p } }) => <Badge tone={partnerTone[p.status]}>{p.status}</Badge> },
+    ...(groups.length > 0 ? [{ id: "group", header: "Group", accessorFn: (p: Partner) => groupName(p.group_id) } as ColumnDef<Partner>] : []),
     { id: "clicks", header: "Clicks", accessorFn: (p) => p.stats.clicks },
     { id: "customers", header: "Customers", accessorFn: (p) => p.stats.customers, cell: ({ row: { original: p } }) => `${p.stats.customers} of ${p.stats.referrals}` },
     { id: "sales", header: "Sales", accessorFn: (p) => p.stats.sales_cents, cell: ({ row: { original: p } }) => money(p.stats.sales_cents, c) },
@@ -352,14 +396,21 @@ function PartnerList({ ws, program, canManage }: { ws: string; program: PartnerP
           rowId={(p) => p.id}
           searchPlaceholder="Search partners"
           toolbar={
-            <>
+            <span className="flex flex-wrap items-center gap-2">
+              {canManage && picked.size > 0 && (
+                <select aria-label="Move to group" className={field} value="" onChange={(e) => e.target.value && move(e.target.value)}>
+                  <option value="">Move {picked.size} to…</option>
+                  {groups.map((g) => <option key={g.id} value={g.id}>{g.name}</option>)}
+                  <option value="none">No group</option>
+                </select>
+              )}
               {(missingOnly || (totals?.partners.missing_payout_details ?? 0) > 0) && (
                 <Button variant={missingOnly ? "primary" : "ghost"} onClick={() => { track("ui.partners_filtered", { filter: "payout_details", value: missingOnly ? "all" : "missing" }); setMissingOnly(!missingOnly); }}>
                   {missingOnly ? "All partners" : `No payout details (${totals?.partners.missing_payout_details})`}
                 </Button>
               )}
               {canManage && <Button onClick={() => setAdding(true)}>Add partner</Button>}
-            </>
+            </span>
           }
           empty="No partners match."
           mobile={(p) => (
@@ -727,10 +778,10 @@ function NewProgram({ ws, onClose, onSaved }: { ws: string; onClose: () => void;
 
 type RuleRow = PartnerRuleInput & { amount: string };
 
-// toRows is the rules the settings edit: partners' own rates are set from
-// the partner's menu and kept as they are.
+// toRows is the rules the settings edit: groups' and partners' own rates
+// are set on the Groups tab and the partner's menu, and kept as they are.
 function toRows(p: PartnerProgram): RuleRow[] {
-  return p.rules.filter((r) => !r.partner_id).map((r) => ({
+  return p.rules.filter((r) => !r.partner_id && !r.group_id).map((r) => ({
     trigger: r.trigger, side: r.side, kind: r.kind, recurrence: r.recurrence, months: r.months ?? undefined, min_sales: r.min_sales,
     action: r.action, action_data: r.action_data, group_id: r.group_id, product_ids: r.product_ids,
     amount: r.kind === "percent" ? String((r.percent_bp ?? 0) / 100) : r.kind === "fixed" ? String((r.amount_cents ?? 0) / 100) : "",
@@ -767,7 +818,7 @@ function ProgramSettings({ ws, program: p, canManage, onClose }: { ws: string; p
       percent_bp: r.kind === "percent" ? Math.round(Number(amount) * 100) : undefined,
       amount_cents: r.kind === "fixed" ? Math.round(Number(amount) * 100) : undefined,
       months: r.recurrence === "months" ? r.months ?? 12 : undefined,
-    })), ...p.rules.filter((r) => r.partner_id).map(toRuleInput)];
+    })), ...p.rules.filter((r) => r.partner_id || r.group_id).map(toRuleInput)];
     const res = await api.PUT("/v1/workspaces/{ws}/partner-programs/{id}/rules", { params: { path: { ws, id: p.id } }, body: { rules: body } });
     setBusy(false);
     if (res.error) return setError(errorMessage(res.error));
@@ -1096,6 +1147,103 @@ function PortalSection({ ws, program: p, canManage }: { ws: string; program: Par
         )}
         {canManage && <Button type="button" variant="ghost" onClick={addAsset}>Add an asset</Button>}
       </div>
+    </div>
+  );
+}
+
+// Groups: each partner is in at most one group, new partners join the
+// default one, and a group's own rate replaces the program's for its
+// partners (a partner's own rate beats it).
+function Groups({ ws, program, canManage, onChanged }: { ws: string; program: PartnerProgram; canManage: boolean; onChanged: () => void }) {
+  const [p, setP] = useState<PartnerProgram | null>(null);
+  const [error, setError] = useState("");
+  const load = useCallback(async () => {
+    const { data, error } = await api.GET("/v1/workspaces/{ws}/partner-programs/{id}", { params: { path: { ws, id: program.id } } });
+    if (error || !data) return setError(errorMessage(error));
+    setP(data);
+  }, [ws, program.id]);
+  useEffect(() => {
+    load();
+  }, [load]);
+  if (!p) return error ? <ErrorText>{error}</ErrorText> : <Loading />;
+
+  const rateOf = (g: PartnerGroup) => p.rules.find((r) => r.group_id === g.id && !r.partner_id && r.side === "partner" && r.trigger === "sale" && (r.kind === "percent" || r.kind === "fixed"));
+  const done = (msg: string) => {
+    toast(msg);
+    load();
+    onChanged();
+  };
+  async function create() {
+    const r = await ask({ title: "New group", body: "Such as Gold or Agencies. Give it its own rate after.", input: { label: "Name", maxLength: 80 }, choices: [{ label: "Cancel", value: "cancel", variant: "ghost" }, { label: "Add", value: "ok" }] });
+    if (r?.choice !== "ok" || !r.value.trim()) return;
+    const { error } = await api.POST("/v1/workspaces/{ws}/partner-programs/{id}/groups", { params: { path: { ws, id: p!.id } }, body: { name: r.value.trim(), default: p!.groups.length === 0 } });
+    if (error) return toast(errorMessage(error), "error");
+    done(p!.groups.length === 0 ? `Added ${r.value.trim()}. New partners join it.` : `Added ${r.value.trim()}.`);
+  }
+  async function patch(g: PartnerGroup, body: { name?: string; default?: boolean }, msg: string) {
+    const { error } = await api.PATCH("/v1/workspaces/{ws}/partner-programs/{id}/groups/{group}", { params: { path: { ws, id: p!.id, group: g.id } }, body });
+    if (error) return toast(errorMessage(error), "error");
+    done(msg);
+  }
+  async function rename(g: PartnerGroup) {
+    const r = await ask({ title: "Rename group", input: { label: "Name", value: g.name, maxLength: 80 }, choices: [{ label: "Cancel", value: "cancel", variant: "ghost" }, { label: "Save", value: "ok" }] });
+    if (r?.choice !== "ok" || !r.value.trim() || r.value.trim() === g.name) return;
+    patch(g, { name: r.value.trim() }, `Renamed to ${r.value.trim()}.`);
+  }
+  async function rate(g: PartnerGroup) {
+    const mine = rateOf(g);
+    const base = rulesSummary({ ...p!, rules: p!.rules.filter((x) => !x.group_id && !x.partner_id) });
+    const r = await ask({
+      title: `Commission for ${g.name}`,
+      body: `A share of each sale for partners in ${g.name}, instead of the program's (${base}). A partner's own rate still beats it. Leave it empty to use the program's rate.`,
+      input: { label: "Percent of each sale", type: "number", value: mine?.kind === "percent" ? String((mine.percent_bp ?? 0) / 100) : "", placeholder: "30", optional: true },
+      choices: [{ label: "Cancel", value: "cancel", variant: "ghost" }, { label: "Save", value: "ok" }],
+    });
+    if (r?.choice !== "ok") return;
+    const pct = r.value.trim() === "" ? null : Number(r.value);
+    if (pct !== null && !(pct > 0 && pct <= 100)) return toast("Enter a percent from 0.01 to 100.", "error");
+    const next = p!.rules.filter((x) => x !== mine).map(toRuleInput);
+    if (pct !== null) next.push({ trigger: "sale", side: "partner", kind: "percent", percent_bp: Math.round(pct * 100), recurrence: "every", group_id: g.id });
+    const { error } = await api.PUT("/v1/workspaces/{ws}/partner-programs/{id}/rules", { params: { path: { ws, id: p!.id } }, body: { rules: next } });
+    if (error) return toast(errorMessage(error), "error");
+    done(pct === null ? `${g.name} is back on the program's rate.` : `${g.name} earns ${pct}% of each sale from now on.`);
+  }
+  async function remove(g: PartnerGroup) {
+    const r = await ask({ title: `Remove ${g.name}?`, body: `Its own rules go with it, and its ${plural(g.partners, "partner")} move to no group. Rewards already earned keep their amounts.`, choices: [{ label: "Cancel", value: "cancel", variant: "ghost" }, { label: "Remove", value: "ok", variant: "danger-solid" }] });
+    if (r?.choice !== "ok") return;
+    const { error } = await api.DELETE("/v1/workspaces/{ws}/partner-programs/{id}/groups/{group}", { params: { path: { ws, id: p!.id, group: g.id } } });
+    if (error) return toast(errorMessage(error), "error");
+    done(`Removed ${g.name}.`);
+  }
+
+  const columns: ColumnDef<PartnerGroup>[] = [
+    { id: "name", header: "Group", accessorFn: (g) => g.name, cell: ({ row: { original: g } }) => <span className="flex items-center gap-2"><span className="font-medium">{g.name}</span>{g.default && <Badge tone="blue">default</Badge>}</span> },
+    { id: "partners", header: "Partners", accessorFn: (g) => g.partners },
+    { id: "rate", header: "Rate", accessorFn: (g) => rateOf(g)?.percent_bp ?? 0, cell: ({ row: { original: g } }) => { const r = rateOf(g); return r ? ruleText(r, p.currency) : <span className="text-muted-foreground">The program's</span>; } },
+    ...(canManage ? [{
+      id: "actions", header: "", enableSorting: false,
+      cell: ({ row: { original: g } }: { row: { original: PartnerGroup } }) => (
+        <Menu aria={`Actions for ${g.name}`} items={[
+          { label: "Commission rate", onClick: () => rate(g) },
+          { label: "Rename", onClick: () => rename(g) },
+          g.default
+            ? { label: "Stop adding new partners here", onClick: () => patch(g, { default: false }, "New partners now join no group.") }
+            : { label: "Make default", onClick: () => patch(g, { default: true }, `New partners now join ${g.name}.`) },
+          { label: "Remove", onClick: () => remove(g) },
+        ]} />
+      ),
+    } as ColumnDef<PartnerGroup>] : []),
+  ];
+  return (
+    <div className="space-y-3">
+      <p className="text-[13px] text-muted-foreground">Each partner is in one group at most. New partners join the default group, and a group's rate replaces the program's for its partners. Move partners from the Partners tab: pick them, then Move to.</p>
+      {p.groups.length === 0 ? (
+        <Empty title="No groups yet" action={canManage && <Button onClick={create}>New group</Button>}>
+          Groups give some partners a different rate, such as Gold for your best affiliates or Agencies.
+        </Empty>
+      ) : (
+        <DataTable columns={columns} data={p.groups} rowId={(g) => g.id} searchPlaceholder="Search groups" toolbar={canManage && <Button onClick={create}>New group</Button>} empty="No groups match." />
+      )}
     </div>
   );
 }

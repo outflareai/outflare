@@ -22878,6 +22878,51 @@ paths:
                 properties:
                   data: { type: array, items: { $ref: "#/components/schemas/JourneyStepKind" } }
         default: { $ref: "#/components/responses/Error" }
+  /v1/workspaces/{ws}/journeys/signing-secret:
+    parameters: [{ $ref: "#/components/parameters/Workspace" }]
+    get:
+      operationId: getJourneySigningSecret
+      x-outflare-access: { scope: emails.manage }
+      summary: The signing secret for journey webhooks
+      description: |
+        Scope: emails.manage. The secret that signs every webhook step's call, made the first time it is asked for.
+        Receivers check the webhook-signature header with it, using any Standard Webhooks library. Showing it is
+        recorded in the audit log.
+      tags: [emails]
+      responses:
+        "200":
+          description: The secret.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/JourneySigningSecret" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/workspaces/{ws}/journeys/signing-secret/rotate:
+    parameters: [{ $ref: "#/components/parameters/Workspace" }]
+    post:
+      operationId: rotateJourneySigningSecret
+      x-outflare-access: { scope: emails.manage }
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      summary: Rotate the signing secret for journey webhooks
+      description: |
+        Scope: emails.manage. Makes a new signing secret. The old one keeps signing beside it for 24 hours, so receivers
+        can switch without missing a call; expire_now drops it at once, for a leaked secret.
+      tags: [emails]
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                expire_now: { type: boolean }
+      responses:
+        "200":
+          description: The new secret.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/JourneySigningSecret" }
+        "202": { $ref: "#/components/responses/MissionHeld" }
+        default: { $ref: "#/components/responses/Error" }
   /v1/workspaces/{ws}/journeys/{id}:
     parameters:
       - { $ref: "#/components/parameters/Workspace" }
@@ -23247,6 +23292,73 @@ paths:
               schema: { $ref: "#/components/schemas/JourneyRun" }
         "404": { $ref: "#/components/responses/Error" }
         default: { $ref: "#/components/responses/Error" }
+  /v1/workspaces/{ws}/journeys/{id}/step-secrets:
+    parameters:
+      - { $ref: "#/components/parameters/Workspace" }
+      - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+    get:
+      operationId: listJourneyStepSecrets
+      x-outflare-access: { scope: emails.read }
+      summary: Which webhook steps have their key set
+      description: "Scope: emails.read. The steps whose key is set, never the keys."
+      tags: [emails]
+      responses:
+        "200":
+          description: Steps with a key.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data: { type: array, items: { $ref: "#/components/schemas/JourneyStepSecret" } }
+        "404": { $ref: "#/components/responses/Error" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/workspaces/{ws}/journeys/{id}/step-secrets/{step}:
+    parameters:
+      - { $ref: "#/components/parameters/Workspace" }
+      - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      - { name: step, in: path, required: true, schema: { type: string } }
+    put:
+      operationId: setJourneyStepSecret
+      x-outflare-access: { scope: emails.manage }
+      summary: Set a webhook step's key
+      description: |
+        Scope: emails.manage. Sets the key a webhook step sends, in place of any earlier one: the header's value (auth
+        header, such as "Bearer sk_..."), the password (auth basic) or the URL parameter's value (auth query). Set the
+        step's auth first. The key is sealed and never shown again. A journey can't go live until every step that sends
+        a key has one.
+      tags: [emails]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [value]
+              properties:
+                value: { type: string, maxLength: 4000, description: The key, on one line. }
+      responses:
+        "200":
+          description: The key is set.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/JourneyStepSecret" }
+        "400": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "202": { $ref: "#/components/responses/MissionHeld" }
+        default: { $ref: "#/components/responses/Error" }
+    delete:
+      operationId: deleteJourneyStepSecret
+      x-outflare-access: { scope: emails.manage }
+      summary: Remove a webhook step's key
+      description: "Scope: emails.manage. The step then sends no key until one is set again."
+      tags: [emails]
+      responses:
+        "204": { description: Removed. }
+        "404": { $ref: "#/components/responses/Error" }
+        "202": { $ref: "#/components/responses/MissionHeld" }
+        default: { $ref: "#/components/responses/Error" }
   /v1/workspaces/{ws}/journeys/{id}/runs/{run}/exit:
     parameters:
       - { $ref: "#/components/parameters/Workspace" }
@@ -23615,6 +23727,7 @@ paths:
               required: [name]
               properties:
                 name: { type: string, maxLength: 80 }
+                default: { type: boolean, description: New partners join this group. }
       responses:
         "201":
           description: The group.
@@ -23640,6 +23753,68 @@ paths:
       tags: [partners]
       responses:
         "204": { description: Removed. }
+        "404": { $ref: "#/components/responses/Error" }
+        "202": { $ref: "#/components/responses/MissionHeld" }
+        default: { $ref: "#/components/responses/Error" }
+    patch:
+      operationId: updatePartnerGroup
+      x-outflare-access: { scope: partners.manage, brand_limited: true }
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      summary: Rename a partner group or make it the default
+      description: "Scope: partners.manage. default: true makes it the group new partners join (when none is given); false stops that. Returns the program."
+      tags: [partners]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name: { type: string, minLength: 1, maxLength: 80 }
+                default: { type: boolean }
+      responses:
+        "200":
+          description: The program, with its groups.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PartnerProgram" }
+        "400": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        "202": { $ref: "#/components/responses/MissionHeld" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/workspaces/{ws}/partner-programs/{id}/groups/{group}/partners:
+    parameters:
+      - { $ref: "#/components/parameters/Workspace" }
+      - { name: id, in: path, required: true, description: "The program's id or slug.", schema: { type: string } }
+      - { name: group, in: path, required: true, description: "The group's id, or none to take partners out of every group.", schema: { type: string } }
+    post:
+      operationId: assignPartnerGroup
+      x-outflare-access: { scope: partners.manage, brand_limited: true }
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      summary: Move partners into a group
+      description: "Scope: partners.manage. A partner is in one group at a time; its rules (group_id) apply to them. Partners of other programs are left alone."
+      tags: [partners]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [partner_ids]
+              properties:
+                partner_ids: { type: array, minItems: 1, maxItems: 1000, items: { type: string, format: uuid } }
+      responses:
+        "200":
+          description: How many moved.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [moved]
+                properties:
+                  moved: { type: integer }
+        "400": { $ref: "#/components/responses/Error" }
         "404": { $ref: "#/components/responses/Error" }
         "202": { $ref: "#/components/responses/MissionHeld" }
         default: { $ref: "#/components/responses/Error" }
@@ -28400,10 +28575,12 @@ components:
         product_ids: { type: array, maxItems: 50, items: { type: string } }
     PartnerGroup:
       type: object
-      required: [id, name]
+      required: [id, name, partners, default]
       properties:
         id: { type: string, format: uuid }
         name: { type: string }
+        partners: { type: integer, description: How many partners are in it. }
+        default: { type: boolean, description: New partners join this group. }
     PartnerProgram:
       type: object
       required: [id, name, slug, kind, status, brand_id, landing_url, currency, credit_window_days, credit_model, codes_win, hold_days,
@@ -28434,6 +28611,7 @@ components:
         portal_url: { type: string, description: "Where partners sign up and sign in: the program's own domain, its subdomain, or /p/{id}/ on this server." }
         rules: { type: array, items: { $ref: "#/components/schemas/PartnerRule" } }
         groups: { type: array, items: { $ref: "#/components/schemas/PartnerGroup" }, description: "Empty in lists; GET the program for them." }
+        default_group_id: { type: [string, "null"], format: uuid, description: "The group new partners join (when none is given); null is none." }
         partners: { type: integer }
         created_at: { type: string, format: date-time }
         updated_at: { type: string, format: date-time }
@@ -29014,12 +29192,14 @@ components:
       description: |
         One test. Set one of attribute (a field on the person's customer record), property (a property of the event
         that started the run), event (whether they did this event since the run started) or email with step (whether
-        the email from that step was delivered, opened or clicked). event and email use exists or not_exists.
+        the email from that step was delivered, opened or clicked), or, in a branch, var (something an earlier step saved
+        in the run). event and email use exists or not_exists.
       properties:
         attribute: { type: string }
         property: { type: string }
         event: { type: string }
         email: { type: string, enum: [delivered, opened, clicked] }
+        var: { type: string, description: "branch only: something an earlier step saved in the run, such as billing.status for a webhook's answer saved as billing." }
         step: { type: string, description: The email step an email condition is about. }
         op: { type: string, enum: [eq, neq, gt, lt, contains, exists, not_exists] }
         value: { description: "What eq, neq, gt, lt and contains compare with." }
@@ -29035,7 +29215,7 @@ components:
         kind:
           type: string
           enum: [email, wait, branch, exit, set_field, add_tag, remove_tag, add_to_list, remove_from_list, enter_journey, exit_journey,
-            enroll_in_sequence, stop_sequences, suppress, unsubscribe_topic, alert, transactional_email, set_consent, assign_owner, move_deal]
+            enroll_in_sequence, stop_sequences, suppress, unsubscribe_topic, alert, transactional_email, set_consent, assign_owner, move_deal, slack, webhook]
         name: { type: string, maxLength: 100 }
         template: { type: string, description: "email: a lifecycle template's handle or id. transactional_email: a transactional one's." }
         wait_seconds: { type: integer, minimum: 60, maximum: 7776000, description: "wait: how long." }
@@ -29046,7 +29226,7 @@ components:
         next: { type: string, description: "The step after; empty ends the run as completed." }
         field: { type: string, description: "set_field: the field's key." }
         change: { type: string, enum: [set, clear, increment], description: "set_field: set (the default), clear or increment." }
-        value: { description: "set_field: the value, or {{event.x}} / {{person.x}} to copy one." }
+        value: { description: "set_field: the value, or {{event.x}}, {{person.x}} or {{vars.x}} to copy one." }
         overwrite_manual: { type: boolean, description: "set_field: overwrite a value a person set by hand. Off by default: the step is then skipped." }
         tag: { type: string, maxLength: 50, description: "add_tag, remove_tag: the tag." }
         list_id: { type: string, format: uuid, description: "add_to_list, remove_from_list: a static list." }
@@ -29056,8 +29236,8 @@ components:
         allow_elsewhere: { type: boolean, description: "enroll_in_sequence: enroll even when active in another sequence." }
         target: { type: string, enum: [email, domain], description: "suppress: their email addresses (the default) or their work domain." }
         topic: { type: string, description: "unsubscribe_topic: an email topic's key; empty for all marketing email." }
-        title: { type: string, maxLength: 120, description: "alert: what it says." }
-        text: { type: string, maxLength: 500, description: "alert: a line of detail." }
+        title: { type: string, maxLength: 120, description: "alert: what it says. slack: a bold line above the message (optional)." }
+        text: { type: string, maxLength: 3000, description: "alert: a line of detail, up to 500 characters. slack: the message, with {{person.x}}, {{event.x}} and {{vars.x}} filled in." }
         to: { type: string, enum: [owner, admins], description: "alert: the record's owner (the default) or the owners and admins." }
         consent: { type: string, enum: [granted, withdrawn], description: "set_consent: what the person agreed to or declined, for topic (empty: all marketing email). Recorded with the run as its evidence." }
         owner_id: { type: string, format: uuid, description: "assign_owner: the member (user id) who becomes the owner." }
@@ -29072,7 +29252,43 @@ components:
             field: { type: string, description: "Its status field that holds the stage, such as deal_stage." }
             stage: { type: string, description: "The stage to move to." }
             closed: { type: array, items: { type: string }, description: "Final stages (won, lost): a deal in one is never moved, and a new one is opened instead." }
+        method: { type: string, enum: [POST, GET, PUT, PATCH, DELETE], description: "webhook: POST by default." }
+        url: { type: string, maxLength: 2000, description: "webhook: an http(s) URL; {{person.x}}, {{event.x}} and {{vars.x}} fill its path and query (escaped), never its host." }
+        headers: { type: object, maxProperties: 20, additionalProperties: { type: string }, description: "webhook: headers, filled in like the URL. Anyone who can read the journey sees them: put keys in auth." }
+        body: { description: "webhook: the JSON body. Strings are filled in; a string that is only {{x}} becomes the value itself (a number stays a number)." }
+        auth: { $ref: "#/components/schemas/JourneyWebhookAuth" }
+        save_as: { type: string, pattern: "^[a-z][a-z0-9_]{0,39}$", description: "webhook: keep the answer in the run's vars under this name, as {status, body}, for later steps." }
+        channel: { type: string, description: "slack: the channel's id." }
+        connection_id: { type: string, format: uuid, description: "slack: which Slack connection; the workspace's first when left out." }
         on_error: { type: string, description: "Action steps: stop (the default: the run fails), continue, or a step id to go to." }
+    JourneyWebhookAuth:
+      type: object
+      required: [type]
+      description: |
+        webhook: how the call proves it may call the receiver, besides the signature every call carries. The key itself
+        is set apart with PUT .../journeys/{id}/step-secrets/{step}, sealed, and never shown again.
+      properties:
+        type: { type: string, enum: [none, header, basic, query], description: "none (the default); header: the key is a header's value; basic: the key is the password; query: the key is a URL parameter." }
+        name: { type: string, description: "header: the header, such as Authorization. query: the parameter, such as api_key." }
+        username: { type: string, description: "basic: the user name." }
+    JourneySigningSecret:
+      type: object
+      required: [secret, created_at, rotated_at, previous_expires_at]
+      description: |
+        The secret that signs every webhook step's call, the Standard Webhooks way (webhook-id, webhook-timestamp and
+        webhook-signature headers), so a receiver can check a call came from this workspace.
+      properties:
+        secret: { type: string, description: "whsec_ followed by the key, as Standard Webhooks libraries take it." }
+        created_at: { type: string, format: date-time }
+        rotated_at: { type: [string, "null"], format: date-time }
+        previous_expires_at: { type: [string, "null"], format: date-time, description: "Until then the secret before the last rotation signs too." }
+    JourneyStepSecret:
+      type: object
+      required: [step, updated_at]
+      description: A webhook step with its key set. The key is never shown.
+      properties:
+        step: { type: string }
+        updated_at: { type: string, format: date-time }
     JourneyTrigger:
       type: object
       required: [kind]
@@ -29216,7 +29432,7 @@ components:
             properties:
               step: { type: string }
               kind: { type: string }
-              outcome: { type: string, description: "What the step would do, in a run step's words: sent, skipped, waited, yes, no, done, failed, exited." }
+              outcome: { type: string, description: "What the step would do, in a run step's words: sent, skipped, waited, yes, no, done, failed, exited; not_called for a webhook or Slack step, which a test never calls." }
               detail: { type: string, description: Why it was skipped or failed. }
               next: { type: string, description: The step it would go to. }
               subject: { type: string, description: "An email step's subject, as the person would get it." }
@@ -29250,7 +29466,7 @@ components:
         published_at: { type: [string, "null"], format: date-time }
     JourneyRun:
       type: object
-      required: [id, journey_id, record_id, name, status, step, next_at, exit_reason, version, steps_taken, context, entered_at, finished_at]
+      required: [id, journey_id, record_id, name, status, step, next_at, exit_reason, version, steps_taken, context, vars, entered_at, finished_at]
       properties:
         id: { type: string, format: uuid }
         journey_id: { type: string, format: uuid }
@@ -29263,6 +29479,7 @@ components:
         version: { type: [integer, "null"], description: "The journey version this run goes through; null for a run from before versions, which follows the current one." }
         steps_taken: { type: integer }
         context: { type: object, additionalProperties: true, description: "The event's properties, or the data it was added with; emails see it as event.*." }
+        vars: { type: object, additionalProperties: true, description: "What its steps saved for later steps, such as a webhook's answer under its save_as; templates see it as vars.*." }
         entered_at: { type: string, format: date-time }
         finished_at: { type: [string, "null"], format: date-time }
         history:
@@ -29274,7 +29491,7 @@ components:
             properties:
               step: { type: string }
               kind: { type: string, description: "The step's kind, as in JourneyStep." }
-              outcome: { type: string }
+              outcome: { type: string, description: "sent, skipped, waiting, waited, yes, no, done, failed, exited, or calling while a webhook or Slack step's call is under way." }
               email_id: { type: [string, "null"], format: uuid }
               detail: { type: [string, "null"] }
               at: { type: string, format: date-time }

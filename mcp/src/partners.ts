@@ -292,11 +292,50 @@ export function registerPartnerTools(server: McpServer, gtm: MissionClient, work
     "create_partner_group",
     {
       title: "Add a partner group",
-      description: "A group (tier) with its own rates: give it rules with set_partner_rules (group_id) and move partners into it with update_partner.",
-      inputSchema: { program, name: z.string().max(80) },
+      description:
+        "A group (tier) with its own rates: give it rules with set_partner_rules (group_id) and move partners into it with " +
+        "assign_partner_group. default: true makes it the group new partners join.",
+      inputSchema: { program, name: z.string().max(80), default: z.boolean().optional() },
       annotations: write,
     },
-    ({ program, name }) => call(() => gtm.POST("/v1/workspaces/{ws}/partner-programs/{id}/groups", { params: { path: { ws: workspace(), id: program } }, body: { name } })),
+    ({ program, ...body }) => call(() => gtm.POST("/v1/workspaces/{ws}/partner-programs/{id}/groups", { params: { path: { ws: workspace(), id: program } }, body })),
+  );
+
+  const group = z.string().uuid().describe("A group's id, from get_partner_program.");
+  server.registerTool(
+    "update_partner_group",
+    {
+      title: "Rename a partner group or make it the default",
+      description: "default: true makes it the group new partners join; false stops that. Returns the program.",
+      inputSchema: { program, group_id: group, name: z.string().min(1).max(80).optional(), default: z.boolean().optional() },
+      annotations: write,
+    },
+    ({ program, group_id, ...body }) =>
+      call(() => gtm.PATCH("/v1/workspaces/{ws}/partner-programs/{id}/groups/{group}", { params: { path: { ws: workspace(), id: program, group: group_id } }, body })),
+  );
+
+  server.registerTool(
+    "assign_partner_group",
+    {
+      title: "Move partners into a group",
+      description: "A partner is in one group at a time, and its rules apply to them. group_id none takes them out of every group.",
+      inputSchema: { program, group_id: z.string().describe('A group\'s id, or "none".'), partner_ids: z.array(id).min(1).max(1000) },
+      annotations: write,
+    },
+    ({ program, group_id, partner_ids }) =>
+      call(() => gtm.POST("/v1/workspaces/{ws}/partner-programs/{id}/groups/{group}/partners", { params: { path: { ws: workspace(), id: program, group: group_id } }, body: { partner_ids } })),
+  );
+
+  server.registerTool(
+    "delete_partner_group",
+    {
+      title: "Remove a partner group",
+      description: "Its own rules go with it; its partners move to no group.",
+      inputSchema: { program, group_id: group },
+      annotations: { ...write, destructiveHint: true },
+    },
+    ({ program, group_id }) =>
+      call(() => gtm.DELETE("/v1/workspaces/{ws}/partner-programs/{id}/groups/{group}", { params: { path: { ws: workspace(), id: program, group: group_id } } })),
   );
 
   server.registerTool(

@@ -151,6 +151,10 @@ Each rule also has:
 
 Action rules all pay, but only one cash rule (percent or fixed) pays per conversion, whatever order the rules are in. The one that pays is, in this order: a partner's own rule over their group's over one for everyone; then the highest tier reached; then the narrower sale (first sale, then first months, then every sale); then a rule for named products over one for all; then the one paying more. So with 10% on the first sale and 2% on every sale, the first sale pays 10% and later ones 2%. Tiers, group rates and partners' own rates replace the base rate instead of adding to it.
 
+### Groups
+
+Each partner is in one group at most, such as Gold or Agencies, and a group's own rules (`group_id`) apply to its partners. On the Groups tab you add, rename and remove groups, give a group its own rate (Commission rate), and make one the default that new partners join (`default` on `POST .../groups` or `PATCH .../groups/{group}`). To move partners, pick them on the Partners tab and choose Move to, or call `POST .../groups/{group}/partners` with up to 1,000 `partner_ids` (`none` takes them out of every group). Removing a group removes its rules and moves its partners to no group.
+
 To give one affiliate a better deal, open their menu and choose Commission rate (a percent of each sale), or add a rule with their `partner_id` through `PUT .../rules`. Rewards already earned keep their amounts.
 
 A program with no rules tracks only. For influencers on a fixed fee, log each fee on the partner (`POST .../partners/{id}/fees`). It is approved at once and counted as a cost, so cost per sale and ROAS work.
@@ -258,7 +262,7 @@ Operators get all three. Viewers get `partners.read`.
 | --- | --- |
 | `GET`/`POST /v1/workspaces/{ws}/partner-programs`, `GET`/`PATCH .../partner-programs/{id}` | read / manage |
 | `GET .../partner-programs/{id}/stats`: the program's totals across all its partners (partners by status, clicks, customers, sales, rewards on hold, due and paid) | read |
-| `PUT .../partner-programs/{id}/rules`, `POST .../groups`, `DELETE .../groups/{group}`, `POST .../postback` | manage |
+| `PUT .../partner-programs/{id}/rules`, `POST .../groups`, `PATCH`/`DELETE .../groups/{group}`, `POST .../groups/{group}/partners`, `POST .../postback` | manage |
 | `GET`/`POST .../partners`, `GET`/`PATCH .../partners/{id}`, `POST`/`DELETE .../promo-codes`, `POST .../fees`, `POST .../adjustments` | read / manage |
 | `POST .../partner-conversions`, `POST .../partner-programs/{id}/widget-sessions` | conversions |
 | `GET .../partner-conversions`, `GET .../partner-referrals`, `GET .../partner-rewards`, `GET .../partner-payouts` (newest first, 100 a page by default, up to 500; `before` is the last page's `next_before`; payouts filter by `program` too) | read |

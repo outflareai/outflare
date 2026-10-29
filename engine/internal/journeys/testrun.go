@@ -141,7 +141,7 @@ func (s *Service) Test(ctx context.Context, ws, journeyID string, in TestInput) 
 		return nil, ErrNotPerson
 	}
 	out.Refusal = why
-	r := run{recordID: in.RecordID, context: event, entered: time.Now()}
+	r := run{recordID: in.RecordID, context: event, vars: map[string]any{}, entered: time.Now()}
 	if err := tx.QueryRow(ctx, `SELECT gen_random_uuid()::text`).Scan(&r.id); err != nil {
 		return nil, err
 	}

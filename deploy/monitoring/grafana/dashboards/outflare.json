@@ -6968,6 +6968,117 @@
           "sort": "desc"
         }
       }
+    },
+    {
+      "type": "row",
+      "title": "Journey webhooks and Slack",
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 513
+      },
+      "id": 187,
+      "panels": []
+    },
+    {
+      "type": "timeseries",
+      "title": "Journey calls",
+      "description": "Calls made by journeys' webhook and Slack steps, per minute, by kind and outcome. Normal: mostly done. retried is a try that will be tried again (the receiver answered 5xx or 429, or didn't answer); failed is a call that gave up or was refused (4xx, or Slack refused the channel). A rise in failed for one kind usually means a receiver changed or a key expired: the run's history says which step.",
+      "id": 188,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 514
+      },
+      "targets": [
+        {
+          "expr": "sum by (kind, outcome) (rate(outflare_journeys_calls_total{job=\"$job\"}[5m])) * 60",
+          "legendFormat": "{{kind}} {{outcome}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "fillOpacity": 10,
+            "stacking": {
+              "mode": "none"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "mean",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Journey call time (p95)",
+      "description": "How long one try of a journey call takes at the 95th percentile, by kind. Normal: under a second. Calls give up after 20 seconds; time near that means a receiver is slow or not answering.",
+      "id": 189,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 514
+      },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, sum by (kind, le) (rate(outflare_journeys_call_duration_seconds_bucket{job=\"$job\"}[5m])))",
+          "legendFormat": "{{kind}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "custom": {
+            "fillOpacity": 10,
+            "stacking": {
+              "mode": "none"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "mean",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
     }
   ]
 }

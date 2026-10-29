@@ -41,7 +41,9 @@ func (s *Server) routesPartners(mux *http.ServeMux) {
 	mux.HandleFunc("PATCH /v1/workspaces/{ws}/partner-programs/{id}", s.inBrand(manage, s.updatePartnerProgram))
 	mux.HandleFunc("PUT /v1/workspaces/{ws}/partner-programs/{id}/rules", s.inBrand(manage, s.setPartnerRules))
 	mux.HandleFunc("POST /v1/workspaces/{ws}/partner-programs/{id}/groups", s.inBrand(manage, s.createPartnerGroup))
+	mux.HandleFunc("PATCH /v1/workspaces/{ws}/partner-programs/{id}/groups/{group}", s.inBrand(manage, s.updatePartnerGroup))
 	mux.HandleFunc("DELETE /v1/workspaces/{ws}/partner-programs/{id}/groups/{group}", s.inBrand(manage, s.deletePartnerGroup))
+	mux.HandleFunc("POST /v1/workspaces/{ws}/partner-programs/{id}/groups/{group}/partners", s.inBrand(manage, s.assignPartnerGroup))
 	mux.HandleFunc("POST /v1/workspaces/{ws}/partner-programs/{id}/postback", s.inBrand(manage, s.rotatePartnerPostback))
 
 	mux.HandleFunc("GET /v1/workspaces/{ws}/partners", s.inBrand(read, s.listPartners))
@@ -79,7 +81,8 @@ func (s *Server) routesPartners(mux *http.ServeMux) {
 
 // partnerEventProps are the audit data keys that also go on the product
 // event: enums, counts and flags, never notes, codes or amounts.
-var partnerEventProps = []string{"kind", "program_kind", "side", "type", "source", "via", "status", "previous_status", "by", "rules", "has_note", "replaced"}
+var partnerEventProps = []string{"kind", "program_kind", "side", "type", "source", "via", "status", "previous_status", "by", "rules", "has_note", "replaced",
+	"default", "renamed", "partners"}
 
 // partnerRecord is record for partner actions, with their enums as event
 // properties.
@@ -96,6 +99,10 @@ func partnerRecord(ctx context.Context, tx pgx.Tx, p *principal, ws, action, tar
 type partnerGroupView struct {
 	ID   string `json:"id"`
 	Name string `json:"name"`
+	// Partners is how many partners are in it.
+	Partners int `json:"partners"`
+	// Default is the group new partners join.
+	Default bool `json:"default"`
 }
 
 type partnerProgramView struct {
@@ -127,15 +134,17 @@ type partnerProgramView struct {
 	PortalURL string             `json:"portal_url"`
 	Rules     []partners.Rule    `json:"rules"`
 	Groups    []partnerGroupView `json:"groups"`
-	Partners  int                `json:"partners"`
-	CreatedAt time.Time          `json:"created_at"`
-	UpdatedAt time.Time          `json:"updated_at"`
+	// DefaultGroupID is the group new partners join; null is none.
+	DefaultGroupID *string   `json:"default_group_id"`
+	Partners       int       `json:"partners"`
+	CreatedAt      time.Time `json:"created_at"`
+	UpdatedAt      time.Time `json:"updated_at"`
 }
 
 const partnerProgramSelect = `
 	SELECT p.id::text, p.name, p.slug, p.kind, p.status, p.brand_id::text, p.landing_url, p.currency, p.credit_window_days, p.credit_model,
 	       p.codes_win, p.hold_days, p.auto_approve, p.auto_accept, p.min_payout_cents, p.terms_url, p.sales_source, p.postback_hint,
-	       p.portal_enabled, p.portal_subdomain, p.portal,
+	       p.portal_enabled, p.portal_subdomain, p.portal, p.default_group_id::text,
 	       (SELECT count(*) FROM partner_memberships m WHERE m.program_id = p.id)::int, p.created_at, p.updated_at
 	FROM partner_programs p WHERE p.workspace_id = $1`
 
@@ -144,7 +153,7 @@ func scanPartnerProgram(row pgx.Row) (partnerProgramView, error) {
 	var portal []byte
 	err := row.Scan(&v.ID, &v.Name, &v.Slug, &v.Kind, &v.Status, &v.BrandID, &v.LandingURL, &v.Currency, &v.CreditWindowDays, &v.CreditModel,
 		&v.CodesWin, &v.HoldDays, &v.AutoApprove, &v.AutoAccept, &v.MinPayoutCents, &v.TermsURL, &v.SalesSource, &v.PostbackHint,
-		&v.PortalEnabled, &v.PortalSubdomain, &portal, &v.Partners, &v.CreatedAt, &v.UpdatedAt)
+		&v.PortalEnabled, &v.PortalSubdomain, &portal, &v.DefaultGroupID, &v.Partners, &v.CreatedAt, &v.UpdatedAt)
 	if err == nil {
 		v.Portal = portalFor(v.Kind, portal)
 	}
@@ -192,7 +201,10 @@ func (s *Server) findPartnerProgram(w http.ResponseWriter, r *http.Request, ws, 
 	}
 	if err == nil {
 		var rows pgx.Rows
-		rows, err = s.pool.Query(ctx, `SELECT id::text, name FROM partner_groups WHERE workspace_id = $1 AND program_id = $2 ORDER BY name`, ws, v.ID)
+		rows, err = s.pool.Query(ctx, `SELECT g.id::text, g.name, (SELECT count(*) FROM partner_memberships m WHERE m.group_id = g.id)::int,
+			COALESCE(p.default_group_id = g.id, false)
+			FROM partner_groups g JOIN partner_programs p ON p.id = g.program_id
+			WHERE g.workspace_id = $1 AND g.program_id = $2 ORDER BY g.name`, ws, v.ID)
 		if err == nil {
 			v.Groups, err = pgx.CollectRows(rows, pgx.RowToStructByPos[partnerGroupView])
 		}
@@ -759,7 +771,8 @@ func (s *Server) createPartnerGroup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var in struct {
-		Name string `json:"name"`
+		Name    string `json:"name"`
+		Default bool   `json:"default"`
 	}
 	if !decode(w, r, &in) {
 		return
@@ -784,8 +797,14 @@ func (s *Server) createPartnerGroup(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			return err
 		}
+		if in.Default {
+			g.Default = true
+			if _, err := tx.Exec(ctx, `UPDATE partner_programs SET default_group_id = $2, updated_at = now() WHERE id = $1`, cur.ID, g.ID); err != nil {
+				return err
+			}
+		}
 		return partnerRecord(ctx, tx, &a.principal, a.WorkspaceID, "partner_program.group_created", "partner_program", cur.ID,
-			map[string]any{"group_id": g.ID})
+			map[string]any{"group_id": g.ID, "default": in.Default})
 	})
 	if errors.Is(err, errConflict) {
 		writeError(w, r, http.StatusConflict, "conflict", "the program already has a group called "+name)

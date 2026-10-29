@@ -8198,6 +8198,7 @@ export function createServer({ client: gtm, workspace, readOnly = false, mission
     property: z.string().optional().describe("A property of the event that started the run."),
     event: z.string().optional().describe("Whether they did this event since the run started (exists or not_exists)."),
     email: z.enum(["delivered", "opened", "clicked"]).optional().describe("Whether the email from step was delivered, opened or clicked."),
+    var: z.string().optional().describe("Branches only: something an earlier step saved, such as billing.status for a webhook answer saved as billing."),
     step: z.string().optional(),
     op: z.enum(["eq", "neq", "gt", "lt", "contains", "exists", "not_exists"]),
     value: z.unknown().optional(),
@@ -8244,6 +8245,8 @@ export function createServer({ client: gtm, workspace, readOnly = false, mission
             "set_consent",
             "assign_owner",
             "move_deal",
+            "slack",
+            "webhook",
           ]),
           name: z.string().optional(),
           template: z.string().optional().describe("email: a lifecycle template's handle."),
@@ -8255,7 +8258,7 @@ export function createServer({ client: gtm, workspace, readOnly = false, mission
           next: z.string().optional().describe("The step after; empty ends the run."),
           field: z.string().optional().describe("set_field: the field's key."),
           change: z.enum(["set", "clear", "increment"]).optional(),
-          value: z.unknown().optional().describe("set_field: the value, or {{event.x}} / {{person.x}}."),
+          value: z.unknown().optional().describe("set_field: the value, or {{event.x}}, {{person.x}} or {{vars.x}}."),
           overwrite_manual: z.boolean().optional().describe("set_field: overwrite a value a person set by hand."),
           tag: z.string().optional(),
           list_id: z.string().optional().describe("add_to_list, remove_from_list: a static list."),
@@ -8265,8 +8268,8 @@ export function createServer({ client: gtm, workspace, readOnly = false, mission
           allow_elsewhere: z.boolean().optional(),
           target: z.enum(["email", "domain"]).optional(),
           topic: z.string().optional(),
-          title: z.string().optional(),
-          text: z.string().optional(),
+          title: z.string().optional().describe("alert: what it says. slack: a bold line above the message."),
+          text: z.string().optional().describe("alert: a line of detail. slack: the message; {{person.x}}, {{event.x}} and {{vars.x}} fill in."),
           to: z.enum(["owner", "admins"]).optional(),
           consent: z.enum(["granted", "withdrawn"]).optional().describe("set_consent: for topic, or all marketing email when topic is empty."),
           owner_id: z.string().optional().describe("assign_owner: a member's user id (list_members)."),
@@ -8276,6 +8279,19 @@ export function createServer({ client: gtm, workspace, readOnly = false, mission
             .object({ type: z.string(), field: z.string(), stage: z.string(), closed: z.array(z.string()).optional() })
             .optional()
             .describe("move_deal: the deal record type, its stage field, the stage, and the closed stages."),
+          method: z.enum(["POST", "GET", "PUT", "PATCH", "DELETE"]).optional().describe("webhook: POST by default."),
+          url: z.string().optional().describe("webhook: an https URL; {{…}} fills its path and query, never its host."),
+          headers: z.record(z.string(), z.string()).optional().describe("webhook: headers anyone who can read the journey sees. Never put keys here: use auth."),
+          body: z.unknown().optional().describe("webhook: the JSON body; a string that is only {{x}} becomes the value itself."),
+          auth: z
+            .object({ type: z.enum(["none", "header", "basic", "query"]), name: z.string().optional(), username: z.string().optional() })
+            .optional()
+            .describe(
+              "webhook: where the receiver's own key goes (header name, basic username, or query parameter name). The person sets the key itself in the Outflare app; it never goes through the chat. Every call is also signed.",
+            ),
+          save_as: z.string().optional().describe("webhook: keep the answer as vars.<save_as> ({status, body}) for later steps."),
+          channel: z.string().optional().describe("slack: the channel's id."),
+          connection_id: z.string().optional().describe("slack: which Slack connection; the first when left out."),
           on_error: z.string().optional().describe("Action steps: stop (default), continue, or a step id."),
         }),
       )
@@ -8289,7 +8305,7 @@ export function createServer({ client: gtm, workspace, readOnly = false, mission
     {
       title: "List the kinds of journey step",
       description:
-        "Every step a journey can have: email, wait, branch, exit, and actions that change the person's fields and tags, move them between lists, journeys and sequences, suppress them, unsubscribe them or raise an alert. Each with its settings as JSON Schema.",
+        "Every step a journey can have: email, wait, branch, exit, and actions that change the person's fields and tags, move them between lists, journeys and sequences, suppress them, unsubscribe them, raise an alert, post to Slack or call a webhook. Each with its settings as JSON Schema.",
       inputSchema: {},
       annotations: read,
     },
@@ -8499,6 +8515,18 @@ export function createServer({ client: gtm, workspace, readOnly = false, mission
       annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true },
     },
     ({ journey, ...body }) => call(() => gtm.POST("/v1/workspaces/{ws}/journeys/{id}/runs", { params: { path: { ws, id: journey } }, body })),
+  );
+
+  server.registerTool(
+    "list_journey_step_secrets",
+    {
+      title: "List which webhook steps have their key",
+      description:
+        "The webhook steps of a journey whose key (auth) is set, never the keys. A journey can't go live until each webhook step with auth has one; the person sets it in the Outflare app, so keys never pass through the chat.",
+      inputSchema: { journey: z.string().describe("The journey's id.") },
+      annotations: read,
+    },
+    ({ journey }) => call(() => gtm.GET("/v1/workspaces/{ws}/journeys/{id}/step-secrets", { params: { path: { ws, id: journey } } })),
   );
 
   server.registerTool(

@@ -222,6 +222,15 @@ var (
 		Namespace: namespace, Subsystem: "rules", Name: "evaluations_total",
 		Help: "Rules evaluated for a record, by trigger kind and outcome (fired; or why not: no_match, duplicate, cooldown, late, before_live, too_deep, manual; absence clocks started and stopped).",
 	}, []string{"trigger", "outcome"})
+	// Journey webhook and Slack steps: calls out of a run, with retries.
+	journeyCalls = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Namespace: namespace, Subsystem: "journeys", Name: "calls_total",
+		Help: "Calls journey steps made, by step kind (webhook, slack) and outcome (done; retried, for a try that will be tried again; failed).",
+	}, []string{"kind", "outcome"})
+	journeyCallDuration = prometheus.NewHistogramVec(prometheus.HistogramOpts{
+		Namespace: namespace, Subsystem: "journeys", Name: "call_duration_seconds",
+		Help: "Time one try of a journey step's call took, by step kind.", Buckets: requestBuckets,
+	}, []string{"kind"})
 	// Exclusions: people a journey, broadcast or sequence left out.
 	excluded = prometheus.NewCounterVec(prometheus.CounterOpts{
 		Namespace: namespace, Subsystem: "automations", Name: "excluded_total",
@@ -410,7 +419,7 @@ var own = []prometheus.Collector{
 	hooksReceived, hookEvents, hookLag,
 	domainConnectLookups, domainConnectDuration,
 	queryRuns, queryDuration, queryRows,
-	ruleEvaluations, excluded,
+	ruleEvaluations, journeyCalls, journeyCallDuration, excluded,
 	semanticRuns, semanticItems, semanticDuration, semanticAvailable, semanticWorkspaces, knowledgeAsks, knowledgeAskDuration,
 	adConversions, adConversionsOldest,
 	meetingEvents, meetingEventsPending,
@@ -567,6 +576,13 @@ func FlagCache(hit bool) {
 // RuleEvaluated counts one rule evaluated for one record, by trigger kind
 // and outcome.
 func RuleEvaluated(trigger, outcome string) { ruleEvaluations.WithLabelValues(trigger, outcome).Inc() }
+
+// JourneyCalled records one try of a journey step's call: its kind
+// (webhook, slack), outcome (done, retried, failed) and time.
+func JourneyCalled(kind, outcome string, d time.Duration) {
+	journeyCalls.WithLabelValues(kind, outcome).Inc()
+	journeyCallDuration.WithLabelValues(kind).Observe(d.Seconds())
+}
 
 // Excluded records people an exclusion left out of a journey, a
 // broadcast or a sequence.

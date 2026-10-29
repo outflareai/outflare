@@ -159,6 +159,8 @@ type renderer struct {
 	defaults map[string]string
 	used     map[string]bool
 	escape   bool
+	// wrap, when set, escapes each value instead (Fill, for a URL).
+	wrap func(string) string
 }
 
 func (r *renderer) value(name string) (string, bool) {
@@ -193,11 +195,33 @@ func (r *renderer) render(nodes []node, b *strings.Builder) {
 			if r.escape && !n.raw {
 				v = html.EscapeString(v)
 			}
+			if r.wrap != nil {
+				v = r.wrap(v)
+			}
 			b.WriteString(v)
 		default:
 			b.WriteString(n.text)
 		}
 	}
+}
+
+// Fill fills one piece of text outside an email, such as a journey
+// webhook's URL or body or a Slack message, with the same syntax. Nothing
+// is HTML-escaped; wrap, when set, escapes each value (for a URL).
+func Fill(src string, vars map[string]any, wrap func(string) string) (string, error) {
+	nodes, err := parse(src)
+	if err != nil {
+		return "", err
+	}
+	var b strings.Builder
+	(&renderer{vars: vars, defaults: map[string]string{}, used: map[string]bool{}, wrap: wrap}).render(nodes, &b)
+	return b.String(), nil
+}
+
+// CheckFill reports the first mistake in text for Fill, or nil.
+func CheckFill(src string) error {
+	_, err := parse(src)
+	return err
 }
 
 // Check parses every part and returns the first mistake, naming the part.

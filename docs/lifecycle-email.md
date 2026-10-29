@@ -260,7 +260,7 @@ with the rule's dry run. On a phone the flow is read-only.
 - **Actions.** Steps that do something besides email, each going on to
   `next`:
   - **Data.**
-    - `set_field` sets, clears or increments a field (`field`, `change`, `value`). `value` can copy one with `{{event.x}}` or `{{person.x}}`. It never overwrites a value a person set by hand, unless `overwrite_manual` is on; the step is then `skipped`.
+    - `set_field` sets, clears or increments a field (`field`, `change`, `value`). `value` can copy one with `{{event.x}}`, `{{person.x}}` or `{{vars.x}}`. It never overwrites a value a person set by hand, unless `overwrite_manual` is on; the step is then `skipped`.
     - `add_tag` and `remove_tag` put a tag on the person or take it off.
     - `add_to_list` and `remove_from_list` move them in or out of a static list ([lists.md](lists.md#static-lists)).
     - `set_consent` records that they agreed to (`granted`) or declined (`withdrawn`) an email `topic`, or all marketing email when it's empty. The run is the evidence. Use it when they opted in somewhere Outflare doesn't see, such as a checkbox your app reports in an event.
@@ -274,9 +274,13 @@ with the rule's dry run. On a phone the flow is read-only.
     - `suppress` adds their addresses, or their work domain, to the suppression list.
     - `unsubscribe_topic` withdraws their consent to a topic, or to all marketing email.
   - **Messaging.** `transactional_email` sends a published transactional `template`, such as an account notice. Marketing consent, topics and the frequency cap don't apply to it, but the suppression list and the policy check do. Use the `email` step for marketing.
-  - **Notify.** `alert` raises an alert (`title`, `text`) to the record's `owner` or to the owners and admins. It is emailed or sent to Slack as alert settings say.
+  - **Notify.**
+    - `alert` raises an alert (`title`, `text`) to the record's `owner` or to the owners and admins. It is emailed or sent to Slack as alert settings say.
+    - `slack` posts `text` (with an optional bold `title`) to a `channel` in the workspace's own Slack connection (the first one, or `connection_id`). It is tried again for about a minute when Slack is busy.
+  - **Integrations.** `webhook` calls any URL: your own system, Zapier, n8n or another tool's API. See [Webhook steps](#webhook-steps).
 
   Each action is done, `skipped` with why, or `failed`. A failed step does what its `on_error` says: `stop` (the default) fails the run, `continue` goes on to `next`, and a step id goes there. `GET .../journeys/step-kinds` (MCP `list_journey_step_kinds`) lists every kind with its settings as JSON Schema and the fields that name the next step. The flow builder's step picker reads it.
+- **Run variables.** A step can save something for later steps: a webhook's answer is kept as `vars.<save_as>`. Templates, webhook and Slack text and `set_field` values read it as `{{vars.x}}`, and a branch tests it with a `var` condition (`{"var": "billing.status", "op": "eq", "value": 200}`). One run shows its `vars`.
 - **Goal.** When the person does `goal_event`, their run ends with reason
   `goal`.
 - **Exit criteria.**
@@ -285,7 +289,7 @@ with the rule's dry run. On a phone the flow is read-only.
 - **Exclusions.** `exclude` names lists (smart or static) and tags. People on any of the lists, with any of the tags, or who work at a company with one, never start, even when added by hand. The refusal says why: `excluded: on the list Hands off`, `excluded: tagged competitor` or `excluded: their company is tagged competitor`. Broadcasts and sequences take the same `exclude` (see Exclusions).
 - **Changing it.** Activating checks every email step's template is
   published, and that the lists, journeys and sequences action steps name
-  are the workspace's. A journey that hasn't gone live yet changes freely. A live
+  are the workspace's, and that every webhook step with `auth` has its key. A journey that hasn't gone live yet changes freely. A live
   one is read-only: **Edit** makes a draft version beside it (`POST
   .../journeys/{id}/draft`, then `PATCH .../draft`; MCP
   `edit_journey_draft`) while the live version keeps running, and
@@ -334,6 +338,19 @@ with the rule's dry run. On a phone the flow is read-only.
   completed, exited and failed, and per step how many were sent, skipped,
   waited, or went yes or no, and how many are on it now (`at_step`). `GET .../journeys/{id}/runs` lists the people
   in it, and one run lists what each of its steps did.
+
+### Webhook steps
+
+A `webhook` step makes one HTTP call per person:
+
+- **The call.** `method` (POST by default), `url`, `headers` and a JSON `body`. `{{person.x}}`, `{{event.x}}`, `{{vars.x}}` and `{{run.id}}` fill in the URL's path and query (escaped), header values and body strings; the host is fixed. A body string that is only `{{x}}` becomes the value itself, so a number stays a number. Headers are visible to anyone who can read the journey: never put keys in them.
+- **The receiver's key.** `auth` says where it goes: `header` (`name`, such as `Authorization`, with the key as its value, such as `Bearer ...`), `basic` (`username`; the key is the password) or `query` (`name`, such as `api_key`). Set the key itself with `PUT .../journeys/{id}/step-secrets/{step}` (`{"value": "..."}`), or in the step's settings in the app. It is sealed and never shown again; `GET .../step-secrets` lists which steps have one. A journey can't go live until every step with `auth` has its key. MCP agents can't set or read keys, so keys never pass through a chat.
+- **The signature.** Every call is signed the [Standard Webhooks](https://www.standardwebhooks.com) way, with the `webhook-id`, `webhook-timestamp` and `webhook-signature` headers, using the workspace's signing secret (`GET .../journeys/signing-secret`, made the first time it is asked for). Your own receiver can check it with any Standard Webhooks library; receivers that don't care skip it. `POST .../journeys/signing-secret/rotate` makes a new one; the old one keeps signing for 24 hours, or stops at once with `expire_now`.
+- **Retries.** The call runs in the background, so the run waits for it. A 5xx, 408, 425 or 429 answer, or no answer within 20 seconds, is tried again for about 40 minutes. `webhook-id` and `Idempotency-Key` stay the same on every try, so the receiver can tell a retry. Any other non-2xx answer fails the step at once; `on_error` decides what happens next. Redirects aren't followed.
+- **The answer.** With `save_as`, the answer is kept as `vars.<save_as>`: `{status, body}`, the body as JSON when it is JSON, else as text, up to 16 KB.
+- **Where it can call.** Only public `https` addresses, unless the server sets `WEBHOOKS_ALLOW_PRIVATE` (self-hosted receivers on the same network).
+
+The run's history shows each call as `calling`, then `done` with the status and time (`200 in 184 ms`), or `failed` with why.
 
 ## Exclusions
 

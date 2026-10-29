@@ -534,6 +534,9 @@ func (s *Server) activateJourney(w http.ResponseWriter, r *http.Request) {
 	if !s.journeyApplied(w, r, s.checkJourneyRefs(r, a.WorkspaceID, cur.Steps)) {
 		return
 	}
+	if !s.journeyApplied(w, r, s.checkJourneyKeys(r, a.WorkspaceID, cur.ID, cur.Steps)) {
+		return
+	}
 	s.setJourneyStatus(w, r, a, cur, "active", []string{"draft", "paused"})
 }
 
@@ -628,6 +631,8 @@ type journeyRunView struct {
 	Version    *int           `json:"version"`
 	StepsTaken int            `json:"steps_taken"`
 	Context    map[string]any `json:"context"`
+	// What its steps saved for later steps, such as a webhook's answer.
+	Vars       map[string]any `json:"vars"`
 	EnteredAt  time.Time      `json:"entered_at"`
 	FinishedAt *time.Time     `json:"finished_at"`
 	// What each step did, in order: only on a single run.
@@ -636,17 +641,18 @@ type journeyRunView struct {
 
 const journeyRunSelect = `
 	SELECT r.id, r.journey_id, r.record_id, COALESCE(rc.name, ''), r.status, r.step, r.next_at, r.exit_reason, r.journey_version, r.steps_taken, r.context,
-	       r.entered_at, r.finished_at
+	       r.entered_at, r.finished_at, r.vars
 	FROM journey_runs r LEFT JOIN records rc ON rc.id = r.record_id
 	WHERE r.workspace_id = $1 AND r.journey_id = $2`
 
 func scanJourneyRun(row pgx.Row) (journeyRunView, error) {
 	var v journeyRunView
-	var ctxJSON []byte
+	var ctxJSON, varsJSON []byte
 	err := row.Scan(&v.ID, &v.JourneyID, &v.RecordID, &v.Name, &v.Status, &v.Step, &v.NextAt, &v.ExitReason, &v.Version, &v.StepsTaken, &ctxJSON,
-		&v.EnteredAt, &v.FinishedAt)
-	v.Context = map[string]any{}
+		&v.EnteredAt, &v.FinishedAt, &varsJSON)
+	v.Context, v.Vars = map[string]any{}, map[string]any{}
 	_ = json.Unmarshal(ctxJSON, &v.Context)
+	_ = json.Unmarshal(varsJSON, &v.Vars)
 	return v, err
 }
 

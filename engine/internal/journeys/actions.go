@@ -63,6 +63,11 @@ type actionDef struct {
 	StepKind
 	check func(st Step) string
 	run   func(ctx context.Context, x *act) (outcome, detail string, err error)
+	// call, instead of run, is a step that calls out (a webhook, Slack):
+	// it runs in a job of its own after the run's transaction, tried
+	// again on errors that can pass, attempts times at most.
+	call     func(ctx context.Context, c *call) callResult
+	attempts int
 }
 
 // act is one action step being run for one person.
@@ -114,6 +119,7 @@ var next = []string{"next"}
 var conditionSchema = schema(map[string]any{
 	"attribute": str("A field on the person, such as plan."), "property": str("A property of the event that started the run."),
 	"event": str("Whether they did this event since the run started."), "email": enum("Whether an earlier email step's email was", "delivered", "opened", "clicked"),
+	"var":  str("Something an earlier step saved, such as billing.status for a webhook's answer saved as billing."),
 	"step": str("The email step an email condition is about."), "op": enum("The test", "eq", "neq", "gt", "lt", "contains", "exists", "not_exists"),
 	"value": map[string]any{"description": "What eq, neq, gt, lt and contains compare with."},
 }, "op")
@@ -136,7 +142,7 @@ var Actions = []actionDef{
 	{StepKind: StepKind{Kind: "set_field", Group: "data", Label: "Update a field",
 		Description: "Set, clear or add to a field on the person. It never overwrites a value a person set by hand unless overwrite_manual is on.",
 		Settings: schema(map[string]any{"field": str("The field's key, such as lifecycle_stage."), "change": enum("set (the default), clear or increment", "set", "clear", "increment"),
-			"value": map[string]any{"description": "The new value, or {{event.x}} / {{person.x}} to copy one."}, "overwrite_manual": map[string]any{"type": "boolean"}}, "field")},
+			"value": map[string]any{"description": "The new value, or {{event.x}}, {{person.x}} or {{vars.x}} to copy one."}, "overwrite_manual": map[string]any{"type": "boolean"}}, "field")},
 		check: func(st Step) string {
 			switch {
 			case !fieldRE.MatchString(st.Field) || strings.Contains(st.Field, "."):
@@ -280,6 +286,30 @@ var Actions = []actionDef{
 			return ""
 		},
 		run: raiseAlert},
+	{StepKind: StepKind{Kind: "slack", Group: "notify", Label: "Post to Slack",
+		Description: "Post a message to a channel in the workspace's own Slack. {{person.x}}, {{event.x}} and {{vars.x}} fill in. Tried again for about a minute when Slack is busy.",
+		Requires:    []Requirement{{Connection: "slack", Label: "Slack (Settings, Connections)"}},
+		Settings: schema(map[string]any{"channel": map[string]any{"type": "string", "description": "The channel's id, from the connection's channel list.", "x-outflare-picker": "slack_channel"},
+			"text": str("The message, up to 3,000 characters."), "title": str("A bold line above it, up to 120 characters; optional."),
+			"connection_id": map[string]any{"type": "string", "format": "uuid", "description": "Which Slack connection; the workspace's first when empty.", "x-outflare-picker": "connection"}}, "channel", "text")},
+		check:    checkSlack,
+		call:     slackCall,
+		attempts: 5},
+	{StepKind: StepKind{Kind: "webhook", Group: "integrations", Label: "Call a webhook",
+		Description: "Call any URL: your own system, Zapier, n8n or another tool's API. {{person.x}}, {{event.x}} and {{vars.x}} fill in the URL, headers and body. Every call is signed with the workspace's signing secret; auth adds the receiver's own key. Tried again for about 40 minutes on 5xx, 429 or no answer; the answer can be saved for later steps.",
+		Settings: schema(map[string]any{
+			"method":  enum("POST (the default), GET, PUT, PATCH or DELETE", "POST", "GET", "PUT", "PATCH", "DELETE"),
+			"url":     str("An https URL, up to 2,000 characters."),
+			"headers": map[string]any{"type": "object", "maxProperties": 20, "additionalProperties": map[string]any{"type": "string"}, "description": "Headers anyone who can see the journey can read; put keys in auth."},
+			"body":    map[string]any{"description": "The JSON body. A string that is only {{x}} copies the value as it is (a number stays a number)."},
+			"auth": schema(map[string]any{"type": enum("none (the default), header, basic or query", "none", "header", "basic", "query"),
+				"name":     str("The header (header) or URL parameter (query) the key goes in."),
+				"username": str("For basic: the user name; the key is the password.")}, "type"),
+			"save_as": str("Keep the answer in vars.<save_as> as {status, body}: lowercase letters, digits and _."),
+		}, "url")},
+		check:    checkWebhook,
+		call:     webhookCall,
+		attempts: 10},
 }
 
 func init() {
@@ -342,8 +372,9 @@ func needID(name string, get func(Step) string) func(Step) string {
 	}
 }
 
-// value is the step's value, with {{event.x}} or {{person.x}} copied from
-// the run's event or the person's fields.
+// value is the step's value, with {{event.x}}, {{person.x}} or {{vars.x}}
+// copied from the run's event, the person's fields or what an earlier step
+// saved.
 func (x *act) value() any {
 	s, ok := x.st.Value.(string)
 	if !ok || !strings.HasPrefix(s, "{{") || !strings.HasSuffix(s, "}}") {
@@ -353,6 +384,9 @@ func (x *act) value() any {
 	switch {
 	case strings.HasPrefix(path, "event."):
 		v, _ := lookup(x.r.context, strings.TrimPrefix(path, "event."))
+		return v
+	case strings.HasPrefix(path, "vars."):
+		v, _ := lookup(x.r.vars, strings.TrimPrefix(path, "vars."))
 		return v
 	case strings.HasPrefix(path, "person."):
 		attrs, err := attributes(context.Background(), x.tx, x.ws, x.r.recordID)

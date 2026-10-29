@@ -129,6 +129,7 @@ Read (always available):
 | `list_email_topics` | Subscription topics for lifecycle email, such as product updates |
 | `list_email_broadcasts`, `get_email_broadcast` | Lifecycle emails sent to many people at once, with results; who was skipped and why |
 | `list_journeys`, `get_journey`, `list_journey_runs`, `list_journey_step_kinds` | If-this-then-that flows for people on customer records, what each step did, who is in them, and every kind of step a journey can have |
+| `list_journey_step_secrets` | Which webhook steps have their key set (never the keys: people set them in the app, so keys never pass through the chat) |
 | `get_automation_map` | Every rule and journey as one graph, with what sets each off, what it touches, its volume for the last 7 days, and flags for loops, overlapping emails, unused events and journeys that never start. Needs `emails.read` and `customers.read` |
 | `list_rules`, `get_rule`, `simulate_rule`, `list_rule_firings` | The rules engine: rules that turn what happens to records into business events, a dry run of what one would have done, and when it fired for whom |
 | `list_emails`, `get_email`, `get_email_recipient` | Transactional and lifecycle emails with delivery status, opens, clicks and what triggered each; one email's content and timeline; everything one address was sent |
@@ -340,7 +341,7 @@ Write (left out when `OUTFLARE_MCP_READ_ONLY=1`):
 | `sync_supplier_mailboxes` | Read the supplier's mailboxes again now, e.g. right after ordering more |
 | `update_supplier_sync` | Auto-import new mailboxes, Google app passwords on or off, daily cap for imported mailboxes, push on or off |
 | `create_partner_program`, `update_partner_program` | Start a referral, affiliate or influencer program from its preset, or change, pause or archive one |
-| `set_partner_rules`, `create_partner_group` | Replace a program's stackable reward rules (cash, fixed, action, two-sided, tiers), or add a group with its own rates |
+| `set_partner_rules`, `create_partner_group`, `update_partner_group`, `assign_partner_group`, `delete_partner_group` | Replace a program's reward rules (cash, fixed, action, two-sided, tiers), and manage its groups: add, rename, make default, move partners in bulk, remove |
 | `add_partner`, `update_partner`, `add_partner_promo_code` | Add a customer record as a partner, approve, suspend or move them, set their postback URL, and tie promo codes to them |
 | `log_partner_fee`, `adjust_partner_balance` | Log a fixed fee (an influencer's post) or correct what a partner is owed |
 | `report_partner_conversion` | Report a lead, sale or refund the way the workspace's backend does |

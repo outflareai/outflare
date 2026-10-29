@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net/http"
 	"strconv"
 	"strings"
 	"time"
@@ -14,10 +15,12 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/outflareai/outflare/engine/internal/audit"
+	"github.com/outflareai/outflare/engine/internal/connectors"
 	"github.com/outflareai/outflare/engine/internal/customers"
 	"github.com/outflareai/outflare/engine/internal/emails"
 	"github.com/outflareai/outflare/engine/internal/jobs"
 	"github.com/outflareai/outflare/engine/internal/metrics"
+	"github.com/outflareai/outflare/engine/internal/secrets"
 )
 
 // JobRun moves one run along until it waits or ends.
@@ -32,6 +35,18 @@ type Service struct {
 	// Fields writes record fields for set_field and tag steps (the API
 	// server). Without it those steps fail.
 	Fields FieldWriter
+	// Store opens the workspace's own Slack connection for slack steps, and
+	// Box opens webhook keys and the signing secret. Without them those
+	// steps fail.
+	Store *connectors.Store
+	Box   *secrets.Box
+	// AllowPrivate lets webhook steps call private, loopback and plain
+	// http addresses, for self-hosted servers whose receivers are on the
+	// same network (WEBHOOKS_ALLOW_PRIVATE). Off, only public
+	// https URLs work.
+	AllowPrivate bool
+	// Client overrides the HTTP client webhook steps call with, for tests.
+	Client *http.Client
 	// Deals moves deals for move_deal steps (the API server). Without it
 	// those steps fail.
 	Deals DealMover
@@ -41,6 +56,7 @@ type Service struct {
 func (s *Service) Register(q *jobs.Queue) {
 	q.Handle(customers.JobJourneyEvent, s.eventJob)
 	q.Handle(JobRun, s.runJob)
+	q.Handle(JobCall, s.callJob)
 }
 
 // journey is a journey as runs read it.
@@ -356,6 +372,7 @@ type run struct {
 	version                 *int
 	nextAt                  *time.Time
 	context                 map[string]any
+	vars                    map[string]any
 	entered                 time.Time
 	taken                   int
 }
@@ -364,18 +381,10 @@ type run struct {
 func (s *Service) advance(ctx context.Context, ws, runID string) (bool, error) {
 	more := false
 	err := pgx.BeginFunc(ctx, s.Pool, func(tx pgx.Tx) error {
-		var r run
-		var ctxJSON []byte
-		err := tx.QueryRow(ctx, `SELECT id, journey_id, record_id, step, journey_version, next_at, context, entered_at, steps_taken FROM journey_runs
-			WHERE workspace_id = $1 AND id = $2 AND status = 'active' FOR UPDATE`, ws, runID).
-			Scan(&r.id, &r.journeyID, &r.recordID, &r.step, &r.version, &r.nextAt, &ctxJSON, &r.entered, &r.taken)
-		if errors.Is(err, pgx.ErrNoRows) {
-			return nil
-		}
-		if err != nil {
+		r, found, err := loadRun(ctx, tx, ws, runID)
+		if err != nil || !found {
 			return err
 		}
-		_ = json.Unmarshal(ctxJSON, &r.context)
 		j, err := loadJourney(ctx, tx, ws, r.journeyID, false)
 		if err != nil {
 			return err
@@ -424,23 +433,13 @@ func (s *Service) advance(ctx context.Context, ws, runID string) (bool, error) {
 		if err != nil {
 			return err
 		}
-		if t.end != "" {
-			if t.outcome != "" {
-				if err := logStep(ctx, tx, ws, r, st, t.outcome, nil, t.detail); err != nil {
-					return err
-				}
-			}
-			return s.finish(ctx, tx, ws, r, t.end, t.reason)
+		if t.call != nil {
+			// A call runs in a job of its own, outside this transaction;
+			// the run waits for it.
+			return s.startCall(ctx, tx, ws, r, st, t.call)
 		}
-		if err := logStep(ctx, tx, ws, r, st, t.outcome, t.emailID, t.detail); err != nil {
-			return err
-		}
-		if _, err := tx.Exec(ctx, `UPDATE journey_runs SET step = NULLIF($2, ''), next_at = NULL, steps_taken = steps_taken + 1, updated_at = now() WHERE id = $1`,
-			r.id, t.next); err != nil {
-			return err
-		}
-		more = true
-		return nil
+		more, err = s.moveOn(ctx, tx, ws, r, st, t)
+		return err
 	})
 	return more, err
 }
@@ -452,6 +451,8 @@ type taken struct {
 	// end and reason are set when the run ends at this step: its status
 	// and why.
 	end, reason string
+	// call is set when the step is a call to start: the run waits for it.
+	call *actionDef
 }
 
 // take does one step of a run. A test run (t set) goes through the same
@@ -466,7 +467,7 @@ func (s *Service) take(ctx context.Context, tx pgx.Tx, ws string, j *journey, r 
 		if err != nil {
 			return taken{}, err
 		}
-		yes, err := holds(ctx, tx, subject{ws: ws, runID: r.id, recordID: r.recordID, attributes: attrs, context: r.context, entered: r.entered}, st.Conditions, st.Match)
+		yes, err := holds(ctx, tx, subject{ws: ws, runID: r.id, recordID: r.recordID, attributes: attrs, context: r.context, vars: r.vars, entered: r.entered}, st.Conditions, st.Match)
 		if err != nil {
 			return taken{}, err
 		}
@@ -502,21 +503,80 @@ func (s *Service) take(ctx context.Context, tx pgx.Tx, ws string, j *journey, r 
 	if a == nil {
 		return taken{end: "failed", reason: "unknown_step"}, nil
 	}
+	if a.call != nil {
+		switch {
+		case t != nil:
+			// A test never calls out: the call would be a job, after
+			// the test is rolled back.
+			return taken{next: st.Next, outcome: "not_called", detail: "a test doesn't make calls"}, nil
+		case r.nextAt == nil:
+			return taken{call: a}, nil
+		}
+		return onError(st, taken{next: st.Next, outcome: "failed", detail: "the call did not finish in time"}), nil
+	}
 	outcome, detail, err := a.run(ctx, &act{s: s, tx: tx, ws: ws, j: j, r: r, st: st})
 	if err != nil {
 		return taken{}, err
 	}
-	next := st.Next
-	if outcome == "failed" {
-		switch st.OnError {
-		case "", "stop":
-			return taken{outcome: "failed", detail: detail, end: "failed", reason: "action_failed"}, nil
-		case "continue":
-		default:
-			next = st.OnError
-		}
+	return onError(st, taken{next: st.Next, outcome: outcome, detail: detail}), nil
+}
+
+// onError applies a failed action's on_error: stop (the run fails),
+// continue, or a step to go to.
+func onError(st *Step, t taken) taken {
+	if t.outcome != "failed" {
+		return t
 	}
-	return taken{next: next, outcome: outcome, detail: detail}, nil
+	switch st.OnError {
+	case "", "stop":
+		t.end, t.reason = "failed", "action_failed"
+	case "continue":
+	default:
+		t.next = st.OnError
+	}
+	return t
+}
+
+// loadRun reads an active run, locking it until tx ends.
+func loadRun(ctx context.Context, tx pgx.Tx, ws, runID string) (run, bool, error) {
+	var r run
+	var ctxJSON, varsJSON []byte
+	err := tx.QueryRow(ctx, `SELECT id, journey_id, record_id, step, journey_version, next_at, context, vars, entered_at, steps_taken FROM journey_runs
+		WHERE workspace_id = $1 AND id = $2 AND status = 'active' FOR UPDATE`, ws, runID).
+		Scan(&r.id, &r.journeyID, &r.recordID, &r.step, &r.version, &r.nextAt, &ctxJSON, &varsJSON, &r.entered, &r.taken)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return r, false, nil
+	}
+	if err != nil {
+		return r, false, err
+	}
+	_ = json.Unmarshal(ctxJSON, &r.context)
+	_ = json.Unmarshal(varsJSON, &r.vars)
+	if r.vars == nil {
+		r.vars = map[string]any{}
+	}
+	return r, true, nil
+}
+
+// moveOn records what a step did and moves the run on to its next step,
+// or ends it. It reports whether the run goes on.
+func (s *Service) moveOn(ctx context.Context, tx pgx.Tx, ws string, r run, st *Step, t taken) (bool, error) {
+	if t.end != "" {
+		if t.outcome != "" {
+			if err := logStep(ctx, tx, ws, r, st, t.outcome, nil, t.detail); err != nil {
+				return false, err
+			}
+		}
+		return false, s.finish(ctx, tx, ws, r, t.end, t.reason)
+	}
+	if err := logStep(ctx, tx, ws, r, st, t.outcome, t.emailID, t.detail); err != nil {
+		return false, err
+	}
+	if _, err := tx.Exec(ctx, `UPDATE journey_runs SET step = NULLIF($2, ''), next_at = NULL, steps_taken = steps_taken + 1, updated_at = now() WHERE id = $1`,
+		r.id, t.next); err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 func attributes(ctx context.Context, q jobs.Querier, ws, recordID string) (map[string]any, error) {
@@ -575,7 +635,7 @@ func (s *Service) email(ctx context.Context, tx pgx.Tx, ws string, j *journey, r
 	_ = json.Unmarshal(attrs, &attributes)
 	d := emails.Draft{NewEmail: emails.NewEmail{WorkspaceID: ws, BrandID: j.brandID, To: []string{address}, Purpose: "lifecycle",
 		Trigger: "journey", TriggerRef: j.id, Surface: "job"},
-		TemplateID: templateID, Data: map[string]any{"person": emails.PersonData(r.recordID, name, address, attributes), "event": r.context}}
+		TemplateID: templateID, Data: map[string]any{"person": emails.PersonData(r.recordID, name, address, attributes), "event": r.context, "vars": r.vars}}
 	e, err := s.Emails.Compose(ctx, tx, d)
 	var ce *emails.ComposeError
 	if errors.As(err, &ce) {

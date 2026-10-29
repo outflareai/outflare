@@ -54,6 +54,20 @@ type Step struct {
 	Title           string `json:"title,omitempty"`
 	Text            string `json:"text,omitempty"`
 	To              string `json:"to,omitempty"`
+	// webhook: the call, with {{person.x}}, {{event.x}} and {{vars.x}}
+	// filled in the URL, header values and body; how it proves who may
+	// call (the key itself is set apart, never in the steps); and where
+	// its answer is kept for later steps (vars.<save_as>).
+	Method  string            `json:"method,omitempty"`
+	URL     string            `json:"url,omitempty"`
+	Headers map[string]string `json:"headers,omitempty"`
+	Body    any               `json:"body,omitempty"`
+	Auth    *Auth             `json:"auth,omitempty"`
+	SaveAs  string            `json:"save_as,omitempty"`
+	// slack: the channel, and which Slack connection (the workspace's
+	// first when empty). The message is text, with title in bold above it.
+	Channel      string `json:"channel,omitempty"`
+	ConnectionID string `json:"connection_id,omitempty"`
 	// What a failed action does: stop (the default: the run fails),
 	// continue (go on to next) or a step id to go to.
 	// set_consent: granted or withdrawn, for topic (empty: all marketing
@@ -69,6 +83,17 @@ type Step struct {
 	OnError string    `json:"on_error,omitempty"`
 }
 
+// Auth is how a webhook step's call proves it may call: type none (the
+// default), header (name: the header, such as Authorization), basic
+// (username; the key is the password) or query (name: the URL
+// parameter, such as api_key). The key is set on its own (PUT
+// .../step-secrets/{step}), sealed, and never shown again.
+type Auth struct {
+	Type     string `json:"type"`
+	Name     string `json:"name,omitempty"`
+	Username string `json:"username,omitempty"`
+}
+
 // Condition is one test on a person or what started their run.
 //
 //   - attribute: a field on their customer record (plan, country).
@@ -76,6 +101,8 @@ type Step struct {
 //   - event: whether they did this event since the run started.
 //   - email with step: whether the email from that step was delivered,
 //     opened or clicked.
+//   - var: something an earlier step saved in the run, such as
+//     billing.status for a webhook's answer saved as billing.
 //
 // Op is eq, neq, gt, lt, contains, exists or not_exists. For event and
 // email it is exists (did) or not_exists (didn't).
@@ -84,6 +111,7 @@ type Condition struct {
 	Property  string `json:"property,omitempty"`
 	Event     string `json:"event,omitempty"`
 	Email     string `json:"email,omitempty"`
+	Var       string `json:"var,omitempty"`
 	Step      string `json:"step,omitempty"`
 	Op        string `json:"op"`
 	Value     any    `json:"value,omitempty"`
@@ -205,13 +233,13 @@ func Check(steps []Step) string {
 
 func checkCondition(c Condition) string {
 	set := 0
-	for _, v := range []string{c.Attribute, c.Property, c.Event, c.Email} {
+	for _, v := range []string{c.Attribute, c.Property, c.Event, c.Email, c.Var} {
 		if v != "" {
 			set++
 		}
 	}
 	if set != 1 {
-		return "each condition tests one of attribute, property, event or email"
+		return "each condition tests one of attribute, property, event, email or var"
 	}
 	if !ops[c.Op] {
 		return "op is eq, neq, gt, lt, contains, exists or not_exists"
@@ -219,6 +247,8 @@ func checkCondition(c Condition) string {
 	switch {
 	case c.Attribute != "" && !fieldRE.MatchString(c.Attribute), c.Property != "" && !fieldRE.MatchString(c.Property):
 		return "attribute and property are field names such as plan or address.country"
+	case c.Var != "" && !fieldRE.MatchString(c.Var):
+		return "var is a saved value's path, such as billing.status"
 	case c.Event != "" && !ValidEventName(c.Event):
 		return "event must be an event name such as order_completed"
 	case c.Email != "" && c.Email != "delivered" && c.Email != "opened" && c.Email != "clicked":
@@ -255,8 +285,8 @@ func CheckFilter(filter []Condition) string {
 		return "a trigger has at most 20 conditions"
 	}
 	for _, c := range filter {
-		if c.Event != "" || c.Email != "" {
-			return "trigger conditions test attribute or property; use a branch step for event and email conditions"
+		if c.Event != "" || c.Email != "" || c.Var != "" {
+			return "trigger conditions test attribute or property; use a branch step for event, email and var conditions"
 		}
 		if msg := checkCondition(c); msg != "" {
 			return msg
