@@ -11,6 +11,7 @@ import (
 	"github.com/outflareai/outflare/engine/internal/classify"
 	"github.com/outflareai/outflare/engine/internal/connectors"
 	"github.com/outflareai/outflare/engine/internal/emailfind"
+	"github.com/outflareai/outflare/engine/internal/inboundemail"
 	"github.com/outflareai/outflare/engine/internal/jobs"
 	"github.com/outflareai/outflare/engine/internal/metrics"
 	"github.com/outflareai/outflare/engine/internal/pipeline"
@@ -59,6 +60,7 @@ type Host struct {
 	server          *api.Server
 	emailFinder     *emailfind.Service
 	stages          *pipeline.Runner
+	inboundEmail    *inboundemail.Service
 }
 
 type route struct {
@@ -90,6 +92,25 @@ func (h *Host) HandleJob(kind string, fn func(ctx context.Context, payload json.
 func (h *Host) EnqueueJob(ctx context.Context, kind string, payload any, idempotencyKey string) error {
 	_, err := jobs.Enqueue(ctx, h.Pool, jobs.NewJob{Kind: kind, Payload: payload, IdempotencyKey: idempotencyKey})
 	return err
+}
+
+// EnableInboundEmail turns on inbound email: each workspace gets
+// addresses at domain (such as in.outflare.ai) for purposes like support
+// and AI receipts. The extension receives the mail at its own edge and
+// delivers each message to POST /v1/inbound/email: the raw message as the
+// body, the recipient in X-Outflare-To, and X-Outflare-Timestamp and
+// X-Outflare-Signature from SignInboundEmail with secret. A 404 means no
+// such address: refuse the message. It also lists the inbound_email
+// capability, so the web app offers it.
+func (h *Host) EnableInboundEmail(domain string, secret []byte) {
+	h.inboundEmail.Enable(domain, secret)
+	h.AddCapability("inbound_email")
+}
+
+// SignInboundEmail is the X-Outflare-Signature for a delivery made at
+// unix second ts.
+func SignInboundEmail(secret []byte, ts int64, raw []byte) string {
+	return inboundemail.Sign(secret, ts, raw)
 }
 
 // Metrics is the registry the engine's private metrics port serves

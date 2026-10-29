@@ -295,6 +295,7 @@ var Follows = []Ref{
 	{"customer_events", "record_id"}, {"customer_events", "account_id"}, {"consents", "record_id"},
 	{"leads", "record_id"}, {"messages", "record_id"}, {"inbound_messages", "record_id"},
 	{"meetings", "record_id"}, {"deals", "record_id"}, {"emails", "record_id"},
+	{"support_conversations", "record_id"}, {"support_messages", "record_id"},
 	{"email_broadcast_recipients", "record_id"}, {"suppressions", "record_id"},
 	{"journey_runs", "record_id"}, {"payment_subscriptions", "record_id"}, {"seo_competitors", "record_id"},
 	{"site_sessions", "record_id"}, {"site_visitors", "record_id"}, {"site_visitors", "account_id"},

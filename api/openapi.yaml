@@ -17190,6 +17190,128 @@ paths:
         "404": { $ref: "#/components/responses/Error" }
         "202": { $ref: "#/components/responses/MissionHeld" }
         default: { $ref: "#/components/responses/Error" }
+  /v1/inbound/email:
+    post:
+      operationId: receiveInboundEmail
+      summary: Deliver an inbound message (operator's edge)
+      description: |
+        For the server's own mail receiver, not for workspaces: an extension that turned inbound email on delivers each
+        message here. The body is the raw message (up to 25 MB); `X-Outflare-To` is the recipient, `X-Outflare-Timestamp`
+        the unix time and `X-Outflare-Signature` the hex HMAC-SHA256 of `<timestamp>.<body>` with the inbound secret.
+        404 means no such address: refuse the message. 404 too on servers without inbound email.
+      tags: [inbound_email]
+      parameters:
+        - { name: X-Outflare-To, in: header, required: true, schema: { type: string, example: acme-support@in.example.test } }
+        - { name: X-Outflare-Timestamp, in: header, required: true, schema: { type: string } }
+        - { name: X-Outflare-Signature, in: header, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          message/rfc822:
+            schema: { type: string, format: binary }
+      responses:
+        "200":
+          description: Already received (same Message-ID); nothing queued.
+          content:
+            application/json:
+              schema: { type: object, required: [queued], properties: { queued: { type: boolean } } }
+        "202":
+          description: Stored and queued to be processed.
+          content:
+            application/json:
+              schema: { type: object, required: [queued, id], properties: { queued: { type: boolean }, id: { type: string, format: uuid } } }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/workspaces/{ws}/inbound-addresses:
+    parameters:
+      - { $ref: "#/components/parameters/Workspace" }
+    get:
+      operationId: listInboundAddresses
+      x-outflare-access: { scope: workspace.read }
+      summary: List inbound email addresses
+      description: |
+        Scope: workspace.read. The workspace's addresses at the server's inbound domain: people forward mail to them,
+        such as their support mailbox or AI receipts. Support addresses read like support inboxes (`northpeak-support@`),
+        one per brand; other purposes have one per workspace with letters nobody can guess. `purposes` lists the ones
+        this workspace can use. With a brand picked, its addresses and the workspace's own. `available` is false where
+        the server has no inbound email (it is part of Outflare Cloud).
+      tags: [inbound_email]
+      parameters:
+        - { $ref: "#/components/parameters/Brand" }
+      responses:
+        "200":
+          description: The addresses.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [available, domain, purposes, data]
+                properties:
+                  available: { type: boolean }
+                  domain: { type: [string, "null"], example: in.outflare.ai }
+                  purposes: { type: array, items: { type: string, enum: [ai_receipts, support] } }
+                  data: { type: array, items: { $ref: "#/components/schemas/InboundAddress" } }
+        default: { $ref: "#/components/responses/Error" }
+    post:
+      operationId: createInboundAddress
+      x-outflare-access: { scope: workspace.manage }
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      summary: Get, rename or replace an inbound email address
+      description: |
+        Scope: workspace.manage. The address for a purpose (and, for support, a brand), made the first time (201) and
+        returned after (200). For support, `name` renames it (such as `help-northpeak`; 409 when taken); an old name of
+        the same address can be taken back. `replace: true` makes a new one. Either way mail to the old address is then
+        refused, so everyone forwarding must update their forwarding. 404 where the server has no inbound email, or the
+        purpose is off for the workspace.
+      tags: [inbound_email]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [purpose]
+              properties:
+                purpose: { type: string, enum: [ai_receipts, support] }
+                brand: { type: string, description: "Support only: the brand's id or handle; leave out for the workspace's own address." }
+                name: { type: string, description: "Support only: the part before the @, 4 to 64 lowercase letters, digits and dashes." }
+                replace: { type: boolean }
+      responses:
+        "200":
+          description: The existing address, or the same name again.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/InboundAddress" }
+        "201":
+          description: A new address.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/InboundAddress" }
+        "202": { $ref: "#/components/responses/MissionHeld" }
+        "400": { $ref: "#/components/responses/Error" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/workspaces/{ws}/inbound-emails:
+    parameters:
+      - { $ref: "#/components/parameters/Workspace" }
+    get:
+      operationId: listInboundEmails
+      x-outflare-access: { scope: audit.read }
+      summary: List received messages
+      description: "Scope: audit.read. The latest 100 messages delivered to the workspace's inbound addresses and what became of each: processed, ignored, rejected (reason: unknown_forwarder when nobody here forwarded mail for a purpose only members forward) or failed. With a brand picked, mail to its addresses and the workspace's own."
+      tags: [inbound_email]
+      parameters:
+        - { $ref: "#/components/parameters/Brand" }
+      responses:
+        "200":
+          description: The messages, newest first.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data: { type: array, items: { $ref: "#/components/schemas/InboundEmail" } }
+        default: { $ref: "#/components/responses/Error" }
   /v1/workspaces/{ws}/knowledge/items:
     parameters: [{ $ref: "#/components/parameters/Workspace" }]
     get:
@@ -17453,6 +17575,318 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/KnowledgeAnswer" }
         "400": { $ref: "#/components/responses/Error" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/workspaces/{ws}/support/conversations:
+    parameters: [{ $ref: "#/components/parameters/Workspace" }]
+    get:
+      operationId: listSupportConversations
+      x-outflare-access: { scope: inbox.read, brand_limited: true }
+      summary: List support conversations
+      description: |
+        Scope: inbox.read. The support inbox: conversations with customers who wrote to a support mailbox, newest
+        message first. Filter by status, assignee (`me`, `none` or a user id), team, tag, customer record or words
+        in the subject, address, name or messages. `counts` are the inbox's folders (open, pending, closed, mine,
+        unassigned) whatever the filters. With a brand picked, its conversations and those of no brand (a mailbox shared by
+        every brand).
+      tags: [support]
+      parameters:
+        - { name: status, in: query, schema: { type: string, enum: [open, pending, closed, all] }, description: "open waits on the team, pending on the customer." }
+        - { name: assignee, in: query, schema: { type: string }, description: "me, none or a user id." }
+        - { name: team_id, in: query, schema: { type: string, format: uuid } }
+        - { name: tag, in: query, schema: { type: string } }
+        - { name: record_id, in: query, schema: { type: string, format: uuid }, description: "One customer's conversations." }
+        - { name: q, in: query, schema: { type: string }, description: "Words in the subject, address, name or messages." }
+        - { name: sort, in: query, schema: { type: string, enum: [newest, oldest] }, description: "oldest (with status=open) puts who has waited longest first." }
+        - { $ref: "#/components/parameters/Brand" }
+        - { $ref: "#/components/parameters/Fields" }
+        - { name: limit, in: query, description: 1 to 200. Default 50., schema: { type: integer, minimum: 1, maximum: 200 } }
+        - { name: offset, in: query, schema: { type: integer, minimum: 0 } }
+        - { $ref: "#/components/parameters/Cursor" }
+      responses:
+        "200":
+          description: A page of conversations.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, total, next_offset, next_cursor, counts]
+                properties:
+                  data: { type: array, items: { $ref: "#/components/schemas/SupportConversation" } }
+                  total: { type: integer }
+                  next_offset: { type: [integer, "null"] }
+                  next_cursor: { type: [string, "null"] }
+                  counts: { $ref: "#/components/schemas/SupportCounts" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/workspaces/{ws}/support/conversations/{id}:
+    parameters:
+      - { $ref: "#/components/parameters/Workspace" }
+      - { name: id, in: path, required: true, schema: { type: string } }
+    get:
+      operationId: getSupportConversation
+      x-outflare-access: { scope: inbox.read, brand_limited: true }
+      summary: Get a support conversation
+      description: |
+        Scope: inbox.read. The conversation, every message in it (the customer's emails, the team's replies and
+        notes only the team sees) oldest first, and the customer's other conversations. A person opening it marks
+        it read.
+      tags: [support]
+      responses:
+        "200":
+          description: The conversation and its messages.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [conversation, messages, other_conversations]
+                properties:
+                  conversation: { $ref: "#/components/schemas/SupportConversation" }
+                  messages: { type: array, items: { $ref: "#/components/schemas/SupportMessage" } }
+                  other_conversations: { type: array, items: { $ref: "#/components/schemas/SupportConversation" } }
+        default: { $ref: "#/components/responses/Error" }
+    patch:
+      operationId: updateSupportConversation
+      x-outflare-access: { scope: inbox.manage, brand_limited: true }
+      summary: Assign, tag or close a support conversation
+      description: |
+        Scope: inbox.manage. Set its status (open, pending or closed), who it is assigned to (a member, or null),
+        its team (or null), its tags (lowercased, at most 20) or whether it shows as unread. A customer writing
+        again opens a pending or closed conversation by itself.
+      tags: [support]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                status: { type: string, enum: [open, pending, closed] }
+                assignee_id: { type: [string, "null"], format: uuid, description: "A member's user id; null to unassign." }
+                team_id: { type: [string, "null"], format: uuid }
+                tags: { type: array, maxItems: 20, items: { type: string, minLength: 1, maxLength: 40 } }
+                unread: { type: boolean }
+      responses:
+        "200":
+          description: The conversation.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SupportConversation" }
+        "202": { $ref: "#/components/responses/MissionHeld" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/workspaces/{ws}/support/conversations/{id}/replies:
+    parameters:
+      - { $ref: "#/components/parameters/Workspace" }
+      - { name: id, in: path, required: true, schema: { type: string } }
+    post:
+      operationId: replySupportConversation
+      x-outflare-access: { scope: inbox.manage, brand_limited: true }
+      summary: Reply to a customer
+      description: |
+        Scope: inbox.manage. Emails the customer from the support mailbox the conversation came in on, in the same
+        thread. It is sent in the background: the message's `status` goes from sending to sent or failed (with
+        `error`). The address must pass the policy check for mail a person asked for: an unsubscribe from marketing
+        doesn't stop it, a bounce or a block does (409 `blocked`). The conversation becomes pending (waiting on the
+        customer) unless `status` says otherwise, and the first reply sets `first_reply_at`.
+      tags: [support]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [body]
+              properties:
+                body: { type: string, minLength: 1, maxLength: 20000 }
+                status: { type: string, enum: [pending, closed, open], description: "The conversation's status after the reply; pending by default." }
+      responses:
+        "201":
+          description: The reply, queued to send.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [id, status]
+                properties:
+                  id: { type: string, format: uuid }
+                  status: { type: string, enum: [sending] }
+        "202": { $ref: "#/components/responses/MissionHeld" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/workspaces/{ws}/support/conversations/{id}/notes:
+    parameters:
+      - { $ref: "#/components/parameters/Workspace" }
+      - { name: id, in: path, required: true, schema: { type: string } }
+    post:
+      operationId: addSupportNote
+      x-outflare-access: { scope: inbox.manage, brand_limited: true }
+      summary: Add a note to a support conversation
+      description: "Scope: inbox.manage. A note for the team. The customer never sees it."
+      tags: [support]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [body]
+              properties:
+                body: { type: string, minLength: 1, maxLength: 20000 }
+      responses:
+        "201":
+          description: The note.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [id]
+                properties:
+                  id: { type: string, format: uuid }
+        "202": { $ref: "#/components/responses/MissionHeld" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/workspaces/{ws}/support/conversations/{id}/suggest-reply:
+    parameters:
+      - { $ref: "#/components/parameters/Workspace" }
+      - { name: id, in: path, required: true, schema: { type: string } }
+    post:
+      operationId: suggestSupportReply
+      x-outflare-access: { scope: inbox.manage, brand_limited: true }
+      summary: Suggest a reply from knowledge
+      description: |
+        Scope: inbox.manage. Drafts an answer to the customer's latest email from what customers may be told
+        (knowledge that is public or for AI answering customers), with the workspace's own AI model, citing its
+        sources. Nothing is sent: a person edits it and replies. It runs only when asked, so it spends nothing on
+        its own. With no AI model, `answer` is null and `ai.problem` says why; 409 `nothing_to_answer` when the
+        customer has written nothing yet.
+      tags: [support]
+      responses:
+        "200":
+          description: The suggested answer, with its sources.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/KnowledgeAnswer" }
+        "202": { $ref: "#/components/responses/MissionHeld" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/workspaces/{ws}/support/stats:
+    parameters: [{ $ref: "#/components/parameters/Workspace" }]
+    get:
+      operationId: getSupportStats
+      x-outflare-access: { scope: inbox.read, brand_limited: true }
+      summary: Support at a glance
+      description: |
+        Scope: inbox.read. Conversations started in the last `days` (30 by default), how many were answered and
+        closed, and the median time to the first reply and to closing, with the inbox's folder counts.
+      tags: [support]
+      parameters:
+        - { name: days, in: query, schema: { type: integer, minimum: 1, maximum: 365, default: 30 } }
+        - { $ref: "#/components/parameters/Brand" }
+      responses:
+        "200":
+          description: Support numbers.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [days, conversations, replied, closed, median_first_reply_seconds, median_resolution_seconds, counts]
+                properties:
+                  days: { type: integer }
+                  conversations: { type: integer }
+                  replied: { type: integer }
+                  closed: { type: integer }
+                  median_first_reply_seconds: { type: [number, "null"] }
+                  median_resolution_seconds: { type: [number, "null"] }
+                  counts: { $ref: "#/components/schemas/SupportCounts" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/workspaces/{ws}/support/mailboxes:
+    parameters: [{ $ref: "#/components/parameters/Workspace" }]
+    get:
+      operationId: listSupportMailboxes
+      x-outflare-access: { scope: mailboxes.read }
+      summary: List support mailboxes
+      description: "Scope: mailboxes.read. The connected mailboxes whose mail goes to the support inbox."
+      tags: [support]
+      responses:
+        "200":
+          description: Support mailboxes.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data: { type: array, items: { $ref: "#/components/schemas/SupportMailbox" } }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/workspaces/{ws}/support/mailboxes/{id}:
+    parameters:
+      - { $ref: "#/components/parameters/Workspace" }
+      - { name: id, in: path, required: true, schema: { type: string } }
+    put:
+      operationId: addSupportMailbox
+      x-outflare-access: { scope: mailboxes.manage }
+      summary: Use a mailbox for support
+      description: |
+        Scope: mailboxes.manage. From now on the mailbox's new mail goes to the support inbox instead of the sales
+        inbox, and sequences never send from it. 409 `mailbox_in_use` while it sends for a sequence or campaign
+        (take it off them first) or when Outflare only knows it from a sequencer and can't read it.
+      tags: [support]
+      responses:
+        "200":
+          description: The support mailbox.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SupportMailbox" }
+        "202": { $ref: "#/components/responses/MissionHeld" }
+        default: { $ref: "#/components/responses/Error" }
+    delete:
+      operationId: removeSupportMailbox
+      x-outflare-access: { scope: mailboxes.manage }
+      summary: Stop using a mailbox for support
+      description: |
+        Scope: mailboxes.manage. Its new mail goes to the sales inbox again. Its conversations stay, but can't be
+        answered by email until a support mailbox is set again.
+      tags: [support]
+      responses:
+        "204": { description: Done. }
+        "202": { $ref: "#/components/responses/MissionHeld" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/workspaces/{ws}/test/support-email:
+    parameters: [{ $ref: "#/components/parameters/Workspace" }]
+    post:
+      operationId: simulateSupportEmail
+      x-outflare-access: { scope: inbox.manage }
+      summary: Simulate a customer writing to support (test workspaces)
+      description: |
+        Delivers a made-up email from a customer to a support mailbox, handled like real mail: it starts a
+        conversation or, with `in_reply_to` (a reply's message id), continues one. Only in a test workspace; a
+        live one answers 409 `live_workspace`.
+      tags: [sandbox]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [mailbox_id, from, body]
+              properties:
+                mailbox_id: { type: string, format: uuid }
+                from: { type: string, format: email }
+                name: { type: string }
+                subject: { type: string }
+                body: { type: string, minLength: 1, maxLength: 20000 }
+                in_reply_to: { type: string, description: "The Message-ID the email answers." }
+      responses:
+        "201":
+          description: Where it landed.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [message_id, conversation_id]
+                properties:
+                  message_id: { type: string, format: uuid }
+                  conversation_id: { type: string, format: uuid }
+        "202": { $ref: "#/components/responses/MissionHeld" }
         default: { $ref: "#/components/responses/Error" }
   /v1/workspaces/{ws}/knowledge/stats:
     parameters: [{ $ref: "#/components/parameters/Workspace" }]
@@ -19323,6 +19757,51 @@ paths:
           content:
             text/javascript:
               schema: { type: string }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/site/signup:
+    post:
+      operationId: sendSiteSignup
+      summary: Report a sign-up from the website
+      description: |
+        Public: the site key (ofk_) in the body is the authority. What outflare.signup(email) in the tracking script sends
+        when a visitor signs up, for sites whose backend reports nothing to Outflare. It records a signup conversion
+        (source browser) for the partner whose link the visitor came from, by the visitor's own visits with a ref, under
+        each program's window and credit rule, so the lead shows at once. Anyone can call it with any address, so it pays
+        a sign-up reward only when the program sets pay_browser_signups; sales and refunds still come from your server or
+        billing. The answer is the same whether or not a partner was credited. Send the JSON as text/plain to skip the
+        CORS preflight.
+      tags: [partners]
+      requestBody:
+        required: true
+        content:
+          text/plain:
+            schema: { type: string }
+          application/json:
+            schema:
+              type: object
+              required: [key, anonymousId, email]
+              properties:
+                key: { type: string, example: ofk_test_not_a_real_key }
+                anonymousId: { type: string, minLength: 8, maxLength: 64 }
+                email: { type: string, format: email }
+      responses:
+        "200":
+          description: Taken.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok]
+                properties:
+                  ok: { type: boolean }
+        default: { $ref: "#/components/responses/Error" }
+    options:
+      operationId: sendSiteSignupPreflight
+      summary: CORS preflight for website sign-ups
+      description: "Public. Any origin may send; the key, not the page, is checked."
+      tags: [partners]
+      responses:
+        "204": { description: Allowed. }
         default: { $ref: "#/components/responses/Error" }
   /v1/site/consent:
     get:
@@ -29006,7 +29485,7 @@ components:
     PartnerProgram:
       type: object
       required: [id, name, slug, kind, status, brand_id, landing_url, currency, credit_window_days, credit_model, codes_win, hold_days,
-        auto_approve, auto_accept, min_payout_cents, terms_url, sales_source, postback_hint, portal_enabled, portal_subdomain, portal, portal_url, rules, groups,
+        auto_approve, auto_accept, pay_browser_signups, min_payout_cents, terms_url, sales_source, postback_hint, portal_enabled, portal_subdomain, portal, portal_url, rules, groups,
         partners, created_at, updated_at]
       properties:
         id: { type: string, format: uuid }
@@ -29023,6 +29502,7 @@ components:
         hold_days: { type: integer, description: Rewards wait this long before they can be approved; refunds inside it cancel them. }
         auto_approve: { type: boolean, description: Approve rewards on their own once the hold ends. }
         auto_accept: { type: boolean, description: Partners who sign up are accepted without review. }
+        pay_browser_signups: { type: boolean, description: "Sign-ups the website reports with outflare.signup() (sendSiteSignup) earn sign-up rewards. Off by default: anyone can call it, so they make the lead only; money comes from your server and billing." }
         min_payout_cents: { type: integer, format: int64 }
         terms_url: { type: string }
         sales_source: { type: string, description: "A billing connector (stripe) whose synced payments and refunds are also partner sales; '' for the API and postbacks only." }
@@ -29148,6 +29628,7 @@ components:
         hold_days: { type: integer, minimum: 0, maximum: 365 }
         auto_approve: { type: boolean }
         auto_accept: { type: boolean }
+        pay_browser_signups: { type: boolean }
         min_payout_cents: { type: integer, format: int64, minimum: 0 }
         terms_url: { type: string, maxLength: 2000 }
         sales_source: { type: string, description: "A billing connector's id (stripe): its synced payments and refunds become partner sales too. \"\" for none." }
@@ -29271,7 +29752,7 @@ components:
         amount_cents: { type: integer, format: int64 }
         currency: { type: string }
         product_id: { type: string }
-        source: { type: string, enum: [api, postback, billing, manual, import], description: "billing: a payment synced from the program's sales_source." }
+        source: { type: string, enum: [api, postback, billing, manual, import, browser], description: "billing: a payment synced from the program's sales_source. browser: a sign-up the website reported with outflare.signup()." }
         occurred_at: { type: string, format: date-time }
         created_at: { type: string, format: date-time }
     PartnerConversionInput:
@@ -29294,6 +29775,7 @@ components:
         currency: { type: string, description: "The program's currency when left out; a sale in another is not credited." }
         product_id: { type: string, maxLength: 200 }
         sub_id: { type: string, maxLength: 100 }
+        anonymous_id: { type: string, description: "The website visitor's id (outflare.anonymousId() in the browser). Their visits with a partner's ref credit the partner, under the program's window and credit rule, before the product identifies them." }
         occurred_at: { type: string, description: "RFC 3339 or Unix seconds; now when left out." }
     PartnerConversionResult:
       type: object
@@ -30688,7 +31170,7 @@ components:
           description: "What the test set out to show, kept as it was when it started: the hypothesis, control, goals, guardrails, smallest change, the plan, and the flag's versions (weights and a fingerprint of their content) and rollout. Null for a draft, and for tests started before registration."
           oneOf:
             - type: object
-              required: [hypothesis, control, goals, guardrails, min_effect, rollout, versions, plan, registered_at]
+              required: [hypothesis, control, goals, guardrails, min_effect, rollout, versions, plan, variance_reduction, registered_at]
               properties:
                 hypothesis: { type: string }
                 control: { type: string }
@@ -30714,6 +31196,7 @@ components:
                         weekly_per_version: { type: number }
                         visitors_per_version: { type: integer }
                     - type: "null"
+                variance_reduction: { type: boolean, description: "The test adjusts for visitors' history (CUPED) for its whole life." }
                 registered_at: { type: string, format: date-time }
             - type: "null"
         created_at: { type: string, format: date-time }
@@ -30815,6 +31298,7 @@ components:
         lift_high: { type: number, description: High end of the always-valid 95% range of the lift. }
         p_value: { type: number, minimum: 0, maximum: 1, description: "Always-valid p-value, the lowest over the test's daily looks, corrected for the number of versions compared with the control (raw_p_value times corrected_for, at most 1): below 0.05 it is safe to stop, however often you looked, and it never rises again." }
         raw_p_value: { type: number, minimum: 0, maximum: 1, description: The always-valid p-value before the correction for several versions. }
+        variance_reduction: { type: number, minimum: 0, maximum: 1, description: "Share of the noise taken out by adjusting for the visitors' value of the goal in the 28 days before they joined (CUPED), at the last look; 0 when not used." }
     ABTestResults:
       type: object
       required: [test_id, status, control, winner, result]
@@ -30868,6 +31352,7 @@ components:
             sample_ratio_mismatch: { type: boolean, description: "True when sample_ratio_p is under 0.001: something (a redirect, a cache, bots) is breaking the split, so there is no winner." }
             min_effect: { type: number, description: The smallest change the p-values were tuned to detect. }
             corrected_for: { type: integer, description: "Versions compared with the control. Past one, every p_value and range is corrected for that many chances of a false winner." }
+            variance_reduction: { type: boolean, description: "The comparisons are adjusted for the visitors' history before they joined (CUPED), as registered when the test started; each comparison says how much noise it took out." }
             flag_changed:
               type: [array, "null"]
               items: { type: string }
@@ -36315,6 +36800,41 @@ components:
         parent_id: { type: [string, "null"], format: uuid, description: The folder to put it in; null for the top level. }
         brand_id: { type: [string, "null"], description: "A brand's id or handle; null for every brand." }
         position: { type: integer }
+    InboundAddress:
+      type: object
+      required: [id, purpose, brand_id, email, created_at, confirmation, last_email_at]
+      properties:
+        id: { type: string, format: uuid }
+        purpose: { type: string, enum: [ai_receipts, support] }
+        brand_id: { type: [string, "null"], format: uuid, description: "Support addresses: the brand whose mail it takes; null for the workspace's own." }
+        email: { type: string, example: northpeak-support@in.example.test }
+        created_at: { type: string, format: date-time }
+        confirmation:
+          description: "Support addresses: Gmail's request to confirm forwarding a mailbox to this address, for an admin to open. Outflare never follows it itself."
+          oneOf:
+            - type: object
+              required: [from, code, url, at]
+              properties:
+                from: { type: string, description: "The mailbox that asked to forward here." }
+                code: { type: [string, "null"] }
+                url: { type: [string, "null"] }
+                at: { type: [string, "null"], format: date-time }
+            - type: "null"
+        last_email_at: { type: [string, "null"], format: date-time, description: "When mail last arrived." }
+    InboundEmail:
+      type: object
+      required: [id, purpose, received_at, from, forwarded_by, subject, dkim_domains, status, reason, size_bytes]
+      properties:
+        id: { type: string, format: uuid }
+        purpose: { type: string, description: "The address's purpose, such as support or ai_receipts." }
+        received_at: { type: string, format: date-time }
+        from: { type: [string, "null"] }
+        forwarded_by: { type: [string, "null"] }
+        subject: { type: [string, "null"] }
+        dkim_domains: { type: array, items: { type: string }, description: Domains whose DKIM signature on it checked out. }
+        status: { type: string, enum: [received, processed, ignored, rejected, failed] }
+        reason: { type: [string, "null"] }
+        size_bytes: { type: integer }
     KnowledgeItem:
       type: object
       required: [id, kind, title, excerpt, visibility, status, brand_id, collection_id, version, owner_id, owner_name, review_by, created_by, updated_by, created_at, updated_at, deleted_at, uses_30d]
@@ -36374,6 +36894,81 @@ components:
         collection_id: { type: [string, "null"], format: uuid }
         match: { type: string, enum: [words, meaning, both], description: How it was found. }
         score: { type: number, description: For ordering only. }
+    SupportCounts:
+      type: object
+      description: The support inbox's folders.
+      required: [open, pending, closed, mine, unassigned]
+      properties:
+        open: { type: integer, description: "Waiting on the team." }
+        pending: { type: integer, description: "Waiting on the customer." }
+        closed: { type: integer }
+        mine: { type: integer, description: "Not closed and assigned to you." }
+        unassigned: { type: integer, description: "Not closed and assigned to nobody." }
+    SupportPerson:
+      type: object
+      required: [id, name]
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+    SupportConversation:
+      type: object
+      required: [id, brand_id, record_id, contact, mailbox_id, mailbox_email, channel, subject, status, assignee, team, tags,
+        unread, last_from, preview, messages, first_message_at, first_reply_at, closed_at, last_message_at, created_at]
+      properties:
+        id: { type: string, format: uuid }
+        brand_id: { type: [string, "null"], format: uuid }
+        record_id: { type: [string, "null"], format: uuid, description: "The customer's record." }
+        contact:
+          type: object
+          required: [name, email]
+          properties:
+            name: { type: string }
+            email: { type: string }
+        mailbox_id: { type: [string, "null"], format: uuid, description: "The support mailbox it came in on; null once that mailbox is removed." }
+        mailbox_email: { type: [string, "null"] }
+        channel: { type: string, enum: [email] }
+        subject: { type: string }
+        status: { type: string, enum: [open, pending, closed], description: "open waits on the team, pending on the customer." }
+        assignee: { oneOf: [{ $ref: "#/components/schemas/SupportPerson" }, { type: "null" }] }
+        team: { oneOf: [{ $ref: "#/components/schemas/SupportPerson" }, { type: "null" }] }
+        tags: { type: array, items: { type: string } }
+        unread: { type: boolean }
+        last_from: { type: string, enum: [customer, team] }
+        preview: { type: string, description: "The start of the latest email." }
+        messages: { type: integer, description: "Emails both ways, not notes." }
+        first_message_at: { type: string, format: date-time }
+        first_reply_at: { type: [string, "null"], format: date-time }
+        closed_at: { type: [string, "null"], format: date-time }
+        last_message_at: { type: string, format: date-time }
+        created_at: { type: string, format: date-time }
+    SupportMessage:
+      type: object
+      required: [id, kind, author, from_email, from_name, to_email, subject, body, auto_reply, status, error, created_at, sent_at]
+      properties:
+        id: { type: string, format: uuid }
+        kind: { type: string, enum: [in, out, note], description: "in: from the customer. out: the team's reply. note: for the team only." }
+        author: { oneOf: [{ $ref: "#/components/schemas/SupportPerson" }, { type: "null" }] }
+        from_email: { type: string }
+        from_name: { type: string }
+        to_email: { type: string }
+        subject: { type: string }
+        body: { type: string }
+        auto_reply: { type: boolean, description: "An out-of-office or other automatic answer." }
+        status: { type: string, enum: [received, sending, sent, failed, saved] }
+        error: { type: [string, "null"], description: "Why a reply wasn't sent." }
+        created_at: { type: string, format: date-time }
+        sent_at: { type: [string, "null"], format: date-time }
+    SupportMailbox:
+      type: object
+      required: [id, email, display_name, brand_id, status, last_synced_at, sync_error]
+      properties:
+        id: { type: string, format: uuid }
+        email: { type: string }
+        display_name: { type: string }
+        brand_id: { type: [string, "null"], format: uuid }
+        status: { type: string }
+        last_synced_at: { type: [string, "null"], format: date-time }
+        sync_error: { type: [string, "null"] }
     KnowledgeAnswer:
       type: object
       required: [id, question, audience, answered, answer, citations, passages, meaning, ai]

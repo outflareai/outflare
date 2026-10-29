@@ -273,6 +273,18 @@ var (
 		Namespace: namespace, Subsystem: "knowledge", Name: "asks_total",
 		Help: "Questions asked of the knowledge base, by outcome (answered, unanswered, no_ai, error).",
 	}, []string{"outcome"})
+	supportMessages = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Namespace: namespace, Subsystem: "support", Name: "messages_total",
+		Help: "Support inbox messages, by kind (in: from a customer, out: a reply queued, note) and outcome.",
+	}, []string{"kind", "outcome"})
+	supportReplies = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Namespace: namespace, Subsystem: "support", Name: "replies_total",
+		Help: "Support replies the send job finished, by outcome (sent, failed, retry).",
+	}, []string{"outcome"})
+	supportReplyDuration = prometheus.NewHistogram(prometheus.HistogramOpts{
+		Namespace: namespace, Subsystem: "support", Name: "reply_seconds",
+		Help: "Time to send one support reply through its mailbox.", Buckets: []float64{.1, .25, .5, 1, 2.5, 5, 10, 20, 30, 60},
+	})
 	knowledgeAskDuration = prometheus.NewHistogram(prometheus.HistogramOpts{
 		Namespace: namespace, Subsystem: "knowledge", Name: "ask_seconds",
 		Help: "Time to answer a question from knowledge: finding passages and the AI model's answer.", Buckets: []float64{.1, .25, .5, 1, 2.5, 5, 10, 20, 30, 60},
@@ -406,6 +418,23 @@ var (
 	webSearches = linkCounter("web_searches_total",
 		"Searches on workspaces' own SERP connections (search-results), by outcome (done, budget_reached, connector_invalid, connector_auth, connector_quota, connector_unavailable).", "outcome")
 
+	inboundReceived = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Namespace: namespace, Subsystem: "inbound_email", Name: "received_total",
+		Help: "Messages delivered to POST /v1/inbound/email, by purpose (ai_receipts, support, or none when the address is unknown) and outcome (accepted, duplicate, unknown_address, bad_signature, too_large, error).",
+	}, []string{"purpose", "outcome"})
+	inboundProcessed = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Namespace: namespace, Subsystem: "inbound_email", Name: "processed_total",
+		Help: "Inbound messages processed, by purpose and status (processed, ignored, rejected, failed).",
+	}, []string{"purpose", "status"})
+	inboundBytes = prometheus.NewCounter(prometheus.CounterOpts{
+		Namespace: namespace, Subsystem: "inbound_email", Name: "received_bytes_total",
+		Help: "Size of the inbound messages accepted.",
+	})
+	inboundPurged = prometheus.NewCounter(prometheus.CounterOpts{
+		Namespace: namespace, Subsystem: "inbound_email", Name: "raw_purged_total",
+		Help: "Raw inbound messages deleted after 30 days (their details stay).",
+	})
+
 	buildInfo = prometheus.NewGaugeVec(prometheus.GaugeOpts{
 		Namespace: namespace, Name: "build_info",
 		Help: "Always 1; the labels are the running engine version and its role (OUTFLARE_ROLE).",
@@ -429,12 +458,14 @@ var own = []prometheus.Collector{
 	queryRuns, queryDuration, queryRows,
 	ruleEvaluations, journeyCalls, journeyCallDuration, excluded, sequencerPushes, crmContactPushes,
 	semanticRuns, semanticItems, semanticDuration, semanticAvailable, semanticWorkspaces, knowledgeAsks, knowledgeAskDuration,
+	supportMessages, supportReplies, supportReplyDuration,
 	adConversions, adConversionsOldest,
 	meetingEvents, meetingEventsPending,
 	reviewReads, reviewsFound, socialReads, syncRuns, linkReads, linkPageChecks, archiveLookups, linkPitches, linkReplies, linkLiveChecks, webSearches,
 	socialPublishes,
 	partnerClicks, partnerConversions, partnerRewards, partnerRewardsOverdue, partnerImports, partnerImportObjects, partnerPostbacks,
 	newsRuns, newsFound, newsReads,
+	inboundReceived, inboundProcessed, inboundBytes, inboundPurged,
 	buildInfo,
 }
 
@@ -645,6 +676,16 @@ func KnowledgeAsked(outcome string, d time.Duration) {
 	knowledgeAskDuration.Observe(d.Seconds())
 }
 
+// SupportMessage records one support inbox message: kind in, out or note,
+// and its outcome.
+func SupportMessage(kind, outcome string) { supportMessages.WithLabelValues(kind, outcome).Inc() }
+
+// SupportSent records one run of the support reply job.
+func SupportSent(outcome string, d time.Duration) {
+	supportReplies.WithLabelValues(outcome).Inc()
+	supportReplyDuration.Observe(d.Seconds())
+}
+
 // SetSemanticAvailable says whether the database has pgvector.
 func SetSemanticAvailable(ok bool) {
 	if ok {
@@ -830,3 +871,24 @@ func PartnerImportObjects(kind, result string, n int) {
 // PartnerRewardsOverdue records how long the oldest reward due to approve
 // on its own has waited past its hold.
 func PartnerRewardsOverdue(d time.Duration) { partnerRewardsOverdue.Set(d.Seconds()) }
+
+// InboundReceived counts one message delivered to the inbound endpoint:
+// its purpose ("none" when the address is unknown), outcome and size.
+func InboundReceived(purpose, outcome string, bytes int) {
+	if purpose == "" {
+		purpose = "none"
+	}
+	inboundReceived.WithLabelValues(purpose, outcome).Inc()
+	if outcome == "accepted" {
+		inboundBytes.Add(float64(bytes))
+	}
+}
+
+// InboundProcessed counts one inbound message processed, by its purpose
+// and the status it ended in.
+func InboundProcessed(purpose, status string) {
+	inboundProcessed.WithLabelValues(purpose, status).Inc()
+}
+
+// InboundPurged counts raw inbound messages deleted after 30 days.
+func InboundPurged(n int64) { inboundPurged.Add(float64(n)) }

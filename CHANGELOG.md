@@ -6,6 +6,17 @@ Each pull request that changes what Outflare does adds a change note in [changes
 
 ## [Unreleased]
 
+## [0.42.0] - 2026-10-29
+
+### Added
+
+- Partners: `outflare.signup(email)` in the website script credits a partner with a sign-up straight from the browser, for sites whose backend reports nothing. It pays no sign-up reward unless the program allows it. Your backend can also credit a sign-up by the visitor's `anonymous_id`.
+- Support inbox: mark a connected mailbox for support and customers' emails become conversations your team assigns, tags, notes, answers in the same thread and closes, with first-reply and resolution times. Suggest a reply drafts an answer from your knowledge, only when you ask.
+
+### Changed
+
+- A/B tests reach an answer sooner: new tests adjust for what each visitor did in the 28 days before they joined (variance reduction, known as CUPED), which removes noise without changing the expected result. Each comparison says how much noise was taken out.
+
 ## [0.41.0] - 2026-10-29
 
 ### Changed

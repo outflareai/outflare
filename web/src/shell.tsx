@@ -95,6 +95,7 @@ export const tabNames: Record<Tab, string> = {
   rules: "Rules",
   automations: "Automation map",
   providers: "Email providers",
+  support: "Support inbox",
   knowledge: "Library",
   company: "About your company",
   brands: "Brands",
@@ -174,6 +175,7 @@ export const tabBlurbs: Record<Tab, string> = {
   reddit: "Find threads where your brand can help, reply with a disclosure from its own account, and count the sign-ups.",
   seo: "Domain rating, backlinks and the keywords your sites rank for, from DataForSEO or Ahrefs.",
   connectors: "The services Outflare can use, connected once for the whole workspace.",
+  support: "Customers who write to your support mailbox, as conversations your team assigns, answers and closes.",
   knowledge: "Articles and quick answers your team writes once: products, prices, policies and stock answers. Your team and every AI in Outflare answer from them.",
   company: "What Outflare knows about your company, so people and agents never have to repeat it.",
   brands: "The businesses you market from this workspace, each with its own website, context, links and mailboxes.",
@@ -286,6 +288,8 @@ export const modules: Module[] = [
   { id: "analytics", label: "Analytics", icon: "reports", tabs: ["channels", "outcomes", "analytics", "tracking", "flags", "ab-tests", "links"] },
   // Playbooks: recipes that use every module above, from playbooks/ in the repository.
   { id: "playbooks", label: "Playbooks", icon: "playbooks", tabs: ["playbooks"] },
+  // Answering customers: the support inbox.
+  { id: "support", label: "Support", icon: "support", tabs: ["support"] },
   // What the business knows: knowledge, company context and memories, which
   // every module and agent reads.
   { id: "knowledge", label: "Knowledge", icon: "book", tabs: ["knowledge", "company"] },
@@ -297,7 +301,7 @@ const allModules = modules;
 
 // Pages that work for someone kept to some brands. The others need every
 // brand (the API answers 403), so they are hidden from them.
-const brandTabs: readonly Tab[] = ["overview", "seo-overview", "audits", "fixes", "experiments", "keywords", "ai-visibility", "backlinks", "competitors", "link-building", "news", "reddit", "social", "reviews", "ads", "visitors", "tracking", "flags", "ab-tests", "inbox", "sequences", "people", "leads", "lists", "rules", "lead-finder", "suppression", "mailboxes", "domains", "knowledge", "company", "brands", "setup", "ideal-customers", "members", "account", "instance", "ai-accounts"];
+const brandTabs: readonly Tab[] = ["overview", "seo-overview", "audits", "fixes", "experiments", "keywords", "ai-visibility", "backlinks", "competitors", "link-building", "news", "reddit", "social", "reviews", "ads", "visitors", "tracking", "flags", "ab-tests", "inbox", "sequences", "people", "leads", "lists", "rules", "lead-finder", "suppression", "mailboxes", "domains", "knowledge", "company", "brands", "setup", "ideal-customers", "members", "account", "instance", "ai-accounts", "support"];
 // Pages of parts of Outflare switched on per workspace while they are
 // tested (GET /v1/me lists each workspace's features).
 const featureTabs: Partial<Record<Tab, string>> = { "ai-accounts": "ai_accounts" };
@@ -1042,6 +1046,10 @@ function callFor(tab: Tab, ws: string, item?: string): Call {
       return { title: "Email topics", path: "/v1/workspaces/{ws}/email-topics", params: base, mcp: "list_email_topics", ask: "Add topics for product updates and our monthly newsletter, and put my lifecycle templates in the right one.", scope: "emails.read" };
     case "providers":
       return { title: "Email providers", path: "/v1/workspaces/{ws}/email-providers", params: base, mcp: "list_email_providers", ask: "Is my email provider still in the SES sandbox, and are my sending domains verified?", scope: "emails.read" };
+    case "support":
+      return item
+        ? { title: "One conversation", path: "/v1/workspaces/{ws}/support/conversations/{id}", params: { ...base, id: item }, mcp: "get_support_conversation", ask: "Draft a reply to this customer from our knowledge, and show it to me before sending.", scope: "inbox.read" }
+        : { title: "Support inbox", path: "/v1/workspaces/{ws}/support/conversations", params: base, mcp: "list_support_conversations", ask: "Which customers have waited longest for an answer, and what do they want?", scope: "inbox.read" };
     case "knowledge":
       return { title: "Knowledge", path: "/v1/workspaces/{ws}/knowledge/items", params: base, mcp: "search_knowledge", ask: "Write down our refund policy: full refunds within 30 days, no questions asked.", scope: "workspace.read" };
     case "company":

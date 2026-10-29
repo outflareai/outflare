@@ -824,6 +824,7 @@ function ProgramSettings({ ws, program: p, canManage, onClose }: { ws: string; p
   const [model, setModel] = useState(p.credit_model);
   const [hold, setHold] = useState(String(p.hold_days));
   const [auto, setAuto] = useState(p.auto_approve);
+  const [payBrowser, setPayBrowser] = useState(p.pay_browser_signups);
   const [minPayout, setMinPayout] = useState(String(p.min_payout_cents / 100));
   const [salesSource, setSalesSource] = useState(p.sales_source);
   const [rules, setRules] = useState<RuleRow[]>(toRows(p));
@@ -837,7 +838,7 @@ function ProgramSettings({ ws, program: p, canManage, onClose }: { ws: string; p
     setError("");
     const { error } = await api.PATCH("/v1/workspaces/{ws}/partner-programs/{id}", {
       params: { path: { ws, id: p.id } },
-      body: { landing_url: landing.trim(), credit_window_days: Number(windowDays), credit_model: model, hold_days: Number(hold), auto_approve: auto, min_payout_cents: Math.round(Number(minPayout) * 100), sales_source: salesSource },
+      body: { landing_url: landing.trim(), credit_window_days: Number(windowDays), credit_model: model, hold_days: Number(hold), auto_approve: auto, pay_browser_signups: payBrowser, min_payout_cents: Math.round(Number(minPayout) * 100), sales_source: salesSource },
     });
     if (error) {
       setBusy(false);
@@ -892,6 +893,9 @@ function ProgramSettings({ ws, program: p, canManage, onClose }: { ws: string; p
             </div>
             <label className="flex items-center gap-2 text-[13px]">
               <input type="checkbox" checked={auto} onChange={(e) => setAuto(e.target.checked)} /> Approve rewards on their own when the hold ends
+            </label>
+            <label className="flex items-center gap-2 text-[13px]">
+              <input type="checkbox" checked={payBrowser} onChange={(e) => setPayBrowser(e.target.checked)} /> Pay for sign-ups the browser reports (outflare.signup). Off: they make the lead only, since anyone can call it
             </label>
             <label className="flex items-center gap-2 text-[13px]">
               <input type="checkbox" checked={salesSource === "stripe"} onChange={(e) => setSalesSource(e.target.checked ? "stripe" : "")} /> Also take sales and refunds from connected Stripe

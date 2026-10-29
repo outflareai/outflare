@@ -37,22 +37,26 @@ import (
 // conversionInput is a conversion as the API, a postback or an import
 // reports it.
 type conversionInput struct {
-	Type        string  `json:"type"`
-	EventName   string  `json:"event_name"`
-	Recurring   bool    `json:"recurring"`
-	Program     string  `json:"program"`
-	Ref         string  `json:"ref"`
-	ClickID     string  `json:"click_id"`
-	PromoCode   string  `json:"promo_code"`
-	CustomerID  string  `json:"customer_id"`
-	Email       string  `json:"email"`
-	RecordID    string  `json:"record_id"`
-	ExternalID  string  `json:"external_id"`
-	RefundOf    string  `json:"refund_of"`
-	AmountCents *int64  `json:"amount_cents"`
-	Currency    string  `json:"currency"`
-	ProductID   string  `json:"product_id"`
-	SubID       string  `json:"sub_id"`
+	Type        string `json:"type"`
+	EventName   string `json:"event_name"`
+	Recurring   bool   `json:"recurring"`
+	Program     string `json:"program"`
+	Ref         string `json:"ref"`
+	ClickID     string `json:"click_id"`
+	PromoCode   string `json:"promo_code"`
+	CustomerID  string `json:"customer_id"`
+	Email       string `json:"email"`
+	RecordID    string `json:"record_id"`
+	ExternalID  string `json:"external_id"`
+	RefundOf    string `json:"refund_of"`
+	AmountCents *int64 `json:"amount_cents"`
+	Currency    string `json:"currency"`
+	ProductID   string `json:"product_id"`
+	SubID       string `json:"sub_id"`
+	// AnonymousID is the website visitor's id (outflare.anonymousId()):
+	// their visits with a partner's ref credit the partner, as the
+	// customer's own visits do once the product identifies them.
+	AnonymousID string  `json:"anonymous_id"`
 	OccurredAt  *string `json:"occurred_at"`
 	at          time.Time
 }
@@ -89,6 +93,8 @@ func (in *conversionInput) check(now time.Time) error {
 		return errInvalid("click_id is the ref_click value from a partner link")
 	case in.RecordID != "" && !validUUID(in.RecordID):
 		return errInvalid("record_id is a record's id")
+	case in.AnonymousID != "" && !siteCookieRe.MatchString(in.AnonymousID):
+		return errInvalid("anonymous_id is the visitor's id from the website script (outflare.anonymousId())")
 	case len(in.CustomerID) > 200 || len(in.ExternalID) > 200 || len(in.RefundOf) > 200 || len(in.ProductID) > 200 || len(in.SubID) > 100:
 		return errInvalid("customer_id, external_id, refund_of and product_id are at most 200 characters, sub_id 100")
 	}
@@ -437,9 +443,9 @@ func (c *conversionRun) visited(ctx context.Context, rec string) (*membershipRow
 		FROM site_sessions s
 		JOIN partner_memberships m ON m.workspace_id = s.workspace_id AND lower(m.code) = lower(s.ref)
 		JOIN partner_programs p ON p.id = m.program_id
-		WHERE s.workspace_id = $1 AND s.record_id = $2 AND s.ref <> '' AND ($3 = '' OR m.program_id::text = $3)
+		WHERE s.workspace_id = $1 AND (s.record_id = $2 OR ($5 <> '' AND s.anonymous_id = $5)) AND s.ref <> '' AND ($3 = '' OR m.program_id::text = $3)
 		  AND s.started_at >= $4::timestamptz - interval '366 days' AND s.started_at <= $4::timestamptz + interval '1 hour'`,
-		c.ws, rec, c.program, c.in.at)
+		c.ws, rec, c.program, c.in.at, c.in.AnonymousID)
 	if err != nil {
 		return nil, err
 	}
@@ -631,6 +637,17 @@ func (c *conversionRun) leadOrSale(ctx context.Context) error {
 	}
 	earned := partners.Rewards(rules, partners.Conversion{Trigger: trigger, AmountCents: amount, ProductID: in.ProductID,
 		PartnerID: m.id, GroupID: m.groupID, PriorSales: prior, FirstSaleAt: f.firstSaleAt, At: in.at})
+	if c.source == "browser" {
+		// Anyone can call outflare.signup(): it makes the lead, and pays
+		// only when the program trusts it to.
+		var pay bool
+		if err := tx.QueryRow(ctx, `SELECT pay_browser_signups FROM partner_programs WHERE id = $1`, m.programID).Scan(&pay); err != nil {
+			return err
+		}
+		if !pay {
+			earned = nil
+		}
+	}
 	hold := in.at.AddDate(0, 0, m.holdDays)
 	for _, e := range earned {
 		recipient := m.recordID

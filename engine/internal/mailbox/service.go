@@ -296,10 +296,13 @@ type Account struct {
 	Email       string
 	DisplayName string
 	Status      string
-	SMTP        Endpoint
-	SMTPCred    Credentials
-	IMAP        Endpoint
-	IMAPCred    Credentials
+	// Purpose is outreach or support (mailboxes.purpose).
+	Purpose  string
+	BrandID  *string
+	SMTP     Endpoint
+	SMTPCred Credentials
+	IMAP     Endpoint
+	IMAPCred Credentials
 }
 
 // IsTestWorkspace reports whether a workspace is a test one, whose
@@ -348,10 +351,10 @@ func (s *Service) Load(ctx context.Context, q jobs.Querier, workspaceID, id stri
 	var sealed []byte
 	var connID *string
 	err := q.QueryRow(ctx, `
-		SELECT email, display_name, status, smtp_host, smtp_port, smtp_username,
+		SELECT email, display_name, status, purpose, brand_id::text, smtp_host, smtp_port, smtp_username,
 		       imap_host, imap_port, imap_username, credentials, provider, auth_method, oauth_connection_id
 		FROM mailboxes WHERE id = $1 AND workspace_id = $2`, id, workspaceID,
-	).Scan(&a.Email, &a.DisplayName, &a.Status, &smtpHost, &smtpPort, &a.SMTPCred.Username,
+	).Scan(&a.Email, &a.DisplayName, &a.Status, &a.Purpose, &a.BrandID, &smtpHost, &smtpPort, &a.SMTPCred.Username,
 		&imapHost, &imapPort, &a.IMAPCred.Username, &sealed, &provider, &method, &connID)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, ErrNotFound

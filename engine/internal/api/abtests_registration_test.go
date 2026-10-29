@@ -3,6 +3,7 @@ package api_test
 import (
 	"strings"
 	"testing"
+	"time"
 )
 
 // Starting a test registers what it set out to show; the hypothesis is
@@ -63,5 +64,45 @@ func TestABTestRegistration(t *testing.T) {
 	}
 	if r["sample_ratio_mismatch"] != false {
 		t.Fatalf("checked the 50/50 split against today's weights: %v", r["sample_ratio_p"])
+	}
+}
+
+// A test registered from now on adjusts for visitors' history (CUPED):
+// visitors who signed up before tend to again, and the results take that
+// noise out.
+func TestABTestVarianceReduction(t *testing.T) {
+	e := freshEnv(t)
+	owner, ws := setupOwner(t, e.h)
+	base := "/v1/workspaces/" + ws
+	owner.must(201, "POST", base+"/flags", map[string]any{"key": "cta", "name": "Call to action",
+		"variants": []map[string]any{{"key": "control", "weight": 50}, {"key": "bold", "weight": 50}}})
+	id := owner.must(201, "POST", base+"/ab-tests", map[string]any{"flag": "cta",
+		"goals": []map[string]any{{"kind": "event", "name": "page_shared", "metric": "count"}}})["id"].(string)
+	started := owner.must(200, "POST", base+"/ab-tests/"+id+"/start", nil)
+	if started["registration"].(map[string]any)["variance_reduction"] != true {
+		t.Fatalf("registration: %v", started["registration"])
+	}
+	// 600 visitors; a third were keen before the test (shared 3 pages in
+	// the last weeks) and stay keen after; bold adds a little.
+	if _, err := e.pool.Exec(t.Context(), `
+		INSERT INTO customer_events (workspace_id, kind, name, anonymous_id, properties, context, occurred_at)
+		SELECT $1::uuid, 'track', 'experiment_viewed', 'v-' || i, jsonb_build_object('flag', 'cta', 'variant', CASE WHEN i % 2 = 0 THEN 'control' ELSE 'bold' END), '{}'::jsonb, now()
+		FROM generate_series(1, 600) i
+		UNION ALL
+		SELECT $1::uuid, 'track', 'page_shared', 'v-' || i, '{}'::jsonb, '{}'::jsonb, now() - interval '10 days' - k * interval '1 hour'
+		FROM generate_series(1, 600) i, generate_series(1, 3) k WHERE i % 3 = 0
+		UNION ALL
+		SELECT $1::uuid, 'track', 'page_shared', 'v-' || i, '{}'::jsonb, '{}'::jsonb, now() + interval '1 second'
+		FROM generate_series(1, 600) i, generate_series(1, 3) k WHERE i % 3 = 0 OR (i % 2 = 1 AND i % 7 = 0 AND k = 1)`, ws); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(1100 * time.Millisecond)
+	r := owner.must(200, "GET", base+"/ab-tests/"+id+"/results", nil)["result"].(map[string]any)
+	if r["variance_reduction"] != true {
+		t.Fatalf("not adjusted: %v", r["variance_reduction"])
+	}
+	c := r["goals"].([]any)[0].(map[string]any)["comparisons"].([]any)[0].(map[string]any)
+	if vr, _ := c["variance_reduction"].(float64); vr < 0.5 {
+		t.Fatalf("variance reduction: %v", c)
 	}
 }

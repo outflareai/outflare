@@ -5,6 +5,8 @@
 // attribution on the server. Visitors are known only by a random id; your
 // own product links it to a person by sending identify with userId and this
 // anonymousId (outflare.anonymousId()) when they sign up or sign in.
+// Sites whose backend reports nothing can call outflare.signup(email)
+// instead, so a partner's referral shows as a lead at once.
 //
 //   <script async src="https://app.outflare.ai/site.js" data-key="ofk_..."></script>
 //
@@ -842,6 +844,16 @@
     // The visitor's id, to send with identify from your server when they
     // sign up or sign in, so their earlier visits join their record.
     anonymousId: function () { return anon; },
+    // The visitor signed up with this email: the partner whose link they
+    // came from gets the lead at once. For sites whose backend reports
+    // nothing; sales still come from your server or billing. Resolves to
+    // true once sent.
+    signup: function (email) {
+      if (!email || !w.fetch) return Promise.resolve(false);
+      return fetch(api + "/v1/site/signup", { method: "POST", keepalive: true, headers: { "Content-Type": "text/plain" },
+        body: JSON.stringify({ key: key, anonymousId: anon, email: String(email) }) })
+        .then(function (res) { return res.ok; }, function () { return false; });
+    },
     // The visitor's choices: {necessary, analytics, marketing, preferences,
     // decided, region, rule, gpc}. With true they accept every category
     // (analytics keeps their id in a cookie for a year), with false they

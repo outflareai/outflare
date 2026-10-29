@@ -13,7 +13,7 @@ import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
 type Way = "html" | "nextjs" | "gtm";
 type SiteKey = { brand_id: string | null; snippet: string };
-type Call = "curl" | "node" | "postback";
+type Call = "browser" | "curl" | "node" | "postback";
 
 // scriptAttrs reads the src and data- attributes of the site key's
 // snippet, to write it again for Next.js.
@@ -47,11 +47,12 @@ export function PartnerInstall({ ws, program: p }: { ws: string; program: Partne
   const key = keys?.find((k) => p.brand_id && k.brand_id === p.brand_id) ?? keys?.[0];
   const base = `${location.origin}/v1/workspaces/${ws}/partner-conversions`;
   const calls: Record<Call, string> = {
-    curl: `# When someone signs up (a token with the partners.conversions scope)\ncurl ${base} \\\n  -H "Authorization: Bearer $OUTFLARE_TOKEN" -H "Content-Type: application/json" \\\n  -d '{"type": "signup", "program": "${p.slug}", "customer_id": "user_123", "email": "ana@example.com"}'\n\n# When they pay, and again on every renewal; a refund names the sale\ncurl ${base} \\\n  -H "Authorization: Bearer $OUTFLARE_TOKEN" -H "Content-Type: application/json" \\\n  -d '{"type": "sale", "program": "${p.slug}", "customer_id": "user_123", "amount_cents": 4900, "currency": "${p.currency}", "external_id": "inv_1001"}'`,
+    curl: `# When someone signs up (a token with the partners.conversions scope)\ncurl ${base} \\\n  -H "Authorization: Bearer $OUTFLARE_TOKEN" -H "Content-Type: application/json" \\\n  -d '{"type": "signup", "program": "${p.slug}", "customer_id": "user_123", "email": "ana@example.com", "anonymous_id": "<outflare.anonymousId() from the page>"}'\n\n# When they pay, and again on every renewal; a refund names the sale\ncurl ${base} \\\n  -H "Authorization: Bearer $OUTFLARE_TOKEN" -H "Content-Type: application/json" \\\n  -d '{"type": "sale", "program": "${p.slug}", "customer_id": "user_123", "amount_cents": 4900, "currency": "${p.currency}", "external_id": "inv_1001"}'`,
     node: `// When someone signs up, and when they pay (amounts in cents)\nawait fetch("${base}", {\n  method: "POST",\n  headers: { Authorization: \`Bearer \${process.env.OUTFLARE_TOKEN}\`, "Content-Type": "application/json" },\n  body: JSON.stringify({ type: "sale", program: "${p.slug}", customer_id: user.id, amount_cents: 4900, currency: "${p.currency}", external_id: invoice.id }),\n});`,
     postback: p.postback_hint
       ? `Settings, Postback URL (it starts ${p.postback_hint}), with:\n?type=sale&user_id=user_123&amount=49.00&order_id=inv_1001`
       : "Make a postback URL above, then call it with ?type=sale&user_id=user_123&amount=49.00&order_id=inv_1001",
+    browser: `// No backend code: after your sign-up form succeeds, on the page with the script\noutflare.signup(form.email.value);\n\n// The partner gets the lead at once. ${p.pay_browser_signups ? "Sign-up rewards are paid for these (Settings)." : "It pays no sign-up reward unless Settings allows it, since anyone can call it."}\n// Sales come from connected Stripe (Settings) or your server.`,
   };
   const pick = <T extends string>(step: "script" | "conversions", set: (v: T) => void) => (v: string) => {
     set(v as T);
@@ -89,6 +90,7 @@ export function PartnerInstall({ ws, program: p }: { ws: string; program: Partne
             <TabsTrigger value="curl" className="px-3 text-[12px]">API</TabsTrigger>
             <TabsTrigger value="node" className="px-3 text-[12px]">Node.js</TabsTrigger>
             <TabsTrigger value="postback" className="px-3 text-[12px]">Postback URL</TabsTrigger>
+            <TabsTrigger value="browser" className="px-3 text-[12px]">Browser only</TabsTrigger>
           </TabsList>
         </Tabs>
         <Snippet text={calls[call]} />

@@ -336,3 +336,50 @@ func TestValueFindsLift(t *testing.T) {
 	}
 	t.Logf("found after %d days; planner said %d visitors", found, need)
 }
+
+// CUPED keeps the estimate and takes out the noise a visitor's history
+// predicts; with no history it changes nothing.
+func TestCompareAdjusted(t *testing.T) {
+	rnd := rand.New(rand.NewPCG(7, 11))
+	// arm builds n visitors whose value since joining is half their value
+	// before, plus noise, plus lift.
+	arm := func(name string, n int, lift float64, history bool) Arm {
+		a := Arm{Variant: name, Visitors: int64(n)}
+		for range n {
+			x := 0.0
+			if history {
+				x = float64(rnd.IntN(10))
+			}
+			y := math.Max(0, 0.5*x+rnd.NormFloat64()+2+lift)
+			a.Sum += y
+			a.SumSq += y * y
+			a.SumX += x
+			a.SumXX += x * x
+			a.SumXY += x * y
+			if y > 0 {
+				a.Conversions++
+			}
+		}
+		a.Mean = a.Sum / float64(n)
+		return a
+	}
+	look := []Arm{arm("control", 3000, 0, true), arm("new", 3000, 0.15, true)}
+	plain := CompareSeries([][]Arm{look}, MetricValue, 0.05, 0)[0]
+	adj := CompareAdjusted([][]Arm{look}, MetricValue, 0.05, 0)[0]
+	if adj.VarianceReduction < 0.5 || plain.VarianceReduction != 0 {
+		t.Fatalf("variance reduction: adjusted %v, plain %v", adj.VarianceReduction, plain.VarianceReduction)
+	}
+	if math.Abs(adj.Lift-plain.Lift) > 0.03 {
+		t.Fatalf("the adjustment moved the lift: %v vs %v", adj.Lift, plain.Lift)
+	}
+	if adj.RawPValue > plain.RawPValue || adj.LiftHigh-adj.LiftLow >= plain.LiftHigh-plain.LiftLow {
+		t.Fatalf("no sharper: p %v vs %v, range %v vs %v", adj.RawPValue, plain.RawPValue, adj.LiftHigh-adj.LiftLow, plain.LiftHigh-plain.LiftLow)
+	}
+
+	// No history at all: nothing to adjust for.
+	bare := []Arm{arm("control", 500, 0, false), arm("new", 500, 0.1, false)}
+	a, b := CompareAdjusted([][]Arm{bare}, MetricValue, 0.05, 0)[0], CompareSeries([][]Arm{bare}, MetricValue, 0.05, 0)[0]
+	if a.VarianceReduction != 0 || a.Lift != b.Lift || a.RawPValue != b.RawPValue {
+		t.Fatalf("without history: %+v vs %+v", a, b)
+	}
+}

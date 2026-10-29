@@ -90,7 +90,7 @@ export type UiEvent =
   | "ui.ai_accounts_view_opened" // a view of AI accounts opened (view: accounts, spend, people, timeline, usage)
   | "ui.ai_accounts_example_shown" // the example usage data on AI accounts' Usage view turned on
   | "ui.copied" // a copy button
-  | "ui.partner_install_viewed" // a tab of a partner program's install steps opened (step: script or conversions; way: html, nextjs, gtm, curl, node, postback)
+  | "ui.partner_install_viewed" // a tab of a partner program's install steps opened (step: script or conversions; way: html, nextjs, gtm, curl, node, postback, browser)
   | "ui.partners_filtered" // a program's partner list filtered (filter: payout_details, value: missing or all)
   | "ui.journey_step_picker_opened" // the journey builder's step picker opened (from: start, link, rule)
   | "ui.journey_step_added" // a step put into a journey being built, before it is saved (kind, group, at: start or the link it went on)
@@ -113,6 +113,7 @@ export type UiEvent =
   | "ui.knowledge_formatted" // formatting used in the knowledge editor (command: h2, bold, ul, table, ...; how: toolbar, slash, key)
   | "ui.knowledge_pasted" // formatted text pasted into the knowledge editor and kept as Markdown
   | "ui.knowledge_audience_picked" // the Ask box switched who the answer is for (audience: team, customers)
+  | "ui.support_mailbox_picked" // a mailbox chosen for support from the Support settings (first: whether it was the first)
   | "ui.knowledge_started" // the knowledge editor opened for something new (kind: article, snippet; template: none or a starter's id)
   | "ui.playbook_opened" // a playbook opened on the Playbooks page (playbook_id, ready)
   | "ui.playbook_prompt_copied" // a playbook's prompt copied (playbook_id)

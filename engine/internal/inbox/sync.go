@@ -21,6 +21,7 @@ import (
 	"github.com/outflareai/outflare/engine/internal/leads"
 	"github.com/outflareai/outflare/engine/internal/linkbuild"
 	"github.com/outflareai/outflare/engine/internal/mailbox"
+	"github.com/outflareai/outflare/engine/internal/support"
 	"github.com/outflareai/outflare/engine/internal/track"
 )
 
@@ -301,6 +302,14 @@ type match struct {
 // message was stored before.
 func (s *Syncer) store(ctx context.Context, tx pgx.Tx, acct *mailbox.Account, uv, uid int64, received time.Time, p *Parsed) (bool, error) {
 	ws := acct.WorkspaceID
+	if acct.Purpose == support.PurposeSupport {
+		// Customers writing to support: the support inbox, not sales.
+		r, err := support.Intake(ctx, tx, support.Email{WorkspaceID: ws, BrandID: acct.BrandID, MailboxID: acct.ID,
+			UIDValidity: uv, UID: uid, MessageID: p.MessageID, InReplyTo: p.InReplyTo, References: p.References,
+			From: p.From, FromName: p.FromName, To: p.To, Subject: p.Subject, Body: p.Body, Received: received,
+			AutoReply: p.AutoReply || p.Bounce != nil})
+		return r.New, err
+	}
 	ids := append([]string{p.InReplyTo}, p.References...)
 	if p.Bounce != nil {
 		ids = append(ids, p.Bounce.MessageIDs...)

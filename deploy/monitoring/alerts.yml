@@ -409,6 +409,29 @@ groups:
         annotations:
           summary: "Answers from the knowledge base take over 20 seconds at the 95th percentile; the AI providers are slow, or the workspaces' Knowledge answers model is a slow one (Settings, AI model)."
 
+      - alert: OutflareSupportRepliesFailing
+        # Replies to customers aren't going out: the support mailboxes'
+        # servers refuse them, or the mailboxes were paused or removed.
+        expr: sum(rate(outflare_support_replies_total{outcome="failed"}[30m])) / sum(rate(outflare_support_replies_total{outcome=~"sent|failed"}[30m])) > 0.25 and sum(increase(outflare_support_replies_total{outcome=~"sent|failed"}[30m])) > 3
+        for: 15m
+        labels: { severity: warning }
+        annotations:
+          summary: "Over a quarter of support replies fail to send; check support.reply_failed events and the engine log (\"support reply not sent\") for the mailbox's error, and the support mailboxes' status."
+
+      - alert: OutflareSupportRepliesBacklog
+        expr: max(outflare_jobs_oldest_due_seconds{kind="support.send"}) > 300
+        for: 10m
+        labels: { severity: warning }
+        annotations:
+          summary: "A support reply has waited over 5 minutes for a worker; customers are waiting on answers the team already wrote. Check the job queue row for busy or stuck workers."
+
+      - alert: OutflareSupportRepliesSlow
+        expr: histogram_quantile(0.95, sum by (le) (rate(outflare_support_reply_seconds_bucket[30m]))) > 20 and sum(increase(outflare_support_replies_total[30m])) > 5
+        for: 30m
+        labels: { severity: info }
+        annotations:
+          summary: "Support replies take over 20 seconds to send at the 95th percentile; the support mailboxes' mail servers are slow to accept mail."
+
       - alert: OutflareAdConversionsFailing
         # Ad platforms refusing conversions sent back: a sign-in, token or
         # conversion action changed at the platform.
@@ -664,3 +687,27 @@ groups:
         labels: { severity: warning }
         annotations:
           summary: "Over half of web searches (search-results) fail for reasons other than a budget: DataForSEO's or Geonode's search API may be failing or have changed; check api.called for readSearchResults by error code."
+
+      - alert: OutflareInboundEmailBadSignatures
+        # The operator's edge (Outflare Cloud's mail receiver) signs every
+        # delivery; refusals mean the two disagree on the secret, so
+        # workspaces' forwarded mail is being lost.
+        expr: sum(increase(outflare_inbound_email_received_total{outcome="bad_signature"}[15m])) > 5
+        for: 15m
+        labels: { severity: critical }
+        annotations:
+          summary: "Inbound email deliveries are refused for a bad signature: the mail receiver and the engine have different inbound secrets, and forwarded mail (support, AI receipts) is lost until they match."
+
+      - alert: OutflareInboundEmailFailing
+        expr: sum(increase(outflare_inbound_email_processed_total{status="failed"}[30m])) > 5
+        for: 15m
+        labels: { severity: warning }
+        annotations:
+          summary: "Inbound messages keep failing to be processed (retried): check inbound_email.process_failed in the engine log and the inbound.process jobs."
+
+      - alert: OutflareInboundEmailErrors
+        expr: sum(increase(outflare_inbound_email_received_total{outcome="error"}[15m])) > 5
+        for: 15m
+        labels: { severity: warning }
+        annotations:
+          summary: "Inbound email deliveries fail on Outflare's side before they are stored (usually the database): the mail receiver retries, but check POST /v1/inbound/email errors in the log."

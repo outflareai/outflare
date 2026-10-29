@@ -192,6 +192,7 @@ func (s *Server) portalBase(ctx context.Context, program string, subdomain *stri
 func (s *Server) routesPartnerPortal(mux *http.ServeMux) {
 	s.routesPartnerPostbacks(mux)
 	s.routesPartnerImports(mux)
+	s.routesPartnerSite(mux)
 	read, manage := auth.ScopePartnersRead, auth.ScopePartnersManage
 	mux.HandleFunc("PUT /v1/workspaces/{ws}/partner-programs/{id}/portal", s.inBrand(manage, s.setPartnerPortal))
 	mux.HandleFunc("GET /v1/workspaces/{ws}/partner-programs/{id}/assets", s.inBrand(read, s.listPartnerAssets))

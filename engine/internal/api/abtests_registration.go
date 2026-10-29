@@ -34,15 +34,18 @@ type abRegisteredPlan struct {
 }
 
 type abRegistration struct {
-	Hypothesis   string                `json:"hypothesis"`
-	Control      string                `json:"control"`
-	Goals        []abtests.Goal        `json:"goals"`
-	Guardrails   []abtests.Goal        `json:"guardrails"`
-	MinEffect    float64               `json:"min_effect"`
-	Rollout      int                   `json:"rollout"`
-	Versions     []abRegisteredVersion `json:"versions"`
-	Plan         *abRegisteredPlan     `json:"plan"`
-	RegisteredAt time.Time             `json:"registered_at"`
+	Hypothesis string                `json:"hypothesis"`
+	Control    string                `json:"control"`
+	Goals      []abtests.Goal        `json:"goals"`
+	Guardrails []abtests.Goal        `json:"guardrails"`
+	MinEffect  float64               `json:"min_effect"`
+	Rollout    int                   `json:"rollout"`
+	Versions   []abRegisteredVersion `json:"versions"`
+	Plan       *abRegisteredPlan     `json:"plan"`
+	// VarianceReduction says the test adjusts for visitors' history (CUPED)
+	// for its whole life; tests registered from then on do.
+	VarianceReduction bool      `json:"variance_reduction"`
+	RegisteredAt      time.Time `json:"registered_at"`
 }
 
 func contentHash(payload []byte) string {
@@ -53,7 +56,7 @@ func contentHash(payload []byte) string {
 // abRegister is t's registration as it starts, with f as it is now.
 func abRegister(ctx context.Context, q abtests.Querier, ws string, t abTestView, f flagView, now time.Time) (abRegistration, error) {
 	reg := abRegistration{Hypothesis: t.Hypothesis, Control: t.Control, Goals: t.Goals, Guardrails: t.Guardrails, MinEffect: t.MinEffect,
-		Rollout: f.Rollout, RegisteredAt: now.UTC()}
+		Rollout: f.Rollout, VarianceReduction: true, RegisteredAt: now.UTC()}
 	weights := make([]int, len(f.Variants))
 	for i, v := range f.Variants {
 		reg.Versions = append(reg.Versions, abRegisteredVersion{Key: v.Key, Weight: v.Weight, ContentHash: contentHash(v.Payload)})

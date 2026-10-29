@@ -101,6 +101,8 @@ var errorCodes = []errorCode{
 	{"blocked", []int{409}, "The policy blocks this, for example the mailbox or domain is paused. The message says why.", false},
 	{"not_active", []int{409}, "The item is not in a state that allows this.", false},
 	{"no_referral", []int{422}, "The reply doesn't name an email address to add. Add the person as a lead by hand.", false},
+	{"mailbox_in_use", []int{409}, "The mailbox can't answer support: it sends for a sequence or campaign, or Outflare can't read it. The message says which.", false},
+	{"nothing_to_answer", []int{409}, "The customer hasn't written anything to answer yet.", false},
 	{"plan_not_ready", []int{409}, "The infrastructure plan is not ready for this step.", false},
 	{"price_mismatch", []int{409}, "The amounts sent do not match the plan's quote. Send once_cents and monthly_cents as the quote shows them.", false},
 

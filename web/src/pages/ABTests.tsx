@@ -532,6 +532,11 @@ function TestSheet({ ws, test, flag, canManage, onClose, onChanged, onFlagChange
                   <p>Results now mix visitors from before and after. To measure the new setup cleanly, end this test and duplicate it.</p>
                 </div>
               )}
+              {results.result.variance_reduction && (results.result.goals[0]?.comparisons?.[0]?.variance_reduction ?? 0) > 0 && (
+                <p className="text-muted-foreground text-[12px]">
+                  Adjusted for what visitors did in the 28 days before they joined, which took out {Math.round((results.result.goals[0]!.comparisons![0]!.variance_reduction ?? 0) * 100)}% of the noise, so the test needs fewer visitors.
+                </p>
+              )}
               {test.registration && <RegistrationCard reg={test.registration} />}
               {test.learning && (
                 <Card title="What it taught">

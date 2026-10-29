@@ -19,6 +19,8 @@ var Erased = []Ref{
 	{"rule_firings", "record_id"}, {"link_prospect_contacts", "record_id"}, {"link_pitches", "record_id"},
 	// Lists they were put on by hand, an import or a journey.
 	{"static_list_members", "record_id"},
+	// What they wrote to support, and the team's answers.
+	{"support_conversations", "record_id"}, {"support_messages", "record_id"},
 	// The articles a journalist wrote, as their byline.
 	{"news_article_authors", "record_id"},
 	// Press coverage sits on the outlet's company record.

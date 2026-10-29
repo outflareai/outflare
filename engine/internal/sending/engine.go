@@ -683,7 +683,7 @@ func (e *Engine) pickMailbox(ctx context.Context, tx pgx.Tx, en enrollment, now 
 			WHERE g.mailbox_id = m.id AND g.status IN ('sending', 'sent', 'unknown') AND g.created_at > $3::timestamptz - interval '24 hours'
 		) c ON true
 		JOIN mailbox_assignments a ON a.mailbox_id = m.id AND a.sequence_id = $2 AND a.state = 'active' AND a.link_id IS NULL
-		WHERE m.workspace_id = $1 AND m.status = 'active' AND m.has_login AND m.lifecycle_stage = 'ready'
+		WHERE m.workspace_id = $1 AND m.status = 'active' AND m.has_login AND m.lifecycle_stage = 'ready' AND m.purpose = 'outreach'
 		  -- One sending home: a mailbox someone attached to a platform campaign
 		  -- waits until a person decides where it sends.
 		  AND NOT EXISTS (SELECT 1 FROM mailbox_platforms p WHERE p.mailbox_id = m.id AND cardinality(p.campaign_ids) > 0)

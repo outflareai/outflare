@@ -38,6 +38,16 @@ The program's settings (Install) give the website snippet ready to paste as an H
 
 Either way, the visit is stored with its `ref` ([website tracking](website-tracking.md)). A visit only *proposes* a partner. The partner is credited (*bound*) only when your backend reports a sign-up or sale for that person.
 
+## Three ways to record a sign-up
+
+Pick the one your site allows. Each credits the partner whose link the visitor came from, by their own visits with a `ref`, under the program's window and credit rule.
+
+- **No code: the website snippet and your billing.** Put the snippet on your site and connect Stripe (Settings → "Also take sales and refunds from connected Stripe"). Sales come from Stripe; there is no lead until the first payment.
+- **A little code: `outflare.signup(email)`.** Call it in the browser once your sign-up form succeeds, on a page with the snippet. The lead shows at once (a `signup` conversion with source `browser`). Anyone can call it with any address, so it pays no sign-up reward unless the program turns on **Pay for sign-ups the browser reports** (`pay_browser_signups`, off by default). Money still comes only from your server or billing.
+- **Developers: your backend.** Report the sign-up with the conversion API or the postback URL (below), with the partner's `ref`, a `promo_code`, the visitor's `anonymous_id` (`outflare.anonymousId()` from the page), or just the customer's email or id when they visited with a ref.
+
+Doing both is fine: the browser makes the lead, and your server's report of the same customer finds the same referral.
+
 ## Reporting conversions from your backend
 
 Your backend reports every `signup` (or `lead`), `sale`, `refund` and `custom` conversion, server to server. Outflare credits the ones a partner referred. It is the same job your backend does with Tolt's API today. [Moving from Tolt](partners-tolt-migration.md) maps each Tolt call to this one.

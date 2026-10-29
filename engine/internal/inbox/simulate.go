@@ -12,6 +12,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/outflareai/outflare/engine/internal/mailbox"
+	"github.com/outflareai/outflare/engine/internal/support"
 )
 
 // Simulated mail for test workspaces: what a lead's reply, an auto-reply,
@@ -125,6 +126,10 @@ func (s *Syncer) Deliver(ctx context.Context, workspaceID, mailboxID string, raw
 		}
 		if _, err := s.store(ctx, tx, acct, 1, uid, time.Now(), p); err != nil {
 			return err
+		}
+		if acct.Purpose == support.PurposeSupport {
+			return tx.QueryRow(ctx, `SELECT id::text FROM support_messages WHERE mailbox_id = $1 AND uidvalidity = 1 AND uid = $2`,
+				acct.ID, uid).Scan(&id)
 		}
 		return tx.QueryRow(ctx, `SELECT id::text FROM inbound_messages WHERE mailbox_id = $1 AND uidvalidity = 1 AND uid = $2`,
 			acct.ID, uid).Scan(&id)

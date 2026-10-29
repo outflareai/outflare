@@ -122,8 +122,12 @@ type partnerProgramView struct {
 	HoldDays         int     `json:"hold_days"`
 	AutoApprove      bool    `json:"auto_approve"`
 	AutoAccept       bool    `json:"auto_accept"`
-	MinPayoutCents   int64   `json:"min_payout_cents"`
-	TermsURL         string  `json:"terms_url"`
+	// PayBrowserSignups pays sign-up rewards for sign-ups the website
+	// reports with outflare.signup(), which anyone can call. Off: those make
+	// the lead only.
+	PayBrowserSignups bool   `json:"pay_browser_signups"`
+	MinPayoutCents    int64  `json:"min_payout_cents"`
+	TermsURL          string `json:"terms_url"`
 	// SalesSource is a payment connector (stripe) whose synced payments
 	// and refunds are also partner sales; "" for the API and postbacks only.
 	SalesSource     string         `json:"sales_source"`
@@ -145,7 +149,7 @@ type partnerProgramView struct {
 
 const partnerProgramSelect = `
 	SELECT p.id::text, p.name, p.slug, p.kind, p.status, p.brand_id::text, p.landing_url, p.currency, p.credit_window_days, p.credit_model,
-	       p.codes_win, p.hold_days, p.auto_approve, p.auto_accept, p.min_payout_cents, p.terms_url, p.sales_source, p.postback_hint,
+	       p.codes_win, p.hold_days, p.auto_approve, p.auto_accept, p.pay_browser_signups, p.min_payout_cents, p.terms_url, p.sales_source, p.postback_hint,
 	       p.portal_enabled, p.portal_subdomain, p.portal, p.default_group_id::text,
 	       (SELECT count(*) FROM partner_memberships m WHERE m.program_id = p.id)::int, p.created_at, p.updated_at
 	FROM partner_programs p WHERE p.workspace_id = $1`
@@ -154,7 +158,7 @@ func scanPartnerProgram(row pgx.Row) (partnerProgramView, error) {
 	var v partnerProgramView
 	var portal []byte
 	err := row.Scan(&v.ID, &v.Name, &v.Slug, &v.Kind, &v.Status, &v.BrandID, &v.LandingURL, &v.Currency, &v.CreditWindowDays, &v.CreditModel,
-		&v.CodesWin, &v.HoldDays, &v.AutoApprove, &v.AutoAccept, &v.MinPayoutCents, &v.TermsURL, &v.SalesSource, &v.PostbackHint,
+		&v.CodesWin, &v.HoldDays, &v.AutoApprove, &v.AutoAccept, &v.PayBrowserSignups, &v.MinPayoutCents, &v.TermsURL, &v.SalesSource, &v.PostbackHint,
 		&v.PortalEnabled, &v.PortalSubdomain, &portal, &v.DefaultGroupID, &v.Partners, &v.CreatedAt, &v.UpdatedAt)
 	if err == nil {
 		v.Portal = portalFor(v.Kind, portal)
@@ -272,23 +276,24 @@ func (s *Server) getPartnerProgram(w http.ResponseWriter, r *http.Request) {
 }
 
 type partnerProgramInput struct {
-	Name             *string          `json:"name"`
-	Slug             *string          `json:"slug"`
-	Kind             *string          `json:"kind"`
-	Status           *string          `json:"status"`
-	Brand            *string          `json:"brand"`
-	LandingURL       *string          `json:"landing_url"`
-	Currency         *string          `json:"currency"`
-	CreditWindowDays *int             `json:"credit_window_days"`
-	CreditModel      *string          `json:"credit_model"`
-	CodesWin         *bool            `json:"codes_win"`
-	HoldDays         *int             `json:"hold_days"`
-	AutoApprove      *bool            `json:"auto_approve"`
-	AutoAccept       *bool            `json:"auto_accept"`
-	MinPayoutCents   *int64           `json:"min_payout_cents"`
-	TermsURL         *string          `json:"terms_url"`
-	SalesSource      *string          `json:"sales_source"`
-	Rules            *[]partnerRuleIn `json:"rules"`
+	Name              *string          `json:"name"`
+	Slug              *string          `json:"slug"`
+	Kind              *string          `json:"kind"`
+	Status            *string          `json:"status"`
+	Brand             *string          `json:"brand"`
+	LandingURL        *string          `json:"landing_url"`
+	Currency          *string          `json:"currency"`
+	CreditWindowDays  *int             `json:"credit_window_days"`
+	CreditModel       *string          `json:"credit_model"`
+	CodesWin          *bool            `json:"codes_win"`
+	HoldDays          *int             `json:"hold_days"`
+	AutoApprove       *bool            `json:"auto_approve"`
+	AutoAccept        *bool            `json:"auto_accept"`
+	PayBrowserSignups *bool            `json:"pay_browser_signups"`
+	MinPayoutCents    *int64           `json:"min_payout_cents"`
+	TermsURL          *string          `json:"terms_url"`
+	SalesSource       *string          `json:"sales_source"`
+	Rules             *[]partnerRuleIn `json:"rules"`
 }
 
 var (
@@ -541,10 +546,11 @@ func (s *Server) updatePartnerProgram(w http.ResponseWriter, r *http.Request) {
 				credit_window_days = COALESCE($8, credit_window_days), credit_model = COALESCE($9, credit_model),
 				codes_win = COALESCE($10, codes_win), hold_days = COALESCE($11, hold_days), auto_approve = COALESCE($12, auto_approve),
 				auto_accept = COALESCE($13, auto_accept), min_payout_cents = COALESCE($14, min_payout_cents),
-				terms_url = COALESCE($15, terms_url), sales_source = COALESCE($16, sales_source), updated_at = now()
+				terms_url = COALESCE($15, terms_url), sales_source = COALESCE($16, sales_source),
+				pay_browser_signups = COALESCE($17, pay_browser_signups), updated_at = now()
 			WHERE workspace_id = $1 AND id = $2`,
 			a.WorkspaceID, cur.ID, name, in.Status, brand, landing, in.Currency, in.CreditWindowDays, in.CreditModel,
-			in.CodesWin, in.HoldDays, in.AutoApprove, in.AutoAccept, in.MinPayoutCents, terms, in.SalesSource); err != nil {
+			in.CodesWin, in.HoldDays, in.AutoApprove, in.AutoAccept, in.MinPayoutCents, terms, in.SalesSource, in.PayBrowserSignups); err != nil {
 			return err
 		}
 		changed := []string{}
@@ -552,7 +558,7 @@ func (s *Server) updatePartnerProgram(w http.ResponseWriter, r *http.Request) {
 			"landing_url": in.LandingURL != nil, "currency": in.Currency != nil, "credit_window_days": in.CreditWindowDays != nil,
 			"credit_model": in.CreditModel != nil, "codes_win": in.CodesWin != nil, "hold_days": in.HoldDays != nil,
 			"auto_approve": in.AutoApprove != nil, "auto_accept": in.AutoAccept != nil, "min_payout_cents": in.MinPayoutCents != nil,
-			"terms_url": in.TermsURL != nil, "sales_source": in.SalesSource != nil} {
+			"terms_url": in.TermsURL != nil, "sales_source": in.SalesSource != nil, "pay_browser_signups": in.PayBrowserSignups != nil} {
 			if set {
 				changed = append(changed, k)
 			}

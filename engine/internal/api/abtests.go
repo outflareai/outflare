@@ -575,6 +575,7 @@ func abSpec(ctx context.Context, q abtests.Querier, ws string, t abTestView, f f
 	}
 	// The split is checked against the weights the test started with.
 	spec.Weights = registeredWeights(t.Registration, spec.Variants, spec.Weights)
+	spec.VarianceReduction = t.Registration != nil && t.Registration.VarianceReduction
 	err := q.QueryRow(ctx, `SELECT coalesce((SELECT exclude_domains FROM visitor_settings WHERE workspace_id = $1), '{}')`, ws).Scan(&spec.ExcludeDomains)
 	return spec, err
 }

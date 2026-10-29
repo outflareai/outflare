@@ -219,7 +219,8 @@ func Load(ctx context.Context, tx pgx.Tx, workspaceID string, now time.Time) (*S
 		LEFT JOIN mailbox_locks l ON l.mailbox_id = m.id AND (l.until IS NULL OR l.until > $2)
 		LEFT JOIN mailbox_assignments a ON a.mailbox_id = m.id
 		LEFT JOIN campaign_links cl ON cl.id = a.link_id
-		WHERE m.workspace_id = $1`, workspaceID, now, DefaultSequenceDays)
+		-- Support mailboxes answer customers and never send sequences.
+		WHERE m.workspace_id = $1 AND m.purpose = 'outreach'`, workspaceID, now, DefaultSequenceDays)
 	if err != nil {
 		return nil, err
 	}

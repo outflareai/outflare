@@ -56,6 +56,7 @@ import (
 	"github.com/outflareai/outflare/engine/internal/health"
 	"github.com/outflareai/outflare/engine/internal/imports"
 	"github.com/outflareai/outflare/engine/internal/inbound"
+	"github.com/outflareai/outflare/engine/internal/inboundemail"
 	"github.com/outflareai/outflare/engine/internal/inbox"
 	"github.com/outflareai/outflare/engine/internal/indexability"
 	"github.com/outflareai/outflare/engine/internal/infra"
@@ -81,6 +82,7 @@ import (
 	"github.com/outflareai/outflare/engine/internal/seointel"
 	"github.com/outflareai/outflare/engine/internal/seosync"
 	"github.com/outflareai/outflare/engine/internal/smartlists"
+	"github.com/outflareai/outflare/engine/internal/support"
 	"github.com/outflareai/outflare/engine/internal/sysmail"
 	"github.com/outflareai/outflare/engine/internal/telemetry"
 	"github.com/outflareai/outflare/engine/internal/track"
@@ -231,6 +233,7 @@ func Run(ctx context.Context, log *slog.Logger, cmd string, exts ...Extension) e
 	send.Register(queue)
 	syncer := &inbox.Syncer{Pool: pool, Mail: mail, Log: log}
 	syncer.Register(queue)
+	(&support.Sender{Pool: pool, Mail: mail, Log: log}).Register(queue)
 	alloc := &allocation.Service{Pool: pool, Log: log}
 	alloc.Register(queue)
 	infraSvc := &infra.Service{Pool: pool, Mail: mail, Log: log}
@@ -354,7 +357,9 @@ func Run(ctx context.Context, log *slog.Logger, cmd string, exts ...Extension) e
 	}
 	// Work that moves through stages one item at a time (docs/pipeline.md).
 	stages := pipeline.NewRunner(pool, log)
-	host := &Host{Pool: pool, Log: log, PublicURL: cfg.PublicURL, signedInDomain: cfg.SignedInCookieDomain, queue: queue, box: box, telemetry: tel, mailer: mailer, store: integrations, emailFinder: emailFinder, stages: stages}
+	inboundMail := &inboundemail.Service{Pool: pool, Log: log}
+	queue.Handle(inboundemail.JobProcess, inboundMail.Process)
+	host := &Host{inboundEmail: inboundMail, Pool: pool, Log: log, PublicURL: cfg.PublicURL, signedInDomain: cfg.SignedInCookieDomain, queue: queue, box: box, telemetry: tel, mailer: mailer, store: integrations, emailFinder: emailFinder, stages: stages}
 	for _, ext := range exts {
 		if err := ext.Setup(ctx, host); err != nil {
 			return fmt.Errorf("extension %s: %w", ext.Name(), err)
@@ -376,7 +381,7 @@ func Run(ctx context.Context, log *slog.Logger, cmd string, exts ...Extension) e
 	}
 	apiServer := api.NewServer(pool, log, api.Options{
 		WebDir: cfg.WebDir, PublicURL: cfg.PublicURL, Mailboxes: mail, Sending: send, Inbox: syncer, OAuth: tokens, Allocation: alloc,
-		Box: box, Integrations: integrations, Verify: verifier, EmailFinder: emailFinder, Imports: importer, Platforms: plat, Lists: lister, Outcomes: results, AnalyticsSync: analyticsSync, SEOSync: seoSync, AdSync: adSync, Crawl: crawler, Vendors: vendors, Inbound: liveUpdates, Telemetry: tel, Mailer: mailer, Webhooks: hooks, Emails: lifecycle, Research: researcher, RateLimit: cfg.RateLimit, Passkeys: cfg.PasskeysOn(), ClientIPHeader: cfg.ClientIPHeader,
+		Box: box, Integrations: integrations, Verify: verifier, EmailFinder: emailFinder, InboundEmail: inboundMail, Imports: importer, Platforms: plat, Lists: lister, Outcomes: results, AnalyticsSync: analyticsSync, SEOSync: seoSync, AdSync: adSync, Crawl: crawler, Vendors: vendors, Inbound: liveUpdates, Telemetry: tel, Mailer: mailer, Webhooks: hooks, Emails: lifecycle, Research: researcher, RateLimit: cfg.RateLimit, Passkeys: cfg.PasskeysOn(), ClientIPHeader: cfg.ClientIPHeader,
 		TrackingTarget: cfg.TrackingTarget, PartnersDomain: cfg.PartnersDomain, TrackingCerts: host.trackingCerts, EdgeSecret: cfg.EdgeSecret,
 		PostHogKey: cfg.PostHogKey, PostHogHost: cfg.PostHogHost, MCP: mcpUpstream, PrivacyURL: cfg.PrivacyURL, TermsURL: cfg.TermsURL, CommunityLinks: cfg.CommunityLinks, CommunityXURL: cfg.CommunityXURL, CommunityBuilderURL: cfg.CommunityBuilderURL, SignedInCookieDomain: cfg.SignedInCookieDomain,
 		SiteInbox: true, QueryConnections: queryConnections(cfg.QueryConnections),
@@ -567,6 +572,12 @@ func Run(ctx context.Context, log *slog.Logger, cmd string, exts ...Extension) e
 		go func() {
 			defer wg.Done()
 			apiServer.RunSemanticSearch(ctx, 5*time.Minute)
+		}()
+		// Raw inbound messages are deleted after 30 days.
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			inboundMail.RunPurge(ctx, time.Hour)
 		}()
 		// The AI usage log keeps 13 months of calls.
 		wg.Add(1)

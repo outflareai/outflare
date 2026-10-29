@@ -13,6 +13,7 @@ import { registerQueryTools } from "./query.js";
 import { registerRecordTools } from "./records.js";
 import { registerContextTools } from "./context.js";
 import { registerKnowledgeTools } from "./knowledge.js";
+import { registerSupportTools } from "./support.js";
 import { registerFlagTools } from "./flags.js";
 import { registerAIAccountTools } from "./aiaccounts.js";
 import { registerABTestTools } from "./abtests.js";
@@ -303,6 +304,7 @@ export function createServer({ client: gtm, workspace, readOnly = false, mission
   // What Outflare knows and what is blocked: the first call of a conversation.
   registerContextTools(server, gtm, () => ws, readOnly, call, withBrand);
   registerKnowledgeTools(server, gtm, () => ws, readOnly, call, withBrand);
+  registerSupportTools(server, gtm, () => ws, readOnly, call);
   registerFlagTools(server, gtm, () => ws, readOnly, call, withBrand);
   registerAIAccountTools(server, gtm, () => ws, readOnly, call);
   registerABTestTools(server, gtm, () => ws, readOnly, call, withBrand);

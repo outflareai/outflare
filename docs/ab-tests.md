@@ -120,6 +120,12 @@ Every few hours Outflare checks each running test and raises an [alert](alerts.m
 - **Freeze** a running test (`POST .../ab-tests/{id}/freeze` with `{"frozen": true}`, MCP `freeze_ab_test`) to stop new visitors joining while those already in keep counting: to let it finish on the visitors it has, such as before a launch that would change the traffic. Unfreezing lets them join again, counting those who arrived meanwhile.
 - **Duplicate** a test (`POST .../ab-tests/{id}/duplicate`, MCP `duplicate_ab_test`) to get a draft with the same flag, control, goals, guardrails and hypothesis, to run it again or try a variation.
 
+## Variance reduction
+
+Tests started from now on adjust for what each visitor did before they joined (CUPED): their value of the goal in the 28 days before they first saw a version. People who signed up, bought or shared a lot before tend to do so again, whatever version they see, and that predictable part is noise. Taking it out leaves the same expected lift with a tighter range and an earlier answer; how much sooner depends on how well past behaviour predicts future behaviour on your site. Visitors with no history count as zero, which keeps the estimate fair; a site of mostly first-time visitors gains little.
+
+The adjustment is part of the test's registration, so a test uses it for its whole life or not at all, and tests started before it keep their original maths. Each comparison's `variance_reduction` says how much of the noise it took out, and the test's page says so under the result. Breakdowns are not adjusted.
+
 ## Registered at start
 
 When a test starts, Outflare keeps what it set out to show as the test's `registration` (on `GET .../ab-tests/{id}`, and under **Registered when it started** on the test's page): the hypothesis, control, goals, guardrails, smallest change, the plan (about how many weeks and visitors per version it was likely to need), and the flag as it was, with each version's share, a fingerprint of its content, and the rollout. It never changes, so anyone reading the results later can see the test was judged by the rules set before it ran.

@@ -12758,6 +12758,87 @@ export interface paths {
         patch: operations["updateKnowledgeCollection"];
         trace?: never;
     };
+    "/v1/inbound/email": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Deliver an inbound message (operator's edge)
+         * @description For the server's own mail receiver, not for workspaces: an extension that turned inbound email on delivers each
+         *     message here. The body is the raw message (up to 25 MB); `X-Outflare-To` is the recipient, `X-Outflare-Timestamp`
+         *     the unix time and `X-Outflare-Signature` the hex HMAC-SHA256 of `<timestamp>.<body>` with the inbound secret.
+         *     404 means no such address: refuse the message. 404 too on servers without inbound email.
+         */
+        post: operations["receiveInboundEmail"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/workspaces/{ws}/inbound-addresses": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+            };
+            cookie?: never;
+        };
+        /**
+         * List inbound email addresses
+         * @description Scope: workspace.read. The workspace's addresses at the server's inbound domain: people forward mail to them,
+         *     such as their support mailbox or AI receipts. Support addresses read like support inboxes (`northpeak-support@`),
+         *     one per brand; other purposes have one per workspace with letters nobody can guess. `purposes` lists the ones
+         *     this workspace can use. With a brand picked, its addresses and the workspace's own. `available` is false where
+         *     the server has no inbound email (it is part of Outflare Cloud).
+         */
+        get: operations["listInboundAddresses"];
+        put?: never;
+        /**
+         * Get, rename or replace an inbound email address
+         * @description Scope: workspace.manage. The address for a purpose (and, for support, a brand), made the first time (201) and
+         *     returned after (200). For support, `name` renames it (such as `help-northpeak`; 409 when taken); an old name of
+         *     the same address can be taken back. `replace: true` makes a new one. Either way mail to the old address is then
+         *     refused, so everyone forwarding must update their forwarding. 404 where the server has no inbound email, or the
+         *     purpose is off for the workspace.
+         */
+        post: operations["createInboundAddress"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/workspaces/{ws}/inbound-emails": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+            };
+            cookie?: never;
+        };
+        /**
+         * List received messages
+         * @description Scope: audit.read. The latest 100 messages delivered to the workspace's inbound addresses and what became of each: processed, ignored, rejected (reason: unknown_forwarder when nobody here forwarded mail for a purpose only members forward) or failed. With a brand picked, mail to its addresses and the workspace's own.
+         */
+        get: operations["listInboundEmails"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/workspaces/{ws}/knowledge/items": {
         parameters: {
             query?: never;
@@ -12951,6 +13032,248 @@ export interface paths {
          *     to missions may ask outside one.
          */
         post: operations["askKnowledge"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/workspaces/{ws}/support/conversations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+            };
+            cookie?: never;
+        };
+        /**
+         * List support conversations
+         * @description Scope: inbox.read. The support inbox: conversations with customers who wrote to a support mailbox, newest
+         *     message first. Filter by status, assignee (`me`, `none` or a user id), team, tag, customer record or words
+         *     in the subject, address, name or messages. `counts` are the inbox's folders (open, pending, closed, mine,
+         *     unassigned) whatever the filters. With a brand picked, its conversations and those of no brand (a mailbox shared by
+         *     every brand).
+         */
+        get: operations["listSupportConversations"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/workspaces/{ws}/support/conversations/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        /**
+         * Get a support conversation
+         * @description Scope: inbox.read. The conversation, every message in it (the customer's emails, the team's replies and
+         *     notes only the team sees) oldest first, and the customer's other conversations. A person opening it marks
+         *     it read.
+         */
+        get: operations["getSupportConversation"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Assign, tag or close a support conversation
+         * @description Scope: inbox.manage. Set its status (open, pending or closed), who it is assigned to (a member, or null),
+         *     its team (or null), its tags (lowercased, at most 20) or whether it shows as unread. A customer writing
+         *     again opens a pending or closed conversation by itself.
+         */
+        patch: operations["updateSupportConversation"];
+        trace?: never;
+    };
+    "/v1/workspaces/{ws}/support/conversations/{id}/replies": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Reply to a customer
+         * @description Scope: inbox.manage. Emails the customer from the support mailbox the conversation came in on, in the same
+         *     thread. It is sent in the background: the message's `status` goes from sending to sent or failed (with
+         *     `error`). The address must pass the policy check for mail a person asked for: an unsubscribe from marketing
+         *     doesn't stop it, a bounce or a block does (409 `blocked`). The conversation becomes pending (waiting on the
+         *     customer) unless `status` says otherwise, and the first reply sets `first_reply_at`.
+         */
+        post: operations["replySupportConversation"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/workspaces/{ws}/support/conversations/{id}/notes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Add a note to a support conversation
+         * @description Scope: inbox.manage. A note for the team. The customer never sees it.
+         */
+        post: operations["addSupportNote"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/workspaces/{ws}/support/conversations/{id}/suggest-reply": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Suggest a reply from knowledge
+         * @description Scope: inbox.manage. Drafts an answer to the customer's latest email from what customers may be told
+         *     (knowledge that is public or for AI answering customers), with the workspace's own AI model, citing its
+         *     sources. Nothing is sent: a person edits it and replies. It runs only when asked, so it spends nothing on
+         *     its own. With no AI model, `answer` is null and `ai.problem` says why; 409 `nothing_to_answer` when the
+         *     customer has written nothing yet.
+         */
+        post: operations["suggestSupportReply"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/workspaces/{ws}/support/stats": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+            };
+            cookie?: never;
+        };
+        /**
+         * Support at a glance
+         * @description Scope: inbox.read. Conversations started in the last `days` (30 by default), how many were answered and
+         *     closed, and the median time to the first reply and to closing, with the inbox's folder counts.
+         */
+        get: operations["getSupportStats"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/workspaces/{ws}/support/mailboxes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+            };
+            cookie?: never;
+        };
+        /**
+         * List support mailboxes
+         * @description Scope: mailboxes.read. The connected mailboxes whose mail goes to the support inbox.
+         */
+        get: operations["listSupportMailboxes"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/workspaces/{ws}/support/mailboxes/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Use a mailbox for support
+         * @description Scope: mailboxes.manage. From now on the mailbox's new mail goes to the support inbox instead of the sales
+         *     inbox, and sequences never send from it. 409 `mailbox_in_use` while it sends for a sequence or campaign
+         *     (take it off them first) or when Outflare only knows it from a sequencer and can't read it.
+         */
+        put: operations["addSupportMailbox"];
+        post?: never;
+        /**
+         * Stop using a mailbox for support
+         * @description Scope: mailboxes.manage. Its new mail goes to the sales inbox again. Its conversations stay, but can't be
+         *     answered by email until a support mailbox is set again.
+         */
+        delete: operations["removeSupportMailbox"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/workspaces/{ws}/test/support-email": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Simulate a customer writing to support (test workspaces)
+         * @description Delivers a made-up email from a customer to a support mailbox, handled like real mail: it starts a
+         *     conversation or, with `in_reply_to` (a reply's message id), continues one. Only in a test workspace; a
+         *     live one answers 409 `live_workspace`.
+         */
+        post: operations["simulateSupportEmail"];
         delete?: never;
         options?: never;
         head?: never;
@@ -14444,6 +14767,36 @@ export interface paths {
         post?: never;
         delete?: never;
         options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/site/signup": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Report a sign-up from the website
+         * @description Public: the site key (ofk_) in the body is the authority. What outflare.signup(email) in the tracking script sends
+         *     when a visitor signs up, for sites whose backend reports nothing to Outflare. It records a signup conversion
+         *     (source browser) for the partner whose link the visitor came from, by the visitor's own visits with a ref, under
+         *     each program's window and credit rule, so the lead shows at once. Anyone can call it with any address, so it pays
+         *     a sign-up reward only when the program sets pay_browser_signups; sales and refunds still come from your server or
+         *     billing. The answer is the same whether or not a partner was credited. Send the JSON as text/plain to skip the
+         *     CORS preflight.
+         */
+        post: operations["sendSiteSignup"];
+        delete?: never;
+        /**
+         * CORS preflight for website sign-ups
+         * @description Public. Any origin may send; the key, not the page, is checked.
+         */
+        options: operations["sendSiteSignupPreflight"];
         head?: never;
         patch?: never;
         trace?: never;
@@ -24004,6 +24357,8 @@ export interface components {
             auto_approve: boolean;
             /** @description Partners who sign up are accepted without review. */
             auto_accept: boolean;
+            /** @description Sign-ups the website reports with outflare.signup() (sendSiteSignup) earn sign-up rewards. Off by default: anyone can call it, so they make the lead only; money comes from your server and billing. */
+            pay_browser_signups: boolean;
             /** Format: int64 */
             min_payout_cents: number;
             terms_url: string;
@@ -24164,6 +24519,7 @@ export interface components {
             hold_days?: number;
             auto_approve?: boolean;
             auto_accept?: boolean;
+            pay_browser_signups?: boolean;
             /** Format: int64 */
             min_payout_cents?: number;
             terms_url?: string;
@@ -24393,10 +24749,10 @@ export interface components {
             currency: string;
             product_id: string;
             /**
-             * @description billing: a payment synced from the program's sales_source.
+             * @description billing: a payment synced from the program's sales_source. browser: a sign-up the website reported with outflare.signup().
              * @enum {string}
              */
-            source: "api" | "postback" | "billing" | "manual" | "import";
+            source: "api" | "postback" | "billing" | "manual" | "import" | "browser";
             /** Format: date-time */
             occurred_at: string;
             /** Format: date-time */
@@ -24440,6 +24796,8 @@ export interface components {
             currency?: string;
             product_id?: string;
             sub_id?: string;
+            /** @description The website visitor's id (outflare.anonymousId() in the browser). Their visits with a partner's ref credit the partner, under the program's window and credit rule, before the product identifies them. */
+            anonymous_id?: string;
             /** @description RFC 3339 or Unix seconds; now when left out. */
             occurred_at?: string;
         };
@@ -26363,6 +26721,8 @@ export interface components {
                     weekly_per_version: number;
                     visitors_per_version: number;
                 } | null;
+                /** @description The test adjusts for visitors' history (CUPED) for its whole life. */
+                variance_reduction: boolean;
                 /** Format: date-time */
                 registered_at: string;
             } | null;
@@ -26488,6 +26848,8 @@ export interface components {
             p_value: number;
             /** @description The always-valid p-value before the correction for several versions. */
             raw_p_value: number;
+            /** @description Share of the noise taken out by adjusting for the visitors' value of the goal in the 28 days before they joined (CUPED), at the last look; 0 when not used. */
+            variance_reduction?: number;
         };
         ABTestResults: {
             /** Format: uuid */
@@ -26543,6 +26905,8 @@ export interface components {
                 min_effect: number;
                 /** @description Versions compared with the control. Past one, every p_value and range is corrected for that many chances of a false winner. */
                 corrected_for: number;
+                /** @description The comparisons are adjusted for the visitors' history before they joined (CUPED), as registered when the test started; each comparison says how much noise it took out. */
+                variance_reduction?: boolean;
                 /** @description How the flag changed since the test started, in sentences (its split, content, rollout or versions, or it was turned off). Results that mix before and after need care. Null for tests started before registration. */
                 flag_changed?: string[] | null;
                 /** Format: date-time */
@@ -33302,6 +33666,52 @@ export interface components {
             brand_id?: string | null;
             position?: number;
         };
+        InboundAddress: {
+            /** Format: uuid */
+            id: string;
+            /** @enum {string} */
+            purpose: "ai_receipts" | "support";
+            /**
+             * Format: uuid
+             * @description Support addresses: the brand whose mail it takes; null for the workspace's own.
+             */
+            brand_id: string | null;
+            /** @example northpeak-support@in.example.test */
+            email: string;
+            /** Format: date-time */
+            created_at: string;
+            /** @description Support addresses: Gmail's request to confirm forwarding a mailbox to this address, for an admin to open. Outflare never follows it itself. */
+            confirmation: {
+                /** @description The mailbox that asked to forward here. */
+                from: string;
+                code: string | null;
+                url: string | null;
+                /** Format: date-time */
+                at: string | null;
+            } | null;
+            /**
+             * Format: date-time
+             * @description When mail last arrived.
+             */
+            last_email_at: string | null;
+        };
+        InboundEmail: {
+            /** Format: uuid */
+            id: string;
+            /** @description The address's purpose, such as support or ai_receipts. */
+            purpose: string;
+            /** Format: date-time */
+            received_at: string;
+            from: string | null;
+            forwarded_by: string | null;
+            subject: string | null;
+            /** @description Domains whose DKIM signature on it checked out. */
+            dkim_domains: string[];
+            /** @enum {string} */
+            status: "received" | "processed" | "ignored" | "rejected" | "failed";
+            reason: string | null;
+            size_bytes: number;
+        };
         KnowledgeItem: {
             /** Format: uuid */
             id: string;
@@ -33432,6 +33842,109 @@ export interface components {
             match: "words" | "meaning" | "both";
             /** @description For ordering only. */
             score: number;
+        };
+        /** @description The support inbox's folders. */
+        SupportCounts: {
+            /** @description Waiting on the team. */
+            open: number;
+            /** @description Waiting on the customer. */
+            pending: number;
+            closed: number;
+            /** @description Not closed and assigned to you. */
+            mine: number;
+            /** @description Not closed and assigned to nobody. */
+            unassigned: number;
+        };
+        SupportPerson: {
+            /** Format: uuid */
+            id: string;
+            name: string;
+        };
+        SupportConversation: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            brand_id: string | null;
+            /**
+             * Format: uuid
+             * @description The customer's record.
+             */
+            record_id: string | null;
+            contact: {
+                name: string;
+                email: string;
+            };
+            /**
+             * Format: uuid
+             * @description The support mailbox it came in on; null once that mailbox is removed.
+             */
+            mailbox_id: string | null;
+            mailbox_email: string | null;
+            /** @enum {string} */
+            channel: "email";
+            subject: string;
+            /**
+             * @description open waits on the team, pending on the customer.
+             * @enum {string}
+             */
+            status: "open" | "pending" | "closed";
+            assignee: components["schemas"]["SupportPerson"] | null;
+            team: components["schemas"]["SupportPerson"] | null;
+            tags: string[];
+            unread: boolean;
+            /** @enum {string} */
+            last_from: "customer" | "team";
+            /** @description The start of the latest email. */
+            preview: string;
+            /** @description Emails both ways, not notes. */
+            messages: number;
+            /** Format: date-time */
+            first_message_at: string;
+            /** Format: date-time */
+            first_reply_at: string | null;
+            /** Format: date-time */
+            closed_at: string | null;
+            /** Format: date-time */
+            last_message_at: string;
+            /** Format: date-time */
+            created_at: string;
+        };
+        SupportMessage: {
+            /** Format: uuid */
+            id: string;
+            /**
+             * @description in: from the customer. out: the team's reply. note: for the team only.
+             * @enum {string}
+             */
+            kind: "in" | "out" | "note";
+            author: components["schemas"]["SupportPerson"] | null;
+            from_email: string;
+            from_name: string;
+            to_email: string;
+            subject: string;
+            body: string;
+            /** @description An out-of-office or other automatic answer. */
+            auto_reply: boolean;
+            /** @enum {string} */
+            status: "received" | "sending" | "sent" | "failed" | "saved";
+            /** @description Why a reply wasn't sent. */
+            error: string | null;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            sent_at: string | null;
+        };
+        SupportMailbox: {
+            /** Format: uuid */
+            id: string;
+            email: string;
+            display_name: string;
+            /** Format: uuid */
+            brand_id: string | null;
+            status: string;
+            /** Format: date-time */
+            last_synced_at: string | null;
+            sync_error: string | null;
         };
         KnowledgeAnswer: {
             /**
@@ -59655,6 +60168,167 @@ export interface operations {
             default: components["responses"]["Error"];
         };
     };
+    receiveInboundEmail: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-Outflare-To": string;
+                "X-Outflare-Timestamp": string;
+                "X-Outflare-Signature": string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "message/rfc822": string;
+            };
+        };
+        responses: {
+            /** @description Already received (same Message-ID); nothing queued. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        queued: boolean;
+                    };
+                };
+            };
+            /** @description Stored and queued to be processed. */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        queued: boolean;
+                        /** Format: uuid */
+                        id: string;
+                    };
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    listInboundAddresses: {
+        parameters: {
+            query?: {
+                /** @description Only records of this brand: its id or handle, none for records shared by every brand, or all (the default). */
+                brand?: components["parameters"]["Brand"];
+            };
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The addresses. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        available: boolean;
+                        /** @example in.outflare.ai */
+                        domain: string | null;
+                        purposes: ("ai_receipts" | "support")[];
+                        data: components["schemas"]["InboundAddress"][];
+                    };
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    createInboundAddress: {
+        parameters: {
+            query?: never;
+            header?: {
+                /**
+                 * @description Makes the write safe to retry. A repeat with the same key from the same caller within 24 hours gets the first
+                 *     answer back (with `Idempotent-Replayed: true`) instead of running again. The same key for a different request
+                 *     is refused with 422 `idempotency_key_reused`; while the first is still running, 409 `idempotency_in_progress`.
+                 *     Use a new random key, such as a UUID, for each distinct write.
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @enum {string} */
+                    purpose: "ai_receipts" | "support";
+                    /** @description Support only: the brand's id or handle; leave out for the workspace's own address. */
+                    brand?: string;
+                    /** @description Support only: the part before the @, 4 to 64 lowercase letters, digits and dashes. */
+                    name?: string;
+                    replace?: boolean;
+                };
+            };
+        };
+        responses: {
+            /** @description The existing address, or the same name again. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InboundAddress"];
+                };
+            };
+            /** @description A new address. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InboundAddress"];
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            400: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    listInboundEmails: {
+        parameters: {
+            query?: {
+                /** @description Only records of this brand: its id or handle, none for records shared by every brand, or all (the default). */
+                brand?: components["parameters"]["Brand"];
+            };
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The messages, newest first. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["InboundEmail"][];
+                    };
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
     listKnowledgeItems: {
         parameters: {
             query?: {
@@ -60031,6 +60705,394 @@ export interface operations {
                 };
             };
             400: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    listSupportConversations: {
+        parameters: {
+            query?: {
+                /** @description open waits on the team, pending on the customer. */
+                status?: "open" | "pending" | "closed" | "all";
+                /** @description me, none or a user id. */
+                assignee?: string;
+                team_id?: string;
+                tag?: string;
+                /** @description One customer's conversations. */
+                record_id?: string;
+                /** @description Words in the subject, address, name or messages. */
+                q?: string;
+                /** @description oldest (with status=open) puts who has waited longest first. */
+                sort?: "newest" | "oldest";
+                /** @description Only records of this brand: its id or handle, none for records shared by every brand, or all (the default). */
+                brand?: components["parameters"]["Brand"];
+                /**
+                 * @description Only these fields of each item, comma separated (fields=id,email,status); id always comes back.
+                 *     Paging fields stay. A field the items don't have answers 400 naming the ones they do. Any GET takes it.
+                 */
+                fields?: components["parameters"]["Fields"];
+                /** @description 1 to 200. Default 50. */
+                limit?: number;
+                offset?: number;
+                /**
+                 * @description next_cursor from the previous page, unchanged. Every paged list takes it, so one loop pages them all:
+                 *     call, then call again with cursor=next_cursor until next_cursor is null. Cursors are opaque; don't build them.
+                 */
+                cursor?: components["parameters"]["Cursor"];
+            };
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description A page of conversations. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["SupportConversation"][];
+                        total: number;
+                        next_offset: number | null;
+                        next_cursor: string | null;
+                        counts: components["schemas"]["SupportCounts"];
+                    };
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    getSupportConversation: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The conversation and its messages. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        conversation: components["schemas"]["SupportConversation"];
+                        messages: components["schemas"]["SupportMessage"][];
+                        other_conversations: components["schemas"]["SupportConversation"][];
+                    };
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    updateSupportConversation: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @enum {string} */
+                    status?: "open" | "pending" | "closed";
+                    /**
+                     * Format: uuid
+                     * @description A member's user id; null to unassign.
+                     */
+                    assignee_id?: string | null;
+                    /** Format: uuid */
+                    team_id?: string | null;
+                    tags?: string[];
+                    unread?: boolean;
+                };
+            };
+        };
+        responses: {
+            /** @description The conversation. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SupportConversation"];
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            default: components["responses"]["Error"];
+        };
+    };
+    replySupportConversation: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    body: string;
+                    /**
+                     * @description The conversation's status after the reply; pending by default.
+                     * @enum {string}
+                     */
+                    status?: "pending" | "closed" | "open";
+                };
+            };
+        };
+        responses: {
+            /** @description The reply, queued to send. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** Format: uuid */
+                        id: string;
+                        /** @enum {string} */
+                        status: "sending";
+                    };
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            default: components["responses"]["Error"];
+        };
+    };
+    addSupportNote: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    body: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The note. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** Format: uuid */
+                        id: string;
+                    };
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            default: components["responses"]["Error"];
+        };
+    };
+    suggestSupportReply: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The suggested answer, with its sources. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["KnowledgeAnswer"];
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            default: components["responses"]["Error"];
+        };
+    };
+    getSupportStats: {
+        parameters: {
+            query?: {
+                days?: number;
+                /** @description Only records of this brand: its id or handle, none for records shared by every brand, or all (the default). */
+                brand?: components["parameters"]["Brand"];
+            };
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Support numbers. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        days: number;
+                        conversations: number;
+                        replied: number;
+                        closed: number;
+                        median_first_reply_seconds: number | null;
+                        median_resolution_seconds: number | null;
+                        counts: components["schemas"]["SupportCounts"];
+                    };
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    listSupportMailboxes: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Support mailboxes. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["SupportMailbox"][];
+                    };
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    addSupportMailbox: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The support mailbox. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SupportMailbox"];
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            default: components["responses"]["Error"];
+        };
+    };
+    removeSupportMailbox: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            202: components["responses"]["MissionHeld"];
+            /** @description Done. */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    simulateSupportEmail: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** Format: uuid */
+                    mailbox_id: string;
+                    /** Format: email */
+                    from: string;
+                    name?: string;
+                    subject?: string;
+                    body: string;
+                    /** @description The Message-ID the email answers. */
+                    in_reply_to?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description Where it landed. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** Format: uuid */
+                        message_id: string;
+                        /** Format: uuid */
+                        conversation_id: string;
+                    };
+                };
+            };
+            202: components["responses"]["MissionHeld"];
             default: components["responses"]["Error"];
         };
     };
@@ -62558,6 +63620,59 @@ export interface operations {
                 content: {
                     "text/javascript": string;
                 };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    sendSiteSignup: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "text/plain": string;
+                "application/json": {
+                    /** @example ofk_test_not_a_real_key */
+                    key: string;
+                    anonymousId: string;
+                    /** Format: email */
+                    email: string;
+                };
+            };
+        };
+        responses: {
+            /** @description Taken. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        ok: boolean;
+                    };
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    sendSiteSignupPreflight: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Allowed. */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             default: components["responses"]["Error"];
         };

@@ -183,7 +183,15 @@ type Spec struct {
 	// ExcludeDomains leaves out visitors from these companies (the
 	// workspace's own team), as on the Visitors page.
 	ExcludeDomains []string
+	// VarianceReduction adjusts each goal and guardrail for its visitors'
+	// value of it in the PreDays before they joined (CUPED). A test uses
+	// it for its whole life or not at all, as registered when it started.
+	VarianceReduction bool
 }
+
+// PreDays is how far before joining a visitor's history counts for
+// variance reduction.
+const PreDays = 28
 
 // Day is the cumulative arms at the end of one day (UTC), control first;
 // the last day of a running test is today so far.
@@ -239,6 +247,9 @@ type Result struct {
 	// CorrectedFor is how many versions are compared with the control; past
 	// one, every p-value and range is corrected for that many chances.
 	CorrectedFor int `json:"corrected_for"`
+	// VarianceReduction says the comparisons were adjusted for the
+	// visitors' history (CUPED); each comparison says by how much.
+	VarianceReduction bool `json:"variance_reduction"`
 	// FlagChanged says how the flag changed since the test started (its
 	// split, content, rollout or versions): results that mix the before
 	// and after need care.
@@ -250,7 +261,11 @@ type Result struct {
 // day by day, and compares them with the control.
 func Results(ctx context.Context, q Querier, ws string, s Spec) (Result, error) {
 	order, weights := controlFirst(s)
-	res := Result{ComputedAt: time.Now().UTC(), MinEffect: s.MinEffect, CorrectedFor: max(1, len(order)-1)}
+	res := Result{ComputedAt: time.Now().UTC(), MinEffect: s.MinEffect, CorrectedFor: max(1, len(order)-1), VarianceReduction: s.VarianceReduction}
+	compare := CompareSeries
+	if s.VarianceReduction {
+		compare = CompareAdjusted
+	}
 	if res.MinEffect <= 0 {
 		res.MinEffect = DefaultMinEffect
 	}
@@ -284,7 +299,7 @@ func Results(ctx context.Context, q Querier, ws string, s Spec) (Result, error) 
 			looks = [][]Arm{list}
 		}
 		gr := GoalResult{Goal: g, Arms: list, Metric: g.MetricOf(), Baseline: base, Exploratory: i > 0,
-			Comparisons: CompareSeries(looks, g.MetricOf(), s.MinEffect, base)}
+			Comparisons: compare(looks, g.MetricOf(), s.MinEffect, base)}
 		if i == 0 {
 			gr.Days = days
 		}
@@ -310,7 +325,7 @@ func Results(ctx context.Context, q Querier, ws string, s Spec) (Result, error) 
 			looks = [][]Arm{list}
 		}
 		gr := GuardrailResult{GoalResult: GoalResult{Goal: g, Arms: list, Metric: g.MetricOf(), Exploratory: true,
-			Comparisons: CompareSeries(looks, g.MetricOf(), s.MinEffect, 0)}, Harmed: []string{}}
+			Comparisons: compare(looks, g.MetricOf(), s.MinEffect, 0)}, Harmed: []string{}}
 		for _, c := range gr.Comparisons {
 			worse := c.ChanceToBeat <= 0.05
 			if g.Better == "lower" {
@@ -416,6 +431,34 @@ func hitsSQL(g Goal, ws, end, arg, window, prop string) string {
 		WHERE e.workspace_id = ` + ws + ` AND ` + cond + ` AND e.occurred_at < ` + end + ` ` + within("e.occurred_at")
 }
 
+// preHitsSQL is hitsSQL for the PreDays before each visitor in seen
+// joined: every time they reached goal g then, (anonymous_id, val), and
+// nothing unless $on. It reads only events and deals, the same as the
+// goal does.
+func preHitsSQL(g Goal, ws, arg, prop, on string) string {
+	from := fmt.Sprintf("seen.occurred_at - interval '%d days'", PreDays)
+	if g.Kind == "deal" {
+		val := "1"
+		if g.MetricOf() == MetricValue {
+			val = "coalesce(d.amount_cents, 0) / 100.0"
+		}
+		return `SELECT seen.anonymous_id, ` + val + `::float8 AS val
+			FROM seen
+			JOIN site_visitors sv ON sv.workspace_id = ` + ws + ` AND sv.anonymous_id = seen.anonymous_id AND sv.record_id IS NOT NULL
+			JOIN deals d ON d.workspace_id = ` + ws + ` AND d.record_id = sv.record_id AND d.state = 'won' AND d.currency = 'USD'
+			WHERE ` + on + ` AND d.closed_at >= ` + from + ` AND d.closed_at < seen.occurred_at`
+	}
+	cond, _ := goalSQL(g)
+	cond = fmt.Sprintf(cond, arg)
+	val := "1"
+	if g.MetricOf() == MetricValue {
+		val = "CASE WHEN jsonb_typeof(e.properties->" + prop + "::text) = 'number' THEN greatest((e.properties->>" + prop + "::text)::float8, 0) ELSE 0 END"
+	}
+	return `SELECT seen.anonymous_id, ` + val + `::float8 AS val
+		FROM customer_events e JOIN seen ON seen.anonymous_id = e.anonymous_id
+		WHERE ` + on + ` AND e.workspace_id = ` + ws + ` AND ` + cond + ` AND e.occurred_at >= ` + from + ` AND e.occurred_at < seen.occurred_at`
+}
+
 // goalArgs are the values hitsSQL's $arg, $window, $prop and $cap stand
 // for: the goal's argument, its window in hours or nil, the property and
 // the cap on a visitor's value (1 for a conversion goal) or nil.
@@ -467,6 +510,7 @@ var segmentSQL = map[string]string{
 // arms per day, by segment.
 func tally(ctx context.Context, q Querier, ws string, s Spec, g Goal, order []string, dim string) (map[string][]Day, error) {
 	hits := hitsSQL(g, "$1", "($4::timestamptz[])[2]", "$5", "$6", "$7")
+	pre := preHitsSQL(g, "$1", "$5", "$7", "$11")
 	arg, window, prop, capv := goalArgs(g)
 	// A visitor's segment rides along with their variant, after a unit
 	// separator, through every step below.
@@ -477,8 +521,10 @@ func tally(ctx context.Context, q Querier, ws string, s Spec, g Goal, order []st
 				AND ss.id = CASE WHEN e.context->>'sessionId' ~ '^[0-9a-fA-F-]{36}$' THEN (e.context->>'sessionId')::uuid END`
 	}
 	// params gives every placeholder a type, used by the goal or not.
+	// pre is each visitor's value of the goal in the PreDays before they
+	// joined (x, for variance reduction; nothing when $11 is false).
 	rows, err := q.Query(ctx, `
-		WITH params AS (SELECT $5::text, $6::int, $7::text, $8::float8, $9::timestamptz, $10::text[]), first AS (
+		WITH params AS (SELECT $5::text, $6::int, $7::text, $8::float8, $9::timestamptz, $10::text[], $11::bool), first AS (
 			SELECT DISTINCT ON (e.anonymous_id) e.anonymous_id, (e.properties->>'variant') || chr(31) || `+seg+` AS variant, e.occurred_at
 			FROM customer_events e `+join+`
 			WHERE e.workspace_id = $1 AND e.name = $2 AND e.properties->>'flag' = $3
@@ -496,6 +542,11 @@ func tally(ctx context.Context, q Querier, ws string, s Spec, g Goal, order []st
 						OR EXISTS (SELECT 1 FROM record_identities d WHERE d.record_id IN (sv.account_id, sv.record_id)
 							AND d.namespace = 'domain' AND d.valid_to IS NULL AND (d.value = x OR d.value LIKE '%.' || x)))))
 		), hits AS (`+hits+`
+		), pre AS (
+			SELECT anonymous_id, least(sum(val), $8::float8) AS x FROM (`+pre+`) p GROUP BY 1
+		), seenx AS (
+			SELECT seen.anonymous_id, seen.variant, seen.occurred_at, coalesce(pre.x, 0)::float8 AS x
+			FROM seen LEFT JOIN pre ON pre.anonymous_id = seen.anonymous_id
 		), daily AS (
 			SELECT anonymous_id, variant, to_char(at AT TIME ZONE 'UTC', 'YYYY-MM-DD') AS day, sum(val) AS dv
 			FROM hits GROUP BY 1, 2, 3
@@ -504,12 +555,13 @@ func tally(ctx context.Context, q Querier, ws string, s Spec, g Goal, order []st
 				least(sum(dv) OVER (PARTITION BY anonymous_id ORDER BY day), $8::float8) AS v
 			FROM daily
 		), inc AS (
-			SELECT variant, day, v, coalesce(lag(v) OVER (PARTITION BY anonymous_id ORDER BY day), 0) AS pv FROM cum
+			SELECT c.variant, c.day, c.v, coalesce(lag(c.v) OVER (PARTITION BY c.anonymous_id ORDER BY c.day), 0) AS pv, sx.x
+			FROM cum c JOIN seenx sx ON sx.anonymous_id = c.anonymous_id
 		)
-		SELECT variant, to_char(occurred_at AT TIME ZONE 'UTC', 'YYYY-MM-DD'), count(*), 0, 0::float8, 0::float8 FROM seen GROUP BY 1, 2
+		SELECT variant, to_char(occurred_at AT TIME ZONE 'UTC', 'YYYY-MM-DD'), count(*), 0, 0::float8, 0::float8, sum(x), sum(x * x), 0::float8 FROM seenx GROUP BY 1, 2
 		UNION ALL
-		SELECT variant, day, 0, count(*) FILTER (WHERE v > 0 AND pv = 0), sum(v - pv), sum(v * v - pv * pv) FROM inc GROUP BY 1, 2`,
-		ws, ExposureEvent, s.FlagKey, []time.Time{s.From, s.To}, arg, window, prop, capv, joinUntil(s), nonNil(s.ExcludeDomains))
+		SELECT variant, day, 0, count(*) FILTER (WHERE v > 0 AND pv = 0), sum(v - pv), sum(v * v - pv * pv), 0::float8, 0::float8, sum(x * (v - pv)) FROM inc GROUP BY 1, 2`,
+		ws, ExposureEvent, s.FlagKey, []time.Time{s.From, s.To}, arg, window, prop, capv, joinUntil(s), nonNil(s.ExcludeDomains), s.VarianceReduction && dim == "")
 	if err != nil {
 		return nil, err
 	}
@@ -521,8 +573,8 @@ func tally(ctx context.Context, q Querier, ws string, s Spec, g Goal, order []st
 	for rows.Next() {
 		var key, day string
 		var visitors, conversions int64
-		var sum, sq float64
-		if err := rows.Scan(&key, &day, &visitors, &conversions, &sum, &sq); err != nil {
+		var sum, sq, sx, sxx, sxy float64
+		if err := rows.Scan(&key, &day, &visitors, &conversions, &sum, &sq, &sx, &sxx, &sxy); err != nil {
 			rows.Close()
 			return nil, err
 		}
@@ -545,6 +597,9 @@ func tally(ctx context.Context, q Querier, ws string, s Spec, g Goal, order []st
 		st[i].Conversions += conversions
 		st[i].Sum += sum
 		st[i].SumSq += sq
+		st[i].SumX += sx
+		st[i].SumXX += sxx
+		st[i].SumXY += sxy
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
@@ -573,6 +628,9 @@ func cumulative(byDay map[string][]Arm, order []string, measured bool) []Day {
 		for i := range order {
 			total[i].Visitors += byDay[d][i].Visitors
 			total[i].Conversions += byDay[d][i].Conversions
+			total[i].SumX += byDay[d][i].SumX
+			total[i].SumXX += byDay[d][i].SumXX
+			total[i].SumXY += byDay[d][i].SumXY
 			if measured {
 				total[i].Sum += byDay[d][i].Sum
 				total[i].SumSq += byDay[d][i].SumSq

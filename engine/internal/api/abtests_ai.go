@@ -867,6 +867,9 @@ func writeABResults(b *strings.Builder, t abTestView, res abtests.Result) {
 		for _, c := range g.Comparisons {
 			fmt.Fprintf(b, "%s vs %s: chance to beat %.1f%%, lift %+.1f%% (always-valid range %+.1f%% to %+.1f%%), always-valid p %.4f, safe to stop: %v\n",
 				c.Variant, t.Control, c.ChanceToBeat*100, c.Lift*100, c.LiftLow*100, c.LiftHigh*100, c.PValue, c.PValue < abtests.Alpha)
+			if c.VarianceReduction > 0 {
+				fmt.Fprintf(b, "(Adjusted for visitors' history before the test, which took out %.0f%% of the noise.)\n", c.VarianceReduction*100)
+			}
 		}
 	}
 	for i, g := range res.Guardrails {

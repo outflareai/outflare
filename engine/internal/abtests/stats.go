@@ -17,6 +17,12 @@ type Arm struct {
 	Mean float64 `json:"mean,omitempty"`
 	// SumSq is the total of the squared values, for the variance.
 	SumSq float64 `json:"-"`
+	// SumX, SumXX and SumXY are the totals of each visitor's value of the
+	// goal before they joined (X, the covariate for variance reduction),
+	// its square, and its product with their value since (Y).
+	SumX  float64 `json:"-"`
+	SumXX float64 `json:"-"`
+	SumXY float64 `json:"-"`
 }
 
 // Rate is the share of the arm's visitors who converted.
@@ -74,6 +80,9 @@ type Comparison struct {
 	// uncorrected one.
 	PValue    float64 `json:"p_value"`
 	RawPValue float64 `json:"raw_p_value"`
+	// VarianceReduction is the share of the variance the visitors' history
+	// took out (CUPED), at the last look; 0 when none was used.
+	VarianceReduction float64 `json:"variance_reduction"`
 }
 
 // Alpha is the false-winner rate the always-valid test and range keep to.
@@ -119,20 +128,107 @@ func CompareSeries(looks [][]Arm, metric string, minEffect, baseline float64) []
 	return compareSeries(looks, metric, minEffect, baseline, len(looks[len(looks)-1])-1)
 }
 
+// CompareAdjusted is CompareSeries with variance reduction (CUPED): each
+// arm's mean is adjusted for its visitors' value of the goal before they
+// joined (Arm.SumX and the rest), which takes out the part of the noise
+// their history predicts. The adjusted difference has the same
+// expectation, since history can't depend on the version, and a smaller
+// variance, so the same evidence is reached with fewer visitors.
+func CompareAdjusted(looks [][]Arm, metric string, minEffect, baseline float64) []Comparison {
+	if len(looks) == 0 {
+		return nil
+	}
+	return compareSeriesWith(looks, metric, minEffect, baseline, len(looks[len(looks)-1])-1, true)
+}
+
+// sums are an arm's totals of Y (its value since joining) and Y².
+func (a Arm) sums(metric string) (y, yy float64) {
+	if metric == "" || metric == MetricConversion {
+		return float64(a.Conversions), float64(a.Conversions)
+	}
+	return a.Sum, a.SumSq
+}
+
+// adjusted is each arm's moments after CUPED, and the share of the
+// variance it removed. theta is estimated within arms (pooled), so a
+// version's effect can't leak into it, and each mean is moved by theta
+// times how far its arm's history is from everyone's.
+func adjusted(arms []Arm, metric string) ([]Moments, float64) {
+	out := make([]Moments, len(arms))
+	var cxy, vxx, sumX, n float64
+	for _, a := range arms {
+		if a.Visitors == 0 {
+			continue
+		}
+		k := float64(a.Visitors)
+		y, _ := a.sums(metric)
+		cxy += a.SumXY - a.SumX*y/k
+		vxx += a.SumXX - a.SumX*a.SumX/k
+		sumX += a.SumX
+		n += k
+	}
+	theta := 0.0
+	if vxx > 0 {
+		theta = cxy / vxx
+	}
+	var before, after float64
+	for i, a := range arms {
+		if a.Visitors == 0 {
+			continue
+		}
+		k := float64(a.Visitors)
+		y, yy := a.sums(metric)
+		my, mx := y/k, a.SumX/k
+		vy := math.Max(0, yy/k-my*my)
+		vx := math.Max(0, a.SumXX/k-mx*mx)
+		cov := a.SumXY/k - mx*my
+		v := math.Max(0, vy-2*theta*cov+theta*theta*vx)
+		out[i] = Moments{Mean: my - theta*(mx-sumX/n), Var: v}
+		before += vy * k
+		after += v * k
+	}
+	reduction := 0.0
+	if before > 0 && theta != 0 {
+		reduction = math.Max(0, 1-after/before)
+	}
+	return out, reduction
+}
+
 // compareSeries is CompareSeries corrected for tests comparisons in all,
 // such as every version in every segment of a breakdown.
 func compareSeries(looks [][]Arm, metric string, minEffect, baseline float64, tests int) []Comparison {
+	return compareSeriesWith(looks, metric, minEffect, baseline, tests, false)
+}
+
+// compareSeriesWith is compareSeries, with variance reduction when cuped.
+func compareSeriesWith(looks [][]Arm, metric string, minEffect, baseline float64, tests int, cuped bool) []Comparison {
 	if len(looks) == 0 || len(looks[len(looks)-1]) < 2 {
 		return nil
 	}
+	// moments are each arm's moments at a look, adjusted or not.
+	moments := func(look []Arm) ([]Moments, float64) {
+		if cuped {
+			return adjusted(look, metric)
+		}
+		out := make([]Moments, len(look))
+		for i, a := range look {
+			out[i] = a.Moments(metric)
+		}
+		return out, 0
+	}
 	last := looks[len(looks)-1]
 	c := last[0]
+	lastM, reduction := moments(last)
 	versions := float64(max(1, tests))
 	alpha := Alpha / versions
 	out := make([]Comparison, 0, len(last)-1)
 	for i, a := range last[1:] {
 		cmp := Comparison{Variant: a.Variant, ChanceToBeat: chanceToBeat(c, a, metric), RawPValue: 1}
-		cm, am := c.Moments(metric), a.Moments(metric)
+		cm, am := lastM[0], lastM[i+1]
+		if reduction > 0 {
+			cmp.VarianceReduction = reduction
+			cmp.ChanceToBeat = normalChance(cm, c.Visitors, am, a.Visitors)
+		}
 		if cm.Mean > 0 && am.Mean > 0 {
 			cmp.Lift = am.Mean/cm.Mean - 1
 		}
@@ -142,7 +238,8 @@ func compareSeries(looks [][]Arm, metric string, minEffect, baseline float64, te
 				continue
 			}
 			lc, la := look[0], look[i+1]
-			lcm, lam := lc.Moments(metric), la.Moments(metric)
+			lm, _ := moments(look)
+			lcm, lam := lm[0], lm[i+1]
 			p, h, ok := sequential(lcm, lc.Visitors, lam, la.Visitors, tau(minEffect, baseline, lcm.Mean), alpha)
 			if !ok {
 				continue
@@ -180,11 +277,16 @@ func chanceToBeat(a, b Arm, metric string) float64 {
 	if metric == "" || metric == MetricConversion {
 		return ChanceToBeat(a, b)
 	}
-	if a.Visitors < 2 || b.Visitors < 2 {
+	return normalChance(a.Moments(metric), a.Visitors, b.Moments(metric), b.Visitors)
+}
+
+// normalChance is P(mean_b > mean_a) from the normal approximation of two
+// means with these moments over na and nb visitors.
+func normalChance(am Moments, na int64, bm Moments, nb int64) float64 {
+	if na < 2 || nb < 2 {
 		return 0.5
 	}
-	am, bm := a.Moments(metric), b.Moments(metric)
-	se := math.Sqrt(am.Var/float64(a.Visitors) + bm.Var/float64(b.Visitors))
+	se := math.Sqrt(am.Var/float64(na) + bm.Var/float64(nb))
 	if se == 0 {
 		switch {
 		case bm.Mean > am.Mean:

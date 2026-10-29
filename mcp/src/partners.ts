@@ -42,6 +42,7 @@ const programSettings = {
   hold_days: z.number().int().min(0).max(365).optional(),
   auto_approve: z.boolean().optional(),
   auto_accept: z.boolean().optional(),
+  pay_browser_signups: z.boolean().optional(),
   min_payout_cents: z.number().int().min(0).optional(),
   terms_url: z.string().max(2000).optional(),
   sales_source: z.string().optional().describe('A billing connector (stripe) whose synced payments and refunds are also partner sales; "" for none.'),

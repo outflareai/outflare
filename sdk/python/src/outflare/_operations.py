@@ -879,6 +879,54 @@ class Operations(_Mixin):
             idempotency_key=idempotency_key,
         )
 
+    def add_support_mailbox(
+        self,
+        id: str,
+        *,
+        ws: str | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Use a mailbox for support.
+
+        Scope: mailboxes.manage. From now on the mailbox's new mail goes to the support inbox instead of the sales
+        inbox, and sequences never send from it. 409 `mailbox_in_use` while it sends for a sequence or campaign
+        (take it off them first) or when Outflare only knows it from a sequencer and can't read it.
+
+        Needs: the mailboxes.manage scope.
+        PUT /v1/workspaces/{ws}/support/mailboxes/{id}
+        """
+        return self._call(
+            "PUT",
+            "/v1/workspaces/{ws}/support/mailboxes/{id}",
+            path={"id": id, "ws": ws},
+            idempotency_key=idempotency_key,
+        )
+
+    def add_support_note(
+        self,
+        id: str,
+        *,
+        ws: str | None = None,
+        body: str,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Add a note to a support conversation.
+
+        Scope: inbox.manage. A note for the team. The customer never sees it.
+
+        Needs: the inbox.manage scope.
+        POST /v1/workspaces/{ws}/support/conversations/{id}/notes
+        """
+        return self._call(
+            "POST",
+            "/v1/workspaces/{ws}/support/conversations/{id}/notes",
+            path={"id": id, "ws": ws},
+            body={"body": body},
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
     def add_suppressions(
         self,
         *,
@@ -3361,6 +3409,37 @@ class Operations(_Mixin):
             idempotency_key=idempotency_key,
         )
 
+    def create_inbound_address(
+        self,
+        *,
+        ws: str | None = None,
+        brand: str | None = None,
+        name: str | None = None,
+        purpose: Literal["ai_receipts", "support"],
+        replace: bool | None = None,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Get, rename or replace an inbound email address.
+
+        Scope: workspace.manage. The address for a purpose (and, for support, a brand), made the first time (201) and
+        returned after (200). For support, `name` renames it (such as `help-northpeak`; 409 when taken); an old name of
+        the same address can be taken back. `replace: true` makes a new one. Either way mail to the old address is then
+        refused, so everyone forwarding must update their forwarding. 404 where the server has no inbound email, or the
+        purpose is off for the workspace.
+
+        Needs: the workspace.manage scope.
+        POST /v1/workspaces/{ws}/inbound-addresses
+        """
+        return self._call(
+            "POST",
+            "/v1/workspaces/{ws}/inbound-addresses",
+            path={"ws": ws},
+            body={"brand": brand, "name": name, "purpose": purpose, "replace": replace},
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
     def create_inbox_tag(
         self,
         *,
@@ -4142,6 +4221,7 @@ class Operations(_Mixin):
         *,
         ws: str | None = None,
         amount_cents: int | None = None,
+        anonymous_id: str | None = None,
         click_id: str | None = None,
         currency: str | None = None,
         customer_id: str | None = None,
@@ -4185,6 +4265,7 @@ class Operations(_Mixin):
             path={"ws": ws},
             body={
                 "amount_cents": amount_cents,
+                "anonymous_id": anonymous_id,
                 "click_id": click_id,
                 "currency": currency,
                 "customer_id": customer_id,
@@ -4277,6 +4358,7 @@ class Operations(_Mixin):
         landing_url: str | None = None,
         min_payout_cents: int | None = None,
         name: str | None = None,
+        pay_browser_signups: bool | None = None,
         rules: list[dict[str, Any]] | None = None,
         sales_source: str | None = None,
         slug: str | None = None,
@@ -4313,6 +4395,7 @@ class Operations(_Mixin):
                 "landing_url": landing_url,
                 "min_payout_cents": min_payout_cents,
                 "name": name,
+                "pay_browser_signups": pay_browser_signups,
                 "rules": rules,
                 "sales_source": sales_source,
                 "slug": slug,
@@ -10897,6 +10980,49 @@ class Operations(_Mixin):
             path={"id": id, "ws": ws},
         )
 
+    def get_support_conversation(
+        self,
+        id: str,
+        *,
+        ws: str | None = None,
+    ) -> Any:
+        """Get a support conversation.
+
+        Scope: inbox.read. The conversation, every message in it (the customer's emails, the team's replies and
+        notes only the team sees) oldest first, and the customer's other conversations. A person opening it marks
+        it read.
+
+        Needs: the inbox.read scope.
+        GET /v1/workspaces/{ws}/support/conversations/{id}
+        """
+        return self._call(
+            "GET",
+            "/v1/workspaces/{ws}/support/conversations/{id}",
+            path={"id": id, "ws": ws},
+        )
+
+    def get_support_stats(
+        self,
+        *,
+        ws: str | None = None,
+        days: int | None = None,
+        brand: str | None = None,
+    ) -> Any:
+        """Support at a glance.
+
+        Scope: inbox.read. Conversations started in the last `days` (30 by default), how many were answered and
+        closed, and the median time to the first reply and to closing, with the inbox's folder counts.
+
+        Needs: the inbox.read scope.
+        GET /v1/workspaces/{ws}/support/stats
+        """
+        return self._call(
+            "GET",
+            "/v1/workspaces/{ws}/support/stats",
+            path={"ws": ws},
+            query={"days": days, "brand": brand},
+        )
+
     def get_tracking_campaign(
         self,
         id: str,
@@ -13386,6 +13512,50 @@ class Operations(_Mixin):
             "GET",
             "/v1/workspaces/{ws}/imports",
             path={"ws": ws},
+        )
+
+    def list_inbound_addresses(
+        self,
+        *,
+        ws: str | None = None,
+        brand: str | None = None,
+    ) -> Any:
+        """List inbound email addresses.
+
+        Scope: workspace.read. The workspace's addresses at the server's inbound domain: people forward mail to them,
+        such as their support mailbox or AI receipts. Support addresses read like support inboxes (`northpeak-support@`),
+        one per brand; other purposes have one per workspace with letters nobody can guess. `purposes` lists the ones
+        this workspace can use. With a brand picked, its addresses and the workspace's own. `available` is false where
+        the server has no inbound email (it is part of Outflare Cloud).
+
+        Needs: the workspace.read scope.
+        GET /v1/workspaces/{ws}/inbound-addresses
+        """
+        return self._call(
+            "GET",
+            "/v1/workspaces/{ws}/inbound-addresses",
+            path={"ws": ws},
+            query={"brand": brand},
+        )
+
+    def list_inbound_emails(
+        self,
+        *,
+        ws: str | None = None,
+        brand: str | None = None,
+    ) -> Any:
+        """List received messages.
+
+        Scope: audit.read. The latest 100 messages delivered to the workspace's inbound addresses and what became of each: processed, ignored, rejected (reason: unknown_forwarder when nobody here forwarded mail for a purpose only members forward) or failed. With a brand picked, mail to its addresses and the workspace's own.
+
+        Needs: the audit.read scope.
+        GET /v1/workspaces/{ws}/inbound-emails
+        """
+        return self._call(
+            "GET",
+            "/v1/workspaces/{ws}/inbound-emails",
+            path={"ws": ws},
+            query={"brand": brand},
         )
 
     def list_inbox(
@@ -16164,6 +16334,72 @@ class Operations(_Mixin):
             },
         )
 
+    def list_support_conversations(
+        self,
+        *,
+        ws: str | None = None,
+        status: Literal["open", "pending", "closed", "all"] | None = None,
+        assignee: str | None = None,
+        team_id: str | None = None,
+        tag: str | None = None,
+        record_id: str | None = None,
+        q: str | None = None,
+        sort: Literal["newest", "oldest"] | None = None,
+        brand: str | None = None,
+        fields: list[str] | None = None,
+        limit: int | None = None,
+        offset: int | None = None,
+        cursor: str | None = None,
+    ) -> Any:
+        """List support conversations.
+
+        Scope: inbox.read. The support inbox: conversations with customers who wrote to a support mailbox, newest
+        message first. Filter by status, assignee (`me`, `none` or a user id), team, tag, customer record or words
+        in the subject, address, name or messages. `counts` are the inbox's folders (open, pending, closed, mine,
+        unassigned) whatever the filters. With a brand picked, its conversations and those of no brand (a mailbox shared by
+        every brand).
+
+        Needs: the inbox.read scope.
+        GET /v1/workspaces/{ws}/support/conversations
+        """
+        return self._call(
+            "GET",
+            "/v1/workspaces/{ws}/support/conversations",
+            path={"ws": ws},
+            query={
+                "status": status,
+                "assignee": assignee,
+                "team_id": team_id,
+                "tag": tag,
+                "record_id": record_id,
+                "q": q,
+                "sort": sort,
+                "brand": brand,
+                "fields": fields,
+                "limit": limit,
+                "offset": offset,
+                "cursor": cursor,
+            },
+        )
+
+    def list_support_mailboxes(
+        self,
+        *,
+        ws: str | None = None,
+    ) -> Any:
+        """List support mailboxes.
+
+        Scope: mailboxes.read. The connected mailboxes whose mail goes to the support inbox.
+
+        Needs: the mailboxes.read scope.
+        GET /v1/workspaces/{ws}/support/mailboxes
+        """
+        return self._call(
+            "GET",
+            "/v1/workspaces/{ws}/support/mailboxes",
+            path={"ws": ws},
+        )
+
     def list_suppression_syncs(
         self,
         *,
@@ -17721,6 +17957,29 @@ class Operations(_Mixin):
             idempotency_key=idempotency_key,
         )
 
+    def receive_inbound_email(
+        self,
+        *,
+        content: str | bytes,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Deliver an inbound message (operator's edge).
+
+        For the server's own mail receiver, not for workspaces: an extension that turned inbound email on delivers each
+        message here. The body is the raw message (up to 25 MB); `X-Outflare-To` is the recipient, `X-Outflare-Timestamp`
+        the unix time and `X-Outflare-Signature` the hex HMAC-SHA256 of `<timestamp>.<body>` with the inbound secret.
+        404 means no such address: refuse the message. 404 too on servers without inbound email.
+
+        POST /v1/inbound/email
+        """
+        return self._call(
+            "POST",
+            "/v1/inbound/email",
+            content=content,
+            content_type="message/rfc822",
+            idempotency_key=idempotency_key,
+        )
+
     def reclaim_link_prospects(
         self,
         *,
@@ -18234,6 +18493,28 @@ class Operations(_Mixin):
             idempotency_key=idempotency_key,
         )
 
+    def remove_support_mailbox(
+        self,
+        id: str,
+        *,
+        ws: str | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Stop using a mailbox for support.
+
+        Scope: mailboxes.manage. Its new mail goes to the sales inbox again. Its conversations stay, but can't be
+        answered by email until a support mailbox is set again.
+
+        Needs: the mailboxes.manage scope.
+        DELETE /v1/workspaces/{ws}/support/mailboxes/{id}
+        """
+        return self._call(
+            "DELETE",
+            "/v1/workspaces/{ws}/support/mailboxes/{id}",
+            path={"id": id, "ws": ws},
+            idempotency_key=idempotency_key,
+        )
+
     def remove_suppression(
         self,
         id: str,
@@ -18322,6 +18603,36 @@ class Operations(_Mixin):
             "POST",
             "/v1/workspaces/{ws}/hook-events/{event}/replay",
             path={"event": event, "ws": ws},
+            idempotency_key=idempotency_key,
+        )
+
+    def reply_support_conversation(
+        self,
+        id: str,
+        *,
+        ws: str | None = None,
+        body: str,
+        status: Literal["pending", "closed", "open"] | None = None,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Reply to a customer.
+
+        Scope: inbox.manage. Emails the customer from the support mailbox the conversation came in on, in the same
+        thread. It is sent in the background: the message's `status` goes from sending to sent or failed (with
+        `error`). The address must pass the policy check for mail a person asked for: an unsubscribe from marketing
+        doesn't stop it, a bounce or a block does (409 `blocked`). The conversation becomes pending (waiting on the
+        customer) unless `status` says otherwise, and the first reply sets `first_reply_at`.
+
+        Needs: the inbox.manage scope.
+        POST /v1/workspaces/{ws}/support/conversations/{id}/replies
+        """
+        return self._call(
+            "POST",
+            "/v1/workspaces/{ws}/support/conversations/{id}/replies",
+            path={"id": id, "ws": ws},
+            body={"body": body, "status": status},
+            extra_body=extra_body,
             idempotency_key=idempotency_key,
         )
 
@@ -19400,6 +19711,35 @@ class Operations(_Mixin):
             idempotency_key=idempotency_key,
         )
 
+    def send_site_signup(
+        self,
+        *,
+        anonymousId: str,
+        email: str,
+        key: str,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Report a sign-up from the website.
+
+        Public: the site key (ofk_) in the body is the authority. What outflare.signup(email) in the tracking script sends
+        when a visitor signs up, for sites whose backend reports nothing to Outflare. It records a signup conversion
+        (source browser) for the partner whose link the visitor came from, by the visitor's own visits with a ref, under
+        each program's window and credit rule, so the lead shows at once. Anyone can call it with any address, so it pays
+        a sign-up reward only when the program sets pay_browser_signups; sales and refunds still come from your server or
+        billing. The answer is the same whether or not a partner was credited. Send the JSON as text/plain to skip the
+        CORS preflight.
+
+        POST /v1/site/signup
+        """
+        return self._call(
+            "POST",
+            "/v1/site/signup",
+            body={"anonymousId": anonymousId, "email": email, "key": key},
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
     def send_visitor_people(
         self,
         id: str,
@@ -20091,6 +20431,44 @@ class Operations(_Mixin):
             idempotency_key=idempotency_key,
         )
 
+    def simulate_support_email(
+        self,
+        *,
+        ws: str | None = None,
+        body: str,
+        from_: str,
+        in_reply_to: str | None = None,
+        mailbox_id: str,
+        name: str | None = None,
+        subject: str | None = None,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Simulate a customer writing to support (test workspaces).
+
+        Delivers a made-up email from a customer to a support mailbox, handled like real mail: it starts a
+        conversation or, with `in_reply_to` (a reply's message id), continues one. Only in a test workspace; a
+        live one answers 409 `live_workspace`.
+
+        Needs: the inbox.manage scope.
+        POST /v1/workspaces/{ws}/test/support-email
+        """
+        return self._call(
+            "POST",
+            "/v1/workspaces/{ws}/test/support-email",
+            path={"ws": ws},
+            body={
+                "body": body,
+                "from": from_,
+                "in_reply_to": in_reply_to,
+                "mailbox_id": mailbox_id,
+                "name": name,
+                "subject": subject,
+            },
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
     def start_ab_test(
         self,
         test: str,
@@ -20692,6 +21070,31 @@ class Operations(_Mixin):
             path={"ws": ws},
             body={"brand_id": brand_id, "count": count, "goal": goal, "notes": notes, "page": page},
             extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
+    def suggest_support_reply(
+        self,
+        id: str,
+        *,
+        ws: str | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Suggest a reply from knowledge.
+
+        Scope: inbox.manage. Drafts an answer to the customer's latest email from what customers may be told
+        (knowledge that is public or for AI answering customers), with the workspace's own AI model, citing its
+        sources. Nothing is sent: a person edits it and replies. It runs only when asked, so it spends nothing on
+        its own. With no AI model, `answer` is null and `ai.problem` says why; 409 `nothing_to_answer` when the
+        customer has written nothing yet.
+
+        Needs: the inbox.manage scope.
+        POST /v1/workspaces/{ws}/support/conversations/{id}/suggest-reply
+        """
+        return self._call(
+            "POST",
+            "/v1/workspaces/{ws}/support/conversations/{id}/suggest-reply",
+            path={"id": id, "ws": ws},
             idempotency_key=idempotency_key,
         )
 
@@ -23672,6 +24075,7 @@ class Operations(_Mixin):
         landing_url: str | None = None,
         min_payout_cents: int | None = None,
         name: str | None = None,
+        pay_browser_signups: bool | None = None,
         rules: list[dict[str, Any]] | None = None,
         sales_source: str | None = None,
         slug: str | None = None,
@@ -23704,6 +24108,7 @@ class Operations(_Mixin):
                 "landing_url": landing_url,
                 "min_payout_cents": min_payout_cents,
                 "name": name,
+                "pay_browser_signups": pay_browser_signups,
                 "rules": rules,
                 "sales_source": sales_source,
                 "slug": slug,
@@ -24710,6 +25115,37 @@ class Operations(_Mixin):
             "/v1/workspaces/{ws}/integrations/{id}/mailbox-sync",
             path={"id": id, "ws": ws},
             body={"app_passwords": app_passwords, "auto_import": auto_import, "daily_limit": daily_limit, "push": push},
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
+    def update_support_conversation(
+        self,
+        id: str,
+        *,
+        ws: str | None = None,
+        assignee_id: str | None = None,
+        status: Literal["open", "pending", "closed"] | None = None,
+        tags: list[str] | None = None,
+        team_id: str | None = None,
+        unread: bool | None = None,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Assign, tag or close a support conversation.
+
+        Scope: inbox.manage. Set its status (open, pending or closed), who it is assigned to (a member, or null),
+        its team (or null), its tags (lowercased, at most 20) or whether it shows as unread. A customer writing
+        again opens a pending or closed conversation by itself.
+
+        Needs: the inbox.manage scope.
+        PATCH /v1/workspaces/{ws}/support/conversations/{id}
+        """
+        return self._call(
+            "PATCH",
+            "/v1/workspaces/{ws}/support/conversations/{id}",
+            path={"id": id, "ws": ws},
+            body={"assignee_id": assignee_id, "status": status, "tags": tags, "team_id": team_id, "unread": unread},
             extra_body=extra_body,
             idempotency_key=idempotency_key,
         )

@@ -2,6 +2,7 @@
 package api
 
 import (
+	"cmp"
 	"context"
 	"crypto/rand"
 	"encoding/hex"
@@ -35,6 +36,7 @@ import (
 	"github.com/outflareai/outflare/engine/internal/emails"
 	"github.com/outflareai/outflare/engine/internal/imports"
 	"github.com/outflareai/outflare/engine/internal/inbound"
+	"github.com/outflareai/outflare/engine/internal/inboundemail"
 	"github.com/outflareai/outflare/engine/internal/inbox"
 	"github.com/outflareai/outflare/engine/internal/lists"
 	"github.com/outflareai/outflare/engine/internal/mailbox"
@@ -79,6 +81,7 @@ type Server struct {
 	lists         *lists.Service
 	verifier      *verify.Service
 	emailFinder   *emailfind.Service
+	inboundEmail  *inboundemail.Service
 	classifier    *classify.Classifier
 	research      *research.Service
 	vendors       *vendorsync.Service
@@ -157,6 +160,9 @@ type Options struct {
 	// EmailFinder proposes and verifies addresses from a workspace's learned
 	// patterns; nil turns the /email-finder endpoints off.
 	EmailFinder *emailfind.Service
+	// InboundEmail receives workspaces' forwarded mail when an extension
+	// turned it on (package inboundemail); nil leaves it off.
+	InboundEmail *inboundemail.Service
 	// Classifier says what kind of email domain an address is; nil builds
 	// one on the built-in data that asks the system resolver.
 	Classifier *classify.Classifier
@@ -358,6 +364,7 @@ func NewServer(pool *pgxpool.Pool, log *slog.Logger, opts Options) *Server {
 		integrations:     opts.Integrations,
 		verifier:         opts.Verify,
 		emailFinder:      opts.EmailFinder,
+		inboundEmail:     cmp.Or(opts.InboundEmail, &inboundemail.Service{}),
 		classifier:       classifier,
 		research:         opts.Research,
 		lists:            opts.Lists,
@@ -522,7 +529,9 @@ func (s *Server) buildHandler() http.Handler {
 	s.routesCustomerProfiles(mux)
 	s.routesKnowledge(mux)
 	s.routesKnowledgeRetrieval(mux)
+	s.routesSupport(mux)
 	s.routesKnowledgeInsights(mux)
+	s.routesInboundEmail(mux)
 	s.routesVerification(mux)
 	s.routesClassify(mux)
 	s.routesWorkspaceDomains(mux)

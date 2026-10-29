@@ -8,6 +8,9 @@
 hello@outflare.ai
 crawl@outflare.ai
 push@outflare.ai
+# Gmail's sender of forwarding confirmations, which inbound email
+# recognises to keep the confirmation for whoever confirms it.
+forwarding-noreply@google.com
 # Git and GitHub's own no-reply addresses.
 users.noreply.github.com
 noreply.github.com
