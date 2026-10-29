@@ -8,6 +8,7 @@
      "storage": [
        {"name": "of_cb", "category": "necessary", "purpose": "Keeps this site's consent banner settings for a few minutes."},
        {"name": "of_cs", "category": "necessary", "purpose": "Remembers when this browser last reported the site's cookies."},
+       {"name": "of_vid", "category": "preferences", "purpose": "A random id for this visit only, so every page shows the same versions of the site. Gone when the tab closes."},
        {"name": "of_flags", "category": "preferences", "purpose": "Keeps the versions of the site this visit is shown."},
        {"name": "of_flag_preview", "category": "necessary", "purpose": "A version of the site a team member chose to preview."}
      ]},

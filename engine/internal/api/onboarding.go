@@ -44,7 +44,7 @@ var onboardingSteps = []onboardingStepDef{
 	{"goal", "Pick what to do first", "Outflare suggests the tools and the first mission for it.", "get-started", "update_onboarding", true},
 	{"website", "Connect your website", "One script on your pages and one set of DNS records, so this brand's visits, sign-ups and search show up from today.", "setup", "get_brand_dns", true},
 	{"connect", "Connect your tools", "Only what your first goal needs, such as analytics, Search Console or your CRM.", "connectors", "request_connection", true},
-	{"community", "Star and follow Outflare", "Outflare is free and open source. A star helps other teams find it, and on X you hear about new features first.", "get-started", "", true},
+	{"community", "Star and follow Outflare", "Outflare is free and open source, and built in public. A star helps other teams find it, Outflare on X has every release, and following the builder shows each feature the day it ships.", "get-started", "", true},
 	{"mission", "Start your first mission", "Say what you want in plain words; your AI drafts the plan for you to approve.", "missions", "plan_mission", true},
 	{"team", "Invite your team", "Teammates share the same connections, context and inbox.", "members", "", false},
 }

@@ -87,6 +87,8 @@ export type UiEvent =
   | "ui.dns_one_click_used" // a way to add DNS records outside Lifecycle (where: seo_site, tracking_domain, sending_domain, brand_setup, brand_dns; way: cloudflare, ai, developer, manual; how: sign_in, connected, added, approval, approved, approval_cancelled, copied, claude, chatgpt, email; groups for brand_dns)
   | "ui.request_failed" // a call never got an answer (offline, blocked)
   | "ui.command_run" // a command palette command
+  | "ui.ai_accounts_view_opened" // a view of AI accounts opened (view: accounts, spend, people, timeline, usage)
+  | "ui.ai_accounts_example_shown" // the example usage data on AI accounts' Usage view turned on
   | "ui.copied" // a copy button
   | "ui.partner_install_viewed" // a tab of a partner program's install steps opened (step: script or conversions; way: html, nextjs, gtm, curl, node, postback)
   | "ui.partners_filtered" // a program's partner list filtered (filter: payout_details, value: missing or all)
@@ -153,7 +155,10 @@ export type UiEvent =
   | "ui.connect_for_returned" // back on that page after Connectors (connector, from, connected)
   | "ui.record_dialog_closed" // People: the add or edit dialog closed without saving, after typing (mode: add, edit; type; changed: fields changed)
   | "ui.cloud_feature_shown" // an Outflare Cloud feature's page on a server that doesn't run it (capability)
-  | "ui.cloud_feature_clicked"; // its link to Outflare Cloud (capability)
+  | "ui.cloud_feature_clicked" // its link to Outflare Cloud (capability)
+  | "ui.feedback_opened" // the Feedback box opened (from: top_bar, event)
+  | "ui.community_link_opened" // a link to Outflare on GitHub, X, its changelog or support (target: issue_draft, discussion_draft, x_post, good_first_issue, codespace, discussions, support_email, changelog; from: feedback, feedback_step2, whats_new, palette; kind for drafts: bug, idea, question)
+  | "ui.whats_new_opened"; // What's new opened (unseen: releases new since they last looked)
 
 type Props = Record<string, string | number | boolean | undefined>;
 

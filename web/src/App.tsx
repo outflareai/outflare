@@ -2,7 +2,8 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { cn } from "@/lib/utils";
 import type { Workspace } from "@outflare/sdk";
 import { api } from "./api";
-import { identify, page, resetAnalytics } from "./lib/analytics";
+import { identify, page, resetAnalytics, track } from "./lib/analytics";
+import { github, openFeedback } from "@/components/build-with-us";
 import { appPath, isID, isItemSlug, itemKinds, itemOrPage, parsePath, rememberWorkspaces, type Tab } from "./lib/paths";
 import { DialogHost, Loading, toast, ToastHost } from "./ui";
 import { Icon, type IconName } from "./icons";
@@ -19,6 +20,7 @@ import { Webhooks } from "./pages/Webhooks";
 import { Alerts } from "./pages/Alerts";
 import { Digests } from "./pages/Digests";
 import { AIUsage } from "./pages/AIUsage";
+import { AIAccounts } from "./pages/AIAccounts";
 import { Experiments } from "./pages/Experiments";
 import { Audit } from "./pages/Audit";
 import { Logs } from "./pages/Logs";
@@ -477,6 +479,8 @@ function Shell({ me, onSignOut, onReload }: { me: Me; onSignOut: () => void; onR
     ...(ws && writer ? [{ id: "new-email-template", label: "Create an email template", group: "Lifecycle", icon: "templates" as IconName, run: () => setTab("templates", "new") }] : []),
     ...(can("tokens.manage") ? [{ id: "token", label: "Create an API token", group: "Developer", icon: "tokens" as IconName, run: () => go("tokens") }] : []),
     ...me.workspaces.filter((w) => w.id !== wsId).map((w) => ({ id: `ws-${w.id}`, label: `Switch to ${w.name}`, group: "Workspaces", icon: "overview" as IconName, run: () => { setWsId(w.id); setItem(undefined); } })),
+    { id: "feedback", label: "Send feedback about Outflare", group: "Help", icon: "feedback", run: openFeedback },
+    { id: "github", label: "Discuss Outflare on GitHub", group: "Help", icon: "discuss", run: () => { track("ui.community_link_opened", { target: "discussions", from: "palette" }); open(github.discussions, "_blank", "noopener"); } },
     { id: "theme", label: theme === "dark" ? "Switch to light theme" : "Switch to dark theme", group: "Preferences", icon: theme === "dark" ? "sun" : "moon", run: toggleTheme },
     { id: "signout", label: "Sign out", group: "Account", icon: "logout", run: signOut },
   ];
@@ -600,6 +604,9 @@ function Shell({ me, onSignOut, onReload }: { me: Me; onSignOut: () => void; onR
             {ready && ws && tab === "alerts" && <Alerts key={ws.id} ws={ws.id} canManage={isAdmin} />}
             {ready && ws && tab === "digests" && <Digests key={ws.id} ws={ws.id} canManage={isAdmin} go={setTab} />}
             {ready && ws && tab === "ai-usage" && <AIUsage key={ws.id} ws={ws.id} canManage={isAdmin} go={setTab} />}
+            {ready && ws && tab === "ai-accounts" && canOpen(ws, "ai-accounts") && (
+              <AIAccounts key={ws.id} ws={ws.id} me={me.user.id ?? ""} canAdd={can("my_ai_accounts.manage") || can("ai_accounts.manage")} seeAll={can("ai_accounts.read") || can("ai_accounts.manage")} manageAll={can("ai_accounts.manage")} seeSpend={can("ai_spend.read")} go={setTab} />
+            )}
             {ready && ws && tab === "webhooks" && <Webhooks key={ws.id} ws={ws.id} canManage={isAdmin} open={item ?? ""} onOpen={(id) => setItem(id || undefined)} />}
             {ready && ws && tab === "tokens" && can("tokens.manage") && <Tokens key={ws.id} ws={ws.id} open={item} setOpen={setItem} go={setTab} />}
             {ready && ws && tab === "audit" && can("audit.read") && <Audit key={ws.id} ws={ws.id} />}

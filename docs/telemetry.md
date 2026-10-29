@@ -62,6 +62,10 @@ Builds from source send nothing unless they set a stats server: official release
 
 Names, email addresses, domains, the server's URL or hostname, lead or company data, email subjects or bodies, sequence or brand names, credentials, API tokens, connector account details, and anything you type. The collector does not store the IP address the report came from; it may derive a country from it before discarding it.
 
+## Feedback goes to GitHub, from your browser
+
+The app's Feedback button sends nothing from this server. It opens GitHub (a new issue for a bug, a discussion for an idea or a question) or X, in your browser, with your note filled in, and nothing is posted until you post it there under your own account. What's new reads the release notes built into this version, so it needs no connection either.
+
 ## What comes back
 
 The stats server answers with the newest version and any notices for the version you run, for example a security fix. The server keeps them as plain data: at most ten notices, links only if they are `https`, nothing is run. **Settings → This server** shows them.

@@ -447,3 +447,54 @@ func TestSiteFlagsVisualChanges(t *testing.T) {
 		t.Fatalf("edit token: %s %v", got.Href, got.Stored)
 	}
 }
+
+// Without consent there is no id cookie, but the id lasts the visit: it is
+// kept in the tab's sessionStorage, so the next page is the same visitor
+// and gets the same versions. With consent the cookie's id comes first.
+func TestSiteVisitIDWithoutConsent(t *testing.T) {
+	node, err := exec.LookPath("node")
+	if err != nil {
+		t.Skip("node not installed")
+	}
+	run := func(opts map[string]any) (got struct {
+		Anon     string
+		FlagAsks int
+		Stored   map[string]string
+		Cookies  map[string]string
+	}) {
+		t.Helper()
+		b, _ := json.Marshal(opts)
+		out, err := exec.Command(node, "testdata/run_site.mjs", "site.js", string(b)).CombinedOutput()
+		if err != nil {
+			t.Fatalf("%v: %s", err, out)
+		}
+		if err := json.Unmarshal(out, &got); err != nil {
+			t.Fatalf("%v: %s", err, out)
+		}
+		return got
+	}
+	first := run(map[string]any{"href": "https://northpeak.example/", "consent": "required"})
+	if first.Cookies["of_aid"] != "" || first.Stored["of_vid"] != first.Anon || first.Anon == "" {
+		t.Fatalf("first page: %+v", first)
+	}
+	next := run(map[string]any{"href": "https://northpeak.example/pricing", "consent": "required", "stored": first.Stored})
+	if next.Anon != first.Anon || next.Cookies["of_aid"] != "" {
+		t.Fatalf("next page is a new visitor: %q then %q", first.Anon, next.Anon)
+	}
+	// A server's decision for an id of its own doesn't replace the visit's.
+	boot := map[string]any{"anonymousId": "srv-4f1c2a9e", "flags": map[string]any{"hero": "faster"}}
+	got := run(map[string]any{"href": "https://northpeak.example/", "consent": "required", "stored": first.Stored, "bootstrap": boot,
+		"flags": map[string]any{"flags": map[string]any{"hero": "control"}}, "quiet": true})
+	if got.Anon != first.Anon || got.FlagAsks != 1 {
+		t.Fatalf("bootstrap replaced the visit's id: %+v", got)
+	}
+	// A bad stored value is ignored.
+	if got := run(map[string]any{"href": "https://northpeak.example/", "consent": "required", "stored": map[string]string{"of_vid": "<x>"}}); got.Anon == "<x>" {
+		t.Fatalf("bad of_vid used: %+v", got)
+	}
+	// With consent the cookie's id wins, and the visit keeps it too.
+	got = run(map[string]any{"href": "https://northpeak.example/", "cookie": "of_aid=brw-77aa01bc", "stored": first.Stored})
+	if got.Anon != "brw-77aa01bc" || got.Stored["of_vid"] != "brw-77aa01bc" {
+		t.Fatalf("consented: %+v", got)
+	}
+}

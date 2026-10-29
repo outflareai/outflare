@@ -1,0 +1,21 @@
+name: Bug report
+description: Something in Outflare doesn't work as it should.
+labels: [bug]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened?
+      description: What you did, what you expected and what happened instead. The app's Feedback button can fill this in for you.
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: Settings → This server shows it. Write "Cloud" for app.outflare.ai.
+  - type: textarea
+    id: more
+    attributes:
+      label: Anything else?
+      description: Steps to reproduce, screenshots or logs. Leave out keys, passwords and your customers' data.

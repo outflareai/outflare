@@ -74,7 +74,7 @@
   if (!script) return;
   var key = script.getAttribute("data-key") || "";
   // Sent with every batch, so Outflare can tell a site running an old copy.
-  var VERSION = "8";
+  var VERSION = "9";
   // Events go where the script came from: a path the site forwards keeps
   // its prefix.
   var src = new URL(script.src, location.href);
@@ -118,7 +118,9 @@
   }
   // A cookie goes on the widest domain that takes it, so www and app
   // subdomains share it. Without consent there is no id cookie at all: the
-  // id lives only in this page, and in-app navigation keeps it.
+  // id lives in this tab's sessionStorage for the visit (of_vid), so every
+  // page of the visit is one visitor and sees the same versions, and it is
+  // gone when the tab closes.
   function setCookie(name, value, keep) {
     var parts = location.hostname.split("."), attrs = "; path=/; SameSite=Lax" + (location.protocol === "https:" ? "; Secure" : "");
     attrs += "; max-age=" + (keep ? YEAR : 0);
@@ -128,10 +130,14 @@
       if (keep ? readCookie(name, "[^;]*") === value : !readCookie(name, "[^;]*")) return;
     }
   }
-  function writeCookie(id) { setCookie(COOKIE, id, consented); }
+  var VISIT = "of_vid";
+  function keepVisit(id) { try { sessionStorage.setItem(VISIT, id); } catch (e) {} }
+  function writeCookie(id) { setCookie(COOKIE, id, consented); keepVisit(id); }
   // An id cookie already there was set with consent.
-  var stored = readCookie();
-  var anon = stored || uuid(), carriedID = false, started = Date.now();
+  var stored = readCookie(), visitID = "";
+  try { visitID = sessionStorage.getItem(VISIT) || ""; } catch (e) {}
+  if (!/^[A-Za-z0-9-]{8,64}$/.test(visitID)) visitID = "";
+  var anon = stored || visitID || uuid(), carriedID = false, started = Date.now();
   // A link from one of the site's other domains carries the visitor's id,
   // valid for two minutes so a shared link doesn't merge its readers. It
   // counts only when the visitor came from another listed domain, so a
@@ -157,7 +163,7 @@
     var bootEl = d.getElementById && d.getElementById("outflare-flags");
     var b = bootEl && JSON.parse(bootEl.textContent || "null");
     if (b && typeof b.anonymousId === "string" && /^[A-Za-z0-9-]{8,64}$/.test(b.anonymousId) && b.flags && typeof b.flags === "object" &&
-      (b.anonymousId === anon || (!stored && !carriedID))) {
+      (b.anonymousId === anon || (!stored && !visitID && !carriedID))) {
       anon = b.anonymousId;
       boot = { flags: {}, payloads: {} };
       for (var bk in b.flags) {
@@ -238,6 +244,7 @@
   recompute();
   if (consented) writeCookie(anon);
   else if (stored && choice) setCookie(COOKIE, anon, false);
+  keepVisit(anon);
 
   // Variants to preview, from ?of_flag=key:variant, kept for the visit.
   var preview = {};

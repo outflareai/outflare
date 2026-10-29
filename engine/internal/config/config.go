@@ -139,8 +139,13 @@ type Config struct {
 	// started. On by default. CommunityXURL is OUTFLARE_FOLLOW_URL: the X
 	// profile "Follow us on X" opens, an https address, by default
 	// Outflare's own (https://x.com/outflareai); off leaves that item out.
-	CommunityLinks bool
-	CommunityXURL  string
+	// CommunityBuilderURL is OUTFLARE_BUILDER_URL: the X profile of the
+	// person building Outflare in public, for "Follow the builder" and the
+	// handle the Feedback box tags on X, by default Outflare's founder
+	// (https://x.com/jackfitzgerald); off leaves both out.
+	CommunityLinks      bool
+	CommunityXURL       string
+	CommunityBuilderURL string
 
 	// SignedInCookieDomain is OUTFLARE_SIGNED_IN_COOKIE_DOMAIN: a parent
 	// domain of PUBLIC_URL's host, such as example.com for
@@ -199,7 +204,8 @@ func Load() (Config, error) {
 		PrivacyURL: os.Getenv("OUTFLARE_PRIVACY_URL"),
 		TermsURL:   os.Getenv("OUTFLARE_TERMS_URL"),
 
-		CommunityXURL: strings.TrimSpace(getenv("OUTFLARE_FOLLOW_URL", "https://x.com/outflareai")),
+		CommunityXURL:       strings.TrimSpace(getenv("OUTFLARE_FOLLOW_URL", "https://x.com/outflareai")),
+		CommunityBuilderURL: strings.TrimSpace(getenv("OUTFLARE_BUILDER_URL", "https://x.com/jackfitzgerald")),
 
 		SignedInCookieDomain: strings.ToLower(strings.Trim(strings.TrimSpace(os.Getenv("OUTFLARE_SIGNED_IN_COOKIE_DOMAIN")), ".")),
 	}
@@ -233,6 +239,13 @@ func Load() (Config, error) {
 	}
 	if c.CommunityXURL != "" && !strings.HasPrefix(c.CommunityXURL, "https://") {
 		return c, fmt.Errorf("OUTFLARE_FOLLOW_URL must be an https address, got %q", c.CommunityXURL)
+	}
+	switch strings.ToLower(c.CommunityBuilderURL) {
+	case "off", "false", "0":
+		c.CommunityBuilderURL = ""
+	}
+	if c.CommunityBuilderURL != "" && !strings.HasPrefix(c.CommunityBuilderURL, "https://") {
+		return c, fmt.Errorf("OUTFLARE_BUILDER_URL must be an https address, got %q", c.CommunityBuilderURL)
 	}
 	if err := c.S3.check(); err != nil {
 		return c, err

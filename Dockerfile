@@ -13,6 +13,8 @@ RUN pnpm install --frozen-lockfile
 COPY sdk/ts sdk/ts
 COPY web web
 COPY mcp mcp
+# The app's "What's new" shows the newest releases from it.
+COPY CHANGELOG.md ./
 RUN pnpm --filter @outflare/sdk build && pnpm --filter @outflare/web build
 # The MCP server as one file, which the engine runs and serves at /mcp.
 RUN pnpm --filter @outflare/mcp build && pnpm --filter @outflare/mcp bundle

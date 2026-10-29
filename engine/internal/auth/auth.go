@@ -122,6 +122,18 @@ const (
 	ScopePartnersRead        = "partners.read"
 	ScopePartnersManage      = "partners.manage"
 	ScopePartnersConversions = "partners.conversions"
+	// AI Accounts (plans/ai-accounts): the AI subscriptions the
+	// workspace's people pay for. my_ai_accounts.* are the accounts the
+	// caller belongs to; ai_accounts.* are everyone's, and grant the
+	// my_ai_accounts scope of the same level (see narrower); ai_spend.read
+	// shows the money on everyone's accounts (prices, spend, receipts).
+	// Own and everyone's are separate areas because any scope in an area
+	// grants reading it.
+	ScopeMyAIAccountsRead   = "my_ai_accounts.read"
+	ScopeMyAIAccountsManage = "my_ai_accounts.manage"
+	ScopeAIAccountsRead     = "ai_accounts.read"
+	ScopeAIAccountsManage   = "ai_accounts.manage"
+	ScopeAISpendRead        = "ai_spend.read"
 )
 
 // AllScopes lists every scope that exists, in display order.
@@ -174,6 +186,11 @@ var AllScopes = []string{
 	ScopePartnersRead,
 	ScopePartnersManage,
 	ScopePartnersConversions,
+	ScopeMyAIAccountsRead,
+	ScopeMyAIAccountsManage,
+	ScopeAIAccountsRead,
+	ScopeAIAccountsManage,
+	ScopeAISpendRead,
 }
 
 const (
@@ -192,8 +209,8 @@ var roleScopes = map[string][]string{
 	RoleOwner: AllScopes,
 	// Admins do everything except take people's access away.
 	RoleAdmin:    slices.DeleteFunc(slices.Clone(AllScopes), func(s string) bool { return s == ScopeMembersRemove }),
-	RoleOperator: {ScopeWorkspaceRead, ScopeContextManage, ScopeMembersRead, ScopeMailboxesRead, ScopeMailboxesManage, ScopeLeadsRead, ScopeLeadsManage, ScopeSequencesRead, ScopeSequencesManage, ScopeInboxRead, ScopeInboxManage, ScopeIntegrationsRead, ScopeIntegrationsManage, ScopeOutcomesRead, ScopeOutcomesManage, ScopeProjectsRead, ScopeProjectsManage, ScopeInfraRead, ScopeInfraManage, ScopeAnalyticsRead, ScopeAnalyticsManage, ScopeMissionsRead, ScopeMissionsRun, ScopeMissionsApprove, ScopeSEORead, ScopeSEOManage, ScopeWebhooksRead, ScopeEmailsRead, ScopeEmailsSend, ScopeEmailsManage, ScopeCustomersRead, ScopeCustomersManage, ScopeSocialRead, ScopeSocialManage, ScopeSocialPost, ScopePartnersRead, ScopePartnersManage, ScopePartnersConversions},
-	RoleViewer:   {ScopeWorkspaceRead, ScopeMembersRead, ScopeMailboxesRead, ScopeLeadsRead, ScopeSequencesRead, ScopeInboxRead, ScopeIntegrationsRead, ScopeOutcomesRead, ScopeProjectsRead, ScopeInfraRead, ScopeAnalyticsRead, ScopeMissionsRead, ScopeSEORead, ScopeWebhooksRead, ScopeEmailsRead, ScopeCustomersRead, ScopeSocialRead, ScopePartnersRead},
+	RoleOperator: {ScopeWorkspaceRead, ScopeContextManage, ScopeMembersRead, ScopeMailboxesRead, ScopeMailboxesManage, ScopeLeadsRead, ScopeLeadsManage, ScopeSequencesRead, ScopeSequencesManage, ScopeInboxRead, ScopeInboxManage, ScopeIntegrationsRead, ScopeIntegrationsManage, ScopeOutcomesRead, ScopeOutcomesManage, ScopeProjectsRead, ScopeProjectsManage, ScopeInfraRead, ScopeInfraManage, ScopeAnalyticsRead, ScopeAnalyticsManage, ScopeMissionsRead, ScopeMissionsRun, ScopeMissionsApprove, ScopeSEORead, ScopeSEOManage, ScopeWebhooksRead, ScopeEmailsRead, ScopeEmailsSend, ScopeEmailsManage, ScopeCustomersRead, ScopeCustomersManage, ScopeSocialRead, ScopeSocialManage, ScopeSocialPost, ScopePartnersRead, ScopePartnersManage, ScopePartnersConversions, ScopeMyAIAccountsManage},
+	RoleViewer:   {ScopeWorkspaceRead, ScopeMembersRead, ScopeMailboxesRead, ScopeLeadsRead, ScopeSequencesRead, ScopeInboxRead, ScopeIntegrationsRead, ScopeOutcomesRead, ScopeProjectsRead, ScopeInfraRead, ScopeAnalyticsRead, ScopeMissionsRead, ScopeSEORead, ScopeWebhooksRead, ScopeEmailsRead, ScopeCustomersRead, ScopeSocialRead, ScopePartnersRead, ScopeMyAIAccountsManage},
 }
 
 // workspaceWide are scopes about the whole workspace: settings, people,
@@ -229,11 +246,26 @@ func ValidRole(role string) bool { _, ok := roleScopes[role]; return ok }
 // RoleScopes returns the scopes granted by a role.
 func RoleScopes(role string) []string { return roleScopes[role] }
 
+// narrower maps a scope over everyone's records to the scope over the
+// caller's own that it includes: seeing everyone's AI accounts includes
+// seeing your own.
+var narrower = map[string]string{
+	ScopeAIAccountsRead:   ScopeMyAIAccountsRead,
+	ScopeAIAccountsManage: ScopeMyAIAccountsManage,
+}
+
 // Grants reports whether scopes allow want. Any scope in an area includes
 // reading it: leads.manage can list leads, missions.run can read missions.
+// A scope over everyone's records includes the one over the caller's own
+// (narrower).
 func Grants(scopes []string, want string) bool {
 	if slices.Contains(scopes, want) {
 		return true
+	}
+	for wide, narrow := range narrower {
+		if narrow == want && Grants(scopes, wide) {
+			return true
+		}
 	}
 	area, ok := strings.CutSuffix(want, ".read")
 	if !ok {

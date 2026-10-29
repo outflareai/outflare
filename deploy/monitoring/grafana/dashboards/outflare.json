@@ -7128,6 +7128,55 @@
           "sort": "desc"
         }
       }
+    },
+    {
+      "type": "timeseries",
+      "title": "People created or updated in CRMs",
+      "description": "People journeys' push_to_crm steps created or updated in the workspace's CRM (HubSpot), per minute, by connector and outcome. Normal: created and updated. error is the CRM failing, refusing the workspace's key, or not having a property a step names; the run's history says which journey.",
+      "id": 197,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 522
+      },
+      "targets": [
+        {
+          "expr": "sum by (connector, outcome) (rate(outflare_crm_contacts_pushed_total{job=\"$job\"}[5m])) * 60",
+          "legendFormat": "{{connector}} {{outcome}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "fillOpacity": 10,
+            "stacking": {
+              "mode": "none"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "mean",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
     }
   ]
 }

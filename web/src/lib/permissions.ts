@@ -20,6 +20,8 @@ export const areas: Area[] = [
   { id: "partners", label: "Partners", help: "Referral, affiliate and influencer programs, partners, rewards and payouts. Reporting conversions from your backend is its own power below.", read: ["partners.read"], write: ["partners.manage"] },
   { id: "missions", label: "Missions", help: "Work toward a goal on its own, within limits.", read: ["missions.read"], write: ["missions.run"] },
   { id: "analytics", label: "Analytics", help: "Reports from connected analytics tools, and the campaign links that tag your traffic.", read: ["analytics.read"], write: ["analytics.manage"] },
+  { id: "my_ai_accounts", label: "Your AI accounts", help: "The AI subscriptions you use: their usage, resets and renewals.", read: ["my_ai_accounts.read"], write: ["my_ai_accounts.manage"] },
+  { id: "ai_accounts", label: "Everyone's AI accounts", help: "Every AI subscription people in the workspace use.", read: ["ai_accounts.read"], write: ["ai_accounts.manage"] },
   { id: "webhooks", label: "Webhooks", help: "Endpoints that hear about changes, and their signing secrets.", read: ["webhooks.read"], write: ["webhooks.manage"] },
   { id: "people", label: "Members and audit log", help: "Who is in the workspace and what everyone did.", read: ["members.read", "audit.read"], write: [] },
 ];
@@ -31,6 +33,7 @@ export const extras: { scope: Scope; label: string; help: string }[] = [
   { scope: "partners.conversions", label: "Report partner conversions", help: "Send sign-ups, sales and refunds from your backend, and mark action rewards done. All a server token for partners needs." },
   { scope: "suppressions.manage", label: "Remove from the suppression list", help: "Let mail reach people who were suppressed." },
   { scope: "members.manage", label: "Invite people and change roles", help: "Never past what the person who connected it can do. Removing people is only for a signed-in person." },
+  { scope: "ai_spend.read", label: "See AI spend", help: "Prices, spend and receipts on everyone's AI accounts." },
   { scope: "tokens.manage", label: "Manage API tokens", help: "Create, change and revoke tokens." },
   { scope: "workspace.manage", label: "Workspace settings", help: "Rename the workspace and change its URL." },
 ];

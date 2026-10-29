@@ -65,6 +65,14 @@ func TestManageIncludesRead(t *testing.T) {
 		{[]string{ScopeLeadsManage}, ScopeMailboxesRead, false},
 		{[]string{ScopeSuppressionsManage}, ScopeLeadsRead, false},
 		{nil, ScopeWorkspaceRead, false},
+		// Everyone's AI accounts include your own, not the other way round.
+		{[]string{ScopeAIAccountsRead}, ScopeMyAIAccountsRead, true},
+		{[]string{ScopeAIAccountsManage}, ScopeMyAIAccountsRead, true},
+		{[]string{ScopeAIAccountsManage}, ScopeMyAIAccountsManage, true},
+		{[]string{ScopeAIAccountsRead}, ScopeMyAIAccountsManage, false},
+		{[]string{ScopeMyAIAccountsManage}, ScopeMyAIAccountsRead, true},
+		{[]string{ScopeMyAIAccountsManage}, ScopeAIAccountsRead, false},
+		{[]string{ScopeAISpendRead}, ScopeAIAccountsRead, false},
 	} {
 		if got := Grants(c.scopes, c.want); got != c.ok {
 			t.Errorf("Grants(%v, %s) = %v", c.scopes, c.want, got)

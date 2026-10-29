@@ -44,7 +44,7 @@ type Run = {
   // Only on a single run (and the front page's latest runs).
   pipeline?: Pipeline; contacts?: Counts; campaign?: RunCampaign;
   spend?: { ai_cents: number; web_cents: number; web_tokens: number; people_credits: number };
-  results?: { in_campaign: number; sent: number; replied: number };
+  results?: { in_campaign: number; sent: number; replied: number; meetings?: number };
   to_review?: number;
 };
 type Pipeline = { state: "running" | "paused" | "cancelled" | "finished"; pause_code?: string; pause_reason?: string; stages: StageCount[] };
@@ -57,7 +57,7 @@ type Candidate = {
   score: number | null; reasons: string[]; query: string; status: "pending" | "added" | "dismissed"; record_id: string | null; from_index: boolean;
   picked?: boolean; blocked?: string | null; warnings?: string[];
 };
-type Totals = { runs: number; found: number; fit: number; added: number; people: number; emails: number; in_campaign: number; replied: number; ai_cents: number; web_cents: number; web_tokens: number };
+type Totals = { runs: number; found: number; fit: number; added: number; people: number; emails: number; in_campaign: number; replied: number; meetings?: number; ai_cents: number; web_cents: number; web_tokens: number };
 type Need = { kind: "paused" | "ready" | "review" | "waiting"; run_id: string; profile_id: string | null; profile_name: string; count: number; code?: string; reason?: string; campaign?: string };
 type Search = Totals & { profile_id: string; profile_name: string; campaign: RunCampaign | null; last_run: Run | null };
 type Summary = { days: number; needs: Need[]; totals: Totals; searches: Search[] };
@@ -305,11 +305,12 @@ function Results({ totals: t, days, onDays }: { totals: Totals; days: number; on
           <option value={365}>Last year</option>
         </select>
       </div>
-      <Stats cols={4}>
+      <Stats cols={t.meetings !== undefined ? 5 : 4}>
         <Stat label="Companies" value={n(t.found)} sub={`${n(t.fit)} fit, ${n(t.added)} added`} />
         <Stat label="People" value={n(t.people)} sub={`${n(t.emails)} with an email`} />
         <Stat label="In campaigns" value={n(t.in_campaign)} sub={`${n(t.replied)} replied${t.in_campaign ? `, ${((100 * t.replied) / t.in_campaign).toFixed(1)}%` : ""}`} />
-        <Stat label="Spent" value={money(spent)} sub={t.in_campaign ? `${usd(spent / t.in_campaign)} a person in a campaign` : `${n(t.web_tokens)} Geonode tokens`} />
+        {t.meetings !== undefined && <Stat label="Meetings" value={n(t.meetings)} sub={t.in_campaign ? `${((100 * t.meetings) / t.in_campaign).toFixed(1)}% of people in campaigns` : "booked by people it found"} />}
+        <Stat label="Spent" value={money(spent)} sub={t.meetings ? `${money(spent / t.meetings)} a meeting` : t.in_campaign ? `${usd(spent / t.in_campaign)} a person in a campaign` : `${n(t.web_tokens)} Geonode tokens`} />
       </Stats>
     </section>
   );
@@ -324,7 +325,7 @@ function SearchesTable({ searches, canManage, onOpen, onRunAgain }: { searches: 
           <tr className="border-b">
             <th className="px-3 py-2 font-medium">Search</th><th className="px-3 py-2 font-medium">Campaign</th><th className="px-3 py-2 font-medium">Latest run</th>
             <th className="px-3 py-2 text-right font-medium">Companies</th><th className="px-3 py-2 text-right font-medium">People</th>
-            <th className="px-3 py-2 text-right font-medium">In campaign</th><th className="px-3 py-2 text-right font-medium">Replied</th>
+            <th className="px-3 py-2 text-right font-medium">In campaign</th><th className="px-3 py-2 text-right font-medium">Replied</th><th className="px-3 py-2 text-right font-medium">Meetings</th>
             <th className="px-3 py-2 text-right font-medium">Spent</th><th className="px-3 py-2" />
           </tr>
         </thead>
@@ -356,6 +357,7 @@ function SearchesTable({ searches, canManage, onOpen, onRunAgain }: { searches: 
                 <td className="px-3 py-2.5 text-right tabular-nums">{n(s.people)}</td>
                 <td className="px-3 py-2.5 text-right tabular-nums">{n(s.in_campaign)}</td>
                 <td className="px-3 py-2.5 text-right tabular-nums">{n(s.replied)}</td>
+                <td className="px-3 py-2.5 text-right tabular-nums">{s.meetings !== undefined ? n(s.meetings) : "–"}</td>
                 <td className="px-3 py-2.5 text-right tabular-nums">{money(s.ai_cents + s.web_cents)}</td>
                 <td className="px-3 py-2.5 text-right">{action}</td>
               </tr>
@@ -748,9 +750,10 @@ function Funnel({ run, people, onPick }: { run: Run; people: number; onPick: (t:
     { label: "People", value: people, sub: `${n(emails?.skipped ?? 0)} no email`, tab: "people" },
     { label: "Ready", value: k?.ready ?? 0, sub: "waiting for you", tab: "people", filter: "ready", hot: (k?.ready ?? 0) > 0 },
     { label: "In campaign", value: k?.enrolled ?? 0, sub: `${n(run.results?.replied ?? 0)} replied`, tab: "people", filter: "enrolled" },
+    ...(run.results?.meetings !== undefined ? [{ label: "Meetings", value: run.results.meetings, sub: "booked" }] : []),
   ];
   return (
-    <div className="grid grid-cols-2 gap-1.5 sm:grid-cols-4 lg:grid-cols-7">
+    <div className={`grid grid-cols-2 gap-1.5 sm:grid-cols-4 ${tiles.length > 7 ? "lg:grid-cols-8" : "lg:grid-cols-7"}`}>
       {tiles.map((t) => (
         <button key={t.label} type="button" disabled={!t.tab} onClick={() => t.tab && onPick(t.tab, t.filter)}
           className={`min-w-0 rounded-lg border bg-card px-3 py-2 text-left shadow-xs enabled:hover:bg-accent/40 ${t.hot ? "border-amber-400 ring-1 ring-amber-400 dark:border-amber-700 dark:ring-amber-700" : ""}`}>
@@ -1047,7 +1050,8 @@ function Spend({ run }: { run: Run }) {
         <Stat label="AI" value={money(sp.ai_cents)} sub={`your AI key, up to ${money(run.max_ai_cents)}`} />
         <Stat label="Web (Geonode)" value={sp.web_cents ? money(sp.web_cents) : `${n(sp.web_tokens)} tokens`} sub={`${plural(run.searches, "search", "searches")}, ${plural(run.pages, "page")}`} />
         <Stat label="Data provider" value={`${n(sp.people_credits)}`} sub="credits for people searches" />
-        <Stat label="Per result" value={inCampaign ? usd(money$ / inCampaign) : fit ? usd(money$ / fit) : "–"} sub={inCampaign ? "a person in the campaign" : "a company that fits"} />
+        <Stat label="Per result" value={run.results?.meetings ? money(money$ / run.results.meetings) : inCampaign ? usd(money$ / inCampaign) : fit ? usd(money$ / fit) : "–"}
+          sub={run.results?.meetings ? "a meeting" : inCampaign ? "a person in the campaign" : "a company that fits"} />
       </Stats>
       <p className="text-[12px] text-muted-foreground">Everything runs on your own accounts. Email checks use your verifier's credits, which show on the Connectors page.</p>
     </div>

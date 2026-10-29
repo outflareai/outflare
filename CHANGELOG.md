@@ -6,6 +6,12 @@ Each pull request that changes what Outflare does adds a change note in [changes
 
 ## [Unreleased]
 
+## [0.40.0] - 2026-10-29
+
+### Changed
+
+- CRM → Lead finder shows meetings: how many people each search found went on to book one, with the cost per meeting.
+
 ## [0.39.0] - 2026-10-29
 
 ### Added

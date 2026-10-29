@@ -61,7 +61,7 @@ The script loads without holding up the page, so the original can show for a mom
 <script type="application/json" id="outflare-flags">{"anonymousId":"the visitor's id","flags":{"pricing-headline":"faster"},"payloads":{}}</script>
 ```
 
-Decide for the `of_aid` cookie when the browser has one. Without it, make an id (8 to 64 letters, digits and dashes): the script uses the server's id for that page, and keeps it in the cookie only when the visitor's consent allows, as it does its own. An answer decided for a different id than the browser's is ignored, and the script asks as usual. The SDKs build the tag, escaped so content in a payload can't break out of it:
+Decide for the `of_aid` cookie when the browser has one. Without it, make an id (8 to 64 letters, digits and dashes): the script takes the server's id on the visit's first page and keeps it for the visit (in the cookie only when the visitor's consent allows, as it does its own). On later pages without the cookie, the script already has the visit's id and versions, so it ignores answers for a new id. An answer decided for a different id than the browser's is ignored, and the script asks as usual. The SDKs build the tag, escaped so content in a payload can't break out of it:
 
 ```ts
 import { createClient, flagsBootstrapTag } from "@outflare/sdk";

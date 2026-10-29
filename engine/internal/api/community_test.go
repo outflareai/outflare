@@ -87,6 +87,32 @@ func TestCommunityLinksOff(t *testing.T) {
 	}
 }
 
+func TestCommunityBuilderLink(t *testing.T) {
+	h := freshEnvWith(t, func(o *api.Options) {
+		o.CommunityLinks = true
+		o.CommunityXURL = "https://x.example/outflare"
+		o.CommunityBuilderURL = "https://x.example/builder"
+	}).h
+	owner, _ := setupOwner(t, h)
+	c := owner.must(200, "GET", "/v1/me/community", nil)
+	links := c["links"].([]any)
+	if len(links) != 3 {
+		t.Fatalf("links: %v", links)
+	}
+	if b := links[2].(map[string]any); b["id"] != "builder" || b["url"] != "https://x.example/builder" || !strings.HasPrefix(b["title"].(string), "Follow the builder") {
+		t.Fatalf("builder item: %v", b)
+	}
+	// Following the builder is an item like the others: ticked once opened,
+	// and the card stays until every item is done.
+	owner.must(200, "PATCH", "/v1/me/community", map[string]any{"clicked": "github"})
+	if c = owner.must(200, "PATCH", "/v1/me/community", map[string]any{"clicked": "x"}); c["show"] != true {
+		t.Fatalf("builder still to follow: %v", c)
+	}
+	if c = owner.must(200, "PATCH", "/v1/me/community", map[string]any{"clicked": "builder"}); c["show"] != false || c["links"].([]any)[2].(map[string]any)["done"] != true {
+		t.Fatalf("after following the builder: %v", c)
+	}
+}
+
 func TestCommunityOnboardingStep(t *testing.T) {
 	h := freshEnvWith(t, func(o *api.Options) {
 		o.CommunityLinks = true

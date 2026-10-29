@@ -1,0 +1,21 @@
+name: Feature request
+description: Something Outflare should do. For an early idea, start a discussion instead.
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What are you trying to do?
+      description: The job you want done, and what gets in the way today.
+    validations:
+      required: true
+  - type: textarea
+    id: idea
+    attributes:
+      label: How could Outflare help?
+  - type: checkboxes
+    id: build
+    attributes:
+      label: Want to build it?
+      options:
+        - label: I'd like to send a pull request for this (see CONTRIBUTING.md).

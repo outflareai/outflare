@@ -324,7 +324,7 @@ type workspaceView struct {
 	// reaches anyone.
 	Test bool `json:"test"`
 	// Parts of Outflare switched on for this workspace (package
-	// features). Left out when none is on, and in lists of workspaces.
+	// features). Left out when none is on, and in lists other than /v1/me.
 	Features []string `json:"features,omitempty"`
 }
 
@@ -397,6 +397,13 @@ func (s *Server) me(w http.ResponseWriter, r *http.Request) {
 	if err := rows.Err(); err != nil {
 		s.internal(w, r, err)
 		return
+	}
+	rows.Close()
+	for i := range wss {
+		if wss[i].Features, err = features.List(ctx, s.pool, wss[i].ID); err != nil {
+			s.internal(w, r, err)
+			return
+		}
 	}
 	view, err := s.supportViewOf(ctx, p)
 	if err != nil {

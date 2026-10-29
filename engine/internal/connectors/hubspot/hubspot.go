@@ -47,7 +47,7 @@ func (HubSpot) Definition() c.Definition {
 		Summary: "Count meetings and deals from outreach, and log booked meetings on the contact.",
 		Description: "Reads deals (stage, amount, close date) and meetings, and ties each to the lead and campaign that started it. " +
 			"Optionally writes meetings booked from outreach onto the HubSpot contact (off by default, since HubSpot may already log them from its own calendar sync), " +
-			"and replies with the labels you pick as a note on the contact, with a task to follow up. Deals are never changed.",
+			"and replies with the labels you pick as a note on the contact, with a task to follow up. Journeys can create or update contacts (a push to CRM step). Deals are never changed.",
 		Website: "https://www.hubspot.com", DocsURL: "https://developers.hubspot.com/docs/api/crm/deals",
 		KeyURL: "https://knowledge.hubspot.com/integrations/how-do-i-get-my-hubspot-api-key",
 		Auth:   c.AuthOAuth2, AuthMethods: c.Both,
@@ -57,7 +57,7 @@ func (HubSpot) Definition() c.Definition {
 		},
 		Fields: []c.Field{{Name: "api_key", Label: "Private app access token", Secret: true, Placeholder: "pat-…",
 			Help: "In HubSpot: Settings, Integrations, Private apps, Create a private app. Give it the scopes " + strings.Join(scopes[1:], ", ") + ", and crm.objects.owners.read if reply tasks should go to the lead's owner."}},
-		Capabilities: []string{outcomes.CapDeals, outcomes.CapMeetings, outcomes.CapPushCRM, outcomes.CapPushReplies},
+		Capabilities: []string{outcomes.CapDeals, outcomes.CapMeetings, outcomes.CapPushCRM, outcomes.CapPushReplies, c.CapPushContacts},
 		Pricing:      "Works on every HubSpot plan, including free",
 		Replaces:     []string{"hubspot_private_app"},
 	}

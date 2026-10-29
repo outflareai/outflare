@@ -41,14 +41,18 @@ type communityLink struct {
 }
 
 // communityLinksFor lists the links a server shows: none when its operator
-// turned them off, and X only when there is a profile to open.
-func communityLinksFor(on bool, xURL string) []communityLink {
+// turned them off, and each X item only when there is a profile to open:
+// Outflare's own, for releases, and the builder's, to watch it get built.
+func communityLinksFor(on bool, xURL, builderURL string) []communityLink {
 	if !on {
 		return []communityLink{}
 	}
 	links := []communityLink{{ID: "github", Title: "Star us on GitHub", URL: communityRepoURL}}
 	if xURL != "" {
 		links = append(links, communityLink{ID: "x", Title: "Follow us on X", URL: xURL})
+	}
+	if builderURL != "" {
+		links = append(links, communityLink{ID: "builder", Title: "Follow the builder: watch Outflare get built in public", URL: builderURL})
 	}
 	return links
 }
@@ -94,7 +98,7 @@ func (s *Server) getCommunity(w http.ResponseWriter, r *http.Request) {
 }
 
 type communityInput struct {
-	// The link the person just opened: github or x.
+	// The link the person just opened: github, x or builder.
 	Clicked *string `json:"clicked"`
 	// True hides the items; false shows them again.
 	Hidden *bool `json:"hidden"`

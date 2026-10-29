@@ -130,7 +130,7 @@ A site key sits in your page's HTML, so anyone can copy it. It can only add brow
 
 ## Consent
 
-With consent, the snippet keeps the visitor's id in a first-party cookie, `of_aid`, for a year. Where consent is needed, it sets no cookie until you call `outflare.consent(true)`: the id lasts only for that page (in-app navigation keeps it), so visits before consent aren't linked to each other. `outflare.consent(false)` removes the cookie.
+With consent, the snippet keeps the visitor's id in a first-party cookie, `of_aid`, for a year. Where consent is needed, it sets no cookie until you call `outflare.consent(true)`. Until then the id lasts for the visit: it is kept in the tab's session storage (`of_vid`), so every page of the visit is the same visitor and sees the same [feature flag](feature-flags.md) versions, and it is gone when the tab closes. Visits before consent aren't linked to each other. Consenting keeps the same id in the cookie. `outflare.consent(false)` removes the cookie.
 
 - With `data-consent="auto"` (the default), visitors whose time zone is in the EEA, Switzerland or the UK, and anyone with Global Privacy Control on, start without a cookie.
 - `data-consent="required"` does the same for everyone.

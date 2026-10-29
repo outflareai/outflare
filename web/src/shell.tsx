@@ -34,6 +34,7 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel,
 import { CommandDialog, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList, CommandShortcut } from "@/components/ui/command";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Separator } from "@/components/ui/separator";
+import { FeedbackButton, WhatsNewButton } from "@/components/build-with-us";
 
 export const tabNames: Record<Tab, string> = {
   overview: "Home",
@@ -41,6 +42,7 @@ export const tabNames: Record<Tab, string> = {
   setup: "Brand setup",
   ai: "AI apps",
   "ai-usage": "AI usage",
+  "ai-accounts": "AI accounts",
   tools: "All tools",
   reports: "Sending reports",
   analytics: "Website analytics",
@@ -118,6 +120,7 @@ export const tabBlurbs: Record<Tab, string> = {
   setup: "One brand's website script, site verification and tools, in order, each in one click where it can be. Leave any time and pick up where you left off.",
   ai: "Run Outflare from Claude, ChatGPT, Cursor or any AI app: one URL, sign in, and ask.",
   "ai-usage": "Where your AI spend goes: each tool, model and day, on your own provider bill, with a monthly limit per tool.",
+  "ai-accounts": "The Claude, ChatGPT, Cursor and Copilot plans and AI API accounts people pay for: what each costs, when it renews and who it belongs to.",
   tools: "Every tool in Outflare, what it does, and where to learn more.",
   inbox: "Replies from every mailbox in one place, with the ones that need an answer first.",
   playbooks: "Ready-made recipes for growth, from welcoming new sign-ups to getting named in AI answers. Copy the prompt or start one as a mission.",
@@ -294,8 +297,12 @@ const allModules = modules;
 
 // Pages that work for someone kept to some brands. The others need every
 // brand (the API answers 403), so they are hidden from them.
-const brandTabs: readonly Tab[] = ["overview", "seo-overview", "audits", "fixes", "experiments", "keywords", "ai-visibility", "backlinks", "competitors", "link-building", "news", "reddit", "social", "reviews", "ads", "visitors", "tracking", "flags", "ab-tests", "inbox", "sequences", "people", "leads", "lists", "rules", "lead-finder", "suppression", "mailboxes", "domains", "knowledge", "company", "brands", "setup", "ideal-customers", "members", "account", "instance"];
-export const canOpen = (ws: Workspace | undefined, t: Tab) => !ws?.brand_ids?.length || brandTabs.includes(t);
+const brandTabs: readonly Tab[] = ["overview", "seo-overview", "audits", "fixes", "experiments", "keywords", "ai-visibility", "backlinks", "competitors", "link-building", "news", "reddit", "social", "reviews", "ads", "visitors", "tracking", "flags", "ab-tests", "inbox", "sequences", "people", "leads", "lists", "rules", "lead-finder", "suppression", "mailboxes", "domains", "knowledge", "company", "brands", "setup", "ideal-customers", "members", "account", "instance", "ai-accounts"];
+// Pages of parts of Outflare switched on per workspace while they are
+// tested (GET /v1/me lists each workspace's features).
+const featureTabs: Partial<Record<Tab, string>> = { "ai-accounts": "ai_accounts" };
+export const canOpen = (ws: Workspace | undefined, t: Tab) =>
+  (!featureTabs[t] || !!ws?.features?.includes(featureTabs[t]!)) && (!ws?.brand_ids?.length || brandTabs.includes(t));
 
 // The sidebar keeps two things. Pins are kept in this browser for the
 // person who made them, and dropped if someone else signs in. Which module
@@ -406,7 +413,7 @@ export function PinButton({ tab, from, className }: { tab: Tab; from: string; cl
 export function settingsGroups(isAdmin: boolean, ws?: Workspace): NavGroup[] {
   const groups: NavGroup[] = [
     { label: "Workspace", tabs: ["workspace", "members"] },
-    { label: "AI", tabs: ["ai", "ai-usage"] },
+    { label: "AI", tabs: ["ai", "ai-usage", "ai-accounts"] },
     { label: "Notifications", tabs: ["alerts", "digests"] },
     { label: "Developers", tabs: isAdmin ? ["tokens", "webhooks", "logs", "audit", "tools"] : ["webhooks", "tools"] },
     { label: "You", tabs: ["account"] },
@@ -415,7 +422,7 @@ export function settingsGroups(isAdmin: boolean, ws?: Workspace): NavGroup[] {
   return groups.map((g) => ({ ...g, tabs: g.tabs.filter((t) => canOpen(ws, t)) })).filter((g) => g.tabs.length > 0);
 }
 
-export const settingsTabs: readonly Tab[] = ["workspace", "members", "ai", "ai-usage", "alerts", "digests", "tokens", "webhooks", "logs", "audit", "tools", "account", "instance"];
+export const settingsTabs: readonly Tab[] = ["workspace", "members", "ai", "ai-usage", "ai-accounts", "alerts", "digests", "tokens", "webhooks", "logs", "audit", "tools", "account", "instance"];
 export const isSettings = (t: Tab) => settingsTabs.includes(t);
 
 // ---- Theme ----
@@ -872,6 +879,8 @@ export function TopBar({ ws, tab, item, itemName, onTab, onApi, apiOpen }: { ws?
           </>
         )}
       </nav>
+      <WhatsNewButton />
+      <FeedbackButton page={tab} />
       <button onClick={onApi} aria-pressed={apiOpen} className={cn("inline-flex h-7 items-center gap-1.5 rounded-md border px-2 font-mono text-[12px] shadow-xs transition-colors", apiOpen ? "border-brand/50 bg-brand/10 text-brand-strong dark:text-brand" : "text-muted-foreground hover:bg-accent hover:text-foreground")}>
         <Icon name="code" className="size-3.5" />
         API
@@ -897,6 +906,8 @@ function callFor(tab: Tab, ws: string, item?: string): Call {
       return { title: "AI apps connected with OAuth", path: "/v1/workspaces/{ws}/agent-apps", params: base, ask: "What can you do for me in Outflare?", scope: "workspace.read" };
     case "ai-usage":
       return { title: "Where AI spend goes", path: "/v1/workspaces/{ws}/ai-usage", params: base, mcp: "get_ai_usage", ask: "Which Outflare tools spent the most AI money this month, and where could a cheaper model do the job?", scope: "integrations.read" };
+    case "ai-accounts":
+      return { title: "AI subscriptions and API accounts", path: "/v1/workspaces/{ws}/ai-accounts", params: base, mcp: "list_ai_accounts", ask: "Which of our AI subscriptions renew this week, and what do they cost?", scope: "my_ai_accounts.read" };
     case "tools":
       return { title: "What this server can do", path: "/v1/meta", params: {}, ask: "What can Outflare do for my outreach, and what should I set up first?", scope: "none (public)" };
     case "seo":

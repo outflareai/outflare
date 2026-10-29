@@ -452,10 +452,12 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * The "Star us on GitHub" and "Follow us on X" items
-         * @description Two optional one-click items the app shows on Home and at the end of Get started. Nobody can check a star or a
+         * The "Star us on GitHub", "Follow us on X" and "Follow the builder" items
+         * @description Optional one-click items the app shows on Home and at the end of Get started: star the repository, follow
+         *     Outflare on X (releases) and follow the builder on X (Outflare built in public). Nobody can check a star or a
          *     follow, so opening a link ticks its item. Each person has their own. `links` is empty when the server's operator
-         *     turned them off (`OUTFLARE_COMMUNITY_LINKS=off`); "Follow us on X" is left out when `OUTFLARE_FOLLOW_URL=off`.
+         *     turned them off (`OUTFLARE_COMMUNITY_LINKS=off`); "Follow us on X" is left out when `OUTFLARE_FOLLOW_URL=off`,
+         *     and "Follow the builder" when `OUTFLARE_BUILDER_URL=off`.
          */
         get: operations["getCommunityLinks"];
         put?: never;
@@ -4297,6 +4299,96 @@ export interface paths {
          *     stays credited only while a module pins it. A new name alone keeps the version.
          */
         patch: operations["updateAttributionModel"];
+        trace?: never;
+    };
+    "/v1/workspaces/{ws}/ai-accounts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+            };
+            cookie?: never;
+        };
+        /**
+         * List AI accounts
+         * @description Scope: my_ai_accounts.read for the accounts you belong to; ai_accounts.read lists everyone's. The AI
+         *     subscriptions and API accounts the workspace's people pay for (Claude, ChatGPT, Cursor, Copilot, the Anthropic and
+         *     OpenAI APIs), by provider then name. The price on an account you don't belong to needs ai_spend.read
+         *     (`price_hidden` says when it is left out). AI Accounts is a workspace feature: 404 until it is switched on.
+         */
+        get: operations["listAIAccounts"];
+        put?: never;
+        /**
+         * Add an AI account
+         * @description Scope: my_ai_accounts.manage, with yourself among `members` (you are its owner when `members` is left out);
+         *     ai_accounts.manage adds accounts for anyone. Such as
+         *     `{"provider": "claude", "name": "Claude Max — Design", "account_email": "ana@acme.example", "plan": "Max 20x", "billing_cycle": "monthly", "renews_on": "2026-11-14", "price_cents": 20000}`.
+         */
+        post: operations["createAIAccount"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/workspaces/{ws}/ai-accounts/outflare": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+            };
+            cookie?: never;
+        };
+        /**
+         * What Outflare's own AI spent
+         * @description Scope: ai_spend.read. The AI account Outflare itself uses: what its agent and tools spent this calendar month
+         *     on the workspace's own AI keys, by provider. GET .../ai-usage has the detail by tool, model and day.
+         */
+        get: operations["getOutflareAIAccount"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/workspaces/{ws}/ai-accounts/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        /**
+         * Get an AI account
+         * @description Scope: my_ai_accounts.read for an account you belong to, ai_accounts.read for anyone's. 404 for an account you may not see.
+         */
+        get: operations["getAIAccount"];
+        put?: never;
+        post?: never;
+        /**
+         * Remove an AI account
+         * @description Scope: my_ai_accounts.manage for an account you belong to, ai_accounts.manage for anyone's. For a mistake: an account that ended stays with `cancelled: true`.
+         */
+        delete: operations["deleteAIAccount"];
+        options?: never;
+        head?: never;
+        /**
+         * Change an AI account
+         * @description Scope: my_ai_accounts.manage for an account you belong to (you stay among `members`), ai_accounts.manage for
+         *     anyone's. Send only the fields to change; an empty string clears optional text and dates. `members` replaces the
+         *     list; people already on it may have left the workspace, new ones must be in it.
+         */
+        patch: operations["updateAIAccount"];
         trace?: never;
     };
     "/v1/workspaces/{ws}/conversion-definitions": {
@@ -23476,6 +23568,92 @@ export interface components {
             /** @description Required when making one; never changes. */
             key?: string;
         };
+        /**
+         * @description The AI tool. claude, chatgpt, cursor and copilot are people's plans; anthropic_api and openai_api are API accounts.
+         * @enum {string}
+         */
+        AIProvider: "claude" | "chatgpt" | "cursor" | "copilot" | "anthropic_api" | "openai_api";
+        AIAccountMember: {
+            /** Format: uuid */
+            user_id: string;
+            /**
+             * @description owner answers for the account; user also signs in to it.
+             * @enum {string}
+             */
+            role: "owner" | "user";
+            name: string;
+            email: string;
+            /** @description They are no longer in the workspace. */
+            left: boolean;
+        };
+        AIAccount: {
+            /** Format: uuid */
+            id: string;
+            provider: components["schemas"]["AIProvider"];
+            /** @example Claude Max — Design */
+            name: string;
+            /** @description The email the account is on at the AI company. */
+            account_email: string | null;
+            /** @example Max 20x */
+            plan: string | null;
+            seats: number | null;
+            /**
+             * @description Only company-paid accounts count in spend.
+             * @enum {string}
+             */
+            paid_by: "company" | "person";
+            /** @enum {string|null} */
+            billing_cycle: "monthly" | "yearly" | "prepaid" | "usage" | null;
+            /** Format: date */
+            renews_on: string | null;
+            /**
+             * Format: int64
+             * @description The price per billing cycle in US cents. Null when unknown, or when you may not see it (price_hidden).
+             */
+            price_cents: number | null;
+            /** @description The price is left out because the account isn't yours and you lack ai_spend.read. */
+            price_hidden: boolean;
+            /** @description Banked resets the AI company lets the account use (Codex resets, Claude reset grants). Null when unknown. */
+            resets_available: number | null;
+            cancelled: boolean;
+            /** @description Nobody who owns it is still in the workspace. */
+            owner_left: boolean;
+            members: components["schemas"]["AIAccountMember"][];
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            updated_at: string;
+        };
+        AIAccountInput: {
+            provider?: components["schemas"]["AIProvider"];
+            name?: string;
+            /** @description Empty clears it. */
+            account_email?: string;
+            plan?: string;
+            seats?: number;
+            /** @enum {string} */
+            paid_by?: "company" | "person";
+            /** @enum {string} */
+            billing_cycle?: "monthly" | "yearly" | "prepaid" | "usage" | "";
+            /**
+             * @description A date (YYYY-MM-DD); empty clears it.
+             * @example 2026-11-14
+             */
+            renews_on?: string;
+            /** Format: int64 */
+            price_cents?: number;
+            resets_available?: number;
+            cancelled?: boolean;
+            members?: {
+                /** Format: uuid */
+                user_id: string;
+                /**
+                 * @default owner
+                 * @enum {string}
+                 */
+                role: "owner" | "user";
+            }[];
+        };
         ConversionDefinition: components["schemas"]["ConversionDefinitionFields"] & {
             id: string;
             /** @example held_call */
@@ -24659,7 +24837,7 @@ export interface components {
         JourneyStep: {
             id: string;
             /** @enum {string} */
-            kind: "email" | "wait" | "branch" | "exit" | "set_field" | "add_tag" | "remove_tag" | "add_to_list" | "remove_from_list" | "enter_journey" | "exit_journey" | "enroll_in_sequence" | "stop_sequences" | "suppress" | "unsubscribe_topic" | "alert" | "transactional_email" | "set_consent" | "assign_owner" | "move_deal" | "slack" | "webhook" | "push_to_sequencer" | "ai";
+            kind: "email" | "wait" | "branch" | "exit" | "set_field" | "add_tag" | "remove_tag" | "add_to_list" | "remove_from_list" | "enter_journey" | "exit_journey" | "enroll_in_sequence" | "stop_sequences" | "suppress" | "unsubscribe_topic" | "alert" | "transactional_email" | "set_consent" | "assign_owner" | "move_deal" | "slack" | "webhook" | "push_to_sequencer" | "push_to_crm" | "ai";
             name?: string;
             /** @description email: a lifecycle template's handle or id. transactional_email: a transactional one's. */
             template?: string;
@@ -24715,6 +24893,10 @@ export interface components {
             allow_elsewhere?: boolean;
             /** @description push_to_sequencer: the campaign's own variables, by their name there, with {{person.x}}, {{event.x}} and {{vars.x}} filled in. */
             variables?: {
+                [key: string]: string;
+            };
+            /** @description push_to_crm: the CRM's own properties by their internal names (such as lifecyclestage), with {{person.x}}, {{event.x}} and {{vars.x}} filled in. */
+            properties?: {
                 [key: string]: string;
             };
             /**
@@ -24784,7 +24966,7 @@ export interface components {
             channel?: string;
             /**
              * Format: uuid
-             * @description slack: which Slack connection; the workspace's first when left out.
+             * @description slack: which Slack connection; the workspace's first when left out. push_to_crm: which CRM connection; the workspace's first that can create contacts when left out.
              */
             connection_id?: string;
             /** @description Action steps: stop (the default: the run fails), continue, or a step id to go to. */
@@ -31237,7 +31419,7 @@ export interface components {
             invites: number;
         };
         /** @enum {string} */
-        Scope: "workspace.read" | "workspace.manage" | "context.manage" | "members.read" | "members.manage" | "members.remove" | "roles.manage" | "tokens.manage" | "audit.read" | "mailboxes.read" | "mailboxes.manage" | "leads.read" | "leads.manage" | "suppressions.manage" | "sequences.read" | "sequences.manage" | "inbox.read" | "inbox.manage" | "integrations.read" | "integrations.manage" | "outcomes.read" | "outcomes.manage" | "projects.read" | "projects.manage" | "infrastructure.read" | "infrastructure.manage" | "infrastructure.approve" | "analytics.read" | "analytics.manage" | "missions.read" | "missions.run" | "missions.approve" | "seo.read" | "seo.manage" | "social.read" | "social.manage" | "social.post" | "partners.read" | "partners.manage" | "partners.conversions" | "webhooks.read" | "webhooks.manage" | "emails.read" | "emails.send" | "emails.manage" | "customers.read" | "customers.manage" | "catalog.manage";
+        Scope: "workspace.read" | "workspace.manage" | "context.manage" | "members.read" | "members.manage" | "members.remove" | "roles.manage" | "tokens.manage" | "audit.read" | "mailboxes.read" | "mailboxes.manage" | "leads.read" | "leads.manage" | "suppressions.manage" | "sequences.read" | "sequences.manage" | "inbox.read" | "inbox.manage" | "integrations.read" | "integrations.manage" | "outcomes.read" | "outcomes.manage" | "projects.read" | "projects.manage" | "infrastructure.read" | "infrastructure.manage" | "infrastructure.approve" | "analytics.read" | "analytics.manage" | "missions.read" | "missions.run" | "missions.approve" | "seo.read" | "seo.manage" | "social.read" | "social.manage" | "social.post" | "partners.read" | "partners.manage" | "partners.conversions" | "my_ai_accounts.read" | "my_ai_accounts.manage" | "ai_accounts.read" | "ai_accounts.manage" | "ai_spend.read" | "webhooks.read" | "webhooks.manage" | "emails.read" | "emails.send" | "emails.manage" | "customers.read" | "customers.manage" | "catalog.manage";
         Workspace: {
             /** Format: uuid */
             id: string;
@@ -31259,7 +31441,7 @@ export interface components {
             scopes?: components["schemas"]["Scope"][];
             /** @description The brands you are kept to; empty for every brand. */
             brand_ids?: string[];
-            /** @description Parts of Outflare switched on for this workspace while they are tested, such as ai_accounts. Left out when none is on, and in lists of workspaces. */
+            /** @description Parts of Outflare switched on for this workspace while they are tested, such as ai_accounts. Left out when none is on, and in lists of workspaces other than GET /v1/me. */
             features?: string[];
         };
         Member: {
@@ -32831,7 +33013,7 @@ export interface components {
         CommunityLinks: {
             links: {
                 /** @enum {string} */
-                id: "github" | "x";
+                id: "github" | "x" | "builder";
                 /** @example Star us on GitHub */
                 title: string;
                 /** Format: uri */
@@ -44079,6 +44261,199 @@ export interface operations {
             400: components["responses"]["Error"];
             404: components["responses"]["Error"];
             409: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    listAIAccounts: {
+        parameters: {
+            query?: {
+                provider?: components["schemas"]["AIProvider"];
+                /** @description true keeps only the accounts you belong to. */
+                mine?: boolean;
+            };
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The accounts. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["AIAccount"][];
+                    };
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    createAIAccount: {
+        parameters: {
+            query?: never;
+            header?: {
+                /**
+                 * @description Makes the write safe to retry. A repeat with the same key from the same caller within 24 hours gets the first
+                 *     answer back (with `Idempotent-Replayed: true`) instead of running again. The same key for a different request
+                 *     is refused with 422 `idempotency_key_reused`; while the first is still running, 409 `idempotency_in_progress`.
+                 *     Use a new random key, such as a UUID, for each distinct write.
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AIAccountInput"];
+            };
+        };
+        responses: {
+            /** @description The account. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AIAccount"];
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            400: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    getOutflareAIAccount: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description This month's spend. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @example 2026-10 */
+                        month: string;
+                        /** Format: int64 */
+                        calls: number;
+                        /**
+                         * Format: int64
+                         * @description US cents
+                         */
+                        cost_cents: number;
+                        providers: {
+                            /** @description The AI connection: claude, openai and so on. */
+                            provider: string;
+                            /** Format: int64 */
+                            calls: number;
+                            /** Format: int64 */
+                            cost_cents: number;
+                        }[];
+                    };
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    getAIAccount: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The account. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AIAccount"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    deleteAIAccount: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            202: components["responses"]["MissionHeld"];
+            /** @description Removed. */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            403: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    updateAIAccount: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AIAccountInput"];
+            };
+        };
+        responses: {
+            /** @description The account. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AIAccount"];
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            400: components["responses"]["Error"];
+            403: components["responses"]["Error"];
             default: components["responses"]["Error"];
         };
     };

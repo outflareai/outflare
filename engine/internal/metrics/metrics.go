@@ -227,6 +227,10 @@ var (
 		Namespace: namespace, Subsystem: "journeys", Name: "calls_total",
 		Help: "Calls journey steps made, by step kind (webhook, slack, push_to_sequencer, ai) and outcome (done; skipped, nothing to do; retried, for a try that will be tried again; failed).",
 	}, []string{"kind", "outcome"})
+	crmContactPushes = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Namespace: namespace, Subsystem: "crm", Name: "contacts_pushed_total",
+		Help: "People journeys created or updated in a CRM, by connector (hubspot) and outcome (created, updated, error).",
+	}, []string{"connector", "outcome"})
 	sequencerPushes = prometheus.NewCounterVec(prometheus.CounterOpts{
 		Namespace: namespace, Subsystem: "sequencers", Name: "leads_pushed_total",
 		Help: "People journeys added to sequencer campaigns, by connector (smartlead, instantly, emailbison) and outcome (added, already_in, refused by the sequencer, error).",
@@ -423,7 +427,7 @@ var own = []prometheus.Collector{
 	hooksReceived, hookEvents, hookLag,
 	domainConnectLookups, domainConnectDuration,
 	queryRuns, queryDuration, queryRows,
-	ruleEvaluations, journeyCalls, journeyCallDuration, excluded, sequencerPushes,
+	ruleEvaluations, journeyCalls, journeyCallDuration, excluded, sequencerPushes, crmContactPushes,
 	semanticRuns, semanticItems, semanticDuration, semanticAvailable, semanticWorkspaces, knowledgeAsks, knowledgeAskDuration,
 	adConversions, adConversionsOldest,
 	meetingEvents, meetingEventsPending,
@@ -586,6 +590,12 @@ func RuleEvaluated(trigger, outcome string) { ruleEvaluations.WithLabelValues(tr
 func JourneyCalled(kind, outcome string, d time.Duration) {
 	journeyCalls.WithLabelValues(kind, outcome).Inc()
 	journeyCallDuration.WithLabelValues(kind).Observe(d.Seconds())
+}
+
+// CRMContactPushed records one try at creating or updating a person in a
+// CRM: the connector, and what happened (created, updated, error).
+func CRMContactPushed(connector, outcome string) {
+	crmContactPushes.WithLabelValues(connector, outcome).Inc()
 }
 
 // SequencerPushed records one try at adding a person to a sequencer

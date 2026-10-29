@@ -96,3 +96,19 @@ func TestFollowURL(t *testing.T) {
 		t.Fatal("an address without https was taken")
 	}
 }
+
+func TestBuilderURL(t *testing.T) {
+	t.Setenv("DATABASE_URL", "postgres://example")
+	t.Setenv("OUTFLARE_BUILDER_URL", "")
+	if c, err := Load(); err != nil || c.CommunityBuilderURL != "https://x.com/jackfitzgerald" {
+		t.Fatalf("default %q %v", c.CommunityBuilderURL, err)
+	}
+	t.Setenv("OUTFLARE_BUILDER_URL", "off")
+	if c, err := Load(); err != nil || c.CommunityBuilderURL != "" {
+		t.Fatalf("off %q %v", c.CommunityBuilderURL, err)
+	}
+	t.Setenv("OUTFLARE_BUILDER_URL", "x.com/someone")
+	if _, err := Load(); err == nil {
+		t.Fatal("an address without https was taken")
+	}
+}

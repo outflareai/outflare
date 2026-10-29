@@ -26,7 +26,7 @@ const (
 	// siteScriptVersion is the version /site.js sends (VERSION in site.js);
 	// siteScriptMinVersion is the oldest the server still takes as is.
 	// Copies from before the script sent a version count as "1".
-	siteScriptVersion    = 8
+	siteScriptVersion    = 9
 	siteScriptMinVersion = 1
 
 	// A site key whose site sent visits but none for this long is silent.

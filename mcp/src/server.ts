@@ -14,6 +14,7 @@ import { registerRecordTools } from "./records.js";
 import { registerContextTools } from "./context.js";
 import { registerKnowledgeTools } from "./knowledge.js";
 import { registerFlagTools } from "./flags.js";
+import { registerAIAccountTools } from "./aiaccounts.js";
 import { registerABTestTools } from "./abtests.js";
 import { registerSupplierTools } from "./suppliers.js";
 import { registerPartnerTools } from "./partners.js";
@@ -303,6 +304,7 @@ export function createServer({ client: gtm, workspace, readOnly = false, mission
   registerContextTools(server, gtm, () => ws, readOnly, call, withBrand);
   registerKnowledgeTools(server, gtm, () => ws, readOnly, call, withBrand);
   registerFlagTools(server, gtm, () => ws, readOnly, call, withBrand);
+  registerAIAccountTools(server, gtm, () => ws, readOnly, call);
   registerABTestTools(server, gtm, () => ws, readOnly, call, withBrand);
   registerBrandTools(server, gtm, () => ws, readOnly, call);
   registerSetupTools(server, gtm, () => ws, readOnly, call);
@@ -8248,6 +8250,7 @@ export function createServer({ client: gtm, workspace, readOnly = false, mission
             "slack",
             "webhook",
             "push_to_sequencer",
+            "push_to_crm",
             "ai",
           ]),
           name: z.string().optional(),
@@ -8269,6 +8272,7 @@ export function createServer({ client: gtm, workspace, readOnly = false, mission
           scope: z.enum(["journey", "others", "sequence", "all", "company"]).optional(),
           allow_elsewhere: z.boolean().optional(),
           variables: z.record(z.string(), z.string()).optional().describe("push_to_sequencer: the campaign's own variables by name; {{person.x}} fills in."),
+          properties: z.record(z.string(), z.string()).optional().describe("push_to_crm: HubSpot properties by internal name, such as lifecyclestage; {{person.x}} fills in."),
           target: z.enum(["email", "domain"]).optional(),
           topic: z.string().optional(),
           title: z.string().optional().describe("alert: what it says. slack: a bold line above the message."),
@@ -8297,7 +8301,7 @@ export function createServer({ client: gtm, workspace, readOnly = false, mission
           choices: z.array(z.string().max(100)).min(2).max(20).optional().describe("ai: the only answers allowed, to sort people. Leave out for a written answer."),
           max_words: z.number().int().min(1).max(300).optional().describe("ai: for a written answer, at most this many words."),
           channel: z.string().optional().describe("slack: the channel's id."),
-          connection_id: z.string().optional().describe("slack: which Slack connection; the first when left out."),
+          connection_id: z.string().optional().describe("slack: which Slack connection. push_to_crm: which CRM connection. The first when left out."),
           on_error: z.string().optional().describe("Action steps: stop (default), continue, or a step id."),
         }),
       )

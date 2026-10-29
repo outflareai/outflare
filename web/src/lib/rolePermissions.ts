@@ -40,11 +40,14 @@ export const roleGroups: RoleGroup[] = [
     areas: [
       { label: "Connected tools", help: "Connect and disconnect accounts", read: "integrations.read", manage: "integrations.manage" },
       { label: "Webhooks", help: "URLs that receive workspace events", read: "webhooks.read", manage: "webhooks.manage" },
+      { label: "Their own AI accounts", help: "The AI subscriptions they use: usage, resets and renewals", read: "my_ai_accounts.read", manage: "my_ai_accounts.manage" },
+      { label: "Everyone's AI accounts", help: "Every AI subscription people in the workspace use", read: "ai_accounts.read", manage: "ai_accounts.manage" },
     ],
     toggles: [
       { label: "Workspace settings", help: "Name, address and brand rules", scope: "workspace.manage" },
       { label: "Unsubscribe list", help: "Remove someone from it, so they can be emailed again", scope: "suppressions.manage" },
       { label: "Shared fields", help: "Record types, fields and option lists", scope: "catalog.manage" },
+      { label: "AI spend", help: "Prices, spend and receipts on everyone's AI accounts", scope: "ai_spend.read" },
       { label: "API tokens", help: "Create and revoke tokens", scope: "tokens.manage" },
       { label: "Audit log and request logs", help: "See everything that happened", scope: "audit.read" },
     ],

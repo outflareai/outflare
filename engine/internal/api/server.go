@@ -225,9 +225,12 @@ type Options struct {
 	PrivacyURL, TermsURL string
 	// CommunityLinks shows the optional "Star us on GitHub" and "Follow us
 	// on X" items (GET /v1/me/community); CommunityXURL is the X profile,
-	// empty to leave that item out.
-	CommunityLinks bool
-	CommunityXURL  string
+	// empty to leave that item out. CommunityBuilderURL is the X profile of
+	// the person building Outflare in public ("Follow the builder"), empty
+	// to leave it out.
+	CommunityLinks      bool
+	CommunityXURL       string
+	CommunityBuilderURL string
 	// SignedInCookieDomain, when set, is a parent domain of PUBLIC_URL's
 	// host (outflare.ai for app.outflare.ai) where the server keeps an
 	// outflare_signed_in=1 cookie while someone is signed in, so a website
@@ -338,7 +341,7 @@ func NewServer(pool *pgxpool.Pool, log *slog.Logger, opts Options) *Server {
 		mcp:              opts.MCP,
 		privacyURL:       opts.PrivacyURL,
 		termsURL:         opts.TermsURL,
-		community:        communityLinksFor(opts.CommunityLinks, opts.CommunityXURL),
+		community:        communityLinksFor(opts.CommunityLinks, opts.CommunityXURL, opts.CommunityBuilderURL),
 		limiter:          loginLimiter{pool: pool, name: "sign_in", log: log},
 		emailLimiter:     loginLimiter{pool: pool, name: "account_email", log: log},
 		pool:             pool,
@@ -515,6 +518,7 @@ func (s *Server) buildHandler() http.Handler {
 	s.routesAttribution(mux)
 	s.routesAttributionModels(mux)
 	s.routesConversionDefinitions(mux)
+	s.routesAIAccounts(mux)
 	s.routesCustomerProfiles(mux)
 	s.routesKnowledge(mux)
 	s.routesKnowledgeRetrieval(mux)

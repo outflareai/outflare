@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Ideas and questions
+    url: https://github.com/outflareai/outflare/discussions
+    about: Share an idea, ask a question or show what you built. The best ideas become issues.
+  - name: Security vulnerability
+    url: https://github.com/outflareai/outflare/blob/main/SECURITY.md
+    about: Report it privately, never in a public issue.

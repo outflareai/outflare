@@ -176,6 +176,15 @@ groups:
         annotations:
           summary: "Journey {{ $labels.kind }} calls take over 10 seconds at the 95th percentile (they give up at 20): a slow receiver ties up job workers. Look at the Journey webhooks, Slack, sequencers and AI steps row."
 
+      - alert: OutflareCRMPushesFailing
+        expr: |
+          sum by (connector) (increase(outflare_crm_contacts_pushed_total{outcome="error"}[30m])) > 10
+          and sum by (connector) (increase(outflare_crm_contacts_pushed_total{outcome="error"}[30m]))
+            > 0.5 * sum by (connector) (increase(outflare_crm_contacts_pushed_total[30m]))
+        labels: { severity: warning }
+        annotations:
+          summary: "Over half the people journeys tried to create or update in {{ $labels.connector }} in 30 minutes failed. One workspace's key expired or a step names a property the CRM doesn't have (the run's history says which); if it is every workspace, {{ $labels.connector }} is down or changed its API. journey_step.called failures with kind push_to_crm in the logs name the journey."
+
       - alert: OutflareSequencerPushesFailing
         expr: |
           sum by (connector) (increase(outflare_sequencers_leads_pushed_total{outcome="error"}[30m])) > 10

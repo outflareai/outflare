@@ -2529,6 +2529,56 @@ class Operations(_Mixin):
             idempotency_key=idempotency_key,
         )
 
+    def create_ai_account(
+        self,
+        *,
+        ws: str | None = None,
+        account_email: str | None = None,
+        billing_cycle: Literal["monthly", "yearly", "prepaid", "usage", ""] | None = None,
+        cancelled: bool | None = None,
+        members: list[dict[str, Any]] | None = None,
+        name: str | None = None,
+        paid_by: Literal["company", "person"] | None = None,
+        plan: str | None = None,
+        price_cents: int | None = None,
+        provider: Literal["claude", "chatgpt", "cursor", "copilot", "anthropic_api", "openai_api"] | None = None,
+        renews_on: str | None = None,
+        resets_available: int | None = None,
+        seats: int | None = None,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Add an AI account.
+
+        Scope: my_ai_accounts.manage, with yourself among `members` (you are its owner when `members` is left out);
+        ai_accounts.manage adds accounts for anyone. Such as
+        `{"provider": "claude", "name": "Claude Max — Design", "account_email": "ana@acme.example", "plan": "Max 20x", "billing_cycle": "monthly", "renews_on": "2026-11-14", "price_cents": 20000}`.
+
+        Needs: the my_ai_accounts.manage scope.
+        POST /v1/workspaces/{ws}/ai-accounts
+        """
+        return self._call(
+            "POST",
+            "/v1/workspaces/{ws}/ai-accounts",
+            path={"ws": ws},
+            body={
+                "account_email": account_email,
+                "billing_cycle": billing_cycle,
+                "cancelled": cancelled,
+                "members": members,
+                "name": name,
+                "paid_by": paid_by,
+                "plan": plan,
+                "price_cents": price_cents,
+                "provider": provider,
+                "renews_on": renews_on,
+                "resets_available": resets_available,
+                "seats": seats,
+            },
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
     def create_ai_cohort(
         self,
         *,
@@ -5196,6 +5246,27 @@ class Operations(_Mixin):
             idempotency_key=idempotency_key,
         )
 
+    def delete_ai_account(
+        self,
+        id: str,
+        *,
+        ws: str | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Remove an AI account.
+
+        Scope: my_ai_accounts.manage for an account you belong to, ai_accounts.manage for anyone's. For a mistake: an account that ended stays with `cancelled: true`.
+
+        Needs: the my_ai_accounts.manage scope.
+        DELETE /v1/workspaces/{ws}/ai-accounts/{id}
+        """
+        return self._call(
+            "DELETE",
+            "/v1/workspaces/{ws}/ai-accounts/{id}",
+            path={"id": id, "ws": ws},
+            idempotency_key=idempotency_key,
+        )
+
     def delete_ai_cohort(
         self,
         cohort: str,
@@ -7125,6 +7196,25 @@ class Operations(_Mixin):
                 "account_id": account_id,
                 "brand": brand,
             },
+        )
+
+    def get_ai_account(
+        self,
+        id: str,
+        *,
+        ws: str | None = None,
+    ) -> Any:
+        """Get an AI account.
+
+        Scope: my_ai_accounts.read for an account you belong to, ai_accounts.read for anyone's. 404 for an account you may not see.
+
+        Needs: the my_ai_accounts.read scope.
+        GET /v1/workspaces/{ws}/ai-accounts/{id}
+        """
+        return self._call(
+            "GET",
+            "/v1/workspaces/{ws}/ai-accounts/{id}",
+            path={"id": id, "ws": ws},
         )
 
     def get_ai_bot_hits(
@@ -9414,6 +9504,25 @@ class Operations(_Mixin):
             "/v1/openapi.yaml",
         )
 
+    def get_outflare_ai_account(
+        self,
+        *,
+        ws: str | None = None,
+    ) -> Any:
+        """What Outflare's own AI spent.
+
+        Scope: ai_spend.read. The AI account Outflare itself uses: what its agent and tools spent this calendar month
+        on the workspace's own AI keys, by provider. GET .../ai-usage has the detail by tool, model and day.
+
+        Needs: the ai_spend.read scope.
+        GET /v1/workspaces/{ws}/ai-accounts/outflare
+        """
+        return self._call(
+            "GET",
+            "/v1/workspaces/{ws}/ai-accounts/outflare",
+            path={"ws": ws},
+        )
+
     def get_partner(
         self,
         id: str,
@@ -11488,6 +11597,30 @@ class Operations(_Mixin):
             "GET",
             "/v1/workspaces/{ws}/agent-apps",
             path={"ws": ws},
+        )
+
+    def list_ai_accounts(
+        self,
+        *,
+        ws: str | None = None,
+        provider: Literal["claude", "chatgpt", "cursor", "copilot", "anthropic_api", "openai_api"] | None = None,
+        mine: bool | None = None,
+    ) -> Any:
+        """List AI accounts.
+
+        Scope: my_ai_accounts.read for the accounts you belong to; ai_accounts.read lists everyone's. The AI
+        subscriptions and API accounts the workspace's people pay for (Claude, ChatGPT, Cursor, Copilot, the Anthropic and
+        OpenAI APIs), by provider then name. The price on an account you don't belong to needs ai_spend.read
+        (`price_hidden` says when it is left out). AI Accounts is a workspace feature: 404 until it is switched on.
+
+        Needs: the my_ai_accounts.read scope.
+        GET /v1/workspaces/{ws}/ai-accounts
+        """
+        return self._call(
+            "GET",
+            "/v1/workspaces/{ws}/ai-accounts",
+            path={"ws": ws},
+            query={"provider": provider, "mine": mine},
         )
 
     def list_ai_cohorts(
@@ -21166,6 +21299,57 @@ class Operations(_Mixin):
             "/v1/workspaces/{ws}/agent-apps/{id}",
             path={"id": id, "ws": ws},
             body={"require_mission": require_mission, "scopes": scopes},
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
+    def update_ai_account(
+        self,
+        id: str,
+        *,
+        ws: str | None = None,
+        account_email: str | None = None,
+        billing_cycle: Literal["monthly", "yearly", "prepaid", "usage", ""] | None = None,
+        cancelled: bool | None = None,
+        members: list[dict[str, Any]] | None = None,
+        name: str | None = None,
+        paid_by: Literal["company", "person"] | None = None,
+        plan: str | None = None,
+        price_cents: int | None = None,
+        provider: Literal["claude", "chatgpt", "cursor", "copilot", "anthropic_api", "openai_api"] | None = None,
+        renews_on: str | None = None,
+        resets_available: int | None = None,
+        seats: int | None = None,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Change an AI account.
+
+        Scope: my_ai_accounts.manage for an account you belong to (you stay among `members`), ai_accounts.manage for
+        anyone's. Send only the fields to change; an empty string clears optional text and dates. `members` replaces the
+        list; people already on it may have left the workspace, new ones must be in it.
+
+        Needs: the my_ai_accounts.manage scope.
+        PATCH /v1/workspaces/{ws}/ai-accounts/{id}
+        """
+        return self._call(
+            "PATCH",
+            "/v1/workspaces/{ws}/ai-accounts/{id}",
+            path={"id": id, "ws": ws},
+            body={
+                "account_email": account_email,
+                "billing_cycle": billing_cycle,
+                "cancelled": cancelled,
+                "members": members,
+                "name": name,
+                "paid_by": paid_by,
+                "plan": plan,
+                "price_cents": price_cents,
+                "provider": provider,
+                "renews_on": renews_on,
+                "resets_available": resets_available,
+                "seats": seats,
+            },
             extra_body=extra_body,
             idempotency_key=idempotency_key,
         )

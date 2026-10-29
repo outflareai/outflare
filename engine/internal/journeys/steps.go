@@ -77,6 +77,9 @@ type Step struct {
 	// push_to_sequencer: the campaign's own variables, by their name
 	// there, with {{person.x}}, {{event.x}} and {{vars.x}} filled in.
 	Variables map[string]string `json:"variables,omitempty"`
+	// push_to_crm: the CRM's own properties, by their internal names
+	// there, filled in the same way.
+	Properties map[string]string `json:"properties,omitempty"`
 	// What a failed action does: stop (the default: the run fails),
 	// continue (go on to next) or a step id to go to.
 	// set_consent: granted or withdrawn, for topic (empty: all marketing

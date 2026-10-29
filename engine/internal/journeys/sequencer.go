@@ -12,6 +12,7 @@ import (
 	"github.com/outflareai/outflare/engine/internal/connectors"
 	"github.com/outflareai/outflare/engine/internal/customers"
 	"github.com/outflareai/outflare/engine/internal/emails"
+	"github.com/outflareai/outflare/engine/internal/jobs"
 	"github.com/outflareai/outflare/engine/internal/leads"
 	"github.com/outflareai/outflare/engine/internal/metrics"
 )
@@ -94,19 +95,8 @@ func pushCall(ctx context.Context, c *call) callResult {
 		return failed("connector_needed", "the sequence's campaign is in a sequencer Outflare can't add people to")
 	}
 
-	// The person, with the company they work at.
-	var email, first, last, company, domain string
-	var suppressed bool
-	err = s.Pool.QueryRow(ctx, `SELECT COALESCE(e.value, ''), COALESCE(r.attributes->>'first_name', ''), COALESCE(r.attributes->>'last_name', ''),
-			COALESCE(a.name, ''), COALESCE(a.domain, ''), e.value IS NOT NULL AND EXISTS (`+leads.SuppressedSQL("r.workspace_id", "e.value")+`)
-		FROM records r
-		LEFT JOIN LATERAL (SELECT value FROM record_identities i WHERE i.record_id = r.id AND i.namespace = 'email' AND i.verified
-			AND i.valid_to IS NULL ORDER BY i.valid_from, i.id LIMIT 1) e ON true
-		LEFT JOIN LATERAL (SELECT co.name, (SELECT value FROM record_identities d WHERE d.record_id = co.id AND d.namespace = 'domain'
-				AND d.valid_to IS NULL ORDER BY d.valid_from, d.id LIMIT 1) AS domain
-			FROM record_relationships rr JOIN records co ON co.id = rr.to_id AND co.archived_at IS NULL AND co.merged_into IS NULL
-			WHERE rr.from_id = r.id AND rr.kind = 'companies' AND rr.valid_to IS NULL ORDER BY rr.valid_from, rr.to_id LIMIT 1) a ON true
-		WHERE r.workspace_id = $1 AND r.id = $2`, c.ws, c.r.recordID).Scan(&email, &first, &last, &company, &domain, &suppressed)
+	who, err := pushPersonOf(ctx, s.Pool, c.ws, c.r.recordID)
+	email, first, last, company, domain, suppressed := who.email, who.first, who.last, who.company, who.domain, who.suppressed
 	switch {
 	case errors.Is(err, pgx.ErrNoRows):
 		return callResult{outcome: "skipped", detail: "the person no longer exists"}
@@ -177,4 +167,29 @@ func pushCall(ctx context.Context, c *call) callResult {
 				"via": "journey", "journey_id": c.j.id, "run_id": c.r.id},
 			Props: map[string]any{"connector": link.connector}})
 	}}
+}
+
+// pushPerson is what a push to another tool sends about the person: their
+// verified email, name and the company they work at, and whether the
+// address is on the opt-out list.
+type pushPerson struct {
+	email, first, last, company, domain string
+	suppressed                          bool
+}
+
+// pushPersonOf reads the person for a push; pgx.ErrNoRows when they are
+// gone.
+func pushPersonOf(ctx context.Context, q jobs.Querier, ws, recordID string) (pushPerson, error) {
+	var p pushPerson
+	err := q.QueryRow(ctx, `SELECT COALESCE(e.value, ''), COALESCE(r.attributes->>'first_name', ''), COALESCE(r.attributes->>'last_name', ''),
+			COALESCE(a.name, ''), COALESCE(a.domain, ''), e.value IS NOT NULL AND EXISTS (`+leads.SuppressedSQL("r.workspace_id", "e.value")+`)
+		FROM records r
+		LEFT JOIN LATERAL (SELECT value FROM record_identities i WHERE i.record_id = r.id AND i.namespace = 'email' AND i.verified
+			AND i.valid_to IS NULL ORDER BY i.valid_from, i.id LIMIT 1) e ON true
+		LEFT JOIN LATERAL (SELECT co.name, (SELECT value FROM record_identities d WHERE d.record_id = co.id AND d.namespace = 'domain'
+				AND d.valid_to IS NULL ORDER BY d.valid_from, d.id LIMIT 1) AS domain
+			FROM record_relationships rr JOIN records co ON co.id = rr.to_id AND co.archived_at IS NULL AND co.merged_into IS NULL
+			WHERE rr.from_id = r.id AND rr.kind = 'companies' AND rr.valid_to IS NULL ORDER BY rr.valid_from, rr.to_id LIMIT 1) a ON true
+		WHERE r.workspace_id = $1 AND r.id = $2`, ws, recordID).Scan(&p.email, &p.first, &p.last, &p.company, &p.domain, &p.suppressed)
+	return p, err
 }
