@@ -115,7 +115,6 @@ type settings struct {
 	URL       string `json:"url"`
 	Token     string `json:"token"`
 	Workspace string `json:"workspace,omitempty"`
-	Agency    string `json:"agency,omitempty"`
 }
 
 func (c *runner) configPath() (string, error) {
@@ -131,7 +130,7 @@ func (c *runner) configPath() (string, error) {
 }
 
 // settings reads the saved login, overridden by OUTFLARE_URL,
-// OUTFLARE_TOKEN, OUTFLARE_WORKSPACE and OUTFLARE_AGENCY (the same
+// OUTFLARE_TOKEN and OUTFLARE_WORKSPACE (the same
 // variables the MCP server reads).
 func (c *runner) settings() settings {
 	var s settings
@@ -140,7 +139,7 @@ func (c *runner) settings() settings {
 			json.Unmarshal(b, &s) //nolint:errcheck
 		}
 	}
-	for name, dst := range map[string]*string{"URL": &s.URL, "TOKEN": &s.Token, "WORKSPACE": &s.Workspace, "AGENCY": &s.Agency} {
+	for name, dst := range map[string]*string{"URL": &s.URL, "TOKEN": &s.Token, "WORKSPACE": &s.Workspace} {
 		if v := strings.TrimSpace(c.env.Getenv("OUTFLARE_" + name)); v != "" {
 			*dst = v
 		}
@@ -205,8 +204,7 @@ func (c *runner) login(ctx context.Context, args []string) int {
 				Slug string `json:"slug"`
 				Name string `json:"name"`
 			} `json:"workspace"`
-			AgencyID *string  `json:"agency_id"`
-			Scopes   []string `json:"scopes"`
+			Scopes []string `json:"scopes"`
 		} `json:"token"`
 	}
 	status, body, _, err := c.send(ctx, s, "GET", s.URL+"/v1/whoami", "", nil, "")
@@ -219,11 +217,8 @@ func (c *runner) login(ctx context.Context, args []string) int {
 	if json.Unmarshal(body, &who) != nil || who.Token == nil {
 		return c.fail(1, errors.New("log in with an API token, not a session"))
 	}
-	switch {
-	case who.Token.WorkspaceID != nil:
+	if who.Token.WorkspaceID != nil {
 		s.Workspace = *who.Token.WorkspaceID
-	case who.Token.AgencyID != nil:
-		s.Agency = *who.Token.AgencyID
 	}
 	p, err := c.configPath()
 	if err == nil {
@@ -243,9 +238,6 @@ func (c *runner) login(ctx context.Context, args []string) int {
 	where := "workspace " + s.Workspace
 	if w := who.Token.Workspace; w != nil && w.Name != "" {
 		where = fmt.Sprintf("workspace %q (%s)", w.Name, w.Slug)
-	}
-	if who.Token.Kind == "agency" {
-		where = "agency " + s.Agency + " (pass --workspace or set OUTFLARE_WORKSPACE for a client)"
 	}
 	scopes := strings.Join(who.Token.Scopes, ", ")
 	if scopes == "" {
@@ -312,9 +304,6 @@ func (c *runner) call(ctx context.Context, op *operation, args []string) int {
 					s.Workspace = c.tokenWorkspace(ctx, s)
 				}
 				v = s.Workspace
-			}
-			if v == "" && p.Name == "ag" {
-				v = s.Agency
 			}
 			if v == "" {
 				return c.fail(2, fmt.Errorf("--%s is required%s", name, describeParam(p)))
@@ -686,7 +675,7 @@ func errorText(body []byte) string {
 }
 
 // tokenWorkspace asks whoami which workspace the token belongs to; empty
-// for an agency token or when the server cannot say.
+// when the server cannot say.
 func (c *runner) tokenWorkspace(ctx context.Context, s settings) string {
 	if s.Token == "" {
 		return ""

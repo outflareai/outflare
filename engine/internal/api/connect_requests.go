@@ -285,8 +285,7 @@ func (s *Server) openLink(w http.ResponseWriter, r *http.Request, token string) 
 		// A person, or the person behind the token or app that asked.
 		if err := s.pool.QueryRow(r.Context(), `
 			SELECT coalesce((SELECT u.email FROM users u WHERE u.disabled_at IS NULL AND (u.actor_id = $1
-				OR u.id = (SELECT t.created_by FROM api_tokens t WHERE t.actor_id = $1 LIMIT 1)
-				OR u.id = (SELECT t.created_by FROM agency_tokens t WHERE t.actor_id = $1 LIMIT 1)) LIMIT 1), '')`, *createdBy).Scan(&p.RequesterEmail); err != nil {
+				OR u.id = (SELECT t.created_by FROM api_tokens t WHERE t.actor_id = $1 LIMIT 1)) LIMIT 1), '')`, *createdBy).Scan(&p.RequesterEmail); err != nil {
 			s.internal(w, r, err)
 			return p, connectors.Definition{}, false
 		}

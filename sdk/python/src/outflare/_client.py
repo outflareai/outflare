@@ -29,7 +29,6 @@ class _Base:
         *,
         base_url: str | None = None,
         workspace: str | None = None,
-        agency: str | None = None,
         mission: str | None = None,
         max_retries: int = 3,
         timeout: float = 60.0,
@@ -40,7 +39,6 @@ class _Base:
             raise ValueError("pass token= or set OUTFLARE_TOKEN to an API token (oft_...)")
         self.base_url = (base_url or os.environ.get("OUTFLARE_URL") or "https://app.outflare.ai").rstrip("/")
         self._workspace = workspace or os.environ.get("OUTFLARE_WORKSPACE") or None
-        self._agency = agency or os.environ.get("OUTFLARE_AGENCY") or None
         self.mission = mission
         self.max_retries = max_retries
         self.timeout = timeout
@@ -55,29 +53,18 @@ class _Base:
             token = self._call("GET", "/v1/whoami").get("token") or {}
             self._workspace = token.get("workspace_id")
             if not self._workspace:
-                raise ValueError("this token has no workspace of its own (an agency token): pass workspace=")
+                raise ValueError("this token has no workspace of its own: pass workspace=")
         return self._workspace
-
-    @property
-    def agency(self) -> str:
-        """The agency agency calls go to: the one given, or else the token's own, from whoami."""
-        if not self._agency:
-            token = self._call("GET", "/v1/whoami").get("token") or {}
-            self._agency = token.get("agency_id")
-            if not self._agency:
-                raise ValueError("this is not an agency token: pass agency=")
-        return self._agency
 
     def with_options(self, **changes: Any) -> Any:
         """A copy with some settings changed, sharing the connection pool.
 
-        client.with_options(workspace="acme-client") or with_options(mission=mission_id)
+        client.with_options(workspace="acme") or with_options(mission=mission_id)
         """
         opts: dict[str, Any] = {
             "token": self.token,
             "base_url": self.base_url,
             "workspace": self._workspace,
-            "agency": self._agency,
             "mission": self.mission,
             "max_retries": self.max_retries,
             "timeout": self.timeout,
@@ -182,8 +169,6 @@ class _Base:
     def _fill(self, route: str, path: dict[str, Any]) -> str:
         if "{ws}" in route and not path.get("ws"):
             path["ws"] = self.workspace
-        if "{ag}" in route and not path.get("ag"):
-            path["ag"] = self.agency
         for k, v in path.items():
             if v is None:
                 raise ValueError(f"{k} is required")

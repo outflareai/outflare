@@ -319,34 +319,17 @@ type workspaceView struct {
 	Scopes []string `json:"scopes,omitempty"`
 	// The brands the caller is kept to; empty for every brand.
 	BrandIDs []string `json:"brand_ids"`
-	// Set for an agency's client workspaces.
-	AgencyID *string `json:"agency_id"`
-	// The agency's white label, shown in place of Outflare.
-	Brand *brandView `json:"brand"`
 	// A test workspace: its mailboxes are simulated, so nothing it sends
 	// reaches anyone.
 	Test bool `json:"test"`
 }
 
-type brandView struct {
-	AgencyName   string `json:"agency_name"`
-	Name         string `json:"name"`
-	LogoURL      string `json:"logo_url"`
-	AccentColor  string `json:"accent_color"`
-	SupportEmail string `json:"support_email"`
-}
-
-// workspaceSelect reads a workspace with its agency's branding; callers add
-// the role column and a FROM clause continuation joining workspaces w.
-const workspaceBrandCols = `w.agency_id, ag.name, ag.brand_name, ag.logo_url, ag.accent_color, ag.support_email, w.test`
-
 func scanWorkspace(row pgx.Row, v *workspaceView, withRole bool) error {
-	var agName, bName, logo, accent, support *string
 	dest := []any{&v.ID, &v.Name, &v.Slug}
 	if withRole {
 		dest = append(dest, &v.Role, &v.BrandIDs, &v.RoleID, &v.Scopes)
 	}
-	dest = append(dest, &v.AgencyID, &agName, &bName, &logo, &accent, &support, &v.Test)
+	dest = append(dest, &v.Test)
 	if err := row.Scan(dest...); err != nil {
 		return err
 	}
@@ -355,9 +338,6 @@ func scanWorkspace(row pgx.Row, v *workspaceView, withRole bool) error {
 	}
 	if v.BrandIDs == nil || (withRole && !auth.BrandLimitable(v.Scopes)) {
 		v.BrandIDs = []string{}
-	}
-	if v.AgencyID != nil {
-		v.Brand = &brandView{AgencyName: *agName, Name: *bName, LogoURL: *logo, AccentColor: *accent, SupportEmail: *support}
 	}
 	return nil
 }
@@ -387,21 +367,11 @@ func (s *Server) me(w http.ResponseWriter, r *http.Request) {
 		}
 		user.EmailResendAfter = seconds(wait)
 	}
-	// Workspaces the person is a member of, plus every client of their
-	// agencies, each with their strongest role.
+	// Workspaces the person is a member of, with their role.
 	rows, err := s.pool.Query(ctx, `
-		SELECT w.id, w.name, w.slug, r.role, r.brand_ids::text[], r.role_id::text, r.scopes, `+workspaceBrandCols+`
-		FROM (
-			SELECT DISTINCT ON (ws) ws, role, brand_ids, role_id, scopes FROM (
-				SELECT m.workspace_id AS ws, m.role, `+roleRankSQL+` AS rank, m.brand_ids, m.role_id, `+memberRoleScopes+` AS scopes FROM memberships m WHERE m.user_id = $1
-				UNION ALL
-				SELECT w.id, am.role, `+roleRankSQL+`, '{}'::uuid[], NULL::uuid,
-					(SELECT wr.scopes FROM workspace_roles wr WHERE wr.workspace_id = w.id AND wr.builtin = am.role)
-				FROM agency_members am JOIN workspaces w ON w.agency_id = am.agency_id WHERE am.user_id = $1
-			) x ORDER BY ws, rank DESC, cardinality(brand_ids)
-		) r
-		JOIN workspaces w ON w.id = r.ws
-		LEFT JOIN agencies ag ON ag.id = w.agency_id
+		SELECT w.id, w.name, w.slug, m.role, m.brand_ids::text[], m.role_id::text, `+memberRoleScopes+`, w.test
+		FROM memberships m JOIN workspaces w ON w.id = m.workspace_id
+		WHERE m.user_id = $1
 		ORDER BY w.created_at`, p.UserID)
 	if err != nil {
 		s.internal(w, r, err)
@@ -424,19 +394,6 @@ func (s *Server) me(w http.ResponseWriter, r *http.Request) {
 		s.internal(w, r, err)
 		return
 	}
-	arows, err := s.pool.Query(ctx, `
-		SELECT a.id, a.name, a.brand_name, a.logo_url, a.accent_color, a.support_email,
-		       (SELECT count(*)::int FROM workspaces w WHERE w.agency_id = a.id), m.role, a.created_at
-		FROM agencies a JOIN agency_members m ON m.agency_id = a.id WHERE m.user_id = $1 ORDER BY a.created_at`, p.UserID)
-	if err != nil {
-		s.internal(w, r, err)
-		return
-	}
-	ags, err := pgx.CollectRows(arows, pgx.RowToStructByPos[agencyView])
-	if err != nil {
-		s.internal(w, r, err)
-		return
-	}
 	view, err := s.supportViewOf(ctx, p)
 	if err != nil {
 		s.internal(w, r, err)
@@ -446,7 +403,7 @@ func (s *Server) me(w http.ResponseWriter, r *http.Request) {
 	if view != nil {
 		links = []MenuLink{}
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"user": user, "workspaces": wss, "agencies": ags, "menu_links": links, "support_view": view})
+	writeJSON(w, http.StatusOK, map[string]any{"user": user, "workspaces": wss, "menu_links": links, "support_view": view})
 }
 
 func (s *Server) createWorkspace(w http.ResponseWriter, r *http.Request) {
@@ -507,7 +464,7 @@ func (s *Server) writeWorkspace(w http.ResponseWriter, r *http.Request, id, role
 	if role != "" {
 		v.Scopes = effectiveScopes(role, nil)
 	}
-	row := s.pool.QueryRow(r.Context(), `SELECT w.id, w.name, w.slug, `+workspaceBrandCols+` FROM workspaces w LEFT JOIN agencies ag ON ag.id = w.agency_id WHERE w.id = $1`, id)
+	row := s.pool.QueryRow(r.Context(), `SELECT w.id, w.name, w.slug, w.test FROM workspaces w WHERE w.id = $1`, id)
 	if err := scanWorkspace(row, &v, false); err != nil {
 		s.internal(w, r, err)
 		return

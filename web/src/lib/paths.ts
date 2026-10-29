@@ -9,14 +9,14 @@
 // Older links still open: /w/{workspace id}/{tab} is rewritten to the slug,
 // and /{workspace}/{tab}?brand=repocket to /{workspace}/repocket/{tab}.
 
-export const appTabs = ["overview", "get-started", "setup", "ai", "ai-usage", "tools", "reports", "channels", "analytics", "tracking", "flags", "ab-tests", "links", "seo", "seo-overview", "audits", "fixes", "experiments", "keywords", "ai-visibility", "backlinks", "competitors", "reddit", "social", "reviews", "ads", "partners", "visitors", "inbox", "missions", "playbooks", "outcomes", "projects", "sequences", "link-building", "news", "infrastructure", "mailboxes", "domains", "warmup", "servers", "allocation", "lifecycle", "emails", "broadcasts", "journeys", "rules", "templates", "topics", "providers", "leads", "lists", "lead-finder", "email-finder", "suppression", "company", "brands", "ideal-customers", "workspace", "members", "alerts", "digests", "senders", "connectors", "webhooks", "tokens", "logs", "audit", "agency", "instance", "account"] as const;
+export const appTabs = ["overview", "get-started", "setup", "ai", "ai-usage", "tools", "reports", "channels", "analytics", "tracking", "flags", "ab-tests", "links", "seo", "seo-overview", "audits", "fixes", "experiments", "keywords", "ai-visibility", "backlinks", "competitors", "reddit", "social", "reviews", "ads", "partners", "visitors", "inbox", "missions", "playbooks", "outcomes", "projects", "sequences", "link-building", "news", "infrastructure", "mailboxes", "domains", "warmup", "servers", "allocation", "lifecycle", "emails", "broadcasts", "journeys", "rules", "templates", "topics", "providers", "leads", "lists", "lead-finder", "email-finder", "suppression", "company", "brands", "ideal-customers", "workspace", "members", "alerts", "digests", "senders", "connectors", "webhooks", "tokens", "logs", "audit", "instance", "account"] as const;
 export type Tab = (typeof appTabs)[number];
 
 export const isTab = (t?: string): t is Tab => !!t && (appTabs as readonly string[]).includes(t);
 
 // Pages that belong to the whole workspace, not to a brand: their URLs
 // have no brand in them.
-export const workspaceTabs: readonly Tab[] = ["get-started", "tools", "ai", "ai-usage", "workspace", "members", "digests", "tokens", "webhooks", "agency", "instance", "account"];
+export const workspaceTabs: readonly Tab[] = ["get-started", "tools", "ai", "ai-usage", "workspace", "members", "digests", "tokens", "webhooks", "instance", "account"];
 
 // The brand part of URLs: a handle, "all", or "" for a workspace without
 // brands. Set by lib/brand.ts as the brand picked changes.

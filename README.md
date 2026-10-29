@@ -485,16 +485,6 @@ curl -X POST "$URL/v1/workspaces/$WS/emails" -H "Authorization: Bearer $TOKEN" -
   -d '{"to": "ana@customer.example", "template": "password-reset", "data": {"reset_url": "https://app.example.com/r/abc"}}'
 ```
 
-## Agencies
-
-Run outbound for many clients from one login. Create an agency on the Agency page (or `POST /v1/agencies`) and each client gets its own workspace, with its own mailboxes, leads, sequences and inbox, so nothing mixes between clients.
-
-- **Your team** gets its agency role (owner, admin, operator or viewer) in every client workspace. Invite a client's own staff to just their workspace.
-- **One agent for every client**: an agency token (`ofa_...`) works in every client workspace with the scopes you give it. Run the MCP server with `OUTFLARE_AGENCY` and the agent gets `list_clients`, `use_client` and `create_client` (see [`mcp/README.md`](mcp/README.md)).
-- **Every client at a glance**: `GET /v1/agencies/$AG/clients` lists each client's mailboxes, live sequences, sends, reply and bounce rates for the week, and replies waiting, worst bounce rate first.
-- **White label**: brand name, logo, accent colour and support email replace Outflare in client workspaces.
-- Agency changes (clients, team, tokens, branding) are logged at `GET /v1/agencies/$AG/events`.
-
 ## API
 
 Your first call, against a fresh instance: create a token under **API tokens** (choose Read only, Can make changes, or area by area, and when it expires; you can rename it or change what it may do later) (or `POST /v1/workspaces/{ws}/api-tokens`), then

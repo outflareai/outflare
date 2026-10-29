@@ -14,7 +14,7 @@ const id = z.string().uuid();
 const read = { readOnlyHint: true, openWorldHint: false } as const;
 const external = { readOnlyHint: false, destructiveHint: false, openWorldHint: true } as const;
 
-// workspace is read on every call: with an agency, use_client changes it.
+// workspace is read on every call.
 export function registerSupplierTools(server: McpServer, gtm: MissionClient, workspace: () => string, readOnly: boolean, call: Call): void {
   const supplier = id.describe("The supplier integration's id, from the integrations list (connector cheapinboxes).");
 

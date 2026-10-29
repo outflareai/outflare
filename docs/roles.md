@@ -34,5 +34,3 @@ API tokens never hold more than the person who made them, and never `members.rem
 - `POST /roles`, `PATCH /roles/{role}` and `DELETE /roles/{role}` (`?move_to=` when it's in use) need `roles.manage`. `{role}` is a role's id, or `admin`, `operator` (or `member`) or `viewer`.
 - Members and invites take `role` (a starting role) or `role_id` (one of the workspace's own roles). They return `role_id` and `role_name`. `role` then holds the starting role nearest below the custom one, which is what a version without custom roles reads.
 - `GET /v1/workspaces/{ws}` and `/v1/me` return your `scopes` in each workspace.
-
-Agencies keep the four fixed roles for their own team for now.

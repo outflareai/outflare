@@ -24,7 +24,7 @@ export const GUIDE = `# Outflare, in one page
 Outflare is the brain of a company's go-to-market. It sends cold email from the company's own mailboxes, connects out to every other tool (data, verification, CRMs, calendars, analytics, SEO, mailbox suppliers) and lets agents run all of it within limits people set.
 
 ## How things connect
-- Workspace: one company (or one agency client). Everything below belongs to exactly one workspace. Members are people with a role (owner, admin, operator, viewer); API tokens are machines with scopes, optionally held to one project.
+- Workspace: one company. Everything below belongs to exactly one workspace. Members are people with a role (owner, admin, operator, viewer); API tokens are machines with scopes, optionally held to one project.
 - Company context and memories: what Outflare knows about the business (get_context). Read them before writing anything; save what the person tells you with update_context and remember.
 - Brands: a company can market several brands, each with its own website (list_brands). Connectors, members, tokens and leads are shared; each brand has its own context, memories, projects, domains and mailboxes. Pass brand to get_context to read the company's context with that brand's on top; a brand's mailboxes only send for its sequences. Records without a brand are shared.
 - Project: one motion, an offer sold to one ideal customer in one market. Its brief (get_project_brief) holds offer, audience, market and ICP filters. Domains, mailboxes, lead lists and sequences can belong to a project; the rest is shared.

@@ -108,59 +108,6 @@ class Operations(_Mixin):
             idempotency_key=idempotency_key,
         )
 
-    def add_agency_client(
-        self,
-        *,
-        ag: str | None = None,
-        name: str | None = None,
-        workspace_id: str | None = None,
-        extra_body: dict[str, Any] | None = None,
-        idempotency_key: str | None = None,
-    ) -> Any:
-        """Create a client workspace, or bring in one you own.
-
-        Send name to create a new client workspace (agency admins, or agency
-        tokens with can_create_clients). It has no direct members: agency
-        people reach it through their agency role. Send workspace_id to bring
-        in a workspace you own directly.
-
-        Needs: agency role admin.
-        POST /v1/agencies/{ag}/clients
-        """
-        return self._call(
-            "POST",
-            "/v1/agencies/{ag}/clients",
-            path={"ag": ag},
-            body={"name": name, "workspace_id": workspace_id},
-            extra_body=extra_body,
-            idempotency_key=idempotency_key,
-        )
-
-    def add_agency_member(
-        self,
-        *,
-        ag: str | None = None,
-        email: str,
-        role: Literal["owner", "admin", "operator", "viewer"],
-        extra_body: dict[str, Any] | None = None,
-        idempotency_key: str | None = None,
-    ) -> Any:
-        """Add someone who already has an account.
-
-        Agency admins. They get this role in every client workspace. Nobody can give a role above their own.
-
-        Needs: agency role admin.
-        POST /v1/agencies/{ag}/members
-        """
-        return self._call(
-            "POST",
-            "/v1/agencies/{ag}/members",
-            path={"ag": ag},
-            body={"email": email, "role": role},
-            extra_body=extra_body,
-            idempotency_key=idempotency_key,
-        )
-
     def add_ai_prompts(
         self,
         cohort: str,
@@ -2244,38 +2191,6 @@ class Operations(_Mixin):
                 "target_id": target_id,
                 "value_property": value_property,
                 "value_unit": value_unit,
-            },
-            extra_body=extra_body,
-            idempotency_key=idempotency_key,
-        )
-
-    def create_agency_token(
-        self,
-        *,
-        ag: str | None = None,
-        can_create_clients: bool | None = None,
-        expires_in_days: int | None = None,
-        name: str,
-        scopes: list[str],
-        extra_body: dict[str, Any] | None = None,
-        idempotency_key: str | None = None,
-    ) -> Any:
-        """Create a token that works in every client workspace.
-
-        Agency admins. Scopes apply in each client and can't exceed your agency role. The secret is returned once.
-
-        Needs: agency role admin.
-        POST /v1/agencies/{ag}/api-tokens
-        """
-        return self._call(
-            "POST",
-            "/v1/agencies/{ag}/api-tokens",
-            path={"ag": ag},
-            body={
-                "can_create_clients": can_create_clients,
-                "expires_in_days": expires_in_days,
-                "name": name,
-                "scopes": scopes,
             },
             extra_body=extra_body,
             idempotency_key=idempotency_key,
@@ -6273,24 +6188,6 @@ class Operations(_Mixin):
                 "account_id": account_id,
                 "brand": brand,
             },
-        )
-
-    def get_agency(
-        self,
-        *,
-        ag: str | None = None,
-    ) -> Any:
-        """An agency.
-
-        Agency members, or the agency's own tokens.
-
-        Needs: agency role viewer.
-        GET /v1/agencies/{ag}
-        """
-        return self._call(
-            "GET",
-            "/v1/agencies/{ag}",
-            path={"ag": ag},
         )
 
     def get_ai_bot_hits(
@@ -10382,74 +10279,6 @@ class Operations(_Mixin):
             "/v1/workspaces/{ws}/ads/conversion-targets",
             path={"ws": ws},
             query={"account_id": account_id},
-        )
-
-    def list_agency_clients(
-        self,
-        *,
-        ag: str | None = None,
-    ) -> Any:
-        """Every client with this week's numbers.
-
-        Agency members or agency tokens. Worst bounce rate first.
-
-        Needs: agency role viewer.
-        GET /v1/agencies/{ag}/clients
-        """
-        return self._call(
-            "GET",
-            "/v1/agencies/{ag}/clients",
-            path={"ag": ag},
-        )
-
-    def list_agency_events(
-        self,
-        *,
-        ag: str | None = None,
-    ) -> Any:
-        """Agency log.
-
-        Agency admins. Clients, members, tokens and branding changes, newest first (last 200).
-
-        Needs: agency role admin.
-        GET /v1/agencies/{ag}/events
-        """
-        return self._call(
-            "GET",
-            "/v1/agencies/{ag}/events",
-            path={"ag": ag},
-        )
-
-    def list_agency_members(
-        self,
-        *,
-        ag: str | None = None,
-    ) -> Any:
-        """Agency members.
-
-        Needs: agency role viewer.
-        GET /v1/agencies/{ag}/members
-        """
-        return self._call(
-            "GET",
-            "/v1/agencies/{ag}/members",
-            path={"ag": ag},
-        )
-
-    def list_agency_tokens(
-        self,
-        *,
-        ag: str | None = None,
-    ) -> Any:
-        """Active agency tokens.
-
-        Needs: agency role admin.
-        GET /v1/agencies/{ag}/api-tokens
-        """
-        return self._call(
-            "GET",
-            "/v1/agencies/{ag}/api-tokens",
-            path={"ag": ag},
         )
 
     def list_agent_apps(
@@ -16524,48 +16353,6 @@ class Operations(_Mixin):
             idempotency_key=idempotency_key,
         )
 
-    def remove_agency_client(
-        self,
-        *,
-        ag: str | None = None,
-        ws: str | None = None,
-        idempotency_key: str | None = None,
-    ) -> Any:
-        """Take a workspace out of the agency.
-
-        Agency owners. The workspace and its data stay. If nobody owns it directly, you become its owner.
-
-        Needs: agency role owner.
-        DELETE /v1/agencies/{ag}/clients/{ws}
-        """
-        return self._call(
-            "DELETE",
-            "/v1/agencies/{ag}/clients/{ws}",
-            path={"ag": ag, "ws": ws},
-            idempotency_key=idempotency_key,
-        )
-
-    def remove_agency_member(
-        self,
-        user: str,
-        *,
-        ag: str | None = None,
-        idempotency_key: str | None = None,
-    ) -> Any:
-        """Remove someone from the agency.
-
-        The last owner can't be removed.
-
-        Needs: agency role admin.
-        DELETE /v1/agencies/{ag}/members/{user}
-        """
-        return self._call(
-            "DELETE",
-            "/v1/agencies/{ag}/members/{user}",
-            path={"user": user, "ag": ag},
-            idempotency_key=idempotency_key,
-        )
-
     def remove_connection_hook(
         self,
         id: str,
@@ -17271,25 +17058,6 @@ class Operations(_Mixin):
             path={"record": record, "ws": ws},
             body={"decision": decision},
             extra_body=extra_body,
-            idempotency_key=idempotency_key,
-        )
-
-    def revoke_agency_token(
-        self,
-        id: str,
-        *,
-        ag: str | None = None,
-        idempotency_key: str | None = None,
-    ) -> Any:
-        """Revoke an agency token.
-
-        Needs: agency role admin.
-        DELETE /v1/agencies/{ag}/api-tokens/{id}
-        """
-        return self._call(
-            "DELETE",
-            "/v1/agencies/{ag}/api-tokens/{id}",
-            path={"id": id, "ag": ag},
             idempotency_key=idempotency_key,
         )
 
@@ -19665,63 +19433,6 @@ class Operations(_Mixin):
                 "value_property": value_property,
                 "value_unit": value_unit,
             },
-            extra_body=extra_body,
-            idempotency_key=idempotency_key,
-        )
-
-    def update_agency(
-        self,
-        *,
-        ag: str | None = None,
-        accent_color: str | None = None,
-        brand_name: str | None = None,
-        logo_url: str | None = None,
-        name: str | None = None,
-        support_email: str | None = None,
-        extra_body: dict[str, Any] | None = None,
-        idempotency_key: str | None = None,
-    ) -> Any:
-        """Rename the agency or change its white label.
-
-        Agency admins. Client members see the brand name, logo and accent colour in place of Outflare.
-
-        Needs: agency role admin.
-        PATCH /v1/agencies/{ag}
-        """
-        return self._call(
-            "PATCH",
-            "/v1/agencies/{ag}",
-            path={"ag": ag},
-            body={
-                "accent_color": accent_color,
-                "brand_name": brand_name,
-                "logo_url": logo_url,
-                "name": name,
-                "support_email": support_email,
-            },
-            extra_body=extra_body,
-            idempotency_key=idempotency_key,
-        )
-
-    def update_agency_member(
-        self,
-        user: str,
-        *,
-        ag: str | None = None,
-        role: Literal["owner", "admin", "operator", "viewer"],
-        extra_body: dict[str, Any] | None = None,
-        idempotency_key: str | None = None,
-    ) -> Any:
-        """Change an agency member's role.
-
-        Needs: agency role admin.
-        PATCH /v1/agencies/{ag}/members/{user}
-        """
-        return self._call(
-            "PATCH",
-            "/v1/agencies/{ag}/members/{user}",
-            path={"user": user, "ag": ag},
-            body={"role": role},
             extra_body=extra_body,
             idempotency_key=idempotency_key,
         )
@@ -23254,7 +22965,7 @@ class Operations(_Mixin):
     ) -> Any:
         """Who the caller is.
 
-        Any session or token. For an API token: its workspace (or agency), project, scopes and expiry, so a client
+        Any session or token. For an API token: its workspace, project, scopes and expiry, so a client
         holding only a token can find everything else. For a signed-in person: the user (GET /v1/me lists their
         workspaces).
 

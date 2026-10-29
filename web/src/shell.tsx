@@ -104,7 +104,6 @@ export const tabNames: Record<Tab, string> = {
   tokens: "API tokens",
   logs: "Logs",
   audit: "Audit log",
-  agency: "Agency",
   instance: "This server",
   account: "Your account",
 };
@@ -180,7 +179,6 @@ export const tabBlurbs: Record<Tab, string> = {
   webhooks: "Events Outflare sends to your own systems as they happen.",
   logs: "Every API call from the web app, the API, MCP agents, the CLI and missions: search, filter, follow live and export.",
   audit: "Every change in the workspace: what, who, when, and through which surface.",
-  agency: "Clients you run outreach for, and their workspaces.",
   instance: "This server's version, updates and anonymous usage report.",
   account: "Your email address, password and passkeys.",
 };
@@ -250,7 +248,6 @@ export const tabDocs: Partial<Record<Tab, string>> = {
   webhooks: "/docs/api/webhooks/",
   logs: "/docs/api/logs/",
   audit: "/docs/guides/workspaces-and-access/",
-  agency: "/docs/guides/agencies/",
   instance: "/docs/self-hosting/telemetry/",
 };
 
@@ -398,20 +395,19 @@ export function PinButton({ tab, from, className }: { tab: Tab; from: string; cl
 
 // Settings pages sit behind one Settings entry, with their own menu:
 // the workspace, its AI, and what developers and agents use.
-export function settingsGroups(isAdmin: boolean, agency = false, ws?: Workspace): NavGroup[] {
+export function settingsGroups(isAdmin: boolean, ws?: Workspace): NavGroup[] {
   const groups: NavGroup[] = [
     { label: "Workspace", tabs: ["workspace", "members"] },
     { label: "AI", tabs: ["ai", "ai-usage"] },
     { label: "Notifications", tabs: ["alerts", "digests"] },
     { label: "Developers", tabs: isAdmin ? ["tokens", "webhooks", "logs", "audit", "tools"] : ["webhooks", "tools"] },
-    ...(agency ? [{ label: "Agency", tabs: ["agency"] as Tab[] }] : []),
     { label: "You", tabs: ["account"] },
     { label: "Server", tabs: ["instance"] },
   ];
   return groups.map((g) => ({ ...g, tabs: g.tabs.filter((t) => canOpen(ws, t)) })).filter((g) => g.tabs.length > 0);
 }
 
-export const settingsTabs: readonly Tab[] = ["workspace", "members", "ai", "ai-usage", "alerts", "digests", "tokens", "webhooks", "logs", "audit", "tools", "agency", "account", "instance"];
+export const settingsTabs: readonly Tab[] = ["workspace", "members", "ai", "ai-usage", "alerts", "digests", "tokens", "webhooks", "logs", "audit", "tools", "account", "instance"];
 export const isSettings = (t: Tab) => settingsTabs.includes(t);
 
 // ---- Theme ----
@@ -717,8 +713,8 @@ function BrandSwitcher({ ws, onManage, chip, onPicked }: { ws: Workspace; onMana
 function WorkspaceSwitcher({ workspaces, ws, onChange }: { workspaces: Workspace[]; ws?: Workspace; onChange: (id: string) => void }) {
   const inner = (
     <>
-      {/* One row: the Outflare mark (or an agency's brand), then the workspace. Collapsed, only the mark shows. */}
-      <Logo brand={ws?.brand} markOnly className="shrink-0" />
+      {/* One row: the Outflare mark, then the workspace. Collapsed, only the mark shows. */}
+      <Logo markOnly className="shrink-0" />
       <span aria-hidden="true" className="text-muted-foreground/40 group-data-[collapsible=icon]:hidden">/</span>
       <span className="min-w-0 flex-1 truncate text-left font-medium group-data-[collapsible=icon]:hidden">{ws?.name}</span>
     </>
@@ -1036,8 +1032,6 @@ function callFor(tab: Tab, ws: string, item?: string): Call {
       return { title: "Request logs", path: "/v1/workspaces/{ws}/logs", params: { ...base, level: "warning,error", since: "1h" }, mcp: "list_logs", ask: "Which of my calls failed in the last hour, and why?", scope: "audit.read" };
     case "audit":
       return { title: "Audit log", path: "/v1/workspaces/{ws}/audit-events", params: base, scope: "audit.read" };
-    case "agency":
-      return { title: "Your agencies", path: "/v1/agencies", params: {}, mcp: "list_clients", ask: "Which clients have bounce problems or replies waiting this week?", scope: "agency member (or an ofa_ agency token for /clients)" };
     case "instance":
       return { title: "Usage stats and updates", path: "/v1/instance/telemetry", params: {}, scope: "signed-in user (not API tokens)" };
     case "account":

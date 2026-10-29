@@ -361,8 +361,7 @@ func (s *Server) checkRoleChange(a *access, v roleView) error {
 func (s *Server) applyRole(ctx context.Context, tx pgx.Tx, a *access, v roleView, name, desc string, scopes []string) error {
 	// Taking a permission off a role takes it from everyone on it, which is
 	// the same as lowering each of them: it needs Remove people. Starting
-	// roles always count as in use, since agency members take their access
-	// in client workspaces from them too.
+	// roles always count as in use.
 	if (v.Builtin != nil || v.Members > 0 || v.Invites > 0) && !auth.Within(v.Scopes, scopes) && !a.has(auth.ScopeMembersRemove) {
 		return errDenied("taking permissions off " + v.Name + " takes them from the people on it, which needs the Remove people permission")
 	}
@@ -646,7 +645,7 @@ func (s *Server) leaveWorkspace(w http.ResponseWriter, r *http.Request) {
 		var role string
 		err := tx.QueryRow(ctx, `SELECT role FROM memberships WHERE workspace_id = $1 AND user_id = $2 FOR UPDATE`, a.WorkspaceID, a.UserID).Scan(&role)
 		if errors.Is(err, pgx.ErrNoRows) {
-			return errInvalid("you're here through your agency, so leave the agency or ask it to remove you")
+			return errInvalid("you're not a member of this workspace")
 		}
 		if err != nil {
 			return err

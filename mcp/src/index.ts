@@ -3,12 +3,11 @@
 //
 //   OUTFLARE_URL=https://outflare.example.com OUTFLARE_TOKEN=oft_... outflare-mcp
 //
-// The token says which workspace (or agency) it belongs to; set
-// OUTFLARE_WORKSPACE only to pick an agency client at startup.
+// The token says which workspace it belongs to, so OUTFLARE_WORKSPACE is
+// optional.
 // OUTFLARE_MISSION=<uuid> makes every call act inside that agent mission.
 // OUTFLARE_BRAND=<handle> makes get_context and the list tools default to
 // one brand; the agent can still ask for others.
-// With an agency token the agent picks a client with use_client.
 //
 // OUTFLARE_MCP_HTTP=127.0.0.1:<port> serves Streamable HTTP instead, for the
 // engine to proxy at /mcp (see http.ts); it then needs
@@ -41,20 +40,18 @@ async function main() {
     return;
   }
   const client = createClient({ baseUrl: env("URL"), token: env("TOKEN"), missions: true, clientName: `mcp/${VERSION}` });
-  let agency = opt("AGENCY");
   let workspace = opt("WORKSPACE");
-  if (!agency && !workspace) {
+  if (!workspace) {
     const { data, error } = await client.GET("/v1/whoami");
     if (error || !data?.token) {
       console.error("outflare-mcp: the server refused OUTFLARE_TOKEN, or it is not an API token:", error ?? "no token");
       process.exit(1);
     }
-    agency = data.token.agency_id ?? undefined;
     workspace = data.token.workspace_id ?? undefined;
   }
   const server = createServer({
     client,
-    ...(agency ? { agency, workspace } : { workspace: workspace ?? env("WORKSPACE") }),
+    workspace: workspace ?? env("WORKSPACE"),
     readOnly: ["1", "true", "yes"].includes((opt("MCP_READ_ONLY") ?? "").toLowerCase()),
     mission: opt("MISSION"),
     brand: opt("BRAND"),

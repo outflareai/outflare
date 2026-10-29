@@ -32,7 +32,6 @@ func (s *Server) whoami(w http.ResponseWriter, r *http.Request) {
 		Kind        string     `json:"kind"`
 		WorkspaceID *string    `json:"workspace_id"`
 		Workspace   *wsRef     `json:"workspace"`
-		AgencyID    *string    `json:"agency_id"`
 		ProjectID   *string    `json:"project_id"`
 		BrandID     *string    `json:"brand_id"`
 		Brand       *brandRef  `json:"brand"`
@@ -54,13 +53,6 @@ func (s *Server) whoami(w http.ResponseWriter, r *http.Request) {
 	}{}
 	out.Actor.ID, out.Actor.Type = p.ActorID, p.ActorType
 	switch {
-	case p.TokenAgencyID != "":
-		t := &tokenView{ID: p.TokenID, Kind: "agency", AgencyID: &p.TokenAgencyID, Scopes: p.TokenScopes}
-		if err := s.pool.QueryRow(ctx, `SELECT name, expires_at FROM agency_tokens WHERE id = $1`, p.TokenID).Scan(&t.Name, &t.ExpiresAt); err != nil {
-			s.internal(w, r, err)
-			return
-		}
-		out.Token = t
 	case p.TokenID != "":
 		t := &tokenView{ID: p.TokenID, Kind: "workspace", WorkspaceID: &p.TokenWorkspaceID, ProjectID: p.TokenProjectID, Scopes: p.TokenScopes,
 			Workspace: &wsRef{ID: p.TokenWorkspaceID}, BrandID: p.TokenBrandID}

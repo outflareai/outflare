@@ -18,8 +18,7 @@ info:
     (the API token scope it needs in the workspace) and `project_tokens`
     (whether a project token may call it), `brand_limited` (whether a
     caller kept to some brands, a brand token or an operator or viewer
-    with brands, may call it; elsewhere it gets 403), `agency_role` and
-    `agency_tokens` for agency endpoints, or `signed_in` for endpoints
+    with brands, may call it; elsewhere it gets 403), or `signed_in` for endpoints
     only a signed-in person can use, `authenticated` for any session or
     token. Operations without it are public.
     The engine's tests check every value against the running server.
@@ -128,7 +127,7 @@ paths:
       x-outflare-access: { authenticated: true }
       summary: Who the caller is
       description: |
-        Any session or token. For an API token: its workspace (or agency), project, scopes and expiry, so a client
+        Any session or token. For an API token: its workspace, project, scopes and expiry, so a client
         holding only a token can find everything else. For a signed-in person: the user (GET /v1/me lists their
         workspaces).
       tags: [access]
@@ -151,14 +150,14 @@ paths:
                     oneOf:
                       - type: "null"
                       - type: object
-                        required: [id, name, kind, workspace_id, workspace, agency_id, project_id, scopes, expires_at]
+                        required: [id, name, kind, workspace_id, workspace, project_id, scopes, expires_at]
                         properties:
                           id: { type: string, format: uuid }
                           name: { type: string }
-                          kind: { type: string, enum: [workspace, agency] }
+                          kind: { type: string, enum: [workspace] }
                           workspace_id: { type: [string, "null"], format: uuid }
                           workspace:
-                            description: The token's workspace, with its slug and name; null for an agency token.
+                            description: The token's workspace, with its slug and name.
                             oneOf:
                               - type: "null"
                               - type: object
@@ -168,7 +167,6 @@ paths:
                                   slug: { type: string, example: acme }
                                   name: { type: string, example: Acme Outbound }
                                   test: { type: boolean, description: "A test workspace, where nothing reaches the outside world." }
-                          agency_id: { type: [string, "null"], format: uuid }
                           project_id: { type: [string, "null"], format: uuid }
                           brand_id: { type: [string, "null"], format: uuid, description: "Set for a brand token: it sees that brand's records and the shared ones, and changes only that brand's." }
                           brand:
@@ -780,7 +778,7 @@ paths:
             application/json:
               schema:
                 type: object
-                required: [user, workspaces, agencies, menu_links, support_view]
+                required: [user, workspaces, menu_links, support_view]
                 properties:
                   user:
                     type: object
@@ -799,11 +797,8 @@ paths:
                         description: Seconds until another confirmation email can be sent (`POST /v1/me/email-verification`); 0 when one can be sent now or the address is confirmed.
                   workspaces:
                     type: array
-                    description: Workspaces the user is a member of, plus every client workspace of their agencies, each with their strongest role.
+                    description: Workspaces the user is a member of, with their role.
                     items: { $ref: "#/components/schemas/Workspace" }
-                  agencies:
-                    type: array
-                    items: { $ref: "#/components/schemas/Agency" }
                   menu_links:
                     type: array
                     description: Extra sidebar items for this person only, added by a server extension, such as the hosted Cloud's staff console for its staff. Empty for almost everyone.
@@ -885,307 +880,6 @@ paths:
                 required: [ended]
                 properties:
                   ended: { type: boolean }
-        default: { $ref: "#/components/responses/Error" }
-  /v1/agencies:
-    get:
-      operationId: listAgencies
-      x-outflare-access: { signed_in: true }
-      summary: Agencies the signed-in user belongs to
-      tags: [agencies]
-      responses:
-        "200":
-          description: Agencies.
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  data: { type: array, items: { $ref: "#/components/schemas/Agency" } }
-        default: { $ref: "#/components/responses/Error" }
-    post:
-      operationId: createAgency
-      x-outflare-access: { signed_in: true }
-      summary: Create an agency
-      description: |
-        Signed-in users only. The creator becomes the agency's owner. Pass
-        workspace_ids to bring workspaces you own in as clients.
-      tags: [agencies]
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              required: [name]
-              properties:
-                name: { type: string, maxLength: 100 }
-                workspace_ids: { type: array, items: { type: string, format: uuid } }
-      responses:
-        "201":
-          description: Created.
-          content:
-            application/json:
-              schema: { $ref: "#/components/schemas/Agency" }
-        "400": { $ref: "#/components/responses/Error" }
-        default: { $ref: "#/components/responses/Error" }
-  /v1/agencies/{ag}:
-    parameters: [{ $ref: "#/components/parameters/Agency" }]
-    get:
-      operationId: getAgency
-      x-outflare-access: { agency_role: viewer, agency_tokens: true }
-      summary: An agency
-      description: Agency members, or the agency's own tokens.
-      tags: [agencies]
-      responses:
-        "200":
-          description: The agency.
-          content:
-            application/json:
-              schema: { $ref: "#/components/schemas/Agency" }
-        "404": { $ref: "#/components/responses/Error" }
-        default: { $ref: "#/components/responses/Error" }
-    patch:
-      operationId: updateAgency
-      x-outflare-access: { agency_role: admin }
-      summary: Rename the agency or change its white label
-      description: Agency admins. Client members see the brand name, logo and accent colour in place of Outflare.
-      tags: [agencies]
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              properties:
-                name: { type: string, maxLength: 100 }
-                brand_name: { type: string, maxLength: 60 }
-                logo_url: { type: string, description: "An https URL, or empty to clear." }
-                accent_color: { type: string, pattern: "^(#[0-9a-fA-F]{6})?$" }
-                support_email: { type: string }
-      responses:
-        "200":
-          description: The agency.
-          content:
-            application/json:
-              schema: { $ref: "#/components/schemas/Agency" }
-        "400": { $ref: "#/components/responses/Error" }
-        default: { $ref: "#/components/responses/Error" }
-  /v1/agencies/{ag}/clients:
-    parameters: [{ $ref: "#/components/parameters/Agency" }]
-    get:
-      operationId: listAgencyClients
-      x-outflare-access: { agency_role: viewer, agency_tokens: true }
-      summary: Every client with this week's numbers
-      description: Agency members or agency tokens. Worst bounce rate first.
-      tags: [agencies]
-      responses:
-        "200":
-          description: Clients.
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  data: { type: array, items: { $ref: "#/components/schemas/AgencyClient" } }
-        default: { $ref: "#/components/responses/Error" }
-    post:
-      operationId: addAgencyClient
-      x-outflare-access: { agency_role: admin, agency_tokens: true }
-      summary: Create a client workspace, or bring in one you own
-      description: |
-        Send name to create a new client workspace (agency admins, or agency
-        tokens with can_create_clients). It has no direct members: agency
-        people reach it through their agency role. Send workspace_id to bring
-        in a workspace you own directly.
-      tags: [agencies]
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              properties:
-                name: { type: string, maxLength: 100 }
-                workspace_id: { type: string, format: uuid }
-      responses:
-        "201":
-          description: The client workspace.
-          content:
-            application/json:
-              schema: { $ref: "#/components/schemas/Workspace" }
-        "400": { $ref: "#/components/responses/Error" }
-        "403": { $ref: "#/components/responses/Error" }
-        default: { $ref: "#/components/responses/Error" }
-  /v1/agencies/{ag}/clients/{ws}:
-    parameters:
-      - { $ref: "#/components/parameters/Agency" }
-      - { $ref: "#/components/parameters/Workspace" }
-    delete:
-      operationId: removeAgencyClient
-      x-outflare-access: { agency_role: owner }
-      summary: Take a workspace out of the agency
-      description: Agency owners. The workspace and its data stay. If nobody owns it directly, you become its owner.
-      tags: [agencies]
-      responses:
-        "204": { description: Removed. }
-        "404": { $ref: "#/components/responses/Error" }
-        default: { $ref: "#/components/responses/Error" }
-  /v1/agencies/{ag}/members:
-    parameters: [{ $ref: "#/components/parameters/Agency" }]
-    get:
-      operationId: listAgencyMembers
-      x-outflare-access: { agency_role: viewer }
-      summary: Agency members
-      tags: [agencies]
-      responses:
-        "200":
-          description: Members.
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  data: { type: array, items: { $ref: "#/components/schemas/Member" } }
-        default: { $ref: "#/components/responses/Error" }
-    post:
-      operationId: addAgencyMember
-      x-outflare-access: { agency_role: admin }
-      summary: Add someone who already has an account
-      description: Agency admins. They get this role in every client workspace. Nobody can give a role above their own.
-      tags: [agencies]
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              required: [email, role]
-              properties:
-                email: { type: string }
-                role: { $ref: "#/components/schemas/Role" }
-      responses:
-        "200":
-          description: Members.
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  data: { type: array, items: { $ref: "#/components/schemas/Member" } }
-        "404": { $ref: "#/components/responses/Error" }
-        default: { $ref: "#/components/responses/Error" }
-  /v1/agencies/{ag}/members/{user}:
-    parameters:
-      - { $ref: "#/components/parameters/Agency" }
-      - { name: user, in: path, required: true, schema: { type: string, format: uuid } }
-    patch:
-      operationId: updateAgencyMember
-      x-outflare-access: { agency_role: admin }
-      summary: Change an agency member's role
-      tags: [agencies]
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              required: [role]
-              properties:
-                role: { $ref: "#/components/schemas/Role" }
-      responses:
-        "200":
-          description: Members.
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  data: { type: array, items: { $ref: "#/components/schemas/Member" } }
-        default: { $ref: "#/components/responses/Error" }
-    delete:
-      operationId: removeAgencyMember
-      x-outflare-access: { agency_role: admin }
-      summary: Remove someone from the agency
-      description: The last owner can't be removed.
-      tags: [agencies]
-      responses:
-        "204": { description: Removed. }
-        default: { $ref: "#/components/responses/Error" }
-  /v1/agencies/{ag}/api-tokens:
-    parameters: [{ $ref: "#/components/parameters/Agency" }]
-    get:
-      operationId: listAgencyTokens
-      x-outflare-access: { agency_role: admin }
-      summary: Active agency tokens
-      tags: [agencies]
-      responses:
-        "200":
-          description: Tokens.
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  data: { type: array, items: { $ref: "#/components/schemas/AgencyToken" } }
-        default: { $ref: "#/components/responses/Error" }
-    post:
-      operationId: createAgencyToken
-      x-outflare-access: { agency_role: admin }
-      summary: Create a token that works in every client workspace
-      description: Agency admins. Scopes apply in each client and can't exceed your agency role. The secret is returned once.
-      tags: [agencies]
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              required: [name, scopes]
-              properties:
-                name: { type: string }
-                scopes: { type: array, items: { $ref: "#/components/schemas/Scope" } }
-                can_create_clients: { type: boolean, default: false }
-                expires_in_days: { type: integer, minimum: 1, maximum: 3650 }
-      responses:
-        "201":
-          description: Created.
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  api_token: { $ref: "#/components/schemas/AgencyToken" }
-                  token: { type: string, description: "The secret, starting ofa_. Shown once." }
-        default: { $ref: "#/components/responses/Error" }
-  /v1/agencies/{ag}/api-tokens/{id}:
-    parameters:
-      - { $ref: "#/components/parameters/Agency" }
-      - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
-    delete:
-      operationId: revokeAgencyToken
-      x-outflare-access: { agency_role: admin }
-      summary: Revoke an agency token
-      tags: [agencies]
-      responses:
-        "204": { description: Revoked. }
-        default: { $ref: "#/components/responses/Error" }
-  /v1/agencies/{ag}/events:
-    parameters: [{ $ref: "#/components/parameters/Agency" }]
-    get:
-      operationId: listAgencyEvents
-      x-outflare-access: { agency_role: admin }
-      summary: Agency log
-      description: Agency admins. Clients, members, tokens and branding changes, newest first (last 200).
-      tags: [agencies]
-      responses:
-        "200":
-          description: Events.
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  data: { type: array, items: { $ref: "#/components/schemas/AgencyEvent" } }
         default: { $ref: "#/components/responses/Error" }
   /v1/workspaces:
     post:
@@ -25735,11 +25429,6 @@ components:
         is refused with 422 `idempotency_key_reused`; while the first is still running, 409 `idempotency_in_progress`.
         Use a new random key, such as a UUID, for each distinct write.
       schema: { type: string, minLength: 1, maxLength: 255 }
-    Agency:
-      name: ag
-      in: path
-      required: true
-      schema: { type: string, format: uuid }
     Workspace:
       name: ws
       in: path
@@ -32282,66 +31971,6 @@ components:
         role_id: { type: [string, "null"], format: uuid, description: "The workspace's own role you are on, when you are on one." }
         scopes: { type: array, items: { $ref: "#/components/schemas/Scope" }, description: "What you may do in this workspace." }
         brand_ids: { type: array, items: { type: string, format: uuid }, description: "The brands you are kept to; empty for every brand." }
-        agency_id: { type: [string, "null"], format: uuid, description: Set when the workspace is an agency client. }
-        brand:
-          description: The agency's white label for a client workspace; null otherwise.
-          oneOf:
-            - { $ref: "#/components/schemas/WhiteLabel" }
-            - { type: "null" }
-    WhiteLabel:
-      type: object
-      required: [agency_name, name, logo_url, accent_color, support_email]
-      properties:
-        agency_name: { type: string }
-        name: { type: string, description: Shown instead of Outflare when set. }
-        logo_url: { type: string }
-        accent_color: { type: string, example: "#2563eb" }
-        support_email: { type: string }
-    Agency:
-      type: object
-      required: [id, name, brand_name, logo_url, accent_color, support_email, clients, created_at]
-      properties:
-        id: { type: string, format: uuid }
-        name: { type: string }
-        brand_name: { type: string }
-        logo_url: { type: string }
-        accent_color: { type: string }
-        support_email: { type: string }
-        clients: { type: integer }
-        role: { $ref: "#/components/schemas/Role" }
-        created_at: { type: string, format: date-time }
-    AgencyClient:
-      type: object
-      required: [id, name, slug, mailboxes_active, mailboxes_paused, active_sequences, sent_7d, replies_7d, bounced_7d, bounce_rate_7d, reply_rate_7d, open_replies, created_at]
-      properties:
-        id: { type: string, format: uuid }
-        name: { type: string }
-        slug: { type: string }
-        mailboxes_active: { type: integer }
-        mailboxes_paused: { type: integer }
-        active_sequences: { type: integer }
-        sent_7d: { type: integer }
-        replies_7d: { type: integer }
-        bounced_7d: { type: integer }
-        bounce_rate_7d: { type: [number, "null"], description: "Percent of sends that bounced, last 7 days." }
-        reply_rate_7d: { type: [number, "null"], description: "Percent of leads emailed in the last 7 days who replied." }
-        open_replies: { type: integer, description: Replies not done or snoozed. }
-        created_at: { type: string, format: date-time }
-    AgencyToken:
-      allOf:
-        - { $ref: "#/components/schemas/APIToken" }
-        - type: object
-          properties:
-            can_create_clients: { type: boolean }
-    AgencyEvent:
-      type: object
-      properties:
-        id: { type: string, format: uuid }
-        actor: { type: [string, "null"] }
-        action: { type: string, example: agency.client_added }
-        target: { type: string }
-        data: { type: object }
-        created_at: { type: string, format: date-time }
     Member:
       type: object
       properties:

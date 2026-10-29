@@ -51,7 +51,7 @@ const page = {
   cursor: z.string().optional().describe("next_cursor from the previous page."),
 };
 
-// workspace is read on every call: with an agency, use_client changes it.
+// workspace is read on every call.
 export function registerPartnerTools(server: McpServer, gtm: MissionClient, workspace: () => string, readOnly: boolean, call: Call): void {
   const program = z.string().describe("The program's id or slug.");
   const partner = id.describe("The partner's id (their membership in one program), from list_partners.");

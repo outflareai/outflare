@@ -55,7 +55,7 @@ Rows about a person or company carry `record_id` (AGENTS.md, Rules). **Now:** le
 
 ## Who may call it
 
-Every operation declares `x-outflare-access`: `scope` (the token scope it needs in the workspace), `project_tokens`, `agency_role`/`agency_tokens`, `signed_in` (people only), or `authenticated` (any caller). Operations without it are public. The contract test checks each value against the server.
+Every operation declares `x-outflare-access`: `scope` (the token scope it needs in the workspace), `project_tokens`, `signed_in` (people only), or `authenticated` (any caller). Operations without it are public. The contract test checks each value against the server.
 
 - A new area gets `area.read` and `area.manage` scopes. Any scope in an area includes `area.read` (`auth.Grants`), so check the narrowest scope a route needs and never require both. Split out a scope only when the risk differs, as `suppressions.manage` and `infrastructure.approve` do (one can email people who opted out, the other spends money).
 - Roles are bundles of scopes. The starting roles' defaults are in `engine/internal/auth`: viewers get every `.read` unless it exposes secrets, operators (Members) get the marketing work, admins get everything but `members.remove`. A workspace can change them and add its own ([roles.md](roles.md)), so check scopes (`access.has`), never a role name. A new scope goes into the admin default automatically; add it to the operator or viewer default when they should have it, and to `web/src/lib/rolePermissions.ts` so the role editor shows it in plain words.
@@ -149,7 +149,6 @@ The engine stays free and complete (AGPL). Paid features and billing live in bui
 
 - Names are `verb_noun` in snake case and match the operation where one exists (`create_webhook`). Descriptions say when to use the tool and what to do next ("Then call test_webhook").
 - Every tool carries annotations: `readOnlyHint` for reads (only these load in read-only mode), `destructiveHint` for deletes and ends, `openWorldHint` for anything that emails people, spends money or calls outside services. Clients use them to ask before acting.
-- A tool reads the workspace at call time, never at startup, so agency agents can switch clients.
 - Answers are compact JSON, also sent as `structuredContent`; errors carry the status, `code`, message and request id. **Next:** an `outputSchema` per tool from the document's response schema.
 
 ## Adding something: checklist

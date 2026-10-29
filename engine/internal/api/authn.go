@@ -47,8 +47,6 @@ type principal struct {
 	TokenWorkspaceID string
 	TokenScopes      []string
 	TokenOwnerID     string // the user who made the token, if they still exist
-	// Agency tokens have no workspace; they reach the agency's clients.
-	TokenAgencyID string
 	// Set when the token is bound to one project.
 	TokenProjectID *string
 	// Set when the token is bound to one brand.
@@ -124,8 +122,6 @@ func (s *Server) missingScope(a *access, scope string) string {
 	case a.TokenGrantID != "":
 		return "missing scope " + scope + ": this app was not allowed to do this; the person who connected it can turn it on under Connect your AI, " +
 			s.publicURL + "/w/" + a.WorkspaceID + "/ai/" + a.TokenGrantID
-	case a.TokenAgencyID != "":
-		return "missing scope " + scope + ": this agency token was not given it"
 	}
 	return "missing scope " + scope + ": this token was not given it; add it to the token under API tokens, " + s.publicURL + "/w/" + a.WorkspaceID + "/tokens/" + a.TokenID
 }
@@ -191,19 +187,6 @@ func (s *Server) authenticateSession(r *http.Request) (*principal, error) {
 		}
 		return p, err
 
-	case strings.HasPrefix(secret, auth.PrefixAgencyToken) && !fromCookie:
-		p := &principal{ActorType: "api_token"}
-		err := s.pool.QueryRow(ctx, `
-			UPDATE agency_tokens SET last_used_at = now()
-			WHERE token_hash = $1 AND revoked_at IS NULL AND (expires_at IS NULL OR expires_at > now())
-			  AND NOT EXISTS (SELECT 1 FROM users u WHERE u.id = agency_tokens.created_by AND u.disabled_at IS NOT NULL)
-			RETURNING id, actor_id, agency_id, scopes`, hash,
-		).Scan(&p.TokenID, &p.ActorID, &p.TokenAgencyID, &p.TokenScopes)
-		if errors.Is(err, pgx.ErrNoRows) {
-			return nil, nil
-		}
-		return p, err
-
 	case strings.HasPrefix(secret, auth.PrefixSession):
 		p := &principal{ActorType: "human"}
 		err := s.pool.QueryRow(ctx, `
@@ -227,8 +210,6 @@ type routeAccess struct {
 	Scope         string `yaml:"scope,omitempty"`
 	ProjectTokens bool   `yaml:"project_tokens,omitempty"`
 	BrandLimited  bool   `yaml:"brand_limited,omitempty"`
-	AgencyRole    string `yaml:"agency_role,omitempty"`
-	AgencyTokens  bool   `yaml:"agency_tokens,omitempty"`
 	SignedIn      bool   `yaml:"signed_in,omitempty"`
 	Authenticated bool   `yaml:"authenticated,omitempty"` // any caller: a session or any token
 }
@@ -298,18 +279,7 @@ func (s *Server) workspaceRoute(scope string, projectAware, brandAware bool, nex
 		}
 		noteWorkspace(r, ws)
 		a := &access{principal: *p, WorkspaceID: ws}
-		if p.TokenAgencyID != "" {
-			var client bool
-			if err := s.pool.QueryRow(r.Context(), `SELECT EXISTS (SELECT 1 FROM workspaces WHERE id = $1 AND agency_id = $2)`, ws, p.TokenAgencyID).Scan(&client); err != nil {
-				s.internal(w, r, err)
-				return
-			}
-			if !client {
-				writeError(w, r, http.StatusNotFound, "not_found", "workspace not found")
-				return
-			}
-			a.Scopes = p.TokenScopes
-		} else if p.TokenID != "" {
+		if p.TokenID != "" {
 			if p.TokenWorkspaceID != ws {
 				writeError(w, r, http.StatusNotFound, "not_found", "workspace not found")
 				return
@@ -389,15 +359,10 @@ func (s *Server) workspaceRoute(scope string, projectAware, brandAware bool, nex
 	}
 }
 
-// workspaceRoles lists a user's roles in a workspace ($1) for user $2: a
-// direct membership, and the role their agency gives them in its clients.
-// Callers take the highest rank.
+// workspaceRoles lists a user's role in a workspace ($1) for user $2: their
+// membership. Callers take the highest rank.
 const workspaceRoles = `
-	SELECT m.role, ` + roleRankSQL + ` AS rank, m.brand_ids, m.role_id, ` + memberRoleScopes + ` AS scopes FROM memberships m WHERE m.workspace_id = $1 AND m.user_id = $2
-	UNION ALL
-	SELECT am.role, ` + roleRankSQL + `, '{}'::uuid[], NULL::uuid, (SELECT wr.scopes FROM workspace_roles wr WHERE wr.workspace_id = w.id AND wr.builtin = am.role)
-	FROM agency_members am JOIN workspaces w ON w.agency_id = am.agency_id
-	WHERE w.id = $1 AND am.user_id = $2`
+	SELECT m.role, ` + roleRankSQL + ` AS rank, m.brand_ids, m.role_id, ` + memberRoleScopes + ` AS scopes FROM memberships m WHERE m.workspace_id = $1 AND m.user_id = $2`
 
 const roleRankSQL = `CASE role WHEN 'owner' THEN 3 WHEN 'admin' THEN 2 WHEN 'operator' THEN 1 ELSE 0 END`
 

@@ -28,7 +28,6 @@ const paths = {
   senders: <><path d="M18 21a8 8 0 0 0-16 0" /><circle cx="10" cy="8" r="5" /><path d="M22 20c0-3.37-2-6.5-4-8a5 5 0 0 0-.45-8.3" /></>,
   analytics: <><path d="M22 12h-2.48a2 2 0 0 0-1.93 1.46l-2.35 8.36a.25.25 0 0 1-.48 0L9.24 2.18a.25.25 0 0 0-.48 0l-2.35 8.36A2 2 0 0 1 4.49 12H2" /></>,
   reports: <><path d="M3 3v18h18" /><path d="M7 16v-4" /><path d="M11 16V8" /><path d="M15 16v-6" /><path d="M19 16V5" /></>,
-  agency: <><path d="M3 21h18" /><path d="M5 21V7l7-4 7 4v14" /><path d="M9 21v-6h6v6" /><path d="M9 10h.01" /><path d="M15 10h.01" /></>,
   connectors: <><path d="M12 22v-5" /><path d="M9 8V2" /><path d="M15 8V2" /><path d="M18 8v5a4 4 0 0 1-4 4h-4a4 4 0 0 1-4-4V8Z" /></>,
   logs: <><path d="M13 12h8" /><path d="M13 18h8" /><path d="M13 6h8" /><path d="M3 12h1" /><path d="M3 18h1" /><path d="M3 6h1" /><path d="M8 12h1" /><path d="M8 18h1" /><path d="M8 6h1" /></>,
   shield: <><path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z" /></>,

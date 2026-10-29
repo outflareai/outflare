@@ -27,8 +27,7 @@ The server is now at `mcp/dist/index.js`. It needs Node 18 or later.
 | --- | --- |
 | `OUTFLARE_URL` | Your instance, e.g. `https://outflare.example.com` |
 | `OUTFLARE_TOKEN` | An API token (`oft_...`) created in the web app under API tokens |
-| `OUTFLARE_WORKSPACE` | Optional: the token already says which workspace it belongs to. With an agency token, the client to start in |
-| `OUTFLARE_AGENCY` | Optional, for agencies: found from an agency token (`ofa_...`) too. The agent picks a client with `use_client` |
+| `OUTFLARE_WORKSPACE` | Optional: the token already says which workspace it belongs to |
 | `OUTFLARE_MCP_READ_ONLY` | Optional. `1` registers only the tools that change nothing |
 | `OUTFLARE_MISSION` | Optional. A mission id: every call acts inside that mission (the `use_mission` tool changes it) |
 | `OUTFLARE_BRAND` | Optional. A brand's handle: `get_context` and the list tools default to that brand. The agent can still pass another brand, or `all` |
@@ -41,18 +40,6 @@ Give the token only the scopes the agent needs. A reporting agent needs `workspa
 claude mcp add outflare \
   -e OUTFLARE_URL=https://outflare.example.com \
   -e OUTFLARE_TOKEN=oft_... \
-  -- node /path/to/outflare/mcp/dist/index.js
-```
-
-### One agent for every client (agencies)
-
-Create an agency token on the Agency page. It works in every client workspace, with the scopes you give it in each. Run the server with an agency token and three more tools appear: `list_clients` (every client with this week's sends, replies, bounces and open replies), `use_client` (switch the workspace every other tool works in) and `create_client` (new client workspace, if the token is allowed to create clients).
-
-```sh
-claude mcp add outflare-agency \
-  -e OUTFLARE_URL=https://outflare.example.com \
-  -e OUTFLARE_TOKEN=ofa_... \
-  -e OUTFLARE_AGENCY=<agency id> \
   -- node /path/to/outflare/mcp/dist/index.js
 ```
 

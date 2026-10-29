@@ -196,27 +196,6 @@ test("turns warm-up on for a pool", async () => {
   assert.deepEqual(JSON.parse(calls[0].body), { enabled: true, pool_id: pool });
 });
 
-test("agency mode switches between client workspaces", async () => {
-  const AG = "44444444-4444-4444-8444-444444444444";
-  const C2 = "55555555-5555-4555-8555-555555555555";
-  const { client, calls } = await connect(
-    (req) => (new URL(req.url).pathname === `/v1/workspaces/${C2}` ? [200, { id: C2, name: "Contoso", slug: "contoso" }] : [200, { data: [] }]),
-    { agency: AG, workspace: undefined },
-  );
-  const names = (await client.listTools()).tools.map((t) => t.name);
-  assert.ok(names.includes("list_clients") && names.includes("use_client") && names.includes("create_client"));
-  await client.callTool({ name: "list_clients", arguments: {} });
-  assert.equal(calls[0].url.pathname, `/v1/agencies/${AG}/clients`);
-  const res = await client.callTool({ name: "use_client", arguments: { workspace_id: C2 } });
-  assert.match(res.content[0].text, /Contoso/);
-  await client.callTool({ name: "list_leads", arguments: {} });
-  assert.equal(calls.at(-1).url.pathname, `/v1/workspaces/${C2}/leads`);
-  // Supplier tools follow the switch too.
-  const SUP = "66666666-6666-4666-8666-666666666666";
-  await client.callTool({ name: "list_supplier_mailboxes", arguments: { integration_id: SUP } });
-  assert.equal(calls.at(-1).url.pathname, `/v1/workspaces/${C2}/integrations/${SUP}/mailboxes`);
-});
-
 test("lead and mailbox tools: read, change, delete, list membership", async () => {
   const { client, calls } = await connect(() => [200, {}]);
   const LEAD = "44444444-4444-4444-8444-444444444444";

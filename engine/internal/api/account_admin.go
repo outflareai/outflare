@@ -109,8 +109,7 @@ func planUserDeletion(ctx context.Context, tx pgx.Tx, userID string) (UserDeleti
 
 // DeleteUser deletes a person for good, in tx: their workspaces that nobody
 // else uses, their sign-ins (sessions, passwords, Google, passkeys), their
-// memberships and pending account emails, and agencies left with no
-// members. In shared workspaces their past actions stay but are shown as
+// memberships and pending account emails. In shared workspaces their past actions stay but are shown as
 // "Deleted user", and an owner is promoted if they were the only one.
 func (a *Accounts) DeleteUser(ctx context.Context, tx pgx.Tx, userID string) (UserDeletion, error) {
 	plan, promote, err := planUserDeletion(ctx, tx, userID)
@@ -153,8 +152,7 @@ func (a *Accounts) DeleteUser(ctx context.Context, tx pgx.Tx, userID string) (Us
 			return plan, err
 		}
 	}
-	_, err = tx.Exec(ctx, `DELETE FROM agencies a WHERE NOT EXISTS (SELECT 1 FROM agency_members m WHERE m.agency_id = a.id)`)
-	return plan, err
+	return plan, nil
 }
 
 // DeleteWorkspace deletes a workspace and everything in it, in tx. Its

@@ -262,9 +262,7 @@ func RoleRank(role string) int {
 const (
 	PrefixSession  = "ofs_"
 	PrefixAPIToken = "oft_"
-	// Agency tokens work in every client workspace of one agency.
-	PrefixAgencyToken = "ofa_"
-	PrefixInvite      = "ofi_"
+	PrefixInvite   = "ofi_"
 	// Site keys are public: a website's tracking snippet writes browser
 	// events with one, and it opens nothing else.
 	PrefixSiteKey = "ofk_"

@@ -116,24 +116,13 @@ export function Status({ tone = "grey", children }: { tone?: keyof typeof tones;
   );
 }
 
-// An agency's client workspaces show the agency's brand instead.
-export function Logo({ className = "", brand, markOnly = false }: { className?: string; brand?: { name: string; logo_url: string; accent_color: string } | null; markOnly?: boolean }) {
-  const name = brand?.name || "Outflare";
-  const custom = Boolean(brand?.name || brand?.logo_url);
+export function Logo({ className = "", markOnly = false }: { className?: string; markOnly?: boolean }) {
   return (
     // The Outflare lockup's mark and name touch: the gap is in the artwork.
-    <span className={`inline-flex items-center font-semibold tracking-tight ${custom ? "gap-2" : ""} ${className}`}>
-      {brand?.logo_url ? (
-        <img src={brand.logo_url} alt="" className={`${markOnly ? "size-5" : "size-6"} rounded-md object-cover`} />
-      ) : brand?.name ? (
-        <span aria-hidden="true" className={`flex ${markOnly ? "size-5 text-[10px]" : "size-6 text-[11px]"} items-center justify-center rounded-md font-mono font-bold text-white`} style={{ background: brand.accent_color || "#171717" }}>{brand.name[0]}</span>
-      ) : (
-        <OutflareMark className={`${markOnly ? "h-[18px]" : "h-6"} w-auto shrink-0`} />
-      )}
+    <span className={`inline-flex items-center font-semibold tracking-tight ${className}`}>
+      <OutflareMark className={`${markOnly ? "h-[18px]" : "h-6"} w-auto shrink-0`} />
       {markOnly ? (
-        <span className="sr-only">{name}</span>
-      ) : custom ? (
-        <span className="truncate">{name}</span>
+        <span className="sr-only">Outflare</span>
       ) : (
         <span className="inline-flex shrink-0">
           <OutflareWordmark className="h-6 w-auto" />

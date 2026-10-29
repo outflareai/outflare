@@ -9,26 +9,6 @@ import { areas, canChange, changes, extras, levelOf, readOnly, summary, withLeve
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import type { Tab } from "../App";
 
-// Scopes by area, each with what it allows in plain words. Agency tokens
-// still pick from these; workspace tokens use @/lib/permissions.
-export const groups: { area: string; scopes: [Scope, string][] }[] = [
-  { area: "Outreach", scopes: [["leads.read", "Read leads, lists and the suppression list"], ["leads.manage", "Import and edit leads, add suppressions"], ["sequences.read", "Read sequences, enrollments and sent emails"], ["sequences.manage", "Create, start and pause sequences, add leads"], ["inbox.read", "Read replies"], ["inbox.manage", "Reply to leads, mark read"]] },
-  { area: "Missions", scopes: [["missions.read", "Read missions, their calls and held changes"], ["missions.run", "Run missions: plan, act inside them, report, pause or stop"], ["missions.approve", "Approve missions and their held changes (never for the agent itself)"]] },
-  { area: "Customers", scopes: [["customers.read", "Read people, companies and other records, their timelines and consents, product events, and the catalog of their fields"], ["customers.manage", "Add and change records, their identities and links, send product events and record consent"], ["catalog.manage", "Add and change record types, fields, option lists and event definitions"]] },
-  { area: "SEO", scopes: [["seo.read", "See SEO sites, crawls and the pages they found"], ["seo.manage", "Add and change SEO sites, check ownership and start or stop crawls"]] },
-  { area: "Social", scopes: [["social.read", "See social watches, the posts they found and replies with their results"], ["social.manage", "Add and change watches, ignore posts, draft, edit and reject replies (only a person approves one)"]] },
-  { area: "Webhooks", scopes: [["webhooks.read", "See webhook endpoints and their deliveries"], ["webhooks.manage", "Add, change and remove webhook endpoints, and see their signing secrets"]] },
-  { area: "Lifecycle email", scopes: [["emails.read", "See emails sent through your email providers and their delivery"], ["emails.send", "Send transactional and lifecycle email, such as receipts and password resets"], ["emails.manage", "Manage email providers, sending domains and templates"]] },
-  { area: "Mailboxes", scopes: [["mailboxes.read", "Read mailboxes and domain health"], ["mailboxes.manage", "Connect, pause and remove mailboxes"]] },
-  { area: "Workspace", scopes: [["workspace.read", "Read the overview numbers"], ["workspace.manage", "Rename the workspace and change its URL"], ["context.manage", "Edit the company context and save memories"], ["members.read", "List members"], ["members.manage", "Invite and remove members"], ["suppressions.manage", "Remove entries from the suppression list"], ["tokens.manage", "Create and revoke API tokens"], ["audit.read", "Read the audit log"]] },
-];
-
-export const presets: { label: string; help: string; scopes: Scope[] }[] = [
-  { label: "Reporting", help: "Reads everything, changes nothing", scopes: ["workspace.read", "mailboxes.read", "leads.read", "sequences.read", "inbox.read"] },
-  { label: "Outreach agent", help: "What the MCP server needs to run outreach", scopes: ["workspace.read", "context.manage", "mailboxes.read", "leads.read", "leads.manage", "sequences.read", "sequences.manage", "inbox.read", "inbox.manage"] },
-  { label: "Mission agent", help: "Runs missions: outreach plus planning and reporting, never approving", scopes: ["workspace.read", "context.manage", "mailboxes.read", "leads.read", "leads.manage", "sequences.read", "sequences.manage", "inbox.read", "inbox.manage", "missions.read", "missions.run"] },
-];
-
 /** A labelled Copy button, for secrets shown once. */
 export function CopyButton({ text }: { text: string }) {
   const [copied, setCopied] = useState(false);

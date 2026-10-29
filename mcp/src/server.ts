@@ -30,10 +30,8 @@ export const VERSION = "0.1.0";
 
 export type ServerOptions = {
   client: MissionClient;
-  /** Workspace id (the uuid in the web app's /w/{id}/ URLs). Optional with an agency: pick a client with use_client. */
-  workspace?: string;
-  /** Agency id, for an agency token (ofa_) that runs every client workspace. */
-  agency?: string;
+  /** Workspace id (the uuid in the web app's /w/{id}/ URLs). */
+  workspace: string;
   /** Register only the tools that change nothing. */
   readOnly?: boolean;
   /** Act inside this mission from the start (use_mission changes it). */
@@ -93,7 +91,7 @@ export function nextStep(code: string, message = ""): string | undefined {
     case "forbidden":
       return "This app or token isn't allowed to do this. The message names the permission and, when the person can turn it on, gives the link: pass the link on and say which permission. Do not retry.";
     case "not_found":
-      return "Check the id with the matching list tool. With an agency, check use_client picked the right client.";
+      return "Check the id with the matching list tool.";
     case "invalid_request":
       return "Fix the field named in param (or the message) and call again.";
     case "invalid_cursor":
@@ -239,10 +237,8 @@ const steps = z
   )
   .max(20);
 
-export function createServer({ client: gtm, workspace, agency, readOnly = false, mission: initialMission, brand: defaultBrand }: ServerOptions): McpServer {
-  // With an agency token the current client can change (use_client); every
-  // tool reads ws when it runs.
-  let ws = workspace ?? "";
+export function createServer({ client: gtm, workspace, readOnly = false, mission: initialMission, brand: defaultBrand }: ServerOptions): McpServer {
+  const ws = workspace;
   // The mission calls act in. Every request carries it, so the engine logs
   // the call against the mission and applies its mode to writes.
   let mission: string | null = initialMission ?? null;
@@ -303,11 +299,7 @@ export function createServer({ client: gtm, workspace, agency, readOnly = false,
         "a new account's first plan needs review_platform_plan.\n\n" +
         "Missions: create_mission (or plan_mission), use_mission, get_mission for the brief, company context and limits, submit_mission_plan, act, post_mission_update, complete_mission. " +
         "A write answered with mission_action is a dry run or waits for a person: poll get_mission_action, never approve it yourself. If a tool is missing, request_connector.\n\n" +
-        "Errors: a failed call says the code and a Next step line; follow it. forbidden means you aren't allowed: give the person the link in the message and say which permission to turn on; do not retry." +
-        (agency
-          ? "\n\nThis server runs an agency: list_clients shows every client with this week's numbers; call use_client before any other tool to choose which client workspace you are working in. " +
-            "Each client has its own context and memories; never carry one client's into another."
-          : ""),
+        "Errors: a failed call says the code and a Next step line; follow it. forbidden means you aren't allowed: give the person the link in the message and say which permission to turn on; do not retry.",
     },
   );
   const register = server.registerTool.bind(server) as (...a: unknown[]) => unknown;
@@ -321,31 +313,6 @@ export function createServer({ client: gtm, workspace, agency, readOnly = false,
   // withBrand fills in the default brand (OUTFLARE_BRAND) when a list call
   // names none; brand "all" asks for every brand.
   const withBrand = <T extends { brand?: string }>(q: T): T => (q.brand === undefined && defaultBrand ? { ...q, brand: defaultBrand } : q);
-
-  if (agency) {
-    server.registerTool(
-      "list_clients",
-      {
-        title: "List the agency's clients",
-        description: "Every client workspace with mailboxes, active sequences, sends, replies, bounces and rates over 7 days, and open replies. Worst bounce rate first. Shows which client is current.",
-        annotations: read,
-      },
-      async () => {
-        const r = await call(() => gtm.GET("/v1/agencies/{ag}/clients", { params: { path: { ag: agency } } }));
-        return ws ? { ...r, content: [...r.content, { type: "text" as const, text: `Current client workspace: ${ws}` }] } : r;
-      },
-    );
-    server.registerTool(
-      "use_client",
-      { title: "Switch to a client", description: "Make a client workspace (an id from list_clients) the one every other tool works in.", inputSchema: { workspace_id: id }, annotations: { ...read, idempotentHint: true } },
-      async ({ workspace_id }) => {
-        const r = await gtm.GET("/v1/workspaces/{ws}", { params: { path: { ws: workspace_id } } });
-        if (!r.data) return { isError: true, content: [{ type: "text" as const, text: "That workspace isn't one of this agency's clients. Use an id from list_clients." }] };
-        ws = workspace_id;
-        return { content: [{ type: "text" as const, text: `Now working in ${r.data.name} (${workspace_id}).` }] };
-      },
-    );
-  }
 
   // What Outflare knows and what is blocked: the first call of a conversation.
   registerContextTools(server, gtm, () => ws, readOnly, call, withBrand);
@@ -5769,23 +5736,6 @@ export function createServer({ client: gtm, workspace, agency, readOnly = false,
     ({ sequence_id, action }) =>
       call(() => gtm.POST("/v1/workspaces/{ws}/sequences/{id}/orphaned-follow-ups", { params: { path: { ws, id: sequence_id } }, body: { action } })),
   );
-  if (agency) {
-    server.registerTool(
-      "create_client",
-      {
-        title: "Create a client workspace",
-        description: "Creates a new client workspace in the agency and switches to it. Needs an agency token allowed to create clients.",
-        inputSchema: { name: z.string().min(1).max(100) },
-        annotations: write,
-      },
-      async ({ name }) => {
-        const r = await gtm.POST("/v1/agencies/{ag}/clients", { params: { path: { ag: agency } }, body: { name } });
-        if (r.data?.id) ws = r.data.id;
-        return call(async () => r);
-      },
-    );
-  }
-
   // Changing things.
 
   server.registerTool(

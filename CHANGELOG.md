@@ -6,6 +6,16 @@ Each pull request that changes what Outflare does adds a change note in [changes
 
 ## [Unreleased]
 
+## [0.26.0] - 2026-10-29
+
+### Changed
+
+- Agency accounts are gone for now, to keep Outflare simple: a workspace is one company, with its brands inside it. The Agency page, the `/v1/agencies` API, agency tokens (`ofa_`), the MCP tools `list_clients`, `use_client` and `create_client`, and agency white label are removed. Client workspaces stay, with their direct members and data.
+
+### Upgrading
+
+- agency tokens stop working, and people who reached a workspace only through an agency lose access to it; add them as members of that workspace first. No migration runs; the agency tables stay until a later release.
+
 ## [0.25.0] - 2026-10-29
 
 ### Added

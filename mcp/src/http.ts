@@ -4,8 +4,8 @@
 // the caller's bearer token (an OAuth access token or an API token), so this
 // only listens on loopback and only answers the engine.
 //
-// Each MCP session keeps its own server, because use_client and
-// use_mission change what later calls do. The session belongs to the API
+// Each MCP session keeps its own server, because use_mission changes
+// what later calls do. The session belongs to the API
 // token that opened it: an app's refreshed access token is the same token
 // with a new secret, so it carries on; any other token is refused.
 
@@ -66,7 +66,7 @@ async function readJSON(req: IncomingMessage): Promise<unknown> {
   return chunks.length ? JSON.parse(Buffer.concat(chunks).toString("utf8")) : undefined;
 }
 
-type Who = { tokenId: string; workspace?: string; agency?: string; scopes: string[] };
+type Who = { tokenId: string; workspace: string; scopes: string[] };
 
 export function serveHttp(opts: HttpOptions) {
   const sessions = new Map<string, Session>();
@@ -87,8 +87,8 @@ export function serveHttp(opts: HttpOptions) {
   async function whoami(token: string): Promise<Who | null> {
     const { data } = await client({ token }).GET("/v1/whoami");
     const t = data?.token;
-    if (!t) return null;
-    return { tokenId: t.id, workspace: t.workspace_id ?? undefined, agency: t.agency_id ?? undefined, scopes: t.scopes ?? [] };
+    if (!t?.workspace_id) return null;
+    return { tokenId: t.id, workspace: t.workspace_id, scopes: t.scopes ?? [] };
   }
 
   async function open(token: string, res: ServerResponse): Promise<Session | null> {
@@ -100,7 +100,7 @@ export function serveHttp(opts: HttpOptions) {
     const auth = { token };
     // A token that may change nothing gets only the tools that change nothing.
     const readOnly = !who.scopes.some((s) => !s.endsWith(".read"));
-    const server = createServer({ client: client(auth), ...(who.agency ? { agency: who.agency, workspace: who.workspace } : { workspace: who.workspace! }), readOnly });
+    const server = createServer({ client: client(auth), workspace: who.workspace, readOnly });
     let session: Session;
     const transport = new StreamableHTTPServerTransport({
       sessionIdGenerator: () => randomUUID(),

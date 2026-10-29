@@ -116,7 +116,7 @@ func (h *Host) runOnce(ctx context.Context) error {
 	)
 	// The server's own settings must not leak in from the engine's
 	// environment: each session's token comes from its request.
-	cmd.Env = filter(cmd.Env, "OUTFLARE_TOKEN=", "OUTFLARE_WORKSPACE=", "OUTFLARE_AGENCY=", "OUTFLARE_MISSION=", "OUTFLARE_BRAND=", "OUTFLARE_SECRET_KEY", "DATABASE_URL=")
+	cmd.Env = filter(cmd.Env, "OUTFLARE_TOKEN=", "OUTFLARE_WORKSPACE=", "OUTFLARE_MISSION=", "OUTFLARE_BRAND=", "OUTFLARE_SECRET_KEY", "DATABASE_URL=")
 	out, err := cmd.StderrPipe()
 	if err != nil {
 		return err

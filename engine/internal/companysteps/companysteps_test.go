@@ -140,15 +140,23 @@ func TestCompanySteps(t *testing.T) {
 		origin != "prospect" || via != "lead_finder" || name != "Co hooli.example" || len(hooli.warnings) != 0 {
 		t.Fatalf("new company: %s %s %s %+v %v", origin, via, name, hooli, err)
 	}
-	v, err := pipeline.View(ctx, pool, ws, run)
-	if err != nil {
-		t.Fatal(err)
-	}
-	counts := map[string]pipeline.StageCount{}
-	for _, s := range v.Stages {
-		counts[s.Stage] = s
-	}
-	if counts[Known].Skipped != 1 || counts[Known].Errors[AlreadyKnown] != 1 || counts[ContactRules].Skipped != 2 || counts[AddToCRM].Done != 2 {
-		t.Fatalf("stages: %+v", v.Stages)
+	// The links above are written before each item is marked done, so the
+	// counts can lag them for a moment.
+	for {
+		v, err := pipeline.View(ctx, pool, ws, run)
+		if err != nil {
+			t.Fatal(err)
+		}
+		counts := map[string]pipeline.StageCount{}
+		for _, s := range v.Stages {
+			counts[s.Stage] = s
+		}
+		if counts[Known].Skipped == 1 && counts[Known].Errors[AlreadyKnown] == 1 && counts[ContactRules].Skipped == 2 && counts[AddToCRM].Done == 2 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("stages: %+v", v.Stages)
+		}
+		time.Sleep(20 * time.Millisecond)
 	}
 }

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { cn } from "@/lib/utils";
-import type { Agency as AgencyT, Workspace } from "@outflare/sdk";
+import type { Workspace } from "@outflare/sdk";
 import { api } from "./api";
 import { identify, page, resetAnalytics } from "./lib/analytics";
 import { appPath, isID, isItemSlug, itemKinds, itemOrPage, parsePath, rememberWorkspaces, type Tab } from "./lib/paths";
@@ -53,7 +53,6 @@ import { ABTests } from "./pages/ABTests";
 import { CampaignLinks } from "./pages/CampaignLinks";
 import { Channels } from "./pages/Channels";
 import { IdealCustomers } from "./pages/IdealCustomers";
-import { Agency } from "./pages/Agency";
 import { LeadFinder } from "./pages/LeadFinder";
 import { EmailFinder } from "./pages/EmailFinder";
 import { CloudPage } from "./pages/CloudLocked";
@@ -89,7 +88,7 @@ import { ConnectAI } from "./pages/ConnectAI";
 import { Authorize } from "./pages/Authorize";
 import { setBrand, useBrand } from "@/lib/brand";
 
-type Me = { user: { id?: string; name?: string; email?: string; email_verified?: boolean; has_password?: boolean; email_resend_after?: number }; workspaces: Workspace[]; agencies: AgencyT[]; menu_links?: MenuLink[]; support_view?: { expires_at: string } | null };
+type Me = { user: { id?: string; name?: string; email?: string; email_verified?: boolean; has_password?: boolean; email_resend_after?: number }; workspaces: Workspace[]; menu_links?: MenuLink[]; support_view?: { expires_at: string } | null };
 type State =
   | { kind: "loading" }
   | { kind: "setup" }
@@ -453,10 +452,7 @@ function Shell({ me, onSignOut, onReload }: { me: Me; onSignOut: () => void; onR
     return () => removeEventListener("keydown", onKey);
   }, [go]);
 
-  // The Agency page shows for agency members, and for workspace owners who
-  // might want to start one.
-  const showAgency = me.agencies.length > 0 || ws?.role === "owner";
-  const settings = settingsGroups(isAdmin, showAgency, ws);
+  const settings = settingsGroups(isAdmin, ws);
   const goTo = (t: Tab, label = tabNames[t], group = "Go to"): Command => ({ id: `go-${t}`, label, group, icon: t as IconName, hint: shortcuts[t] ? `G ${shortcuts[t]!.toUpperCase()}` : undefined, run: () => go(t) });
   const commands: Command[] = [
     ...everyday.filter((t) => canOpen(ws, t)).map((t) => goTo(t)),
@@ -599,7 +595,6 @@ function Shell({ me, onSignOut, onReload }: { me: Me; onSignOut: () => void; onR
             {ready && ws && tab === "ai" && <ConnectAI key={ws.id} ws={ws.id} canSeeAll={isAdmin} go={setTab} open={item} setOpen={setItem} />}
             {ready && ws && tab === "logs" && can("audit.read") && <Logs key={ws.id} ws={ws.id} canManage={isAdmin} />}
             {ready && ws && tab === "tools" && <Tools go={setTab} />}
-            {tab === "agency" && showAgency && <Agency agencies={me.agencies} ws={ws} myId={me.user.id ?? ""} onReload={onReload} openClient={(id) => { setWsId(id); setTab("overview"); }} />}
             {tab === "instance" && <Instance />}
             {tab === "account" && <Account onChanged={onReload} />}
           </SettingsFrame>

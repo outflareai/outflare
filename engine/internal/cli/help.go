@@ -169,9 +169,6 @@ func describeAccess(a map[string]any) string {
 	if a["project_tokens"] == true {
 		parts = append(parts, "project tokens allowed")
 	}
-	if v, ok := a["agency_role"].(string); ok {
-		parts = append(parts, "agency role "+v)
-	}
 	if a["signed_in"] == true {
 		parts = append(parts, "a signed-in person (not an API token)")
 	}
