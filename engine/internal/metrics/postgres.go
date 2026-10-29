@@ -77,7 +77,7 @@ var (
 	reviewPages     = desc("reviews", "pages", "Review pages being read, by platform and state (ok, failing: the last read failed).", "platform", "state")
 	reviewStuck     = desc("reviews", "stuck_pages", "Active review pages whose last 3 or more reads failed, retries included, by platform and the last error code.", "platform", "code")
 	socialStuck     = desc("social", "stuck_accounts", "Active social accounts whose last 3 or more reads failed, retries included, by channel and the last error code.", "channel", "code")
-	syncStuck       = desc("sync", "stuck", "Scheduled syncs of connected connections whose last 3 or more runs failed, retries included, by module and the last error code.", "module", "code")
+	syncStuck       = desc("sync", "stuck", "Scheduled reads (connections' syncs, SEO site reads, news searches, competitor looks) whose last 3 or more runs failed, retries included, by module and the last error code.", "module", "code")
 	reviewOldest    = desc("reviews", "oldest_read_seconds", "How long since the least recently read active review page was read (or added, if never read), by platform.", "platform")
 	socialScheduled = desc("social", "publications_scheduled", "Approved posts waiting to go out, by channel and state (due: its time has come, later: scheduled ahead).", "channel", "state")
 	socialOverdue   = desc("social", "publication_overdue_seconds", "How long past its time the most overdue approved post is, by channel. Posts go out within a minute or two of their time.", "channel")
@@ -315,7 +315,14 @@ func (p *Postgres) query() []prometheus.Metric {
 			UNION ALL SELECT 'page_conversions', c.last_error_code, c.integration_id FROM page_conversion_syncs c WHERE c.failures >= 3
 			UNION ALL SELECT 'ads', d.last_error_code, d.integration_id FROM ad_syncs d WHERE d.failures >= 3
 			UNION ALL SELECT 'seo', e.last_error_code, e.integration_id FROM seo_syncs e WHERE e.failures >= 3
-		) x JOIN integrations i ON i.id = x.integration_id AND i.status = 'connected'
+			UNION ALL SELECT 'seo_site_' || f.kind, f.last_error_code, f.integration_id FROM seo_site_read_failures f
+				WHERE f.failures >= 3 AND f.last_failed_at > now() - interval '7 days'
+			-- Not a connection's: news searches and competitor looks.
+			UNION ALL SELECT 'news', n.last_error_code, NULL FROM news_searches n WHERE n.status = 'active' AND n.failures >= 3
+			UNION ALL SELECT 'competitor_glances', CASE WHEN g.check_error IS NULL THEN NULL ELSE 'crawl_failed' END, NULL
+				FROM seo_competitors g WHERE g.status = 'tracked' AND g.check_failures >= 3
+		) x LEFT JOIN integrations i ON i.id = x.integration_id
+		WHERE x.integration_id IS NULL OR i.status = 'connected'
 		GROUP BY 1, 2`, func(r rowser) error {
 		for r.Next() {
 			var module, code string

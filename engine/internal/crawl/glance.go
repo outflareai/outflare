@@ -13,6 +13,7 @@ import (
 
 	"github.com/outflareai/outflare/engine/internal/audit"
 	"github.com/outflareai/outflare/engine/internal/jobs"
+	"github.com/outflareai/outflare/engine/internal/retry"
 	"github.com/outflareai/outflare/engine/internal/track"
 )
 
@@ -186,8 +187,12 @@ func (s *Service) glance(ctx context.Context, job jobs.Job) error {
 	ev := track.Event{Name: "seo_competitor.checked", WorkspaceID: ws, ActorType: "system", Surface: "job",
 		Props: map[string]any{"competitor_id": p.CompetitorID, "site_id": siteID}}
 	fail := func(code, reason string, err error) error {
-		_, uerr := s.Pool.Exec(ctx, `UPDATE seo_competitors SET checked_at = now(), check_error = $3, updated_at = now()
-			WHERE id = $1 AND workspace_id = $2`, p.CompetitorID, ws, reason)
+		// The owner's opt-out and robots.txt are answers, not failures to
+		// retry; anything else is tried again soon.
+		retryable := code != "crawl_opted_out" && code != "robots_disallowed"
+		_, uerr := s.Pool.Exec(ctx, `UPDATE seo_competitors SET checked_at = now(), check_error = $3, updated_at = now(),
+			check_failures = CASE WHEN $4 THEN check_failures + 1 ELSE 0 END
+			WHERE id = $1 AND workspace_id = $2`, p.CompetitorID, ws, reason, retryable)
 		ev.Name = "seo_competitor.check_failed"
 		if code == "internal" {
 			track.Fail(ctx, s.Log, ev, code, err)
@@ -267,7 +272,7 @@ func (s *Service) glance(ctx context.Context, job jobs.Job) error {
 		if _, err := tx.Exec(ctx, `
 			UPDATE seo_competitors SET title = $3, description = $4,
 			       pages = (SELECT count(*) FROM competitor_pages WHERE competitor_id = $1 AND gone_at IS NULL),
-			       checked_at = now(), check_error = NULL, updated_at = now()
+			       checked_at = now(), check_error = NULL, check_failures = 0, updated_at = now()
 			WHERE id = $1 AND workspace_id = $2`, p.CompetitorID, ws, look.Title, look.Description); err != nil {
 			return err
 		}
@@ -324,27 +329,38 @@ func (s *Service) glance(ctx context.Context, job jobs.Job) error {
 	return nil
 }
 
-// scheduleGlances queues a look at each tracked competitor not looked at
+// ScheduleGlances queues a look at each tracked competitor not looked at
 // for a week.
-func (s *Service) scheduleGlances(ctx context.Context) error {
+func (s *Service) ScheduleGlances(ctx context.Context) error {
+	// A look that failed for a reason that can pass (the site didn't answer)
+	// is tried again soon (retry.After), not a week later.
 	rows, err := s.Pool.Query(ctx, `
-		SELECT id, workspace_id FROM seo_competitors
-		WHERE status = 'tracked' AND (checked_at IS NULL OR checked_at < now() - make_interval(secs => $1))
+		SELECT id, workspace_id, check_failures > 0 FROM seo_competitors
+		WHERE status = 'tracked' AND (checked_at IS NULL OR checked_at < now() - make_interval(secs => $1)
+		   OR (check_failures > 0 AND checked_at < now() - `+retry.SQL("check_failures")+`))
 		ORDER BY checked_at NULLS FIRST LIMIT 200`, glanceEvery.Seconds())
 	if err != nil {
 		return err
 	}
-	type due struct{ id, ws string }
+	type due struct {
+		id, ws string
+		retry  bool
+	}
 	list, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (due, error) {
 		var d due
-		return d, row.Scan(&d.id, &d.ws)
+		return d, row.Scan(&d.id, &d.ws, &d.retry)
 	})
 	if err != nil {
 		return err
 	}
 	now := time.Now()
 	for _, d := range list {
-		if err := StartGlance(ctx, s.Pool, d.ws, d.id, now.Truncate(24*time.Hour)); err != nil {
+		// A retry gets an hourly key, so it isn't held to one look a day.
+		at := now.Truncate(24 * time.Hour)
+		if d.retry {
+			at = now
+		}
+		if err := StartGlance(ctx, s.Pool, d.ws, d.id, at); err != nil {
 			return err
 		}
 	}

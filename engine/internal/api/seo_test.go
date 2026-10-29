@@ -58,6 +58,9 @@ func dfsTarget(r *http.Request) string {
 	return t
 }
 
+// dfsRivalsDown makes the fake's competitors report fail.
+var dfsRivalsDown atomic.Bool
+
 func setDFSRivals(items ...any) {
 	dfsRivals.Lock()
 	dfsRivals.items = items
@@ -95,6 +98,10 @@ func (fakeDataForSEO) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		out = task(0.02, map[string]any{"rank": rank, "backlinks": 9000, "referring_domains": 300})
 	case "/v3/dataforseo_labs/google/competitors_domain/live":
+		if dfsRivalsDown.Load() {
+			out = map[string]any{"status_code": 50000, "status_message": "Internal Error."}
+			break
+		}
 		dfsRivals.Lock()
 		out = task(0.011, map[string]any{"total_count": len(dfsRivals.items), "items": dfsRivals.items})
 		dfsRivals.Unlock()

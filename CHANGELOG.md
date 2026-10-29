@@ -6,6 +6,12 @@ Each pull request that changes what Outflare does adds a change note in [changes
 
 ## [Unreleased]
 
+## [0.32.0] - 2026-10-29
+
+### Changed
+
+- News searches, competitor looks, SEO sites' weekly competitor and backlink reads, and scheduled lead list refreshes that fail are now tried again soon (after 15 minutes, then 1, 2 and 4 hours) instead of waiting for their next scheduled run.
+
 ## [0.31.0] - 2026-10-29
 
 ### Added

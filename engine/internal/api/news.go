@@ -19,6 +19,7 @@ import (
 	"github.com/outflareai/outflare/engine/internal/metrics"
 	"github.com/outflareai/outflare/engine/internal/news"
 	"github.com/outflareai/outflare/engine/internal/outcomes"
+	"github.com/outflareai/outflare/engine/internal/retry"
 	"github.com/outflareai/outflare/engine/internal/track"
 	"github.com/outflareai/outflare/engine/internal/usagelimits"
 )
@@ -834,8 +835,8 @@ func (s *Server) openNewsSearcher(ctx context.Context, ws string, brand *string)
 // connection, books what it cost, and keeps the articles it found: for a
 // coverage search, those that name the brand's query and aren't on its own
 // site become coverage. A failure is kept on the search (last_error_code)
-// and is an event; it is retried only when the provider was unavailable
-// or rate limited.
+// and is an event; the job is retried when the provider was unavailable or
+// rate limited, and the search runs again soon (retry.After) either way.
 func (s *Server) RunNewsSearch(ctx context.Context, ws, searchID string) error {
 	start := time.Now()
 	var v newsSearchView
@@ -856,8 +857,13 @@ func (s *Server) RunNewsSearch(ctx context.Context, ws, searchID string) error {
 		ev.Name = "news_search.run_failed"
 		ev.Props["duration_ms"] = time.Since(start).Milliseconds()
 		track.Fail(ctx, s.log, ev, code, err)
-		if _, uerr := s.pool.Exec(ctx, `UPDATE news_searches SET last_checked_at = now(), last_error_code = $3 WHERE workspace_id = $1 AND id = $2`,
-			ws, searchID, code); uerr != nil {
+		// A failed run is tried again soon (retry.After), never later than
+		// the next regular run, unless only a person can fix it.
+		retryable := code != "connector_needed" && code != "connector_"+connectors.ErrInvalid
+		if _, uerr := s.pool.Exec(ctx, `UPDATE news_searches SET last_checked_at = now(), last_error_code = $3, failures = failures + 1,
+			next_check_at = CASE WHEN $4 THEN LEAST(next_check_at, now() + `+retry.SQL("failures + 1")+`) ELSE next_check_at END
+			WHERE workspace_id = $1 AND id = $2`,
+			ws, searchID, code, retryable); uerr != nil {
 			return uerr
 		}
 		if code == "connector_"+connectors.ErrUnavailable || code == "connector_"+connectors.ErrQuota {
@@ -940,7 +946,7 @@ func (s *Server) RunNewsSearch(ctx context.Context, ws, searchID string) error {
 			}
 			coverageAdded = len(added)
 		}
-		_, err := tx.Exec(ctx, `UPDATE news_searches SET last_checked_at = now(), last_error_code = NULL WHERE workspace_id = $1 AND id = $2`, ws, searchID)
+		_, err := tx.Exec(ctx, `UPDATE news_searches SET last_checked_at = now(), last_error_code = NULL, failures = 0 WHERE workspace_id = $1 AND id = $2`, ws, searchID)
 		return err
 	})
 	if err != nil {

@@ -20,7 +20,7 @@ A web search connection: [Geonode](connectors.md). Each run is one search on you
 | `locale` | A language code (`en`) or tag (`en-GB`), or empty for the provider's default. |
 | `status` | `active`, or `paused` to keep it and stop running it. |
 
-A new search runs straight away. **Run now** (`POST /v1/workspaces/{ws}/news-searches/{search}/run`) runs it again whatever its schedule. A workspace keeps up to 200 searches. A search's `last_error_code` says why its last run failed; it clears on the next run that works.
+A new search runs straight away. **Run now** (`POST /v1/workspaces/{ws}/news-searches/{search}/run`) runs it again whatever its schedule. A workspace keeps up to 200 searches. A search's `last_error_code` says why its last run failed; it clears on the next run that works. A failed run is tried again soon, before the search's next time: after 15 minutes, then 1 and 2 hours, then every 4 hours. A search with no web search connection, or one whose key was refused, waits for its schedule, since only you can fix that.
 
 ## Articles
 

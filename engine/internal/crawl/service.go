@@ -1121,7 +1121,7 @@ func (s *Service) Run(ctx context.Context) {
 		if err := s.Schedule(ctx); err != nil && ctx.Err() == nil {
 			track.Fail(ctx, s.Log, track.Event{Name: "crawl.schedule_failed", ActorType: "system", Surface: "system"}, "internal", err)
 		}
-		if err := s.scheduleGlances(ctx); err != nil && ctx.Err() == nil {
+		if err := s.ScheduleGlances(ctx); err != nil && ctx.Err() == nil {
 			track.Fail(ctx, s.Log, track.Event{Name: "seo_competitor.schedule_failed", ActorType: "system", Surface: "system"}, "internal", err)
 		}
 	}

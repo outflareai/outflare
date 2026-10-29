@@ -475,7 +475,8 @@ groups:
 
       - alert: OutflareSyncsStuck
         # A connection's scheduled sync (analytics, Search Console, page
-        # conversions, ads, SEO snapshots) failed 3 runs in a row, retries
+        # conversions, ads, SEO snapshots, SEO site reads, news searches)
+        # failed 3 runs in a row, retries
         # included, with an error that isn't the workspace's to fix:
         # Outflare's own (internal), or the provider failing for hours.
         # Refused keys, spent quotas and budgets show on the connection

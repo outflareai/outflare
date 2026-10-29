@@ -167,11 +167,20 @@ func TestNewsWatchFindsArticlesAndCoverage(t *testing.T) {
 	// A failed run is kept on the search, and retried when the provider
 	// was busy.
 	fake.status = http.StatusTooManyRequests
+	if _, err := e.pool.Exec(ctx, `UPDATE news_searches SET next_check_at = now() + interval '6 hours' WHERE id = $1`, topicID); err != nil {
+		t.Fatal(err)
+	}
 	if err := e.srv.RunNewsSearch(ctx, ws, topicID); err == nil {
 		t.Fatal("a busy provider is retried")
 	}
 	if s := owner.must(200, "GET", base+"/news-searches/"+topicID, nil); s["last_error_code"] != "connector_quota" {
 		t.Fatalf("failed run: %v", s)
+	}
+	// It is checked again in 15 minutes, not at its next interval.
+	var failures, wait int
+	if err := e.pool.QueryRow(ctx, `SELECT failures, EXTRACT(epoch FROM next_check_at - now())::int FROM news_searches WHERE id = $1`, topicID).
+		Scan(&failures, &wait); err != nil || failures != 1 || wait > 15*60 || wait < 14*60 {
+		t.Fatalf("retry: failures %d, next check in %ds (%v)", failures, wait, err)
 	}
 
 	// Pausing and changing the schedule; deleting a search keeps coverage.

@@ -397,3 +397,74 @@ func (s Settings) LinkRowsOrDefault() int {
 	}
 	return DefaultLinkRows
 }
+
+// noteSiteRead keeps whether an SEO site's weekly read (competitors or
+// backlinks) through a connection failed, so the hourly schedule tries it
+// again soon (retry.After); a read that works clears it.
+func (s *Syncer) noteSiteRead(ctx context.Context, ws, integrationID, siteID, kind string, err error) {
+	var dbErr error
+	if err == nil {
+		_, dbErr = s.Pool.Exec(ctx, `DELETE FROM seo_site_read_failures WHERE integration_id = $1 AND site_id = $2 AND kind = $3`,
+			integrationID, siteID, kind)
+	} else {
+		code := "connector_" + connectors.KindOf(err)
+		var be *BudgetError
+		if errors.As(err, &be) {
+			code = "budget_reached"
+		}
+		_, dbErr = s.Pool.Exec(ctx, `INSERT INTO seo_site_read_failures (integration_id, site_id, workspace_id, kind, last_error_code)
+			VALUES ($1, $2, $3, $4, $5)
+			ON CONFLICT (integration_id, site_id, kind) DO UPDATE SET failures = seo_site_read_failures.failures + 1,
+				last_failed_at = now(), last_error_code = EXCLUDED.last_error_code`, integrationID, siteID, ws, kind, code)
+	}
+	if dbErr != nil && s.Log != nil {
+		s.Log.Warn("seo: record a site read", "integration", integrationID, "site", siteID, "kind", kind, "err", dbErr)
+	}
+}
+
+// retrySiteReads reads again the SEO sites' competitors and backlinks
+// whose weekly read through this connection failed, and only those.
+func (s *Syncer) retrySiteReads(ctx context.Context, ws, integrationID string) error {
+	o, err := s.Store.Open(ctx, s.Pool, ws, integrationID)
+	if errors.Is(err, connectors.ErrNotFound) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	r, ok := o.Connector.(connectors.SEOReader)
+	if !ok {
+		return nil
+	}
+	rows, err := s.Pool.Query(ctx, `SELECT site_id::text, kind FROM seo_site_read_failures WHERE integration_id = $1 AND workspace_id = $2`, integrationID, ws)
+	if err != nil {
+		return err
+	}
+	failed := map[string]map[string]bool{}
+	var site, kind string
+	if _, err := pgx.ForEachRow(rows, []any{&site, &kind}, func() error {
+		if failed[site] == nil {
+			failed[site] = map[string]bool{}
+		}
+		failed[site][kind] = true
+		return nil
+	}); err != nil {
+		return err
+	}
+	sites, err := LinkSites(ctx, s.Pool, ws)
+	if err != nil {
+		return err
+	}
+	set := SettingsOf(o.Config)
+	for _, site := range sites {
+		if failed[site.ID]["competitors"] {
+			_, err := s.SyncSiteCompetitors(ctx, o, r, site, set.Country, time.Now())
+			s.noteSiteRead(ctx, ws, o.ID, site.ID, "competitors", err)
+		}
+		if failed[site.ID]["backlinks"] && connectors.SupportsSEO(r, connectors.SEOLinks) {
+			_, err := SyncSiteLinks(ctx, s.Pool, o, r, site, time.Now())
+			s.noteSiteRead(ctx, ws, o.ID, site.ID, "backlinks", err)
+		}
+	}
+	return nil
+}

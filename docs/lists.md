@@ -34,7 +34,7 @@ Paste an API key in Connectors (or from the Lead lists page). Each provider says
    - *Minimum fit score* (`min_score`): people scored below it are left out before any credits are spent.
    - *Verify emails* before adding (on by default, through your verification service or the built-in checks), and optionally *only verified emails*.
    - *Leave out* people emailed in the last N days (`skip_contacted_days`, default 90), people already in an active sequence, and anyone on the suppression list. This works across every list and campaign in the workspace.
-5. **Build, then refresh.** A build runs in the background. Refresh adds people who are new since last time, by hand or every N days (`refresh_every_days`). People already in the list are skipped for free.
+5. **Build, then refresh.** A build runs in the background. Refresh adds people who are new since last time, by hand or every N days (`refresh_every_days`). People already in the list are skipped for free. A scheduled refresh that failed is tried again after 15 minutes, then 1 and 2 hours, then 4, up to 5 failures in a row; after that the list waits for its next scheduled refresh.
 
 Each run reports what it found, added and enriched, what it left out and why (`already_in_list`, `low_score`, `no_email`, `unverified`, `undeliverable`, `suppressed`, `contacted`, `in_sequence`), the credits it spent per provider and why it stopped early, if it did. Credits go into the spend ledger, so cost per meeting includes data costs.
 

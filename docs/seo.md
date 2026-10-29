@@ -203,8 +203,10 @@ links from the site's own subdomains do not.
 - **Cost.** A read is one call per site: about $0.03 on DataForSEO, and 50
   to 200 API units on Ahrefs at the default 200 rows (estimated at one unit
   a row). It counts against the connection's budget like any other call; a
-  failed read is kept on its run (`links[].error` in the sync answer) and
-  doesn't stop the snapshot. Each read is the audit action
+  failed read is kept on its run (`links[].error` in the sync answer),
+  doesn't stop the snapshot, and is tried again on its own soon (after 15
+  minutes, then 1 and 2 hours, then every 4 hours), as is a site's failed
+  read of its competitors, until one works or next week's snapshot comes. Each read is the audit action
   `backlinks.synced` with its counts.
 
 Links are read with the workspace's own DataForSEO or Ahrefs account and kept
@@ -274,7 +276,9 @@ same list.
   `POST /seo-competitors/{id}/check`), obeying robots.txt: no other pages
   and no links followed ([OutflareBot](crawler.md#outflarebot)). It costs
   nothing. When robots.txt disallows OutflareBot, only the connection's
-  numbers are shown.
+  numbers are shown. A look that failed for another reason (the site didn't
+  answer) is tried again after 15 minutes, then 1 and 2 hours, then every 4
+  hours until one works, not a week later.
 - **The feed.** What changed is an event that is never changed afterwards
   (`GET /seo-competitors/events`, MCP `list_competitor_events`): pages added
   to or removed from their sitemaps (with up to 10 URLs), a new home page

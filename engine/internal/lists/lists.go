@@ -27,6 +27,7 @@ import (
 	c "github.com/outflareai/outflare/engine/internal/connectors"
 	"github.com/outflareai/outflare/engine/internal/jobs"
 	"github.com/outflareai/outflare/engine/internal/leads"
+	"github.com/outflareai/outflare/engine/internal/retry"
 	"github.com/outflareai/outflare/engine/internal/verify"
 )
 
@@ -320,24 +321,46 @@ func (s *Service) Loop(ctx context.Context, every time.Duration) {
 	}
 }
 
+// refreshRetries is how many failed refreshes in a row a list tries again
+// before it waits for its next scheduled one, so a search that keeps failing
+// does not spend the workspace's credits every few hours.
+const refreshRetries = 5
+
 // RefreshDue queues a refresh for every list whose next refresh has come,
-// moves its next refresh on, and drops expired cache entries.
+// moves its next refresh on, and drops expired cache entries. A list whose
+// last refresh failed is tried again before its next one, sooner after the
+// first failure and less often after more (retry.After).
 func (s *Service) RefreshDue(ctx context.Context) error {
 	if _, err := s.Pool.Exec(ctx, `DELETE FROM enrichment_cache WHERE fetched_at < $1`, time.Now().Add(-cacheKeepFor)); err != nil {
 		return err
 	}
 	rows, err := s.Pool.Query(ctx, `
-		SELECT workspace_id, id FROM lead_lists
-		WHERE next_refresh_at <= now() AND kind = 'search' AND refresh_every_days IS NOT NULL
-		ORDER BY next_refresh_at LIMIT 100`)
+		SELECT l.workspace_id, l.id, l.next_refresh_at > now() FROM lead_lists l
+		LEFT JOIN LATERAL (
+			SELECT r.status, r.finished_at FROM list_runs r
+			WHERE r.list_id = l.id AND r.kind = 'refresh' ORDER BY r.created_at DESC LIMIT 1
+		) last ON true
+		LEFT JOIN LATERAL (
+			SELECT count(*) AS failures FROM list_runs r
+			WHERE r.list_id = l.id AND r.kind = 'refresh' AND r.status = 'failed'
+			  AND r.created_at > COALESCE((SELECT max(d.created_at) FROM list_runs d
+				WHERE d.list_id = l.id AND d.kind = 'refresh' AND d.status = 'done'), '-infinity')
+		) f ON true
+		WHERE l.kind = 'search' AND l.refresh_every_days IS NOT NULL
+		  AND (l.next_refresh_at <= now()
+		    OR (last.status = 'failed' AND f.failures < $1 AND last.finished_at < now() - `+retry.SQL("f.failures")+`))
+		ORDER BY l.next_refresh_at LIMIT 100`, refreshRetries)
 	if err != nil {
 		return err
 	}
-	type due struct{ ws, id string }
+	type due struct {
+		ws, id string
+		retry  bool
+	}
 	var all []due
 	for rows.Next() {
 		var d due
-		if err := rows.Scan(&d.ws, &d.id); err != nil {
+		if err := rows.Scan(&d.ws, &d.id, &d.retry); err != nil {
 			rows.Close()
 			return err
 		}
@@ -346,8 +369,9 @@ func (s *Service) RefreshDue(ctx context.Context) error {
 	rows.Close()
 	for _, d := range all {
 		err := pgx.BeginFunc(ctx, s.Pool, func(tx pgx.Tx) error {
+			// A retry leaves the next scheduled refresh where it is.
 			if _, err := tx.Exec(ctx, `UPDATE lead_lists SET next_refresh_at = now() + make_interval(days => refresh_every_days)
-				WHERE id = $1`, d.id); err != nil {
+				WHERE id = $1 AND NOT $2`, d.id, d.retry); err != nil {
 				return err
 			}
 			p, project, err := ParamsForList(ctx, tx, d.ws, d.id)

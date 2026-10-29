@@ -330,6 +330,9 @@ type payload struct {
 	// DeadPages only reads again who links to competitors' dead pages
 	// whose weekly read failed, and nothing else.
 	DeadPages bool `json:"dead_pages,omitempty"`
+	// SiteReads only reads again the SEO sites' competitors and backlinks
+	// whose weekly read failed, and nothing else.
+	SiteReads bool `json:"site_reads,omitempty"`
 }
 
 // Register adds the job handler.
@@ -477,6 +480,19 @@ func (s *Syncer) tickNew(ctx context.Context, ids []string) error {
 				return err
 			}
 		}
+		// So is an SEO site's competitor or backlink read that failed this
+		// week; next week's snapshot reads it anyway.
+		var siteFailedAt int64
+		if err := s.Pool.QueryRow(ctx, `SELECT COALESCE(max(extract(epoch FROM f.last_failed_at))::bigint, 0) FROM seo_site_read_failures f
+			WHERE f.integration_id = $1 AND f.last_failed_at > now() - interval '7 days'
+			  AND f.last_failed_at < now() - `+retry.SQL("f.failures"), id).Scan(&siteFailedAt); err != nil {
+			return err
+		}
+		if siteFailedAt > 0 {
+			if _, err := enqueue(ctx, s.Pool, i.WorkspaceID, payload{Integration: id, SiteReads: true}, fmt.Sprintf("%s:site_reads:%d", id, siteFailedAt)); err != nil {
+				return err
+			}
+		}
 	}
 	return nil
 }
@@ -524,6 +540,9 @@ func (s *Syncer) job(ctx context.Context, job jobs.Job) error {
 	}
 	if p.DeadPages {
 		return s.retryDeadPages(ctx, *job.WorkspaceID, p.Integration)
+	}
+	if p.SiteReads {
+		return s.retrySiteReads(ctx, *job.WorkspaceID, p.Integration)
 	}
 	res, err := s.sync(ctx, *job.WorkspaceID, p.Integration, p.NewOnly, p.Retry)
 	s.report(ctx, *job.WorkspaceID, p.Integration, res, err)
@@ -700,6 +719,7 @@ func (s *Syncer) sync(ctx context.Context, ws, integrationID string, newOnly, re
 		run, err := s.SyncSiteCompetitors(ctx, o, r, site, set.Country, time.Now())
 		res.Competitors = append(res.Competitors, run)
 		res.Cost += run.Cost
+		s.noteSiteRead(ctx, ws, o.ID, site.ID, "competitors", err)
 		if err != nil {
 			code := "provider_error"
 			if errors.As(err, &be) {
@@ -724,6 +744,7 @@ func (s *Syncer) sync(ctx context.Context, ws, integrationID string, newOnly, re
 			run, err := SyncSiteLinks(ctx, s.Pool, o, r, site, time.Now())
 			res.Links = append(res.Links, run)
 			res.Cost += run.Cost
+			s.noteSiteRead(ctx, ws, o.ID, site.ID, "backlinks", err)
 			if err != nil {
 				code := "provider_error"
 				if errors.As(err, &be) {

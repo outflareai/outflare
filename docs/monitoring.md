@@ -106,7 +106,7 @@ Every Outflare metric starts with `outflare_`, so it is easy to keep only those 
 | `outflare_reviews_new_total` | `platform` | Reviews kept for the first time. |
 | `outflare_reviews_pages` | `platform`, `state` (`ok`, `failing`) | Active review pages, and how many failed their last read. |
 | `outflare_sync_runs_total` | `module` (`analytics`, `search_console`, `page_conversions`, `ads`, `seo`), `outcome` (`success`, `internal`, `budget_reached`, `connector_*`) | Scheduled sync runs of connections. |
-| `outflare_sync_stuck` | `module`, `code` | Syncs of connected connections whose last 3 or more runs failed, retries included, by the last error code. |
+| `outflare_sync_stuck` | `module`, `code` | Scheduled reads whose last 3 or more runs failed, retries included, by the last error code: connections' syncs, SEO site competitor and backlink reads (`seo_site_competitors`, `seo_site_backlinks`), news searches (`news`) and competitor looks (`competitor_glances`, always `crawl_failed`). |
 | `outflare_social_account_reads_total` | `channel`, `outcome` (`success`, `blocked`, `page_not_found`, `invalid_address`, `no_follower_count`, `save_failed`, `connector_error`) | Reads of social accounts' followers ([social](social.md)). |
 | `outflare_social_stuck_accounts` | `channel`, `code` | Active social accounts whose last 3 or more reads failed, retries included, by the last error code. |
 | `outflare_reviews_stuck_pages` | `platform`, `code` | Active review pages whose last 3 or more reads failed, retries included, by the last error code. |
