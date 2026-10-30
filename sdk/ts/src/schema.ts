@@ -9792,6 +9792,379 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/workspaces/{ws}/reddit/settings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+            };
+            cookie?: never;
+        };
+        /**
+         * List each brand's Reddit campaign settings and budget
+         * @description Scope: social.read. One entry per brand the caller sees (or the ?brand= one): its Engain connection and project, its limits, and what it has spent this month and today.
+         */
+        get: operations["listRedditSettings"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/workspaces/{ws}/reddit/settings/{brand}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                /** @description The brand's id or handle. */
+                brand: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Set a brand's Engain connection, project and limits
+         * @description Scope: social.manage. Only a signed-in person may change limits
+         *     (credit limits, actions per subreddit a day, upvotes per item) or
+         *     whether each action needs a person's approval: an agent never
+         *     raises its own budget. Fields left out keep their value;
+         *     `no_monthly_limit` and `no_daily_limit` clear a limit. Credits are
+         *     Engain credits; `credit_price_cents` turns them into money in
+         *     reports.
+         */
+        put: operations["putRedditSettings"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/workspaces/{ws}/reddit/budget": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+            };
+            cookie?: never;
+        };
+        /**
+         * What a brand has spent and has left on Reddit
+         * @description Scope: social.read. Credits spent this month and today (UTC) against the brand's limits, and what Engain says the workspace has left across every brand. Read it before planning actions.
+         */
+        get: operations["getRedditBudget"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/workspaces/{ws}/reddit/experiments": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+            };
+            cookie?: never;
+        };
+        /**
+         * List Reddit experiments
+         * @description Scope: social.read. Newest first, at most limit. Read the conclusions of closed ones before starting a new test.
+         */
+        get: operations["listRedditExperiments"];
+        put?: never;
+        /**
+         * Start a Reddit experiment
+         * @description Scope: social.manage. One hypothesis and the strategy it tests. Actions name it with experiment_id, and the report compares them.
+         */
+        post: operations["createRedditExperiment"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/workspaces/{ws}/reddit/experiments/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        /**
+         * Get a Reddit experiment
+         * @description Scope: social.read.
+         */
+        get: operations["getRedditExperiment"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Edit or close a Reddit experiment
+         * @description Scope: social.manage. status closed with a conclusion (what was tested, the numbers, what to do next) ends it; new actions can't join a closed experiment.
+         */
+        patch: operations["updateRedditExperiment"];
+        trace?: never;
+    };
+    "/v1/workspaces/{ws}/reddit/actions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+            };
+            cookie?: never;
+        };
+        /**
+         * List Reddit campaign actions
+         * @description Scope: social.read. Every comment, reply, post, thread and upvote order, newest first, with its status, lifespan and cost. next_before pages back.
+         */
+        get: operations["listRedditActions"];
+        put?: never;
+        /**
+         * Place a comment, reply, post, thread or upvotes on Reddit
+         * @description Scope: social.manage, and social.post to send it. Logs the action
+         *     and, unless `submit` is false or the brand needs a person's
+         *     approval, checks the brand's limits and sends it to Engain in the
+         *     background, spending Engain credits (about 5 for a comment or
+         *     reply, 10 for a post, 0.1 an upvote). Over a limit, the action is
+         *     kept as a draft and the answer is 409 `reddit_budget_reached` or
+         *     `reddit_limit_reached`.
+         *
+         *     `target_url`: the thread for a comment, the comment's permalink for
+         *     a reply, the subreddit (https://www.reddit.com/r/name) for a post,
+         *     any of those for a thread group, a thread or comment for upvotes
+         *     (or `parent_action_id` to upvote one of ours once it is live).
+         *     Links carry no tracking parameters. Describe what the action tests
+         *     (`strategy`, `link_type`, `brand_mentioned`, `tone`) so the report
+         *     can compare.
+         */
+        post: operations["createRedditAction"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/workspaces/{ws}/reddit/actions/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        /**
+         * Get a Reddit action with its timeline and checks
+         * @description Scope: social.read. The action, its events (sent, live, removed, restored), what each check of Reddit saw, and Engain's last answer as it sent it.
+         */
+        get: operations["getRedditAction"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/workspaces/{ws}/reddit/actions/{id}/approve": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Approve a draft action so it is sent
+         * @description Scope: social.post. Checks the brand's limits and sends the draft to Engain. When the brand needs a person's approval, only a signed-in person may.
+         */
+        post: operations["approveRedditAction"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/workspaces/{ws}/reddit/actions/{id}/cancel": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Withdraw an action not yet sent
+         * @description Scope: social.manage. A draft or an approved action that hasn't gone to Engain yet.
+         */
+        post: operations["cancelRedditAction"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/workspaces/{ws}/reddit/actions/{id}/check": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Check an action on Engain and Reddit now
+         * @description Scope: social.manage. Queues a check straight away instead of waiting for the next one. Checks run by themselves: every 10 minutes for a new live item, then less often.
+         */
+        post: operations["checkRedditAction"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/workspaces/{ws}/reddit/preflight": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Check drafts against a subreddit's rules before sending
+         * @description Scope: social.manage. Engain's rule check on up to 25 drafts for one
+         *     subreddit, free and limited to 5 calls a minute. Each item is
+         *     {key, taskType: post|comment|reply, content, title?, context?}; a
+         *     reply needs context.parentCommentUrl. The answer is Engain's as it
+         *     sent it: per item a verdict (pass, warn, fail), the rules at risk,
+         *     removalRisk, marketingIntentRisk, authenticityRisk (reads as AI),
+         *     naturalnessAdvice and the subreddit's historical removal rate.
+         */
+        post: operations["preflightRedditDrafts"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/workspaces/{ws}/reddit/subreddits/{name}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                name: string;
+            };
+            cookie?: never;
+        };
+        /**
+         * How strict a subreddit is
+         * @description Scope: social.read. Engain's historical removal rates there across all its customers (engain, as Engain sent it), beside the brand's own numbers there (ours).
+         */
+        get: operations["getRedditSubreddit"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/workspaces/{ws}/reddit/threads": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+            };
+            cookie?: never;
+        };
+        /**
+         * Threads worth acting on, found by Engain
+         * @description Scope: social.read. type new: fresh threads for the brand's topics; type seo: threads that rank on Google. As Engain sent them; pass its cursor back for more.
+         */
+        get: operations["listRedditThreads"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/workspaces/{ws}/reddit/report": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+            };
+            cookie?: never;
+        };
+        /**
+         * Mentions, links, cost and lifespan of Reddit actions
+         * @description Scope: social.read. A mention is an action that names the brand and
+         *     went live on Reddit; a link, one with a link that went live. Live
+         *     counts are what a logged-out visitor sees now. Lifespan is from
+         *     going live to removal or deletion (or now); survived_7d is the
+         *     share of items at least 7 days old that lived 7 days. group_by
+         *     splits the numbers to compare tactics.
+         */
+        get: operations["getRedditReport"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/workspaces/{ws}/integrations/{id}/sign-in": {
         parameters: {
             query?: never;
@@ -30196,6 +30569,210 @@ export interface components {
             created_at: string;
             /** Format: date-time */
             updated_at: string;
+        };
+        /** @description A brand's Reddit campaign settings. Limits are checked before any action spends Engain credits. */
+        RedditSettings: {
+            /** Format: uuid */
+            brand_id: string;
+            /**
+             * Format: uuid
+             * @description The Engain connection; null uses any Engain connection the brand can use.
+             */
+            integration_id: string | null;
+            /** @description Empty uses the Engain account's only project. */
+            engain_project_id: string;
+            /** @description Null is no limit. */
+            monthly_credit_limit: number | null;
+            /** @description Null is no limit. Days are UTC. */
+            daily_credit_limit: number | null;
+            max_actions_per_subreddit_day: number;
+            max_upvotes_per_item: number;
+            /** @description A person approves each action before it is sent. */
+            require_approval: boolean;
+            credit_price_cents: number;
+            currency: string;
+            /** @description False when these are the defaults and nothing was saved yet. */
+            saved: boolean;
+        };
+        RedditBudget: {
+            /** Format: uuid */
+            brand_id: string;
+            /** @description Credits this month (UTC): Engain's figure when known, else the estimate. */
+            month_credits: number;
+            day_credits: number;
+            monthly_credit_limit: number | null;
+            daily_credit_limit: number | null;
+            /** @description Null when there is no monthly limit. */
+            month_remaining: number | null;
+            day_remaining: number | null;
+            month_cost_cents: number;
+            currency: string;
+            /** @description What Engain says the workspace has left, across every brand; null when not read. */
+            engain_credits: number | null;
+        };
+        RedditExperiment: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            brand_id: string;
+            name: string;
+            hypothesis: string;
+            strategy: string;
+            /** @enum {string} */
+            status: "open" | "closed";
+            conclusion: string;
+            /** Format: uuid */
+            mission_id: string | null;
+            /** Format: uuid */
+            created_by: string | null;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            closed_at: string | null;
+            actions: number;
+        };
+        /** @description One thing placed on Reddit through Engain, and everything known about it since. */
+        RedditAction: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            brand_id: string;
+            /** Format: uuid */
+            experiment_id: string | null;
+            /** @enum {string} */
+            kind: "comment" | "reply" | "post" | "thread" | "upvotes";
+            strategy: string;
+            target_url: string;
+            /** @enum {string} */
+            target_kind: "" | "thread" | "comment" | "subreddit";
+            subreddit: string;
+            title: string;
+            content: string;
+            children: {
+                [key: string]: unknown;
+            }[];
+            link_url: string;
+            /** @enum {string} */
+            link_type: "none" | "brand_site" | "review_site" | "docs" | "third_party" | "other";
+            brand_mentioned: boolean;
+            competitors: string[];
+            tone: string;
+            /** @enum {string} */
+            account_tier: "" | "shared" | "dedicated";
+            upvotes_goal: number;
+            upvotes_per_day: number;
+            upvotes_start: string;
+            /** Format: uuid */
+            parent_action_id: string | null;
+            /** Format: date-time */
+            scheduled_at: string | null;
+            notes: string;
+            /**
+             * @description draft: not sent. approved: queued. sending: the call is out. submitted: Engain took it, not on Reddit yet. live: a logged-out visitor sees it. frozen: live but locked or archived. removed: taken down by moderators, a filter or Reddit. hidden: not shown in the thread. gone: deleted, or the account is. failed: Engain refused it or never published it. cancelled: withdrawn. done: an upvote order finished.
+             * @enum {string}
+             */
+            status: "draft" | "approved" | "sending" | "submitted" | "live" | "frozen" | "removed" | "hidden" | "gone" | "failed" | "cancelled" | "done";
+            status_reason: string | null;
+            estimated_credits: number;
+            /** @description Engain's figure, when it reported one. */
+            credits: number | null;
+            /** @description The rule check kept with it */
+            preflight: unknown;
+            engain_ids: string[];
+            /** @description Engain's own status word. */
+            engain_status: string;
+            /** @example t1_k2x9qz */
+            reddit_fullname: string;
+            permalink: string;
+            /** @description The Reddit account that posted it. */
+            author: string;
+            score: number | null;
+            peak_score: number | null;
+            reply_count: number | null;
+            upvotes_delivered: number | null;
+            /** @description Reddit's reason: moderator, automod_filtered, reddit, anti_evil_ops, content_takedown, deleted, removed. */
+            removal_category: string;
+            /** Format: date-time */
+            sent_at: string | null;
+            /** Format: date-time */
+            live_at: string | null;
+            /** Format: date-time */
+            ended_at: string | null;
+            /** @description Days live so far, or until it ended. */
+            live_days: number | null;
+            /** Format: date-time */
+            last_checked_at: string | null;
+            /** Format: date-time */
+            next_check_at: string | null;
+            check_error: string | null;
+            /** Format: uuid */
+            mission_id: string | null;
+            /** Format: uuid */
+            created_by: string | null;
+            /** Format: uuid */
+            approved_by: string | null;
+            /** Format: date-time */
+            approved_at: string | null;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            updated_at: string;
+            /** @description The detail view only: Engain's last answer about it, as sent. */
+            engain_raw?: unknown;
+            /** @description The detail view only. */
+            events?: {
+                /** @example went_live */
+                kind: string;
+                from_status: string;
+                to_status: string;
+                detail: {
+                    [key: string]: unknown;
+                };
+                /** Format: date-time */
+                at: string;
+            }[];
+            /** @description The detail view only, newest first. */
+            snapshots?: {
+                /** Format: date-time */
+                at: string;
+                /** @enum {string} */
+                state: "live" | "frozen" | "removed" | "gone";
+                score: number | null;
+                reply_count: number | null;
+                removal_category: string;
+                locked: boolean;
+                archived: boolean;
+            }[];
+        };
+        RedditReportRow: {
+            group: string;
+            actions: number;
+            mentions_live: number;
+            mentions_placed: number;
+            links_live: number;
+            links_placed: number;
+            removed: number;
+            pending: number;
+            credits: number;
+            cost_cents: number;
+            credits_per_mention: number | null;
+            median_live_days: number | null;
+            mean_live_days: number | null;
+            /** @description Share, 0 to 1, of items at least a day old that lived a day. */
+            survived_1d: number | null;
+            survived_7d: number | null;
+            survived_30d: number | null;
+            upvotes_bought: number;
+        };
+        RedditReport: {
+            /** Format: uuid */
+            brand_id: string;
+            group_by: string;
+            /** Format: date-time */
+            from: string | null;
+            totals: components["schemas"]["RedditReportRow"];
+            groups: components["schemas"]["RedditReportRow"][];
+            currency: string;
         };
         /** @description A recurring series of posts, approved once by a person. */
         SocialSeries: {
@@ -55734,6 +56311,659 @@ export interface operations {
             403: components["responses"]["Error"];
             404: components["responses"]["Error"];
             409: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    listRedditSettings: {
+        parameters: {
+            query?: {
+                /** @description Only records of this brand: its id or handle, none for records shared by every brand, or all (the default). */
+                brand?: components["parameters"]["Brand"];
+            };
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Settings and budgets. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: {
+                            settings: components["schemas"]["RedditSettings"];
+                            budget: components["schemas"]["RedditBudget"];
+                        }[];
+                    };
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    putRedditSettings: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                /** @description The brand's id or handle. */
+                brand: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @description An Engain connection's id; empty string to use any Engain connection the brand can use. */
+                    integration_id?: string | null;
+                    engain_project_id?: string;
+                    monthly_credit_limit?: number;
+                    daily_credit_limit?: number;
+                    no_monthly_limit?: boolean;
+                    no_daily_limit?: boolean;
+                    max_actions_per_subreddit_day?: number;
+                    max_upvotes_per_item?: number;
+                    require_approval?: boolean;
+                    credit_price_cents?: number;
+                    /** @example USD */
+                    currency?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The settings. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RedditSettings"];
+                };
+            };
+            400: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    getRedditBudget: {
+        parameters: {
+            query: {
+                /** @description The brand's id or handle. */
+                brand: string;
+            };
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The budget. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RedditBudget"];
+                };
+            };
+            400: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    listRedditExperiments: {
+        parameters: {
+            query?: {
+                status?: "open" | "closed";
+                limit?: number;
+                /**
+                 * @description next_cursor from the previous page, unchanged. Every paged list takes it, so one loop pages them all:
+                 *     call, then call again with cursor=next_cursor until next_cursor is null. Cursors are opaque; don't build them.
+                 */
+                cursor?: components["parameters"]["Cursor"];
+                /**
+                 * @description Only these fields of each item, comma separated (fields=id,email,status); id always comes back.
+                 *     Paging fields stay. A field the items don't have answers 400 naming the ones they do. Any GET takes it.
+                 */
+                fields?: components["parameters"]["Fields"];
+                /** @description Only records of this brand: its id or handle, none for records shared by every brand, or all (the default). */
+                brand?: components["parameters"]["Brand"];
+            };
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Experiments. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["RedditExperiment"][];
+                        next_cursor?: components["schemas"]["NextCursor"];
+                    };
+                };
+            };
+            400: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    createRedditExperiment: {
+        parameters: {
+            query?: never;
+            header?: {
+                /**
+                 * @description Makes the write safe to retry. A repeat with the same key from the same caller within 24 hours gets the first
+                 *     answer back (with `Idempotent-Replayed: true`) instead of running again. The same key for a different request
+                 *     is refused with 422 `idempotency_key_reused`; while the first is still running, 409 `idempotency_in_progress`.
+                 *     Use a new random key, such as a UUID, for each distinct write.
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @description The brand's id or handle. */
+                    brand: string;
+                    name: string;
+                    hypothesis?: string;
+                    /** @example reply_under_top_comment */
+                    strategy?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The experiment. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RedditExperiment"];
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            400: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    getRedditExperiment: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The experiment. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RedditExperiment"];
+                };
+            };
+            404: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    updateRedditExperiment: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    name?: string;
+                    hypothesis?: string;
+                    strategy?: string;
+                    /** @enum {string} */
+                    status?: "open" | "closed";
+                    conclusion?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The experiment. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RedditExperiment"];
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            400: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    listRedditActions: {
+        parameters: {
+            query?: {
+                /** @description One status or several, comma-separated: draft, approved, sending, submitted, live, frozen, removed, hidden, gone, failed, cancelled, done. */
+                status?: string;
+                kind?: "comment" | "reply" | "post" | "thread" | "upvotes";
+                subreddit?: string;
+                experiment_id?: string;
+                before?: string;
+                limit?: number;
+                /**
+                 * @description next_cursor from the previous page, unchanged. Every paged list takes it, so one loop pages them all:
+                 *     call, then call again with cursor=next_cursor until next_cursor is null. Cursors are opaque; don't build them.
+                 */
+                cursor?: components["parameters"]["Cursor"];
+                /**
+                 * @description Only these fields of each item, comma separated (fields=id,email,status); id always comes back.
+                 *     Paging fields stay. A field the items don't have answers 400 naming the ones they do. Any GET takes it.
+                 */
+                fields?: components["parameters"]["Fields"];
+                /** @description Only records of this brand: its id or handle, none for records shared by every brand, or all (the default). */
+                brand?: components["parameters"]["Brand"];
+            };
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Actions. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["RedditAction"][];
+                        /** Format: date-time */
+                        next_before: string | null;
+                        next_cursor?: components["schemas"]["NextCursor"];
+                    };
+                };
+            };
+            400: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    createRedditAction: {
+        parameters: {
+            query?: never;
+            header?: {
+                /**
+                 * @description Makes the write safe to retry. A repeat with the same key from the same caller within 24 hours gets the first
+                 *     answer back (with `Idempotent-Replayed: true`) instead of running again. The same key for a different request
+                 *     is refused with 422 `idempotency_key_reused`; while the first is still running, 409 `idempotency_in_progress`.
+                 *     Use a new random key, such as a UUID, for each distinct write.
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @description The brand's id or handle. */
+                    brand: string;
+                    /** Format: uuid */
+                    experiment_id?: string | null;
+                    /** @enum {string} */
+                    kind: "comment" | "reply" | "post" | "thread" | "upvotes";
+                    strategy?: string;
+                    target_url?: string;
+                    /** @description A post's title. */
+                    title?: string;
+                    content?: string;
+                    /** @description Thread groups: replies from other pool accounts (1 to 10), in order. */
+                    children?: {
+                        id?: string;
+                        /** @description An earlier child's id; null replies to the parent. */
+                        parent_id?: string | null;
+                        /** @enum {string} */
+                        type?: "comment" | "reply";
+                        account: number;
+                        content: string;
+                        delay_minutes?: number;
+                    }[];
+                    link_url?: string;
+                    /** @enum {string} */
+                    link_type?: "none" | "brand_site" | "review_site" | "docs" | "third_party" | "other";
+                    brand_mentioned?: boolean;
+                    competitors?: string[];
+                    /** @example comparison */
+                    tone?: string;
+                    /** @enum {string} */
+                    account_tier?: "" | "shared" | "dedicated";
+                    /** @description Upvotes to add: the order's size for kind upvotes, else a boost plan sent with the task. */
+                    upvotes_goal?: number;
+                    upvotes_per_day?: number;
+                    /** @enum {string} */
+                    upvotes_start?: "" | "immediately" | "after_3_days" | "after_5_days" | "after_7_days";
+                    /** Format: uuid */
+                    parent_action_id?: string | null;
+                    /** Format: date-time */
+                    scheduled_at?: string | null;
+                    notes?: string;
+                    /** @description The rule check's verdict for this draft, kept with it. */
+                    preflight?: unknown;
+                    /** @default true */
+                    submit?: boolean;
+                };
+            };
+        };
+        responses: {
+            /** @description The action. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RedditAction"];
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            400: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    getRedditAction: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The action. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RedditAction"];
+                };
+            };
+            404: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    approveRedditAction: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The action. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RedditAction"];
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    cancelRedditAction: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The action. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RedditAction"];
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    checkRedditAction: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Queued. */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        queued: boolean;
+                    };
+                };
+            };
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    preflightRedditDrafts: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    brand: string;
+                    subreddit: string;
+                    items: {
+                        [key: string]: unknown;
+                    }[];
+                };
+            };
+        };
+        responses: {
+            /** @description Engain's verdicts. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            400: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    getRedditSubreddit: {
+        parameters: {
+            query: {
+                brand: string;
+            };
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The subreddit. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        subreddit: string;
+                        ours: components["schemas"]["RedditReportRow"];
+                        /** @description Engain's removal rates, or null. */
+                        engain: unknown;
+                        engain_error?: string;
+                    };
+                };
+            };
+            400: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    listRedditThreads: {
+        parameters: {
+            query: {
+                brand: string;
+                type?: "new" | "seo";
+                engain_cursor?: string;
+                limit?: number;
+            };
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Engain's opportunities. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            400: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    getRedditReport: {
+        parameters: {
+            query: {
+                brand: string;
+                experiment_id?: string;
+                subreddit?: string;
+                /** @description A date or time: only actions created since. */
+                from?: string;
+                group_by?: "subreddit" | "strategy" | "kind" | "link_type" | "account_tier" | "experiment" | "tone" | "author";
+            };
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The report. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RedditReport"];
+                };
+            };
+            400: components["responses"]["Error"];
+            404: components["responses"]["Error"];
             default: components["responses"]["Error"];
         };
     };

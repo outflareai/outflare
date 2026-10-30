@@ -6,6 +6,12 @@ Each pull request that changes what Outflare does adds a change note in [changes
 
 ## [Unreleased]
 
+## [0.48.0] - 2026-10-30
+
+### Added
+
+- Help centre: publish the knowledge you mark for it as a public site customers can read and search, one per brand and on your own domain if you like. Style it to match your brand with a live preview, and see what readers read and what they searched for but didn't find.
+
 ## [0.47.0] - 2026-10-30
 
 ### Added

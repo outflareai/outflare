@@ -313,7 +313,7 @@ test("analytics for agents: changes, catalog resource, prompts and compact answe
   assert.equal(read.contents[0].mimeType, "application/json");
 
   const prompts = (await client.listPrompts()).prompts.map((p) => p.name);
-  assert.deepEqual(prompts.sort(), ["explain_traffic_change", "seo_check", "set_up_outflare", "weekly_website_review", "whats_blocked"]);
+  assert.deepEqual(prompts.sort(), ["explain_traffic_change", "run_reddit_campaign", "seo_check", "set_up_outflare", "weekly_website_review", "whats_blocked"]);
   const p = await client.getPrompt({ name: "weekly_website_review", arguments: { host: "example.com" } });
   assert.ok(p.messages[0].content.text.includes("get_analytics_changes with host example.com"));
 
@@ -422,4 +422,31 @@ test("brand tools reach the brand routes, and OUTFLARE_BRAND is the list default
   assert.deepEqual(JSON.parse(calls[2].body), { voice: "Plain." });
   await client.callTool({ name: "get_context", arguments: {} });
   assert.ok(calls.some((c) => c.url.pathname.endsWith("/context") && c.url.search === "?brand=repocket"));
+});
+
+test("reddit tools: guide, campaign prompt, actions and the report; read-only leaves out placing", async () => {
+  const { client, calls } = await connect(() => [200, { data: [] }]);
+  const guide = await client.readResource({ uri: "outflare://reddit-guide" });
+  assert.match(guide.contents[0].text, /place_reddit_action/);
+  const p = await client.getPrompt({ name: "run_reddit_campaign", arguments: { brand: "geonode", budget: "300" } });
+  assert.match(p.messages[0].content.text, /geonode.*300 Engain credits/);
+
+  const thread = "https://www.reddit.com/r/proxies/comments/1abc2d/best_residential_proxies/";
+  await client.callTool({ name: "place_reddit_action", arguments: { brand: "geonode", kind: "comment", target_url: thread, content: "Geonode held up for me", brand_mentioned: true } });
+  assert.equal(calls[0].method, "POST");
+  assert.equal(calls[0].url.pathname, `/v1/workspaces/${WS}/reddit/actions`);
+  assert.equal(JSON.parse(calls[0].body).kind, "comment");
+  await client.callTool({ name: "get_reddit_report", arguments: { brand: "geonode", group_by: "strategy" } });
+  assert.equal(calls[1].url.pathname, `/v1/workspaces/${WS}/reddit/report`);
+  assert.equal(calls[1].url.search, "?brand=geonode&group_by=strategy");
+  await client.callTool({ name: "get_reddit_subreddit", arguments: { brand: "geonode", subreddit: "r/proxies" } });
+  assert.equal(calls[2].url.pathname, `/v1/workspaces/${WS}/reddit/subreddits/proxies`);
+  await client.callTool({ name: "close_reddit_experiment", arguments: { experiment: SEQ, conclusion: "Plain recommendations last a week." } });
+  assert.equal(calls[3].method, "PATCH");
+  assert.deepEqual(JSON.parse(calls[3].body), { status: "closed", conclusion: "Plain recommendations last a week." });
+
+  const ro = await connect(() => [200, {}], { readOnly: true });
+  const names = (await ro.client.listTools()).tools.map((t) => t.name);
+  assert.ok(names.includes("get_reddit_report") && names.includes("preflight_reddit_drafts"));
+  assert.ok(!names.includes("place_reddit_action") && !names.includes("approve_reddit_action"));
 });

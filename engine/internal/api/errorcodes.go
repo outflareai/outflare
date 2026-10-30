@@ -134,6 +134,10 @@ var errorCodes = []errorCode{
 	{"ai_budget_reached", []int{409}, "AI calls reached the workspace's monthly limit. An admin can raise it under Settings, AI model.", false},
 	{"ai_failed", []int{502}, "The workspace's AI model did not answer, or not usably. Retry; the message says more.", true},
 
+	// Reddit campaigns.
+	{"reddit_budget_reached", []int{409}, "The action would pass the brand's Reddit credit limit for the month or the day. A person can raise it in PUT .../reddit/settings/{brand}; GET .../reddit/budget shows what is left.", false},
+	{"reddit_limit_reached", []int{409}, "The action would pass one of the brand's Reddit limits: actions per subreddit a day, or upvotes on one item. The message says which.", false},
+
 	// Customer records.
 	{"identity_taken", []int{409}, "Another record already holds this verified identity, such as a verified email. The message names it when you can see it: change that record, or add the identity unverified.", false},
 	{"merge_refused", []int{409}, "Both records have their own user id, so they are two accounts in your product and are never merged. Link them as the same human instead (POST .../records/duplicates/{candidate}/link).", false},

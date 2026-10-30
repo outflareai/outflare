@@ -13608,6 +13608,508 @@ paths:
         "404": { $ref: "#/components/responses/Error" }
         "409": { $ref: "#/components/responses/Error" }
         default: { $ref: "#/components/responses/Error" }
+  /v1/workspaces/{ws}/reddit/settings:
+    parameters: [{ $ref: "#/components/parameters/Workspace" }]
+    get:
+      operationId: listRedditSettings
+      x-outflare-access: { scope: social.read, brand_limited: true }
+      summary: List each brand's Reddit campaign settings and budget
+      description: "Scope: social.read. One entry per brand the caller sees (or the ?brand= one): its Engain connection and project, its limits, and what it has spent this month and today."
+      tags: [reddit]
+      parameters:
+        - { $ref: "#/components/parameters/Brand" }
+      responses:
+        "200":
+          description: Settings and budgets.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data:
+                    type: array
+                    items:
+                      type: object
+                      required: [settings, budget]
+                      properties:
+                        settings: { $ref: "#/components/schemas/RedditSettings" }
+                        budget: { $ref: "#/components/schemas/RedditBudget" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/workspaces/{ws}/reddit/settings/{brand}:
+    parameters:
+      - { $ref: "#/components/parameters/Workspace" }
+      - { name: brand, in: path, required: true, schema: { type: string }, description: The brand's id or handle. }
+    put:
+      operationId: putRedditSettings
+      x-outflare-access: { scope: social.manage, brand_limited: true }
+      summary: Set a brand's Engain connection, project and limits
+      description: |
+        Scope: social.manage. Only a signed-in person may change limits
+        (credit limits, actions per subreddit a day, upvotes per item) or
+        whether each action needs a person's approval: an agent never
+        raises its own budget. Fields left out keep their value;
+        `no_monthly_limit` and `no_daily_limit` clear a limit. Credits are
+        Engain credits; `credit_price_cents` turns them into money in
+        reports.
+      tags: [reddit]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                integration_id: { type: [string, "null"], description: "An Engain connection's id; empty string to use any Engain connection the brand can use." }
+                engain_project_id: { type: string, maxLength: 200 }
+                monthly_credit_limit: { type: number, minimum: 0 }
+                daily_credit_limit: { type: number, minimum: 0 }
+                no_monthly_limit: { type: boolean }
+                no_daily_limit: { type: boolean }
+                max_actions_per_subreddit_day: { type: integer, minimum: 1, maximum: 100 }
+                max_upvotes_per_item: { type: integer, minimum: 0, maximum: 2000 }
+                require_approval: { type: boolean }
+                credit_price_cents: { type: number, minimum: 0 }
+                currency: { type: string, example: USD }
+      responses:
+        "200":
+          description: The settings.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RedditSettings" }
+        "400": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/workspaces/{ws}/reddit/budget:
+    parameters: [{ $ref: "#/components/parameters/Workspace" }]
+    get:
+      operationId: getRedditBudget
+      x-outflare-access: { scope: social.read, brand_limited: true }
+      summary: What a brand has spent and has left on Reddit
+      description: "Scope: social.read. Credits spent this month and today (UTC) against the brand's limits, and what Engain says the workspace has left across every brand. Read it before planning actions."
+      tags: [reddit]
+      parameters:
+        - { name: brand, in: query, required: true, schema: { type: string }, description: The brand's id or handle. }
+      responses:
+        "200":
+          description: The budget.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RedditBudget" }
+        "400": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/workspaces/{ws}/reddit/experiments:
+    parameters: [{ $ref: "#/components/parameters/Workspace" }]
+    get:
+      operationId: listRedditExperiments
+      x-outflare-access: { scope: social.read, brand_limited: true }
+      summary: List Reddit experiments
+      description: "Scope: social.read. Newest first, at most limit. Read the conclusions of closed ones before starting a new test."
+      tags: [reddit]
+      parameters:
+        - { name: status, in: query, schema: { type: string, enum: [open, closed] } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 200, default: 50 } }
+        - { $ref: "#/components/parameters/Cursor" }
+        - { $ref: "#/components/parameters/Fields" }
+        - { $ref: "#/components/parameters/Brand" }
+      responses:
+        "200":
+          description: Experiments.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data: { type: array, items: { $ref: "#/components/schemas/RedditExperiment" } }
+                  next_cursor: { $ref: "#/components/schemas/NextCursor" }
+        "400": { $ref: "#/components/responses/Error" }
+        default: { $ref: "#/components/responses/Error" }
+    post:
+      operationId: createRedditExperiment
+      x-outflare-access: { scope: social.manage, brand_limited: true }
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      summary: Start a Reddit experiment
+      description: "Scope: social.manage. One hypothesis and the strategy it tests. Actions name it with experiment_id, and the report compares them."
+      tags: [reddit]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [brand, name]
+              properties:
+                brand: { type: string, description: The brand's id or handle. }
+                name: { type: string, maxLength: 200 }
+                hypothesis: { type: string, maxLength: 2000 }
+                strategy: { type: string, maxLength: 100, example: reply_under_top_comment }
+      responses:
+        "201":
+          description: The experiment.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RedditExperiment" }
+        "202": { $ref: "#/components/responses/MissionHeld" }
+        "400": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/workspaces/{ws}/reddit/experiments/{id}:
+    parameters:
+      - { $ref: "#/components/parameters/Workspace" }
+      - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+    get:
+      operationId: getRedditExperiment
+      x-outflare-access: { scope: social.read, brand_limited: true }
+      summary: Get a Reddit experiment
+      description: "Scope: social.read."
+      tags: [reddit]
+      responses:
+        "200":
+          description: The experiment.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RedditExperiment" }
+        "404": { $ref: "#/components/responses/Error" }
+        default: { $ref: "#/components/responses/Error" }
+    patch:
+      operationId: updateRedditExperiment
+      x-outflare-access: { scope: social.manage, brand_limited: true }
+      summary: Edit or close a Reddit experiment
+      description: "Scope: social.manage. status closed with a conclusion (what was tested, the numbers, what to do next) ends it; new actions can't join a closed experiment."
+      tags: [reddit]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name: { type: string, maxLength: 200 }
+                hypothesis: { type: string, maxLength: 2000 }
+                strategy: { type: string, maxLength: 100 }
+                status: { type: string, enum: [open, closed] }
+                conclusion: { type: string, maxLength: 5000 }
+      responses:
+        "200":
+          description: The experiment.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RedditExperiment" }
+        "202": { $ref: "#/components/responses/MissionHeld" }
+        "400": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/workspaces/{ws}/reddit/actions:
+    parameters: [{ $ref: "#/components/parameters/Workspace" }]
+    get:
+      operationId: listRedditActions
+      x-outflare-access: { scope: social.read, brand_limited: true }
+      summary: List Reddit campaign actions
+      description: "Scope: social.read. Every comment, reply, post, thread and upvote order, newest first, with its status, lifespan and cost. next_before pages back."
+      tags: [reddit]
+      parameters:
+        - { name: status, in: query, schema: { type: string }, description: "One status or several, comma-separated: draft, approved, sending, submitted, live, frozen, removed, hidden, gone, failed, cancelled, done." }
+        - { name: kind, in: query, schema: { type: string, enum: [comment, reply, post, thread, upvotes] } }
+        - { name: subreddit, in: query, schema: { type: string } }
+        - { name: experiment_id, in: query, schema: { type: string, format: uuid } }
+        - { name: before, in: query, schema: { type: string, format: date-time } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 200, default: 50 } }
+        - { $ref: "#/components/parameters/Cursor" }
+        - { $ref: "#/components/parameters/Fields" }
+        - { $ref: "#/components/parameters/Brand" }
+      responses:
+        "200":
+          description: Actions.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, next_before]
+                properties:
+                  data: { type: array, items: { $ref: "#/components/schemas/RedditAction" } }
+                  next_before: { type: [string, "null"], format: date-time }
+                  next_cursor: { $ref: "#/components/schemas/NextCursor" }
+        "400": { $ref: "#/components/responses/Error" }
+        default: { $ref: "#/components/responses/Error" }
+    post:
+      operationId: createRedditAction
+      x-outflare-access: { scope: social.manage, brand_limited: true }
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      summary: Place a comment, reply, post, thread or upvotes on Reddit
+      description: |
+        Scope: social.manage, and social.post to send it. Logs the action
+        and, unless `submit` is false or the brand needs a person's
+        approval, checks the brand's limits and sends it to Engain in the
+        background, spending Engain credits (about 5 for a comment or
+        reply, 10 for a post, 0.1 an upvote). Over a limit, the action is
+        kept as a draft and the answer is 409 `reddit_budget_reached` or
+        `reddit_limit_reached`.
+
+        `target_url`: the thread for a comment, the comment's permalink for
+        a reply, the subreddit (https://www.reddit.com/r/name) for a post,
+        any of those for a thread group, a thread or comment for upvotes
+        (or `parent_action_id` to upvote one of ours once it is live).
+        Links carry no tracking parameters. Describe what the action tests
+        (`strategy`, `link_type`, `brand_mentioned`, `tone`) so the report
+        can compare.
+      tags: [reddit]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [brand, kind]
+              properties:
+                brand: { type: string, description: The brand's id or handle. }
+                experiment_id: { type: [string, "null"], format: uuid }
+                kind: { type: string, enum: [comment, reply, post, thread, upvotes] }
+                strategy: { type: string, maxLength: 100 }
+                target_url: { type: string, maxLength: 2000 }
+                title: { type: string, maxLength: 300, description: A post's title. }
+                content: { type: string, maxLength: 40000 }
+                children:
+                  type: array
+                  maxItems: 20
+                  description: "Thread groups: replies from other pool accounts (1 to 10), in order."
+                  items:
+                    type: object
+                    required: [account, content]
+                    properties:
+                      id: { type: string, maxLength: 64 }
+                      parent_id: { type: [string, "null"], description: "An earlier child's id; null replies to the parent." }
+                      type: { type: string, enum: [comment, reply] }
+                      account: { type: integer, minimum: 1, maximum: 10 }
+                      content: { type: string }
+                      delay_minutes: { type: integer, minimum: 1 }
+                link_url: { type: string, maxLength: 2000 }
+                link_type: { type: string, enum: [none, brand_site, review_site, docs, third_party, other] }
+                brand_mentioned: { type: boolean }
+                competitors: { type: array, maxItems: 20, items: { type: string } }
+                tone: { type: string, maxLength: 50, example: comparison }
+                account_tier: { type: string, enum: ["", shared, dedicated] }
+                upvotes_goal: { type: integer, minimum: 0, maximum: 2000, description: "Upvotes to add: the order's size for kind upvotes, else a boost plan sent with the task." }
+                upvotes_per_day: { type: integer, minimum: 0, maximum: 10 }
+                upvotes_start: { type: string, enum: ["", immediately, after_3_days, after_5_days, after_7_days] }
+                parent_action_id: { type: [string, "null"], format: uuid }
+                scheduled_at: { type: [string, "null"], format: date-time }
+                notes: { type: string, maxLength: 5000 }
+                preflight: { description: "The rule check's verdict for this draft, kept with it." }
+                submit: { type: boolean, default: true }
+      responses:
+        "201":
+          description: The action.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RedditAction" }
+        "202": { $ref: "#/components/responses/MissionHeld" }
+        "400": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/workspaces/{ws}/reddit/actions/{id}:
+    parameters:
+      - { $ref: "#/components/parameters/Workspace" }
+      - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+    get:
+      operationId: getRedditAction
+      x-outflare-access: { scope: social.read, brand_limited: true }
+      summary: Get a Reddit action with its timeline and checks
+      description: "Scope: social.read. The action, its events (sent, live, removed, restored), what each check of Reddit saw, and Engain's last answer as it sent it."
+      tags: [reddit]
+      responses:
+        "200":
+          description: The action.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RedditAction" }
+        "404": { $ref: "#/components/responses/Error" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/workspaces/{ws}/reddit/actions/{id}/approve:
+    parameters:
+      - { $ref: "#/components/parameters/Workspace" }
+      - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+    post:
+      operationId: approveRedditAction
+      x-outflare-access: { scope: social.post, brand_limited: true }
+      summary: Approve a draft action so it is sent
+      description: "Scope: social.post. Checks the brand's limits and sends the draft to Engain. When the brand needs a person's approval, only a signed-in person may."
+      tags: [reddit]
+      responses:
+        "200":
+          description: The action.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RedditAction" }
+        "202": { $ref: "#/components/responses/MissionHeld" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/workspaces/{ws}/reddit/actions/{id}/cancel:
+    parameters:
+      - { $ref: "#/components/parameters/Workspace" }
+      - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+    post:
+      operationId: cancelRedditAction
+      x-outflare-access: { scope: social.manage, brand_limited: true }
+      summary: Withdraw an action not yet sent
+      description: "Scope: social.manage. A draft or an approved action that hasn't gone to Engain yet."
+      tags: [reddit]
+      responses:
+        "200":
+          description: The action.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RedditAction" }
+        "202": { $ref: "#/components/responses/MissionHeld" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/workspaces/{ws}/reddit/actions/{id}/check:
+    parameters:
+      - { $ref: "#/components/parameters/Workspace" }
+      - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+    post:
+      operationId: checkRedditAction
+      x-outflare-access: { scope: social.manage, brand_limited: true }
+      summary: Check an action on Engain and Reddit now
+      description: "Scope: social.manage. Queues a check straight away instead of waiting for the next one. Checks run by themselves: every 10 minutes for a new live item, then less often."
+      tags: [reddit]
+      responses:
+        "202":
+          description: Queued.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [queued]
+                properties:
+                  queued: { type: boolean }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/workspaces/{ws}/reddit/preflight:
+    parameters: [{ $ref: "#/components/parameters/Workspace" }]
+    post:
+      operationId: preflightRedditDrafts
+      x-outflare-access: { scope: social.manage, brand_limited: true }
+      summary: Check drafts against a subreddit's rules before sending
+      description: |
+        Scope: social.manage. Engain's rule check on up to 25 drafts for one
+        subreddit, free and limited to 5 calls a minute. Each item is
+        {key, taskType: post|comment|reply, content, title?, context?}; a
+        reply needs context.parentCommentUrl. The answer is Engain's as it
+        sent it: per item a verdict (pass, warn, fail), the rules at risk,
+        removalRisk, marketingIntentRisk, authenticityRisk (reads as AI),
+        naturalnessAdvice and the subreddit's historical removal rate.
+      tags: [reddit]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [brand, subreddit, items]
+              properties:
+                brand: { type: string }
+                subreddit: { type: string }
+                items: { type: array, minItems: 1, maxItems: 25, items: { type: object, additionalProperties: true } }
+      responses:
+        "200":
+          description: Engain's verdicts.
+          content:
+            application/json:
+              schema: { type: object, additionalProperties: true }
+        "400": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/workspaces/{ws}/reddit/subreddits/{name}:
+    parameters:
+      - { $ref: "#/components/parameters/Workspace" }
+      - { name: name, in: path, required: true, schema: { type: string } }
+    get:
+      operationId: getRedditSubreddit
+      x-outflare-access: { scope: social.read, brand_limited: true }
+      summary: How strict a subreddit is
+      description: "Scope: social.read. Engain's historical removal rates there across all its customers (engain, as Engain sent it), beside the brand's own numbers there (ours)."
+      tags: [reddit]
+      parameters:
+        - { name: brand, in: query, required: true, schema: { type: string } }
+      responses:
+        "200":
+          description: The subreddit.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [subreddit, ours, engain]
+                properties:
+                  subreddit: { type: string }
+                  ours: { $ref: "#/components/schemas/RedditReportRow" }
+                  engain: { description: "Engain's removal rates, or null." }
+                  engain_error: { type: string }
+        "400": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/workspaces/{ws}/reddit/threads:
+    parameters: [{ $ref: "#/components/parameters/Workspace" }]
+    get:
+      operationId: listRedditThreads
+      x-outflare-access: { scope: social.read, brand_limited: true }
+      summary: Threads worth acting on, found by Engain
+      description: "Scope: social.read. type new: fresh threads for the brand's topics; type seo: threads that rank on Google. As Engain sent them; pass its cursor back for more."
+      tags: [reddit]
+      parameters:
+        - { name: brand, in: query, required: true, schema: { type: string } }
+        - { name: type, in: query, schema: { type: string, enum: [new, seo] } }
+        - { name: engain_cursor, in: query, schema: { type: string } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 100, default: 25 } }
+      responses:
+        "200":
+          description: Engain's opportunities.
+          content:
+            application/json:
+              schema: { type: object, additionalProperties: true }
+        "400": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/workspaces/{ws}/reddit/report:
+    parameters: [{ $ref: "#/components/parameters/Workspace" }]
+    get:
+      operationId: getRedditReport
+      x-outflare-access: { scope: social.read, brand_limited: true }
+      summary: Mentions, links, cost and lifespan of Reddit actions
+      description: |
+        Scope: social.read. A mention is an action that names the brand and
+        went live on Reddit; a link, one with a link that went live. Live
+        counts are what a logged-out visitor sees now. Lifespan is from
+        going live to removal or deletion (or now); survived_7d is the
+        share of items at least 7 days old that lived 7 days. group_by
+        splits the numbers to compare tactics.
+      tags: [reddit]
+      parameters:
+        - { name: brand, in: query, required: true, schema: { type: string } }
+        - { name: experiment_id, in: query, schema: { type: string, format: uuid } }
+        - { name: subreddit, in: query, schema: { type: string } }
+        - { name: from, in: query, schema: { type: string }, description: "A date or time: only actions created since." }
+        - { name: group_by, in: query, schema: { type: string, enum: [subreddit, strategy, kind, link_type, account_tier, experiment, tone, author] } }
+      responses:
+        "200":
+          description: The report.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RedditReport" }
+        "400": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        default: { $ref: "#/components/responses/Error" }
   /v1/workspaces/{ws}/integrations/{id}/sign-in:
     parameters:
       - { $ref: "#/components/parameters/Workspace" }
@@ -34178,6 +34680,175 @@ components:
         published_at: { type: [string, "null"], format: date-time }
         created_at: { type: string, format: date-time }
         updated_at: { type: string, format: date-time }
+    RedditSettings:
+      type: object
+      description: A brand's Reddit campaign settings. Limits are checked before any action spends Engain credits.
+      required: [brand_id, integration_id, engain_project_id, monthly_credit_limit, daily_credit_limit, max_actions_per_subreddit_day, max_upvotes_per_item,
+        require_approval, credit_price_cents, currency, saved]
+      properties:
+        brand_id: { type: string, format: uuid }
+        integration_id: { type: [string, "null"], format: uuid, description: "The Engain connection; null uses any Engain connection the brand can use." }
+        engain_project_id: { type: string, description: "Empty uses the Engain account's only project." }
+        monthly_credit_limit: { type: [number, "null"], description: Null is no limit. }
+        daily_credit_limit: { type: [number, "null"], description: "Null is no limit. Days are UTC." }
+        max_actions_per_subreddit_day: { type: integer }
+        max_upvotes_per_item: { type: integer }
+        require_approval: { type: boolean, description: "A person approves each action before it is sent." }
+        credit_price_cents: { type: number }
+        currency: { type: string }
+        saved: { type: boolean, description: "False when these are the defaults and nothing was saved yet." }
+    RedditBudget:
+      type: object
+      required: [brand_id, month_credits, day_credits, monthly_credit_limit, daily_credit_limit, month_remaining, day_remaining, month_cost_cents, currency, engain_credits]
+      properties:
+        brand_id: { type: string, format: uuid }
+        month_credits: { type: number, description: "Credits this month (UTC): Engain's figure when known, else the estimate." }
+        day_credits: { type: number }
+        monthly_credit_limit: { type: [number, "null"] }
+        daily_credit_limit: { type: [number, "null"] }
+        month_remaining: { type: [number, "null"], description: Null when there is no monthly limit. }
+        day_remaining: { type: [number, "null"] }
+        month_cost_cents: { type: number }
+        currency: { type: string }
+        engain_credits: { type: [number, "null"], description: "What Engain says the workspace has left, across every brand; null when not read." }
+    RedditExperiment:
+      type: object
+      required: [id, brand_id, name, hypothesis, strategy, status, conclusion, mission_id, created_by, created_at, closed_at, actions]
+      properties:
+        id: { type: string, format: uuid }
+        brand_id: { type: string, format: uuid }
+        name: { type: string }
+        hypothesis: { type: string }
+        strategy: { type: string }
+        status: { type: string, enum: [open, closed] }
+        conclusion: { type: string }
+        mission_id: { type: [string, "null"], format: uuid }
+        created_by: { type: [string, "null"], format: uuid }
+        created_at: { type: string, format: date-time }
+        closed_at: { type: [string, "null"], format: date-time }
+        actions: { type: integer }
+    RedditAction:
+      type: object
+      description: One thing placed on Reddit through Engain, and everything known about it since.
+      required: [id, brand_id, experiment_id, kind, strategy, target_url, target_kind, subreddit, title, content, children, link_url, link_type, brand_mentioned,
+        competitors, tone, account_tier, upvotes_goal, upvotes_per_day, upvotes_start, parent_action_id, scheduled_at, notes, status, status_reason,
+        estimated_credits, credits, preflight, engain_ids, engain_status, reddit_fullname, permalink, author, score, peak_score, reply_count,
+        upvotes_delivered, removal_category, sent_at, live_at, ended_at, live_days, last_checked_at, next_check_at, check_error, mission_id, created_by,
+        approved_by, approved_at, created_at, updated_at]
+      properties:
+        id: { type: string, format: uuid }
+        brand_id: { type: string, format: uuid }
+        experiment_id: { type: [string, "null"], format: uuid }
+        kind: { type: string, enum: [comment, reply, post, thread, upvotes] }
+        strategy: { type: string }
+        target_url: { type: string }
+        target_kind: { type: string, enum: ["", thread, comment, subreddit] }
+        subreddit: { type: string }
+        title: { type: string }
+        content: { type: string }
+        children: { type: array, items: { type: object, additionalProperties: true } }
+        link_url: { type: string }
+        link_type: { type: string, enum: [none, brand_site, review_site, docs, third_party, other] }
+        brand_mentioned: { type: boolean }
+        competitors: { type: array, items: { type: string } }
+        tone: { type: string }
+        account_tier: { type: string, enum: ["", shared, dedicated] }
+        upvotes_goal: { type: integer }
+        upvotes_per_day: { type: integer }
+        upvotes_start: { type: string }
+        parent_action_id: { type: [string, "null"], format: uuid }
+        scheduled_at: { type: [string, "null"], format: date-time }
+        notes: { type: string }
+        status:
+          type: string
+          enum: [draft, approved, sending, submitted, live, frozen, removed, hidden, gone, failed, cancelled, done]
+          description: "draft: not sent. approved: queued. sending: the call is out. submitted: Engain took it, not on Reddit yet. live: a logged-out visitor sees it. frozen: live but locked or archived. removed: taken down by moderators, a filter or Reddit. hidden: not shown in the thread. gone: deleted, or the account is. failed: Engain refused it or never published it. cancelled: withdrawn. done: an upvote order finished."
+        status_reason: { type: [string, "null"] }
+        estimated_credits: { type: number }
+        credits: { type: [number, "null"], description: "Engain's figure, when it reported one." }
+        preflight: { description: The rule check kept with it, or null. }
+        engain_ids: { type: array, items: { type: string } }
+        engain_status: { type: string, description: Engain's own status word. }
+        reddit_fullname: { type: string, example: t1_k2x9qz }
+        permalink: { type: string }
+        author: { type: string, description: The Reddit account that posted it. }
+        score: { type: [integer, "null"] }
+        peak_score: { type: [integer, "null"] }
+        reply_count: { type: [integer, "null"] }
+        upvotes_delivered: { type: [integer, "null"] }
+        removal_category: { type: string, description: "Reddit's reason: moderator, automod_filtered, reddit, anti_evil_ops, content_takedown, deleted, removed." }
+        sent_at: { type: [string, "null"], format: date-time }
+        live_at: { type: [string, "null"], format: date-time }
+        ended_at: { type: [string, "null"], format: date-time }
+        live_days: { type: [number, "null"], description: "Days live so far, or until it ended." }
+        last_checked_at: { type: [string, "null"], format: date-time }
+        next_check_at: { type: [string, "null"], format: date-time }
+        check_error: { type: [string, "null"] }
+        mission_id: { type: [string, "null"], format: uuid }
+        created_by: { type: [string, "null"], format: uuid }
+        approved_by: { type: [string, "null"], format: uuid }
+        approved_at: { type: [string, "null"], format: date-time }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+        engain_raw: { description: "The detail view only: Engain's last answer about it, as sent." }
+        events:
+          type: array
+          description: The detail view only.
+          items:
+            type: object
+            required: [kind, from_status, to_status, detail, at]
+            properties:
+              kind: { type: string, example: went_live }
+              from_status: { type: string }
+              to_status: { type: string }
+              detail: { type: object, additionalProperties: true }
+              at: { type: string, format: date-time }
+        snapshots:
+          type: array
+          description: The detail view only, newest first.
+          items:
+            type: object
+            required: [at, state, score, reply_count, removal_category, locked, archived]
+            properties:
+              at: { type: string, format: date-time }
+              state: { type: string, enum: [live, frozen, removed, gone] }
+              score: { type: [integer, "null"] }
+              reply_count: { type: [integer, "null"] }
+              removal_category: { type: string }
+              locked: { type: boolean }
+              archived: { type: boolean }
+    RedditReportRow:
+      type: object
+      required: [group, actions, mentions_live, mentions_placed, links_live, links_placed, removed, pending, credits, cost_cents, credits_per_mention,
+        median_live_days, mean_live_days, survived_1d, survived_7d, survived_30d, upvotes_bought]
+      properties:
+        group: { type: string }
+        actions: { type: integer }
+        mentions_live: { type: integer }
+        mentions_placed: { type: integer }
+        links_live: { type: integer }
+        links_placed: { type: integer }
+        removed: { type: integer }
+        pending: { type: integer }
+        credits: { type: number }
+        cost_cents: { type: number }
+        credits_per_mention: { type: [number, "null"] }
+        median_live_days: { type: [number, "null"] }
+        mean_live_days: { type: [number, "null"] }
+        survived_1d: { type: [number, "null"], description: "Share, 0 to 1, of items at least a day old that lived a day." }
+        survived_7d: { type: [number, "null"] }
+        survived_30d: { type: [number, "null"] }
+        upvotes_bought: { type: integer }
+    RedditReport:
+      type: object
+      required: [brand_id, group_by, from, totals, groups, currency]
+      properties:
+        brand_id: { type: string, format: uuid }
+        group_by: { type: string }
+        from: { type: [string, "null"], format: date-time }
+        totals: { $ref: "#/components/schemas/RedditReportRow" }
+        groups: { type: array, items: { $ref: "#/components/schemas/RedditReportRow" } }
+        currency: { type: string }
     SocialSeries:
       type: object
       description: A recurring series of posts, approved once by a person.

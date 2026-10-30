@@ -34,6 +34,7 @@ Outflare is the brain of a company's go-to-market. It sends cold email from the 
 - Connectors: optional. Nothing needs connecting to run. list_connectors shows what can connect; request_connection gives the person a link to connect it, so keys never pass through chat.
 - Missions: an agent working toward a goal within limits. Writes are dry runs or wait for a person until the mission allows them. An agent can never approve its own writes.
 - Outcomes and reports: meetings, deals and spend give cost per meeting; reports and analytics show what is working.
+- Reddit campaigns: comments, replies, posts and upvotes placed through Engain (the workspace's own connection), within each brand's budget, as experiments whose results are tracked. Read get_reddit_guide before the first one.
 - Events: every change is in the audit log and events feed (list_events), and can go to webhooks.
 
 ## When something is wrong

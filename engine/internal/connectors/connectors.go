@@ -58,6 +58,9 @@ const (
 	CapImportCRM       = "import.crm"    // implements CRMImporter
 	CapSocialSearch    = "social.search" // implements SocialSearcher
 	CapSocialReply     = "social.reply"
+	// CapRedditCampaigns: posts, comments, replies and upvotes on Reddit
+	// through a managed account network (Engain), with status reads.
+	CapRedditCampaigns = "reddit.campaigns"
 )
 
 // AccountSignIn is a connector that runs on the workspace's own app: the

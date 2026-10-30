@@ -504,6 +504,7 @@ func (s *Server) buildHandler() http.Handler {
 	s.routesSocial(mux)
 	s.routesSocialAccounts(mux)
 	s.routesSocialPublish(mux)
+	s.routesRedditCampaigns(mux)
 	s.routesBrandLinks(mux)
 	s.routesReviews(mux)
 	s.routesAIFacts(mux)

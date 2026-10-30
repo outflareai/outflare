@@ -5572,6 +5572,119 @@
     },
     {
       "type": "row",
+      "title": "Reddit campaigns (actions sent through Engain)",
+      "id": 423,
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 394
+      },
+      "panels": []
+    },
+    {
+      "type": "timeseries",
+      "title": "Actions sent to Engain",
+      "description": "Reddit campaign actions sent to Engain per hour, by kind and outcome. Normal is all submitted; failed means Engain refused it, unknown that it did not answer so the action may or may not exist (each one is listed with its reason under Reddit).",
+      "id": 424,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 395
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (kind, outcome) (increase(outflare_reddit_sends_total{job=\"$job\"}[1h]))",
+          "legendFormat": "{{kind}} {{outcome}}",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "fillOpacity": 10
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "mean",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Checks of sent actions",
+      "description": "Checks of sent actions per hour on Engain and on Reddit as a logged-out visitor sees them, by outcome. Normal is mostly ok with reddit_read true; reddit_error means Reddit turned the reader away (connect Geonode), engain_error that Engain did not answer.",
+      "id": 425,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 395
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (outcome, reddit_read) (increase(outflare_reddit_checks_total{job=\"$job\"}[1h]))",
+          "legendFormat": "{{outcome}} read={{reddit_read}}",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "fillOpacity": 10
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "mean",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "type": "row",
       "title": "Link building (who links to a page, on workspaces' own SEO connections)",
       "id": 96,
       "collapsed": false,
@@ -5579,7 +5692,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 394
+        "y": 403
       },
       "panels": []
     },
@@ -5596,7 +5709,7 @@
         "h": 8,
         "w": 24,
         "x": 0,
-        "y": 395
+        "y": 404
       },
       "targets": [
         {
@@ -5646,7 +5759,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 403
+        "y": 412
       },
       "targets": [
         {
@@ -5696,7 +5809,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 403
+        "y": 412
       },
       "targets": [
         {
@@ -5746,7 +5859,7 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 411
+        "y": 420
       },
       "targets": [
         {
@@ -5796,7 +5909,7 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 411
+        "y": 420
       },
       "targets": [
         {
@@ -5846,7 +5959,7 @@
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 411
+        "y": 420
       },
       "targets": [
         {
@@ -5896,7 +6009,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 419
+        "y": 428
       },
       "targets": [
         {
@@ -5941,7 +6054,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 427
+        "y": 436
       },
       "collapsed": false,
       "panels": []
@@ -5959,7 +6072,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 428
+        "y": 437
       },
       "targets": [
         {
@@ -6009,7 +6122,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 428
+        "y": 437
       },
       "targets": [
         {
@@ -6068,7 +6181,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 436
+        "y": 445
       },
       "targets": [
         {
@@ -6118,7 +6231,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 436
+        "y": 445
       },
       "targets": [
         {
@@ -6173,7 +6286,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 444
+        "y": 453
       },
       "panels": []
     },
@@ -6190,7 +6303,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 445
+        "y": 454
       },
       "targets": [
         {
@@ -6243,7 +6356,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 445
+        "y": 454
       },
       "targets": [
         {
@@ -6296,7 +6409,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 453
+        "y": 462
       },
       "targets": [
         {
@@ -6349,7 +6462,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 453
+        "y": 462
       },
       "targets": [
         {
@@ -6399,7 +6512,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 461
+        "y": 470
       },
       "targets": [
         {
@@ -6452,7 +6565,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 461
+        "y": 470
       },
       "targets": [
         {
@@ -6505,7 +6618,7 @@
         "h": 8,
         "w": 24,
         "x": 0,
-        "y": 469
+        "y": 478
       },
       "targets": [
         {
@@ -6553,7 +6666,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 477
+        "y": 486
       },
       "collapsed": false,
       "panels": []
@@ -6571,7 +6684,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 478
+        "y": 487
       },
       "targets": [
         {
@@ -6624,7 +6737,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 478
+        "y": 487
       },
       "targets": [
         {
@@ -6665,7 +6778,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 486
+        "y": 495
       },
       "panels": []
     },
@@ -6682,7 +6795,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 487
+        "y": 496
       },
       "targets": [
         {
@@ -6735,7 +6848,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 487
+        "y": 496
       },
       "targets": [
         {
@@ -6784,7 +6897,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 495
+        "y": 504
       },
       "panels": []
     },
@@ -6801,7 +6914,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 496
+        "y": 505
       },
       "targets": [
         {
@@ -6854,7 +6967,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 496
+        "y": 505
       },
       "targets": [
         {
@@ -6903,7 +7016,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 504
+        "y": 513
       },
       "panels": []
     },
@@ -6920,7 +7033,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 505
+        "y": 514
       },
       "targets": [
         {
@@ -6973,7 +7086,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 505
+        "y": 514
       },
       "targets": [
         {
@@ -7030,7 +7143,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 513
+        "y": 522
       },
       "id": 187,
       "panels": []
@@ -7048,7 +7161,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 514
+        "y": 523
       },
       "targets": [
         {
@@ -7097,7 +7210,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 514
+        "y": 523
       },
       "targets": [
         {
@@ -7146,7 +7259,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 522
+        "y": 531
       },
       "targets": [
         {
@@ -7195,7 +7308,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 522
+        "y": 531
       },
       "targets": [
         {
@@ -7244,7 +7357,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 530
+        "y": 539
       },
       "targets": [
         {
@@ -7289,7 +7402,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 538
+        "y": 547
       },
       "panels": []
     },
@@ -7306,7 +7419,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 539
+        "y": 548
       },
       "targets": [
         {
@@ -7351,7 +7464,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 539
+        "y": 548
       },
       "targets": [
         {
@@ -7396,7 +7509,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 547
+        "y": 556
       },
       "targets": [
         {
@@ -7446,7 +7559,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 555
+        "y": 564
       },
       "panels": []
     },
@@ -7463,7 +7576,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 556
+        "y": 565
       },
       "targets": [
         {
@@ -7516,7 +7629,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 556
+        "y": 565
       },
       "targets": [
         {
@@ -7569,7 +7682,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 564
+        "y": 573
       },
       "targets": [
         {
@@ -7631,7 +7744,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 564
+        "y": 573
       },
       "targets": [
         {
@@ -7688,7 +7801,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 572
+        "y": 581
       },
       "id": 191,
       "panels": []
@@ -7706,7 +7819,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 573
+        "y": 582
       },
       "targets": [
         {
@@ -7755,7 +7868,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 573
+        "y": 582
       },
       "targets": [
         {
@@ -7804,7 +7917,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 581
+        "y": 590
       },
       "targets": [
         {
@@ -7849,7 +7962,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 589
+        "y": 598
       },
       "panels": []
     },
@@ -7866,7 +7979,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 590
+        "y": 599
       },
       "targets": [
         {
@@ -7919,7 +8032,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 590
+        "y": 599
       },
       "targets": [
         {

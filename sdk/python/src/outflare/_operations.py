@@ -1365,6 +1365,27 @@ class Operations(_Mixin):
             idempotency_key=idempotency_key,
         )
 
+    def approve_reddit_action(
+        self,
+        id: str,
+        *,
+        ws: str | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Approve a draft action so it is sent.
+
+        Scope: social.post. Checks the brand's limits and sends the draft to Engain. When the brand needs a person's approval, only a signed-in person may.
+
+        Needs: the social.post scope.
+        POST /v1/workspaces/{ws}/reddit/actions/{id}/approve
+        """
+        return self._call(
+            "POST",
+            "/v1/workspaces/{ws}/reddit/actions/{id}/approve",
+            path={"id": id, "ws": ws},
+            idempotency_key=idempotency_key,
+        )
+
     def approve_social_action(
         self,
         id: str,
@@ -1912,6 +1933,27 @@ class Operations(_Mixin):
             idempotency_key=idempotency_key,
         )
 
+    def cancel_reddit_action(
+        self,
+        id: str,
+        *,
+        ws: str | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Withdraw an action not yet sent.
+
+        Scope: social.manage. A draft or an approved action that hasn't gone to Engain yet.
+
+        Needs: the social.manage scope.
+        POST /v1/workspaces/{ws}/reddit/actions/{id}/cancel
+        """
+        return self._call(
+            "POST",
+            "/v1/workspaces/{ws}/reddit/actions/{id}/cancel",
+            path={"id": id, "ws": ws},
+            idempotency_key=idempotency_key,
+        )
+
     def cancel_social_publication(
         self,
         id: str,
@@ -2216,6 +2258,27 @@ class Operations(_Mixin):
             path={"ws": ws},
             body={"brand": brand, "emails": emails, "purpose": purpose},
             extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
+    def check_reddit_action(
+        self,
+        id: str,
+        *,
+        ws: str | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Check an action on Engain and Reddit now.
+
+        Scope: social.manage. Queues a check straight away instead of waiting for the next one. Checks run by themselves: every 10 minutes for a new live item, then less often.
+
+        Needs: the social.manage scope.
+        POST /v1/workspaces/{ws}/reddit/actions/{id}/check
+        """
+        return self._call(
+            "POST",
+            "/v1/workspaces/{ws}/reddit/actions/{id}/check",
+            path={"id": id, "ws": ws},
             idempotency_key=idempotency_key,
         )
 
@@ -4679,6 +4742,113 @@ class Operations(_Mixin):
                 "sequence_id": sequence_id,
                 "starts_on": starts_on,
             },
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
+    def create_reddit_action(
+        self,
+        *,
+        ws: str | None = None,
+        account_tier: Literal["", "shared", "dedicated"] | None = None,
+        brand: str,
+        brand_mentioned: bool | None = None,
+        children: list[dict[str, Any]] | None = None,
+        competitors: list[str] | None = None,
+        experiment_id: str | None = None,
+        kind: Literal["comment", "reply", "post", "thread", "upvotes"],
+        link_type: Literal["none", "brand_site", "review_site", "docs", "third_party", "other"] | None = None,
+        link_url: str | None = None,
+        notes: str | None = None,
+        parent_action_id: str | None = None,
+        preflight: Any | None = None,
+        scheduled_at: str | None = None,
+        strategy: str | None = None,
+        submit: bool | None = None,
+        target_url: str | None = None,
+        title: str | None = None,
+        tone: str | None = None,
+        upvotes_goal: int | None = None,
+        upvotes_per_day: int | None = None,
+        upvotes_start: Literal["", "immediately", "after_3_days", "after_5_days", "after_7_days"] | None = None,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Place a comment, reply, post, thread or upvotes on Reddit.
+
+        Scope: social.manage, and social.post to send it. Logs the action
+        and, unless `submit` is false or the brand needs a person's
+        approval, checks the brand's limits and sends it to Engain in the
+        background, spending Engain credits (about 5 for a comment or
+        reply, 10 for a post, 0.1 an upvote). Over a limit, the action is
+        kept as a draft and the answer is 409 `reddit_budget_reached` or
+        `reddit_limit_reached`.
+
+        `target_url`: the thread for a comment, the comment's permalink for
+        a reply, the subreddit (https://www.reddit.com/r/name) for a post,
+        any of those for a thread group, a thread or comment for upvotes
+        (or `parent_action_id` to upvote one of ours once it is live).
+        Links carry no tracking parameters. Describe what the action tests
+        (`strategy`, `link_type`, `brand_mentioned`, `tone`) so the report
+        can compare.
+
+        Needs: the social.manage scope.
+        POST /v1/workspaces/{ws}/reddit/actions
+        """
+        return self._call(
+            "POST",
+            "/v1/workspaces/{ws}/reddit/actions",
+            path={"ws": ws},
+            body={
+                "account_tier": account_tier,
+                "brand": brand,
+                "brand_mentioned": brand_mentioned,
+                "children": children,
+                "competitors": competitors,
+                "experiment_id": experiment_id,
+                "kind": kind,
+                "link_type": link_type,
+                "link_url": link_url,
+                "notes": notes,
+                "parent_action_id": parent_action_id,
+                "preflight": preflight,
+                "scheduled_at": scheduled_at,
+                "strategy": strategy,
+                "submit": submit,
+                "target_url": target_url,
+                "title": title,
+                "tone": tone,
+                "upvotes_goal": upvotes_goal,
+                "upvotes_per_day": upvotes_per_day,
+                "upvotes_start": upvotes_start,
+            },
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
+    def create_reddit_experiment(
+        self,
+        *,
+        ws: str | None = None,
+        brand: str,
+        hypothesis: str | None = None,
+        name: str,
+        strategy: str | None = None,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Start a Reddit experiment.
+
+        Scope: social.manage. One hypothesis and the strategy it tests. Actions name it with experiment_id, and the report compares them.
+
+        Needs: the social.manage scope.
+        POST /v1/workspaces/{ws}/reddit/experiments
+        """
+        return self._call(
+            "POST",
+            "/v1/workspaces/{ws}/reddit/experiments",
+            path={"ws": ws},
+            body={"brand": brand, "hypothesis": hypothesis, "name": name, "strategy": strategy},
             extra_body=extra_body,
             idempotency_key=idempotency_key,
         )
@@ -10112,6 +10282,120 @@ class Operations(_Mixin):
             "GET",
             "/v1/workspaces/{ws}/catalog/types/{type}",
             path={"type": type, "ws": ws},
+        )
+
+    def get_reddit_action(
+        self,
+        id: str,
+        *,
+        ws: str | None = None,
+    ) -> Any:
+        """Get a Reddit action with its timeline and checks.
+
+        Scope: social.read. The action, its events (sent, live, removed, restored), what each check of Reddit saw, and Engain's last answer as it sent it.
+
+        Needs: the social.read scope.
+        GET /v1/workspaces/{ws}/reddit/actions/{id}
+        """
+        return self._call(
+            "GET",
+            "/v1/workspaces/{ws}/reddit/actions/{id}",
+            path={"id": id, "ws": ws},
+        )
+
+    def get_reddit_budget(
+        self,
+        *,
+        ws: str | None = None,
+        brand: str,
+    ) -> Any:
+        """What a brand has spent and has left on Reddit.
+
+        Scope: social.read. Credits spent this month and today (UTC) against the brand's limits, and what Engain says the workspace has left across every brand. Read it before planning actions.
+
+        Needs: the social.read scope.
+        GET /v1/workspaces/{ws}/reddit/budget
+        """
+        return self._call(
+            "GET",
+            "/v1/workspaces/{ws}/reddit/budget",
+            path={"ws": ws},
+            query={"brand": brand},
+        )
+
+    def get_reddit_experiment(
+        self,
+        id: str,
+        *,
+        ws: str | None = None,
+    ) -> Any:
+        """Get a Reddit experiment.
+
+        Scope: social.read.
+
+        Needs: the social.read scope.
+        GET /v1/workspaces/{ws}/reddit/experiments/{id}
+        """
+        return self._call(
+            "GET",
+            "/v1/workspaces/{ws}/reddit/experiments/{id}",
+            path={"id": id, "ws": ws},
+        )
+
+    def get_reddit_report(
+        self,
+        *,
+        ws: str | None = None,
+        brand: str,
+        experiment_id: str | None = None,
+        subreddit: str | None = None,
+        from_: str | None = None,
+        group_by: str | None = None,
+    ) -> Any:
+        """Mentions, links, cost and lifespan of Reddit actions.
+
+        Scope: social.read. A mention is an action that names the brand and
+        went live on Reddit; a link, one with a link that went live. Live
+        counts are what a logged-out visitor sees now. Lifespan is from
+        going live to removal or deletion (or now); survived_7d is the
+        share of items at least 7 days old that lived 7 days. group_by
+        splits the numbers to compare tactics.
+
+        Needs: the social.read scope.
+        GET /v1/workspaces/{ws}/reddit/report
+        """
+        return self._call(
+            "GET",
+            "/v1/workspaces/{ws}/reddit/report",
+            path={"ws": ws},
+            query={
+                "brand": brand,
+                "experiment_id": experiment_id,
+                "subreddit": subreddit,
+                "from": from_,
+                "group_by": group_by,
+            },
+        )
+
+    def get_reddit_subreddit(
+        self,
+        name: str,
+        *,
+        ws: str | None = None,
+        brand: str,
+    ) -> Any:
+        """How strict a subreddit is.
+
+        Scope: social.read. Engain's historical removal rates there across all its customers (engain, as Engain sent it), beside the brand's own numbers there (ours).
+
+        Needs: the social.read scope.
+        GET /v1/workspaces/{ws}/reddit/subreddits/{name}
+        """
+        return self._call(
+            "GET",
+            "/v1/workspaces/{ws}/reddit/subreddits/{name}",
+            path={"name": name, "ws": ws},
+            query={"brand": brand},
         )
 
     def get_reply_rules(
@@ -15703,6 +15987,111 @@ class Operations(_Mixin):
             path={"ws": ws},
         )
 
+    def list_reddit_actions(
+        self,
+        *,
+        ws: str | None = None,
+        status: str | None = None,
+        kind: Literal["comment", "reply", "post", "thread", "upvotes"] | None = None,
+        subreddit: str | None = None,
+        experiment_id: str | None = None,
+        before: str | None = None,
+        limit: int | None = None,
+        cursor: str | None = None,
+        fields: list[str] | None = None,
+        brand: str | None = None,
+    ) -> Any:
+        """List Reddit campaign actions.
+
+        Scope: social.read. Every comment, reply, post, thread and upvote order, newest first, with its status, lifespan and cost. next_before pages back.
+
+        Needs: the social.read scope.
+        GET /v1/workspaces/{ws}/reddit/actions
+        """
+        return self._call(
+            "GET",
+            "/v1/workspaces/{ws}/reddit/actions",
+            path={"ws": ws},
+            query={
+                "status": status,
+                "kind": kind,
+                "subreddit": subreddit,
+                "experiment_id": experiment_id,
+                "before": before,
+                "limit": limit,
+                "cursor": cursor,
+                "fields": fields,
+                "brand": brand,
+            },
+        )
+
+    def list_reddit_experiments(
+        self,
+        *,
+        ws: str | None = None,
+        status: Literal["open", "closed"] | None = None,
+        limit: int | None = None,
+        cursor: str | None = None,
+        fields: list[str] | None = None,
+        brand: str | None = None,
+    ) -> Any:
+        """List Reddit experiments.
+
+        Scope: social.read. Newest first, at most limit. Read the conclusions of closed ones before starting a new test.
+
+        Needs: the social.read scope.
+        GET /v1/workspaces/{ws}/reddit/experiments
+        """
+        return self._call(
+            "GET",
+            "/v1/workspaces/{ws}/reddit/experiments",
+            path={"ws": ws},
+            query={"status": status, "limit": limit, "cursor": cursor, "fields": fields, "brand": brand},
+        )
+
+    def list_reddit_settings(
+        self,
+        *,
+        ws: str | None = None,
+        brand: str | None = None,
+    ) -> Any:
+        """List each brand's Reddit campaign settings and budget.
+
+        Scope: social.read. One entry per brand the caller sees (or the ?brand= one): its Engain connection and project, its limits, and what it has spent this month and today.
+
+        Needs: the social.read scope.
+        GET /v1/workspaces/{ws}/reddit/settings
+        """
+        return self._call(
+            "GET",
+            "/v1/workspaces/{ws}/reddit/settings",
+            path={"ws": ws},
+            query={"brand": brand},
+        )
+
+    def list_reddit_threads(
+        self,
+        *,
+        ws: str | None = None,
+        brand: str,
+        type: Literal["new", "seo"] | None = None,
+        engain_cursor: str | None = None,
+        limit: int | None = None,
+    ) -> Any:
+        """Threads worth acting on, found by Engain.
+
+        Scope: social.read. type new: fresh threads for the brand's topics; type seo: threads that rank on Google. As Engain sent them; pass its cursor back for more.
+
+        Needs: the social.read scope.
+        GET /v1/workspaces/{ws}/reddit/threads
+        """
+        return self._call(
+            "GET",
+            "/v1/workspaces/{ws}/reddit/threads",
+            path={"ws": ws},
+            query={"brand": brand, "type": type, "engain_cursor": engain_cursor, "limit": limit},
+        )
+
     def list_review_page_days(
         self,
         id: str,
@@ -17557,6 +17946,38 @@ class Operations(_Mixin):
             idempotency_key=idempotency_key,
         )
 
+    def preflight_reddit_drafts(
+        self,
+        *,
+        ws: str | None = None,
+        brand: str,
+        items: list[dict[str, Any]],
+        subreddit: str,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Check drafts against a subreddit's rules before sending.
+
+        Scope: social.manage. Engain's rule check on up to 25 drafts for one
+        subreddit, free and limited to 5 calls a minute. Each item is
+        {key, taskType: post|comment|reply, content, title?, context?}; a
+        reply needs context.parentCommentUrl. The answer is Engain's as it
+        sent it: per item a verdict (pass, warn, fail), the rules at risk,
+        removalRisk, marketingIntentRisk, authenticityRisk (reads as AI),
+        naturalnessAdvice and the subreddit's historical removal rate.
+
+        Needs: the social.manage scope.
+        POST /v1/workspaces/{ws}/reddit/preflight
+        """
+        return self._call(
+            "POST",
+            "/v1/workspaces/{ws}/reddit/preflight",
+            path={"ws": ws},
+            body={"brand": brand, "items": items, "subreddit": subreddit},
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
     def prepare_brand_setup(
         self,
         brand: str,
@@ -17989,6 +18410,59 @@ class Operations(_Mixin):
             "/v1/workspaces/{ws}/mailbox-health/settings",
             path={"ws": ws},
             body={"auto_pause": auto_pause, "min_sends": min_sends, "pause_bounce_rate": pause_bounce_rate},
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
+    def put_reddit_settings(
+        self,
+        brand: str,
+        *,
+        ws: str | None = None,
+        credit_price_cents: float | None = None,
+        currency: str | None = None,
+        daily_credit_limit: float | None = None,
+        engain_project_id: str | None = None,
+        integration_id: str | None = None,
+        max_actions_per_subreddit_day: int | None = None,
+        max_upvotes_per_item: int | None = None,
+        monthly_credit_limit: float | None = None,
+        no_daily_limit: bool | None = None,
+        no_monthly_limit: bool | None = None,
+        require_approval: bool | None = None,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Set a brand's Engain connection, project and limits.
+
+        Scope: social.manage. Only a signed-in person may change limits
+        (credit limits, actions per subreddit a day, upvotes per item) or
+        whether each action needs a person's approval: an agent never
+        raises its own budget. Fields left out keep their value;
+        `no_monthly_limit` and `no_daily_limit` clear a limit. Credits are
+        Engain credits; `credit_price_cents` turns them into money in
+        reports.
+
+        Needs: the social.manage scope.
+        PUT /v1/workspaces/{ws}/reddit/settings/{brand}
+        """
+        return self._call(
+            "PUT",
+            "/v1/workspaces/{ws}/reddit/settings/{brand}",
+            path={"brand": brand, "ws": ws},
+            body={
+                "credit_price_cents": credit_price_cents,
+                "currency": currency,
+                "daily_credit_limit": daily_credit_limit,
+                "engain_project_id": engain_project_id,
+                "integration_id": integration_id,
+                "max_actions_per_subreddit_day": max_actions_per_subreddit_day,
+                "max_upvotes_per_item": max_upvotes_per_item,
+                "monthly_credit_limit": monthly_credit_limit,
+                "no_daily_limit": no_daily_limit,
+                "no_monthly_limit": no_monthly_limit,
+                "require_approval": require_approval,
+            },
             extra_body=extra_body,
             idempotency_key=idempotency_key,
         )
@@ -24613,6 +25087,41 @@ class Operations(_Mixin):
                 "provider": provider,
                 "sequence_id": sequence_id,
                 "starts_on": starts_on,
+            },
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
+    def update_reddit_experiment(
+        self,
+        id: str,
+        *,
+        ws: str | None = None,
+        conclusion: str | None = None,
+        hypothesis: str | None = None,
+        name: str | None = None,
+        status: Literal["open", "closed"] | None = None,
+        strategy: str | None = None,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Edit or close a Reddit experiment.
+
+        Scope: social.manage. status closed with a conclusion (what was tested, the numbers, what to do next) ends it; new actions can't join a closed experiment.
+
+        Needs: the social.manage scope.
+        PATCH /v1/workspaces/{ws}/reddit/experiments/{id}
+        """
+        return self._call(
+            "PATCH",
+            "/v1/workspaces/{ws}/reddit/experiments/{id}",
+            path={"id": id, "ws": ws},
+            body={
+                "conclusion": conclusion,
+                "hypothesis": hypothesis,
+                "name": name,
+                "status": status,
+                "strategy": strategy,
             },
             extra_body=extra_body,
             idempotency_key=idempotency_key,

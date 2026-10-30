@@ -672,6 +672,20 @@ groups:
         annotations:
           summary: "Over 5 {{ $labels.channel }} posts failed in an hour: the channel may have changed its API or be down; check the social_publication.publish_failed events by error code."
 
+      - alert: OutflareRedditSendsFailing
+        expr: sum(increase(outflare_reddit_sends_total{outcome=~"failed|unknown"}[1h])) > 5
+        for: 15m
+        labels: { severity: warning }
+        annotations:
+          summary: "Over 5 Reddit campaign actions failed to reach Engain in an hour: Engain may be down or have changed its API; check the reddit_action.send_failed events by error code."
+
+      - alert: OutflareRedditChecksFailing
+        expr: sum(rate(outflare_reddit_checks_total{outcome!="ok"}[6h])) / sum(rate(outflare_reddit_checks_total[6h])) > 0.5 and sum(increase(outflare_reddit_checks_total[6h])) > 20
+        for: 1h
+        labels: { severity: warning }
+        annotations:
+          summary: "Over half of Reddit campaign checks failed in 6 hours: Reddit may be turning the reader away or Engain not answering; check reddit_action.check_failed events and whether workspaces have Geonode connected."
+
       - alert: OutflareLinkReadsFailing
         # budget_reached is a workspace's own limit doing its job, not a
         # fault, so it is left out.

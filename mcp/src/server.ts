@@ -17,6 +17,7 @@ import { registerSupportTools } from "./support.js";
 import { registerFlagTools } from "./flags.js";
 import { registerAIAccountTools } from "./aiaccounts.js";
 import { registerABTestTools } from "./abtests.js";
+import { registerRedditTools } from "./reddit.js";
 import { registerSupplierTools } from "./suppliers.js";
 import { registerPartnerTools } from "./partners.js";
 
@@ -308,6 +309,7 @@ export function createServer({ client: gtm, workspace, readOnly = false, mission
   registerFlagTools(server, gtm, () => ws, readOnly, call, withBrand);
   registerAIAccountTools(server, gtm, () => ws, readOnly, call);
   registerABTestTools(server, gtm, () => ws, readOnly, call, withBrand);
+  registerRedditTools(server, gtm, () => ws, readOnly, call);
   registerBrandTools(server, gtm, () => ws, readOnly, call);
   registerSetupTools(server, gtm, () => ws, readOnly, call);
   registerRecordTools(server, gtm, () => ws, readOnly, call);

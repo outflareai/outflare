@@ -96,4 +96,4 @@ Each reply's link carries `utm_source=reddit`, `utm_medium=social`, `utm_campaig
 
 ## Engain
 
-[Engain](https://engain.io) posts Reddit comments, replies, posts and threads from its own pool of accounts, and can add upvotes. Connect it on the Connectors page with your own Engain API key (Settings, API in Engain; API access needs Engain's Max plan). Connecting checks the key and shows your projects and credits left; tasks and votes are billed to your Engain credits.
+[Engain](https://engain.io) posts Reddit comments, replies, posts and threads from its own pool of accounts, and can add upvotes. Connect it on the Connectors page with your own Engain API key (Settings, API in Engain; API access needs Engain's Max plan). Connecting checks the key and shows your projects and credits left; tasks and votes are billed to your Engain credits. Campaigns, budgets and results are in [reddit-campaigns.md](reddit-campaigns.md).

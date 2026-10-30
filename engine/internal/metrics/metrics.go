@@ -367,6 +367,16 @@ var (
 		Help: "Posts the publish job tried, by channel and outcome (published, failed: the channel refused or the outcome is unknown, retried: a rate limit before anything was posted).",
 	}, []string{"channel", "outcome"})
 
+	// Reddit campaigns: actions sent to Engain and checks of them.
+	redditSends = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Namespace: namespace, Subsystem: "reddit", Name: "sends_total",
+		Help: "Reddit campaign actions sent to Engain, by kind and outcome (submitted, failed: refused, unknown: no answer, so it may or may not exist).",
+	}, []string{"kind", "outcome"})
+	redditChecks = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Namespace: namespace, Subsystem: "reddit", Name: "checks_total",
+		Help: "Checks of sent Reddit campaign actions, by outcome (ok, engain_error, reddit_error, internal) and whether Reddit was read.",
+	}, []string{"outcome", "reddit_read"})
+
 	// Link reads: who links to a page or domain, from the workspace's
 	// own SEO connection.
 	linkReads = prometheus.NewCounterVec(prometheus.CounterOpts{
@@ -484,6 +494,8 @@ var own = []prometheus.Collector{
 	meetingEvents, meetingEventsPending,
 	reviewReads, reviewsFound, socialReads, syncRuns, linkReads, linkPageChecks, archiveLookups, linkPitches, linkReplies, linkLiveChecks, webSearches,
 	socialPublishes,
+	redditSends,
+	redditChecks,
 	partnerClicks, partnerConversions, partnerRewards, partnerRewardsOverdue, partnerImports, partnerImportObjects, partnerPostbacks,
 	newsRuns, newsFound, newsReads,
 	inboundReceived, inboundProcessed, inboundBytes, inboundPurged,
@@ -856,6 +868,20 @@ func NewsArticleRead(status string, journalist bool) {
 // SocialPublished records one try of the publish job.
 func SocialPublished(channel, outcome string) {
 	socialPublishes.WithLabelValues(channel, outcome).Inc()
+}
+
+// RedditSent records one send of a Reddit campaign action to Engain.
+func RedditSent(kind, outcome string) {
+	redditSends.WithLabelValues(kind, outcome).Inc()
+}
+
+// RedditChecked records one check of a sent Reddit campaign action.
+func RedditChecked(outcome string, redditRead bool) {
+	read := "false"
+	if redditRead {
+		read = "true"
+	}
+	redditChecks.WithLabelValues(outcome, read).Inc()
 }
 
 // DomainConnectLookup records a Domain Connect lookup: available, or the
