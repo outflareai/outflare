@@ -85,7 +85,7 @@ func EnsurePerson(ctx context.Context, q Querier, workspaceID, namespace, value 
 			RequestID: requestID, ActorType: "system", Data: map[string]any{"record_id": oldest, "namespace": namespace, "verified": true}})
 	}
 	var id string
-	if err := q.QueryRow(ctx, `INSERT INTO records (workspace_id, record_type, origin) VALUES ($1, 'person', 'first_party') RETURNING id::text`, workspaceID).Scan(&id); err != nil {
+	if err := q.QueryRow(ctx, `INSERT INTO records (workspace_id, record_type, brand_id, origin) VALUES ($1, 'person', outflare_first_brand($1), 'first_party') RETURNING id::text`, workspaceID).Scan(&id); err != nil {
 		return "", err
 	}
 	if _, err := q.Exec(ctx, `INSERT INTO record_identities (workspace_id, record_id, namespace, value, verified, verified_at, source)
@@ -235,7 +235,7 @@ func RecordEvent(ctx context.Context, q Querier, workspaceID string, ev Event) (
 	}
 	var id string
 	err = q.QueryRow(ctx, `INSERT INTO customer_events (workspace_id, record_id, brand_id, kind, name, raw_name, properties, source, message_id, occurred_at, request_id)
-		SELECT $1, r.id, r.brand_id, 'track', $3, $3, $4, $5, $6, $7, $8 FROM records r WHERE r.id = $2 AND r.workspace_id = $1
+		SELECT $1, r.id, COALESCE(r.brand_id, outflare_first_brand($1)), 'track', $3, $3, $4, $5, $6, $7, $8 FROM records r WHERE r.id = $2 AND r.workspace_id = $1
 		ON CONFLICT (workspace_id, message_id) DO NOTHING RETURNING id::text`,
 		workspaceID, ev.RecordID, ev.Name, string(props), ev.Source, msg, ev.OccurredAt, ev.RequestID).Scan(&id)
 	if errors.Is(err, pgx.ErrNoRows) {

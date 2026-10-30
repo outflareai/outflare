@@ -20,6 +20,7 @@ func TestJourneyVersions(t *testing.T) {
 	got := track.Capture(t)
 	e := freshEnv(t)
 	owner, ws := setupOwner(t, e.h)
+	guardrailsOff(t, owner, ws)
 	base := "/v1/workspaces/" + ws
 	ctx := context.Background()
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))

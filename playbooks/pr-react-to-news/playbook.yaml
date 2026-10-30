@@ -1,0 +1,62 @@
+id: pr-react-to-news
+version: 1
+title: React to today's news with your expert's comment
+summary: When a story breaks on a topic your expert knows, draft their comment, get their approval and pitch the journalists covering it, within hours.
+description: |
+  Reactive PR wins on speed: a journalist writing about breaking news
+  wants an expert's view today, not next week. This playbook reads what
+  the news watch found on your expert's topics, picks the story worth
+  reacting to, drafts a short comment in the expert's voice for them to
+  approve, and pitches it to the journalists covering that story. Nothing
+  is quoted until the expert approves those exact words.
+tier: obvious
+goals: [search, ai_answers]
+publisher: outflare
+author: { github: outflareai }
+needs:
+  data:
+    - { check: mailboxes, label: A mailbox to send pitches from }
+  connections:
+    - capability: web.search
+      label: Geonode, so the news watch reads today's news
+      recommended: [geonode]
+    - capability: plan
+      label: An AI model to draft the comment and write openers, unless you run this from your own AI app
+      optional: true
+      recommended: [claude, openai]
+inputs:
+  - name: brand
+    label: Brand
+    example: Northpeak
+steps:
+  - say: Read the brand's experts and their topics, and the articles the news watch found in the last day on those topics.
+    tools: [getBrandContext, listPRExperts, listNewsSearches, runNewsSearch, listNewsArticles]
+  - say: Pick the story most worth reacting to and start a reactive story on that article.
+    tools: [suggestStories, createStory, listStories]
+  - say: Draft a short comment in the expert's voice as a quote for them to approve, with any number as a sourced fact.
+    tools: [addStoryQuote, addStoryFact, getStory]
+  - say: Once the expert has approved the quote, draft the release, check it and fix what the check finds. A person approves it.
+    tools: [draftStory, updateStory, checkStory]
+  - say: Pitch the journalists who wrote about the story, through a short sequence whose first step uses {{custom.opener}}, each pitch waiting for a person.
+    tools: [listJournalists, listSequences, createSequence, startStoryPitches, listStoryPitches]
+  - say: Report replies and coverage.
+    tools: [getStoryResults]
+guardrails:
+  - Never puts words in the expert's mouth; the comment is quoted only after they approve those exact words.
+  - Comments on the news, never on a person in it, and never on tragedies or anything that would be unkind to profit from.
+  - The release and every pitch wait for a person's approval.
+  - One email and at most one follow-up per journalist, stopping on any reply.
+measure:
+  - { metric: Hours to pitch, how: "Time from the article being found to the first pitch approved." }
+  - { metric: Articles quoting the expert, how: "Coverage counted for the story within 7 days." }
+prompt: |
+  Run the "React to today's news" playbook for {{brand}}. Look at what the
+  news watch found in the last day on our experts' topics and pick the
+  story most worth reacting to. Draft a short comment in our expert's
+  voice for them to approve; nothing is quoted until they do. Then draft
+  and check the release and pitch the journalists who covered the story.
+  The release and every pitch wait for my approval.
+example: |
+  A new bot law made the news at 9:00. Northpeak's CEO approved a
+  two-sentence comment by 11:00, 6 journalists were pitched by noon, and
+  one quoted her that afternoon.

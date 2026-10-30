@@ -89,6 +89,7 @@ export type UiEvent =
   | "ui.command_run" // a command palette command
   | "ui.ai_accounts_view_opened" // a view of AI accounts opened (view: accounts, spend, people, timeline, usage)
   | "ui.ai_accounts_example_shown" // the example usage data on AI accounts' Usage view turned on
+  | "ui.ai_device_link_approved" // a computer linked to Outflare for desktop from /connect/computer
   | "ui.copied" // a copy button
   | "ui.data_network_previewed" // the owner opened what joining the data network would share (addresses)
   | "ui.data_network_join_cancelled" // the owner closed that preview without joining (addresses)
@@ -144,6 +145,9 @@ export type UiEvent =
   | "ui.setup_method_used" // a way to do an install step picked (step, method: gtm, dns, developer, ai, manual; how: copied, email, claude, chatgpt)
   | "ui.indexability_filtered" // a site's indexability report filtered by verdict or issue (filter, value: the verdict or issue id, or all)
   | "ui.logs_filtered" // a filter on the Logs page changed (filter: which one)
+  | "ui.brand_events_filtered" // a filter on a brand's Events page changed (filter: status, code or source; value: the status or code, or set/all for source)
+  | "ui.brand_event_opened" // one received event opened on a brand's Events page (status, code)
+  | "ui.brand_events_replayed" // rejected or held events replayed from a brand's Events page (how: selected, code, held_name or one; replayed)
   | "ui.logs_live_toggled" // Live on the Logs page turned on or off (on)
   | "ui.logs_exported" // logs downloaded (format: csv or ndjson)
   | "ui.logs_link_copied" // a link to a filtered Logs view copied (filters: how many)

@@ -63,11 +63,13 @@ var brandOf = map[string]string{
 	"seo_competitor":       `SELECT brand_id FROM seo_competitors WHERE id = $1::uuid AND workspace_id = $2`,
 	"backlink":             `SELECT brand_id FROM backlinks WHERE id = $1::uuid AND workspace_id = $2`,
 	"link_prospect":        `SELECT brand_id FROM link_prospects WHERE id = $1::uuid AND workspace_id = $2`,
+	"link_asset":           `SELECT brand_id FROM link_assets WHERE id = $1::uuid AND workspace_id = $2`,
 	"news_search":          `SELECT brand_id FROM news_searches WHERE id = $1::uuid AND workspace_id = $2`,
 	"coverage":             `SELECT brand_id FROM coverage WHERE id = $1::uuid AND workspace_id = $2`,
 	"support_conversation": `SELECT brand_id FROM support_conversations WHERE id = $1::uuid AND workspace_id = $2`,
 	"story":                `SELECT brand_id FROM stories WHERE id = $1::uuid AND workspace_id = $2`,
 	"pr_expert":            `SELECT brand_id FROM pr_experts WHERE id = $1::uuid AND workspace_id = $2`,
+	"story_pitch":          `SELECT s.brand_id FROM story_pitches p JOIN stories s ON s.id = p.story_id WHERE p.id = $1::uuid AND p.workspace_id = $2`,
 	// A domain's id is its name.
 	"domain": `SELECT brand_id FROM sending_domains WHERE domain = lower($1) AND workspace_id = $2`,
 }

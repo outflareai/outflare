@@ -77,7 +77,8 @@ func TestSearch(t *testing.T) {
 	if hits := gn.must(200, "GET", base+"/search?q=ada", nil)["data"].([]any); len(hits) != 0 {
 		t.Fatalf("another brand's person: %v", hits)
 	}
-	if hits := gn.must(200, "GET", base+"/search?q=northpeak", nil)["data"].([]any); len(hits) != 1 {
-		t.Fatalf("a shared company: %v", hits)
+	// A company made without a brand belongs to the first brand, not Geonode.
+	if hits := gn.must(200, "GET", base+"/search?q=northpeak", nil)["data"].([]any); len(hits) != 0 {
+		t.Fatalf("the first brand's company: %v", hits)
 	}
 }

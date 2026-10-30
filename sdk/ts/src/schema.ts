@@ -4413,6 +4413,143 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/desktop/links": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Start linking a computer (Outflare for desktop)
+         * @description For Outflare for desktop, before it is linked; anyone may call it. Returns a short `user_code` to show and a
+         *     `device_code` to poll POST /v1/desktop/token with. The person opens `verification_url`, signs in, and approves
+         *     the code (POST /v1/workspaces/{ws}/ai-devices). Expires in 15 minutes.
+         */
+        post: operations["createDesktopLink"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/desktop/token": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Get the computer's token once its link is approved
+         * @description Poll every `interval` seconds. 202 while the person hasn't approved yet; 410 link_expired when it expired or was used; 200 with the device token (shown once) when approved.
+         */
+        post: operations["claimDesktopToken"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/desktop/config": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Settings for a linked computer
+         * @description With the device token. How often to report, which tools to read, sources switched off for every computer (stop reading them), and whose computer it is. 401 when it was unlinked: link again. 404 while AI Accounts is off for the workspace.
+         */
+        get: operations["getDesktopConfig"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/desktop/reports": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Report usage from a linked computer
+         * @description With the device token, every `report_every_seconds`. Only numbers: for each AI account signed in on the computer,
+         *     its limit windows (how much is used, when each resets), plan and banked resets; plus the tools it couldn't read,
+         *     by code. An empty report is a heartbeat. Readings go on the account signed in with the same email anywhere in the
+         *     workspace (adding the person to it), else the person's only account for that tool, else a new account owned by
+         *     the person. Sources switched off are left out (`skipped: source_off`).
+         */
+        post: operations["sendDesktopReport"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/workspaces/{ws}/ai-devices": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+            };
+            cookie?: never;
+        };
+        /**
+         * List linked computers
+         * @description Scope: my_ai_accounts.read. Your computers running Outflare for desktop; everyone's with everyone=true and ai_accounts.read. `silent` means no report for over an hour.
+         */
+        get: operations["listAIDevices"];
+        put?: never;
+        /**
+         * Link a computer
+         * @description Scope: my_ai_accounts.manage, as a person. Approves the code Outflare for desktop shows; the app then gets its token and reports for you in this workspace.
+         */
+        post: operations["approveAIDevice"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/workspaces/{ws}/ai-devices/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Unlink a computer
+         * @description Scope: my_ai_accounts.manage for your own, ai_accounts.manage for anyone's. Its token stops working; the app asks to be linked again.
+         */
+        delete: operations["unlinkAIDevice"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/workspaces/{ws}/ai-accounts/outflare": {
         parameters: {
             query?: never;
@@ -6554,9 +6691,45 @@ export interface paths {
          *     `weekly_reads` has the weekly SEO snapshot read who links to pages
          *     that just went from tracked competitors' sitemaps (default on),
          *     spending at most `weekly_budget_percent` of the connection's monthly
-         *     budget a month on it (1 to 100, default 10). Send only what changes.
+         *     budget a month on it (1 to 100, default 10). `recheck_days` is how
+         *     often the pages of broken-link prospects nobody has pitched are
+         *     checked again, so links that break later are found
+         *     (`outbound_link.broken`): 0 is never, default 30. A check is free
+         *     apart from the workspace's own AI reading the page. Send only what
+         *     changes.
          */
         patch: operations["updateLinkBuildingSettings"];
+        trace?: never;
+    };
+    "/v1/workspaces/{ws}/link-building/assets": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+            };
+            cookie?: never;
+        };
+        /**
+         * List published assets
+         * @description Scope: seo.read. Pages marked published to promote, newest first (up to 200). `?brand=` filters.
+         */
+        get: operations["listLinkAssets"];
+        put?: never;
+        /**
+         * Mark a page of yours published
+         * @description Scope: seo.manage. Records `asset.published` for a page worth
+         *     promoting (a guide, a study, a tool), which can start the "Promote a
+         *     new page" playbook on its own (playbook automations). Its SEO site,
+         *     and so its brand, is the site the URL is on. 409 `conflict` when the
+         *     page is already marked.
+         */
+        post: operations["publishLinkAsset"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
         trace?: never;
     };
     "/v1/workspaces/{ws}/link-reads": {
@@ -7507,6 +7680,233 @@ export interface paths {
          *     finds errors, kept on the story as `last_check`.
          */
         post: operations["approveStory"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/workspaces/{ws}/stories/ideas": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Suggest story ideas with AI
+         * @description Scope: seo.manage. Queues the workspace's own AI model (its PR
+         *     stories task under Settings, AI model) to suggest story ideas
+         *     from the brand, its facts, its experts' topics, its recent
+         *     coverage and the last two weeks of news its topic searches found.
+         *     Each idea is a story with status `idea` and source `ai_ideas`; it
+         *     never states numbers or quotes. Outflare never uses an AI key of
+         *     its own: without a connected model this is 409
+         *     `connector_needed`. The result is the story.ideas_suggested event.
+         */
+        post: operations["suggestStories"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/workspaces/{ws}/stories/{story}/draft": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                story: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Draft a story's release with AI
+         * @description Scope: seo.manage. Queues the workspace's own AI model to write
+         *     the story's release from its headline, notes, facts and approved
+         *     quotes only (never a draft or withdrawn quote), improving the
+         *     current release when there is one. The draft replaces the
+         *     release, moves the story to `draft` and is checked like any
+         *     release; a person still approves it. Follow `ai_status` on the
+         *     story (drafting, then empty, or failed with `ai_error`). 409 while
+         *     a draft is being written or the story is archived, and
+         *     `connector_needed` without a connected model.
+         */
+        post: operations["draftStory"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/workspaces/{ws}/stories/results": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+            };
+            cookie?: never;
+        };
+        /**
+         * Results of stories
+         * @description Scope: seo.read. Each story's pitches (approved in the window),
+         *     replies by kind, and coverage found in the window: coverage a
+         *     person put on the story, or coverage of its brand by a journalist
+         *     it pitched, after the pitch. Only stories with a pitch or coverage
+         *     in the window are listed, most coverage first; `total` sums them.
+         *     Reads what is stored, so it costs nothing.
+         */
+        get: operations["getStoryResults"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/workspaces/{ws}/stories/{story}/pitches": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                story: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Pitch an approved story to journalists
+         * @description Scope: sequences.manage. Starts a pitch for each journalist (a
+         *     person record with an email address) through one of the
+         *     workspace's own sequences: one that stops on any reply, has 1 or 2
+         *     steps (one follow-up at most) and uses `{{custom.opener}}`. The
+         *     workspace's own AI writes each opener from the story and the
+         *     journalist's latest article, using only the story's facts and
+         *     approved quotes; it is checked like the release, and a person
+         *     approves each pitch. Journalists are skipped (`skipped`, with a
+         *     reason) when they aren't a person, have no address, already have
+         *     a pitch for this story, or were pitched by the workspace in the
+         *     last week, whichever brand. 409 unless the story is approved.
+         */
+        post: operations["startStoryPitches"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/workspaces/{ws}/story-pitches": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+            };
+            cookie?: never;
+        };
+        /**
+         * List story pitches
+         * @description Scope: sequences.read. Newest first.
+         */
+        get: operations["listStoryPitches"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/workspaces/{ws}/story-pitches/{pitch}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                pitch: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Change a draft pitch's opener
+         * @description Scope: sequences.manage. Only a draft pitch.
+         */
+        patch: operations["updateStoryPitch"];
+        trace?: never;
+    };
+    "/v1/workspaces/{ws}/story-pitches/{pitch}/approve": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                pitch: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Approve a pitch
+         * @description Scope: sequences.manage. Only a person approves (403 for tokens and
+         *     agents). Checks the opener (edited when `opener` is given) like the
+         *     release: a number in none of the story's facts or a quote that isn't
+         *     approved is 409 `check_failed`. Then the journalist becomes a lead
+         *     with the opener as `custom.opener` and the headline as
+         *     `custom.story_title`, and is enrolled in the sequence, held until
+         *     the story's embargo. 409 when the story is no longer approved, the
+         *     journalist was pitched in the last week, or asked not to be
+         *     contacted.
+         */
+        post: operations["approveStoryPitch"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/workspaces/{ws}/story-pitches/{pitch}/reject": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                pitch: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Reject a draft pitch
+         * @description Scope: sequences.manage.
+         */
+        post: operations["rejectStoryPitch"];
         delete?: never;
         options?: never;
         head?: never;
@@ -16658,6 +17058,262 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/brands/{brand}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+            };
+            cookie?: never;
+        };
+        /**
+         * Read a brand by its id
+         * @description Scope: workspace.read. A brand owns its data (records, events, journeys and every other area move under
+         *     /v1/brands/{brand}/ in turn), so a brand's own calls need only its id, never the workspace's. A member kept to
+         *     some brands, or a token made for one brand, sees only those; any other brand is 404.
+         */
+        get: operations["getBrandByID"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/brands/{brand}/events": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+            };
+            cookie?: never;
+        };
+        /**
+         * List a brand's received events
+         * @description Scope: customers.read. Every event sent to POST /v1/brands/{brand}/events, newest first, with what happened to
+         *     it: pending (waiting to be processed, usually seconds), accepted, duplicate, rejected (code and reason say what
+         *     to fix) or held (a name the catalog hasn't approved). expires_at is when the event is deleted: 30 days after it
+         *     arrived when accepted or duplicate, 90 when rejected or held. Read one with GET .../events/{event} to see it as
+         *     sent.
+         */
+        get: operations["listBrandEvents"];
+        put?: never;
+        /**
+         * Send product events to a brand
+         * @description Scope: customers.manage. Sends what people do in your product to this brand, in Segment's format: one event,
+         *     or {"batch": [...]} with up to 500 (5 MB). type is track, identify, page, screen, group or alias; camelCase
+         *     (userId, anonymousId, messageId) and snake_case both work, so a product already sending to Segment or
+         *     RudderStack can point here as is. Send it from your servers: the token can change customer records.
+         *
+         *     Every event is saved as sent and the answer is 202 at once, with a receipt id per event. Only the envelope is
+         *     checked here (JSON, size, batch length, source); an event is never refused for its content. A job then
+         *     processes the events in the order they arrived, usually within seconds, the way POST
+         *     .../customer-events does: it matches each to a person (userId, then a verified email, then anonymousId),
+         *     writes identify's traits to catalog fields and links group's company. Each event ends accepted, duplicate (a
+         *     messageId the brand already has), rejected (code and reason say what to fix; fix it and replay) or held (a
+         *     track name the catalog hasn't approved yet: approve it, then replay). Follow them with GET .../events or GET
+         *     .../events/{event}. Events belong to the brand in the URL; a brand_id in the body is ignored.
+         */
+        post: operations["ingestBrandEvents"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/brands/{brand}/events/summary": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+            };
+            cookie?: never;
+        };
+        /**
+         * Summarise a brand's received events
+         * @description Scope: customers.read. How many events arrived in the last 24 hours and 7 days by status, how many wait and
+         *     since when, the rejection codes still kept (with the latest reason and when the first of them is deleted) and
+         *     the held names waiting for approval.
+         */
+        get: operations["getBrandEventsSummary"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/brands/{brand}/events/replay": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Replay rejected or held events
+         * @description Scope: customers.manage. Processes rejected and held events again, after you fixed what they needed (approved
+         *     the name, changed a property's type, freed an identity): either the ones in ids, or every one matching a
+         *     filter (status, code, source, batch_id, name), up to 10,000 a call (more is true when there are others). They
+         *     go back to pending and the job processes them again; each ends with a new status. Accepted, duplicate and
+         *     pending events are left alone and counted in skipped.
+         */
+        post: operations["replayBrandEvents"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/brands/{brand}/events/{event}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                /** @description The event's id: its receipt id. */
+                event: string;
+            };
+            cookie?: never;
+        };
+        /**
+         * Read a received event
+         * @description Scope: customers.read. One event with what happened to it, and raw: the event as sent, with its batch's context merged in.
+         */
+        get: operations["getBrandEvent"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/brands/{brand}/records/{record}/privacy-exports": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                record: components["parameters"]["RecordID"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Export everything a brand holds about a person or company
+         * @description Scope: customers.manage. Starts a privacy export of one record, for a person's request to see their data: the
+         *     record with its fields, and every row that points at it in this brand (its identities, links, field history,
+         *     merges, product events, consent, emails, messages, replies, meetings, deals, payments, list memberships,
+         *     journey runs and the rest), as one gzipped JSON file. Only the record's own brand is exported: a person with the
+         *     same email in another brand is a different person, and a record of another brand is not found. Secrets are
+         *     never included (columns holding tokens, passwords, hashes or sealed values).
+         *
+         *     Answers 202 with the export, pending. A job builds it, usually within seconds; then its status is ready and
+         *     download_url downloads the file for 7 days, after which it expires and the file is deleted. Over 100 MB
+         *     uncompressed fails with error_code too_large. Erasing the record deletes its exports. The request, the result
+         *     and every download are in the audit log; privacy_export.ready is also a webhook event.
+         */
+        post: operations["requestPrivacyExport"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/brands/{brand}/privacy-exports": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+            };
+            cookie?: never;
+        };
+        /**
+         * List a brand's privacy exports
+         * @description Scope: customers.read. The brand's privacy exports, newest first, without their files. Filter by record or status.
+         */
+        get: operations["listPrivacyExports"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/brands/{brand}/privacy-exports/{export}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                /** @description The privacy export's id. */
+                export: string;
+            };
+            cookie?: never;
+        };
+        /**
+         * Read a privacy export
+         * @description Scope: customers.read. An export's status, the rows it holds by table, when it expires and, once ready, its download_url.
+         */
+        get: operations["getPrivacyExport"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/brands/{brand}/privacy-exports/{export}/download": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                /** @description The privacy export's id. */
+                export: string;
+            };
+            cookie?: never;
+        };
+        /**
+         * Download a privacy export
+         * @description Scope: customers.manage, because the file is someone's personal data in bulk. The export as a gzipped JSON file
+         *     (privacy-export-{id}.json.gz): {"exported_at", "brand": {"id", "name"}, "record": {...}, "tables": {"table":
+         *     [rows]}}, each row with every column but secrets. Each download is recorded in the audit log
+         *     (privacy_export.downloaded). 409 export_not_ready while it is pending or when it failed; 410 export_expired
+         *     once its 7 days are over.
+         */
+        get: operations["downloadPrivacyExport"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/workspaces/{ws}/brands/{brand}": {
         parameters: {
             query?: never;
@@ -18462,6 +19118,42 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/workspaces/{ws}/email-guardrails": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+            };
+            cookie?: never;
+        };
+        /**
+         * How much marketing email one person may get
+         * @description Scope: emails.read. Guardrails on marketing (lifecycle) email that
+         *     journeys and broadcasts send: a frequency cap (per_day in any 24
+         *     hours, per_week in any 7 days) and quiet hours (quiet_start to
+         *     quiet_end o'clock in the person's timezone attribute, else
+         *     time_zone). On by default: 1 a day, 3 a week, 8pm to 8am.
+         *     Transactional email is never capped or held. A capped email is not
+         *     sent: the journey step's outcome is frequency_cap, the broadcast
+         *     skips the person with the reason, and it is recorded as
+         *     email.capped on their timeline. An email due in quiet hours is
+         *     held until they end (step outcome quiet_hours).
+         */
+        get: operations["getEmailGuardrails"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Change the marketing email guardrails
+         * @description Scope: emails.manage. Send only the fields to change. Recorded as email_guardrails.updated.
+         */
+        patch: operations["updateEmailGuardrails"];
+        trace?: never;
+    };
     "/v1/workspaces/{ws}/email-topics": {
         parameters: {
             query?: never;
@@ -20195,7 +20887,7 @@ export interface paths {
          *     only proposes a partner: this call binds it. Identify the customer with customer_id (your own user id),
          *     email or record_id, the same way each time. external_id (your charge or order id) makes a retry safe and is what
          *     a refund's refund_of names. Not credited is not an error: the answer is 200 with credited false and a reason
-         *     (no_partner, partner_inactive, program_inactive, self_referral, sale_not_found or currency). 201 means it was
+         *     (no_partner, partner_inactive, program_inactive, self_referral, sale_not_found, currency or lead_expired). 201 means it was
          *     credited, with the rewards it earned.
          */
         post: operations["createPartnerConversion"];
@@ -20395,7 +21087,7 @@ export interface paths {
          * Download payouts as CSV, with payout details
          * @description Scope: partners.manage, because the file holds each partner's payout details. Columns: payout_id, program,
          *     partner_id, partner_code, partner_name, partner_email, payout_method, amount (a decimal), currency, status, reference,
-         *     created_at, paid_at. Due payouts unless status says otherwise; at most 10,000 rows. Pay them from your own account or
+         *     created_at, paid_at, payout_type, payout_token. Due payouts unless status says otherwise; at most 10,000 rows. Pay them from your own account or
          *     upload the file to a payout tool, then mark each one paid. Recorded in the audit log (partner_payouts.exported).
          */
         get: operations["exportPartnerPayouts"];
@@ -20429,7 +21121,8 @@ export interface paths {
          *     fees and adjustments reach the program's minimum, one payout gathers them and partner_payout.created fires.
          *     Outflare never holds or sends money: pay from your own account or payout tool, then mark it paid.
          *     An imported partner with no payout details (Tolt's API doesn't give them) waits: their balance stays until they
-         *     add details on the portal, and waiting_for_details counts them.
+         *     add details on the portal, and waiting_for_details counts them. With a payout term (payout_term_days, Net N),
+         *     only rewards earned in a month that ended at least N days ago are gathered; the rest wait for a later payout.
          */
         post: operations["createPartnerPayouts"];
         delete?: never;
@@ -22613,6 +23306,23 @@ export interface webhooks {
         patch?: never;
         trace?: never;
     };
+    "privacy_export.ready": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** A privacy export of a person or company is ready to download. The target is the export; data has record_id, brand_id, size_bytes (gzipped), rows, counts (rows by table) and expires_at (7 days later). GET /v1/brands/{brand}/privacy-exports/{id} has its download_url. */
+        post: operations["webhook_privacy_export_ready"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "brand.created": {
         parameters: {
             query?: never;
@@ -23219,6 +23929,74 @@ export interface webhooks {
         put?: never;
         /** A page is gone from a tracked competitor's sitemaps (at most 50 a look). Sites still linking to it may link to yours instead. data has site_id, competitor_id, url and removed (how many went in this look). */
         post: operations["webhook_competitor_page_removed"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "competitor_link.new": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** A domain is new among a tracked competitor's linking domains. */
+        post: operations["webhook_competitor_link_new"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "outbound_link.broken": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** A link prospect's page has a newly broken outbound link. */
+        post: operations["webhook_outbound_link_broken"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "asset.published": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** A page worth promoting was marked published. */
+        post: operations["webhook_asset_published"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "mention.found": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** The news watch found a new article naming a brand. */
+        post: operations["webhook_mention_found"];
         delete?: never;
         options?: never;
         head?: never;
@@ -24211,7 +24989,7 @@ export interface components {
              */
             id: string;
             /** @enum {string} */
-            type: "lead.replied" | "lead.unsubscribed" | "inbox.replied" | "inbox.updated" | "inbox.classified" | "lead.bounced" | "mailbox.auto_paused" | "lead.created" | "lead.updated" | "lead.deleted" | "leads.imported" | "suppressions.added" | "suppression.removed" | "lead_list.created" | "lead_list.leads_added" | "lead_list.run_started" | "lead_list.build_done" | "lead_list.build_failed" | "lead_list.refresh_done" | "lead_list.refresh_failed" | "lead_list.enrich_done" | "lead_list.enrich_failed" | "import.done" | "import.failed" | "sequence.created" | "sequence.updated" | "sequence.activated" | "sequence.paused" | "sequence.archived" | "sequence.deleted" | "sequence.steps_updated" | "sequence.leads_enrolled" | "enrollment.stopped" | "mailbox.imported" | "mailbox.updated" | "mailbox.paused" | "mailbox.resumed" | "mailbox.stage_changed" | "mailbox.deleted" | "domain.added" | "domain.paused" | "domain.resumed" | "domain.removed" | "email.queued" | "email.sent" | "email.delivered" | "email.bounced" | "email.complained" | "email.failed" | "email.suppressed" | "email.cancelled" | "email.unsubscribed" | "email.opened" | "email.clicked" | "email.preferences_changed" | "email_domain.verified" | "email_domain.verification_failed" | "email_provider.events_failed" | "email_template.published" | "meeting.created" | "meeting.updated" | "meeting.deleted" | "deal.created" | "deal.updated" | "deal.deleted" | "spend.recorded" | "integration.connected" | "integration.updated" | "integration.disconnected" | "connect_request.created" | "deploy.detected" | "deploy.failed" | "digest.ready" | "ai_budget.warned" | "ai_budget.reached" | "connection_limit.warned" | "connection_limit.reached" | "experiment.started" | "experiment.concluded" | "mission.created" | "mission.updated" | "mission.submitted" | "mission.approved" | "mission.paused" | "mission.resumed" | "mission.stopped" | "mission.completed" | "mission.action_held" | "mission.action_approved" | "mission.action_rejected" | "playbook.started" | "playbook_automation.created" | "playbook_automation.updated" | "playbook_automation.approved" | "playbook_automation.paused" | "playbook_automation.held" | "playbook_automation.ran" | "playbook_automation.deleted" | "infra.plan_created" | "infra.plan_approved" | "infra.ordered" | "infra.order_failed" | "infra.domains_bought" | "infra.mailbox_joined" | "infra.plan_warming" | "infra.plan_ready" | "infra.plan_cancelled" | "fix.found" | "fix.updated" | "fix.started" | "fix.verify_requested" | "fix.confirmed" | "fix.reopened" | "record.created" | "record.bulk_created" | "record.bulk_updated" | "record.updated" | "record.merged" | "identity.verified" | "identity.closed" | "relationship.added" | "relationship.ended" | "consent.granted" | "consent.withdrawn" | "consent.bulk_withdrawn" | "brand.created" | "brand.updated" | "knowledge.created" | "knowledge.updated" | "knowledge.deleted" | "knowledge.restored" | "email_broadcast.created" | "email_broadcast.started" | "email_broadcast.sent" | "email_broadcast.failed" | "email_broadcast.cancelled" | "journey.created" | "journey.updated" | "journey_run.entered" | "journey_run.exited" | "rule.created" | "rule.updated" | "rule.activated" | "rule.paused" | "rule.archived" | "rule.fired" | "brand_setup.installed" | "brand_setup.install_failed" | "install.issue_opened" | "install.issue_resolved" | "seo_site.created" | "seo_site.verified" | "seo_site.unverified" | "seo_site.deleted" | "crawl.started" | "crawl.stopped" | "crawl.done" | "link_pitch.drafted" | "link_pitch.approved" | "link_pitch.rejected" | "link_prospect.overdue" | "backlink.new" | "backlink.lost" | "backlink.regained" | "competitor.page_removed" | "link_prospect.found" | "link_prospect.checked" | "link_prospect.excluded" | "link_prospect.pitched" | "link_prospect.replied" | "link_prospect.agreed" | "link_prospect.live" | "link_prospect.declined" | "link_prospect.removed" | "link_prospect.reopened" | "link_prospect.updated" | "link_prospect.deleted" | "social_action.drafted" | "social_action.approved" | "social_action.rejected" | "social_action.done" | "social_action.failed" | "review.posted" | "review.replied" | "review.reply_drafted" | "review_momentum.changed" | "alert.raised" | "visitor.became_hot" | "partner_program.created" | "partner_program.updated" | "partner_program.rules_updated" | "partner.created" | "partner.updated" | "partner_referral.created" | "partner_conversion.created" | "partner_reward.created" | "partner_reward.approved" | "partner_reward.rejected" | "partner_reward.reversed" | "partner_reward.fulfilled" | "partner_payout.created" | "partner_payout.paid" | "partner_payout.canceled" | "workspace.updated" | "webhook.test";
+            type: "lead.replied" | "lead.unsubscribed" | "inbox.replied" | "inbox.updated" | "inbox.classified" | "lead.bounced" | "mailbox.auto_paused" | "lead.created" | "lead.updated" | "lead.deleted" | "leads.imported" | "suppressions.added" | "suppression.removed" | "lead_list.created" | "lead_list.leads_added" | "lead_list.run_started" | "lead_list.build_done" | "lead_list.build_failed" | "lead_list.refresh_done" | "lead_list.refresh_failed" | "lead_list.enrich_done" | "lead_list.enrich_failed" | "import.done" | "import.failed" | "sequence.created" | "sequence.updated" | "sequence.activated" | "sequence.paused" | "sequence.archived" | "sequence.deleted" | "sequence.steps_updated" | "sequence.leads_enrolled" | "enrollment.stopped" | "mailbox.imported" | "mailbox.updated" | "mailbox.paused" | "mailbox.resumed" | "mailbox.stage_changed" | "mailbox.deleted" | "domain.added" | "domain.paused" | "domain.resumed" | "domain.removed" | "email.queued" | "email.sent" | "email.delivered" | "email.bounced" | "email.complained" | "email.failed" | "email.suppressed" | "email.cancelled" | "email.unsubscribed" | "email.opened" | "email.clicked" | "email.preferences_changed" | "email_domain.verified" | "email_domain.verification_failed" | "email_provider.events_failed" | "email_template.published" | "meeting.created" | "meeting.updated" | "meeting.deleted" | "deal.created" | "deal.updated" | "deal.deleted" | "spend.recorded" | "integration.connected" | "integration.updated" | "integration.disconnected" | "connect_request.created" | "deploy.detected" | "deploy.failed" | "digest.ready" | "ai_budget.warned" | "ai_budget.reached" | "connection_limit.warned" | "connection_limit.reached" | "experiment.started" | "experiment.concluded" | "mission.created" | "mission.updated" | "mission.submitted" | "mission.approved" | "mission.paused" | "mission.resumed" | "mission.stopped" | "mission.completed" | "mission.action_held" | "mission.action_approved" | "mission.action_rejected" | "playbook.started" | "playbook_automation.created" | "playbook_automation.updated" | "playbook_automation.approved" | "playbook_automation.paused" | "playbook_automation.held" | "playbook_automation.ran" | "playbook_automation.deleted" | "infra.plan_created" | "infra.plan_approved" | "infra.ordered" | "infra.order_failed" | "infra.domains_bought" | "infra.mailbox_joined" | "infra.plan_warming" | "infra.plan_ready" | "infra.plan_cancelled" | "fix.found" | "fix.updated" | "fix.started" | "fix.verify_requested" | "fix.confirmed" | "fix.reopened" | "record.created" | "record.bulk_created" | "record.bulk_updated" | "record.updated" | "record.merged" | "identity.verified" | "identity.closed" | "relationship.added" | "relationship.ended" | "consent.granted" | "consent.withdrawn" | "consent.bulk_withdrawn" | "privacy_export.ready" | "brand.created" | "brand.updated" | "knowledge.created" | "knowledge.updated" | "knowledge.deleted" | "knowledge.restored" | "email_broadcast.created" | "email_broadcast.started" | "email_broadcast.sent" | "email_broadcast.failed" | "email_broadcast.cancelled" | "journey.created" | "journey.updated" | "journey_run.entered" | "journey_run.exited" | "rule.created" | "rule.updated" | "rule.activated" | "rule.paused" | "rule.archived" | "rule.fired" | "brand_setup.installed" | "brand_setup.install_failed" | "install.issue_opened" | "install.issue_resolved" | "seo_site.created" | "seo_site.verified" | "seo_site.unverified" | "seo_site.deleted" | "crawl.started" | "crawl.stopped" | "crawl.done" | "link_pitch.drafted" | "link_pitch.approved" | "link_pitch.rejected" | "link_prospect.overdue" | "backlink.new" | "backlink.lost" | "backlink.regained" | "competitor.page_removed" | "competitor_link.new" | "outbound_link.broken" | "asset.published" | "mention.found" | "link_prospect.found" | "link_prospect.checked" | "link_prospect.excluded" | "link_prospect.pitched" | "link_prospect.replied" | "link_prospect.agreed" | "link_prospect.live" | "link_prospect.declined" | "link_prospect.removed" | "link_prospect.reopened" | "link_prospect.updated" | "link_prospect.deleted" | "social_action.drafted" | "social_action.approved" | "social_action.rejected" | "social_action.done" | "social_action.failed" | "review.posted" | "review.replied" | "review.reply_drafted" | "review_momentum.changed" | "alert.raised" | "visitor.became_hot" | "partner_program.created" | "partner_program.updated" | "partner_program.rules_updated" | "partner.created" | "partner.updated" | "partner_referral.created" | "partner_conversion.created" | "partner_reward.created" | "partner_reward.approved" | "partner_reward.rejected" | "partner_reward.reversed" | "partner_reward.fulfilled" | "partner_payout.created" | "partner_payout.paid" | "partner_payout.canceled" | "workspace.updated" | "webhook.test";
             /** Format: date-time */
             created_at: string;
             /** Format: uuid */
@@ -25305,10 +26083,93 @@ export interface components {
             /** @description Nobody who owns it is still in the workspace. */
             owner_left: boolean;
             members: components["schemas"]["AIAccountMember"][];
+            /** @description The latest reading of each limit window from Outflare for desktop, in the last week. Empty when no computer reads this account. */
+            usage: components["schemas"]["AIUsageWindow"][];
             /** Format: date-time */
             created_at: string;
             /** Format: date-time */
             updated_at: string;
+        };
+        AIUsageWindow: {
+            /**
+             * @description five_hour, weekly, weekly_opus, monthly, premium_requests, credits...
+             * @example weekly
+             */
+            kind: string;
+            /** @example 74.5 */
+            used_percent: number;
+            /** Format: date-time */
+            resets_at: string | null;
+            /** @enum {string} */
+            source: "official" | "extended";
+            /** Format: date-time */
+            observed_at: string;
+        };
+        WorkspaceBrief: {
+            /** Format: uuid */
+            id: string;
+            name: string;
+            slug: string;
+        };
+        AIDevice: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            user_id: string;
+            user_name: string;
+            /** @example Ana's MacBook */
+            name: string;
+            /** @enum {string} */
+            platform: "macos" | "windows" | "linux";
+            app_version: string;
+            /**
+             * @description The app's own view in its last report. attention: something the person can fix on the computer, such as signing in to a tool again.
+             * @enum {string}
+             */
+            status: "ok" | "attention" | "broken";
+            /** @example not_signed_in */
+            last_error_code: string | null;
+            /** Format: date-time */
+            last_report_at: string | null;
+            /** @description No report for over an hour. */
+            silent: boolean;
+            /** Format: date-time */
+            created_at: string;
+        };
+        DesktopReport: {
+            app_version?: string;
+            /**
+             * @default ok
+             * @enum {string}
+             */
+            status: "ok" | "attention" | "broken";
+            errors?: {
+                /** @enum {string} */
+                provider: "claude" | "chatgpt" | "cursor" | "copilot";
+                /**
+                 * @description not_signed_in, token_expired, not_installed, rate_limited, forbidden, bad_response, network, keychain_denied, source_off or other.
+                 * @example not_signed_in
+                 */
+                code: string;
+            }[];
+            accounts?: {
+                /** @enum {string} */
+                provider: "claude" | "chatgpt" | "cursor" | "copilot";
+                account_email?: string;
+                plan?: string;
+                resets_available?: number | null;
+                /** @enum {string} */
+                source: "official" | "extended";
+                /** Format: date-time */
+                observed_at?: string;
+                windows?: {
+                    /** @example five_hour */
+                    kind: string;
+                    used_percent: number;
+                    /** Format: date-time */
+                    resets_at?: string | null;
+                }[];
+            }[];
         };
         AIAccountInput: {
             provider?: components["schemas"]["AIProvider"];
@@ -25733,6 +26594,8 @@ export interface components {
             credit_model: "first" | "last";
             /** @description A promo code beats a link when a conversion carries both. */
             codes_win: boolean;
+            /** @description A partner's own sign-ups and sales earn them nothing (reason self_referral). On by default. */
+            block_self_referrals: boolean;
             /** @description Rewards wait this long before they can be approved; refunds inside it cancel them. */
             hold_days: number;
             /** @description Approve rewards on their own once the hold ends. */
@@ -25743,6 +26606,14 @@ export interface components {
             pay_browser_signups: boolean;
             /** Format: int64 */
             min_payout_cents: number;
+            /** @description Net N: a reward joins a payout N days after the end of the UTC month it was earned in. null pays it once it is approved. */
+            payout_term_days: number | null;
+            /** @description What partners choose from on the portal; empty allows any. */
+            payout_methods: ("paypal" | "wise" | "bank_transfer" | "crypto" | "other")[];
+            /** @description The crypto tokens partners choose from, such as USDC on Base; empty allows any. */
+            payout_tokens: string[];
+            /** @description A referred customer who hasn't bought within this many days of being referred no longer credits the partner (reason lead_expired). null: leads never expire. */
+            lead_expiry_days: number | null;
             terms_url: string;
             /** @description A billing connector (stripe) whose synced payments and refunds are also partner sales; '' for the API and postbacks only. */
             sales_source: string;
@@ -25791,6 +26662,8 @@ export interface components {
             title?: string;
             /** @description An https address of an image. */
             logo_url?: string;
+            /** @description The browser tab's icon: an https address of an image (.ico, .png or .svg). */
+            favicon_url?: string;
             /** @description The accent colour, such as #0f766e. */
             color?: string;
             custom_css?: string;
@@ -25804,6 +26677,10 @@ export interface components {
             email_from?: string;
             /** @description An email template's id or handle for the sign-in email, with sign_in_url, program_name and partner_name; Outflare's own wording when empty. */
             sign_in_template?: string;
+            /** @description Hide the "Powered by Outflare" line at the foot of the portal, shown by default. */
+            hide_powered_by?: boolean;
+            /** @description Applications must use a work email address: free, disposable and relay addresses are refused (personal_email), as Outflare's email classifier sees them. */
+            business_email_only?: boolean;
         };
         PartnerImport: {
             /** Format: uuid */
@@ -25822,7 +26699,7 @@ export interface components {
                 /** @description Per kind, in the order they are read. */
                 kinds: {
                     /** @enum {string} */
-                    kind: "groups" | "links" | "partners" | "flows" | "promo_codes" | "customers" | "transactions" | "commissions";
+                    kind: "groups" | "links" | "partners" | "flows" | "promo_codes" | "customers" | "transactions" | "commissions" | "clicks";
                     seen: number;
                     created: number;
                     /** @description A status brought over */
@@ -25909,12 +26786,22 @@ export interface components {
             /** @enum {string} */
             credit_model?: "first" | "last";
             codes_win?: boolean;
+            /** @description true when left out on create. */
+            block_self_referrals?: boolean;
             hold_days?: number;
             auto_approve?: boolean;
             auto_accept?: boolean;
             pay_browser_signups?: boolean;
             /** Format: int64 */
             min_payout_cents?: number;
+            /** @description Net 0 to Net 90; null pays rewards once they are approved. */
+            payout_term_days?: number | null;
+            /** @description Empty allows any. */
+            payout_methods?: ("paypal" | "wise" | "bank_transfer" | "crypto" | "other")[];
+            /** @description Crypto tokens, such as USDC on Base; empty allows any. */
+            payout_tokens?: string[];
+            /** @description Days a referred lead has to buy before it stops crediting the partner; null never expires. */
+            lead_expiry_days?: number | null;
             terms_url?: string;
             /** @description A billing connector's id (stripe): its synced payments and refunds become partner sales too. "" for none. */
             sales_source?: string;
@@ -26004,6 +26891,13 @@ export interface components {
             promo_codes: components["schemas"]["PartnerPromoCode"][];
             /** @description Free text, such as "PayPal: ana@example.com", stored sealed. Never bank details. */
             payout_method: string;
+            /**
+             * @description The method the partner chose from the program's payout_methods; null when not chosen.
+             * @enum {string|null}
+             */
+            payout_type: "paypal" | "wise" | "bank_transfer" | "crypto" | "other" | null;
+            /** @description The crypto token they chose, with payout_type crypto. */
+            payout_token: string | null;
             /** @description The partner's own tracker, called (GET) once for each conversion credited to them and each refund of one, with placeholders filled in: {sub_id}, {click_id}, {conversion_id}, {type}, {event_name}, {amount}, {amount_cents}, {currency}, {commission}, {commission_cents}, {status}, {code} and {program} (pending, approved or reversed). Empty for none. */
             postback_url: string;
             note: string;
@@ -26051,6 +26945,13 @@ export interface components {
             /** @description A group of the program; "" for none. */
             group_id?: string | null;
             payout_method?: string;
+            /**
+             * @description null clears it. A method other than crypto clears payout_token.
+             * @enum {string|null}
+             */
+            payout_type?: "paypal" | "wise" | "bank_transfer" | "crypto" | "other" | null;
+            /** @description A crypto token; null clears it. */
+            payout_token?: string | null;
             /** @description An https address with placeholders (see Partner.postback_url); "" removes it. */
             postback_url?: string;
             note?: string;
@@ -26211,7 +27112,7 @@ export interface components {
         PartnerConversionResult: {
             credited: boolean;
             /** @enum {string} */
-            reason?: "no_partner" | "partner_inactive" | "program_inactive" | "self_referral" | "sale_not_found" | "currency";
+            reason?: "no_partner" | "partner_inactive" | "program_inactive" | "self_referral" | "sale_not_found" | "currency" | "lead_expired";
             /** @description Already recorded with this external_id (or, for a lead, already a lead). */
             duplicate: boolean;
             /** Format: uuid */
@@ -26693,6 +27594,13 @@ export interface components {
             name?: string;
             /** @description email: a lifecycle template's handle or id. transactional_email: a transactional one's. */
             template?: string;
+            /** @description email: send even over the workspace's frequency cap (GET .../email-guardrails), for email a person must get. Off by default. */
+            ignore_cap?: boolean;
+            /**
+             * @description email: in the person's quiet hours, hold (the default) sends it when they end; skip doesn't send it (step outcome quiet_hours_skipped) and the run goes on.
+             * @enum {string}
+             */
+            quiet_hours?: "hold" | "skip";
             /** @description wait: how long. */
             wait_seconds?: number;
             /** @description branch: the tests. */
@@ -31977,8 +32885,28 @@ export interface components {
             weekly_reads: boolean;
             /** @description The most of an SEO connection's monthly budget weekly reads spend in a month. */
             weekly_budget_percent: number;
+            /** @description How often the pages of broken-link prospects nobody has pitched are checked again, for outbound_link.broken; 0 is never. */
+            recheck_days: number;
             /** Format: date-time */
             updated_at: string;
+        };
+        /** @description A page of the workspace's own worth promoting, marked published. */
+        LinkAsset: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uri */
+            url: string;
+            title: string;
+            topic: string;
+            /**
+             * Format: uuid
+             * @description The SEO site whose host the URL is on
+             */
+            site_id: string | null;
+            /** Format: uuid */
+            brand_id: string | null;
+            /** Format: date-time */
+            published_at: string;
         };
         LinkRead: {
             /** Format: uuid */
@@ -32312,6 +33240,59 @@ export interface components {
             /** @description The person records of its authors, when their address was found. */
             journalist_ids: string[];
         };
+        StoryPitch: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            story_id: string;
+            /** Format: uuid */
+            brand_id: string;
+            /** Format: uuid */
+            sequence_id: string;
+            sequence_name: string;
+            /**
+             * Format: uuid
+             * @description The journalist's person record.
+             */
+            record_id: string;
+            journalist_name: string;
+            journalist_email: string | null;
+            /** @description Their latest article, which the opener may mention. */
+            article_id: string | null;
+            article_title: string | null;
+            lead_id: string | null;
+            /** @enum {string} */
+            status: "writing" | "draft" | "enrolled" | "rejected";
+            opener: string;
+            /** @description Why a draft has no opener or needs a fix (connector_needed, ai_failed, check_failed: ...), or why it was rejected. */
+            reason: string;
+            /** @enum {string|null} */
+            reply_kind: "covering" | "wants_data" | "wants_interview" | "not_my_beat" | "declined" | "other" | null;
+            /** Format: date-time */
+            replied_at: string | null;
+            /** Format: date-time */
+            approved_at: string | null;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            updated_at: string;
+        };
+        StoryResult: {
+            /** Format: uuid */
+            story_id: string;
+            /** Format: uuid */
+            brand_id: string;
+            title: string;
+            status: string;
+            pitched: number;
+            replied: number;
+            reply_kinds: {
+                [key: string]: number;
+            };
+            coverage: number;
+            /** @description Coverage that links to the brand's site. */
+            linked: number;
+        };
         PRExpert: {
             /** Format: uuid */
             id: string;
@@ -32375,7 +33356,14 @@ export interface components {
             checked_at: string | null;
             /** Format: date-time */
             approved_at: string | null;
+            /** @description manual, or ai_ideas for an idea the workspace's AI suggested. */
             source: string;
+            /**
+             * @description drafting while the workspace's AI writes a draft; failed, with ai_error, when it couldn't.
+             * @enum {string}
+             */
+            ai_status: "" | "drafting" | "failed";
+            ai_error: string;
             /** @description With one story only. */
             facts?: {
                 /** Format: uuid */
@@ -32462,6 +33450,8 @@ export interface components {
             linked: boolean | null;
             /** @enum {string} */
             source: "news_watch" | "manual";
+            /** @description The story a person put it on. Left null, a story's results still count it when a journalist the story pitched wrote it. */
+            story_id: string | null;
             /** Format: date-time */
             found_at: string;
             /** Format: date-time */
@@ -32769,7 +33759,7 @@ export interface components {
             /** @description Each task the AI model does and the model it uses now. */
             tasks: {
                 /** @enum {string} */
-                task: "plan" | "turn" | "check_in" | "reply_labelling" | "classify_domain" | "ai_visibility" | "social_replies" | "social_posts" | "email_verification" | "fix_tickets" | "review_replies" | "link_page_reading" | "ab_tests" | "link_pitches" | "knowledge_answers" | "journeys";
+                task: "plan" | "turn" | "check_in" | "reply_labelling" | "classify_domain" | "ai_visibility" | "social_replies" | "social_posts" | "email_verification" | "fix_tickets" | "review_replies" | "link_page_reading" | "ab_tests" | "link_pitches" | "knowledge_answers" | "journeys" | "pr_stories";
                 name: string;
                 description: string;
                 /** @description Null when no model can run yet. */
@@ -34679,6 +35669,22 @@ export interface components {
             last_error: string | null;
             error_code: string | null;
         };
+        EmailGuardrails: {
+            /** @description Cap how much marketing email one person gets. */
+            cap_enabled: boolean;
+            /** @description At most this many in any 24 hours; 0 for no daily limit. */
+            per_day: number;
+            /** @description At most this many in any 7 days; 0 for no weekly limit. */
+            per_week: number;
+            /** @description Hold marketing email due in quiet hours until they end. */
+            quiet_hours_enabled: boolean;
+            /** @description The hour quiet hours start, 0 to 23, in the person's time zone. */
+            quiet_start: number;
+            /** @description The hour quiet hours end and held email goes. */
+            quiet_end: number;
+            /** @description The IANA time zone for people whose own (their timezone attribute) is unknown. */
+            time_zone: string;
+        };
         PartnerSettings: {
             /** @description When a partner's record is erased (DELETE .../records/{record}), also clear the note and reference on their payouts, which can hold their name or email. The payouts' amounts, dates and status always stay, and their links keep working. On by default. */
             erase_payout_notes: boolean;
@@ -36405,6 +37411,181 @@ export interface components {
             timestamp?: string;
         } & {
             [key: string]: unknown;
+        };
+        /** @description One event, or a batch. Each event is kept as sent and checked when it is processed. */
+        BrandEventsInput: {
+            batch?: components["schemas"]["CustomerEventMessage"][];
+            /** @description batch: context every event in it shares. */
+            context?: {
+                [key: string]: unknown;
+            };
+            /**
+             * @description A label for where the events came from. Default api.
+             * @example segment
+             */
+            source?: string;
+            /** @enum {string} */
+            type?: "track" | "identify" | "page" | "screen" | "group" | "alias";
+        } & {
+            [key: string]: unknown;
+        };
+        BrandEventsReceived: {
+            /**
+             * Format: uuid
+             * @description This send's id: filter GET .../events by it.
+             */
+            batch_id: string;
+            received: number;
+            /** @description A receipt per event, in the order sent. */
+            events: {
+                /** @description The event's place in the batch. */
+                index: number;
+                /**
+                 * Format: uuid
+                 * @description Its receipt id: GET .../events/{id} says what happened to it.
+                 */
+                id: string;
+            }[];
+        };
+        BrandEvent: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            batch_id: string;
+            /** Format: date-time */
+            received_at: string;
+            /**
+             * @description pending: waiting to be processed. held: a track name the catalog hasn't approved; approve it, then replay.
+             * @enum {string}
+             */
+            status: "pending" | "accepted" | "duplicate" | "rejected" | "held";
+            /** @description Why it was rejected or held, such as missing_id, invalid_timestamp, property_type, other_brand, identity_taken, internal or name_not_approved. */
+            code: string | null;
+            /** @description What to fix. */
+            reason: string | null;
+            /** @description The event's type as sent: track, identify, page, screen, group or alias. */
+            type: string | null;
+            /** @description Its catalog name once processed, or the name as sent. */
+            name: string | null;
+            source: string;
+            message_id: string | null;
+            /**
+             * Format: uuid
+             * @description The person it was matched to.
+             */
+            record_id: string | null;
+            /**
+             * Format: uuid
+             * @description The product event it was stored as.
+             */
+            customer_event_id: string | null;
+            /** @description Tries that failed for a reason other than the event. */
+            attempts: number;
+            /** Format: date-time */
+            processed_at: string | null;
+            /**
+             * Format: date-time
+             * @description When it is deleted: 30 days after it arrived when accepted or duplicate, 90 when rejected or held.
+             */
+            expires_at: string | null;
+        };
+        BrandEventDetail: components["schemas"]["BrandEvent"] & {
+            /** @description The event as sent, with its batch's context merged in. */
+            raw: unknown;
+        };
+        BrandEventCounts: {
+            pending: number;
+            accepted: number;
+            duplicate: number;
+            rejected: number;
+            held: number;
+        };
+        BrandEventsSummary: {
+            last_24h: components["schemas"]["BrandEventCounts"];
+            last_7d: components["schemas"]["BrandEventCounts"];
+            /** @description Events waiting to be processed. */
+            pending: number;
+            /** Format: date-time */
+            oldest_pending_at: string | null;
+            /** @description The rejected events still kept, by code, most first. */
+            rejection_codes: {
+                code: string;
+                count: number;
+                /** @description The latest one's reason. */
+                reason: string;
+                /**
+                 * Format: date-time
+                 * @description When the first of them is deleted.
+                 */
+                expires_at: string | null;
+            }[];
+            /** @description Names held until someone approves them in the catalog, most first. */
+            held_names: {
+                name: string;
+                count: number;
+                /** Format: date-time */
+                expires_at: string | null;
+            }[];
+            /** @description Days each status is kept. */
+            retention_days: {
+                [key: string]: number;
+            };
+        };
+        /** @description ids, or a filter. Only rejected and held events are replayed. */
+        BrandEventsReplayInput: {
+            ids?: string[];
+            /** @enum {string} */
+            status?: "rejected" | "held";
+            code?: string;
+            source?: string;
+            /** Format: uuid */
+            batch_id?: string;
+            name?: string;
+        };
+        BrandEventsReplayed: {
+            /** @description Events sent back to be processed. */
+            replayed: number;
+            /** @description ids that weren't rejected or held, or aren't this brand's. */
+            skipped: number;
+            /** @description More events match the filter; call again. */
+            more: boolean;
+        };
+        PrivacyExport: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            brand_id: string;
+            /**
+             * Format: uuid
+             * @description The person or company exported; null once the record is gone.
+             */
+            record_id: string | null;
+            /**
+             * @description pending: being built. ready: download it. failed: error_code says why. expired: past its 7 days; the file was deleted.
+             * @enum {string}
+             */
+            status: "pending" | "ready" | "failed" | "expired";
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            finished_at: string | null;
+            /**
+             * Format: date-time
+             * @description When the file is deleted: 7 days after it was ready.
+             */
+            expires_at: string | null;
+            /** @description The file's size */
+            size_bytes: number | null;
+            /** @description Rows exported, by table. */
+            counts: {
+                [key: string]: number;
+            };
+            /** @description Why it failed: too_large (over 100 MB uncompressed), record_gone or internal. */
+            error_code: string | null;
+            /** @description How often the file was downloaded. */
+            downloads: number;
+            /** @description Downloads the file while ready (needs customers.manage); null otherwise. */
+            download_url: string | null;
         };
         /** @description One event, or a batch. */
         CustomerEventsInput: {
@@ -38347,6 +39528,8 @@ export interface components {
         LogSince: string;
         /** @description Before this time, in the same forms as since. */
         LogUntil: string;
+        /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+        BrandID: string;
         /** @description The brand's id or handle. */
         BrandRef: string;
         /** @description The record type's key: person, account or the workspace's own. */
@@ -46911,6 +48094,261 @@ export interface operations {
             default: components["responses"]["Error"];
         };
     };
+    createDesktopLink: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @example Ana's MacBook */
+                    name: string;
+                    /** @enum {string} */
+                    platform: "macos" | "windows" | "linux";
+                    /** @example 0.1.0 */
+                    app_version: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The link to approve. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @description Secret; poll with it. */
+                        device_code: string;
+                        /** @example ABCD-2345 */
+                        user_code: string;
+                        /** @description Seconds. */
+                        expires_in: number;
+                        /** @description Seconds between polls. */
+                        interval: number;
+                        /** Format: uri */
+                        verification_url: string;
+                    };
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    claimDesktopToken: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    device_code: string;
+                };
+            };
+        };
+        responses: {
+            /** @description Linked. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @description The device token (ofd_...), sent as Authorization: Bearer on /v1/desktop routes. */
+                        token: string;
+                        /** Format: uuid */
+                        device_id: string;
+                        workspace: components["schemas"]["WorkspaceBrief"];
+                    };
+                };
+            };
+            /** @description Not approved yet; poll again. */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @enum {string} */
+                        status: "pending";
+                        interval: number;
+                    };
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    getDesktopConfig: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The settings. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** Format: uuid */
+                        device_id: string;
+                        report_every_seconds: number;
+                        providers: string[];
+                        /**
+                         * @example {
+                         *       "cursor": [
+                         *         "extended"
+                         *       ]
+                         *     }
+                         */
+                        sources_off: {
+                            [key: string]: ("official" | "extended")[];
+                        };
+                        workspace: components["schemas"]["WorkspaceBrief"];
+                        user: {
+                            name: string;
+                            email: string;
+                        };
+                        /** Format: uri */
+                        ai_accounts_url: string;
+                    };
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    sendDesktopReport: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DesktopReport"];
+            };
+        };
+        responses: {
+            /** @description Where each reading went. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        report_every_seconds: number;
+                        accounts: {
+                            provider: string;
+                            /** Format: uuid */
+                            account_id?: string;
+                            created?: boolean;
+                            /** @enum {string} */
+                            skipped?: "source_off" | "no_account";
+                        }[];
+                    };
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    listAIDevices: {
+        parameters: {
+            query?: {
+                everyone?: boolean;
+            };
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The computers, newest first. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["AIDevice"][];
+                    };
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    approveAIDevice: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @example ABCD-2345 */
+                    user_code: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The computer that is now linked. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        name: string;
+                        /** @enum {string} */
+                        platform: "macos" | "windows" | "linux";
+                    };
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            default: components["responses"]["Error"];
+        };
+    };
+    unlinkAIDevice: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            202: components["responses"]["MissionHeld"];
+            /** @description Unlinked. */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            default: components["responses"]["Error"];
+        };
+    };
     getOutflareAIAccount: {
         parameters: {
             query?: never;
@@ -50725,6 +52163,7 @@ export interface operations {
                     pitch_cooldown_days?: number;
                     weekly_reads?: boolean;
                     weekly_budget_percent?: number;
+                    recheck_days?: number;
                 };
             };
         };
@@ -50740,6 +52179,81 @@ export interface operations {
             };
             202: components["responses"]["MissionHeld"];
             400: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    listLinkAssets: {
+        parameters: {
+            query?: {
+                brand?: string;
+            };
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The assets. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["LinkAsset"][];
+                    };
+                };
+            };
+            404: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    publishLinkAsset: {
+        parameters: {
+            query?: never;
+            header?: {
+                /**
+                 * @description Makes the write safe to retry. A repeat with the same key from the same caller within 24 hours gets the first
+                 *     answer back (with `Idempotent-Replayed: true`) instead of running again. The same key for a different request
+                 *     is refused with 422 `idempotency_key_reused`; while the first is still running, 409 `idempotency_in_progress`.
+                 *     Use a new random key, such as a UUID, for each distinct write.
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** Format: uri */
+                    url: string;
+                    title?: string;
+                    /** @description What it is about */
+                    topic?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The asset. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LinkAsset"];
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            400: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            409: components["responses"]["Error"];
             default: components["responses"]["Error"];
         };
     };
@@ -52799,6 +54313,371 @@ export interface operations {
             default: components["responses"]["Error"];
         };
     };
+    suggestStories: {
+        parameters: {
+            query?: never;
+            header?: {
+                /**
+                 * @description Makes the write safe to retry. A repeat with the same key from the same caller within 24 hours gets the first
+                 *     answer back (with `Idempotent-Replayed: true`) instead of running again. The same key for a different request
+                 *     is refused with 422 `idempotency_key_reused`; while the first is still running, 409 `idempotency_in_progress`.
+                 *     Use a new random key, such as a UUID, for each distinct write.
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @description The brand's id or handle. */
+                    brand_id: string;
+                    /** @default 5 */
+                    count?: number;
+                    /** @example Angles for the bot traffic beat */
+                    brief?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description Queued, or held for a person's approval in a mission. */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        queued: boolean;
+                    } | components["schemas"]["MissionHeld"];
+                };
+            };
+            400: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    draftStory: {
+        parameters: {
+            query?: never;
+            header?: {
+                /**
+                 * @description Makes the write safe to retry. A repeat with the same key from the same caller within 24 hours gets the first
+                 *     answer back (with `Idempotent-Replayed: true`) instead of running again. The same key for a different request
+                 *     is refused with 422 `idempotency_key_reused`; while the first is still running, 409 `idempotency_in_progress`.
+                 *     Use a new random key, such as a UUID, for each distinct write.
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                story: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": {
+                    /** @example Lead with the 37%. */
+                    guidance?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description Queued, or held for a person's approval in a mission. */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        queued: boolean;
+                    } | components["schemas"]["MissionHeld"];
+                };
+            };
+            400: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    getStoryResults: {
+        parameters: {
+            query?: {
+                /** @description A brand's id or handle. */
+                brand?: string;
+                days?: number;
+                story_id?: string;
+            };
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Results. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** Format: date-time */
+                        since: string;
+                        days: number;
+                        data: components["schemas"]["StoryResult"][];
+                        total: {
+                            stories: number;
+                            pitched: number;
+                            replied: number;
+                            reply_kinds: {
+                                [key: string]: number;
+                            };
+                            coverage: number;
+                            linked: number;
+                        };
+                    };
+                };
+            };
+            400: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    startStoryPitches: {
+        parameters: {
+            query?: never;
+            header?: {
+                /**
+                 * @description Makes the write safe to retry. A repeat with the same key from the same caller within 24 hours gets the first
+                 *     answer back (with `Idempotent-Replayed: true`) instead of running again. The same key for a different request
+                 *     is refused with 422 `idempotency_key_reused`; while the first is still running, 409 `idempotency_in_progress`.
+                 *     Use a new random key, such as a UUID, for each distinct write.
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                story: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** Format: uuid */
+                    sequence_id: string;
+                    record_ids: string[];
+                };
+            };
+        };
+        responses: {
+            /** @description The pitches started, and the journalists skipped. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["StoryPitch"][];
+                        skipped: {
+                            /** Format: uuid */
+                            record_id: string;
+                            /** @enum {string} */
+                            reason: "not_found" | "not_a_person" | "no_email" | "already_pitched" | "pitched_this_week";
+                        }[];
+                    };
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            400: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    listStoryPitches: {
+        parameters: {
+            query?: {
+                story_id?: string;
+                status?: "writing" | "draft" | "enrolled" | "rejected";
+                /** @description A brand's id or handle. */
+                brand?: string;
+                limit?: number;
+                offset?: number;
+                /**
+                 * @description Only these fields of each item, comma separated (fields=id,email,status); id always comes back.
+                 *     Paging fields stay. A field the items don't have answers 400 naming the ones they do. Any GET takes it.
+                 */
+                fields?: components["parameters"]["Fields"];
+                /**
+                 * @description next_cursor from the previous page, unchanged. Every paged list takes it, so one loop pages them all:
+                 *     call, then call again with cursor=next_cursor until next_cursor is null. Cursors are opaque; don't build them.
+                 */
+                cursor?: components["parameters"]["Cursor"];
+            };
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Pitches. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["StoryPitch"][];
+                        next_offset: number | null;
+                        next_cursor: components["schemas"]["NextCursor"];
+                    };
+                };
+            };
+            400: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    updateStoryPitch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                pitch: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    opener: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The pitch. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StoryPitch"];
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            400: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    approveStoryPitch: {
+        parameters: {
+            query?: never;
+            header?: {
+                /**
+                 * @description Makes the write safe to retry. A repeat with the same key from the same caller within 24 hours gets the first
+                 *     answer back (with `Idempotent-Replayed: true`) instead of running again. The same key for a different request
+                 *     is refused with 422 `idempotency_key_reused`; while the first is still running, 409 `idempotency_in_progress`.
+                 *     Use a new random key, such as a UUID, for each distinct write.
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                pitch: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": {
+                    opener?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The pitch, enrolled. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StoryPitch"];
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            400: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    rejectStoryPitch: {
+        parameters: {
+            query?: never;
+            header?: {
+                /**
+                 * @description Makes the write safe to retry. A repeat with the same key from the same caller within 24 hours gets the first
+                 *     answer back (with `Idempotent-Replayed: true`) instead of running again. The same key for a different request
+                 *     is refused with 422 `idempotency_key_reused`; while the first is still running, 409 `idempotency_in_progress`.
+                 *     Use a new random key, such as a UUID, for each distinct write.
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                pitch: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": {
+                    reason?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The pitch. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StoryPitch"];
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            400: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
     listJournalists: {
         parameters: {
             query?: {
@@ -52968,6 +54847,8 @@ export interface operations {
                 "application/json": {
                     status?: components["schemas"]["CoverageStatus"];
                     linked?: boolean;
+                    /** @description A story of the coverage's brand to put it on, or empty to take it off. */
+                    story_id?: string;
                 };
             };
         };
@@ -65237,6 +67118,8 @@ export interface operations {
                 type?: string;
                 /** @description Only pairs with this record. */
                 record?: string;
+                /** @description Only records of this brand: its id or handle, none for records shared by every brand, or all (the default). */
+                brand?: components["parameters"]["Brand"];
                 limit?: number;
                 before?: string;
                 /**
@@ -68508,6 +70391,352 @@ export interface operations {
             default: components["responses"]["Error"];
         };
     };
+    getBrandByID: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The brand. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Brand"];
+                };
+            };
+            404: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    listBrandEvents: {
+        parameters: {
+            query?: {
+                status?: "pending" | "accepted" | "duplicate" | "rejected" | "held";
+                /** @description A rejection code, such as missing_id or property_type. */
+                code?: string;
+                /** @description The source label the events were sent with. */
+                source?: string;
+                /** @description The batch_id a send answered. */
+                batch_id?: string;
+                /** @description The event's catalog name, such as order_completed. */
+                name?: string;
+                received_after?: string;
+                received_before?: string;
+                limit?: number;
+                before?: string;
+                /**
+                 * @description next_cursor from the previous page, unchanged. Every paged list takes it, so one loop pages them all:
+                 *     call, then call again with cursor=next_cursor until next_cursor is null. Cursors are opaque; don't build them.
+                 */
+                cursor?: components["parameters"]["Cursor"];
+                /**
+                 * @description Only these fields of each item, comma separated (fields=id,email,status); id always comes back.
+                 *     Paging fields stay. A field the items don't have answers 400 naming the ones they do. Any GET takes it.
+                 */
+                fields?: components["parameters"]["Fields"];
+            };
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Events, newest first. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["BrandEvent"][];
+                        next_before: string | null;
+                        next_cursor: components["schemas"]["NextCursor"];
+                    };
+                };
+            };
+            400: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    ingestBrandEvents: {
+        parameters: {
+            query?: never;
+            header?: {
+                /**
+                 * @description Makes the write safe to retry. A repeat with the same key from the same caller within 24 hours gets the first
+                 *     answer back (with `Idempotent-Replayed: true`) instead of running again. The same key for a different request
+                 *     is refused with 422 `idempotency_key_reused`; while the first is still running, 409 `idempotency_in_progress`.
+                 *     Use a new random key, such as a UUID, for each distinct write.
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["BrandEventsInput"];
+            };
+        };
+        responses: {
+            /** @description Saved, to be processed. Inside a mission, a MissionHeld answer when the call was held for approval or dry-run instead. */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BrandEventsReceived"] | components["schemas"]["MissionHeld"];
+                };
+            };
+            400: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            413: components["responses"]["Error"];
+            415: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    getBrandEventsSummary: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The summary. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BrandEventsSummary"];
+                };
+            };
+            404: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    replayBrandEvents: {
+        parameters: {
+            query?: never;
+            header?: {
+                /**
+                 * @description Makes the write safe to retry. A repeat with the same key from the same caller within 24 hours gets the first
+                 *     answer back (with `Idempotent-Replayed: true`) instead of running again. The same key for a different request
+                 *     is refused with 422 `idempotency_key_reused`; while the first is still running, 409 `idempotency_in_progress`.
+                 *     Use a new random key, such as a UUID, for each distinct write.
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["BrandEventsReplayInput"];
+            };
+        };
+        responses: {
+            /** @description Queued. Inside a mission, a MissionHeld answer when the call was held for approval or dry-run instead. */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BrandEventsReplayed"] | components["schemas"]["MissionHeld"];
+                };
+            };
+            400: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    getBrandEvent: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                /** @description The event's id: its receipt id. */
+                event: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The event. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BrandEventDetail"];
+                };
+            };
+            404: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    requestPrivacyExport: {
+        parameters: {
+            query?: never;
+            header?: {
+                /**
+                 * @description Makes the write safe to retry. A repeat with the same key from the same caller within 24 hours gets the first
+                 *     answer back (with `Idempotent-Replayed: true`) instead of running again. The same key for a different request
+                 *     is refused with 422 `idempotency_key_reused`; while the first is still running, 409 `idempotency_in_progress`.
+                 *     Use a new random key, such as a UUID, for each distinct write.
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                record: components["parameters"]["RecordID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Queued. Inside a mission, a MissionHeld answer when the call was held for approval or dry-run instead. */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PrivacyExport"] | components["schemas"]["MissionHeld"];
+                };
+            };
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    listPrivacyExports: {
+        parameters: {
+            query?: {
+                /** @description Only this record's exports. */
+                record?: string;
+                status?: "pending" | "ready" | "failed" | "expired";
+                limit?: number;
+                before?: string;
+                /**
+                 * @description next_cursor from the previous page, unchanged. Every paged list takes it, so one loop pages them all:
+                 *     call, then call again with cursor=next_cursor until next_cursor is null. Cursors are opaque; don't build them.
+                 */
+                cursor?: components["parameters"]["Cursor"];
+                /**
+                 * @description Only these fields of each item, comma separated (fields=id,email,status); id always comes back.
+                 *     Paging fields stay. A field the items don't have answers 400 naming the ones they do. Any GET takes it.
+                 */
+                fields?: components["parameters"]["Fields"];
+            };
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Exports, newest first. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["PrivacyExport"][];
+                        next_before: string | null;
+                        next_cursor: components["schemas"]["NextCursor"];
+                    };
+                };
+            };
+            400: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    getPrivacyExport: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                /** @description The privacy export's id. */
+                export: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The export. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PrivacyExport"];
+                };
+            };
+            404: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    downloadPrivacyExport: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                /** @description The privacy export's id. */
+                export: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The file. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/gzip": string;
+                };
+            };
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+            410: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
     getBrand: {
         parameters: {
             query?: never;
@@ -71688,6 +73917,76 @@ export interface operations {
                 };
             };
             404: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    getEmailGuardrails: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The guardrails. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EmailGuardrails"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    updateEmailGuardrails: {
+        parameters: {
+            query?: never;
+            header?: {
+                /**
+                 * @description Makes the write safe to retry. A repeat with the same key from the same caller within 24 hours gets the first
+                 *     answer back (with `Idempotent-Replayed: true`) instead of running again. The same key for a different request
+                 *     is refused with 422 `idempotency_key_reused`; while the first is still running, 409 `idempotency_in_progress`.
+                 *     Use a new random key, such as a UUID, for each distinct write.
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    cap_enabled?: boolean;
+                    per_day?: number;
+                    per_week?: number;
+                    quiet_hours_enabled?: boolean;
+                    quiet_start?: number;
+                    quiet_end?: number;
+                    time_zone?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The guardrails. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EmailGuardrails"];
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            400: components["responses"]["Error"];
             default: components["responses"]["Error"];
         };
     };
@@ -78265,6 +80564,28 @@ export interface operations {
             };
         };
     };
+    webhook_privacy_export_ready: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["WebhookEvent"];
+            };
+        };
+        responses: {
+            /** @description Any 2xx answer means received; anything else is retried. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
     webhook_brand_created: {
         parameters: {
             query?: never;
@@ -79036,6 +81357,94 @@ export interface operations {
         };
     };
     webhook_competitor_page_removed: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["WebhookEvent"];
+            };
+        };
+        responses: {
+            /** @description Any 2xx answer means received; anything else is retried. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    webhook_competitor_link_new: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["WebhookEvent"];
+            };
+        };
+        responses: {
+            /** @description Any 2xx answer means received; anything else is retried. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    webhook_outbound_link_broken: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["WebhookEvent"];
+            };
+        };
+        responses: {
+            /** @description Any 2xx answer means received; anything else is retried. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    webhook_asset_published: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["WebhookEvent"];
+            };
+        };
+        responses: {
+            /** @description Any 2xx answer means received; anything else is retried. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    webhook_mention_found: {
         parameters: {
             query?: never;
             header?: never;

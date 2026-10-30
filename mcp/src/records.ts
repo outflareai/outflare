@@ -15,6 +15,7 @@ type Call = (fn: () => Promise<{ data?: unknown; error?: unknown; response: Resp
 const id = z.string().uuid();
 const read = { readOnlyHint: true, openWorldHint: false } as const;
 const write = { readOnlyHint: false, destructiveHint: false, openWorldHint: false } as const;
+const brandRef = z.string().min(1).describe("The brand's handle (such as repocket) or id, from list_brands.");
 const typeKey = z.string().min(1).describe("A record type's key: person, account, or one from get_catalog.");
 const valueTypes = z.enum(["text", "number", "currency", "date", "timestamp", "checkbox", "select", "status", "rating", "email", "phone", "url", "location", "record_reference", "actor_reference"]);
 const sources = z.enum(["manual", "first_party", "crm_sync", "enrichment", "import"]);
@@ -42,6 +43,17 @@ const eventProperties = z.array(z.object({ key: z.string().min(1), value_type: v
 export function registerRecordTools(server: McpServer, gtm: MissionClient, workspace: () => string, readOnly: boolean, call: Call): void {
   const path = () => ({ ws: workspace() });
   const recordPath = (record: string) => ({ ws: workspace(), record });
+  // Brand routes take the brand's id; a handle is looked up first.
+  const uuidShape = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+  const onBrand = async <T extends { data?: unknown; error?: unknown; response: Response }>(
+    brand: string,
+    fn: (id: string) => Promise<T>,
+  ): Promise<{ data?: unknown; error?: unknown; response: Response }> => {
+    if (uuidShape.test(brand)) return fn(brand);
+    const found = await gtm.GET("/v1/workspaces/{ws}/brands/{brand}", { params: { path: { ws: workspace(), brand } } });
+    if (!found.data) return found;
+    return fn(found.data.id);
+  };
 
   server.registerTool(
     "get_catalog",
@@ -223,6 +235,85 @@ export function registerRecordTools(server: McpServer, gtm: MissionClient, works
       annotations: read,
     },
     (q) => call(() => gtm.GET("/v1/workspaces/{ws}/records/duplicates", { params: { path: path(), query: q } })),
+  );
+
+  server.registerTool(
+    "list_brand_events",
+    {
+      title: "List a brand's received events",
+      description:
+        "Product events sent to a brand with send_brand_events, newest first, with what happened to each: pending, accepted, duplicate, " +
+        "rejected (code and reason say what to fix) or held (a track name the catalog hasn't approved). expires_at is when it is deleted " +
+        "(30 days accepted, 90 rejected or held). Use get_brand_event for one event as sent.",
+      inputSchema: {
+        brand: brandRef,
+        status: z.enum(["pending", "accepted", "duplicate", "rejected", "held"]).optional(),
+        code: z.string().optional().describe("A rejection code, such as missing_id or property_type."),
+        source: z.string().optional(),
+        batch_id: id.optional().describe("The batch_id send_brand_events answered."),
+        name: z.string().optional().describe("A catalog name, such as order_completed."),
+        received_after: z.string().datetime().optional(),
+        received_before: z.string().datetime().optional(),
+        limit: z.number().int().min(1).max(200).optional(),
+        cursor: z.string().optional(),
+      },
+      annotations: read,
+    },
+    ({ brand, ...q }) => call(() => onBrand(brand, (b) => gtm.GET("/v1/brands/{brand}/events", { params: { path: { brand: b }, query: q } }))),
+  );
+
+  server.registerTool(
+    "get_brand_event",
+    {
+      title: "Read a received event",
+      description: "One event sent to a brand, with its status, what to fix when rejected, and raw: the event exactly as sent.",
+      inputSchema: { brand: brandRef, event: id.describe("The event's receipt id, from send_brand_events or list_brand_events.") },
+      annotations: read,
+    },
+    ({ brand, event }) => call(() => onBrand(brand, (b) => gtm.GET("/v1/brands/{brand}/events/{event}", { params: { path: { brand: b, event } } }))),
+  );
+
+  server.registerTool(
+    "get_brand_events_summary",
+    {
+      title: "Summarise a brand's received events",
+      description:
+        "How many events a brand received in the last 24 hours and 7 days by status, how many wait, the rejection codes still kept with " +
+        "the latest reason, and the held names waiting for approval (approve with update_event_definition, then replay_brand_events).",
+      inputSchema: { brand: brandRef },
+      annotations: read,
+    },
+    ({ brand }) => call(() => onBrand(brand, (b) => gtm.GET("/v1/brands/{brand}/events/summary", { params: { path: { brand: b } } }))),
+  );
+
+  server.registerTool(
+    "get_privacy_export",
+    {
+      title: "Read a privacy export",
+      description:
+        "A privacy export's status (pending, ready, failed with error_code, or expired after 7 days), its rows by table and, once ready, " +
+        "download_url for a person with customers.manage to download the file. Start one with request_privacy_export.",
+      inputSchema: { brand: brandRef, export: id.describe("The export's id, from request_privacy_export or list_privacy_exports.") },
+      annotations: read,
+    },
+    ({ brand, export: x }) => call(() => onBrand(brand, (b) => gtm.GET("/v1/brands/{brand}/privacy-exports/{export}", { params: { path: { brand: b, export: x } } }))),
+  );
+
+  server.registerTool(
+    "list_privacy_exports",
+    {
+      title: "List a brand's privacy exports",
+      description: "A brand's privacy exports, newest first, with their status and expiry; record narrows it to one person or company.",
+      inputSchema: {
+        brand: brandRef,
+        record: id.optional().describe("Only this record's exports."),
+        status: z.enum(["pending", "ready", "failed", "expired"]).optional(),
+        limit: z.number().int().min(1).max(200).optional(),
+        cursor: z.string().optional(),
+      },
+      annotations: read,
+    },
+    ({ brand, ...q }) => call(() => onBrand(brand, (b) => gtm.GET("/v1/brands/{brand}/privacy-exports", { params: { path: { brand: b }, query: q } }))),
   );
 
   if (readOnly) return;
@@ -522,6 +613,100 @@ export function registerRecordTools(server: McpServer, gtm: MissionClient, works
       annotations: write,
     },
     (body) => call(() => gtm.POST("/v1/workspaces/{ws}/customer-events", { params: { path: path() }, body })),
+  );
+
+  server.registerTool(
+    "send_brand_events",
+    {
+      title: "Send product events to a brand",
+      description:
+        "Send what people did in the brand's product, in Segment's format (track, identify, page, screen, group, alias), up to 500 at a time. " +
+        "Every event is saved and answered at once with a receipt id; a job then matches each to a person in this brand (userId, then a " +
+        "verified email, then anonymousId) and marks it accepted, duplicate, rejected (with what to fix) or held (a new track name waiting " +
+        "for approval). Follow them with list_brand_events. Use a messageId so a retry is stored once. Only send events the brand's own " +
+        "systems reported, never guesses.",
+      inputSchema: {
+        brand: brandRef,
+        batch: z
+          .array(
+            z
+              .object({
+                type: z.enum(["track", "identify", "page", "screen", "group", "alias"]),
+                userId: z.string().max(200).optional(),
+                anonymousId: z.string().max(200).optional(),
+                event: z.string().max(200).optional().describe("track: what happened, such as Order Completed."),
+                name: z.string().max(200).optional().describe("page or screen: its name."),
+                properties: z.record(z.string(), z.unknown()).optional(),
+                traits: z
+                  .record(z.string(), z.unknown())
+                  .optional()
+                  .describe("identify: the person; group: the company. email_verified: true only when they proved the email."),
+                groupId: z.string().max(200).optional(),
+                previousId: z.string().max(200).optional(),
+                messageId: z.string().max(200).optional(),
+                timestamp: z.string().datetime().optional(),
+                context: z.record(z.string(), z.unknown()).optional(),
+              })
+              .passthrough(),
+          )
+          .min(1)
+          .max(500),
+        source: z.string().max(60).optional().describe("A label for where they came from, such as segment. Default api."),
+      },
+      annotations: write,
+    },
+    ({ brand, ...body }) => call(() => onBrand(brand, (b) => gtm.POST("/v1/brands/{brand}/events", { params: { path: { brand: b } }, body }))),
+  );
+
+  server.registerTool(
+    "replay_brand_events",
+    {
+      title: "Replay rejected or held events",
+      description:
+        "Process rejected or held events again once what they needed is fixed (the name approved with update_event_definition, a property's " +
+        "type changed, an identity freed): either ids, or a filter (status, code, source, batch_id, name), up to 10,000 a call. Accepted and " +
+        "duplicate events are skipped. Check the result with list_brand_events.",
+      inputSchema: {
+        brand: brandRef,
+        ids: z.array(id).max(1000).optional(),
+        status: z.enum(["rejected", "held"]).optional(),
+        code: z.string().optional(),
+        source: z.string().optional(),
+        batch_id: id.optional(),
+        name: z.string().optional(),
+      },
+      annotations: write,
+    },
+    ({ brand, ...body }) => call(() => onBrand(brand, (b) => gtm.POST("/v1/brands/{brand}/events/replay", { params: { path: { brand: b } }, body }))),
+  );
+
+  server.registerTool(
+    "request_privacy_export",
+    {
+      title: "Export what a brand holds about a person",
+      description:
+        "For a person's request to see their data: builds one file of everything the record's brand holds about a person or company " +
+        "(fields, history, ids, links, product events, consent, emails, replies, meetings, deals, payments and the rest), never another " +
+        "brand's data and never secrets. Answers at once, pending; follow it with get_privacy_export until it is ready, then share its " +
+        "download_url with someone who has customers.manage. The file can be downloaded for 7 days. Only when someone asked for it.",
+      inputSchema: {
+        record: id.describe("The person's or company's record id."),
+        brand: brandRef.optional().describe("The record's brand (handle or id). Leave out to use the brand the record belongs to."),
+      },
+      annotations: write,
+    },
+    async ({ record, brand }) => {
+      let ref = brand;
+      if (!ref) {
+        const found = await gtm.GET("/v1/workspaces/{ws}/records/{record}", { params: { path: recordPath(record) } });
+        if (!found.data) return call(async () => found);
+        ref = found.data.brand_id ?? undefined;
+        if (!ref) return { isError: true, content: [{ type: "text" as const, text: "This record has no brand; pass brand." }] };
+      }
+      return call(() =>
+        onBrand(ref!, (b) => gtm.POST("/v1/brands/{brand}/records/{record}/privacy-exports", { params: { path: { brand: b, record } } })),
+      );
+    },
   );
 
   server.registerTool(

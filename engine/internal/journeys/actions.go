@@ -128,7 +128,9 @@ var conditionSchema = schema(map[string]any{
 var builtinKinds = []StepKind{
 	{Kind: KindEmail, Group: "messaging", Label: "Send an email", Description: "Send a published lifecycle template. Topic, consent and contact rules apply; a person who can't get it is skipped and goes on.",
 		Requires: []Requirement{{Connection: "email_provider", Label: "An email provider (Lifecycle, Email providers)"}},
-		Settings: schema(map[string]any{"template": str("A lifecycle template's handle or id.")}, "template"), Outputs: next},
+		Settings: schema(map[string]any{"template": str("A lifecycle template's handle or id."),
+			"ignore_cap":  map[string]any{"type": "boolean", "description": "Send even over the workspace's frequency cap, for email a person must get."},
+			"quiet_hours": enum("In the person's quiet hours: hold (the default) sends it when they end; skip doesn't send it", "hold", "skip")}, "template"), Outputs: next},
 	{Kind: KindWait, Group: "flow", Label: "Wait", Description: "Wait a while before the next step.", Requires: []Requirement{},
 		Settings: schema(map[string]any{"wait_seconds": map[string]any{"type": "integer", "minimum": 60, "maximum": 7776000}}, "wait_seconds"), Outputs: next},
 	{Kind: KindBranch, Group: "flow", Label: "Branch", Description: "Go one way when the conditions hold and another when they don't.", Requires: []Requirement{},

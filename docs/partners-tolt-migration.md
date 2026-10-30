@@ -38,6 +38,7 @@ Each run reads the whole Tolt program and brings in what isn't in Outflare yet. 
 | Customers | Referred customers, matched by your own `customer_id` and email the same way the conversion API matches them. Tolt's own customer id (`cus_...`, what `tolt.signup()` returned) is kept as one of their user ids, so if your backend stored it and reports renewals with `customer_id: "cus_..."`, those still credit the partner. Running the import again adds it to customers an earlier run brought over. |
 | Transactions | The partner's sales (and refunds), with source `import`. They are not new events on the customer's timeline: your billing or backend already told attribution about them. |
 | Commissions | Rewards with their status: pending ones wait out the program's hold, approved ones are owed in the next payout, paid ones are in paid payouts (one per Tolt payout, or per partner and day) and rejected ones are rejected. Approved and paid commissions count as spend on the day they were earned. |
+| Clicks | Clicks on the partner's links (`/v2/clicks`), with when and the referring host only, so each partner's click count carries over. Each counts once, however often you run the import. They start nothing: no events, no attribution. |
 
 Importing sends no reward webhooks, so your system never grants an old reward twice. New partners do send `partner.created`.
 

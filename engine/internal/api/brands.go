@@ -36,6 +36,7 @@ func (s *Server) routesBrands(mux *http.ServeMux) {
 	mux.HandleFunc("PATCH /v1/workspaces/{ws}/brands/{brand}/context", s.inBrand(auth.ScopeContextManage, s.updateBrandContext))
 	mux.HandleFunc("POST /v1/workspaces/{ws}/brands/{brand}/add", s.inWorkspace(auth.ScopeProfilesManage, s.addToBrand))
 	mux.HandleFunc("POST /v1/workspaces/{ws}/brands/{brand}/remove", s.inWorkspace(auth.ScopeProfilesManage, s.removeFromBrand))
+	mux.HandleFunc("GET /v1/brands/{brand}", s.onBrand(read, s.getBrand))
 	mux.HandleFunc("GET /v1/business-models", s.listBusinessModels)
 	mux.HandleFunc("GET /v1/workspaces/{ws}/brand-rules", s.inBrand(read, s.getBrandRules))
 	mux.HandleFunc("PATCH /v1/workspaces/{ws}/brand-rules", s.inWorkspace(auth.ScopeWorkspaceManage, s.updateBrandRules))
@@ -339,7 +340,7 @@ func handleProblem(h string) string {
 // brand's handle is the part of the app's URLs after the workspace, before
 // the page, so it can't be one of them. TestBrandHandlesAreNotPages keeps
 // the two lists the same.
-var pageNames = []string{"overview", "get-started", "setup", "ai", "ai-usage", "ai-accounts", "tools", "reports", "analytics", "tracking", "links", "seo", "seo-overview", "audits", "fixes", "experiments", "keywords", "ai-visibility", "backlinks", "competitors", "reddit", "reddit-campaigns", "social", "ads", "partners", "visitors", "inbox", "missions", "playbooks", "outcomes", "sequences", "link-building", "news", "infrastructure", "mailboxes", "domains", "warmup", "servers", "allocation", "lifecycle", "emails", "broadcasts", "journeys", "rules", "automations", "templates", "topics", "providers", "people", "leads", "lists", "suppression", "knowledge", "company", "brands", "ideal-customers", "workspace", "members", "alerts", "digests", "senders", "connectors", "webhooks", "tokens", "logs", "audit", "instance", "account", "email-finder", "lead-finder", "reviews", "flags", "channels", "ab-tests", "support", "help-centre"}
+var pageNames = []string{"overview", "get-started", "setup", "ai", "ai-usage", "ai-accounts", "tools", "reports", "analytics", "tracking", "links", "seo", "seo-overview", "audits", "fixes", "experiments", "keywords", "ai-visibility", "backlinks", "competitors", "reddit", "reddit-campaigns", "social", "ads", "partners", "visitors", "inbox", "missions", "playbooks", "outcomes", "sequences", "link-building", "news", "stories", "infrastructure", "mailboxes", "domains", "warmup", "servers", "allocation", "lifecycle", "emails", "broadcasts", "journeys", "rules", "automations", "templates", "topics", "providers", "people", "leads", "lists", "suppression", "knowledge", "company", "brands", "ideal-customers", "workspace", "members", "alerts", "digests", "senders", "connectors", "webhooks", "tokens", "logs", "audit", "instance", "account", "email-finder", "lead-finder", "link-autopilot", "reviews", "flags", "channels", "ab-tests", "support", "help-centre"}
 
 // handleFrom makes a handle from a brand's name: "Repocket Games" becomes
 // "repocket-games".

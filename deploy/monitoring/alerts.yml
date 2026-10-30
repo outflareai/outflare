@@ -160,6 +160,12 @@ groups:
         annotations:
           summary: "Rule jobs ({{ $labels.kind }}) are failing and retrying, so rules fire late or not at all. Find the job's error in the logs (job.failed with this kind)."
 
+      - alert: OutflareEmailsCappedMany
+        expr: sum(increase(outflare_emails_guarded_total{outcome="frequency_cap"}[1h])) > 5000
+        labels: { severity: info }
+        annotations:
+          summary: "Over 5,000 marketing emails were stopped by workspaces' frequency caps in an hour: usually a broadcast or journey that overlaps another. Each is email.capped on the person's timeline; the Marketing email guardrails row shows which sender."
+
       - alert: OutflareJourneyCallsFailing
         expr: |
           sum by (kind) (increase(outflare_journeys_calls_total{outcome="failed"}[30m])) > 10
@@ -392,6 +398,43 @@ groups:
         labels: { severity: warning }
         annotations:
           summary: "Over 500 meetings have waited 30 minutes for their meeting.* event on people's timelines; check meeting_events.run_failed in the engine log. Booked calls don't count as conversions until it drains."
+
+      - alert: OutflareEventInboxBehind
+        # Events sent to POST /v1/brands/{brand}/events are saved, then
+        # processed by the events.process job within seconds.
+        expr: max(outflare_event_inbox_oldest_pending_seconds) > 300
+        for: 5m
+        labels: { severity: warning }
+        annotations:
+          summary: "A product event sent to a brand has waited over 5 minutes to be processed: the job queue is behind or events.process keeps failing (Job queue row; customer_events.process_failed in the engine log). Senders got their 202; their events are safe and wait."
+
+      - alert: OutflareEventInboxRejecting
+        # The event inbox keeps rejected events 90 days so they can be
+        # fixed and replayed; most of them rejected means a sender broke.
+        expr: sum(increase(outflare_event_inbox_processed_total{outcome="rejected"}[1h])) / sum(increase(outflare_event_inbox_processed_total[1h])) > 0.5 and sum(increase(outflare_event_inbox_processed_total[1h])) > 50
+        for: 15m
+        labels: { severity: info }
+        annotations:
+          summary: "Over half of the product events processed in the last hour were rejected: a sender is likely sending the wrong shape. The rejected-by-code panel says what; each brand's Events page says which source and what to fix."
+
+      - alert: OutflareEventInboxPurgeBehind
+        # Rows past their retention (30 days accepted, 90 rejected or
+        # held) are deleted every ten minutes.
+        expr: max(outflare_event_inbox_purge_overdue_seconds) > 21600
+        for: 30m
+        labels: { severity: info }
+        annotations:
+          summary: "Event inbox rows have stayed over 6 hours past their retention: the sweep is failing or can't keep up (customer_events.purge_failed in the engine log). Raw events are kept longer than promised until it catches up."
+
+      - alert: OutflarePrivacyExportsFailing
+        # A privacy export answers a person's request for their data; one
+        # that fails for Outflare's own reasons (internal: the job kept
+        # failing, or stayed pending two hours) needs someone to look.
+        expr: sum(increase(outflare_privacy_exports_built_total{outcome="internal"}[1h])) > 0
+        for: 5m
+        labels: { severity: warning }
+        annotations:
+          summary: "A privacy export failed for Outflare's own reasons in the last hour (privacy_export.build_failed and job.failed for privacy_export.build in the engine log; Privacy exports panels in the event inbox row). The person's data request waits until someone asks for a new export."
 
       - alert: OutflareSemanticSearchNoPgvector
         # Workspaces have meaning-based search on, but the database can't
@@ -694,6 +737,16 @@ groups:
         annotations:
           summary: "Over half of news article reads fail to reach the page; check the news_article.read events by error code and OutflareBot's crawl metrics."
 
+      - alert: OutflareStoryAIFailing
+        # A workspace without a model or past its budget is its own to fix;
+        # ai_failed and connector_auth climbing mean the AI calls themselves
+        # break.
+        expr: sum(rate(outflare_news_story_ai_runs_total{outcome=~"ai_failed|connector_auth"}[6h])) / sum(rate(outflare_news_story_ai_runs_total[6h])) > 0.5 and sum(increase(outflare_news_story_ai_runs_total[6h])) > 10
+        for: 1h
+        labels: { severity: warning }
+        annotations:
+          summary: "Over half of the AI's story work (ideas, release drafts, pitch openers, reading journalists' replies) fails at the AI call; check the story.ideas_failed, story.draft_failed, story_pitch.write_failed and story_pitch.reply_failed events by error code."
+
       - alert: OutflareSocialPostsOverdue
         # Approved posts go out within a minute or two of their time; one
         # 10 minutes late means the social scheduler or the social.publish
@@ -819,6 +872,27 @@ groups:
         labels: { severity: warning }
         annotations:
           summary: "Inbound email deliveries fail on Outflare's side before they are stored (usually the database): the mail receiver retries, but check POST /v1/inbound/email errors in the log."
+
+      - alert: OutflareDesktopReportErrors
+        expr: sum(increase(outflare_desktop_reports_total{outcome="error"}[15m])) > 5
+        for: 15m
+        labels: { severity: warning }
+        annotations:
+          summary: "Reports from Outflare for desktop fail on Outflare's side (usually the database): check POST /v1/desktop/reports errors in the log."
+
+      - alert: OutflareDesktopProviderBroken
+        expr: sum by (provider) (increase(outflare_desktop_read_failures_total{code=~"bad_response|forbidden"}[1h])) > 20 and sum by (provider) (increase(outflare_desktop_readings_total[1h])) < sum by (provider) (increase(outflare_desktop_read_failures_total{code=~"bad_response|forbidden"}[1h]))
+        for: 30m
+        labels: { severity: warning }
+        annotations:
+          summary: "Outflare for desktop can't read {{ $labels.provider }} on most computers (bad_response or forbidden): the provider likely changed its endpoint. Switch that source off in ai_desktop_sources_off and fix the reader in desktop/."
+
+      - alert: OutflareDesktopMostlySilent
+        expr: sum(outflare_desktop_devices{state="silent"}) > 3 and sum(outflare_desktop_devices{state="silent"}) > 3 * sum(outflare_desktop_devices{state="reporting"})
+        for: 12h
+        labels: { severity: info }
+        annotations:
+          summary: "Most linked computers haven't reported for over 12 hours: check the Outflare for desktop release and GET /v1/desktop/config, or the apps can't reach the server."
 
       - alert: OutflareExchangeRatesStale
         expr: max(outflare_exchange_rates_newest_age_seconds) > 6 * 86400

@@ -486,30 +486,32 @@ func nextOffset(offset, n, total int) *int {
 // ---- Coverage ----
 
 type coverageView struct {
-	ID              string     `json:"id"`
-	BrandID         string     `json:"brand_id"`
-	ArticleID       string     `json:"article_id"`
-	URL             string     `json:"url"`
-	Domain          string     `json:"domain"`
-	Title           string     `json:"title"`
-	Snippet         string     `json:"snippet"`
-	RecordID        string     `json:"record_id"`
-	SearchID        *string    `json:"search_id"`
-	Status          string     `json:"status"`
-	Linked          *bool      `json:"linked"`
-	Source          string     `json:"source"`
+	ID        string  `json:"id"`
+	BrandID   string  `json:"brand_id"`
+	ArticleID string  `json:"article_id"`
+	URL       string  `json:"url"`
+	Domain    string  `json:"domain"`
+	Title     string  `json:"title"`
+	Snippet   string  `json:"snippet"`
+	RecordID  string  `json:"record_id"`
+	SearchID  *string `json:"search_id"`
+	Status    string  `json:"status"`
+	Linked    *bool   `json:"linked"`
+	Source    string  `json:"source"`
+	// StoryID is the story a person put it on.
+	StoryID         *string    `json:"story_id"`
 	FoundAt         time.Time  `json:"found_at"`
 	StatusChangedAt time.Time  `json:"status_changed_at"`
 	UpdatedAt       *time.Time `json:"updated_at"`
 }
 
 const coverageCols = `c.id::text, c.brand_id::text, c.article_id::text, x.url, x.title, x.snippet, c.record_id::text, c.search_id::text,
-	c.status, c.linked, c.source, c.found_at, c.status_changed_at, c.updated_at`
+	c.status, c.linked, c.source, c.story_id::text, c.found_at, c.status_changed_at, c.updated_at`
 
 func scanCoverage(row pgx.Row) (coverageView, error) {
 	var v coverageView
 	err := row.Scan(&v.ID, &v.BrandID, &v.ArticleID, &v.URL, &v.Title, &v.Snippet, &v.RecordID, &v.SearchID,
-		&v.Status, &v.Linked, &v.Source, &v.FoundAt, &v.StatusChangedAt, &v.UpdatedAt)
+		&v.Status, &v.Linked, &v.Source, &v.StoryID, &v.FoundAt, &v.StatusChangedAt, &v.UpdatedAt)
 	_, v.Domain = news.ArticleURL(v.URL)
 	return v, err
 }
@@ -709,14 +711,19 @@ func (s *Server) addCoverage(w http.ResponseWriter, r *http.Request) {
 func (s *Server) updateCoverage(w http.ResponseWriter, r *http.Request) {
 	a := accessFrom(r.Context())
 	var req struct {
-		Status string `json:"status"`
-		Linked *bool  `json:"linked"`
+		Status  string  `json:"status"`
+		Linked  *bool   `json:"linked"`
+		StoryID *string `json:"story_id"`
 	}
 	if !decode(w, r, &req) {
 		return
 	}
-	if req.Status == "" && req.Linked == nil {
-		writeError(w, r, http.StatusBadRequest, "invalid_request", "set status or linked")
+	if req.Status == "" && req.Linked == nil && req.StoryID == nil {
+		writeError(w, r, http.StatusBadRequest, "invalid_request", "set status, linked or story_id")
+		return
+	}
+	if req.StoryID != nil && *req.StoryID != "" && !validUUID(*req.StoryID) {
+		writeError(w, r, http.StatusBadRequest, "invalid_request", "story_id is a story's id, or empty to take it off its story")
 		return
 	}
 	if req.Status != "" && !slices.Contains(news.CoverageStates, req.Status) {
@@ -740,12 +747,26 @@ func (s *Server) updateCoverage(w http.ResponseWriter, r *http.Request) {
 		writeError(w, r, http.StatusForbidden, "forbidden", string(errSharedRecord))
 		return
 	}
+	// A story must be the coverage's brand's.
+	if req.StoryID != nil && *req.StoryID != "" {
+		var ok bool
+		if err := s.pool.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM stories WHERE workspace_id = $1 AND id = $2 AND brand_id = $3)`,
+			a.WorkspaceID, *req.StoryID, c.BrandID).Scan(&ok); err != nil {
+			s.internal(w, r, err)
+			return
+		}
+		if !ok {
+			writeError(w, r, http.StatusBadRequest, "invalid_request", "story_id: no story of this coverage's brand")
+			return
+		}
+	}
 	moved := req.Status != "" && req.Status != c.Status
 	err := pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
 		if _, err := tx.Exec(ctx, `UPDATE coverage SET status = CASE WHEN $3 = '' THEN status ELSE $3 END,
 				status_changed_at = CASE WHEN $3 = '' OR $3 = status THEN status_changed_at ELSE now() END,
-				linked = COALESCE($4, linked), updated_by = $5, updated_at = now()
-			WHERE workspace_id = $1 AND id = $2`, a.WorkspaceID, c.ID, req.Status, req.Linked, actorRef(a)); err != nil {
+				linked = COALESCE($4, linked), story_id = CASE WHEN $6::text IS NULL THEN story_id ELSE NULLIF($6, '')::uuid END,
+				updated_by = $5, updated_at = now()
+			WHERE workspace_id = $1 AND id = $2`, a.WorkspaceID, c.ID, req.Status, req.Linked, actorRef(a), req.StoryID); err != nil {
 			return err
 		}
 		action := "coverage.updated"
@@ -755,7 +776,8 @@ func (s *Server) updateCoverage(w http.ResponseWriter, r *http.Request) {
 				action = "coverage.reopened"
 			}
 		}
-		data := map[string]any{"brand_id": c.BrandID, "record_id": c.RecordID, "status": c.Status, "linked_set": req.Linked != nil}
+		data := map[string]any{"brand_id": c.BrandID, "record_id": c.RecordID, "status": c.Status, "linked_set": req.Linked != nil,
+			"story_set": req.StoryID != nil}
 		if moved {
 			data["status"], data["was"] = req.Status, c.Status
 		}

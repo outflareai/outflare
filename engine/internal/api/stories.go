@@ -371,6 +371,10 @@ type storyView struct {
 	CheckedAt    *time.Time      `json:"checked_at"`
 	ApprovedAt   *time.Time      `json:"approved_at"`
 	Source       string          `json:"source"`
+	// AIStatus is drafting while the workspace's AI writes a draft, failed
+	// with AIError when it couldn't.
+	AIStatus string `json:"ai_status"`
+	AIError  string `json:"ai_error"`
 	// Facts and quotes come with one story, not with a list.
 	Facts     *[]storyFactView  `json:"facts,omitempty"`
 	Quotes    *[]storyQuoteView `json:"quotes,omitempty"`
@@ -379,12 +383,12 @@ type storyView struct {
 }
 
 const storyCols = `s.id::text, s.brand_id::text, s.kind, s.title, s.summary, s.release, s.article_id::text, s.status, s.embargo_until,
-	s.last_check, s.checked_at, s.approved_at, s.source, s.created_at, s.updated_at`
+	s.last_check, s.checked_at, s.approved_at, s.source, s.ai_status, s.ai_error, s.created_at, s.updated_at`
 
 func scanStory(row pgx.Row) (storyView, error) {
 	var v storyView
 	err := row.Scan(&v.ID, &v.BrandID, &v.Kind, &v.Title, &v.Summary, &v.Release, &v.ArticleID, &v.Status, &v.EmbargoUntil,
-		&v.LastCheck, &v.CheckedAt, &v.ApprovedAt, &v.Source, &v.CreatedAt, &v.UpdatedAt)
+		&v.LastCheck, &v.CheckedAt, &v.ApprovedAt, &v.Source, &v.AIStatus, &v.AIError, &v.CreatedAt, &v.UpdatedAt)
 	return v, err
 }
 

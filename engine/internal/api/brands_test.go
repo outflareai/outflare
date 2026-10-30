@@ -16,10 +16,13 @@ func TestBrandsContextAndFilters(t *testing.T) {
 	owner, ws := setupOwner(t, h)
 	base := "/v1/workspaces/" + ws
 
-	// A workspace starts with no brands, and its context says nothing about them.
-	if n := len(owner.must(200, "GET", base+"/brands", nil)["data"].([]any)); n != 0 {
-		t.Fatalf("new workspace has %d brands", n)
+	// A workspace starts with one brand, named after it (plans/brands). This
+	// test is about brands people add, so it archives that one first; its
+	// context then says nothing about brands.
+	if l := owner.must(200, "GET", base+"/brands", nil)["data"].([]any); len(l) != 1 || l[0].(map[string]any)["handle"] != "acme-outbound" {
+		t.Fatalf("new workspace's brands: %v", l)
 	}
+	owner.must(200, "PATCH", base+"/brands/acme-outbound", map[string]any{"status": "archived"})
 	if c := owner.must(200, "GET", base+"/context", nil); len(c["brands"].([]any)) != 0 || c["brand"] != nil {
 		t.Fatalf("context without brands: %v", c)
 	}
@@ -138,7 +141,8 @@ func TestBrandsContextAndFilters(t *testing.T) {
 	if n := len(owner.must(200, "GET", base+"/brands", nil)["data"].([]any)); n != 1 {
 		t.Fatalf("active brands: %d", n)
 	}
-	if n := len(owner.must(200, "GET", base+"/brands?status=all", nil)["data"].([]any)); n != 2 {
+	// status=all: the two added, and the archived one sign-up made.
+	if n := len(owner.must(200, "GET", base+"/brands?status=all", nil)["data"].([]any)); n != 3 {
 		t.Fatalf("all brands: %d", n)
 	}
 

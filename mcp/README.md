@@ -142,6 +142,7 @@ Read (always available):
 | `list_lead_lists`, `get_lead_list` | Lead lists with sizes, search settings and the latest build |
 | `list_lead_list_members` | A list's leads with their ICP fit score and reasons, best first |
 | `list_smart_lists`, `get_smart_list`, `list_smart_list_members`, `preview_smart_list` | Smart lists: people on customer records who match rules now (a field, an event in the last N days, being in a lead list), who is in each, and how many a set of rules would pick |
+| `list_ai_devices` | Computers running Outflare for desktop, when each last reported and any AI tool it couldn't read |
 | `list_ai_receipts`, `get_receipt_forwarding` | AI receipts people forwarded and how each was matched, and where to forward them (Outflare Cloud) |
 | `list_ai_accounts`, `get_ai_account`, `get_outflare_ai_account` | AI Accounts: the AI subscriptions and API accounts people pay for (Claude, ChatGPT, Cursor, Copilot, the Anthropic and OpenAI APIs), with plan, price, renewal, who pays, resets available and who they belong to. Your own, or everyone's with `ai_accounts.read`; and what Outflare's own AI spent this month (`ai_spend.read`) |
 | `list_flags`, `get_flag`, `evaluate_flags` | Feature flags: switches and splits (A/B tests) the website script and servers read, and which version a given visitor gets and why |
@@ -159,6 +160,7 @@ Read (always available):
 | `list_suppressions` | The opt-out list: emails and domains never emailed, with who added each, from which tool and how |
 | `list_suppression_syncs`, `update_suppression_sync` | The opt-out list kept in step with EmailBison, Instantly and Smartlead blocklists |
 | `get_contact_rules`, `set_contact_rules` | Who may get marketing email: everyone but third-party leads, or only people who agreed |
+| `get_email_guardrails`, `set_email_guardrails` | How much marketing email one person may get: the frequency cap and quiet hours |
 | `list_sequences`, `get_sequence` | Sequences with steps and counts |
 | `preview_sequence` | Render every step for one lead, with missing template variables |
 | `list_enrollments` | The leads in a sequence and where each one is |
@@ -257,6 +259,8 @@ Write (left out when `OUTFLARE_MCP_READ_ONLY=1`):
 | `link_records`, `end_record_link` | Link two records, such as partner_of, or end a link |
 | `create_record_type`, `update_record_type`, `create_field`, `update_field` | Add or change record types and fields in the shared catalog |
 | `create_option_set`, `update_option_set`, `define_event`, `update_event_definition` | Add or change shared option lists and product event definitions |
+| `request_privacy_export`, `get_privacy_export`, `list_privacy_exports` | Export everything a record's brand holds about a person or company as one file (only that brand, never secrets), follow it until it is ready, and get its download link, valid for 7 days |
+| `send_brand_events`, `list_brand_events`, `get_brand_event`, `get_brand_events_summary`, `replay_brand_events` | Send product events to a brand (saved at once with a receipt each, then processed in the background), see what happened to each (accepted, duplicate, rejected with what to fix, or held for an unapproved name) and replay the rejected or held ones once fixed |
 | `track_customer_events`, `record_consent` | Send product events in Segment's format (matched to people by userId, verified email, then anonymousId) and record consent given or withdrawn |
 | `merge_records`, `link_record_duplicate`, `dismiss_record_duplicate` | Merge a duplicate into the record kept (never two product accounts), link two as the same human, or dismiss a pair |
 | `set_warmup` | Turn warm-up on or off in a connected sequencer (EmailBison, Instantly, Smartlead) for chosen mailboxes, a pool or all |
@@ -413,13 +417,15 @@ Write (left out when `OUTFLARE_MCP_READ_ONLY=1`):
 | `list_news_searches`, `create_news_search`, `update_news_search`, `delete_news_search`, `run_news_search` | The news watch: saved searches that run on a schedule through the workspace's own web search connection, following a topic or looking for a brand |
 | `list_journalists` | Journalists: authors of the news watch's articles whose address was found, as person records on their outlet, with what they wrote and the topics they cover |
 | `list_pr_experts`, `create_pr_expert` | The people each brand quotes in its stories, with one default per brand |
-| `list_stories`, `get_story`, `create_story`, `update_story`, `add_story_fact`, `add_story_quote`, `check_story` | Digital PR stories: a release, the sourced fact behind every number, quotes the expert approves, and the check before a person approves it in Outflare |
+| `list_stories`, `get_story`, `create_story`, `update_story`, `add_story_fact`, `add_story_quote`, `check_story`, `suggest_stories`, `draft_story` | Digital PR stories: a release, the sourced fact behind every number, quotes the expert approves, and the check before a person approves it in Outflare |
+| `pitch_story`, `list_story_pitches`, `update_story_pitch`, `reject_story_pitch`, `get_story_results` | Pitching an approved story to journalists through a sequence (a person approves each pitch in Outflare), reading their replies, and each story's results: pitches, replies and coverage |
 | `list_news_articles`, `list_coverage`, `add_coverage`, `update_coverage` | What the news watch found, and coverage: articles about a brand on the outlet's company record, to confirm or dismiss |
 | `reclaim_link_prospects`, `check_link_prospects`, `check_link_prospect` | Lost links as prospects to win back, and OutflareBot's check of prospects' pages: up or gone, already linking, broken outbound links with archive snapshots, the AI's read (with the workspace's own key) and who to contact |
 | `search_web` | One search results page for any query (Google operators work) from the workspace's own DataForSEO or Geonode; costs money within the connection's budget, so estimate first |
 | `list_link_sequences`, `create_link_sequence`, `update_link_sequence`, `start_link_pitch`, `list_link_pitches`, `edit_link_pitch`, `approve_link_pitch`, `reject_link_pitch`, `get_link_results` | Pitch a prospect through an Outflare sequence with an opener the workspace's AI wrote for the page, approve or edit it (approval is on by default, per sequence), and see results by method: replies read as agreed, declined or asking for payment, links checked until live |
 | `read_links`, `list_link_reads`, `get_link_read`, `list_dead_pages`, `list_top_linked_pages` | Who links to any page or domain, from the workspace's own Ahrefs or DataForSEO (paid; estimate first), and free reports over earlier reads: competitors' dead pages with links, a domain's most linked pages |
-| `get_link_building_settings`, `update_link_building_settings` | The pitch cool-down and the weekly read of competitors' dead pages, with its share of the budget |
+| `get_link_building_settings`, `update_link_building_settings` | The pitch cool-down, the weekly read of competitors' dead pages with its share of the budget, and how often broken-link prospects are checked again |
+| `list_link_assets`, `publish_link_asset` | Mark a page of yours published (`asset.published`), which can start the "Promote a new page" playbook by itself. Needs `seo.read`, and `seo.manage` to publish |
 | `get_site_search`, `get_site_search_history`, `get_site_indexing`, `get_site_sitemaps` | A site's Google Search Console data stored by Outflare: clicks, impressions, CTR and position by page and query for 16 months, day by day history, how Google indexed each page (URL Inspection) and the sitemaps it read |
 | `get_site_indexability`, `list_indexability_pages` | A site's indexability report: every page from the crawl, its sitemaps, Search Console and an SEO tool, whether it can be indexed and whether Google indexed it, the issues where they disagree, and daily history |
 | `list_page_targets`, `set_page_target`, `accept_page_targets`, `update_page_target`, `delete_page_target` | The keyword each page of an SEO site targets: checked against the latest crawl (title, H1, description) with its Search Console numbers, suggestions from the query that brings each page the most clicks; a missing keyword becomes a fix (source `seo_keywords`) |

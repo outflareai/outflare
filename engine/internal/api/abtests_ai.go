@@ -174,16 +174,17 @@ func (s *Server) startABAIRun(w http.ResponseWriter, r *http.Request, kind strin
 		writeError(w, r, http.StatusConflict, "connector_needed", "this uses your own AI model: connect one under Settings, AI model")
 		return
 	}
-	var id string
+	// Read the run back in the same transaction: once it commits, a worker
+	// can claim the job and mark the run running before a later read.
+	var list []abAIRunView
 	err = pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
-		id, err = queueABAIRun(ctx, tx, &a.principal, a.WorkspaceID, a.ActorID, kind, brandID, testID, flagID, input)
+		id, err := queueABAIRun(ctx, tx, &a.principal, a.WorkspaceID, a.ActorID, kind, brandID, testID, flagID, input)
+		if err != nil {
+			return err
+		}
+		list, err = loadABAIRuns(ctx, tx, a.WorkspaceID, ` AND id = $2`, id)
 		return err
 	})
-	if err != nil {
-		s.internal(w, r, err)
-		return
-	}
-	list, err := loadABAIRuns(ctx, s.pool, a.WorkspaceID, ` AND id = $2`, id)
 	if err != nil || len(list) != 1 {
 		s.internal(w, r, err)
 		return

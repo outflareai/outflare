@@ -14,7 +14,11 @@ import (
 
 // Step kinds.
 const (
-	KindEmail  = "email"
+	KindEmail = "email"
+
+	// What quiet hours do to an email step.
+	QuietHold  = "hold"
+	QuietSkip  = "skip"
 	KindWait   = "wait"
 	KindBranch = "branch"
 	KindExit   = "exit"
@@ -35,6 +39,12 @@ type Step struct {
 	Name string `json:"name,omitempty"`
 	// email: a lifecycle template's handle or id.
 	Template string `json:"template,omitempty"`
+	// email: send even over the workspace's frequency cap, for email a
+	// person must get (a sign-in link, a trial ending).
+	IgnoreCap bool `json:"ignore_cap,omitempty"`
+	// email: what quiet hours do to it: hold (the default) sends it when
+	// they end; skip doesn't send it, and the run goes on.
+	QuietHours string `json:"quiet_hours,omitempty"`
 	// wait: how long, in seconds.
 	WaitSeconds int64 `json:"wait_seconds,omitempty"`
 	// branch: the conditions, and whether all or any must hold.
@@ -207,6 +217,9 @@ func Check(steps []Step) string {
 		case KindEmail:
 			if strings.TrimSpace(st.Template) == "" {
 				return "step " + st.ID + ": an email step needs a template"
+			}
+			if st.QuietHours != "" && st.QuietHours != QuietHold && st.QuietHours != QuietSkip {
+				return "step " + st.ID + ": quiet_hours is hold or skip"
 			}
 		case KindWait:
 			if st.WaitSeconds < 60 || st.WaitSeconds > 90*24*3600 {

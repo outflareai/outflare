@@ -841,14 +841,23 @@ function NewProgram({ ws, onClose, onSaved }: { ws: string; onClose: () => void;
   );
 }
 
+type PayoutMethod = PartnerProgram["payout_methods"][number];
+
+const payoutMethods: [PayoutMethod, string][] = [["paypal", "PayPal"], ["wise", "Wise"], ["bank_transfer", "Bank transfer"], ["crypto", "Crypto"], ["other", "Other"]];
+
 function ProgramSettings({ ws, program: p, canManage, onClose }: { ws: string; program: PartnerProgram; canManage: boolean; onClose: () => void }) {
   const [landing, setLanding] = useState(p.landing_url);
   const [windowDays, setWindowDays] = useState(String(p.credit_window_days));
   const [model, setModel] = useState(p.credit_model);
   const [hold, setHold] = useState(String(p.hold_days));
   const [auto, setAuto] = useState(p.auto_approve);
+  const [blockSelf, setBlockSelf] = useState(p.block_self_referrals);
   const [payBrowser, setPayBrowser] = useState(p.pay_browser_signups);
   const [minPayout, setMinPayout] = useState(String(p.min_payout_cents / 100));
+  const [term, setTerm] = useState(p.payout_term_days === null ? "" : String(p.payout_term_days));
+  const [methods, setMethods] = useState<PayoutMethod[]>(p.payout_methods);
+  const [tokens, setTokens] = useState(p.payout_tokens.join(", "));
+  const [leadDays, setLeadDays] = useState(p.lead_expiry_days === null ? "" : String(p.lead_expiry_days));
   const [salesSource, setSalesSource] = useState(p.sales_source);
   const [postback, setPostback] = useState("");
   const [busy, setBusy] = useState(false);
@@ -860,7 +869,9 @@ function ProgramSettings({ ws, program: p, canManage, onClose }: { ws: string; p
     setError("");
     const { error } = await api.PATCH("/v1/workspaces/{ws}/partner-programs/{id}", {
       params: { path: { ws, id: p.id } },
-      body: { landing_url: landing.trim(), credit_window_days: Number(windowDays), credit_model: model, hold_days: Number(hold), auto_approve: auto, pay_browser_signups: payBrowser, min_payout_cents: Math.round(Number(minPayout) * 100), sales_source: salesSource },
+      body: { landing_url: landing.trim(), credit_window_days: Number(windowDays), credit_model: model, hold_days: Number(hold), auto_approve: auto, pay_browser_signups: payBrowser, block_self_referrals: blockSelf, min_payout_cents: Math.round(Number(minPayout) * 100), sales_source: salesSource,
+        payout_term_days: term === "" ? null : Number(term), payout_methods: methods, payout_tokens: methods.includes("crypto") ? tokens.split(",").map((t) => t.trim()).filter(Boolean) : p.payout_tokens,
+        lead_expiry_days: leadDays.trim() === "" ? null : Number(leadDays) },
     });
     setBusy(false);
     if (error) return setError(errorMessage(error));
@@ -900,9 +911,35 @@ function ProgramSettings({ ws, program: p, canManage, onClose }: { ws: string; p
               </label>
               <Input label="Hold (days)" type="number" min={0} max={365} value={hold} onChange={(e) => setHold(e.target.value)} hint="Refunds inside it cancel the reward." />
               <Input label={`Minimum payout (${p.currency})`} type="number" min={0} step="0.01" value={minPayout} onChange={(e) => setMinPayout(e.target.value)} />
+              <label className="block space-y-1 text-[13px]">
+                <span className="font-medium">Payout term</span>
+                <select className={`${field} w-full`} value={term} onChange={(e) => setTerm(e.target.value)}>
+                  <option value="">Once approved</option>
+                  {[0, 15, 30, 45, 60, 90].map((n) => <option key={n} value={String(n)}>Net {n}: {n} days after the month ends</option>)}
+                  {term !== "" && ![0, 15, 30, 45, 60, 90].includes(Number(term)) && <option value={term}>Net {term}</option>}
+                </select>
+              </label>
+              <Input label="Lead expiration (days)" type="number" min={1} max={3650} value={leadDays} onChange={(e) => setLeadDays(e.target.value)} placeholder="Never" hint="A referred lead who hasn't bought by then no longer credits the partner." />
             </div>
+            <div className="space-y-1 text-[13px]">
+              <span className="font-medium">Payout methods partners choose from</span>
+              <div className="flex flex-wrap gap-x-4 gap-y-1">
+                {payoutMethods.map(([m, label]) => (
+                  <label key={m} className="flex items-center gap-2">
+                    <input type="checkbox" checked={methods.includes(m)} onChange={(e) => setMethods(e.target.checked ? [...methods, m] : methods.filter((x) => x !== m))} /> {label}
+                  </label>
+                ))}
+              </div>
+              <p className="text-[12px] text-muted-foreground">None ticked: any method, in the partner's own words.</p>
+            </div>
+            {methods.includes("crypto") && (
+              <Input label="Crypto tokens" value={tokens} onChange={(e) => setTokens(e.target.value)} placeholder="USDC on Base, USDT on Tron" hint="Comma separated. Empty: any token." maxLength={1000} />
+            )}
             <label className="flex items-center gap-2 text-[13px]">
               <input type="checkbox" checked={auto} onChange={(e) => setAuto(e.target.checked)} /> Approve rewards on their own when the hold ends
+            </label>
+            <label className="flex items-center gap-2 text-[13px]">
+              <input type="checkbox" checked={blockSelf} onChange={(e) => setBlockSelf(e.target.checked)} /> Block self-referrals: a partner's own sign-ups and purchases earn them nothing
             </label>
             <label className="flex items-center gap-2 text-[13px]">
               <input type="checkbox" checked={payBrowser} onChange={(e) => setPayBrowser(e.target.checked)} /> Pay for sign-ups the browser reports (outflare.signup). Off: they make the lead only, since anyone can call it
@@ -1080,14 +1117,41 @@ function ImportSection({ ws, program: p, canManage }: { ws: string; program: Par
   );
 }
 
+// PortalPreview shows how the portal's sign-in page will look with the
+// settings as typed, before they are saved.
+function PortalPreview({ title, color, logo, favicon, welcome, poweredBy }: { title: string; color: string; logo: string; favicon: string; welcome: string; poweredBy: boolean }) {
+  const https = (u: string) => (/^https:\/\/\S+$/.test(u) ? u : "");
+  return (
+    <div className="overflow-hidden rounded-md border text-[13px]" aria-label="Portal preview">
+      <div className="flex items-center gap-2 border-b bg-muted/40 px-3 py-1.5 text-[12px] text-muted-foreground">
+        {https(favicon) ? <img src={https(favicon)} alt="" className="size-4" /> : <span className="size-4 rounded-sm bg-muted" />}
+        <span className="truncate">{title}</span>
+      </div>
+      <div className="flex items-center gap-2 border-b px-3 py-2">
+        {https(logo) && <img src={https(logo)} alt="" className="h-6" />}
+        <span className="font-semibold">{title}</span>
+      </div>
+      <div className="space-y-2 px-3 py-3">
+        {welcome && <p className="whitespace-pre-line text-muted-foreground">{welcome}</p>}
+        <span className="inline-block rounded-md px-3 py-1.5 font-semibold text-white" style={{ background: color }}>Email me a sign-in link</span>
+        {poweredBy && <p className="text-[11px] text-muted-foreground">Powered by Outflare</p>}
+      </div>
+    </div>
+  );
+}
+
 function PortalSection({ ws, program: p, canManage }: { ws: string; program: PartnerProgram; canManage: boolean }) {
   const [enabled, setEnabled] = useState(p.portal_enabled);
   const [sub, setSub] = useState(p.portal_subdomain ?? "");
   const [title, setTitle] = useState(p.portal.title ?? "");
   const [color, setColor] = useState(p.portal.color || "#111827");
+  const [logo, setLogo] = useState(p.portal.logo_url ?? "");
+  const [favicon, setFavicon] = useState(p.portal.favicon_url ?? "");
   const [welcome, setWelcome] = useState(p.portal.welcome ?? "");
   const [from, setFrom] = useState(p.portal.email_from ?? "");
   const [signup, setSignup] = useState(!!p.portal.signup_open);
+  const [poweredBy, setPoweredBy] = useState(!p.portal.hide_powered_by);
+  const [businessOnly, setBusinessOnly] = useState(!!p.portal.business_email_only);
   const [url, setUrl] = useState(p.portal_url);
   const [assets, setAssets] = useState<PartnerAsset[]>([]);
   const [busy, setBusy] = useState(false);
@@ -1106,7 +1170,7 @@ function PortalSection({ ws, program: p, canManage }: { ws: string; program: Par
     setError("");
     const { data, error } = await api.PUT("/v1/workspaces/{ws}/partner-programs/{id}/portal", {
       params: { path: { ws, id: p.id } },
-      body: { enabled, subdomain: sub.trim(), settings: { ...p.portal, title: title.trim(), color, welcome: welcome.trim(), email_from: from.trim(), signup_open: signup } },
+      body: { enabled, subdomain: sub.trim(), settings: { ...p.portal, title: title.trim(), color, logo_url: logo.trim(), favicon_url: favicon.trim(), welcome: welcome.trim(), email_from: from.trim(), signup_open: signup, hide_powered_by: !poweredBy, business_email_only: businessOnly } },
     });
     setBusy(false);
     if (error || !data) return setError(errorMessage(error));
@@ -1145,9 +1209,14 @@ function PortalSection({ ws, program: p, canManage }: { ws: string; program: Par
             <Input label="Title" value={title} onChange={(e) => setTitle(e.target.value)} placeholder={p.name} maxLength={120} />
             <Input label="Sender" value={from} onChange={(e) => setFrom(e.target.value)} placeholder="Partners <partners@example.com>" hint="On a verified sending domain. Needed to sign anyone in." />
             <Input label="Colour" type="color" value={color} onChange={(e) => setColor(e.target.value)} />
+            <Input label="Logo" type="url" value={logo} onChange={(e) => setLogo(e.target.value)} placeholder="https://example.com/logo.svg" maxLength={2000} />
+            <Input label="Favicon" type="url" value={favicon} onChange={(e) => setFavicon(e.target.value)} placeholder="https://example.com/favicon.png" maxLength={2000} hint="The browser tab's icon." />
           </div>
+          <PortalPreview title={title.trim() || p.name} color={color} logo={logo.trim()} favicon={favicon.trim()} welcome={welcome.trim()} poweredBy={poweredBy} />
           <Input label="Welcome" value={welcome} onChange={(e) => setWelcome(e.target.value)} maxLength={4000} placeholder="Earn 20% of every sale you send our way." />
           <label className="flex items-center gap-2 text-[13px]"><input type="checkbox" checked={signup} onChange={(e) => setSignup(e.target.checked)} /> Anyone can apply</label>
+          <label className="flex items-center gap-2 text-[13px]"><input type="checkbox" checked={businessOnly} onChange={(e) => setBusinessOnly(e.target.checked)} /> Work email addresses only: refuse applications from free, disposable and relay addresses</label>
+          <label className="flex items-center gap-2 text-[13px]"><input type="checkbox" checked={poweredBy} onChange={(e) => setPoweredBy(e.target.checked)} /> Show "Powered by Outflare" at the foot of the portal</label>
         </fieldset>
         <ErrorText>{error}</ErrorText>
         <div className="flex flex-wrap items-center gap-2">

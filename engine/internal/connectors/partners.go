@@ -31,11 +31,12 @@ const (
 	PartnerKindCustomers    = "customers"
 	PartnerKindTransactions = "transactions"
 	PartnerKindCommissions  = "commissions"
+	PartnerKindClicks       = "clicks"
 )
 
 // PartnerImportKinds is every kind, in import order.
 var PartnerImportKinds = []string{PartnerKindGroups, PartnerKindLinks, PartnerKindPartners, PartnerKindFlows, PartnerKindPromoCodes,
-	PartnerKindCustomers, PartnerKindTransactions, PartnerKindCommissions}
+	PartnerKindCustomers, PartnerKindTransactions, PartnerKindCommissions, PartnerKindClicks}
 
 // LegacyPartnerImportKinds is the order before groups and flows, for an
 // import whose saved progress counted in it.
@@ -57,15 +58,15 @@ type PartnerImporter interface {
 }
 
 // PartnerFetcher is a PartnerImporter that can read one partner by id.
-// An import uses it for a partner that a promo code, customer or
-// commission names but the partner list didn't give, such as one the
+// An import uses it for a partner that a promo code, customer,
+// commission or click names but the partner list didn't give, such as one the
 // platform leaves out of its list (not onboarded, invited).
 type PartnerFetcher interface {
 	PartnerByID(ctx context.Context, cl *Client, creds Creds, program, id string) (ImportPartner, error)
 }
 
-// PartnerIDs are the partners a page's promo codes, customers and
-// commissions name, each once.
+// PartnerIDs are the partners a page's promo codes, customers,
+// commissions and clicks name, each once.
 func (p PartnerObjects) PartnerIDs() []string {
 	seen := map[string]bool{}
 	var out []string
@@ -82,6 +83,9 @@ func (p PartnerObjects) PartnerIDs() []string {
 		add(c.PartnerID)
 	}
 	for _, c := range p.Commissions {
+		add(c.PartnerID)
+	}
+	for _, c := range p.Clicks {
 		add(c.PartnerID)
 	}
 	return out
@@ -119,11 +123,12 @@ type PartnerObjects struct {
 	Customers    []ImportCustomer
 	Transactions []ImportTransaction
 	Commissions  []ImportCommission
+	Clicks       []ImportClick
 }
 
 // Len is how many objects the page holds.
 func (p PartnerObjects) Len() int {
-	return len(p.Groups) + len(p.Flows) + len(p.Partners) + len(p.Links) + len(p.PromoCodes) + len(p.Customers) + len(p.Transactions) + len(p.Commissions)
+	return len(p.Groups) + len(p.Flows) + len(p.Partners) + len(p.Links) + len(p.PromoCodes) + len(p.Customers) + len(p.Transactions) + len(p.Commissions) + len(p.Clicks)
 }
 
 type ImportPartner struct {
@@ -222,6 +227,16 @@ type ImportTransaction struct {
 	RefundedCents int64
 	Created       time.Time
 	RefundedAt    time.Time
+}
+
+// ImportClick is one click on a partner's link there, kept so the
+// partner's click count carries over. Only when and from where.
+type ImportClick struct {
+	ID        string
+	PartnerID string
+	// ReferrerHost is the host of the page the click came from, if known.
+	ReferrerHost string
+	Created      time.Time
 }
 
 type ImportCommission struct {

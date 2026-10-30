@@ -94,10 +94,10 @@ Every deal is one record of the `deal` type, whether it was made in the CRM, by 
 
 Visits to your own websites come in through [website tracking](website-tracking.md): a public site key and a snippet that send anonymous page views with their campaign tags, click ids and referral codes. [Website visitors](website-visitors.md) shows which known companies and people came, and who is hot.
 
-Send what people do in your product to `POST /v1/workspaces/{ws}/customer-events` (MCP `track_customer_events`), in Segment's format: one event, or `{"batch": [...]}` with up to 500. A product already sending to Segment, RudderStack or a similar library can send the same calls here, in camelCase or snake_case. Send them from your servers with an API token that has `customers.manage`, since it can change customer records.
+Send what people do in your product to a brand: `POST /v1/brands/{brand}/events` (MCP `send_brand_events`), in Segment's format: one event, or `{"batch": [...]}` with up to 500 (5 MB). A product already sending to Segment, RudderStack or a similar library can send the same calls here, in camelCase or snake_case. Send them from your servers with an API token that has `customers.manage`, since it can change customer records; a token made for one brand can only send to that brand.
 
 ```json
-{"batch": [
+{"source": "segment", "batch": [
   {"type": "identify", "userId": "u_123", "anonymousId": "a_9f2", "messageId": "m_1",
    "traits": {"email": "ada@example.com", "email_verified": true, "firstName": "Ada", "plan": "pro"}},
   {"type": "track", "userId": "u_123", "event": "Order Completed", "properties": {"total": 42}, "messageId": "m_2"},
@@ -105,10 +105,21 @@ Send what people do in your product to `POST /v1/workspaces/{ws}/customer-events
 ]}
 ```
 
+- **Saved first.** Every event is saved as sent, and the answer is `202` at once with the batch's `batch_id` and a receipt `id` per event. Only the envelope can be refused (not JSON, over 5 MB, more than 500 events, a `source` that isn't a short lowercase label); an event is never refused for its content.
+- **Processed in the background.** A job processes the brand's events in the order they arrived, usually within seconds. Each ends as one of:
+  - `accepted`: stored, with the person it matched (`record_id`) and the product event (`customer_event_id`)
+  - `duplicate`: a `messageId` the brand already has, so it was stored once
+  - `rejected`: something to fix, with a `code` and a `reason` that says what (`missing_id`: every event needs `userId` or `anonymousId`; `invalid_timestamp`; `property_type`: a property isn't the type the catalog defines for that event; `other_brand`: the person belongs to another brand; `identity_taken` and the other record conflicts; `internal`: it failed five times for a reason of ours)
+  - `held`: a track name the catalog hasn't approved yet. It is kept, but changes nobody and drives nothing until you approve it.
+- **Follow them.** `GET /v1/brands/{brand}/events` lists them newest first, filtered by `status`, `code`, `source`, `batch_id`, `name` or when they arrived; `GET .../events/{id}` shows one with the event as sent (`raw`); `GET .../events/summary` counts the last 24 hours and 7 days by status, and lists the rejection codes and held names waiting. The brand's **Events** page in the app shows the same, with what to do about each.
+- **Fix and replay.** Fix what the reason says (approve the name with `PATCH .../catalog/events/{name}`, change a property's type, free an identity), then `POST .../events/replay` with the events' `ids`, or a filter such as `{"status": "held"}` or `{"status": "rejected", "code": "property_type"}`. They go back to `pending` and are processed again. Accepted and duplicate events are never replayed.
+- **Kept for a while.** Accepted and duplicate events stay in this log for 30 days, rejected and held ones for 90, so there is time to fix them; each shows its `expires_at`. The product events themselves (`GET .../customer-events`, the timeline) are kept as before.
 - **Types.** `track` (something happened), `identify` (who someone is), `page` and `screen` (stored as `page.viewed` and `screen.viewed`), `group` (the company they belong to) and `alias` (an id they had before).
-- **Names.** A track's `event` becomes its catalog name: `Order Completed` is `order_completed`, `checkoutStarted` is `checkout_started`, and dotted names such as `product.activated` stay as they are. A name the catalog has not seen arrives **quarantined**: it is stored and shown, but drives nothing until someone approves it (`PATCH .../catalog/events/{name}`).
-- **Retries.** Send a `messageId`: a second event with the same one is stored once and comes back as `duplicate`.
-- **Results.** Each event is `accepted`, `duplicate` or `rejected` on its own, with the person it matched (`record_id`) and its name, so one bad event never loses the rest of the batch.
+- **Names.** A track's `event` becomes its catalog name: `Order Completed` is `order_completed`, `checkoutStarted` is `checkout_started`, and dotted names such as `product.activated` stay as they are. A name the catalog has not seen arrives **quarantined** and its events are `held` until someone approves it. identify, page, screen, group and alias names need no approval.
+- **Retries.** Send a `messageId`: a second event with the same one comes back as `duplicate`.
+- **The brand.** Events belong to the brand in the URL; a `brand_id` in the body is ignored. A `userId` or verified email that a person of another brand holds is `rejected` with `other_brand`: brands keep their data apart.
+
+The workspace route `POST /v1/workspaces/{ws}/customer-events` (MCP `track_customer_events`) still works for now: it processes the events while you wait and answers each one's result in `results`, keeping rejected events only in that answer. It moves to the brand route in a later release.
 
 ### Who an event is about
 
@@ -167,10 +178,21 @@ An unsubscribe from any email, whether a cold sequence's link, a reply asking to
 
 Only the person opting in again clears it: a grant to all marketing email (no topic) whose `source` is one of `signup_form`, `signup`, `opt_in`, `double_opt_in`, `checkout`, `form`, `in_app` or `preference_center`, such as when they create an account and agree to receive email. That grant removes the unsubscribe suppressions on the person's addresses and records `suppression.removed` with `via: opted_in`. A grant from an import, a CRM sync, the API without a source, or an agent never clears an unsubscribe, and bounces, complaints and manual blocks always stay.
 
+## Privacy export
+
+When someone asks what you hold about them, a privacy export gathers it into one file: the record with its fields, and every row in the brand that points at it, which is its emails and ids, links, field history, merges, product events (and the events as sent to the brand), consent, emails, messages, replies, meetings, deals, payments, list memberships, journey runs and the rest. The list is the one merges use (`customers.Follows` and `customers.Owned`), so anything new that points at a person is exported too.
+
+- **One brand.** Privacy requests are per brand: an export covers only the brand the record belongs to. The same email in another brand is another person, and never in the file. Rows linked to the person that belong to no brand (shared by every brand, from before brands owned their data) are theirs too, so they are included.
+- **Ask for one** on the record's page (Privacy export), with `POST /v1/brands/{brand}/records/{record}/privacy-exports` or the MCP tool `request_privacy_export`. It needs `customers.manage`. It answers at once, pending, and a background job builds the file, usually in seconds.
+- **Download it** from the record's page or `download_url` (`GET .../privacy-exports/{export}/download`), for 7 days. The file is gzipped JSON: `{"exported_at", "brand": {"id", "name"}, "record": {...}, "tables": {"emails": [...], ...}}`, each row with all of its columns. Downloading needs `customers.manage` as well, since it is someone's personal data in bulk; `customers.read` can see that an export exists, its status and counts.
+- **No secrets.** Columns holding tokens, secrets, passwords, hashes, sealed values or credentials, and binary columns, are never included.
+- **Limits.** Over 100 MB uncompressed, an export fails with `too_large`. After 7 days the file is deleted and the export shows as expired (a download answers 410); ask for a new one.
+- **Kept on record.** Asking (`privacy_export.requested`), the result (`privacy_export.ready` or `privacy_export.failed`) and every download (`privacy_export.downloaded`) are in the audit log; `privacy_export.ready` is also a webhook event. Erasing the record deletes its exports with it.
+
 ## Scopes
 
 | Scope | Allows | Roles |
 | --- | --- | --- |
 | `customers.read` | Read records, their identities, links, history, timeline and consents, product events, and the catalog | Owner, admin, operator, viewer |
-| `customers.manage` | Add and change records, identities and links, merge duplicates, send product events and record consent | Owner, admin, operator |
+| `customers.manage` | Add and change records, identities and links, merge duplicates, send product events, record consent, and ask for and download privacy exports | Owner, admin, operator |
 | `catalog.manage` | Add and change record types, fields, option lists and event definitions | Owner, admin |

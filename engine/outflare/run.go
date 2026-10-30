@@ -32,6 +32,7 @@ import (
 	"github.com/outflareai/outflare/engine/internal/adconv"
 	"github.com/outflareai/outflare/engine/internal/adsync"
 	"github.com/outflareai/outflare/engine/internal/aiaccounts"
+	"github.com/outflareai/outflare/engine/internal/aidesktop"
 	"github.com/outflareai/outflare/engine/internal/aivis"
 	"github.com/outflareai/outflare/engine/internal/allocation"
 	"github.com/outflareai/outflare/engine/internal/analyticsync"
@@ -610,6 +611,12 @@ func Run(ctx context.Context, log *slog.Logger, cmd string, exts ...Extension) e
 				return err
 			})
 		}()
+		// Outflare for desktop: readings kept 90 days, computers counted.
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			aidesktop.Run(ctx, pool, log, 5*time.Minute)
+		}()
 		// The AI usage log keeps 13 months of calls.
 		wg.Add(1)
 		go func() {
@@ -675,6 +682,17 @@ func Run(ctx context.Context, log *slog.Logger, cmd string, exts ...Extension) e
 		go func() {
 			defer wg.Done()
 			apiServer.RunPayments(ctx)
+		}()
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			apiServer.RunEventInbox(ctx)
+		}()
+		// Privacy exports lose their file after 7 days.
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			apiServer.RunPrivacyExports(ctx)
 		}()
 		wg.Add(1)
 		go func() {

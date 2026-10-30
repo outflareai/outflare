@@ -248,6 +248,8 @@ func startCRMImport(ctx context.Context, tx pgx.Tx, a *access, integrationID, co
 // RegisterJobs adds the server's own background work to the queue.
 func (s *Server) RegisterJobs(q *jobs.Queue) {
 	q.Handle(jobCRMImport, s.crmImportJob)
+	q.Handle(jobEventsProcess, s.eventsProcessJob)
+	q.Handle(jobPrivacyExport, s.privacyExportJob)
 	if s.inboundEmail != nil {
 		q.Handle(inboundemail.JobProcess, s.inboundEmail.Process)
 	}
@@ -1137,7 +1139,7 @@ func (r *crmRun) match(ctx context.Context, tx pgx.Tx, op *crmObjectPlan, rec co
 // add creates an empty record for a CRM record, with its CRM id.
 func (r *crmRun) add(ctx context.Context, tx pgx.Tx, recordType, crmID string) (string, error) {
 	var id string
-	if err := tx.QueryRow(ctx, `INSERT INTO records (workspace_id, record_type, origin, acquired_via, created_by) VALUES ($1, $2, 'import', $4, $3) RETURNING id::text`,
+	if err := tx.QueryRow(ctx, `INSERT INTO records (workspace_id, record_type, brand_id, origin, acquired_via, created_by) VALUES ($1, $2, outflare_first_brand($1), 'import', $4, $3) RETURNING id::text`,
 		r.a.WorkspaceID, recordType, nullIfEmpty(r.a.ActorID), r.o.Integration.Connector).Scan(&id); err != nil {
 		return "", err
 	}

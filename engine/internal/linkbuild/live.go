@@ -14,7 +14,10 @@ import (
 // link is there (live), and a live one every week, so a link that goes
 // away shows as removed. Each is a page check (JobCheck), free. An agreed
 // link not live after OverdueAfter is announced once (link_prospect.overdue)
-// so someone can nudge the site.
+// so someone can nudge the site. The pages of broken-link prospects nobody
+// has pitched are checked again every recheck_days (a link building
+// setting, 30 by default), so links that break later are found
+// (outbound_link.broken).
 
 // Live check timing.
 const (
@@ -47,9 +50,12 @@ func (s *Service) Schedule(ctx context.Context, now time.Time) error {
 	rows, err := s.Pool.Query(ctx, `
 		SELECT x.workspace_id::text, x.id::text FROM link_prospects x
 		LEFT JOIN link_page_checks c ON c.prospect_id = x.id
+		LEFT JOIN link_building_settings st ON st.workspace_id = x.workspace_id
 		WHERE (x.stage = 'agreed' AND (c.checked_at IS NULL OR c.checked_at < $1))
 		   OR (x.stage = 'live' AND (c.checked_at IS NULL OR c.checked_at < $2))
-		ORDER BY c.checked_at NULLS FIRST LIMIT $3`, now.Add(-agreedEvery), now.Add(-liveEvery), maxLiveChecks)
+		   OR (x.stage = 'prospect' AND x.method = 'broken_link' AND c.checked_at IS NOT NULL AND COALESCE(st.recheck_days, 30) > 0
+		       AND c.checked_at < $4::timestamptz - make_interval(days => COALESCE(st.recheck_days, 30)))
+		ORDER BY c.checked_at NULLS FIRST LIMIT $3`, now.Add(-agreedEvery), now.Add(-liveEvery), maxLiveChecks, now)
 	if err != nil {
 		return err
 	}

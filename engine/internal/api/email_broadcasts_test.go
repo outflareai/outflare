@@ -23,6 +23,7 @@ func TestEmailBroadcasts(t *testing.T) {
 	defer rs.Close()
 	e.integrations.Client.BaseURLs["resend"] = rs.URL
 	owner, ws := setupOwner(t, e.h)
+	guardrailsOff(t, owner, ws)
 	base := "/v1/workspaces/" + ws
 	ctx := context.Background()
 	svc := &emails.Service{Pool: e.pool, Store: e.integrations, Box: e.box, PublicURL: "https://outflare.test",

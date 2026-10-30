@@ -1,0 +1,17 @@
+# Workspace-level tables: the team, the account and the machinery.
+# Everything else a workspace owns is brand data and carries brand_id
+# (plans/brands/README.md). Add a table here only when it can never hold
+# a brand's data.
+actors
+brands
+idempotency_keys
+invites
+jobs
+memberships
+oauth_grants
+teams
+workspace_ai_settings
+workspace_features
+workspace_onboarding
+workspace_roles
+workspace_slug_history

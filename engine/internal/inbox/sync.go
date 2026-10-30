@@ -21,6 +21,7 @@ import (
 	"github.com/outflareai/outflare/engine/internal/leads"
 	"github.com/outflareai/outflare/engine/internal/linkbuild"
 	"github.com/outflareai/outflare/engine/internal/mailbox"
+	"github.com/outflareai/outflare/engine/internal/stories"
 	"github.com/outflareai/outflare/engine/internal/support"
 	"github.com/outflareai/outflare/engine/internal/track"
 )
@@ -457,6 +458,10 @@ func (s *Syncer) replied(ctx context.Context, tx pgx.Tx, ws, inboundID, leadID s
 	data["inbound_id"], data["enrollments_stopped"] = inboundID, tag.RowsAffected()
 	// A reply to a link pitch moves its prospect along.
 	if err := linkbuild.Replied(ctx, tx, ws, leadID, inboundID); err != nil {
+		return err
+	}
+	// A journalist's reply to a story pitch is read for what it says.
+	if err := stories.Replied(ctx, tx, ws, leadID, inboundID); err != nil {
 		return err
 	}
 	return audit.Record(ctx, tx, audit.Event{WorkspaceID: ws, ActorType: "system", Action: "lead.replied",

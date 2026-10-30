@@ -24,6 +24,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/outflareai/outflare/engine/internal/audit"
 	"github.com/outflareai/outflare/engine/internal/crawl"
 	"github.com/outflareai/outflare/engine/internal/customers"
 	"github.com/outflareai/outflare/engine/internal/emailfind"
@@ -307,6 +308,8 @@ func (s *Service) store(ctx context.Context, id string, pr prospect, c Check) er
 				id, pr.ws, c.Status, c.HTTPStatus, clip(c.FinalURL, 2048), clip(c.RedirectTo, 2048), c.LinksToUs, our, c.ErrorCode, c.CheckedAt); err != nil {
 				return err
 			}
+		} else if err := s.newlyBroken(ctx, tx, id, pr, c); err != nil {
+			return err
 		} else if _, err := tx.Exec(ctx, `
 			INSERT INTO link_page_checks (prospect_id, workspace_id, status, http_status, final_url, redirect_to, title, author, lang, noindex,
 				word_count, links_to_us, our_links, outbound, broken, page_kind, topic, fit, fit_reason, ai_error, suggested_target,
@@ -394,6 +397,47 @@ func (s *Service) store(ctx context.Context, id string, pr prospect, c Check) er
 		return rec(ctx, tx, "link_prospect.checked", id, data, map[string]any{"site_id": pr.siteID, "method": pr.method, "status": c.Status,
 			"links_to_us": c.LinksToUs, "broken": len(c.Broken), "fit": c.Fit, "contacts": added, "ai": c.Fit != nil})
 	})
+}
+
+// maxBrokenEvents is how many outbound_link.broken events one check
+// records.
+const maxBrokenEvents = 10
+
+// newlyBroken records outbound_link.broken for each link on the page that
+// is broken now and wasn't at the page's previous check (every broken link,
+// on its first check), before the check is stored. A playbook can start on
+// it: the page needs a replacement for that link.
+func (s *Service) newlyBroken(ctx context.Context, tx pgx.Tx, id string, pr prospect, c Check) error {
+	if len(c.Broken) == 0 {
+		return nil
+	}
+	var raw []byte
+	err := tx.QueryRow(ctx, `SELECT COALESCE(broken, '[]') FROM link_page_checks WHERE prospect_id = $1`, id).Scan(&raw)
+	first := errors.Is(err, pgx.ErrNoRows)
+	if err != nil && !first {
+		return err
+	}
+	var before []BrokenLink
+	_ = json.Unmarshal(raw, &before)
+	seen := map[string]bool{}
+	for _, b := range before {
+		seen[b.URL] = true
+	}
+	n := 0
+	for _, b := range c.Broken {
+		if seen[b.URL] || n >= maxBrokenEvents {
+			continue
+		}
+		n++
+		if err := audit.Record(ctx, tx, audit.Event{WorkspaceID: pr.ws, ActorType: "system", Action: "outbound_link.broken",
+			TargetType: "link_prospect", TargetID: id, Data: map[string]any{
+				"site_id": pr.siteID, "brand_id": pr.brandID, "prospect_id": id, "record_id": pr.recordID, "method": pr.method,
+				"page_url": pr.pageURL, "broken_url": b.URL, "status": b.Status, "anchor": b.Anchor, "archive_url": b.ArchiveURL, "first_check": first},
+			Props: map[string]any{"site_id": pr.siteID, "method": pr.method, "status": b.Status, "first_check": first, "archived": b.ArchiveURL != ""}}); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // addContacts makes each contact a person record on the website's company

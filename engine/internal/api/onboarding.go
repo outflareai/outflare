@@ -39,7 +39,7 @@ type onboardingStepDef struct {
 // onboardingSteps are the steps in the order they are shown. tool is the
 // MCP tool an agent calls to do the step, empty when a person must.
 var onboardingSteps = []onboardingStepDef{
-	{"brand", "Add your brand", "Start with one brand: its website and a line on what it does. Every module uses it, so you never type it twice. Add more brands later.", "brands", "create_brand", true},
+	{"brand", "Add your brand", "Start with your brand: its website and a line on what it does. Every module uses it, so you never type it twice. Add more brands later.", "brands", "update_brand", true},
 	{"ai", "Add your AI key", "Outflare has no AI of its own and never pays for yours. Your key lets its agent plan missions, write emails and research companies, billed by your AI provider.", "ai", "request_connection", true},
 	{"goal", "Pick what to do first", "Outflare suggests the tools and the first mission for it.", "get-started", "update_onboarding", true},
 	{"website", "Connect your website", "One script on your pages and one set of DNS records, so this brand's visits, sign-ups and search show up from today.", "setup", "get_brand_dns", true},
@@ -99,7 +99,8 @@ type onboardingView struct {
 	// or skipped yet, and nobody closed it.
 	Show bool `json:"show"`
 	// The brand the walk-through sets up: the workspace's first active
-	// brand, null until there is one. More brands come later, on Brands.
+	// brand, null until one has its website. More brands come later, on
+	// Brands.
 	Brand *onboardingBrand `json:"brand"`
 }
 
@@ -140,7 +141,8 @@ func (s *Server) loadOnboarding(ctx context.Context, ws string) (onboardingView,
 	// AI app (Claude, ChatGPT) runs Outflare over MCP.
 	err = s.pool.QueryRow(ctx, `
 		SELECT
-			EXISTS (SELECT 1 FROM brands WHERE workspace_id = $1 AND status = 'active'),
+			-- Sign-up makes a brand; the step is done once one has its website.
+			EXISTS (SELECT 1 FROM brands WHERE workspace_id = $1 AND status = 'active' AND website <> ''),
 			(SELECT count(*) FROM memberships WHERE workspace_id = $1) > 1
 				OR EXISTS (SELECT 1 FROM invites WHERE workspace_id = $1 AND accepted_at IS NULL AND revoked_at IS NULL AND expires_at > now()),
 			EXISTS (SELECT 1 FROM integrations WHERE workspace_id = $1 AND connector = ANY($2))

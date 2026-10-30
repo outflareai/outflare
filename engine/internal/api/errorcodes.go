@@ -91,9 +91,12 @@ var errorCodes = []errorCode{
 	{"platform_error", []int{502}, "The sending platform returned an error.", true},
 	{"send_failed", []int{502}, "The email could not be sent through the mailbox.", true},
 	{"bad_signature", []int{401}, "An inbound webhook's signature does not match.", false},
+	{"link_expired", []int{410}, "The link for Outflare for desktop expired or was already used. Start linking again in the app.", false},
 	{"expired", []int{410}, "The connect link has expired. Ask for a new one.", false},
 	{"cancelled", []int{410}, "The connect link was cancelled. Ask for a new one.", false},
 	{"used", []int{410}, "The link was already used.", false},
+	{"export_expired", []int{410}, "The privacy export expired (7 days after it was ready) and its file was deleted. Ask for a new one.", false},
+	{"export_not_ready", []int{409}, "The privacy export is still being built, or failed (its error_code says why). Download it once its status is ready.", false},
 	{"mission_required", []int{403}, "This app or token makes changes only inside a mission. Start one, and once a person approves it send its id in the Outflare-Mission header. Reads need no mission.", false},
 	{"not_a_member", []int{403}, "The link is for members of the workspace that made it. Sign in with the account you use there, or ask an admin to invite you.", false},
 
@@ -159,6 +162,7 @@ var errorCodes = []errorCode{
 
 	// Partner portals.
 	{"portal_email_unavailable", []int{409}, "The partner portal can't send sign-in emails: the program has no sender on a verified sending domain of the workspace's own email provider.", false},
+	{"personal_email", []int{400}, "The partner program takes applications only from work email addresses, not free, disposable or relay ones (the portal's business_email_only).", false},
 }
 
 func (s *Server) listErrorCodes(w http.ResponseWriter, r *http.Request) {

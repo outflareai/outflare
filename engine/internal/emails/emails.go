@@ -345,6 +345,9 @@ type NewEmail struct {
 	TopicID *string
 	// The broadcast it is part of.
 	BroadcastID string
+	// The customer record it goes to, when the sender knows it (journeys,
+	// broadcasts); others are linked later by address.
+	RecordID string
 	// Threading, for a reply: the Message-ID it answers and those before
 	// it (without angle brackets, space separated), sent as In-Reply-To
 	// and References.
@@ -401,14 +404,14 @@ func (s *Service) Queue(ctx context.Context, tx pgx.Tx, who Who, e NewEmail) (st
 	_, err := tx.Exec(ctx, `
 		INSERT INTO emails (id, workspace_id, brand_id, provider_id, purpose, from_address, to_addresses, cc, bcc, reply_to,
 			subject, html, text_body, template_id, template_version, tags, metadata, status, test, send_at, created_by,
-			trigger_kind, trigger_ref, request_id, surface, token_id, mission_id, track_opens, track_clicks, recipients, topic_id, broadcast_id,
+			trigger_kind, trigger_ref, request_id, surface, token_id, mission_id, track_opens, track_clicks, recipients, topic_id, broadcast_id, record_id,
 			in_reply_to, references_ids)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21,
-			$22, NULLIF($23, ''), NULLIF($24, ''), NULLIF($25, ''), NULLIF($26, '')::uuid, NULLIF($27, '')::uuid, $28, $29, $30, $31, NULLIF($32, '')::uuid,
-			NULLIF($33, ''), NULLIF($34, ''))`,
+			$22, NULLIF($23, ''), NULLIF($24, ''), NULLIF($25, ''), NULLIF($26, '')::uuid, NULLIF($27, '')::uuid, $28, $29, $30, $31, NULLIF($32, '')::uuid, NULLIF($33, '')::uuid,
+			NULLIF($34, ''), NULLIF($35, ''))`,
 		id, e.WorkspaceID, e.BrandID, e.ProviderID, e.Purpose, e.From, e.To, nonNil(e.Cc), nonNil(e.Bcc), nonNil(e.ReplyTo),
 		e.Subject, e.HTML, e.Text, e.TemplateID, e.TemplateVersion, nonNil(e.Tags), meta, status, e.Test, e.SendAt, createdBy,
-		trigger, e.TriggerRef, who.RequestID, e.Surface, e.TokenID, who.MissionID, e.TrackOpens, e.TrackClicks, recipients, e.TopicID, e.BroadcastID,
+		trigger, e.TriggerRef, who.RequestID, e.Surface, e.TokenID, who.MissionID, e.TrackOpens, e.TrackClicks, recipients, e.TopicID, e.BroadcastID, e.RecordID,
 		e.InReplyTo, e.References)
 	if err != nil {
 		return "", err

@@ -279,7 +279,7 @@ func (s *Server) createSmartList(w http.ResponseWriter, r *http.Request) {
 			createdBy = &a.ActorID
 		}
 		if err := tx.QueryRow(ctx, `INSERT INTO smart_lists (workspace_id, brand_id, name, description, kind, rules, match, refreshed_at, created_by)
-			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING id`, a.WorkspaceID, v.BrandID, v.Name, v.Description, v.Kind, rules, v.Match,
+			VALUES ($1, COALESCE($2, outflare_first_brand($1)), $3, $4, $5, $6, $7, $8, $9) RETURNING id`, a.WorkspaceID, v.BrandID, v.Name, v.Description, v.Kind, rules, v.Match,
 			refreshed, createdBy).Scan(&id); err != nil {
 			return err
 		}

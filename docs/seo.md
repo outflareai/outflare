@@ -497,6 +497,47 @@ sequence skips it.
 Each needs your site in SEO and a mailbox to send from. Your AI model
 reads pages and writes openers; without one, you write them.
 
+#### Running them by themselves
+
+Each link playbook can run on a schedule or start when something happens
+([playbook automations](playbooks.md#running-one-by-itself)). You approve
+it once, with its spend limits, and pitches still wait for your approval.
+Each one suggests what suits it:
+
+| Playbook | Suggested |
+| --- | --- |
+| `link-competitor-gaps` | Monthly, or on `competitor_link.new`, gathered daily |
+| `link-broken-links` | Monthly, or on `outbound_link.broken`, gathered daily |
+| `link-reclaim-lost-links` | Monthly, or on `backlink.lost` and `fix.found`, gathered daily |
+| `link-competitor-dead-pages` | On `competitor.page_removed`, gathered daily |
+| `link-resource-pages` | Monthly |
+| `link-promote-an-asset` | On `asset.published`, a run per page |
+| `link-unlinked-mentions` | Weekly, or on `mention.found`, gathered daily |
+| `link-partners-and-customers` | Monthly, or on `partner.created`, gathered daily |
+
+The events that start them:
+
+- **`competitor_link.new`**: a domain is new among a tracked competitor's
+  linking domains since its previous weekly read, and doesn't link to you.
+  It compares reads the SEO snapshot already makes (the competitors' top
+  domains, `gap_rows`), so it costs nothing more. A domain can be new to a
+  competitor's top list rather than newly linking. `competitors` says how
+  many of your tracked competitors it links to now.
+- **`outbound_link.broken`**: a link prospect's page has a broken link it
+  didn't have at its previous check (every broken link on its first
+  check), with what the Internet Archive kept of it. Pages of broken-link
+  prospects nobody has pitched are checked again every **Check
+  broken-link pages again every** days (link building settings,
+  `recheck_days`, 30 by default, 0 never). Checks are free, apart from your
+  AI reading the page.
+- **`asset.published`**: a page of yours worth promoting is marked
+  published, on the Link building API (`POST .../link-building/assets`,
+  MCP `publish_link_asset`) by a person or an agent, such as the one that
+  publishes your content. Its site, and so its brand, is the SEO site it is
+  on.
+- **`mention.found`**: the news watch found an article naming your brand
+  ([news watch](news-watch.md)).
+
 ## API
 
 ```sh

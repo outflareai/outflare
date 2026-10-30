@@ -1,5 +1,5 @@
 id: link-promote-an-asset
-version: 2
+version: 3
 title: Promote a new page to the sites that link to its topic
 summary: When you publish a guide, study or tool, find who links to the pages that rank for its topic and tell them about yours.
 description: |
@@ -32,13 +32,17 @@ inputs:
     example: northpeak.example
   - name: page
     label: Your new page
+    help: Leave empty when it runs on asset.published; the published page is the one to promote.
     example: https://northpeak.example/guides/layering
+    optional: true
   - name: topic
     label: What people search for to find it
+    help: Leave empty to use the published page's topic.
     example: how to layer for hiking
+    optional: true
 steps:
-  - say: Read your page so the pitch can say what it adds.
-    tools: [listSEOSites, listCrawlPages]
+  - say: Read your page so the pitch can say what it adds. With no page given, take the page and topic from the published assets, newest first.
+    tools: [listSEOSites, listCrawlPages, listLinkAssets]
   - say: Search Google for the topic and keep the top pages that aren't yours, after showing the cost.
     tools: [readSearchResults]
   - say: Read who links to the top three to five of them, after showing the cost and the budget.
@@ -53,6 +57,10 @@ steps:
     tools: [startLinkPitch, listLinkPitches]
   - say: Report what was pitched and, later, what replied, agreed and went live.
     tools: [getLinkResults, listLinkProspects]
+automation:
+  events: [asset.published]
+  gather: each
+
 guardrails:
   - Never offers or agrees to pay for a link; a reply asking for money waits for a person.
   - Every pitch waits for a person's approval, unless they turned approval off for that sequence.

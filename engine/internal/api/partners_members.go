@@ -70,6 +70,10 @@ type partnerView struct {
 	CampaignLink string             `json:"campaign_link"`
 	PromoCodes   []partnerPromoCode `json:"promo_codes"`
 	PayoutMethod string             `json:"payout_method"`
+	// PayoutType is the method the partner chose from the program's
+	// payout_methods, and PayoutToken the crypto token; nil when not chosen.
+	PayoutType  *string `json:"payout_type"`
+	PayoutToken *string `json:"payout_token"`
 	// PostbackURL is the partner's own tracker, called on each conversion
 	// credited to them ({placeholders} filled in); "" for none.
 	PostbackURL    string       `json:"postback_url"`
@@ -94,7 +98,7 @@ const partnerSelect = `
 	SELECT m.id::text, m.program_id::text, p.slug, p.brand_id::text, m.record_id::text, COALESCE(r.name, ''),
 	       COALESCE((SELECT i.value FROM record_identities i WHERE i.record_id = m.record_id AND i.namespace = 'email' AND i.valid_to IS NULL
 	                 ORDER BY i.verified DESC, i.valid_from LIMIT 1), ''),
-	       m.code, m.status, m.group_id::text, m.campaign_id::text, m.payout_method, m.postback_url, m.note, m.source, p.currency, p.landing_url,
+	       m.code, m.status, m.group_id::text, m.campaign_id::text, m.payout_method, m.payout_type, m.payout_token, m.postback_url, m.note, m.source, p.currency, p.landing_url,
 	       COALESCE(c.slug, ''), COALESCE(c.code, ''), COALESCE(c.source, ''), COALESCE(c.medium, ''),
 	       COALESCE((SELECT json_agg(json_build_object('code', pc.code, 'coupon', pc.coupon, 'status', pc.sync_status, 'error', pc.sync_error)
 	                 ORDER BY pc.created_at) FROM partner_promo_codes pc WHERE pc.membership_id = m.id), '[]'),
@@ -123,7 +127,7 @@ func scanPartner(row pgx.Row) (partnerView, error) {
 	var v partnerView
 	st := &v.Stats
 	err := row.Scan(&v.ID, &v.ProgramID, &v.Program, &v.brandID, &v.RecordID, &v.Name, &v.Email, &v.Code, &v.Status, &v.GroupID, &v.CampaignID,
-		&v.payoutSealed, &v.PostbackURL, &v.Note, &v.Source, &v.Currency, &v.landing, &v.campaignSlug, &v.campaignCode, &v.campaignSrc, &v.campaignMedium,
+		&v.payoutSealed, &v.PayoutType, &v.PayoutToken, &v.PostbackURL, &v.Note, &v.Source, &v.Currency, &v.landing, &v.campaignSlug, &v.campaignCode, &v.campaignSrc, &v.campaignMedium,
 		&v.PromoCodes, &st.Clicks, &st.Referrals, &st.Customers, &st.SalesCents, &st.PendingCents, &st.ApprovedCents, &st.PaidCents,
 		&st.BalanceCents, &st.PendingActions, &v.CreatedAt, &v.UpdatedAt)
 	return v, err
@@ -282,16 +286,18 @@ func (s *Server) getPartner(w http.ResponseWriter, r *http.Request) {
 }
 
 type partnerInput struct {
-	Program      *string `json:"program"`
-	RecordID     *string `json:"record_id"`
-	Email        *string `json:"email"`
-	Name         *string `json:"name"`
-	Code         *string `json:"code"`
-	Status       *string `json:"status"`
-	GroupID      *string `json:"group_id"`
-	PayoutMethod *string `json:"payout_method"`
-	PostbackURL  *string `json:"postback_url"`
-	Note         *string `json:"note"`
+	Program      *string          `json:"program"`
+	RecordID     *string          `json:"record_id"`
+	Email        *string          `json:"email"`
+	Name         *string          `json:"name"`
+	Code         *string          `json:"code"`
+	Status       *string          `json:"status"`
+	GroupID      *string          `json:"group_id"`
+	PayoutMethod *string          `json:"payout_method"`
+	PayoutType   optional[string] `json:"payout_type"`
+	PayoutToken  optional[string] `json:"payout_token"`
+	PostbackURL  *string          `json:"postback_url"`
+	Note         *string          `json:"note"`
 }
 
 func (in partnerInput) check() error {
@@ -302,6 +308,10 @@ func (in partnerInput) check() error {
 		return errInvalid("code is 1 to 64 letters, digits, hyphens or underscores, such as ana or ana-20")
 	case in.PayoutMethod != nil && len(*in.PayoutMethod) > 500:
 		return errInvalid("payout_method is at most 500 characters; never store bank details here")
+	case in.PayoutType.Value != nil && !slices.Contains(partnerPayoutMethods, *in.PayoutType.Value):
+		return errInvalid("payout_type is paypal, wise, bank_transfer, crypto or other, or null")
+	case in.PayoutToken.Value != nil && (strings.TrimSpace(*in.PayoutToken.Value) == "" || len(*in.PayoutToken.Value) > 40):
+		return errInvalid("payout_token is 1 to 40 characters, such as USDC on Base, or null")
 	case in.Note != nil && len(*in.Note) > 2000:
 		return errInvalid("note is at most 2,000 characters")
 	case in.PostbackURL != nil && checkPostbackURL(*in.PostbackURL) != nil:
@@ -310,6 +320,20 @@ func (in partnerInput) check() error {
 		return errInvalid("name is at most 200 characters")
 	}
 	return nil
+}
+
+// setPayoutChoice saves the payout method and token a partner chose, each
+// only when sent (null clears it); a method other than crypto clears the
+// token.
+func setPayoutChoice(ctx context.Context, tx pgx.Tx, id string, typ, token optional[string]) error {
+	if !typ.Set && !token.Set {
+		return nil
+	}
+	_, err := tx.Exec(ctx, `UPDATE partner_memberships SET payout_type = CASE WHEN $2 THEN $3 ELSE payout_type END,
+		payout_token = CASE WHEN $4 THEN $5 WHEN $2 AND $3::text IS DISTINCT FROM 'crypto' THEN NULL ELSE payout_token END,
+		updated_at = now() WHERE id = $1`,
+		id, typ.Set, typ.Value, token.Set, trimPtr(token.Value))
+	return err
 }
 
 // newPartnerCode makes a friendly ref code from a name or address: the
@@ -510,7 +534,10 @@ func (s *Server) createPartner(w http.ResponseWriter, r *http.Request) {
 		}
 		id, err = s.joinPartner(ctx, tx, a.WorkspaceID, &a.principal, prog, partnerJoin{rec: rec, code: deref(in.Code), status: status, source: "api",
 			group: in.GroupID, payout: deref(in.PayoutMethod), note: deref(in.Note)})
-		return err
+		if err != nil {
+			return err
+		}
+		return setPayoutChoice(ctx, tx, id, in.PayoutType, in.PayoutToken)
 	})
 	switch {
 	case errors.Is(err, errPartnerExists):
@@ -577,6 +604,9 @@ func (s *Server) updatePartner(w http.ResponseWriter, r *http.Request) {
 			if _, err := tx.Exec(ctx, `UPDATE partner_memberships SET payout_method = $2 WHERE id = $1`, cur.ID, s.sealPayout(cur.ID, *in.PayoutMethod)); err != nil {
 				return err
 			}
+		}
+		if err := setPayoutChoice(ctx, tx, cur.ID, in.PayoutType, in.PayoutToken); err != nil {
+			return err
 		}
 		if _, err := tx.Exec(ctx, `UPDATE partner_memberships SET status = COALESCE($3, status), group_id = $4,
 			note = COALESCE($5, note), postback_url = COALESCE($6, postback_url), updated_at = now()

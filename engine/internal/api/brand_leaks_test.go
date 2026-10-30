@@ -47,6 +47,13 @@ var brandWide = map[string]string{
 	"/v1/workspaces/{ws}/verifications":     "an address checked once is known for every brand",
 	"/v1/workspaces/{ws}/digests/preview":   "digests report on the whole workspace",
 	"/v1/workspaces/{ws}/digests":           "digests report on the whole workspace",
+	// The catalog rows carry their brand since 0316, but reads and writes
+	// stay per workspace until the catalog-per-brand step of
+	// plans/brands/README.md switches them; take these off then.
+	"/v1/workspaces/{ws}/catalog":             "the catalog is read per workspace until the catalog-per-brand step",
+	"/v1/workspaces/{ws}/catalog/types":       "the catalog is read per workspace until the catalog-per-brand step",
+	"/v1/workspaces/{ws}/catalog/option-sets": "the catalog is read per workspace until the catalog-per-brand step",
+	"/v1/workspaces/{ws}/catalog/events":      "the catalog is read per workspace until the catalog-per-brand step",
 }
 
 // sweepQuery is the rest of the query string the sweep sends, for
@@ -316,27 +323,46 @@ func (s *seeder) wanted() []string {
 // seedValues are values for columns whose constraints the seeder can't
 // work out, as table.column. They are set even where the column may be null.
 var seedValues = map[string]string{
-	"mailbox_platforms.status":  "ok",
-	"sending_domains.spf":       "pending",
-	"sending_domains.dkim":      "pending",
-	"sending_domains.dmarc":     "pending",
-	"request_logs.surface":      "api",
-	"fixes.source":              "seo_audit",
-	"fixes.rule":                "title_missing",
-	"fixes.subject_type":        "seo_site",
-	"allocation_changes.action": "assign",
-	"deploys.kind":              "push",
-	"integrations.connector":    "plausible",
-	"social_accounts.channel":   "x",
-	"integrations.brand_ids":    "{}",
-	"customer_events.name":      "bravo_event",
-	"site_keys.key":             "ofk_bravo",
-	"social_watches.keywords":   "{bravo}",
-	"spend_entries.units":       "1",
-	"tracking_campaigns.code":   "bravoleak1",
-	"tracking_campaigns.medium": "email",
-	"tracking_campaigns.source": "bravo",
-	"reviews.platform":          "g2",
+	"mailbox_platforms.status":       "ok",
+	"sending_domains.spf":            "pending",
+	"sending_domains.dkim":           "pending",
+	"sending_domains.dmarc":          "pending",
+	"request_logs.surface":           "api",
+	"fixes.source":                   "seo_audit",
+	"fixes.rule":                     "title_missing",
+	"fixes.subject_type":             "seo_site",
+	"allocation_changes.action":      "assign",
+	"deploys.kind":                   "push",
+	"integrations.connector":         "plausible",
+	"social_accounts.channel":        "x",
+	"integrations.brand_ids":         "{}",
+	"customer_events.name":           "bravo_event",
+	"site_keys.key":                  "ofk_bravo",
+	"social_watches.keywords":        "{bravo}",
+	"spend_entries.units":            "1",
+	"tracking_campaigns.code":        "bravoleak1",
+	"tracking_campaigns.medium":      "email",
+	"tracking_campaigns.source":      "bravo",
+	"reviews.platform":               "g2",
+	"record_types.key":               "bravo_type",
+	"option_sets.key":                "bravo_options",
+	"field_definitions.key":          "bravo_field",
+	"event_definitions.name":         "bravo.defined",
+	"record_identities.namespace":    "email",
+	"record_relationships.kind":      "bravo_link",
+	"record_merge_candidates.reason": "email",
+	"import_items.kind":              "campaign",
+}
+
+// seedPairs are tables that point at two different rows of one table (a
+// link between two records), as the second column, the table and whether
+// the first must sort before the second.
+var seedPairs = map[string]struct {
+	a, b, ref string
+	ordered   bool
+}{
+	"record_relationships":    {"from_id", "to_id", "records", false},
+	"record_merge_candidates": {"record_a", "record_b", "records", true},
 }
 
 var checkIn = regexp.MustCompile(`'([^']*)'`)
@@ -474,6 +500,13 @@ func (s *seeder) seed(tbl string) map[string]any {
 			continue
 		}
 		row := s.parent(f.ref)
+		if p, ok := seedPairs[tbl]; ok && p.ref == f.ref && slices.Contains(f.cols, p.b) {
+			// The second end is another row of the same table.
+			saved := s.rows[p.ref]
+			delete(s.rows, p.ref)
+			row = s.seed(p.ref)
+			s.rows[p.ref] = saved
+		}
 		if row == nil {
 			if need {
 				delete(s.rows, tbl)
@@ -496,6 +529,10 @@ func (s *seeder) seed(tbl string) map[string]any {
 				}
 			}
 		}
+	}
+	if p, ok := seedPairs[tbl]; ok && p.ordered && set[p.a] != "" && set[p.b] != "" {
+		a, b := set[p.a], set[p.b]
+		set[p.a], set[p.b] = "LEAST("+a+", "+b+")", "GREATEST("+a+", "+b+")"
 	}
 	for _, c := range s.cols[tbl] {
 		if _, done := set[c.name]; done {

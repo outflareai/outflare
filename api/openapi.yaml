@@ -6046,6 +6046,189 @@ paths:
         "400": { $ref: "#/components/responses/Error" }
         "403": { $ref: "#/components/responses/Error" }
         default: { $ref: "#/components/responses/Error" }
+  /v1/desktop/links:
+    post:
+      operationId: createDesktopLink
+      summary: Start linking a computer (Outflare for desktop)
+      description: |
+        For Outflare for desktop, before it is linked; anyone may call it. Returns a short `user_code` to show and a
+        `device_code` to poll POST /v1/desktop/token with. The person opens `verification_url`, signs in, and approves
+        the code (POST /v1/workspaces/{ws}/ai-devices). Expires in 15 minutes.
+      security: []
+      tags: [ai_accounts]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, platform, app_version]
+              properties:
+                name: { type: string, minLength: 1, maxLength: 100, example: Ana's MacBook }
+                platform: { type: string, enum: [macos, windows, linux] }
+                app_version: { type: string, maxLength: 40, example: 0.1.0 }
+      responses:
+        "201":
+          description: The link to approve.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [device_code, user_code, expires_in, interval, verification_url]
+                properties:
+                  device_code: { type: string, description: Secret; poll with it. }
+                  user_code: { type: string, example: ABCD-2345 }
+                  expires_in: { type: integer, description: Seconds. }
+                  interval: { type: integer, description: Seconds between polls. }
+                  verification_url: { type: string, format: uri }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/desktop/token:
+    post:
+      operationId: claimDesktopToken
+      summary: Get the computer's token once its link is approved
+      description: "Poll every `interval` seconds. 202 while the person hasn't approved yet; 410 link_expired when it expired or was used; 200 with the device token (shown once) when approved."
+      security: []
+      tags: [ai_accounts]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object, required: [device_code], properties: { device_code: { type: string } } }
+      responses:
+        "200":
+          description: Linked.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [token, device_id, workspace]
+                properties:
+                  token: { type: string, description: "The device token (ofd_...), sent as Authorization: Bearer on /v1/desktop routes." }
+                  device_id: { type: string, format: uuid }
+                  workspace: { $ref: "#/components/schemas/WorkspaceBrief" }
+        "202":
+          description: Not approved yet; poll again.
+          content:
+            application/json:
+              schema: { type: object, required: [status, interval], properties: { status: { type: string, enum: [pending] }, interval: { type: integer } } }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/desktop/config:
+    get:
+      operationId: getDesktopConfig
+      summary: Settings for a linked computer
+      description: "With the device token. How often to report, which tools to read, sources switched off for every computer (stop reading them), and whose computer it is. 401 when it was unlinked: link again. 404 while AI Accounts is off for the workspace."
+      tags: [ai_accounts]
+      security: [{ bearer: [] }]
+      responses:
+        "200":
+          description: The settings.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [device_id, report_every_seconds, providers, sources_off, workspace, user, ai_accounts_url]
+                properties:
+                  device_id: { type: string, format: uuid }
+                  report_every_seconds: { type: integer }
+                  providers: { type: array, items: { type: string } }
+                  sources_off: { type: object, additionalProperties: { type: array, items: { type: string, enum: [official, extended] } }, example: { cursor: [extended] } }
+                  workspace: { $ref: "#/components/schemas/WorkspaceBrief" }
+                  user: { type: object, required: [name, email], properties: { name: { type: string }, email: { type: string } } }
+                  ai_accounts_url: { type: string, format: uri }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/desktop/reports:
+    post:
+      operationId: sendDesktopReport
+      summary: Report usage from a linked computer
+      description: |
+        With the device token, every `report_every_seconds`. Only numbers: for each AI account signed in on the computer,
+        its limit windows (how much is used, when each resets), plan and banked resets; plus the tools it couldn't read,
+        by code. An empty report is a heartbeat. Readings go on the account signed in with the same email anywhere in the
+        workspace (adding the person to it), else the person's only account for that tool, else a new account owned by
+        the person. Sources switched off are left out (`skipped: source_off`).
+      tags: [ai_accounts]
+      security: [{ bearer: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/DesktopReport" }
+      responses:
+        "200":
+          description: Where each reading went.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [accounts, report_every_seconds]
+                properties:
+                  report_every_seconds: { type: integer }
+                  accounts:
+                    type: array
+                    items:
+                      type: object
+                      required: [provider]
+                      properties:
+                        provider: { type: string }
+                        account_id: { type: string, format: uuid }
+                        created: { type: boolean }
+                        skipped: { type: string, enum: [source_off, no_account] }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/workspaces/{ws}/ai-devices:
+    parameters:
+      - { $ref: "#/components/parameters/Workspace" }
+    get:
+      operationId: listAIDevices
+      x-outflare-access: { scope: my_ai_accounts.read, brand_limited: true }
+      summary: List linked computers
+      description: "Scope: my_ai_accounts.read. Your computers running Outflare for desktop; everyone's with everyone=true and ai_accounts.read. `silent` means no report for over an hour."
+      tags: [ai_accounts]
+      parameters:
+        - { name: everyone, in: query, required: false, schema: { type: boolean } }
+      responses:
+        "200":
+          description: The computers, newest first.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data: { type: array, items: { $ref: "#/components/schemas/AIDevice" } }
+        default: { $ref: "#/components/responses/Error" }
+    post:
+      operationId: approveAIDevice
+      x-outflare-access: { scope: my_ai_accounts.manage, brand_limited: true }
+      summary: Link a computer
+      description: "Scope: my_ai_accounts.manage, as a person. Approves the code Outflare for desktop shows; the app then gets its token and reports for you in this workspace."
+      tags: [ai_accounts]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object, required: [user_code], properties: { user_code: { type: string, example: ABCD-2345 } } }
+      responses:
+        "201":
+          description: The computer that is now linked.
+          content:
+            application/json:
+              schema: { type: object, required: [name, platform], properties: { name: { type: string }, platform: { type: string, enum: [macos, windows, linux] } } }
+        "202": { $ref: "#/components/responses/MissionHeld" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/workspaces/{ws}/ai-devices/{id}:
+    parameters:
+      - { $ref: "#/components/parameters/Workspace" }
+      - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+    delete:
+      operationId: unlinkAIDevice
+      x-outflare-access: { scope: my_ai_accounts.manage, brand_limited: true }
+      summary: Unlink a computer
+      description: "Scope: my_ai_accounts.manage for your own, ai_accounts.manage for anyone's. Its token stops working; the app asks to be linked again."
+      tags: [ai_accounts]
+      responses:
+        "204": { description: Unlinked. }
+        "202": { $ref: "#/components/responses/MissionHeld" }
+        default: { $ref: "#/components/responses/Error" }
   /v1/workspaces/{ws}/ai-accounts/outflare:
     parameters:
       - { $ref: "#/components/parameters/Workspace" }
@@ -8882,7 +9065,12 @@ paths:
         `weekly_reads` has the weekly SEO snapshot read who links to pages
         that just went from tracked competitors' sitemaps (default on),
         spending at most `weekly_budget_percent` of the connection's monthly
-        budget a month on it (1 to 100, default 10). Send only what changes.
+        budget a month on it (1 to 100, default 10). `recheck_days` is how
+        often the pages of broken-link prospects nobody has pitched are
+        checked again, so links that break later are found
+        (`outbound_link.broken`): 0 is never, default 30. A check is free
+        apart from the workspace's own AI reading the page. Send only what
+        changes.
       tags: [seo]
       requestBody:
         required: true
@@ -8894,6 +9082,7 @@ paths:
                 pitch_cooldown_days: { type: integer, minimum: 0, maximum: 365 }
                 weekly_reads: { type: boolean }
                 weekly_budget_percent: { type: integer, minimum: 1, maximum: 100 }
+                recheck_days: { type: integer, minimum: 0, maximum: 365 }
       responses:
         "200":
           description: The settings.
@@ -8902,6 +9091,52 @@ paths:
               schema: { $ref: "#/components/schemas/LinkBuildingSettings" }
         "400": { $ref: "#/components/responses/Error" }
         "202": { $ref: "#/components/responses/MissionHeld" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/workspaces/{ws}/link-building/assets:
+    parameters: [{ $ref: "#/components/parameters/Workspace" }]
+    get:
+      operationId: listLinkAssets
+      x-outflare-access: { scope: seo.read, brand_limited: true }
+      summary: List published assets
+      description: "Scope: seo.read. Pages marked published to promote, newest first (up to 200). `?brand=` filters."
+      tags: [seo]
+      parameters:
+        - { name: brand, in: query, schema: { type: string } }
+      responses:
+        "200":
+          description: The assets.
+          content: { application/json: { schema: { type: object, required: [data], properties: { data: { type: array, items: { $ref: "#/components/schemas/LinkAsset" } } } } } }
+        "404": { $ref: "#/components/responses/Error" }
+        default: { $ref: "#/components/responses/Error" }
+    post:
+      operationId: publishLinkAsset
+      x-outflare-access: { scope: seo.manage, brand_limited: true }
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      summary: Mark a page of yours published
+      description: |
+        Scope: seo.manage. Records `asset.published` for a page worth
+        promoting (a guide, a study, a tool), which can start the "Promote a
+        new page" playbook on its own (playbook automations). Its SEO site,
+        and so its brand, is the site the URL is on. 409 `conflict` when the
+        page is already marked.
+      tags: [seo]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [url]
+              properties:
+                url: { type: string, format: uri, maxLength: 2048 }
+                title: { type: string, maxLength: 300 }
+                topic: { type: string, maxLength: 300, description: What it is about, for finding who links to the topic. }
+      responses:
+        "201": { description: The asset., content: { application/json: { schema: { $ref: "#/components/schemas/LinkAsset" } } } }
+        "202": { $ref: "#/components/responses/MissionHeld" }
+        "400": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
         default: { $ref: "#/components/responses/Error" }
   /v1/workspaces/{ws}/link-reads:
     parameters: [{ $ref: "#/components/parameters/Workspace" }]
@@ -10433,6 +10668,333 @@ paths:
         "409": { $ref: "#/components/responses/Error" }
         "202": { $ref: "#/components/responses/MissionHeld" }
         default: { $ref: "#/components/responses/Error" }
+  /v1/workspaces/{ws}/stories/ideas:
+    parameters: [{ $ref: "#/components/parameters/Workspace" }]
+    post:
+      operationId: suggestStories
+      x-outflare-access: { scope: seo.manage, brand_limited: true }
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      summary: Suggest story ideas with AI
+      description: |
+        Scope: seo.manage. Queues the workspace's own AI model (its PR
+        stories task under Settings, AI model) to suggest story ideas
+        from the brand, its facts, its experts' topics, its recent
+        coverage and the last two weeks of news its topic searches found.
+        Each idea is a story with status `idea` and source `ai_ideas`; it
+        never states numbers or quotes. Outflare never uses an AI key of
+        its own: without a connected model this is 409
+        `connector_needed`. The result is the story.ideas_suggested event.
+      tags: [seo]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [brand_id]
+              properties:
+                brand_id: { type: string, description: The brand's id or handle. }
+                count: { type: integer, minimum: 1, maximum: 10, default: 5 }
+                brief: { type: string, maxLength: 1000, example: "Angles for the bot traffic beat" }
+      responses:
+        "202":
+          description: Queued, or held for a person's approval in a mission.
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - type: object
+                    required: [queued]
+                    properties:
+                      queued: { type: boolean }
+                  - { $ref: "#/components/schemas/MissionHeld" }
+        "400": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/workspaces/{ws}/stories/{story}/draft:
+    parameters:
+      - { $ref: "#/components/parameters/Workspace" }
+      - { name: story, in: path, required: true, schema: { type: string, format: uuid } }
+    post:
+      operationId: draftStory
+      x-outflare-access: { scope: seo.manage, brand_limited: true }
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      summary: Draft a story's release with AI
+      description: |
+        Scope: seo.manage. Queues the workspace's own AI model to write
+        the story's release from its headline, notes, facts and approved
+        quotes only (never a draft or withdrawn quote), improving the
+        current release when there is one. The draft replaces the
+        release, moves the story to `draft` and is checked like any
+        release; a person still approves it. Follow `ai_status` on the
+        story (drafting, then empty, or failed with `ai_error`). 409 while
+        a draft is being written or the story is archived, and
+        `connector_needed` without a connected model.
+      tags: [seo]
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                guidance: { type: string, maxLength: 1000, example: "Lead with the 37%." }
+      responses:
+        "202":
+          description: Queued, or held for a person's approval in a mission.
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - type: object
+                    required: [queued]
+                    properties:
+                      queued: { type: boolean }
+                  - { $ref: "#/components/schemas/MissionHeld" }
+        "400": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/workspaces/{ws}/stories/results:
+    parameters: [{ $ref: "#/components/parameters/Workspace" }]
+    get:
+      operationId: getStoryResults
+      x-outflare-access: { scope: seo.read, brand_limited: true }
+      summary: Results of stories
+      description: |
+        Scope: seo.read. Each story's pitches (approved in the window),
+        replies by kind, and coverage found in the window: coverage a
+        person put on the story, or coverage of its brand by a journalist
+        it pitched, after the pitch. Only stories with a pitch or coverage
+        in the window are listed, most coverage first; `total` sums them.
+        Reads what is stored, so it costs nothing.
+      tags: [seo]
+      parameters:
+        - { name: brand, in: query, description: "A brand's id or handle.", schema: { type: string } }
+        - { name: days, in: query, schema: { type: integer, minimum: 1, maximum: 365, default: 28 } }
+        - { name: story_id, in: query, schema: { type: string, format: uuid } }
+      responses:
+        "200":
+          description: Results.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [since, days, data, total]
+                properties:
+                  since: { type: string, format: date-time }
+                  days: { type: integer }
+                  data:
+                    type: array
+                    items: { $ref: "#/components/schemas/StoryResult" }
+                  total:
+                    type: object
+                    required: [stories, pitched, replied, reply_kinds, coverage, linked]
+                    properties:
+                      stories: { type: integer }
+                      pitched: { type: integer }
+                      replied: { type: integer }
+                      reply_kinds: { type: object, additionalProperties: { type: integer } }
+                      coverage: { type: integer }
+                      linked: { type: integer }
+        "400": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/workspaces/{ws}/stories/{story}/pitches:
+    parameters:
+      - { $ref: "#/components/parameters/Workspace" }
+      - { name: story, in: path, required: true, schema: { type: string, format: uuid } }
+    post:
+      operationId: startStoryPitches
+      x-outflare-access: { scope: sequences.manage, brand_limited: true }
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      summary: Pitch an approved story to journalists
+      description: |
+        Scope: sequences.manage. Starts a pitch for each journalist (a
+        person record with an email address) through one of the
+        workspace's own sequences: one that stops on any reply, has 1 or 2
+        steps (one follow-up at most) and uses `{{custom.opener}}`. The
+        workspace's own AI writes each opener from the story and the
+        journalist's latest article, using only the story's facts and
+        approved quotes; it is checked like the release, and a person
+        approves each pitch. Journalists are skipped (`skipped`, with a
+        reason) when they aren't a person, have no address, already have
+        a pitch for this story, or were pitched by the workspace in the
+        last week, whichever brand. 409 unless the story is approved.
+      tags: [seo]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [sequence_id, record_ids]
+              properties:
+                sequence_id: { type: string, format: uuid }
+                record_ids: { type: array, minItems: 1, maxItems: 50, items: { type: string, format: uuid } }
+      responses:
+        "201":
+          description: The pitches started, and the journalists skipped.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, skipped]
+                properties:
+                  data:
+                    type: array
+                    items: { $ref: "#/components/schemas/StoryPitch" }
+                  skipped:
+                    type: array
+                    items:
+                      type: object
+                      required: [record_id, reason]
+                      properties:
+                        record_id: { type: string, format: uuid }
+                        reason: { type: string, enum: [not_found, not_a_person, no_email, already_pitched, pitched_this_week] }
+        "400": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        "202": { $ref: "#/components/responses/MissionHeld" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/workspaces/{ws}/story-pitches:
+    parameters: [{ $ref: "#/components/parameters/Workspace" }]
+    get:
+      operationId: listStoryPitches
+      x-outflare-access: { scope: sequences.read, brand_limited: true }
+      summary: List story pitches
+      description: "Scope: sequences.read. Newest first."
+      tags: [seo]
+      parameters:
+        - { name: story_id, in: query, schema: { type: string, format: uuid } }
+        - { name: status, in: query, schema: { type: string, enum: [writing, draft, enrolled, rejected] } }
+        - { name: brand, in: query, description: "A brand's id or handle.", schema: { type: string } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 500, default: 100 } }
+        - { name: offset, in: query, schema: { type: integer, minimum: 0 } }
+        - { $ref: "#/components/parameters/Fields" }
+        - { $ref: "#/components/parameters/Cursor" }
+      responses:
+        "200":
+          description: Pitches.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, next_offset, next_cursor]
+                properties:
+                  data:
+                    type: array
+                    items: { $ref: "#/components/schemas/StoryPitch" }
+                  next_offset: { type: [integer, "null"] }
+                  next_cursor: { $ref: "#/components/schemas/NextCursor" }
+        "400": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/workspaces/{ws}/story-pitches/{pitch}:
+    parameters:
+      - { $ref: "#/components/parameters/Workspace" }
+      - { name: pitch, in: path, required: true, schema: { type: string, format: uuid } }
+    patch:
+      operationId: updateStoryPitch
+      x-outflare-access: { scope: sequences.manage, brand_limited: true }
+      summary: Change a draft pitch's opener
+      description: "Scope: sequences.manage. Only a draft pitch."
+      tags: [seo]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [opener]
+              properties:
+                opener: { type: string, minLength: 1, maxLength: 2000 }
+      responses:
+        "200":
+          description: The pitch.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/StoryPitch" }
+        "400": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        "202": { $ref: "#/components/responses/MissionHeld" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/workspaces/{ws}/story-pitches/{pitch}/approve:
+    parameters:
+      - { $ref: "#/components/parameters/Workspace" }
+      - { name: pitch, in: path, required: true, schema: { type: string, format: uuid } }
+    post:
+      operationId: approveStoryPitch
+      x-outflare-access: { scope: sequences.manage, brand_limited: true }
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      summary: Approve a pitch
+      description: |
+        Scope: sequences.manage. Only a person approves (403 for tokens and
+        agents). Checks the opener (edited when `opener` is given) like the
+        release: a number in none of the story's facts or a quote that isn't
+        approved is 409 `check_failed`. Then the journalist becomes a lead
+        with the opener as `custom.opener` and the headline as
+        `custom.story_title`, and is enrolled in the sequence, held until
+        the story's embargo. 409 when the story is no longer approved, the
+        journalist was pitched in the last week, or asked not to be
+        contacted.
+      tags: [seo]
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                opener: { type: string, maxLength: 2000 }
+      responses:
+        "200":
+          description: The pitch, enrolled.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/StoryPitch" }
+        "400": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        "202": { $ref: "#/components/responses/MissionHeld" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/workspaces/{ws}/story-pitches/{pitch}/reject:
+    parameters:
+      - { $ref: "#/components/parameters/Workspace" }
+      - { name: pitch, in: path, required: true, schema: { type: string, format: uuid } }
+    post:
+      operationId: rejectStoryPitch
+      x-outflare-access: { scope: sequences.manage, brand_limited: true }
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      summary: Reject a draft pitch
+      description: "Scope: sequences.manage."
+      tags: [seo]
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                reason: { type: string, maxLength: 500 }
+      responses:
+        "200":
+          description: The pitch.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/StoryPitch" }
+        "400": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        "202": { $ref: "#/components/responses/MissionHeld" }
+        default: { $ref: "#/components/responses/Error" }
   /v1/workspaces/{ws}/journalists:
     parameters: [{ $ref: "#/components/parameters/Workspace" }]
     get:
@@ -10564,6 +11126,7 @@ paths:
               properties:
                 status: { $ref: "#/components/schemas/CoverageStatus" }
                 linked: { type: boolean }
+                story_id: { type: string, description: "A story of the coverage's brand to put it on, or empty to take it off." }
       responses:
         "200":
           description: The coverage item.
@@ -19512,6 +20075,7 @@ paths:
         - { name: status, in: query, description: "Comma-separated: open, blocked, merged, linked, dismissed; or all.", schema: { type: string } }
         - { name: type, in: query, description: "A record type's key, such as person.", schema: { type: string } }
         - { name: record, in: query, description: Only pairs with this record., schema: { type: string, format: uuid } }
+        - { $ref: "#/components/parameters/Brand" }
         - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 200, default: 50 } }
         - { name: before, in: query, schema: { type: string } }
         - { $ref: "#/components/parameters/Cursor" }
@@ -22117,6 +22681,274 @@ paths:
         "400": { $ref: "#/components/responses/Error" }
         "202": { $ref: "#/components/responses/MissionHeld" }
         default: { $ref: "#/components/responses/Error" }
+  /v1/brands/{brand}:
+    parameters:
+      - { $ref: "#/components/parameters/BrandID" }
+    get:
+      operationId: getBrandByID
+      x-outflare-access: { scope: workspace.read, brand: true }
+      summary: Read a brand by its id
+      description: |
+        Scope: workspace.read. A brand owns its data (records, events, journeys and every other area move under
+        /v1/brands/{brand}/ in turn), so a brand's own calls need only its id, never the workspace's. A member kept to
+        some brands, or a token made for one brand, sees only those; any other brand is 404.
+      tags: [brands]
+      responses:
+        "200":
+          description: The brand.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Brand" }
+        "404": { $ref: "#/components/responses/Error" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/brands/{brand}/events:
+    parameters:
+      - { $ref: "#/components/parameters/BrandID" }
+    get:
+      operationId: listBrandEvents
+      x-outflare-access: { scope: customers.read, brand: true }
+      summary: List a brand's received events
+      description: |
+        Scope: customers.read. Every event sent to POST /v1/brands/{brand}/events, newest first, with what happened to
+        it: pending (waiting to be processed, usually seconds), accepted, duplicate, rejected (code and reason say what
+        to fix) or held (a name the catalog hasn't approved). expires_at is when the event is deleted: 30 days after it
+        arrived when accepted or duplicate, 90 when rejected or held. Read one with GET .../events/{event} to see it as
+        sent.
+      tags: [records]
+      parameters:
+        - { name: status, in: query, schema: { type: string, enum: [pending, accepted, duplicate, rejected, held] } }
+        - { name: code, in: query, description: "A rejection code, such as missing_id or property_type.", schema: { type: string } }
+        - { name: source, in: query, description: "The source label the events were sent with.", schema: { type: string } }
+        - { name: batch_id, in: query, description: "The batch_id a send answered.", schema: { type: string, format: uuid } }
+        - { name: name, in: query, description: "The event's catalog name, such as order_completed.", schema: { type: string } }
+        - { name: received_after, in: query, schema: { type: string, format: date-time } }
+        - { name: received_before, in: query, schema: { type: string, format: date-time } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 200, default: 50 } }
+        - { name: before, in: query, schema: { type: string } }
+        - { $ref: "#/components/parameters/Cursor" }
+        - { $ref: "#/components/parameters/Fields" }
+      responses:
+        "200":
+          description: Events, newest first.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, next_before, next_cursor]
+                properties:
+                  data: { type: array, items: { $ref: "#/components/schemas/BrandEvent" } }
+                  next_before: { type: [string, "null"] }
+                  next_cursor: { $ref: "#/components/schemas/NextCursor" }
+        "400": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        default: { $ref: "#/components/responses/Error" }
+    post:
+      operationId: ingestBrandEvents
+      x-outflare-access: { scope: customers.manage, brand: true }
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      summary: Send product events to a brand
+      description: |
+        Scope: customers.manage. Sends what people do in your product to this brand, in Segment's format: one event,
+        or {"batch": [...]} with up to 500 (5 MB). type is track, identify, page, screen, group or alias; camelCase
+        (userId, anonymousId, messageId) and snake_case both work, so a product already sending to Segment or
+        RudderStack can point here as is. Send it from your servers: the token can change customer records.
+
+        Every event is saved as sent and the answer is 202 at once, with a receipt id per event. Only the envelope is
+        checked here (JSON, size, batch length, source); an event is never refused for its content. A job then
+        processes the events in the order they arrived, usually within seconds, the way POST
+        .../customer-events does: it matches each to a person (userId, then a verified email, then anonymousId),
+        writes identify's traits to catalog fields and links group's company. Each event ends accepted, duplicate (a
+        messageId the brand already has), rejected (code and reason say what to fix; fix it and replay) or held (a
+        track name the catalog hasn't approved yet: approve it, then replay). Follow them with GET .../events or GET
+        .../events/{event}. Events belong to the brand in the URL; a brand_id in the body is ignored.
+      tags: [records]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/BrandEventsInput" }
+      responses:
+        "202":
+          description: "Saved, to be processed. Inside a mission, a MissionHeld answer when the call was held for approval or dry-run instead."
+          content:
+            application/json:
+              schema: { oneOf: [{ $ref: "#/components/schemas/BrandEventsReceived" }, { $ref: "#/components/schemas/MissionHeld" }] }
+        "400": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "413": { $ref: "#/components/responses/Error" }
+        "415": { $ref: "#/components/responses/Error" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/brands/{brand}/events/summary:
+    parameters:
+      - { $ref: "#/components/parameters/BrandID" }
+    get:
+      operationId: getBrandEventsSummary
+      x-outflare-access: { scope: customers.read, brand: true }
+      summary: Summarise a brand's received events
+      description: |
+        Scope: customers.read. How many events arrived in the last 24 hours and 7 days by status, how many wait and
+        since when, the rejection codes still kept (with the latest reason and when the first of them is deleted) and
+        the held names waiting for approval.
+      tags: [records]
+      responses:
+        "200":
+          description: The summary.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/BrandEventsSummary" }
+        "404": { $ref: "#/components/responses/Error" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/brands/{brand}/events/replay:
+    parameters:
+      - { $ref: "#/components/parameters/BrandID" }
+    post:
+      operationId: replayBrandEvents
+      x-outflare-access: { scope: customers.manage, brand: true }
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      summary: Replay rejected or held events
+      description: |
+        Scope: customers.manage. Processes rejected and held events again, after you fixed what they needed (approved
+        the name, changed a property's type, freed an identity): either the ones in ids, or every one matching a
+        filter (status, code, source, batch_id, name), up to 10,000 a call (more is true when there are others). They
+        go back to pending and the job processes them again; each ends with a new status. Accepted, duplicate and
+        pending events are left alone and counted in skipped.
+      tags: [records]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/BrandEventsReplayInput" }
+      responses:
+        "202":
+          description: "Queued. Inside a mission, a MissionHeld answer when the call was held for approval or dry-run instead."
+          content:
+            application/json:
+              schema: { oneOf: [{ $ref: "#/components/schemas/BrandEventsReplayed" }, { $ref: "#/components/schemas/MissionHeld" }] }
+        "400": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/brands/{brand}/events/{event}:
+    parameters:
+      - { $ref: "#/components/parameters/BrandID" }
+      - { name: event, in: path, required: true, description: "The event's id: its receipt id.", schema: { type: string, format: uuid } }
+    get:
+      operationId: getBrandEvent
+      x-outflare-access: { scope: customers.read, brand: true }
+      summary: Read a received event
+      description: "Scope: customers.read. One event with what happened to it, and raw: the event as sent, with its batch's context merged in."
+      tags: [records]
+      responses:
+        "200":
+          description: The event.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/BrandEventDetail" }
+        "404": { $ref: "#/components/responses/Error" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/brands/{brand}/records/{record}/privacy-exports:
+    parameters:
+      - { $ref: "#/components/parameters/BrandID" }
+      - { $ref: "#/components/parameters/RecordID" }
+    post:
+      operationId: requestPrivacyExport
+      x-outflare-access: { scope: customers.manage, brand: true }
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      summary: Export everything a brand holds about a person or company
+      description: |
+        Scope: customers.manage. Starts a privacy export of one record, for a person's request to see their data: the
+        record with its fields, and every row that points at it in this brand (its identities, links, field history,
+        merges, product events, consent, emails, messages, replies, meetings, deals, payments, list memberships,
+        journey runs and the rest), as one gzipped JSON file. Only the record's own brand is exported: a person with the
+        same email in another brand is a different person, and a record of another brand is not found. Secrets are
+        never included (columns holding tokens, passwords, hashes or sealed values).
+
+        Answers 202 with the export, pending. A job builds it, usually within seconds; then its status is ready and
+        download_url downloads the file for 7 days, after which it expires and the file is deleted. Over 100 MB
+        uncompressed fails with error_code too_large. Erasing the record deletes its exports. The request, the result
+        and every download are in the audit log; privacy_export.ready is also a webhook event.
+      tags: [records]
+      responses:
+        "202":
+          description: "Queued. Inside a mission, a MissionHeld answer when the call was held for approval or dry-run instead."
+          content:
+            application/json:
+              schema: { oneOf: [{ $ref: "#/components/schemas/PrivacyExport" }, { $ref: "#/components/schemas/MissionHeld" }] }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/brands/{brand}/privacy-exports:
+    parameters:
+      - { $ref: "#/components/parameters/BrandID" }
+    get:
+      operationId: listPrivacyExports
+      x-outflare-access: { scope: customers.read, brand: true }
+      summary: List a brand's privacy exports
+      description: "Scope: customers.read. The brand's privacy exports, newest first, without their files. Filter by record or status."
+      tags: [records]
+      parameters:
+        - { name: record, in: query, description: "Only this record's exports.", schema: { type: string, format: uuid } }
+        - { name: status, in: query, schema: { type: string, enum: [pending, ready, failed, expired] } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 200, default: 50 } }
+        - { name: before, in: query, schema: { type: string } }
+        - { $ref: "#/components/parameters/Cursor" }
+        - { $ref: "#/components/parameters/Fields" }
+      responses:
+        "200":
+          description: Exports, newest first.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, next_before, next_cursor]
+                properties:
+                  data: { type: array, items: { $ref: "#/components/schemas/PrivacyExport" } }
+                  next_before: { type: [string, "null"] }
+                  next_cursor: { $ref: "#/components/schemas/NextCursor" }
+        "400": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/brands/{brand}/privacy-exports/{export}:
+    parameters:
+      - { $ref: "#/components/parameters/BrandID" }
+      - { name: export, in: path, required: true, description: "The privacy export's id.", schema: { type: string, format: uuid } }
+    get:
+      operationId: getPrivacyExport
+      x-outflare-access: { scope: customers.read, brand: true }
+      summary: Read a privacy export
+      description: "Scope: customers.read. An export's status, the rows it holds by table, when it expires and, once ready, its download_url."
+      tags: [records]
+      responses:
+        "200":
+          description: The export.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PrivacyExport" }
+        "404": { $ref: "#/components/responses/Error" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/brands/{brand}/privacy-exports/{export}/download:
+    parameters:
+      - { $ref: "#/components/parameters/BrandID" }
+      - { name: export, in: path, required: true, description: "The privacy export's id.", schema: { type: string, format: uuid } }
+    get:
+      operationId: downloadPrivacyExport
+      x-outflare-access: { scope: customers.manage, brand: true }
+      summary: Download a privacy export
+      description: |
+        Scope: customers.manage, because the file is someone's personal data in bulk. The export as a gzipped JSON file
+        (privacy-export-{id}.json.gz): {"exported_at", "brand": {"id", "name"}, "record": {...}, "tables": {"table":
+        [rows]}}, each row with every column but secrets. Each download is recorded in the audit log
+        (privacy_export.downloaded). 409 export_not_ready while it is pending or when it failed; 410 export_expired
+        once its 7 days are over.
+      tags: [records]
+      responses:
+        "200":
+          description: The file.
+          content:
+            application/gzip: { schema: { type: string, format: binary } }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        "410": { $ref: "#/components/responses/Error" }
+        default: { $ref: "#/components/responses/Error" }
   /v1/workspaces/{ws}/brands/{brand}:
     parameters:
       - { $ref: "#/components/parameters/Workspace" }
@@ -24361,6 +25193,62 @@ paths:
                   data: { type: array, items: { $ref: "#/components/schemas/EmailTemplateVersion" } }
         "404": { $ref: "#/components/responses/Error" }
         default: { $ref: "#/components/responses/Error" }
+  /v1/workspaces/{ws}/email-guardrails:
+    parameters: [{ $ref: "#/components/parameters/Workspace" }]
+    get:
+      operationId: getEmailGuardrails
+      x-outflare-access: { scope: emails.read }
+      summary: How much marketing email one person may get
+      description: |
+        Scope: emails.read. Guardrails on marketing (lifecycle) email that
+        journeys and broadcasts send: a frequency cap (per_day in any 24
+        hours, per_week in any 7 days) and quiet hours (quiet_start to
+        quiet_end o'clock in the person's timezone attribute, else
+        time_zone). On by default: 1 a day, 3 a week, 8pm to 8am.
+        Transactional email is never capped or held. A capped email is not
+        sent: the journey step's outcome is frequency_cap, the broadcast
+        skips the person with the reason, and it is recorded as
+        email.capped on their timeline. An email due in quiet hours is
+        held until they end (step outcome quiet_hours).
+      tags: [emails]
+      responses:
+        "200":
+          description: The guardrails.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/EmailGuardrails" }
+        default: { $ref: "#/components/responses/Error" }
+    patch:
+      operationId: updateEmailGuardrails
+      x-outflare-access: { scope: emails.manage }
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      summary: Change the marketing email guardrails
+      description: "Scope: emails.manage. Send only the fields to change. Recorded as email_guardrails.updated."
+      tags: [emails]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                cap_enabled: { type: boolean }
+                per_day: { type: integer, minimum: 0, maximum: 100 }
+                per_week: { type: integer, minimum: 0, maximum: 500 }
+                quiet_hours_enabled: { type: boolean }
+                quiet_start: { type: integer, minimum: 0, maximum: 23 }
+                quiet_end: { type: integer, minimum: 0, maximum: 23 }
+                time_zone: { type: string, maxLength: 100 }
+      responses:
+        "200":
+          description: The guardrails.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/EmailGuardrails" }
+        "400": { $ref: "#/components/responses/Error" }
+        "202": { $ref: "#/components/responses/MissionHeld" }
+        default: { $ref: "#/components/responses/Error" }
   /v1/workspaces/{ws}/email-topics:
     parameters: [{ $ref: "#/components/parameters/Workspace" }]
     get:
@@ -26552,7 +27440,7 @@ paths:
         only proposes a partner: this call binds it. Identify the customer with customer_id (your own user id),
         email or record_id, the same way each time. external_id (your charge or order id) makes a retry safe and is what
         a refund's refund_of names. Not credited is not an error: the answer is 200 with credited false and a reason
-        (no_partner, partner_inactive, program_inactive, self_referral, sale_not_found or currency). 201 means it was
+        (no_partner, partner_inactive, program_inactive, self_referral, sale_not_found, currency or lead_expired). 201 means it was
         credited, with the rewards it earned.
       tags: [partners]
       requestBody:
@@ -26847,7 +27735,7 @@ paths:
       description: |
         Scope: partners.manage, because the file holds each partner's payout details. Columns: payout_id, program,
         partner_id, partner_code, partner_name, partner_email, payout_method, amount (a decimal), currency, status, reference,
-        created_at, paid_at. Due payouts unless status says otherwise; at most 10,000 rows. Pay them from your own account or
+        created_at, paid_at, payout_type, payout_token. Due payouts unless status says otherwise; at most 10,000 rows. Pay them from your own account or
         upload the file to a payout tool, then mark each one paid. Recorded in the audit log (partner_payouts.exported).
       tags: [partners]
       parameters:
@@ -26902,7 +27790,8 @@ paths:
         fees and adjustments reach the program's minimum, one payout gathers them and partner_payout.created fires.
         Outflare never holds or sends money: pay from your own account or payout tool, then mark it paid.
         An imported partner with no payout details (Tolt's API doesn't give them) waits: their balance stays until they
-        add details on the portal, and waiting_for_details counts them.
+        add details on the portal, and waiting_for_details counts them. With a payout term (payout_term_days, Net N),
+        only rewards earned in a month that ended at least N days ago are gathered; the rest wait for a later payout.
       tags: [partners]
       requestBody:
         content:
@@ -28485,6 +29374,18 @@ webhooks:
             schema: { $ref: "#/components/schemas/WebhookEvent" }
       responses:
         "200": { description: Any 2xx answer means received; anything else is retried. }
+  privacy_export.ready:
+    post:
+      operationId: webhook_privacy_export_ready
+      summary: "A privacy export of a person or company is ready to download. The target is the export; data has record_id, brand_id, size_bytes (gzipped), rows, counts (rows by table) and expires_at (7 days later). GET /v1/brands/{brand}/privacy-exports/{id} has its download_url."
+      tags: [webhooks]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/WebhookEvent" }
+      responses:
+        "200": { description: Any 2xx answer means received; anything else is retried. }
   brand.created:
     post:
       operationId: webhook_brand_created
@@ -28909,6 +29810,54 @@ webhooks:
     post:
       operationId: webhook_competitor_page_removed
       summary: "A page is gone from a tracked competitor's sitemaps (at most 50 a look). Sites still linking to it may link to yours instead. data has site_id, competitor_id, url and removed (how many went in this look)."
+      tags: [webhooks]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/WebhookEvent" }
+      responses:
+        "200": { description: Any 2xx answer means received; anything else is retried. }
+  competitor_link.new:
+    post:
+      operationId: webhook_competitor_link_new
+      summary: "A domain is new among a tracked competitor's linking domains."
+      tags: [webhooks]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/WebhookEvent" }
+      responses:
+        "200": { description: Any 2xx answer means received; anything else is retried. }
+  outbound_link.broken:
+    post:
+      operationId: webhook_outbound_link_broken
+      summary: "A link prospect's page has a newly broken outbound link."
+      tags: [webhooks]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/WebhookEvent" }
+      responses:
+        "200": { description: Any 2xx answer means received; anything else is retried. }
+  asset.published:
+    post:
+      operationId: webhook_asset_published
+      summary: "A page worth promoting was marked published."
+      tags: [webhooks]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/WebhookEvent" }
+      responses:
+        "200": { description: Any 2xx answer means received; anything else is retried. }
+  mention.found:
+    post:
+      operationId: webhook_mention_found
+      summary: "The news watch found a new article naming a brand."
       tags: [webhooks]
       requestBody:
         required: true
@@ -29545,6 +30494,12 @@ components:
       in: query
       description: Before this time, in the same forms as since.
       schema: { type: string }
+    BrandID:
+      name: brand
+      in: path
+      required: true
+      description: The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is.
+      schema: { type: string, format: uuid }
     BrandRef:
       name: brand
       in: path
@@ -29817,7 +30772,7 @@ components:
       required: [id, type, created_at, workspace_id, actor, target, request_id, data]
       properties:
         id: { type: string, description: "Unique per event, and the webhook-id header. Use it to ignore repeats.", example: evt_48213 }
-        type: { type: string, enum: [lead.replied, lead.unsubscribed, inbox.replied, inbox.updated, inbox.classified, lead.bounced, mailbox.auto_paused, lead.created, lead.updated, lead.deleted, leads.imported, suppressions.added, suppression.removed, lead_list.created, lead_list.leads_added, lead_list.run_started, lead_list.build_done, lead_list.build_failed, lead_list.refresh_done, lead_list.refresh_failed, lead_list.enrich_done, lead_list.enrich_failed, import.done, import.failed, sequence.created, sequence.updated, sequence.activated, sequence.paused, sequence.archived, sequence.deleted, sequence.steps_updated, sequence.leads_enrolled, enrollment.stopped, mailbox.imported, mailbox.updated, mailbox.paused, mailbox.resumed, mailbox.stage_changed, mailbox.deleted, domain.added, domain.paused, domain.resumed, domain.removed, email.queued, email.sent, email.delivered, email.bounced, email.complained, email.failed, email.suppressed, email.cancelled, email.unsubscribed, email.opened, email.clicked, email.preferences_changed, email_domain.verified, email_domain.verification_failed, email_provider.events_failed, email_template.published, meeting.created, meeting.updated, meeting.deleted, deal.created, deal.updated, deal.deleted, spend.recorded, integration.connected, integration.updated, integration.disconnected, connect_request.created, deploy.detected, deploy.failed, digest.ready, ai_budget.warned, ai_budget.reached, connection_limit.warned, connection_limit.reached, experiment.started, experiment.concluded, mission.created, mission.updated, mission.submitted, mission.approved, mission.paused, mission.resumed, mission.stopped, mission.completed, mission.action_held, mission.action_approved, mission.action_rejected, playbook.started, playbook_automation.created, playbook_automation.updated, playbook_automation.approved, playbook_automation.paused, playbook_automation.held, playbook_automation.ran, playbook_automation.deleted, infra.plan_created, infra.plan_approved, infra.ordered, infra.order_failed, infra.domains_bought, infra.mailbox_joined, infra.plan_warming, infra.plan_ready, infra.plan_cancelled, fix.found, fix.updated, fix.started, fix.verify_requested, fix.confirmed, fix.reopened, record.created, record.bulk_created, record.bulk_updated, record.updated, record.merged, identity.verified, identity.closed, relationship.added, relationship.ended, consent.granted, consent.withdrawn, consent.bulk_withdrawn, brand.created, brand.updated, knowledge.created, knowledge.updated, knowledge.deleted, knowledge.restored, email_broadcast.created, email_broadcast.started, email_broadcast.sent, email_broadcast.failed, email_broadcast.cancelled, journey.created, journey.updated, journey_run.entered, journey_run.exited, rule.created, rule.updated, rule.activated, rule.paused, rule.archived, rule.fired, brand_setup.installed, brand_setup.install_failed, install.issue_opened, install.issue_resolved, seo_site.created, seo_site.verified, seo_site.unverified, seo_site.deleted, crawl.started, crawl.stopped, crawl.done, link_pitch.drafted, link_pitch.approved, link_pitch.rejected, link_prospect.overdue, backlink.new, backlink.lost, backlink.regained, competitor.page_removed, link_prospect.found, link_prospect.checked, link_prospect.excluded, link_prospect.pitched, link_prospect.replied, link_prospect.agreed, link_prospect.live, link_prospect.declined, link_prospect.removed, link_prospect.reopened, link_prospect.updated, link_prospect.deleted, social_action.drafted, social_action.approved, social_action.rejected, social_action.done, social_action.failed, review.posted, review.replied, review.reply_drafted, review_momentum.changed, alert.raised, visitor.became_hot, partner_program.created, partner_program.updated, partner_program.rules_updated, partner.created, partner.updated, partner_referral.created, partner_conversion.created, partner_reward.created, partner_reward.approved, partner_reward.rejected, partner_reward.reversed, partner_reward.fulfilled, partner_payout.created, partner_payout.paid, partner_payout.canceled, workspace.updated, webhook.test] }
+        type: { type: string, enum: [lead.replied, lead.unsubscribed, inbox.replied, inbox.updated, inbox.classified, lead.bounced, mailbox.auto_paused, lead.created, lead.updated, lead.deleted, leads.imported, suppressions.added, suppression.removed, lead_list.created, lead_list.leads_added, lead_list.run_started, lead_list.build_done, lead_list.build_failed, lead_list.refresh_done, lead_list.refresh_failed, lead_list.enrich_done, lead_list.enrich_failed, import.done, import.failed, sequence.created, sequence.updated, sequence.activated, sequence.paused, sequence.archived, sequence.deleted, sequence.steps_updated, sequence.leads_enrolled, enrollment.stopped, mailbox.imported, mailbox.updated, mailbox.paused, mailbox.resumed, mailbox.stage_changed, mailbox.deleted, domain.added, domain.paused, domain.resumed, domain.removed, email.queued, email.sent, email.delivered, email.bounced, email.complained, email.failed, email.suppressed, email.cancelled, email.unsubscribed, email.opened, email.clicked, email.preferences_changed, email_domain.verified, email_domain.verification_failed, email_provider.events_failed, email_template.published, meeting.created, meeting.updated, meeting.deleted, deal.created, deal.updated, deal.deleted, spend.recorded, integration.connected, integration.updated, integration.disconnected, connect_request.created, deploy.detected, deploy.failed, digest.ready, ai_budget.warned, ai_budget.reached, connection_limit.warned, connection_limit.reached, experiment.started, experiment.concluded, mission.created, mission.updated, mission.submitted, mission.approved, mission.paused, mission.resumed, mission.stopped, mission.completed, mission.action_held, mission.action_approved, mission.action_rejected, playbook.started, playbook_automation.created, playbook_automation.updated, playbook_automation.approved, playbook_automation.paused, playbook_automation.held, playbook_automation.ran, playbook_automation.deleted, infra.plan_created, infra.plan_approved, infra.ordered, infra.order_failed, infra.domains_bought, infra.mailbox_joined, infra.plan_warming, infra.plan_ready, infra.plan_cancelled, fix.found, fix.updated, fix.started, fix.verify_requested, fix.confirmed, fix.reopened, record.created, record.bulk_created, record.bulk_updated, record.updated, record.merged, identity.verified, identity.closed, relationship.added, relationship.ended, consent.granted, consent.withdrawn, consent.bulk_withdrawn, privacy_export.ready, brand.created, brand.updated, knowledge.created, knowledge.updated, knowledge.deleted, knowledge.restored, email_broadcast.created, email_broadcast.started, email_broadcast.sent, email_broadcast.failed, email_broadcast.cancelled, journey.created, journey.updated, journey_run.entered, journey_run.exited, rule.created, rule.updated, rule.activated, rule.paused, rule.archived, rule.fired, brand_setup.installed, brand_setup.install_failed, install.issue_opened, install.issue_resolved, seo_site.created, seo_site.verified, seo_site.unverified, seo_site.deleted, crawl.started, crawl.stopped, crawl.done, link_pitch.drafted, link_pitch.approved, link_pitch.rejected, link_prospect.overdue, backlink.new, backlink.lost, backlink.regained, competitor.page_removed, competitor_link.new, outbound_link.broken, asset.published, mention.found, link_prospect.found, link_prospect.checked, link_prospect.excluded, link_prospect.pitched, link_prospect.replied, link_prospect.agreed, link_prospect.live, link_prospect.declined, link_prospect.removed, link_prospect.reopened, link_prospect.updated, link_prospect.deleted, social_action.drafted, social_action.approved, social_action.rejected, social_action.done, social_action.failed, review.posted, review.replied, review.reply_drafted, review_momentum.changed, alert.raised, visitor.became_hot, partner_program.created, partner_program.updated, partner_program.rules_updated, partner.created, partner.updated, partner_referral.created, partner_conversion.created, partner_reward.created, partner_reward.approved, partner_reward.rejected, partner_reward.reversed, partner_reward.fulfilled, partner_payout.created, partner_payout.paid, partner_payout.canceled, workspace.updated, webhook.test] }
         created_at: { type: string, format: date-time }
         workspace_id: { type: string, format: uuid }
         actor: { $ref: "#/components/schemas/WebhookRef" }
@@ -30683,7 +31638,7 @@ components:
         left: { type: boolean, description: They are no longer in the workspace. }
     AIAccount:
       type: object
-      required: [id, provider, name, account_email, plan, seats, paid_by, billing_cycle, renews_on, price_cents, price_hidden, resets_available, cancelled, owner_left, members, created_at, updated_at]
+      required: [id, provider, name, account_email, plan, seats, paid_by, billing_cycle, renews_on, price_cents, price_hidden, resets_available, cancelled, owner_left, members, usage, created_at, updated_at]
       properties:
         id: { type: string, format: uuid }
         provider: { $ref: "#/components/schemas/AIProvider" }
@@ -30700,8 +31655,77 @@ components:
         cancelled: { type: boolean }
         owner_left: { type: boolean, description: Nobody who owns it is still in the workspace. }
         members: { type: array, items: { $ref: "#/components/schemas/AIAccountMember" } }
+        usage: { type: array, items: { $ref: "#/components/schemas/AIUsageWindow" }, description: "The latest reading of each limit window from Outflare for desktop, in the last week. Empty when no computer reads this account." }
         created_at: { type: string, format: date-time }
         updated_at: { type: string, format: date-time }
+    AIUsageWindow:
+      type: object
+      required: [kind, used_percent, resets_at, source, observed_at]
+      properties:
+        kind: { type: string, example: weekly, description: "five_hour, weekly, weekly_opus, monthly, premium_requests, credits..." }
+        used_percent: { type: number, example: 74.5 }
+        resets_at: { type: [string, "null"], format: date-time }
+        source: { type: string, enum: [official, extended] }
+        observed_at: { type: string, format: date-time }
+    WorkspaceBrief:
+      type: object
+      required: [id, name, slug]
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+        slug: { type: string }
+    AIDevice:
+      type: object
+      required: [id, user_id, user_name, name, platform, app_version, status, last_error_code, last_report_at, silent, created_at]
+      properties:
+        id: { type: string, format: uuid }
+        user_id: { type: string, format: uuid }
+        user_name: { type: string }
+        name: { type: string, example: Ana's MacBook }
+        platform: { type: string, enum: [macos, windows, linux] }
+        app_version: { type: string }
+        status: { type: string, enum: [ok, attention, broken], description: "The app's own view in its last report. attention: something the person can fix on the computer, such as signing in to a tool again." }
+        last_error_code: { type: [string, "null"], example: not_signed_in }
+        last_report_at: { type: [string, "null"], format: date-time }
+        silent: { type: boolean, description: No report for over an hour. }
+        created_at: { type: string, format: date-time }
+    DesktopReport:
+      type: object
+      properties:
+        app_version: { type: string, maxLength: 40 }
+        status: { type: string, enum: [ok, attention, broken], default: ok }
+        errors:
+          type: array
+          maxItems: 20
+          items:
+            type: object
+            required: [provider, code]
+            properties:
+              provider: { type: string, enum: [claude, chatgpt, cursor, copilot] }
+              code: { type: string, example: not_signed_in, description: "not_signed_in, token_expired, not_installed, rate_limited, forbidden, bad_response, network, keychain_denied, source_off or other." }
+        accounts:
+          type: array
+          maxItems: 20
+          items:
+            type: object
+            required: [provider, source]
+            properties:
+              provider: { type: string, enum: [claude, chatgpt, cursor, copilot] }
+              account_email: { type: string }
+              plan: { type: string, maxLength: 100 }
+              resets_available: { type: [integer, "null"], minimum: 0 }
+              source: { type: string, enum: [official, extended] }
+              observed_at: { type: string, format: date-time }
+              windows:
+                type: array
+                maxItems: 12
+                items:
+                  type: object
+                  required: [kind, used_percent]
+                  properties:
+                    kind: { type: string, example: five_hour }
+                    used_percent: { type: number, minimum: 0 }
+                    resets_at: { type: [string, "null"], format: date-time }
     AIAccountInput:
       type: object
       properties:
@@ -30998,9 +32022,9 @@ components:
         signup_url: { type: string, description: "The portal's sign-up page for this group (portal_url with ?group=<id>): partners who apply through it join the group. Share it only with those you'd put in the group." }
     PartnerProgram:
       type: object
-      required: [id, name, slug, kind, status, brand_id, landing_url, currency, credit_window_days, credit_model, codes_win, hold_days,
-        auto_approve, auto_accept, pay_browser_signups, min_payout_cents, terms_url, sales_source, postback_hint, portal_enabled, portal_subdomain, portal, portal_url, rules, groups,
-        partners, imported_from, switched_over_at, created_at, updated_at]
+      required: [id, name, slug, kind, status, brand_id, landing_url, currency, credit_window_days, credit_model, codes_win, block_self_referrals, hold_days,
+        auto_approve, auto_accept, pay_browser_signups, min_payout_cents, payout_term_days, payout_methods, payout_tokens, terms_url, sales_source, postback_hint, portal_enabled, portal_subdomain, portal, portal_url, rules, groups,
+        partners, imported_from, switched_over_at, lead_expiry_days, created_at, updated_at]
       properties:
         id: { type: string, format: uuid }
         name: { type: string }
@@ -31013,11 +32037,16 @@ components:
         credit_window_days: { type: integer, description: How long after a visit or click a conversion still credits the partner. }
         credit_model: { type: string, enum: [first, last], description: Which visit with a ref wins inside the window. }
         codes_win: { type: boolean, description: A promo code beats a link when a conversion carries both. }
+        block_self_referrals: { type: boolean, description: "A partner's own sign-ups and sales earn them nothing (reason self_referral). On by default." }
         hold_days: { type: integer, description: Rewards wait this long before they can be approved; refunds inside it cancel them. }
         auto_approve: { type: boolean, description: Approve rewards on their own once the hold ends. }
         auto_accept: { type: boolean, description: Partners who sign up are accepted without review. }
         pay_browser_signups: { type: boolean, description: "Sign-ups the website reports with outflare.signup() (sendSiteSignup) earn sign-up rewards. Off by default: anyone can call it, so they make the lead only; money comes from your server and billing." }
         min_payout_cents: { type: integer, format: int64 }
+        payout_term_days: { type: [integer, "null"], description: "Net N: a reward joins a payout N days after the end of the UTC month it was earned in. null pays it once it is approved." }
+        payout_methods: { type: array, items: { type: string, enum: [paypal, wise, bank_transfer, crypto, other] }, description: "What partners choose from on the portal; empty allows any." }
+        payout_tokens: { type: array, items: { type: string }, description: "The crypto tokens partners choose from, such as USDC on Base; empty allows any." }
+        lead_expiry_days: { type: [integer, "null"], description: "A referred customer who hasn't bought within this many days of being referred no longer credits the partner (reason lead_expired). null: leads never expire." }
         terms_url: { type: string }
         sales_source: { type: string, description: "A billing connector (stripe) whose synced payments and refunds are also partner sales; '' for the API and postbacks only." }
         postback_hint: { type: string, description: "The start of the postback URL's secret; '' when there is none." }
@@ -31050,6 +32079,7 @@ components:
       properties:
         title: { type: string, maxLength: 120, description: "The portal's name; the program's when empty." }
         logo_url: { type: string, description: An https address of an image. }
+        favicon_url: { type: string, description: "The browser tab's icon: an https address of an image (.ico, .png or .svg)." }
         color: { type: string, description: "The accent colour, such as #0f766e." }
         custom_css: { type: string, maxLength: 20000 }
         welcome: { type: string, maxLength: 4000, description: Shown on the sign-in page. Plain text. }
@@ -31058,6 +32088,8 @@ components:
         signup_fields: { type: array, maxItems: 20, items: { $ref: "#/components/schemas/PartnerPortalField" } }
         email_from: { type: string, description: "The sender of sign-in links, on a verified sending domain of the workspace's own email provider. The portal can't sign anyone in without it." }
         sign_in_template: { type: string, description: "An email template's id or handle for the sign-in email, with sign_in_url, program_name and partner_name; Outflare's own wording when empty." }
+        hide_powered_by: { type: boolean, description: "Hide the \"Powered by Outflare\" line at the foot of the portal, shown by default." }
+        business_email_only: { type: boolean, description: "Applications must use a work email address: free, disposable and relay addresses are refused (personal_email), as Outflare's email classifier sees them." }
     PartnerImport:
       type: object
       required: [id, program_id, integration_id, connector, source_program, status, summary, error, created_at, started_at, finished_at]
@@ -31079,7 +32111,7 @@ components:
                 type: object
                 required: [kind, seen, created, updated, unchanged, skipped]
                 properties:
-                  kind: { type: string, enum: [groups, links, partners, flows, promo_codes, customers, transactions, commissions] }
+                  kind: { type: string, enum: [groups, links, partners, flows, promo_codes, customers, transactions, commissions, clicks] }
                   seen: { type: integer }
                   created: { type: integer }
                   updated: { type: integer, description: A status brought over, or a refund added. }
@@ -31148,11 +32180,16 @@ components:
         credit_window_days: { type: integer, minimum: 1, maximum: 365 }
         credit_model: { type: string, enum: [first, last] }
         codes_win: { type: boolean }
+        block_self_referrals: { type: boolean, description: "true when left out on create." }
         hold_days: { type: integer, minimum: 0, maximum: 365 }
         auto_approve: { type: boolean }
         auto_accept: { type: boolean }
         pay_browser_signups: { type: boolean }
         min_payout_cents: { type: integer, format: int64, minimum: 0 }
+        payout_term_days: { type: [integer, "null"], minimum: 0, maximum: 90, description: "Net 0 to Net 90; null pays rewards once they are approved." }
+        payout_methods: { type: array, items: { type: string, enum: [paypal, wise, bank_transfer, crypto, other] }, description: "Empty allows any." }
+        payout_tokens: { type: array, maxItems: 20, items: { type: string, maxLength: 40 }, description: "Crypto tokens, such as USDC on Base; empty allows any." }
+        lead_expiry_days: { type: [integer, "null"], minimum: 1, maximum: 3650, description: "Days a referred lead has to buy before it stops crediting the partner; null never expires." }
         terms_url: { type: string, maxLength: 2000 }
         sales_source: { type: string, description: "A billing connector's id (stripe): its synced payments and refunds become partner sales too. \"\" for none." }
         rules: { type: array, maxItems: 50, items: { $ref: "#/components/schemas/PartnerRuleInput" }, description: "Create only: the preset's rules when left out." }
@@ -31184,7 +32221,7 @@ components:
     Partner:
       type: object
       required: [id, program_id, program, record_id, name, email, code, status, group_id, campaign_id, link, campaign_link, promo_codes,
-        payout_method, postback_url, note, source, currency, stats, created_at, updated_at]
+        payout_method, payout_type, payout_token, postback_url, note, source, currency, stats, created_at, updated_at]
       properties:
         id: { type: string, format: uuid, description: The membership's id. }
         program_id: { type: string, format: uuid }
@@ -31200,6 +32237,8 @@ components:
         campaign_link: { type: string, description: "The landing page tagged with their campaign and ref, with no redirect; '' without a landing page." }
         promo_codes: { type: array, items: { $ref: "#/components/schemas/PartnerPromoCode" } }
         payout_method: { type: string, description: "Free text, such as \"PayPal: ana@example.com\", stored sealed. Never bank details." }
+        payout_type: { type: [string, "null"], enum: [paypal, wise, bank_transfer, crypto, other, null], description: "The method the partner chose from the program's payout_methods; null when not chosen." }
+        payout_token: { type: [string, "null"], description: "The crypto token they chose, with payout_type crypto." }
         postback_url: { type: string, description: "The partner's own tracker, called (GET) once for each conversion credited to them and each refund of one, with placeholders filled in: {sub_id}, {click_id}, {conversion_id}, {type}, {event_name}, {amount}, {amount_cents}, {currency}, {commission}, {commission_cents}, {status}, {code} and {program} (pending, approved or reversed). Empty for none." }
         note: { type: string }
         source: { type: string, enum: [manual, api, signup, import] }
@@ -31226,6 +32265,8 @@ components:
         status: { type: string, enum: [pending, active, suspended, rejected], description: "active when left out." }
         group_id: { type: [string, "null"], description: "A group of the program; \"\" for none." }
         payout_method: { type: string, maxLength: 500 }
+        payout_type: { type: [string, "null"], enum: [paypal, wise, bank_transfer, crypto, other, null], description: "null clears it. A method other than crypto clears payout_token." }
+        payout_token: { type: [string, "null"], maxLength: 40, description: "A crypto token; null clears it." }
         postback_url: { type: string, maxLength: 2000, description: "An https address with placeholders (see Partner.postback_url); \"\" removes it." }
         note: { type: string, maxLength: 2000 }
     PartnerLedgerInput:
@@ -31310,7 +32351,7 @@ components:
       required: [credited, duplicate, partner_id, referral_id, conversion, rewards]
       properties:
         credited: { type: boolean }
-        reason: { type: string, enum: [no_partner, partner_inactive, program_inactive, self_referral, sale_not_found, currency] }
+        reason: { type: string, enum: [no_partner, partner_inactive, program_inactive, self_referral, sale_not_found, currency, lead_expired] }
         duplicate: { type: boolean, description: "Already recorded with this external_id (or, for a lead, already a lead)." }
         partner_id: { type: [string, "null"], format: uuid }
         referral_id: { type: [string, "null"], format: uuid }
@@ -31660,6 +32701,8 @@ components:
             enroll_in_sequence, stop_sequences, suppress, unsubscribe_topic, alert, transactional_email, set_consent, assign_owner, move_deal, slack, webhook, push_to_sequencer, push_to_crm, sync_audience, ai, wait_until, split]
         name: { type: string, maxLength: 100 }
         template: { type: string, description: "email: a lifecycle template's handle or id. transactional_email: a transactional one's." }
+        ignore_cap: { type: boolean, description: "email: send even over the workspace's frequency cap (GET .../email-guardrails), for email a person must get. Off by default." }
+        quiet_hours: { type: string, enum: [hold, skip], description: "email: in the person's quiet hours, hold (the default) sends it when they end; skip doesn't send it (step outcome quiet_hours_skipped) and the run goes on." }
         wait_seconds: { type: integer, minimum: 60, maximum: 7776000, description: "wait: how long." }
         conditions: { type: array, maxItems: 20, items: { $ref: "#/components/schemas/JourneyCondition" }, description: "branch: the tests." }
         match: { type: string, enum: [all, any], description: "branch: all (the default) or any must hold." }
@@ -35852,12 +36895,25 @@ components:
         links: { type: integer }
     LinkBuildingSettings:
       type: object
-      required: [pitch_cooldown_days, weekly_reads, weekly_budget_percent, updated_at]
+      required: [pitch_cooldown_days, weekly_reads, weekly_budget_percent, recheck_days, updated_at]
       properties:
         pitch_cooldown_days: { type: integer, description: "Days after a declined pitch before its website may be pitched again." }
         weekly_reads: { type: boolean, description: "The weekly SEO snapshot reads who links to competitors' newly dead pages." }
         weekly_budget_percent: { type: integer, description: "The most of an SEO connection's monthly budget weekly reads spend in a month." }
+        recheck_days: { type: integer, description: "How often the pages of broken-link prospects nobody has pitched are checked again, for outbound_link.broken; 0 is never." }
         updated_at: { type: string, format: date-time }
+    LinkAsset:
+      type: object
+      description: A page of the workspace's own worth promoting, marked published.
+      required: [id, url, title, topic, site_id, brand_id, published_at]
+      properties:
+        id: { type: string, format: uuid }
+        url: { type: string, format: uri }
+        title: { type: string }
+        topic: { type: string }
+        site_id: { type: [string, "null"], format: uuid, description: The SEO site whose host the URL is on, if any. }
+        brand_id: { type: [string, "null"], format: uuid }
+        published_at: { type: string, format: date-time }
     LinkRead:
       type: object
       required: [id, site_id, brand_id, integration_id, connector, target, scope, reason, competitor_id, status, error_code, total_links, links, referring_domains, cost, unit, created_at]
@@ -36105,6 +37161,42 @@ components:
         published_at: { type: [string, "null"], format: date-time, description: "When the page says it was published." }
         read_status: { type: [string, "null"], enum: [up, gone, blocked, opted_out, unreachable, failed, null], description: "How OutflareBot's read of the page went; null until read." }
         journalist_ids: { type: array, items: { type: string, format: uuid }, description: "The person records of its authors, when their address was found." }
+    StoryPitch:
+      type: object
+      required: [id, story_id, brand_id, sequence_id, sequence_name, record_id, journalist_name, journalist_email, article_id, article_title, lead_id, status, opener, reason, reply_kind, replied_at, approved_at, created_at, updated_at]
+      properties:
+        id: { type: string, format: uuid }
+        story_id: { type: string, format: uuid }
+        brand_id: { type: string, format: uuid }
+        sequence_id: { type: string, format: uuid }
+        sequence_name: { type: string }
+        record_id: { type: string, format: uuid, description: "The journalist's person record." }
+        journalist_name: { type: string }
+        journalist_email: { type: [string, "null"] }
+        article_id: { type: [string, "null"], description: "Their latest article, which the opener may mention." }
+        article_title: { type: [string, "null"] }
+        lead_id: { type: [string, "null"] }
+        status: { type: string, enum: [writing, draft, enrolled, rejected] }
+        opener: { type: string }
+        reason: { type: string, description: "Why a draft has no opener or needs a fix (connector_needed, ai_failed, check_failed: ...), or why it was rejected." }
+        reply_kind: { type: [string, "null"], enum: [covering, wants_data, wants_interview, not_my_beat, declined, other, null] }
+        replied_at: { type: [string, "null"], format: date-time }
+        approved_at: { type: [string, "null"], format: date-time }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    StoryResult:
+      type: object
+      required: [story_id, brand_id, title, status, pitched, replied, reply_kinds, coverage, linked]
+      properties:
+        story_id: { type: string, format: uuid }
+        brand_id: { type: string, format: uuid }
+        title: { type: string }
+        status: { type: string }
+        pitched: { type: integer }
+        replied: { type: integer }
+        reply_kinds: { type: object, additionalProperties: { type: integer } }
+        coverage: { type: integer }
+        linked: { type: integer, description: "Coverage that links to the brand's site." }
     PRExpert:
       type: object
       required: [id, brand_id, record_id, name, email, title, topics, is_default, created_at, updated_at]
@@ -36144,7 +37236,7 @@ components:
         warnings: { type: array, items: { $ref: "#/components/schemas/StoryProblem" } }
     Story:
       type: object
-      required: [id, brand_id, kind, title, summary, release, article_id, status, embargo_until, last_check, checked_at, approved_at, source, created_at, updated_at]
+      required: [id, brand_id, kind, title, summary, release, article_id, status, embargo_until, last_check, checked_at, approved_at, source, ai_status, ai_error, created_at, updated_at]
       properties:
         id: { type: string, format: uuid }
         brand_id: { type: string, format: uuid }
@@ -36158,7 +37250,9 @@ components:
         last_check: { oneOf: [{ $ref: "#/components/schemas/StoryCheck" }, { type: "null" }] }
         checked_at: { type: [string, "null"], format: date-time }
         approved_at: { type: [string, "null"], format: date-time }
-        source: { type: string }
+        source: { type: string, description: "manual, or ai_ideas for an idea the workspace's AI suggested." }
+        ai_status: { type: string, enum: ["", drafting, failed], description: "drafting while the workspace's AI writes a draft; failed, with ai_error, when it couldn't." }
+        ai_error: { type: string }
         facts:
           type: array
           description: With one story only.
@@ -36218,7 +37312,7 @@ components:
               name: { type: string }
     Coverage:
       type: object
-      required: [id, brand_id, article_id, url, domain, title, snippet, record_id, search_id, status, linked, source, found_at, status_changed_at, updated_at]
+      required: [id, brand_id, article_id, url, domain, title, snippet, record_id, search_id, status, linked, source, story_id, found_at, status_changed_at, updated_at]
       properties:
         id: { type: string, format: uuid }
         brand_id: { type: string, format: uuid }
@@ -36232,6 +37326,7 @@ components:
         status: { $ref: "#/components/schemas/CoverageStatus" }
         linked: { type: [boolean, "null"], description: "Whether the article links to the brand's site; null until checked." }
         source: { type: string, enum: [news_watch, manual] }
+        story_id: { type: [string, "null"], description: "The story a person put it on. Left null, a story's results still count it when a journalist the story pitched wrote it." }
         found_at: { type: string, format: date-time }
         status_changed_at: { type: string, format: date-time }
         updated_at: { type: [string, "null"], format: date-time }
@@ -36533,7 +37628,7 @@ components:
             type: object
             required: [task, name, description, model, price, price_source, custom]
             properties:
-              task: { type: string, enum: [plan, turn, check_in, reply_labelling, classify_domain, ai_visibility, social_replies, social_posts, email_verification, fix_tickets, review_replies, link_page_reading, ab_tests, link_pitches, knowledge_answers, journeys] }
+              task: { type: string, enum: [plan, turn, check_in, reply_labelling, classify_domain, ai_visibility, social_replies, social_posts, email_verification, fix_tickets, review_replies, link_page_reading, ab_tests, link_pitches, knowledge_answers, journeys, pr_stories] }
               name: { type: string }
               description: { type: string }
               model: { type: [string, "null"], description: Null when no model can run yet. }
@@ -38044,6 +39139,17 @@ components:
         pushed_count: { type: integer }
         last_error: { type: [string, "null"] }
         error_code: { type: [string, "null"] }
+    EmailGuardrails:
+      type: object
+      required: [cap_enabled, per_day, per_week, quiet_hours_enabled, quiet_start, quiet_end, time_zone]
+      properties:
+        cap_enabled: { type: boolean, description: "Cap how much marketing email one person gets." }
+        per_day: { type: integer, description: "At most this many in any 24 hours; 0 for no daily limit." }
+        per_week: { type: integer, description: "At most this many in any 7 days; 0 for no weekly limit." }
+        quiet_hours_enabled: { type: boolean, description: "Hold marketing email due in quiet hours until they end." }
+        quiet_start: { type: integer, description: "The hour quiet hours start, 0 to 23, in the person's time zone." }
+        quiet_end: { type: integer, description: "The hour quiet hours end and held email goes." }
+        time_zone: { type: string, description: "The IANA time zone for people whose own (their timezone attribute) is unknown." }
     PartnerSettings:
       type: object
       required: [erase_payout_notes]
@@ -39410,6 +40516,138 @@ components:
         previousId: { type: string, description: "alias: the id the person had before." }
         messageId: { type: string, description: Your id for the event, so a retry is stored once. }
         timestamp: { type: string, format: date-time, description: When it happened. Default now; at most 25 months ago. }
+    BrandEventsInput:
+      type: object
+      additionalProperties: true
+      description: One event, or a batch. Each event is kept as sent and checked when it is processed.
+      properties:
+        batch: { type: array, minItems: 1, maxItems: 500, items: { $ref: "#/components/schemas/CustomerEventMessage" } }
+        context: { type: object, additionalProperties: true, description: "batch: context every event in it shares." }
+        source: { type: string, example: segment, description: "A label for where the events came from. Default api." }
+        type: { type: string, enum: [track, identify, page, screen, group, alias] }
+    BrandEventsReceived:
+      type: object
+      required: [batch_id, received, events]
+      properties:
+        batch_id: { type: string, format: uuid, description: "This send's id: filter GET .../events by it." }
+        received: { type: integer }
+        events:
+          type: array
+          description: A receipt per event, in the order sent.
+          items:
+            type: object
+            required: [index, id]
+            properties:
+              index: { type: integer, description: The event's place in the batch. }
+              id: { type: string, format: uuid, description: "Its receipt id: GET .../events/{id} says what happened to it." }
+    BrandEvent:
+      type: object
+      required: [id, batch_id, received_at, status, code, reason, type, name, source, message_id, record_id, customer_event_id, attempts, processed_at, expires_at]
+      properties:
+        id: { type: string, format: uuid }
+        batch_id: { type: string, format: uuid }
+        received_at: { type: string, format: date-time }
+        status:
+          type: string
+          enum: [pending, accepted, duplicate, rejected, held]
+          description: "pending: waiting to be processed. held: a track name the catalog hasn't approved; approve it, then replay."
+        code: { type: [string, "null"], description: "Why it was rejected or held, such as missing_id, invalid_timestamp, property_type, other_brand, identity_taken, internal or name_not_approved." }
+        reason: { type: [string, "null"], description: What to fix. }
+        type: { type: [string, "null"], description: "The event's type as sent: track, identify, page, screen, group or alias." }
+        name: { type: [string, "null"], description: "Its catalog name once processed, or the name as sent." }
+        source: { type: string }
+        message_id: { type: [string, "null"] }
+        record_id: { type: [string, "null"], format: uuid, description: The person it was matched to. }
+        customer_event_id: { type: [string, "null"], format: uuid, description: The product event it was stored as. }
+        attempts: { type: integer, description: Tries that failed for a reason other than the event. }
+        processed_at: { type: [string, "null"], format: date-time }
+        expires_at: { type: [string, "null"], format: date-time, description: "When it is deleted: 30 days after it arrived when accepted or duplicate, 90 when rejected or held." }
+    BrandEventDetail:
+      allOf:
+        - $ref: "#/components/schemas/BrandEvent"
+        - type: object
+          required: [raw]
+          properties:
+            raw: { description: "The event as sent, with its batch's context merged in." }
+    BrandEventCounts:
+      type: object
+      required: [pending, accepted, duplicate, rejected, held]
+      properties:
+        pending: { type: integer }
+        accepted: { type: integer }
+        duplicate: { type: integer }
+        rejected: { type: integer }
+        held: { type: integer }
+    BrandEventsSummary:
+      type: object
+      required: [last_24h, last_7d, pending, oldest_pending_at, rejection_codes, held_names, retention_days]
+      properties:
+        last_24h: { $ref: "#/components/schemas/BrandEventCounts" }
+        last_7d: { $ref: "#/components/schemas/BrandEventCounts" }
+        pending: { type: integer, description: Events waiting to be processed. }
+        oldest_pending_at: { type: [string, "null"], format: date-time }
+        rejection_codes:
+          type: array
+          description: The rejected events still kept, by code, most first.
+          items:
+            type: object
+            required: [code, count, reason, expires_at]
+            properties:
+              code: { type: string }
+              count: { type: integer }
+              reason: { type: string, description: The latest one's reason. }
+              expires_at: { type: [string, "null"], format: date-time, description: When the first of them is deleted. }
+        held_names:
+          type: array
+          description: Names held until someone approves them in the catalog, most first.
+          items:
+            type: object
+            required: [name, count, expires_at]
+            properties:
+              name: { type: string }
+              count: { type: integer }
+              expires_at: { type: [string, "null"], format: date-time }
+        retention_days:
+          type: object
+          description: Days each status is kept.
+          additionalProperties: { type: integer }
+    BrandEventsReplayInput:
+      type: object
+      additionalProperties: false
+      description: ids, or a filter. Only rejected and held events are replayed.
+      properties:
+        ids: { type: array, maxItems: 1000, items: { type: string, format: uuid } }
+        status: { type: string, enum: [rejected, held] }
+        code: { type: string }
+        source: { type: string }
+        batch_id: { type: string, format: uuid }
+        name: { type: string }
+    BrandEventsReplayed:
+      type: object
+      required: [replayed, skipped, more]
+      properties:
+        replayed: { type: integer, description: Events sent back to be processed. }
+        skipped: { type: integer, description: "ids that weren't rejected or held, or aren't this brand's." }
+        more: { type: boolean, description: More events match the filter; call again. }
+    PrivacyExport:
+      type: object
+      required: [id, brand_id, record_id, status, created_at, finished_at, expires_at, size_bytes, counts, error_code, downloads, download_url]
+      properties:
+        id: { type: string, format: uuid }
+        brand_id: { type: string, format: uuid }
+        record_id: { type: [string, "null"], format: uuid, description: "The person or company exported; null once the record is gone." }
+        status:
+          type: string
+          enum: [pending, ready, failed, expired]
+          description: "pending: being built. ready: download it. failed: error_code says why. expired: past its 7 days; the file was deleted."
+        created_at: { type: string, format: date-time }
+        finished_at: { type: [string, "null"], format: date-time }
+        expires_at: { type: [string, "null"], format: date-time, description: "When the file is deleted: 7 days after it was ready." }
+        size_bytes: { type: [integer, "null"], description: The file's size, gzipped. }
+        counts: { type: object, additionalProperties: { type: integer }, description: "Rows exported, by table." }
+        error_code: { type: [string, "null"], description: "Why it failed: too_large (over 100 MB uncompressed), record_gone or internal." }
+        downloads: { type: integer, description: How often the file was downloaded. }
+        download_url: { type: [string, "null"], description: "Downloads the file while ready (needs customers.manage); null otherwise." }
     CustomerEventsInput:
       type: object
       additionalProperties: true

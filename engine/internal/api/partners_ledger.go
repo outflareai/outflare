@@ -474,10 +474,17 @@ func (s *Server) listPartnerPayouts(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"data": list, "next_before": next})
 }
 
+// partnerPayoutTermDue holds for a reward (w) whose program's (p) payout
+// term has passed: Net N is N days after the end of the UTC month it was
+// earned in.
+const partnerPayoutTermDue = `(p.payout_term_days IS NULL OR
+	date_trunc('month', w.created_at AT TIME ZONE 'UTC') + interval '1 month' + make_interval(days => p.payout_term_days) <= now() AT TIME ZONE 'UTC')`
+
 // createPartnerPayouts makes a payout for each partner whose approved
 // balance is at least their program's minimum: one partner (partner_id),
 // one program, or all. Each payout gathers the approved, unpaid cash, fees
-// and adjustments; the partner_payout.created webhook says it is due.
+// and adjustments whose program's payout term has passed; the
+// partner_payout.created webhook says it is due.
 // Outflare sends no money: pay from your own account, then mark it paid.
 func (s *Server) createPartnerPayouts(w http.ResponseWriter, r *http.Request) {
 	a := accessFrom(r.Context())
@@ -500,7 +507,8 @@ func (s *Server) createPartnerPayouts(w http.ResponseWriter, r *http.Request) {
 			m.source = 'import' AND m.payout_method IS NULL
 			FROM partner_rewards w JOIN partner_memberships m ON m.id = w.membership_id JOIN partner_programs p ON p.id = m.program_id
 			WHERE w.workspace_id = $1 AND w.status = 'approved' AND w.payout_id IS NULL AND w.side = 'partner' AND w.kind <> 'action'
-			  AND NOT `+heldAtSource+` AND ($2 = '' OR m.id::text = $2) AND ($3 = '' OR p.id::text = lower($3) OR p.slug = lower($3))
+			  AND `+partnerPayoutTermDue+` AND NOT `+heldAtSource+`
+			  AND ($2 = '' OR m.id::text = $2) AND ($3 = '' OR p.id::text = lower($3) OR p.slug = lower($3))
 			  AND ($4::uuid[] IS NULL OR p.brand_id = ANY($4))
 			GROUP BY m.id, p.id ORDER BY m.id`, a.WorkspaceID, in.PartnerID, in.Program, a.Brands)
 		if err != nil {
@@ -534,8 +542,9 @@ func (s *Server) createPartnerPayouts(w http.ResponseWriter, r *http.Request) {
 				VALUES ($1, $2, $3, $4, $5) RETURNING id::text`, a.WorkspaceID, d.membership, d.total, d.currency, nullIfEmpty(a.ActorID)).Scan(&id); err != nil {
 				return err
 			}
-			tag, err := tx.Exec(ctx, `UPDATE partner_rewards w SET payout_id = $2, updated_at = now() WHERE w.membership_id = $1 AND w.status = 'approved'
-				AND w.payout_id IS NULL AND w.side = 'partner' AND w.kind <> 'action' AND NOT `+heldAtSource, d.membership, id)
+			tag, err := tx.Exec(ctx, `UPDATE partner_rewards w SET payout_id = $2, updated_at = now() FROM partner_programs p
+				WHERE w.membership_id = $1 AND w.status = 'approved' AND w.payout_id IS NULL AND w.side = 'partner' AND w.kind <> 'action'
+				AND p.id = $3 AND `+partnerPayoutTermDue+` AND NOT `+heldAtSource, d.membership, id, d.program)
 			if err != nil {
 				return err
 			}

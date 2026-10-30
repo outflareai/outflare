@@ -226,6 +226,12 @@ var (
 		Namespace: namespace, Subsystem: "rules", Name: "evaluations_total",
 		Help: "Rules evaluated for a record, by trigger kind and outcome (fired; or why not: no_match, duplicate, cooldown, late, before_live, too_deep, manual; absence clocks started and stopped).",
 	}, []string{"trigger", "outcome"})
+	// Marketing email guardrails: sends the frequency cap stopped and
+	// quiet hours held.
+	emailsGuarded = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Namespace: namespace, Subsystem: "emails", Name: "guarded_total",
+		Help: "Marketing emails a guardrail stopped or held, by what sent them (journey, broadcast) and outcome (frequency_cap: not sent; quiet_hours: held until morning; quiet_hours_skipped: not sent, on a step that skips in quiet hours).",
+	}, []string{"trigger", "outcome"})
 	// Journey webhook and Slack steps: calls out of a run, with retries.
 	journeyCalls = prometheus.NewCounterVec(prometheus.CounterOpts{
 		Namespace: namespace, Subsystem: "journeys", Name: "calls_total",
@@ -460,6 +466,10 @@ var (
 		Namespace: namespace, Subsystem: "news", Name: "article_reads_total",
 		Help: "Reads of news articles' pages for their byline, by status (up, gone, blocked, opted_out, unreachable, failed) and journalist (true when the read found a new journalist).",
 	}, []string{"status", "journalist"})
+	storyAIRuns = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Namespace: namespace, Subsystem: "news", Name: "story_ai_runs_total",
+		Help: "Runs of the workspace's own AI on stories, by kind (ideas, draft, pitch: a pitch opener, reply: reading a journalist's reply) and outcome (success, connector_needed, ai_model_needed, ai_budget_reached, connector_auth, ai_failed, check_failed).",
+	}, []string{"kind", "outcome"})
 
 	linkPageChecks = prometheus.NewCounterVec(prometheus.CounterOpts{
 		Namespace: namespace, Subsystem: "seo", Name: "link_page_checks_total",
@@ -499,6 +509,61 @@ var (
 		Namespace: namespace, Subsystem: "inbound_email", Name: "received_bytes_total",
 		Help: "Size of the inbound messages accepted.",
 	})
+	// Product events sent to a brand (POST /v1/brands/{brand}/events): kept
+	// in the event inbox, then processed by the events.process job.
+	eventInboxReceived = prometheus.NewCounter(prometheus.CounterOpts{
+		Namespace: namespace, Subsystem: "event_inbox", Name: "received_total",
+		Help: "Product events saved to the event inbox, waiting to be processed.",
+	})
+	eventInboxProcessed = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Namespace: namespace, Subsystem: "event_inbox", Name: "processed_total",
+		Help: "Product events the events.process job finished, by outcome (accepted, duplicate, rejected, held).",
+	}, []string{"outcome"})
+	eventInboxRejected = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Namespace: namespace, Subsystem: "event_inbox", Name: "rejected_total",
+		Help: "Product events rejected, by code (missing_id, invalid_timestamp, property_type, internal and the rest of the inbox's codes).",
+	}, []string{"code"})
+	eventInboxDuration = prometheus.NewHistogram(prometheus.HistogramOpts{
+		Namespace: namespace, Subsystem: "event_inbox", Name: "process_seconds",
+		Help: "Time to process one product event from the inbox.", Buckets: requestBuckets,
+	})
+	eventInboxPending = prometheus.NewGauge(prometheus.GaugeOpts{
+		Namespace: namespace, Subsystem: "event_inbox", Name: "pending",
+		Help: "Product events waiting to be processed, as of this process's last round.",
+	})
+	eventInboxOldest = prometheus.NewGauge(prometheus.GaugeOpts{
+		Namespace: namespace, Subsystem: "event_inbox", Name: "oldest_pending_seconds",
+		Help: "How long the oldest product event waiting to be processed has waited, as of this process's last round.",
+	})
+	eventInboxPurged = prometheus.NewCounter(prometheus.CounterOpts{
+		Namespace: namespace, Subsystem: "event_inbox", Name: "purged_total",
+		Help: "Event inbox rows deleted at the end of their retention (30 days accepted, 90 rejected or held).",
+	})
+	eventInboxPurgeOverdue = prometheus.NewGauge(prometheus.GaugeOpts{
+		Namespace: namespace, Subsystem: "event_inbox", Name: "purge_overdue_seconds",
+		Help: "How long past its retention the oldest event inbox row still waiting for the sweep is, as of this process's last round.",
+	})
+
+	// Privacy exports (POST /v1/brands/{brand}/records/{record}/privacy-exports),
+	// built by the privacy_export.build job.
+	privacyExportsBuilt = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Namespace: namespace, Subsystem: "privacy_exports", Name: "built_total",
+		Help: "Privacy exports the privacy_export.build job finished, by outcome (ready, too_large, record_gone, internal, error).",
+	}, []string{"outcome"})
+	privacyExportSeconds = prometheus.NewHistogram(prometheus.HistogramOpts{
+		Namespace: namespace, Subsystem: "privacy_exports", Name: "build_seconds",
+		Help: "Time to build one privacy export.", Buckets: []float64{0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10, 30, 60, 120},
+	})
+	privacyExportBytes = prometheus.NewHistogram(prometheus.HistogramOpts{
+		Namespace: namespace, Subsystem: "privacy_exports", Name: "size_bytes",
+		Help:    "Uncompressed size of the privacy exports built (the limit is 100 MB).",
+		Buckets: prometheus.ExponentialBuckets(1024, 4, 10),
+	})
+	privacyExportsExpired = prometheus.NewCounter(prometheus.CounterOpts{
+		Namespace: namespace, Subsystem: "privacy_exports", Name: "expired_total",
+		Help: "Privacy exports whose file was deleted 7 days after it was ready.",
+	})
+
 	inboundPurged = prometheus.NewCounter(prometheus.CounterOpts{
 		Namespace: namespace, Subsystem: "inbound_email", Name: "raw_purged_total",
 		Help: "Raw inbound messages deleted after 30 days (their details stay).",
@@ -515,6 +580,31 @@ var (
 	receiptsConverted = prometheus.NewCounter(prometheus.CounterOpts{
 		Namespace: namespace, Subsystem: "exchange_rates", Name: "receipts_converted_total",
 		Help: "AI receipts charged in another currency given their amount in US dollars once a rate arrived.",
+	})
+
+	desktopLinks = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Namespace: namespace, Subsystem: "desktop", Name: "links_total",
+		Help: "Steps of linking computers to Outflare for desktop: asked (the app asked for a link), approved (a person approved its code), linked (the app got its token).",
+	}, []string{"step"})
+	desktopReports = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Namespace: namespace, Subsystem: "desktop", Name: "reports_total",
+		Help: "Reports from Outflare for desktop, by outcome (ok, invalid, error).",
+	}, []string{"outcome"})
+	desktopReadings = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Namespace: namespace, Subsystem: "desktop", Name: "readings_total",
+		Help: "Usage windows reported by Outflare for desktop, by provider (claude, chatgpt, cursor, copilot) and source (official, extended).",
+	}, []string{"provider", "source"})
+	desktopReadFailures = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Namespace: namespace, Subsystem: "desktop", Name: "read_failures_total",
+		Help: "Tools Outflare for desktop couldn't read, by provider and the app's error code (not_signed_in, rate_limited, bad_response...).",
+	}, []string{"provider", "code"})
+	desktopDevices = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+		Namespace: namespace, Subsystem: "desktop", Name: "devices",
+		Help: "Linked computers by state: reporting (a report in the last hour) or silent.",
+	}, []string{"state"})
+	desktopPurged = prometheus.NewCounter(prometheus.CounterOpts{
+		Namespace: namespace, Subsystem: "desktop", Name: "readings_purged_total",
+		Help: "Usage readings deleted after 90 days.",
 	})
 
 	buildInfo = prometheus.NewGaugeVec(prometheus.GaugeOpts{
@@ -538,7 +628,7 @@ var own = []prometheus.Collector{
 	hooksReceived, hookEvents, hookLag,
 	domainConnectLookups, domainConnectDuration,
 	queryRuns, queryDuration, queryRows,
-	ruleEvaluations, journeyCalls, journeyCallDuration, journeyEntriesRefused, excluded, sequencerPushes, crmContactPushes, adAudienceSyncs,
+	ruleEvaluations, emailsGuarded, journeyCalls, journeyCallDuration, journeyEntriesRefused, excluded, sequencerPushes, crmContactPushes, adAudienceSyncs,
 	semanticRuns, semanticItems, semanticDuration, semanticAvailable, semanticWorkspaces, knowledgeAsks, knowledgeAskDuration,
 	dataNetworkLookups, dataNetworkShared, dataNetworkShareRuns, dataNetworkMembers, dataNetworkWithdrawals, dataNetworkOverdue, dataNetworkLag,
 	helpPages, helpRender,
@@ -550,10 +640,13 @@ var own = []prometheus.Collector{
 	redditSends,
 	redditChecks,
 	partnerClicks, partnerConversions, partnerRewards, partnerRewardsOverdue, partnerImports, partnerImportObjects, partnerPostbacks,
-	newsRuns, newsFound, newsReads,
+	newsRuns, newsFound, newsReads, storyAIRuns,
 	automationRuns, automationLag,
 	inboundReceived, inboundProcessed, inboundBytes, inboundPurged,
+	eventInboxReceived, eventInboxProcessed, eventInboxRejected, eventInboxDuration, eventInboxPending, eventInboxOldest, eventInboxPurged, eventInboxPurgeOverdue,
+	privacyExportsBuilt, privacyExportSeconds, privacyExportBytes, privacyExportsExpired,
 	ratesFetched, ratesAge, receiptsConverted,
+	desktopLinks, desktopReports, desktopReadings, desktopReadFailures, desktopDevices, desktopPurged,
 	buildInfo,
 }
 
@@ -707,6 +800,16 @@ func FlagCache(hit bool) {
 // RuleEvaluated counts one rule evaluated for one record, by trigger kind
 // and outcome.
 func RuleEvaluated(trigger, outcome string) { ruleEvaluations.WithLabelValues(trigger, outcome).Inc() }
+
+// EmailGuarded records a marketing email a guardrail stopped or held: what
+// sent it (journey, broadcast) and the outcome (frequency_cap,
+// quiet_hours).
+func EmailGuarded(trigger, outcome string) {
+	if trigger != "journey" && trigger != "broadcast" {
+		trigger = "other"
+	}
+	emailsGuarded.WithLabelValues(trigger, outcome).Inc()
+}
 
 // JourneyEntryRefused records an automatic entry a journey's limits
 // turned away: limit or reentry.
@@ -941,6 +1044,10 @@ func NewsArticleRead(status string, journalist bool) {
 	newsReads.WithLabelValues(status, strconv.FormatBool(journalist)).Inc()
 }
 
+// StoryAIRun records one run of the AI on stories: ideas or a draft, and
+// its outcome.
+func StoryAIRun(kind, outcome string) { storyAIRuns.WithLabelValues(kind, outcome).Inc() }
+
 // SocialPublished records one try of the publish job.
 func SocialPublished(channel, outcome string) {
 	socialPublishes.WithLabelValues(channel, outcome).Inc()
@@ -1048,6 +1155,50 @@ func InboundProcessed(purpose, status string) {
 // InboundPurged counts raw inbound messages deleted after 30 days.
 func InboundPurged(n int64) { inboundPurged.Add(float64(n)) }
 
+// EventInboxReceived counts product events saved to the event inbox.
+func EventInboxReceived(n int) { eventInboxReceived.Add(float64(n)) }
+
+// EventInboxProcessed counts a product event the inbox job finished, with
+// its outcome (accepted, duplicate, rejected, held), the rejection's code
+// and how long it took.
+func EventInboxProcessed(outcome, code string, d time.Duration) {
+	eventInboxProcessed.WithLabelValues(outcome).Inc()
+	if outcome == "rejected" {
+		eventInboxRejected.WithLabelValues(code).Inc()
+	}
+	eventInboxDuration.Observe(d.Seconds())
+}
+
+// SetEventInboxPending records how many events wait and how long the
+// oldest has waited.
+func SetEventInboxPending(n int, oldest time.Duration) {
+	eventInboxPending.Set(float64(n))
+	eventInboxOldest.Set(max(oldest, 0).Seconds())
+}
+
+// EventInboxPurged counts inbox rows deleted at the end of their retention.
+func EventInboxPurged(n int) { eventInboxPurged.Add(float64(n)) }
+
+// SetEventInboxPurgeOverdue records how far past its retention the oldest
+// row still waiting for the sweep is.
+func SetEventInboxPurgeOverdue(d time.Duration) { eventInboxPurgeOverdue.Set(max(d, 0).Seconds()) }
+
+// PrivacyExportBuilt counts a privacy export the job finished, with its
+// outcome (ready, or the failure's code), how long it took and, when
+// ready, its uncompressed size.
+func PrivacyExportBuilt(outcome string, d time.Duration, size int64) {
+	privacyExportsBuilt.WithLabelValues(outcome).Inc()
+	if d > 0 {
+		privacyExportSeconds.Observe(d.Seconds())
+	}
+	if outcome == "ready" {
+		privacyExportBytes.Observe(float64(size))
+	}
+}
+
+// PrivacyExportsExpired counts privacy exports whose file was deleted.
+func PrivacyExportsExpired(n int) { privacyExportsExpired.Add(float64(n)) }
+
 // RatesFetched counts one fetch of exchange rates, success or error, and
 // on success sets the newest rate's age.
 func RatesFetched(outcome string, newest time.Time) {
@@ -1059,3 +1210,32 @@ func RatesFetched(outcome string, newest time.Time) {
 
 // ReceiptsConverted counts receipts given their US dollar amount late.
 func ReceiptsConverted(n int64) { receiptsConverted.Add(float64(n)) }
+
+// DesktopLinked counts one step of linking a computer.
+func DesktopLinked(step string) { desktopLinks.WithLabelValues(step).Inc() }
+
+// DesktopReport counts one report from Outflare for desktop.
+func DesktopReport(outcome string) { desktopReports.WithLabelValues(outcome).Inc() }
+
+// DesktopReadings counts usage windows reported for a provider.
+func DesktopReadings(provider, source string, n int) {
+	desktopReadings.WithLabelValues(provider, source).Add(float64(n))
+}
+
+// DesktopReadFailed counts a tool the app couldn't read. code comes from
+// the app, so anything outside a bounded pattern is counted as other.
+func DesktopReadFailed(provider, code string) {
+	if len(code) > 40 {
+		code = "other"
+	}
+	desktopReadFailures.WithLabelValues(provider, code).Inc()
+}
+
+// DesktopDevices sets how many linked computers report and are silent.
+func DesktopDevices(reporting, silent int64) {
+	desktopDevices.WithLabelValues("reporting").Set(float64(reporting))
+	desktopDevices.WithLabelValues("silent").Set(float64(silent))
+}
+
+// DesktopPurged counts usage readings deleted after 90 days.
+func DesktopPurged(n int64) { desktopPurged.Add(float64(n)) }

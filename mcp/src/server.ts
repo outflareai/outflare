@@ -4636,6 +4636,112 @@ export function createServer({ client: gtm, workspace, readOnly = false, mission
   );
 
   server.registerTool(
+    "suggest_stories",
+    {
+      title: "Suggest story ideas",
+      description:
+        "Queues the workspace's own AI model to suggest story ideas for a brand from its facts, its experts' topics, its recent coverage and the news its topic searches found. " +
+        "Each idea becomes a story with status idea (list_stories with status idea once it has run). Ideas never state numbers or quotes. " +
+        "Needs a connected AI model; Outflare never uses its own key.",
+      inputSchema: {
+        brand_id: z.string().max(100).describe("A brand's id or handle."),
+        count: z.number().int().min(1).max(10).optional(),
+        brief: z.string().max(1000).optional().describe("What the ideas should be about."),
+      },
+      annotations: write,
+    },
+    (body) => call(() => gtm.POST("/v1/workspaces/{ws}/stories/ideas", { params: { path: { ws } }, body })),
+  );
+
+  server.registerTool(
+    "draft_story",
+    {
+      title: "Draft a story's release",
+      description:
+        "Queues the workspace's own AI model to write the story's release from its headline, notes, facts and approved quotes only, replacing the current release. " +
+        "The draft is checked like any release; follow ai_status on get_story, then fix what the check found. A person still approves it in Outflare.",
+      inputSchema: { story_id: id, guidance: z.string().max(1000).optional().describe("What to change or stress, like \"Lead with the 37%.\"") },
+      annotations: write,
+    },
+    ({ story_id, ...body }) => call(() => gtm.POST("/v1/workspaces/{ws}/stories/{story}/draft", { params: { path: { ws, story: story_id } }, body })),
+  );
+
+  server.registerTool(
+    "pitch_story",
+    {
+      title: "Pitch a story to journalists",
+      description:
+        "Starts pitches of an approved story to up to 50 journalists (person records with an email address, such as from list_journalists) through one of the " +
+        "workspace's own sequences: one that stops on reply, has 1 or 2 steps and uses {{custom.opener}}. The workspace's AI writes each opener from the " +
+        "story's facts and approved quotes and the journalist's latest article; a person approves each pitch in Outflare. Skips journalists without an " +
+        "address, already pitched for this story, or pitched by the workspace in the last week.",
+      inputSchema: {
+        story_id: id,
+        sequence_id: id,
+        record_ids: z.array(id).min(1).max(50).describe("The journalists' person records."),
+      },
+      annotations: write,
+    },
+    ({ story_id, ...body }) => call(() => gtm.POST("/v1/workspaces/{ws}/stories/{story}/pitches", { params: { path: { ws, story: story_id } }, body })),
+  );
+
+  server.registerTool(
+    "list_story_pitches",
+    {
+      title: "List story pitches",
+      description: "Pitches of stories to journalists: the opener, status (writing, draft, enrolled, rejected), and what the journalist's reply said " +
+        "(covering, wants_data, wants_interview, not_my_beat, declined, other). Newest first.",
+      inputSchema: {
+        story_id: id.optional(),
+        status: z.enum(["writing", "draft", "enrolled", "rejected"]).optional(),
+        brand: z.string().max(100).optional().describe("A brand's id or handle."),
+        limit: z.number().int().min(1).max(500).optional(),
+        offset: z.number().int().min(0).optional(),
+      },
+      annotations: read,
+    },
+    (query) => call(() => gtm.GET("/v1/workspaces/{ws}/story-pitches", { params: { path: { ws }, query } })),
+  );
+
+  server.registerTool(
+    "update_story_pitch",
+    {
+      title: "Change a draft pitch's opener",
+      description: "Rewrites a draft pitch's opener. Use only the story's facts and approved quotes: the opener is checked like the release when a person approves it.",
+      inputSchema: { pitch_id: id, opener: z.string().min(1).max(2000) },
+      annotations: { ...write, idempotentHint: true },
+    },
+    ({ pitch_id, ...body }) => call(() => gtm.PATCH("/v1/workspaces/{ws}/story-pitches/{pitch}", { params: { path: { ws, pitch: pitch_id } }, body })),
+  );
+
+  server.registerTool(
+    "reject_story_pitch",
+    {
+      title: "Reject a draft pitch",
+      description: "Drops a draft pitch, so the journalist isn't written to.",
+      inputSchema: { pitch_id: id, reason: z.string().max(500).optional() },
+      annotations: write,
+    },
+    ({ pitch_id, ...body }) => call(() => gtm.POST("/v1/workspaces/{ws}/story-pitches/{pitch}/reject", { params: { path: { ws, pitch: pitch_id } }, body })),
+  );
+
+  server.registerTool(
+    "get_story_results",
+    {
+      title: "Results of stories",
+      description: "Per story over the last days (28 by default): pitches sent, replies by kind, and coverage with how much of it links. " +
+        "Coverage counts when a person put it on the story or a journalist it pitched wrote it after the pitch. Reads what is stored, so it costs nothing.",
+      inputSchema: {
+        brand: z.string().max(100).optional().describe("A brand's id or handle."),
+        days: z.number().int().min(1).max(365).optional(),
+        story_id: id.optional(),
+      },
+      annotations: read,
+    },
+    (query) => call(() => gtm.GET("/v1/workspaces/{ws}/stories/results", { params: { path: { ws }, query } })),
+  );
+
+  server.registerTool(
     "list_journalists",
     {
       title: "List journalists",
@@ -4693,11 +4799,13 @@ export function createServer({ client: gtm, workspace, readOnly = false, mission
     "update_coverage",
     {
       title: "Confirm or dismiss coverage",
-      description: "status confirms or dismisses a coverage item, or moves it back to new. linked says whether the article links to the brand's site.",
+      description: "status confirms or dismisses a coverage item, or moves it back to new. linked says whether the article links to the brand's site. " +
+        "story_id puts it on one of the brand's stories (empty takes it off), so the story's results count it.",
       inputSchema: {
         coverage_id: id,
         status: z.enum(["new", "confirmed", "dismissed"]).optional(),
         linked: z.boolean().optional(),
+        story_id: z.string().optional(),
       },
       annotations: { ...write, idempotentHint: true },
     },
@@ -4988,15 +5096,42 @@ export function createServer({ client: gtm, workspace, readOnly = false, mission
     "update_link_building_settings",
     {
       title: "Change link building settings",
-      description: "pitch_cooldown_days (0 to 365), weekly_reads (on or off) and weekly_budget_percent (1 to 100: the most of an SEO connection's monthly budget the weekly reads spend). Send only what changes.",
+      description:
+        "pitch_cooldown_days (0 to 365), weekly_reads (on or off), weekly_budget_percent (1 to 100: the most of an SEO connection's monthly budget the weekly reads spend) " +
+        "and recheck_days (0 to 365, 0 is never: how often unpitched broken-link prospects' pages are checked again for newly broken links). Send only what changes.",
       inputSchema: {
         pitch_cooldown_days: z.number().int().min(0).max(365).optional(),
         weekly_reads: z.boolean().optional(),
         weekly_budget_percent: z.number().int().min(1).max(100).optional(),
+        recheck_days: z.number().int().min(0).max(365).optional(),
       },
       annotations: { ...write, idempotentHint: true },
     },
     (body) => call(() => gtm.PATCH("/v1/workspaces/{ws}/link-building/settings", { params: { path: { ws } }, body })),
+  );
+
+  server.registerTool(
+    "list_link_assets",
+    {
+      title: "List published assets",
+      description: "Pages of the workspace's own marked published to promote (a guide, a study, a tool), newest first.",
+      inputSchema: { brand: z.string().optional() },
+      annotations: read,
+    },
+    ({ brand }) => call(() => gtm.GET("/v1/workspaces/{ws}/link-building/assets", { params: { path: { ws }, query: { brand } } })),
+  );
+
+  server.registerTool(
+    "publish_link_asset",
+    {
+      title: "Mark a page of yours published",
+      description:
+        "Records asset.published for a page worth promoting, which can start the \"Promote a new page\" playbook by itself when an automation is set for it. " +
+        "Give its full URL, and a topic people search for to find it.",
+      inputSchema: { url: z.string().url().max(2048), title: z.string().max(300).optional(), topic: z.string().max(300).optional() },
+      annotations: write,
+    },
+    (body) => call(() => gtm.POST("/v1/workspaces/{ws}/link-building/assets", { params: { path: { ws } }, body })),
   );
 
   server.registerTool(
@@ -6429,6 +6564,39 @@ export function createServer({ client: gtm, workspace, readOnly = false, mission
       annotations: { ...write, idempotentHint: true },
     },
     (body) => call(() => gtm.PATCH("/v1/workspaces/{ws}/contact-rules", { params: { path }, body })),
+  );
+
+  server.registerTool(
+    "get_email_guardrails",
+    {
+      title: "Get marketing email guardrails",
+      description:
+        "How much marketing email one person may get: a frequency cap (per_day in any 24 hours, per_week in any 7 days) and quiet hours " +
+        "(quiet_start to quiet_end o'clock in their time zone, held until they end). On by default: 1 a day, 3 a week, 8pm to 8am. " +
+        "Transactional email is never capped. A capped journey email shows the step outcome frequency_cap; a held one quiet_hours.",
+      inputSchema: {},
+      annotations: read,
+    },
+    () => call(() => gtm.GET("/v1/workspaces/{ws}/email-guardrails", { params: { path } })),
+  );
+
+  server.registerTool(
+    "set_email_guardrails",
+    {
+      title: "Change marketing email guardrails",
+      description: "Change the frequency cap or quiet hours. Send only what changes. A limit of 0 turns that limit off.",
+      inputSchema: {
+        cap_enabled: z.boolean().optional(),
+        per_day: z.number().int().min(0).max(100).optional(),
+        per_week: z.number().int().min(0).max(500).optional(),
+        quiet_hours_enabled: z.boolean().optional(),
+        quiet_start: z.number().int().min(0).max(23).optional(),
+        quiet_end: z.number().int().min(0).max(23).optional(),
+        time_zone: z.string().max(100).optional().describe("IANA time zone for people whose own is unknown, such as Europe/Paris"),
+      },
+      annotations: { ...write, idempotentHint: true },
+    },
+    (body) => call(() => gtm.PATCH("/v1/workspaces/{ws}/email-guardrails", { params: { path }, body })),
   );
 
   server.registerTool(
@@ -8393,6 +8561,8 @@ export function createServer({ client: gtm, workspace, readOnly = false, mission
           ]),
           name: z.string().optional(),
           template: z.string().optional().describe("email: a lifecycle template's handle."),
+          ignore_cap: z.boolean().optional().describe("email: send even over the frequency cap (get_email_guardrails), for email a person must get."),
+          quiet_hours: z.enum(["hold", "skip"]).optional().describe("email: in quiet hours, hold (default) sends when they end; skip doesn't send and goes on."),
           wait_seconds: z.number().int().min(60).max(7776000).optional(),
           conditions: z.array(condition).max(20).optional(),
           match: z.enum(["all", "any"]).optional(),

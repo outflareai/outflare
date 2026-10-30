@@ -1,0 +1,70 @@
+id: pr-regional-data-story
+version: 1
+title: Split one data story by region for local journalists
+summary: Turn one finding from your own data into a version per city or region, each pitched to the journalists who cover that place.
+description: |
+  Local papers want local numbers. One dataset split by region becomes a
+  story for every regional outlet, and each version has its own figures
+  and its own journalists. This playbook makes one story per region from
+  the brand's own aggregates, each with sourced facts and the expert's
+  approved quote, and pitches each to the people who write about that
+  place. A person approves every release and pitch.
+tier: clever
+goals: [search, ai_answers]
+publisher: outflare
+author: { github: outflareai }
+needs:
+  data:
+    - { check: mailboxes, label: A mailbox to send pitches from }
+  connections:
+    - capability: web.search
+      label: Geonode, so a news search per region finds local journalists
+      recommended: [geonode]
+    - capability: plan
+      label: An AI model to draft the releases and write openers, unless you run this from your own AI app
+      optional: true
+      recommended: [claude, openai]
+inputs:
+  - name: brand
+    label: Brand
+    example: Northpeak
+  - name: finding
+    label: The finding
+    example: Share of small shops that block search bots
+  - name: regions
+    label: The regions
+    help: Cities, regions or countries, separated by commas.
+    example: Manchester, Leeds, Bristol
+steps:
+  - say: Read the brand's context and experts, and save a news search for the topic in each region so local journalists are found.
+    tools: [getBrandContext, listPRExperts, createNewsSearch, listNewsSearches]
+  - say: Work out the finding for each region from the brand's own data, as aggregates only, and leave out regions with too few to be fair.
+    tools: [listQueryTables, runQuery]
+  - say: Start one story per region with its own facts and sources, and draft the expert's quote for approval.
+    tools: [createStory, addStoryFact, addStoryQuote, listStories]
+  - say: Draft each release, check it and fix what the check finds. A person approves each one.
+    tools: [draftStory, getStory, updateStory, checkStory]
+  - say: For each region, pick the journalists from that region's news search and a short sequence whose first step uses {{custom.opener}}.
+    tools: [listJournalists, listSequences, createSequence, previewSequence]
+  - say: Start the pitches, each waiting for a person, and report results by region.
+    tools: [startStoryPitches, listStoryPitches, getStoryResults]
+guardrails:
+  - Never invents a number; a region with too little data is left out rather than guessed.
+  - Uses the brand's data only as aggregates, never a figure about a person or a customer.
+  - Every release and pitch waits for a person's approval.
+  - A journalist gets one pitch a week at most, whichever region or brand.
+measure:
+  - { metric: Articles per region, how: "Coverage counted for each region's story within 30 days." }
+  - { metric: Linked articles, how: "Articles that link to the brand's site, across the regions." }
+prompt: |
+  Run the "Regional data story" playbook for {{brand}}. Take this finding
+  from our own data: {{finding}}. Work it out for each of {{regions}} as
+  aggregates, leaving out any region with too little data. Make one story
+  per region with its own sourced facts and a quote for our expert to
+  approve, draft and check each release, then pitch each to the
+  journalists who cover that region. Every release and pitch waits for my
+  approval.
+example: |
+  Northpeak split its bot-blocking finding across three cities. Leeds had
+  too few sites and was left out; the Manchester and Bristol versions went
+  to 9 local journalists and ran in 2 papers.

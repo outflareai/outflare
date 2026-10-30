@@ -12,6 +12,8 @@ import (
 // (identities, links, history) go with the record itself.
 var Erased = []Ref{
 	{"customer_events", "record_id"}, {"consents", "record_id"},
+	// The events as sent, kept in the event inbox.
+	{"event_inbox", "record_id"},
 	{"leads", "record_id"}, {"messages", "record_id"}, {"inbound_messages", "record_id"},
 	{"meetings", "record_id"}, {"emails", "record_id"}, {"email_broadcast_recipients", "record_id"},
 	{"journey_runs", "record_id"}, {"site_sessions", "record_id"}, {"site_visitors", "record_id"},
@@ -27,10 +29,14 @@ var Erased = []Ref{
 	{"coverage", "record_id"},
 	// A brand's PR expert is the person; their quotes go with them.
 	{"pr_experts", "record_id"},
+	// A journalist's pitches go with them.
+	{"story_pitches", "record_id"},
 	// The customers a partner referred, their purchases, and a partner's
 	// portal sign-ins.
 	{"partner_referrals", "record_id"}, {"partner_conversions", "record_id"},
 	{"partner_sign_in_links", "record_id"}, {"partner_sessions", "record_id"},
+	// Privacy exports of what was kept about them: the files go too.
+	{"privacy_exports", "record_id"},
 }
 
 // Kept are the Follows columns whose rows stay when a record is erased,
@@ -74,6 +80,21 @@ func Erase(ctx context.Context, tx pgx.Tx, workspaceID string, ids, emails []str
 			return nil, err
 		}
 		gone["leads"] += int(tag.RowsAffected())
+	}
+	// Events the inbox rejected or held never got a record, so they are
+	// found by the ids they carry: the person's identities, in their brand.
+	if ok, err := tableExists(ctx, tx, "event_inbox"); err != nil {
+		return nil, err
+	} else if ok {
+		tag, err := tx.Exec(ctx, `DELETE FROM event_inbox e USING records r, record_identities i
+			WHERE e.workspace_id = $1 AND r.workspace_id = $1 AND r.id = ANY($2) AND i.record_id = r.id
+			AND e.brand_id = r.brand_id AND e.record_id IS NULL
+			AND i.value IN (e.raw->>'userId', e.raw->>'user_id', e.raw->>'anonymousId', e.raw->>'anonymous_id',
+				lower(e.raw->'traits'->>'email'), lower(e.raw->'context'->'traits'->>'email'))`, workspaceID, ids)
+		if err != nil {
+			return nil, err
+		}
+		gone["event_inbox"] += int(tag.RowsAffected())
 	}
 	for _, r := range Erased {
 		ok, err := tableExists(ctx, tx, r.Table)
@@ -152,7 +173,7 @@ func keepPartnerLedger(ctx context.Context, tx pgx.Tx, workspaceID string, ids [
 	for _, p := range partners {
 		var standIn string
 		if err := tx.QueryRow(ctx, `INSERT INTO records (workspace_id, record_type, brand_id, name, origin, archived_at)
-			VALUES ($1, 'person', $2, $3, 'manual', now()) RETURNING id::text`, workspaceID, p.brand, erasedPartner).Scan(&standIn); err != nil {
+			VALUES ($1, 'person', COALESCE($2, outflare_first_brand($1)), $3, 'manual', now()) RETURNING id::text`, workspaceID, p.brand, erasedPartner).Scan(&standIn); err != nil {
 			return err
 		}
 		for _, q := range []string{

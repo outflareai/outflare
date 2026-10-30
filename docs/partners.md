@@ -87,6 +87,7 @@ Use a token with only the `partners.conversions` scope. It can report conversion
   - `self_referral`: the partner bought through their own link
   - `sale_not_found`
   - `currency`: the sale is in a currency other than the program's
+  - `lead_expired`: the customer was referred longer ago than the program's lead expiration and hasn't bought yet
 
 Report every sale and let Outflare pick out the referred ones.
 
@@ -139,6 +140,8 @@ Each program keeps its own credit rule. It never follows the workspace's [attrib
 - **`credit_window_days`:** how long after a visit or click a conversion still credits the partner.
 - **`credit_model`:** `first` or `last` visit with a ref inside the window.
 - **`codes_win`:** a promo code beats a link when a conversion carries both.
+- **`block_self_referrals`:** a partner's own sign-ups and purchases earn them nothing (the conversion answers `reason: self_referral`). On by default; turn it off for programs where partners may buy through their own link.
+- **`lead_expiry_days`** (Settings → Lead expiration): a referred customer who hasn't bought within this many days of being referred no longer credits the partner (`lead_expired`). Once they have bought, their later sales credit the partner as the flows say, whatever the lead expiration. Empty (`null`, the default) means leads never expire.
 
 Channel reporting credits a visit by `ofc` first, while commissions credit by `ref` first ([campaign links](campaign-links.md#partner-links-and-ref)).
 
@@ -208,7 +211,11 @@ Pay it from your own account, then mark it paid with a note and the payment's re
 
 To pay them in bulk, download the due payouts as CSV: Payouts → Download CSV, or `GET .../partner-payouts/export` (`status` `due` by default, or `paid`, `canceled`, `all`; `program`). Each row has the partner's code, name, email, payout details, the amount as a decimal and the currency, ready for your payout tool's bulk upload. The file holds payout details, so it needs `partners.manage` and each download is in the audit log (`partner_payouts.exported`).
 
-Outflare has no PayPal, Wise or crypto integration and never stores bank details. A partner's `payout_method` is free text, such as "PayPal: ana@example.com", stored sealed like connector keys. Structured payout fields and tax forms may come later.
+Outflare has no PayPal, Wise or crypto integration and never stores bank details. A partner's `payout_method` is free text, such as "PayPal: ana@example.com", stored sealed like connector keys. Tax forms may come later.
+
+**Payout term.** A program's `payout_term_days` (Settings → Payout term) sets Net 0 to Net 90: a reward joins a payout only that many days after the end of the UTC month it was earned in, so with Net 30 everything approved for October is paid from 30 November. Rewards whose term hasn't passed stay in the balance for a later payout. Left empty (`null`, the default), a reward is paid once it is approved.
+
+**Payout methods.** A program's `payout_methods` lists what partners choose from: `paypal`, `wise`, `bank_transfer`, `crypto` and `other`, and `payout_tokens` the crypto tokens (such as "USDC on Base"). On the portal, a partner picks one (`payout_type`, and `payout_token` for crypto) and adds their details in their own words. With no methods listed, any method is allowed. The method and token are on the partner (`PATCH .../partners/{id}` can set them too) and in the payout CSV's `payout_type` and `payout_token` columns.
 
 **Partners without payout details.** The portal's dashboard asks a partner with no payout details to add them in Settings. On the Partners tab, "No payout details (N)" lists them (`GET .../partners?payout_details=missing`; the program's `stats` count them as `partners.missing_payout_details`). A partner brought in by an import whose platform didn't give their details (Tolt's API has none) gets no payout until they add them: "Make due payouts" leaves their balance as it is and counts them in `waiting_for_details`, and their next payout includes it. Partners added in Outflare are paid as before, details or not.
 
@@ -233,6 +240,7 @@ Each program can have a hosted portal where partners apply, sign in and see how 
   - Following it confirms the address and starts a 30-day session on that portal only.
   - Asking for a link answers the same whether or not the address belongs to a partner.
 - **Applying.** With `signup_open`, anyone can apply with their name, email, your questions (`signup_fields`: text, long text, URL or a choice) and, when the program has terms, accepting them. They become a customer record and a partner, waiting for approval unless the program accepts everyone (`auto_accept`).
+- **Work email only.** With the portal setting `business_email_only` (Settings → Partner portal → Work email addresses only), applications from free, disposable and relay email addresses are refused (`personal_email`), as Outflare's email classifier sees the domain. Partners you add yourself aren't checked.
 - **What partners see:**
   - their links, with sub-ids and any page on the site
   - their promo codes
@@ -243,7 +251,8 @@ Each program can have a hosted portal where partners apply, sign in and see how 
 
   By kind: referral programs show only the dashboard and links, and influencer programs read-only stats and assets. Change `pages` to show more or less.
 - **Emails.** Partners are emailed when a customer they referred converts (with what they earned and how long it's held) and when a payout is made due or paid. Each partner chooses which they get in their settings. The emails come from the portal's sender, through your own email provider.
-- **Look.** Title, logo, accent colour, a welcome message and custom CSS.
+- **Look.** Title, logo, favicon (the browser tab's icon), accent colour, a welcome message and custom CSS. Logo and favicon are https addresses of images. Settings → Partner portal shows a preview of the sign-in page as you type.
+- **"Powered by Outflare"** shows at the foot of the portal. Hide it with the portal setting `hide_powered_by` (Settings → Partner portal). It's free either way.
 - **Seeing it as a partner.** "View as partner" on a partner (`POST .../partners/{id}/impersonate`) opens their portal read-only for an hour, even while the portal is closed. It is recorded in the audit log.
 
 ## Referral widget in your app

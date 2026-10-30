@@ -361,6 +361,7 @@ var toltPaths = map[string]string{
 	c.PartnerKindGroups: "/groups", c.PartnerKindFlows: "/flows",
 	c.PartnerKindPartners: "/partners", c.PartnerKindLinks: "/links", c.PartnerKindPromoCodes: "/promotion-codes",
 	c.PartnerKindCustomers: "/customers", c.PartnerKindTransactions: "/transactions", c.PartnerKindCommissions: "/commissions",
+	c.PartnerKindClicks: "/clicks",
 }
 
 func (t Tolt) PartnerPage(ctx context.Context, cl *c.Client, creds c.Creds, program, kind, after string) (c.PartnerObjects, string, error) {
@@ -450,6 +451,9 @@ func (t Tolt) PartnerPage(ctx context.Context, cl *c.Client, creds c.Creds, prog
 			page.Transactions = append(page.Transactions, toltTransaction(o))
 		case c.PartnerKindCommissions:
 			page.Commissions = append(page.Commissions, toltCommission(o))
+		case c.PartnerKindClicks:
+			page.Clicks = append(page.Clicks, c.ImportClick{ID: str(o, "id"), PartnerID: ref(o, "partner_id", "partner"),
+				ReferrerHost: hostOf(str(o, "referrer", "referer", "referrer_url")), Created: when(o, "created_at", "created")})
 		}
 	}
 	// v2 pages with next_cursor (cur_...) until has_more is false; an
@@ -654,6 +658,22 @@ func when(o map[string]any, keys ...string) time.Time {
 		}
 	}
 	return time.Time{}
+}
+
+// hostOf is the host of an address, or "" (a click keeps only that, never
+// the page or its query).
+func hostOf(raw string) string {
+	if raw == "" {
+		return ""
+	}
+	if !strings.Contains(raw, "://") {
+		raw = "https://" + raw
+	}
+	u, err := url.Parse(raw)
+	if err != nil {
+		return ""
+	}
+	return cutText(strings.ToLower(u.Hostname()), 255)
 }
 
 func truthy(v any) bool {

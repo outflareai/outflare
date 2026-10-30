@@ -38,12 +38,15 @@ code, .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-
 .err { color: #b91c1c; }
 .pill { display: inline-block; padding: 1px 8px; border-radius: 999px; border: 1px solid var(--line); font-size: 12px; }
 .narrow { max-width: 440px; margin: 40px auto; }
+footer#powered { text-align: center; padding: 24px 16px; font-size: 12px; color: var(--muted); }
+footer#powered a { color: inherit; }
 </style>
 <style id="custom"></style>
 </head>
 <body>
 <header><img id="logo" alt="" hidden><h1 id="title">Partner portal</h1><nav id="nav"></nav></header>
 <main id="main"><p class="muted">Loading…</p></main>
+<footer id="powered" hidden>Powered by <a href="https://outflare.ai/?utm_source=partner_portal" target="_blank" rel="noopener">Outflare</a></footer>
 <script>
 (function () {
   "use strict";
@@ -100,6 +103,8 @@ code, .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-
     document.getElementById("title").textContent = program.title;
     if (program.color) document.documentElement.style.setProperty("--accent", program.color);
     if (program.logo_url) { var l = document.getElementById("logo"); l.src = program.logo_url; l.hidden = false; }
+    if (program.favicon_url) document.head.appendChild(el("link", { rel: "icon", href: program.favicon_url }));
+    document.getElementById("powered").hidden = !program.powered_by;
     document.getElementById("custom").textContent = program.custom_css || "";
   }
   function nav() {
@@ -179,7 +184,8 @@ code, .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-
       ]),
       el("div", { "class": "card" }, [el("h3", { text: "Your link" }), el("div", { "class": "row" }, [el("code", { text: me.link }), copyBtn(me.link)]),
         el("p", { "class": "muted", text: (me.hold_days ? "Rewards wait " + me.hold_days + " days for refunds, then are approved. " : "Rewards are approved right away. ") +
-          "Payouts are made once your balance reaches " + money(me.min_payout_cents) + "." })])
+          "Payouts are made once your balance reaches " + money(me.min_payout_cents) +
+          (me.payout_term_days == null ? "." : ", for rewards earned in a month that ended at least " + me.payout_term_days + " days before (Net " + me.payout_term_days + ").") })])
     ]);
   }
   function stat(label, value) { return el("div", { "class": "stat" }, [el("span", { text: label }), el("b", { text: String(value) })]); }
@@ -233,9 +239,22 @@ code, .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-
       ]);
     }, fail);
   }
+  var methodNames = { paypal: "PayPal", wise: "Wise", bank_transfer: "Bank transfer", crypto: "Crypto", other: "Other" };
   function settings() {
     var method = el("textarea", { rows: "2", maxlength: "500", placeholder: "PayPal: you@example.com" });
     method.value = me.payout_method || "";
+    // The program's payout methods (any when it lists none) and, for
+    // crypto, its tokens: a list to pick from, or free text.
+    var offered = me.payout_methods.length ? me.payout_methods : Object.keys(methodNames);
+    var kind = el("select", {}, [el("option", { value: "", text: "Choose…" })].concat(offered.map(function (m) { return el("option", { value: m, text: methodNames[m] || m }); })));
+    kind.value = me.payout_type && offered.indexOf(me.payout_type) >= 0 ? me.payout_type : "";
+    var token = me.payout_tokens.length
+      ? el("select", {}, me.payout_tokens.map(function (t) { return el("option", { value: t, text: t }); }))
+      : el("input", { maxlength: "40", placeholder: "USDC on Base" });
+    token.value = me.payout_token || (me.payout_tokens[0] || "");
+    var tokenRow = el("div", {}, [el("label", { text: "Token" }), token]);
+    function showToken() { tokenRow.style.display = kind.value === "crypto" ? "" : "none"; }
+    kind.addEventListener("change", showToken); showToken();
     var postback = el("input", { type: "url", maxlength: "2000", placeholder: "https://tracker.example/postback?clickid={sub_id}&payout={commission}" });
     postback.value = me.postback_url || "";
     var affiliate = program.kind === "affiliate" || !!me.postback_url;
@@ -246,13 +265,15 @@ code, .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-
     render([el("div", { "class": "card" }, [el("form", { onsubmit: function (e) {
       e.preventDefault();
       var body = { payout_method: method.value, notify: { conversions: conv.checked, payouts: pay.checked } };
+      if (kind.value) { body.payout_type = kind.value; if (kind.value === "crypto") body.payout_token = token.value.trim() || null; }
       if (affiliate) body.postback_url = postback.value;
       api("PATCH", "me", body).then(function (r) {
         me = r; note.className = "banner ok"; note.textContent = "Saved.";
       }, function (err) { note.className = "err"; note.textContent = err.message; });
     } }, [
-      el("label", { text: "How you'd like to be paid" }), method,
-      el("p", { "class": "muted", text: "Free text, kept encrypted. Never put bank account numbers here." }),
+      el("label", { text: "Payout method" }), kind, tokenRow,
+      el("label", { text: "Your payout details" }), method,
+      el("p", { "class": "muted", text: "Such as your PayPal email or wallet address, kept encrypted. Never put bank account numbers here." }),
       affiliate ? el("label", { text: "Postback URL (your own tracker)" }) : null,
       affiliate ? postback : null,
       affiliate ? el("p", { "class": "muted", text: "Called once for each conversion credited to you, and again if it's refunded. Placeholders: {sub_id} (the sub on your link, such as your click id), {click_id}, {conversion_id}, {type}, {event_name}, {amount}, {amount_cents}, {currency}, {commission}, {commission_cents}, {status} (pending, approved or reversed), {code}, {program}. Must start with https://." }) : null,

@@ -1609,6 +1609,19 @@ func createUser(ctx context.Context, tx pgx.Tx, email, name, hash string) (userI
 
 var nonSlug = regexp.MustCompile(`[^a-z0-9]+`)
 
+// firstBrandHandle is the handle of a new workspace's first brand: the
+// name as a slug when that is a valid handle, else "brand".
+func firstBrandHandle(name string) string {
+	h := strings.Trim(nonSlug.ReplaceAllString(strings.ToLower(name), "-"), "-")
+	if len(h) > 40 {
+		h = strings.Trim(h[:40], "-")
+	}
+	if handleProblem(h) != "" {
+		return "brand"
+	}
+	return h
+}
+
 func createWorkspace(ctx context.Context, tx pgx.Tx, name, ownerID string) (string, error) {
 	base := slugFrom(name)
 	var id string
@@ -1634,6 +1647,13 @@ func createWorkspace(ctx context.Context, tx pgx.Tx, name, ownerID string) (stri
 			return "", err
 		}
 		break
+	}
+	// Brands own a workspace's data (plans/brands/README.md), so every
+	// workspace starts with one, named after it. It comes first, so the
+	// catalog rows below belong to it.
+	if _, err := tx.Exec(ctx, `INSERT INTO brands (workspace_id, name, handle) VALUES ($1, $2, $3)`,
+		id, truncate(name, 100), firstBrandHandle(name)); err != nil {
+		return "", err
 	}
 	// New workspaces start with the Deal type, like Attio's Deals.
 	if _, err := tx.Exec(ctx, `SELECT outflare_deal_type($1)`, id); err != nil {

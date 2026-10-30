@@ -360,7 +360,7 @@ func (s *Server) addVisitorCompany(w http.ResponseWriter, r *http.Request) {
 				WHERE l.workspace_id = $1 AND l.domain = $2 ORDER BY l.checked_at DESC LIMIT 1`, a.WorkspaceID, domain).Scan(&via); err != nil && !errors.Is(err, pgx.ErrNoRows) {
 				return err
 			}
-			if err := tx.QueryRow(ctx, `INSERT INTO records (workspace_id, record_type, brand_id, name, origin, acquired_via, created_by) VALUES ($1, 'account', $2, $3, 'prospect', $4, $5) RETURNING id::text`,
+			if err := tx.QueryRow(ctx, `INSERT INTO records (workspace_id, record_type, brand_id, name, origin, acquired_via, created_by) VALUES ($1, 'account', COALESCE($2, outflare_first_brand($1)), $3, 'prospect', $4, $5) RETURNING id::text`,
 				a.WorkspaceID, brand, name, via, nullIfEmpty(a.ActorID)).Scan(&id); err != nil {
 				return err
 			}

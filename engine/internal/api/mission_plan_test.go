@@ -69,6 +69,18 @@ func (fakeClaude) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		readLinkPage(w)
 		return
 	}
+	if strings.Contains(string(body), "You write the opening lines of a short email pitching a story") {
+		answerJSON(w, map[string]any{"opener": "You covered bot blocking last week. We measured 1,200 sites, and a third block their own customers' bots."})
+		return
+	}
+	if strings.Contains(string(body), "You read a journalist's reply to a story pitch") {
+		answerJSON(w, map[string]any{"kind": "wants_data"})
+		return
+	}
+	if strings.Contains(string(body), "You suggest digital PR story ideas") || strings.Contains(string(body), "You write a first draft of a press release") {
+		answerStories(w, string(body))
+		return
+	}
 	if strings.Contains(string(body), "You write fix tickets for a website") {
 		writeTicket(w, string(body))
 		return

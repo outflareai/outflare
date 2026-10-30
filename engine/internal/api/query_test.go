@@ -68,11 +68,12 @@ func TestQuery(t *testing.T) {
 		t.Fatalf("limit: %v", out)
 	}
 
-	// A token kept to one brand sees that brand's people and the shared ones.
+	// A token kept to one brand sees only that brand's people: one made
+	// without a brand belongs to the workspace's first brand.
 	tok := owner.must(201, "POST", base+"/api-tokens", map[string]any{"name": "Repocket agent", "scopes": []string{"customers.read", "leads.read"}, "brand": "repocket"})
 	agent := &client{t: t, h: h, bearer: tok["token"].(string), header: map[string]string{"Outflare-Client": "mcp/0.1.0", "Outflare-Tool": "run_query"}}
 	out = agent.must(200, "POST", base+"/query", map[string]any{"sql": "select name from people order by name"})
-	if rows := queryRows(t, out); len(rows) != 2 || rows[0][0] != "Ada" || rows[1][0] != "Shared" {
+	if rows := queryRows(t, out); len(rows) != 1 || rows[0][0] != "Ada" {
 		t.Fatalf("brand token: %v", out)
 	}
 	if code, out := agent.do("POST", base+"/query", map[string]any{"sql": "select count(*) from leads"}); code != 403 || !strings.Contains(out["error"].(map[string]any)["message"].(string), "no brand") {

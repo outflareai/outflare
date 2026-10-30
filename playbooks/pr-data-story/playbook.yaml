@@ -1,0 +1,75 @@
+id: pr-data-story
+version: 1
+title: Turn your own numbers into a story journalists want
+summary: Find a surprising finding in your own data, write it up with sourced facts and approved quotes, and pitch it to journalists who cover the topic.
+description: |
+  Journalists file stories built on new numbers, and a brand's own data
+  holds findings nobody else can publish. This playbook looks for one in
+  your data as aggregates, never about a person, writes the release with
+  a source for every number and a quote your expert approved, and pitches
+  it to the journalists who wrote about the topic recently. A person
+  approves the release and every pitch.
+tier: clever
+goals: [search, ai_answers]
+publisher: outflare
+author: { github: outflareai }
+needs:
+  data:
+    - { check: mailboxes, label: A mailbox to send pitches from }
+  connections:
+    - capability: web.search
+      label: Geonode, so the news watch finds journalists who cover the topic
+      recommended: [geonode]
+    - capability: plan
+      label: An AI model to suggest angles, draft the release and write openers, unless you run this from your own AI app
+      optional: true
+      recommended: [claude, openai]
+inputs:
+  - name: brand
+    label: Brand
+    example: Northpeak
+  - name: topic
+    label: The topic journalists cover
+    example: bot traffic on the web
+  - name: data
+    label: Where the numbers are
+    help: A saved query, a table or a report. Leave it empty and the agent looks through what Query can read.
+    example: monthly crawl stats by industry
+    optional: true
+steps:
+  - say: Read the brand's context and experts, and make sure a news search follows the topic so the journalists who cover it are known.
+    tools: [getBrandContext, listPRExperts, listNewsSearches, createNewsSearch]
+  - say: Look for a surprising finding in the brand's own data, as aggregates only, and suggest story ideas from it and the news.
+    tools: [listQueryTables, runQuery, suggestStories, listStories]
+  - say: Start the story, add every number as a fact with how to find it again, and draft a quote for the brand's expert to approve.
+    tools: [createStory, addStoryFact, addStoryQuote]
+  - say: Draft the release from the facts and approved quotes, check it, and fix what the check finds. A person approves it.
+    tools: [draftStory, getStory, updateStory, checkStory]
+  - say: Pick the journalists who wrote about the topic in the last two months, and a sequence of one email and at most one follow-up whose first step uses {{custom.opener}}.
+    tools: [listJournalists, listSequences, createSequence, previewSequence]
+  - say: Start a pitch to each journalist. The AI writes an opener from the story and their latest article, and each pitch waits for a person.
+    tools: [startStoryPitches, listStoryPitches]
+  - say: Report replies and the coverage that followed.
+    tools: [getStoryResults, listCoverage]
+guardrails:
+  - Never invents a number, a quote or an expert; every number has a source and every quote the expert's approval.
+  - Uses the brand's data only as aggregates, never a figure about a person or a customer.
+  - The release and every pitch wait for a person's approval.
+  - One email and at most one follow-up per journalist, stopping on any reply, and no journalist pitched twice in a week.
+measure:
+  - { metric: Articles, how: "Coverage counted for the story within 30 days (Stories, the story's results)." }
+  - { metric: Linked articles, how: "Articles that link to the brand's site, on the same results." }
+  - { metric: Reply rate, how: "Journalists who replied divided by journalists pitched." }
+prompt: |
+  Run the "Data story" playbook for {{brand}} on {{topic}}. Look for a
+  surprising finding in our own data ({{data}}), as aggregates only, and
+  suggest the best angle. Write it up as a story with every number as a
+  sourced fact and a quote for our expert to approve, draft the release
+  and check it. Then pick the journalists who covered {{topic}} recently
+  and start a pitch to each through a short sequence. The release and
+  every pitch wait for my approval.
+example: |
+  Northpeak's crawl data showed a third of the 1,200 sites it measured
+  blocked their own customers' bots. The release went to 24 journalists
+  who had written about bots that month; 3 asked for the data and 2
+  articles ran, one with a link.

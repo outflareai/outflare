@@ -47,6 +47,7 @@ func (s *Server) updateLinkSettings(w http.ResponseWriter, r *http.Request) {
 		PitchCooldownDays   *int  `json:"pitch_cooldown_days"`
 		WeeklyReads         *bool `json:"weekly_reads"`
 		WeeklyBudgetPercent *int  `json:"weekly_budget_percent"`
+		RecheckDays         *int  `json:"recheck_days"`
 	}
 	if !decode(w, r, &in) {
 		return
@@ -57,6 +58,10 @@ func (s *Server) updateLinkSettings(w http.ResponseWriter, r *http.Request) {
 	}
 	if in.WeeklyBudgetPercent != nil && (*in.WeeklyBudgetPercent < 1 || *in.WeeklyBudgetPercent > 100) {
 		writeError(w, r, http.StatusBadRequest, "invalid_request", "weekly_budget_percent must be 1 to 100")
+		return
+	}
+	if in.RecheckDays != nil && (*in.RecheckDays < 0 || *in.RecheckDays > 365) {
+		writeError(w, r, http.StatusBadRequest, "invalid_request", "recheck_days must be 0 (never) to 365")
 		return
 	}
 	ctx := r.Context()
@@ -75,14 +80,17 @@ func (s *Server) updateLinkSettings(w http.ResponseWriter, r *http.Request) {
 	if in.WeeklyBudgetPercent != nil {
 		after.WeeklyBudgetPercent = *in.WeeklyBudgetPercent
 	}
+	if in.RecheckDays != nil {
+		after.RecheckDays = *in.RecheckDays
+	}
 	err = pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
 		if _, err := tx.Exec(ctx, `UPDATE link_building_settings SET pitch_cooldown_days = $2, weekly_reads = $3, weekly_budget_percent = $4,
-				updated_by = $5, updated_at = now() WHERE workspace_id = $1`,
-			a.WorkspaceID, after.PitchCooldownDays, after.WeeklyReads, after.WeeklyBudgetPercent, nullIfEmpty(a.ActorID)); err != nil {
+				recheck_days = $6, updated_by = $5, updated_at = now() WHERE workspace_id = $1`,
+			a.WorkspaceID, after.PitchCooldownDays, after.WeeklyReads, after.WeeklyBudgetPercent, nullIfEmpty(a.ActorID), after.RecheckDays); err != nil {
 			return err
 		}
 		data := map[string]any{"pitch_cooldown_days": after.PitchCooldownDays, "weekly_reads": after.WeeklyReads,
-			"weekly_budget_percent": after.WeeklyBudgetPercent}
+			"weekly_budget_percent": after.WeeklyBudgetPercent, "recheck_days": after.RecheckDays}
 		return recordWithProps(ctx, tx, &a.principal, a.WorkspaceID, "link_building.settings_updated", "workspace", a.WorkspaceID, data, data)
 	})
 	if err != nil {

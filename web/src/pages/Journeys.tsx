@@ -29,6 +29,7 @@ import { TestPanel, type TestMarks } from "@/components/journey-flow/test-mode";
 import { KitNotice } from "@/components/kit-notice";
 import { KitExportSheet } from "@/components/kit-export";
 import type { Go } from "./Lifecycle";
+import { useGuardrails } from "./EmailGuardrails";
 
 type Status = Journey["status"];
 const statusTone: Record<Status, "green" | "grey" | "amber"> = { draft: "grey", active: "green", paused: "amber", archived: "grey" };
@@ -205,7 +206,7 @@ function bodyOf(w: Work) {
   };
 }
 
-const outcomeText: Record<string, string> = { sent: "sent", skipped: "skipped", waiting: "waiting", waited: "waited", yes: "yes", no: "no", failed: "failed", exited: "exited" };
+const outcomeText: Record<string, string> = { sent: "sent", skipped: "skipped", waiting: "waiting", waited: "waited", yes: "yes", no: "no", failed: "failed", exited: "exited", frequency_cap: "skipped: frequency cap", quiet_hours: "held for quiet hours", quiet_hours_skipped: "skipped: quiet hours" };
 
 // stepCard is what a step's card says: its label, a detail line, and its
 // live numbers.
@@ -222,10 +223,13 @@ function stepCard(s: Step, j: Journey, kinds: StepKind[], templates: EmailTempla
       const t = templates.find((x) => x.handle === s.template || x.id === s.template);
       // The label already names the template, unless the step has a name.
       if (s.name || (t && !t.published_version)) detail = t ? `${t.name}${t.published_version ? "" : " (not published)"}` : s.template;
-      if (n("sent")) numbers.push({ text: `${n("sent")} sent` });
+      if (n("sent") + n("quiet_hours")) numbers.push({ text: `${n("sent") + n("quiet_hours")} sent` });
       // Opens and clicks as rates of delivered email, as email tools show them.
       if (em?.delivered) numbers.push({ text: `${pct(em.opened, em.delivered)} opened` }, { text: `${pct(em.clicked, em.delivered)} clicked` });
       if (n("skipped")) numbers.push({ text: `${n("skipped")} skipped`, tone: "amber" });
+      if (n("frequency_cap")) numbers.push({ text: `${n("frequency_cap")} capped`, tone: "amber" });
+      if (n("quiet_hours")) numbers.push({ text: `${n("quiet_hours")} held for quiet hours` });
+      if (n("quiet_hours_skipped")) numbers.push({ text: `${n("quiet_hours_skipped")} skipped in quiet hours`, tone: "amber" });
       break;
     }
     case "wait":
@@ -332,6 +336,7 @@ function JourneyDetail({ ws, id, canManage, back, go }: { ws: string; id: string
   const kinds = useStepKinds(ws);
   const templates = useTemplates(ws);
   const catalog = useFlowCatalog(ws);
+  const [guardrails] = useGuardrails(ws);
   const rules = useRules(ws);
   const mobile = useIsMobile();
   const [j, setJ] = useState<Journey | null>(null);
@@ -642,7 +647,7 @@ function JourneyDetail({ ws, id, canManage, back, go }: { ws: string; id: string
       {picker && <StepPicker kinds={kinds} onPick={(k) => addStep(picker, k)} onClose={() => setPicker(null)} onConnect={() => go("connectors")} />}
       {open && (
         <StepPanel ws={ws} step={open} steps={shown.steps} kinds={kinds} templates={templates} catalog={catalog} event={shown.trigger.kind === "event" ? shown.trigger.event : null}
-          problems={probs.get(open.id) ?? []} editable={editable} go={go}
+          problems={probs.get(open.id) ?? []} editable={editable} go={go} guardrails={guardrails}
           extra={!viewing && <StepResults ws={ws} j={j} step={open} card={stepCard(open, j, kinds, templates, shown.steps, [])} />}
           onChange={(x) => work && setSteps(replace(work.steps, x))} onRemove={() => removeStep(open.id)} onClose={() => setPanel(null)} />
       )}

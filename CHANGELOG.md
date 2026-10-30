@@ -6,6 +6,110 @@ Each pull request that changes what Outflare does adds a change note in [changes
 
 ## [Unreleased]
 
+## [0.62.0] - 2026-10-30
+
+### Added
+
+- Link autopilot page: set how many new live links you want a month and a budget, and Outflare's agent runs the link building playbooks toward it. You approve its mission, each automation it sets up and every pitch. Part of Outflare Cloud; other servers show what it does.
+
+### Changed
+
+- The partner portal can take applications from work email addresses only, refusing free, disposable and relay addresses.
+- Partner programs can set a payout term (Net 0 to Net 90 after the month a reward was earned) and the payout methods and crypto tokens partners choose from. Partners pick their method on the portal, and the payout CSV says which.
+
+### Fixed
+
+- The changes from v0.61.0, which didn't pass the release checks, are now published.
+
+## [0.61.0] - 2026-10-30
+
+### Added
+
+- Four digital PR playbooks: a data story from your own numbers, a regional version of it for local papers, a reaction to today's news with your expert's approved comment, and your expert offered to journalists on their beat. Each runs as a mission you approve.
+- Pitch an approved story to journalists through your sequences. Your own AI writes each opener from the story's sourced facts and the journalist's latest article; a person approves every pitch, and sends wait for the embargo. Replies are read as covering it, wants the data, wants an interview or not my beat, and each story shows its results.
+
+### Changed
+
+- The partner portal can have its own favicon, and its logo and favicon are set in Settings, with a preview of the sign-in page as you type.
+
+### Fixed
+
+- The changes from v0.60.0, which didn't pass the release checks, are now published.
+
+## [0.60.0] - 2026-10-30
+
+### Changed
+
+- Partners: each program can turn the self-referral block off (it stays on by default), and the partner portal shows "Powered by Outflare" at its foot, which any program can hide.
+- Partners: the Tolt import brings over clicks on partners' links, so each partner's click count carries over. A second run doesn't count them twice.
+
+## [0.59.5] - 2026-10-30
+
+### Fixed
+
+- The changes from v0.59.4, which didn't pass the release checks, are now published.
+
+## [0.59.4] - 2026-10-30
+
+### Fixed
+
+- The changes from v0.59.2, which didn't pass the release checks, are now published.
+
+## [0.59.3] - 2026-10-30
+
+### Fixed
+
+- The changes from v0.59.0, which didn't pass the release checks, are now published.
+
+## [0.59.2] - 2026-10-30
+
+### Fixed
+
+- The changes from v0.59.0, which didn't pass the release checks, are now published.
+
+## [0.59.1] - 2026-10-30
+
+### Fixed
+
+- The changes from v0.58.0, which didn't pass the release checks, are now published.
+
+## [0.59.0] - 2026-10-30
+
+### Changed
+
+- Journey email steps can send even over the frequency cap, for email a person must get such as a sign-in link, and can skip rather than hold an email due in quiet hours. Skipped emails are logged with the reason, like capped ones.
+- Link building playbooks can now start by themselves when a competitor gains a link, a page you could pitch gets a broken link, you publish a page worth promoting, or the news names your brand.
+- Partner programs can set a lead expiration: a referred customer who hasn't bought within that many days no longer credits the partner.
+- Stories can now use your own AI model to suggest story ideas from your coverage, your experts' topics and the news, and to draft a press release from a story's sourced facts and approved quotes only. Every draft goes through the same check as any release, and a person still approves it.
+
+### Fixed
+
+- The changes from v0.58.0, which didn't pass the release checks, are now published.
+
+## [0.58.0] - 2026-10-30
+
+### Added
+
+- Marketing email guardrails: by default each person gets at most 1 marketing email a day and 3 a week, and nothing between 8pm and 8am in their time zone (held until morning). Change them per workspace. Every capped or held send says why on the journey step and the person's timeline.
+
+## [0.57.0] - 2026-10-30
+
+### Added
+
+- Product events sent to a brand are saved first and answered at once with a receipt per event. Each event then shows whether it was accepted, a duplicate, rejected (with what to fix) or held for an unapproved name, on the brand's new Events page, and rejected or held events can be fixed and replayed for 90 days.
+
+## [0.56.0] - 2026-10-30
+
+### Changed
+
+- Brands keep their customer data apart: every person, company and record, with their details, history and consent, and the fields and types you add to the catalog, now belong to one brand. People with no brand go to your first brand, and duplicates are only found and merged within a brand.
+
+## [0.55.0] - 2026-10-30
+
+### Changed
+
+- Every workspace now starts with a brand, named after the workspace, and workspaces without one got one. Brands are becoming the owner of all their data, so two brands in one workspace never mix: their own API calls live under `/v1/brands/{brand}/`, starting with reading the brand itself.
+
 ## [0.54.1] - 2026-10-30
 
 ### Fixed

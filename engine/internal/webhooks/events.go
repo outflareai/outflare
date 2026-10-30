@@ -158,6 +158,7 @@ var Catalog = []Event{
 	{"consent.granted", "customers", "A person gave consent. data has channel, purpose, source, and topic (true when it is for one topic rather than the whole channel)."},
 	{"consent.withdrawn", "customers", "A person withdrew consent, such as by unsubscribing from any email. data has channel, purpose, source and topic, as for consent.granted."},
 	{"consent.bulk_withdrawn", "customers", "Many people withdrew consent at once, such as unsubscribes imported from another sequencer. data.count says how many."},
+	{"privacy_export.ready", "customers", "A privacy export of a person or company is ready to download. The target is the export; data has record_id, brand_id, size_bytes (gzipped), rows, counts (rows by table) and expires_at (7 days later). GET /v1/brands/{brand}/privacy-exports/{id} has its download_url."},
 	// Brands
 	{"brand.created", "brands", "A brand was added to the workspace."},
 	{"brand.updated", "brands", "A brand's name, website or settings changed. data.fields lists what changed."},
@@ -204,6 +205,10 @@ var Catalog = []Event{
 	{"backlink.lost", "seo", "A link to one of the SEO sites is gone. data has the link as for backlink.new, plus reason when the provider says why (page removed, link removed, redirect)."},
 	{"backlink.regained", "seo", "A lost link to one of the SEO sites is back. data has the link as for backlink.new."},
 	{"competitor.page_removed", "seo", "A page is gone from a tracked competitor's sitemaps (at most 50 a look). Sites still linking to it may link to yours instead. data has site_id, competitor_id, url and removed (how many went in this look)."},
+	{"competitor_link.new", "seo", "A domain is new among a tracked competitor's linking domains since its previous weekly read, and doesn't link to the site (at most 50 a read, strongest first; the read takes a competitor's top domains, so it can be new to the list rather than newly linking). data has site_id, brand_id, competitor_id, competitor, source_domain, source_url, source_rating, competitors (how many tracked competitors it links to now), connector and day."},
+	{"outbound_link.broken", "seo", "A page that is a link prospect has a broken outbound link it didn't have at its previous check (every broken link on its first check; at most 10 a check). Your page could replace it. data has prospect_id, site_id, brand_id, record_id, method, page_url, broken_url, status, anchor, archive_url (what the Internet Archive kept) and first_check."},
+	{"asset.published", "seo", "A page of the workspace's own worth promoting (a guide, a study, a tool) was marked published (POST .../link-building/assets). data has asset_id, url, title, topic, site_id and brand_id."},
+	{"mention.found", "seo", "The news watch found a new article naming a brand. data has brand_id, record_id (the outlet), article_id, search_id, source and kind."},
 	// Link building
 	{"link_prospect.found", "link_building", "A page that could link to an SEO site was added to the link prospects list. data has site_id, brand_id, record_id (the website's company), method, score, stage (prospect, or excluded with excluded_reason) and source."},
 	{"link_prospect.checked", "link_building", "OutflareBot checked a link prospect's page. data has site_id, brand_id, record_id, status (up, gone, redirected, blocked, opted_out, unreachable, failed), links_to_us, broken (how many broken outbound links), fit (0 to 100, or null without AI), score, contacts (how many new) and error_code; GET the prospect for the check."},

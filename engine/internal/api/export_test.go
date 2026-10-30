@@ -52,3 +52,10 @@ func DeprecateOperation(op, instead string) func() {
 	deprecatedOperations[op] = deprecatedOperation{instead: instead}
 	return func() { delete(deprecatedOperations, op) }
 }
+
+// SetPrivacyExportLimit lowers the size a privacy export may reach before
+// it fails with too_large. It returns the undo.
+func SetPrivacyExportLimit(n int64) func() {
+	old := exportLimit.Swap(n)
+	return func() { exportLimit.Store(old) }
+}

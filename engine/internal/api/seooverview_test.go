@@ -19,7 +19,9 @@ func TestSEOOverviewByBrand(t *testing.T) {
 		}
 	}
 
-	// Nothing stored: no brands, an empty shared entry.
+	// Nothing stored: no brands, an empty shared entry. Sign-up made a
+	// brand; this test is about brands people add, so it archives that one.
+	owner.must(200, "PATCH", base+"/brands/acme-outbound", map[string]any{"status": "archived"})
 	empty := owner.must(200, "GET", base+"/seo/overview", nil)["data"].([]any)
 	if len(empty) != 1 || empty[0].(map[string]any)["brand"] != nil || len(empty[0].(map[string]any)["weeks"].([]any)) != 12 {
 		t.Fatalf("empty: %v", empty)

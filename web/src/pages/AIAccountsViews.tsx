@@ -12,7 +12,7 @@ import { AILogo, providerLabel } from "@/components/ai-logo";
 import { Switch } from "@/components/ui/switch";
 import { cn } from "@/lib/utils";
 import { track } from "@/lib/analytics";
-import { companyPaid, dayDate, daysUntil, isoDay, monthlyCents, owners, renewalsBetween, renewingWithin, shortDay, usd } from "@/lib/aiAccounts";
+import { binding, companyPaid, dayDate, daysUntil, isoDay, monthlyCents, owners, readAgo, renewalsBetween, renewingWithin, resetsIn, shortDay, usd, usedTone, windowLabel } from "@/lib/aiAccounts";
 
 const providerOrder: AIProvider[] = ["claude", "chatgpt", "cursor", "copilot", "anthropic_api", "openai_api"];
 
@@ -280,16 +280,70 @@ const verdicts: Record<string, { label: string; tone: "red" | "green" | "blue" }
   room: { label: "↓ Room to spare", tone: "blue" },
 };
 
+// The live part of the Usage view, from Outflare for desktop's latest
+// readings: for each AI tool the account with the most room before its
+// tightest limit, and every account near a limit.
+function LiveUsage({ accounts }: { accounts: AIAccount[] }) {
+  const read = accounts.filter((a) => !a.cancelled && a.usage.length > 0);
+  const room = (a: AIAccount) => Math.max(0, 100 - (binding(a)?.used_percent ?? 0));
+  const byTool = new Map<AIProvider, AIAccount[]>();
+  for (const a of read) byTool.set(a.provider, [...(byTool.get(a.provider) ?? []), a]);
+  const near = read.filter((a) => (binding(a)?.used_percent ?? 0) >= 80).sort((x, y) => room(x) - room(y));
+  return (
+    <>
+      <Card title="Which account to use" description="For each AI tool, the account with the most room before its tightest limit resets, from the latest readings.">
+        <div className="grid gap-3 text-[13px] sm:grid-cols-2">
+          {[...byTool.entries()].map(([provider, list]) => {
+            const [best, ...rest] = [...list].sort((x, y) => room(y) - room(x));
+            const b = binding(best)!;
+            return (
+              <div key={provider} className="rounded-md border p-3">
+                <div className="flex items-center gap-2"><AILogo provider={provider} className="size-6" /> <span className="font-medium">{best.name}</span></div>
+                <div className="mt-2 flex flex-wrap items-baseline gap-x-2"><span className="text-xl font-semibold tabular-nums">{Math.round(room(best))}%</span><span className="text-muted-foreground">left · limited by {windowLabel(b.kind)}{b.resets_at ? ` · resets ${resetsIn(b.resets_at)}` : ""}</span></div>
+                <div className="mt-1.5 h-1.5 overflow-hidden rounded-full bg-muted"><span className="block h-full rounded-full bg-green-600" style={{ width: `${room(best)}%` }} /></div>
+                <div className="mt-2 text-[12px] text-muted-foreground">
+                  {rest.length ? `Next best: ${rest.map((a) => `${a.name} (${Math.round(room(a))}% left)`).join(", ")}` : "The only account read for this tool."} · read {readAgo(b.observed_at)}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </Card>
+      <Card title={near.length ? `${near.length} account${near.length > 1 ? "s are" : " is"} near a limit` : "No account is near a limit"} description="Accounts that have used 80% or more of a limit, tightest first.">
+        {near.length === 0 ? <p className="text-[13px] text-muted-foreground">Every account read has at least 20% of each limit left.</p> : (
+          <ul className="divide-y text-[13px]">
+            {near.map((a) => {
+              const b = binding(a)!;
+              const pct = Math.min(100, Math.round(b.used_percent));
+              return (
+                <li key={a.id} className="grid grid-cols-[minmax(0,14rem)_1fr_minmax(0,11rem)] items-center gap-3 py-2">
+                  <span className="flex min-w-0 items-center gap-2"><AILogo provider={a.provider} className="size-6" /> <span className="truncate">{a.name}</span></span>
+                  <span className="h-2 overflow-hidden rounded-full bg-muted"><span className={cn("block h-full rounded-full", usedTone(pct))} style={{ width: `${pct}%` }} /></span>
+                  <span><span className={cn("font-medium tabular-nums", pct >= 100 && "text-red-600 dark:text-red-400")}>{pct}% {windowLabel(b.kind)}</span><span className="block text-[12px] text-muted-foreground">{b.resets_at ? `Resets ${resetsIn(b.resets_at)}` : "Reset time unknown"}</span></span>
+                </li>
+              );
+            })}
+          </ul>
+        )}
+      </Card>
+    </>
+  );
+}
+
 export function UsageView({ accounts }: { accounts: AIAccount[] }) {
   const [preview, setPreview] = useState(false);
   const peakTone = (v: number) => (v >= 100 ? "bg-red-600" : v >= 80 ? "bg-foreground/80" : v >= 60 ? "bg-foreground/55" : v >= 40 ? "bg-foreground/35" : "bg-foreground/15");
+  const live = accounts.some((a) => a.usage.length > 0);
   return (
     <div className="space-y-6">
+      {live && <LiveUsage accounts={accounts} />}
       <div className="flex flex-wrap items-center gap-3 rounded-md border px-3 py-2.5 text-[13px]">
         <div className="min-w-0 flex-1">
-          <div className="font-medium">Waiting for usage data</div>
+          <div className="font-medium">{live ? "Forecasts and plan fit need a few weeks of readings" : "Waiting for usage data"}</div>
           <div className="text-muted-foreground">
-            Which account to use, what runs out before it resets and which plans fit need readings from Outflare for desktop, which people install once. None of the {accounts.length} accounts has reported yet.
+            {live
+              ? "What runs out before it resets and which plans are too small or too big come from usage over time. They appear once Outflare for desktop has reported for a while."
+              : `Which account to use, what runs out before it resets and which plans fit need readings from Outflare for desktop, which people install once (see Computers). None of the ${accounts.length} accounts has reported yet.`}
           </div>
         </div>
         <label className="flex items-center gap-2 text-muted-foreground"><Switch checked={preview} onCheckedChange={(on) => { setPreview(on); if (on) track("ui.ai_accounts_example_shown"); }} aria-label="Show an example" /> Show an example</label>
@@ -297,7 +351,7 @@ export function UsageView({ accounts }: { accounts: AIAccount[] }) {
 
       {preview && (
         <>
-          <Card title={<span className="flex items-center gap-2">Which account to use <Badge>Example</Badge></span>} description="For each AI tool, the account with the most room before its tightest limit resets.">
+          {!live && <Card title={<span className="flex items-center gap-2">Which account to use <Badge>Example</Badge></span>} description="For each AI tool, the account with the most room before its tightest limit resets.">
             <div className="grid gap-3 sm:grid-cols-2 text-[13px]">
               {example.pick.map((p) => (
                 <div key={p.name} className="rounded-md border p-3">
@@ -308,7 +362,7 @@ export function UsageView({ accounts }: { accounts: AIAccount[] }) {
                 </div>
               ))}
             </div>
-          </Card>
+          </Card>}
 
           <Card title={<span className="flex items-center gap-2">2 accounts run out before they reset <Badge>Example</Badge></span>} description="If everyone keeps their current pace. Time locked out is time someone can't work.">
             <ul className="divide-y text-[13px]">

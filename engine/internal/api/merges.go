@@ -23,7 +23,9 @@ import (
 // an email another record holds and that record has no user id of its own.
 // Two records with different user ids, two real accounts in the
 // workspace's product, are never merged: they can be linked as the same
-// human instead.
+// human instead. Brands keep their data apart (plans/brands/README.md):
+// records of two brands are never paired, merged or linked, even when they
+// share an email.
 
 func (s *Server) routesMerges(mux *http.ServeMux) {
 	read, manage := auth.ScopeCustomersRead, auth.ScopeCustomersManage
@@ -52,6 +54,7 @@ func flagDuplicates(ctx context.Context, tx pgx.Tx, ws, rec, namespace, value st
 		FROM records me
 		JOIN record_identities i ON i.workspace_id = $1 AND i.namespace = $3 AND i.value = $4 AND i.valid_to IS NULL AND i.record_id <> me.id
 		JOIN records o ON o.id = i.record_id AND o.merged_into IS NULL AND o.record_type = me.record_type
+			AND o.brand_id IS NOT DISTINCT FROM me.brand_id
 		WHERE me.id = $2 AND me.workspace_id = $1
 		GROUP BY o.id, me.id, me.record_type
 		ON CONFLICT DO NOTHING`, ws, rec, namespace, value)
@@ -65,10 +68,14 @@ func flagPair(ctx context.Context, tx pgx.Tx, ws, x, y, reason string, verified 
 		SELECT $1, LEAST(r.id, o.id), GREATEST(r.id, o.id), r.record_type, $4, jsonb_build_object('namespace', $4::text, 'verified', $5::boolean),
 			CASE WHEN `+bothUserIDs("r.id", "o.id")+` THEN 'blocked' ELSE 'open' END
 		FROM records r JOIN records o ON o.id = $3 AND o.workspace_id = $1 AND o.record_type = r.record_type
+			AND o.brand_id IS NOT DISTINCT FROM r.brand_id
 		WHERE r.id = $2 AND r.workspace_id = $1
 		ON CONFLICT DO NOTHING`, ws, x, y, reason, verified)
 	return int(tag.RowsAffected()), err
 }
+
+// errOtherBrand refuses to merge or link records of two brands.
+var errOtherBrand = errInvalid("records of different brands can't be merged: brands keep their data apart")
 
 func bothUserIDs(x, y string) string {
 	has := func(id string) string {
@@ -123,6 +130,9 @@ func mergeRecords(ctx context.Context, tx pgx.Tx, a *access, c *catalog, intoID,
 	into, from := locked[intoID], locked[fromID]
 	if into.Type != from.Type {
 		return res, errInvalid(fmt.Sprintf("only records of the same type merge: this is a %s and that a %s", into.Type, from.Type))
+	}
+	if !sameBrand(into.BrandID, from.BrandID) {
+		return res, errOtherBrand
 	}
 	mine, err := userIDs(ctx, tx, into.ID)
 	if err != nil {
@@ -475,8 +485,13 @@ func (s *Server) listDuplicates(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
+	sel, ok := s.brandFilter(w, r)
+	if !ok {
+		return
+	}
 	args := []any{a.WorkspaceID, statuses, beforeAt, beforeID}
 	where := `c.workspace_id = $1 AND c.status = ANY($2) AND (c.created_at, c.id::text) < ($3, $4)`
+	where += sel.sql("c.brand_id", &args)
 	if v := q.Get("type"); v != "" {
 		args = append(args, v)
 		where += ` AND c.record_type = $` + strconv.Itoa(len(args))
@@ -570,6 +585,7 @@ func (s *Server) decideDuplicate(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			return err
 		}
+		var brands []*string
 		for _, rec := range []string{ra, rb} {
 			v, err := loadRecord(ctx, tx, a, rec)
 			if err != nil {
@@ -578,6 +594,10 @@ func (s *Server) decideDuplicate(w http.ResponseWriter, r *http.Request) {
 			if !a.writes(v.BrandID) {
 				return errSharedRecord
 			}
+			brands = append(brands, v.BrandID)
+		}
+		if link && !sameBrand(brands[0], brands[1]) {
+			return errOtherBrand
 		}
 		if status != "open" && status != "blocked" {
 			return recordConflict{"conflict", "this pair was already " + status}

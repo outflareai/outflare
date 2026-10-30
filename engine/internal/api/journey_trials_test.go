@@ -20,6 +20,9 @@ func TestJourneyTest(t *testing.T) {
 	defer rs.Close()
 	e.integrations.Client.BaseURLs["resend"] = rs.URL
 	owner, ws := setupOwner(t, e.h)
+	// Quiet hours would hold the email at night (test mode shows that
+	// too); this test is about the steps, so guardrails are off.
+	guardrailsOff(t, owner, ws)
 	base := "/v1/workspaces/" + ws
 	ctx := context.Background()
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))

@@ -75,6 +75,10 @@ type access struct {
 	// only on routes registered with inBrand. Nil means every
 	// brand.
 	Brands []string
+	// Brand is the brand of a /v1/brands/{brand}/ route (onBrand): every
+	// row the handler reads or writes belongs to it. Empty on workspace
+	// routes.
+	Brand string
 	// Test is true in a test workspace: mailboxes are simulated and
 	// purchases are refused.
 	Test bool
@@ -198,6 +202,7 @@ func (s *Server) authenticateSession(r *http.Request) (*principal, error) {
 type routeAccess struct {
 	Scope         string `yaml:"scope,omitempty"`
 	BrandLimited  bool   `yaml:"brand_limited,omitempty"`
+	Brand         bool   `yaml:"brand,omitempty"` // a /v1/brands/{brand}/ route (onBrand)
 	SignedIn      bool   `yaml:"signed_in,omitempty"`
 	Authenticated bool   `yaml:"authenticated,omitempty"` // any caller: a session or any token
 }
@@ -241,9 +246,53 @@ func (s *Server) inBrand(scope string, next http.HandlerFunc) http.HandlerFunc {
 	return s.workspaceRoute(scope, true, next)
 }
 
+// onBrand runs next for a /v1/brands/{brand}/ route: brand data, which
+// belongs to exactly one brand (plans/brands/README.md). The caller needs
+// scope in the brand's workspace and must see the brand: every member and
+// workspace token does, a member kept to some brands only those, and a
+// brand token only its own. Any other brand is 404, so ids cannot be
+// probed. The handler reads access.Brand and keeps every query to it.
+func (s *Server) onBrand(scope string, next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		noteAccess(r, routeAccess{Scope: scope, Brand: true})
+		brand := r.PathValue("brand")
+		var ws string
+		if validUUID(brand) {
+			err := s.pool.QueryRow(r.Context(), `SELECT workspace_id FROM brands WHERE id = $1`, brand).Scan(&ws)
+			if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+				s.internal(w, r, err)
+				return
+			}
+		}
+		if ws == "" {
+			writeError(w, r, http.StatusNotFound, "not_found", "brand not found")
+			return
+		}
+		r.SetPathValue("ws", ws)
+		s.workspaceAccess(scope, true, func(w http.ResponseWriter, r *http.Request) {
+			a := accessFrom(r.Context())
+			if a.Brands != nil && !slices.Contains(a.Brands, brand) {
+				writeError(w, r, http.StatusNotFound, "not_found", "brand not found")
+				return
+			}
+			a.Brand = brand
+			next(w, r)
+		})(w, r)
+	}
+}
+
 func (s *Server) workspaceRoute(scope string, brandAware bool, next http.HandlerFunc) http.HandlerFunc {
+	inner := s.workspaceAccess(scope, brandAware, next)
 	return func(w http.ResponseWriter, r *http.Request) {
 		noteAccess(r, routeAccess{Scope: scope, BrandLimited: brandAware})
+		inner(w, r)
+	}
+}
+
+// workspaceAccess resolves the caller's access in the {ws} workspace and
+// runs next with it; workspaceRoute and onBrand note the route's access.
+func (s *Server) workspaceAccess(scope string, brandAware bool, next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
 		p, ok := s.authenticated(w, r)
 		if !ok {
 			return

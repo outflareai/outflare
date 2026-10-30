@@ -1,6 +1,7 @@
 package api_test
 
 import (
+	"context"
 	"testing"
 	"time"
 )
@@ -65,6 +66,46 @@ func TestCompetitorGaps(t *testing.T) {
 	owner.must(400, "GET", base+"/seo-competitors/gaps", nil)
 	owner.must(400, "GET", base+"/seo-competitors/gaps?site_id="+siteID+"&kind=pages", nil)
 	owner.must(404, "GET", base+"/seo-competitors/gaps?site_id=00000000-0000-4000-8000-000000000000", nil)
+
+	// The first read is the baseline: nothing is new yet.
+	ctx := context.Background()
+	newLinks := func() []map[string]any {
+		t.Helper()
+		rows, err := e.pool.Query(ctx, `SELECT data FROM audit_events WHERE workspace_id = $1 AND action = 'competitor_link.new' ORDER BY id`, ws)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer rows.Close()
+		var out []map[string]any
+		for rows.Next() {
+			var d map[string]any
+			if err := rows.Scan(&d); err != nil {
+				t.Fatal(err)
+			}
+			out = append(out, d)
+		}
+		return out
+	}
+	if n := newLinks(); len(n) != 0 {
+		t.Fatalf("new links on the first read: %v", n)
+	}
+	// A week later the rival has two more linking domains; one of them
+	// already links to us, so only the other is news.
+	if _, err := e.pool.Exec(ctx, `UPDATE seo_snapshots SET day = day - 7 WHERE workspace_id = $1`, ws); err != nil {
+		t.Fatal(err)
+	}
+	setDFSTarget("rival.example", []any{dfsKeyword("cold email", "https://rival.example/cold", 900, 1)}, []any{
+		map[string]any{"domain": "news.example.org", "rank": 70},
+		map[string]any{"domain": "blog.example.net", "rank": 50},
+		map[string]any{"domain": "fresh.example.net", "rank": 40},
+		map[string]any{"domain": "example.com", "rank": 90},
+	})
+	owner.must(200, "POST", base+"/seo/"+id+"/sync", nil)
+	n := newLinks()
+	if len(n) != 1 || n[0]["source_domain"] != "fresh.example.net" || n[0]["competitor"] != "rival.example" || n[0]["site_id"] != siteID ||
+		n[0]["competitors"].(float64) != 1 || n[0]["connector"] != "dataforseo" {
+		t.Fatalf("competitor_link.new: %v", n)
+	}
 
 	// Off, the snapshot reads no gaps.
 	if set := owner.must(200, "PUT", base+"/seo/"+id+"/settings", map[string]any{"gap_rows": 0}); set["gap_rows"].(float64) != 0 {

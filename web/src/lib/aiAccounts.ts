@@ -1,6 +1,6 @@
 // Shared sums and formats for AI Accounts' pages (pages/AIAccounts*.tsx).
 
-import type { AIAccount } from "@outflare/sdk";
+import type { AIAccount, AIUsageWindow } from "@outflare/sdk";
 
 export const usd = (cents: number) =>
   (cents / 100).toLocaleString("en-US", { style: "currency", currency: "USD", maximumFractionDigits: Math.round(cents) % 100 ? 2 : 0 });
@@ -53,3 +53,37 @@ export function renewalsBetween(a: AIAccount, from: string, to: string): string[
   }
   return out;
 }
+
+// Usage from Outflare for desktop.
+
+const windowNames: Record<string, string> = {
+  five_hour: "5-hour", weekly: "Weekly", weekly_opus: "Weekly Opus", weekly_sonnet: "Weekly Sonnet", monthly: "Monthly",
+  premium_requests: "Premium requests", credits: "Credits", daily: "Daily",
+};
+export const windowLabel = (kind: string) => windowNames[kind] ?? kind.replace(/_/g, " ").replace(/^./, (c) => c.toUpperCase());
+
+// The binding limit: the window with the least room left.
+export function binding(a: AIAccount): AIUsageWindow | undefined {
+  return a.usage.reduce<AIUsageWindow | undefined>((b, w) => (!b || w.used_percent > b.used_percent ? w : b), undefined);
+}
+
+// "in 2h 10m", "in 3d", "now".
+export function resetsIn(at?: string | null) {
+  if (!at) return "";
+  const m = Math.round((new Date(at).getTime() - Date.now()) / 60000);
+  if (m <= 0) return "now";
+  if (m < 60) return `in ${m}m`;
+  if (m < 48 * 60) return `in ${Math.floor(m / 60)}h${m % 60 ? ` ${m % 60}m` : ""}`;
+  return `in ${Math.round(m / 1440)}d`;
+}
+
+// "5 min ago": how fresh a reading is.
+export function readAgo(at: string) {
+  const m = Math.round((Date.now() - new Date(at).getTime()) / 60000);
+  if (m < 1) return "just now";
+  if (m < 60) return `${m} min ago`;
+  if (m < 48 * 60) return `${Math.floor(m / 60)}h ago`;
+  return `${Math.round(m / 1440)}d ago`;
+}
+
+export const usedTone = (p: number) => (p >= 100 ? "bg-red-600" : p >= 80 ? "bg-amber-500" : "bg-green-600");

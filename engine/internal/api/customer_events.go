@@ -213,54 +213,120 @@ type seenName struct {
 	first, last time.Time
 }
 
-func (s *Server) ingestCustomerEvents(w http.ResponseWriter, r *http.Request) {
-	a := accessFrom(r.Context())
-	ctx := r.Context()
+// eventEnvelope is a call's events as sent: the batch's own context and
+// source apply to every event in it.
+type eventEnvelope struct {
+	top    eventMessage
+	items  []json.RawMessage
+	shared map[string]any
+	source string
+}
+
+// readEventEnvelope reads the body both event routes take: one event, or
+// {"batch": [...]} with up to 500, under 5 MB, with an optional source
+// label. It checks only the envelope; each event's content is checked on
+// its own.
+func (s *Server) readEventEnvelope(w http.ResponseWriter, r *http.Request) (eventEnvelope, bool) {
+	var env eventEnvelope
 	if ct := r.Header.Get("Content-Type"); !strings.HasPrefix(ct, "application/json") {
 		writeError(w, r, http.StatusUnsupportedMediaType, "invalid_request", "send a JSON body with Content-Type: application/json")
-		return
+		return env, false
 	}
 	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, maxEventBody))
 	if err != nil {
 		writeError(w, r, http.StatusRequestEntityTooLarge, "invalid_request", "the body must be under 5 MB: send at most 500 events at a time")
-		return
+		return env, false
 	}
-	var top eventMessage
-	if err := json.Unmarshal(body, &top); err != nil {
+	if err := json.Unmarshal(body, &env.top); err != nil {
 		writeError(w, r, http.StatusBadRequest, "invalid_request", "send one event, or {\"batch\": [...]} with up to 500")
+		return env, false
+	}
+	if raw := env.top.get("batch"); raw != nil {
+		if err := json.Unmarshal(raw, &env.items); err != nil {
+			writeError(w, r, http.StatusBadRequest, "invalid_request", "batch must be a list of events")
+			return env, false
+		}
+	} else {
+		env.items = []json.RawMessage{body}
+	}
+	if len(env.items) == 0 || len(env.items) > maxEventBatch {
+		writeError(w, r, http.StatusBadRequest, "invalid_request", "send 1 to 500 events at a time")
+		return env, false
+	}
+	// A batch's own context and source apply to every event in it.
+	if env.shared, err = env.top.object(maxEventContext, "context"); s.allocError(w, r, err) {
+		return env, false
+	}
+	env.source = env.top.text("source")
+	if env.source == "" {
+		env.source = "api"
+	}
+	if env.source == siteSource {
+		writeError(w, r, http.StatusBadRequest, "invalid_request", "source browser is kept for the website snippet's events; name your own source, such as segment or api")
+		return env, false
+	}
+	if !sourceLabel.MatchString(env.source) {
+		writeError(w, r, http.StatusBadRequest, "invalid_request", "source is a short lowercase label such as segment, rudderstack or api")
+		return env, false
+	}
+	return env, true
+}
+
+// eventRejection says whether err rejects only the event it came from, and
+// why: code is the API's error code, detail a more precise one where the
+// event inbox keeps it (missing_id, invalid_timestamp), else code.
+func eventRejection(err error) (code, detail, msg string, ok bool) {
+	var bad errInvalid
+	var conflict recordConflict
+	var ev eventError
+	switch {
+	case errors.Is(err, errSharedRecord):
+		return "forbidden", "other_brand", "this person belongs to a brand you are not limited to", true
+	case errors.As(err, &conflict):
+		return conflict.code, conflict.code, conflict.msg, true
+	case errors.As(err, &ev):
+		return "invalid_request", ev.code, ev.msg, true
+	case errors.As(err, &bad):
+		return "invalid_request", "invalid_request", bad.Error(), true
+	}
+	return "", "", "", false
+}
+
+// eventError is an errInvalid with a precise code for the event inbox. The
+// workspace route still answers invalid_request for it.
+type eventError struct{ code, msg string }
+
+func (e eventError) Error() string { return e.msg }
+func (e eventError) Unwrap() error { return errInvalid(e.msg) }
+
+// badEvent wraps a reason an event is refused, keeping err's message.
+func badEvent(code string, err error) error {
+	if err == nil {
+		return nil
+	}
+	var bad errInvalid
+	if errors.As(err, &bad) {
+		return eventError{code, bad.Error()}
+	}
+	return err
+}
+
+func (s *Server) ingestCustomerEvents(w http.ResponseWriter, r *http.Request) {
+	a := accessFrom(r.Context())
+	ctx := r.Context()
+	env, ok := s.readEventEnvelope(w, r)
+	if !ok {
 		return
 	}
-	var msgs []eventMessage
-	if raw := top.get("batch"); raw != nil {
-		if err := json.Unmarshal(raw, &msgs); err != nil {
+	msgs := make([]eventMessage, len(env.items))
+	for i, raw := range env.items {
+		if err := json.Unmarshal(raw, &msgs[i]); err != nil {
 			writeError(w, r, http.StatusBadRequest, "invalid_request", "batch must be a list of events")
 			return
 		}
-	} else {
-		msgs = []eventMessage{top}
 	}
-	if len(msgs) == 0 || len(msgs) > maxEventBatch {
-		writeError(w, r, http.StatusBadRequest, "invalid_request", "send 1 to 500 events at a time")
-		return
-	}
-	// A batch's own context, brand and source apply to every event in it.
-	shared, err := top.object(maxEventContext, "context")
-	if s.allocError(w, r, err) {
-		return
-	}
-	source := top.text("source")
-	if source == "" {
-		source = "api"
-	}
-	if source == siteSource {
-		writeError(w, r, http.StatusBadRequest, "invalid_request", "source browser is kept for the website snippet's events; name your own source, such as segment or api")
-		return
-	}
-	if !sourceLabel.MatchString(source) {
-		writeError(w, r, http.StatusBadRequest, "invalid_request", "source is a short lowercase label such as segment, rudderstack or api")
-		return
-	}
-	brand, err := s.recordBrand(ctx, a, top.get("brand_id", "brandId"))
+	shared, source := env.shared, env.source
+	brand, err := s.recordBrand(ctx, a, env.top.get("brand_id", "brandId"))
 	if err == nil {
 		brand, err = brandWrite(ctx, s.pool, a, brand)
 	}
@@ -283,22 +349,13 @@ func (s *Server) ingestCustomerEvents(w http.ResponseWriter, r *http.Request) {
 			}
 			before := totals
 			err = s.ingestOne(ctx, sp, a, c, brand, source, shared, m, now, &res, &totals)
-			var bad errInvalid
-			var conflict recordConflict
-			switch {
+			switch code, _, msg, rejected := eventRejection(err); {
 			case err == nil && res.Status == "duplicate":
 				err = sp.Rollback(ctx)
 			case err == nil:
 				res.Status = "accepted"
 				err = sp.Commit(ctx)
-			case errors.As(err, &bad), errors.As(err, &conflict), errors.Is(err, errSharedRecord):
-				code, msg := "invalid_request", err.Error()
-				if conflict.code != "" {
-					code = conflict.code
-				}
-				if errors.Is(err, errSharedRecord) {
-					code, msg = "forbidden", "this person belongs to a brand you are not limited to"
-				}
+			case rejected:
 				res = eventResult{Index: i, Status: "rejected", Error: &struct {
 					Code    string `json:"code"`
 					Message string `json:"message"`
@@ -357,22 +414,22 @@ func (s *Server) ingestOne(ctx context.Context, tx pgx.Tx, a *access, c *catalog
 	m eventMessage, now time.Time, res *eventResult, totals *ingestTotals) error {
 	kind := strings.ToLower(m.text("type"))
 	if !slices.Contains(eventKinds, kind) {
-		return errInvalid("type must be track, identify, page, screen, group or alias")
+		return eventError{"invalid_type", "type must be track, identify, page, screen, group or alias"}
 	}
 	userID, err := m.id("userId", "user_id")
 	if err != nil {
-		return err
+		return badEvent("invalid_id", err)
 	}
 	anonID, err := m.id("anonymousId", "anonymous_id")
 	if err != nil {
-		return err
+		return badEvent("invalid_id", err)
 	}
 	if userID == "" && anonID == "" {
-		return errInvalid("every event needs userId or anonymousId")
+		return eventError{"missing_id", "every event needs userId or anonymousId"}
 	}
 	messageID, err := m.id("messageId", "message_id")
 	if err != nil {
-		return err
+		return badEvent("invalid_id", err)
 	}
 	if messageID != "" {
 		var seen bool
@@ -391,46 +448,46 @@ func (s *Server) ingestOne(ctx context.Context, tx pgx.Tx, a *access, c *catalog
 	case "track":
 		rawName = m.text("event")
 		if rawName == "" {
-			return errInvalid("a track call needs event, such as Order Completed")
+			return eventError{"missing_name", "a track call needs event, such as Order Completed"}
 		}
 		var ok bool
 		if name, ok = eventNameFor(rawName); !ok {
-			return errInvalid("event must have letters in it, such as Order Completed or product.activated")
+			return eventError{"invalid_name", "event must have letters in it, such as Order Completed or product.activated"}
 		}
 	case "page", "screen":
 		rawName = m.text("name")
 	}
 	if len(rawName) > 200 {
-		return errInvalid("the event or page name must be at most 200 characters")
+		return eventError{"invalid_name", "the event or page name must be at most 200 characters"}
 	}
 	res.Name = name
 
 	// When it happened.
 	at, ok, err := m.time("timestamp", "originalTimestamp", "original_timestamp")
 	if err != nil {
-		return err
+		return badEvent("invalid_timestamp", err)
 	}
 	if !ok {
 		at = now
 	}
 	if at.After(now.Add(24 * time.Hour)) {
-		return errInvalid("timestamp is more than a day in the future")
+		return eventError{"invalid_timestamp", "timestamp is more than a day in the future"}
 	}
 	if at.Before(now.AddDate(0, -25, 0)) {
-		return errInvalid("timestamp is more than 25 months ago, past how long events are kept")
+		return eventError{"invalid_timestamp", "timestamp is more than 25 months ago, past how long events are kept"}
 	}
 
 	props, err := m.object(maxEventProperties, "properties")
 	if err != nil {
-		return err
+		return badEvent("invalid_properties", err)
 	}
 	traits, err := m.object(maxEventProperties, "traits")
 	if err != nil {
-		return err
+		return badEvent("invalid_traits", err)
 	}
 	ctxObj, err := m.object(maxEventContext, "context")
 	if err != nil {
-		return err
+		return badEvent("invalid_context", err)
 	}
 	for k, v := range shared {
 		if _, ok := ctxObj[k]; !ok {
@@ -461,10 +518,10 @@ func (s *Server) ingestOne(ctx context.Context, tx pgx.Tx, a *access, c *catalog
 	if kind == "group" {
 		groupID, err := m.id("groupId", "group_id")
 		if err != nil {
-			return err
+			return badEvent("invalid_id", err)
 		}
 		if groupID == "" {
-			return errInvalid("a group call needs groupId, your product's own id for the account")
+			return eventError{"missing_group_id", "a group call needs groupId, your product's own id for the account"}
 		}
 		id, err := s.resolveAccount(ctx, tx, a, c, brand, groupID, traits, rec, res, totals)
 		if err != nil {
@@ -475,10 +532,10 @@ func (s *Server) ingestOne(ctx context.Context, tx pgx.Tx, a *access, c *catalog
 	if kind == "alias" {
 		prev, err := m.id("previousId", "previous_id")
 		if err != nil {
-			return err
+			return badEvent("invalid_id", err)
 		}
 		if prev == "" {
-			return errInvalid("an alias call needs previousId")
+			return eventError{"missing_previous_id", "an alias call needs previousId"}
 		}
 		if rec != nil {
 			if err := s.aliasPerson(ctx, tx, a, c, *rec, prev, res, totals); err != nil {
@@ -495,7 +552,7 @@ func (s *Server) ingestOne(ctx context.Context, tx pgx.Tx, a *access, c *catalog
 	var id string
 	err = tx.QueryRow(ctx, `INSERT INTO customer_events (workspace_id, record_id, account_id, brand_id, kind, name, raw_name, user_id, anonymous_id,
 			properties, traits, context, source, message_id, occurred_at, request_id)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16) RETURNING id::text`,
+		VALUES ($1, $2, $3, COALESCE($4, (SELECT r.brand_id FROM records r WHERE r.id = $2), outflare_first_brand($1)), $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16) RETURNING id::text`,
 		a.WorkspaceID, rec, account, brand, kind, name, rawName, nullIfEmpty(userID), nullIfEmpty(anonID),
 		props, traits, ctxObj, source, nullIfEmpty(messageID), at, RequestID(ctx)).Scan(&id)
 	if isUnique(err) {
@@ -643,7 +700,7 @@ func (s *Server) resolvePerson(ctx context.Context, tx pgx.Tx, a *access, c *cat
 	// identified themselves with traits, such as a newsletter sign-up.
 	if rec == nil && (userID != "" || (kind == "identify" && len(traits) > 0)) {
 		var id string
-		if err := tx.QueryRow(ctx, `INSERT INTO records (workspace_id, record_type, brand_id, origin, created_by) VALUES ($1, 'person', $2, 'first_party', $3) RETURNING id::text`,
+		if err := tx.QueryRow(ctx, `INSERT INTO records (workspace_id, record_type, brand_id, origin, created_by) VALUES ($1, 'person', COALESCE($2, outflare_first_brand($1)), 'first_party', $3) RETURNING id::text`,
 			a.WorkspaceID, brand, nullIfEmpty(a.ActorID)).Scan(&id); err != nil {
 			return nil, err
 		}
@@ -707,6 +764,17 @@ func (s *Server) resolvePerson(ctx context.Context, tx pgx.Tx, a *access, c *cat
 // its own user id is another account in the product, so the two are only
 // listed as a possible duplicate.
 func (s *Server) claimProvenEmail(ctx context.Context, tx pgx.Tx, a *access, c *catalog, rec, owner, email string, res *eventResult, totals *ingestTotals) error {
+	// Brands keep their data apart: a person of another brand is someone
+	// else there, never merged or listed with this one.
+	var same bool
+	if err := tx.QueryRow(ctx, `SELECT x.brand_id IS NOT DISTINCT FROM y.brand_id FROM records x, records y WHERE x.id = $1 AND y.id = $2`,
+		rec, owner).Scan(&same); err != nil {
+		return err
+	}
+	if !same {
+		res.Warnings = append(res.Warnings, "the verified email belongs to a person in another brand; brands keep their data apart, so they were not merged")
+		return nil
+	}
 	ids, err := userIDs(ctx, tx, owner)
 	if err != nil {
 		return err
@@ -831,7 +899,7 @@ func (s *Server) resolveAccount(ctx context.Context, tx pgx.Tx, a *access, c *ca
 	}
 	if acct == nil {
 		var id string
-		if err := tx.QueryRow(ctx, `INSERT INTO records (workspace_id, record_type, brand_id, origin, created_by) VALUES ($1, 'account', $2, 'first_party', $3) RETURNING id::text`,
+		if err := tx.QueryRow(ctx, `INSERT INTO records (workspace_id, record_type, brand_id, origin, created_by) VALUES ($1, 'account', COALESCE($2, outflare_first_brand($1)), 'first_party', $3) RETURNING id::text`,
 			a.WorkspaceID, brand, nullIfEmpty(a.ActorID)).Scan(&id); err != nil {
 			return "", err
 		}

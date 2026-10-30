@@ -89,10 +89,13 @@ import { AIVisibility } from "./pages/AIVisibility";
 import { Backlinks } from "./pages/Backlinks";
 import { Competitors } from "./pages/Competitors";
 import { LinkBuilding } from "./pages/LinkBuilding";
+import { LinkAutopilot } from "./pages/LinkAutopilot";
 import { News } from "./pages/News";
+import { Stories } from "./pages/Stories";
 import { Warmup } from "./pages/Warmup";
 import { ConnectAI } from "./pages/ConnectAI";
 import { Authorize } from "./pages/Authorize";
+import { ConnectComputer } from "./pages/ConnectComputer";
 import { setBrand, useBrand } from "@/lib/brand";
 
 type Me = { user: { id?: string; name?: string; email?: string; email_verified?: boolean; has_password?: boolean; email_resend_after?: number }; workspaces: Workspace[]; menu_links?: MenuLink[]; support_view?: { expires_at: string } | null };
@@ -106,6 +109,7 @@ type State =
   | { kind: "verify"; token: string }
   | { kind: "confirm"; email: string; resendAfter: number }
   | { kind: "authorize"; me: Me }
+  | { kind: "connectComputer"; me: Me }
   | { kind: "app"; me: Me };
 export type { Tab };
 
@@ -138,6 +142,8 @@ export function App() {
       }
       // An AI app sent the person here to approve it (OAuth consent).
       if (location.pathname === "/oauth/authorize") return setState({ kind: "authorize", me: me.data as Me });
+      // Outflare for desktop sent the person here to link their computer.
+      if (location.pathname === "/connect/computer") return setState({ kind: "connectComputer", me: me.data as Me });
       return setState({ kind: "app", me: me.data as Me });
     }
     setState({ kind: "login" });
@@ -182,6 +188,13 @@ export function App() {
         <>
           <Authorize email={state.me.user.email} onSignOut={async () => { await api.POST("/v1/auth/logout"); resetAnalytics(); boot(); }} />
           <DialogHost />
+          <ToastHost />
+        </>
+      );
+    case "connectComputer":
+      return (
+        <>
+          <ConnectComputer workspaces={state.me.workspaces} onDone={() => history.replaceState(null, "", "/")} />
           <ToastHost />
         </>
       );
@@ -583,7 +596,13 @@ function Shell({ me, onSignOut, onReload }: { me: Me; onSignOut: () => void; onR
         {ready && ws && tab === "mailboxes" && <Mailboxes key={ws.id} ws={ws.id} canManage={writer} openOAuth={!!outcome.ws} go={setTab} />}
         {ready && ws && tab === "domains" && <Domains key={ws.id} ws={ws.id} canManage={writer} open={item ?? ""} onOpen={(d) => setItem(d || undefined)} go={setTab} />}
         {ready && ws && tab === "link-building" && <LinkBuilding key={ws.id} ws={ws.id} canManage={can("seo.manage")} go={setTab} waiting={pitchesWaiting} onWaiting={setPitchesWaiting} />}
+        {ready && ws && tab === "link-autopilot" && (
+          <CloudPage feature={cloudFeature("link-autopilot")!}>
+            <LinkAutopilot key={ws.id} ws={ws.id} canManage={can("missions.run")} go={setTab} />
+          </CloudPage>
+        )}
         {ready && ws && tab === "news" && <News key={ws.id} ws={ws.id} canManage={can("seo.manage")} canLists={can("customers.manage")} go={setTab} />}
+        {ready && ws && tab === "stories" && <Stories key={ws.id} ws={ws.id} canManage={can("seo.manage")} go={setTab} />}
         {ready && ws && tab === "allocation" && <Allocation key={ws.id} ws={ws.id} canManage={writer} canSetMode={isAdmin} go={setTab} />}
         {ready && ws && tab === "senders" && <Senders key={ws.id} ws={ws.id} canManage={writer} canManageTeams={isAdmin} />}
         {ready && ws && tab === "servers" && <Servers key={ws.id} ws={ws.id} canManage={writer} open={item ?? ""} onOpen={(id) => setItem(id || undefined)} go={setTab} />}

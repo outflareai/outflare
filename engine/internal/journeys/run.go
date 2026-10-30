@@ -520,17 +520,14 @@ func (s *Service) take(ctx context.Context, tx pgx.Tx, ws string, j *journey, r 
 		}
 		return taken{next: st.Else, outcome: "no"}, nil
 	case KindEmail:
-		id, why, failed, err := s.email(ctx, tx, ws, j, r, st, t)
+		id, outcome, why, failed, err := s.email(ctx, tx, ws, j, r, st, t)
 		if err != nil {
 			return taken{}, err
 		}
 		if failed != "" {
 			return taken{outcome: "failed", detail: failed, end: "failed", reason: "email_failed"}, nil
 		}
-		if why != "" {
-			return taken{next: st.Next, outcome: "skipped", detail: why}, nil
-		}
-		return taken{next: st.Next, outcome: "sent", emailID: id}, nil
+		return taken{next: st.Next, outcome: outcome, detail: why, emailID: id}, nil
 	case KindExit:
 		return taken{outcome: "exited", end: "exited", reason: "exit_step"}, nil
 	case KindWaitUntil:
@@ -675,16 +672,18 @@ func (s *Service) finish(ctx context.Context, tx pgx.Tx, ws string, r run, statu
 }
 
 // email sends an email step's template to the person, and reports the
-// email's id, or why they were skipped (nil id), or why the step cannot
-// work for anyone (failed). A test run (t set) only composes it.
-func (s *Service) email(ctx context.Context, tx pgx.Tx, ws string, j *journey, r run, st *Step, t *trial) (*string, string, string, error) {
+// email's id and the step's outcome: sent; quiet_hours, sent but held
+// until morning; or, with no id, skipped or frequency_cap, with why. Or
+// it reports why the step cannot work for anyone (failed). A test run (t
+// set) only composes it, and checks the guardrails without recording.
+func (s *Service) email(ctx context.Context, tx pgx.Tx, ws string, j *journey, r run, st *Step, t *trial) (*string, string, string, string, error) {
 	var templateID string
 	err := tx.QueryRow(ctx, `SELECT id::text FROM email_templates WHERE workspace_id = $1 AND (id::text = $2 OR handle = $2)`, ws, st.Template).Scan(&templateID)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return nil, "", "the template " + st.Template + " no longer exists", nil
+		return nil, "", "", "the template " + st.Template + " no longer exists", nil
 	}
 	if err != nil {
-		return nil, "", "", err
+		return nil, "", "", "", err
 	}
 	var name, address string
 	var attrs []byte
@@ -693,10 +692,10 @@ func (s *Service) email(ctx context.Context, tx pgx.Tx, ws string, j *journey, r
 			AND i.valid_to IS NULL ORDER BY i.valid_from, i.id LIMIT 1) i ON true
 		WHERE r.workspace_id = $1 AND r.id = $2`, ws, r.recordID).Scan(&name, &address, &attrs)
 	if err != nil {
-		return nil, "", "", err
+		return nil, "", "", "", err
 	}
 	if address == "" {
-		return nil, "no verified email address", "", nil
+		return nil, "skipped", "no verified email address", "", nil
 	}
 	var attributes map[string]any
 	_ = json.Unmarshal(attrs, &attributes)
@@ -707,24 +706,40 @@ func (s *Service) email(ctx context.Context, tx pgx.Tx, ws string, j *journey, r
 	var ce *emails.ComposeError
 	if errors.As(err, &ce) {
 		if ce.Code == "template_variables_missing" || ce.Code == "invalid_request" {
-			return nil, ce.Message, "", nil
+			return nil, "skipped", ce.Message, "", nil
 		}
-		return nil, "", ce.Message, nil
+		return nil, "", "", ce.Message, nil
 	}
 	if err != nil {
-		return nil, "", "", err
+		return nil, "", "", "", err
 	}
 	why, err := emails.SkipReason(ctx, tx, ws, r.recordID, e.TopicID)
 	if err != nil || why != "" {
-		return nil, why, "", err
+		return nil, "skipped", why, "", err
+	}
+	e.RecordID = r.recordID
+	g, err := s.Emails.Guard(ctx, tx, r.recordID, &e, emails.GuardOptions{Dry: t != nil, IgnoreCap: st.IgnoreCap, SkipQuiet: st.QuietHours == QuietSkip})
+	switch {
+	case err != nil:
+		return nil, "", "", "", err
+	case g.Capped != "":
+		return nil, emails.FrequencyCap, g.Capped, "", nil
+	case g.Skipped != "":
+		return nil, emails.QuietHoursSkipped, g.Skipped, "", nil
 	}
 	if t != nil {
 		t.subject = e.Subject
-		return nil, "", "", nil
+		if g.HeldUntil != nil {
+			return nil, emails.QuietHours, emails.HeldDetail(*g.HeldUntil), "", nil
+		}
+		return nil, "sent", "", "", nil
 	}
 	id, err := s.Emails.Queue(ctx, tx, emails.System, e)
 	if err != nil {
-		return nil, "", "", err
+		return nil, "", "", "", err
 	}
-	return &id, "", "", nil
+	if g.HeldUntil != nil {
+		return &id, emails.QuietHours, emails.HeldDetail(*g.HeldUntil), "", nil
+	}
+	return &id, "sent", "", "", nil
 }

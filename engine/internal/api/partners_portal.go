@@ -16,6 +16,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/outflareai/outflare/engine/internal/auth"
+	"github.com/outflareai/outflare/engine/internal/classify"
 	"github.com/outflareai/outflare/engine/internal/customers"
 	"github.com/outflareai/outflare/engine/internal/emails"
 	"github.com/outflareai/outflare/engine/internal/partners"
@@ -64,8 +65,10 @@ type portalField struct {
 // portalSettings are a program portal's look, pages, sign-up form and
 // sender.
 type portalSettings struct {
-	Title        string        `json:"title"`
-	LogoURL      string        `json:"logo_url"`
+	Title   string `json:"title"`
+	LogoURL string `json:"logo_url"`
+	// FaviconURL is the browser tab's icon, an https image.
+	FaviconURL   string        `json:"favicon_url"`
 	Color        string        `json:"color"`
 	CustomCSS    string        `json:"custom_css"`
 	Welcome      string        `json:"welcome"`
@@ -79,6 +82,12 @@ type portalSettings struct {
 	// email, with sign_in_url, program_name and partner_name; Outflare's
 	// own wording when empty.
 	SignInTemplate string `json:"sign_in_template"`
+	// HidePoweredBy hides the "Powered by Outflare" line at the foot of the
+	// portal, shown by default.
+	HidePoweredBy bool `json:"hide_powered_by"`
+	// BusinessEmailOnly refuses applications from free, disposable and
+	// relay email addresses (Outflare's email classifier decides).
+	BusinessEmailOnly bool `json:"business_email_only"`
 }
 
 // portalFor reads stored settings over the kind's defaults: affiliates get
@@ -134,6 +143,13 @@ func (p *portalSettings) check() error {
 			return errInvalid("portal.logo_url is an https address of an image")
 		}
 		p.LogoURL = u
+	}
+	if p.FaviconURL != "" {
+		u, err := utm.Destination(p.FaviconURL)
+		if err != nil || !strings.HasPrefix(u, "https://") {
+			return errInvalid("portal.favicon_url is an https address of an image")
+		}
+		p.FaviconURL = u
 	}
 	for _, pg := range p.Pages {
 		if !slices.Contains(portalPages, pg) {
@@ -492,6 +508,8 @@ type portalProgram struct {
 	enabled, autoAccept                                     bool
 	minPayout                                               int64
 	holdDays                                                int
+	payoutTerm                                              *int
+	payoutMethods, payoutTokens                             []string
 	settings                                                portalSettings
 }
 
@@ -520,9 +538,10 @@ func (s *Server) portalProgramByID(ctx context.Context, id string) (*portalProgr
 	var p portalProgram
 	var raw []byte
 	err := s.pool.QueryRow(ctx, `SELECT workspace_id::text, id::text, name, kind, status, currency, terms_url, landing_url, brand_id::text,
-		portal_subdomain, portal_enabled, auto_accept, min_payout_cents, hold_days, portal FROM partner_programs WHERE id = $1`, id).
+		portal_subdomain, portal_enabled, auto_accept, min_payout_cents, hold_days, payout_term_days, payout_methods, payout_tokens, portal
+		FROM partner_programs WHERE id = $1`, id).
 		Scan(&p.ws, &p.id, &p.name, &p.kind, &p.status, &p.currency, &p.termsURL, &p.landing, &p.brandID, &p.subdomain, &p.enabled, &p.autoAccept,
-			&p.minPayout, &p.holdDays, &raw)
+			&p.minPayout, &p.holdDays, &p.payoutTerm, &p.payoutMethods, &p.payoutTokens, &raw)
 	if err != nil {
 		return nil, err
 	}
@@ -603,6 +622,7 @@ type portalPublicInfo struct {
 	Kind         string        `json:"kind"`
 	Title        string        `json:"title"`
 	LogoURL      string        `json:"logo_url"`
+	FaviconURL   string        `json:"favicon_url"`
 	Color        string        `json:"color"`
 	CustomCSS    string        `json:"custom_css"`
 	Welcome      string        `json:"welcome"`
@@ -611,6 +631,7 @@ type portalPublicInfo struct {
 	SignupFields []portalField `json:"signup_fields"`
 	TermsURL     string        `json:"terms_url"`
 	Currency     string        `json:"currency"`
+	PoweredBy    bool          `json:"powered_by"`
 }
 
 func (p *portalProgram) public() portalPublicInfo {
@@ -618,9 +639,9 @@ func (p *portalProgram) public() portalPublicInfo {
 	if t == "" {
 		t = p.name
 	}
-	return portalPublicInfo{Name: p.name, Kind: p.kind, Title: t, LogoURL: p.settings.LogoURL, Color: p.settings.Color, CustomCSS: p.settings.CustomCSS,
+	return portalPublicInfo{Name: p.name, Kind: p.kind, Title: t, LogoURL: p.settings.LogoURL, FaviconURL: p.settings.FaviconURL, Color: p.settings.Color, CustomCSS: p.settings.CustomCSS,
 		Welcome: p.settings.Welcome, Pages: p.settings.Pages, SignupOpen: p.settings.SignupOpen && p.status == "active", SignupFields: p.settings.SignupFields,
-		TermsURL: p.termsURL, Currency: p.currency}
+		TermsURL: p.termsURL, Currency: p.currency, PoweredBy: !p.settings.HidePoweredBy}
 }
 
 func (s *Server) portalProgramInfo(w http.ResponseWriter, r *http.Request) {
@@ -788,6 +809,9 @@ func (s *Server) portalSignup(w http.ResponseWriter, r *http.Request) {
 	case p.settings.EmailFrom == "":
 		s.portalEmailError(w, r, errPortalEmail)
 		return
+	case p.settings.BusinessEmailOnly && !businessEmail(r.Context(), email):
+		writeError(w, r, http.StatusBadRequest, "personal_email", "apply with your work email address; this program doesn't take free or personal email addresses")
+		return
 	}
 	answers := map[string]any{}
 	for _, f := range p.settings.SignupFields {
@@ -866,6 +890,20 @@ func (s *Server) portalSignup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusCreated, map[string]any{"sent": true})
+}
+
+// businessEmail reports whether an address is on a domain the email
+// classifier doesn't count as free, disposable, relay or private mail.
+func businessEmail(ctx context.Context, email string) bool {
+	res, err := (&classify.Classifier{}).Classify(ctx, classify.Input{Email: email})
+	if err != nil {
+		return false
+	}
+	switch res.Global.Category {
+	case classify.FreePersonal, classify.Disposable, classify.RelayAlias, classify.PrivateMailbox:
+		return false
+	}
+	return true
 }
 
 // portalSession turns a sign-in link's token into a session cookie.
@@ -992,20 +1030,28 @@ func (s *Server) inPortal(next func(http.ResponseWriter, *http.Request, *portalC
 
 // portalMeView is the partner's own view of their membership.
 type portalMeView struct {
-	Name           string           `json:"name"`
-	Email          string           `json:"email"`
-	Code           string           `json:"code"`
-	Status         string           `json:"status"`
-	Link           string           `json:"link"`
-	CampaignLink   string           `json:"campaign_link"`
-	PromoCodes     []string         `json:"promo_codes"`
-	PayoutMethod   string           `json:"payout_method"`
-	PostbackURL    string           `json:"postback_url"`
-	Notify         map[string]bool  `json:"notify"`
-	Currency       string           `json:"currency"`
-	Stats          partnerStats     `json:"stats"`
-	MinPayoutCents int64            `json:"min_payout_cents"`
-	HoldDays       int              `json:"hold_days"`
+	Name           string          `json:"name"`
+	Email          string          `json:"email"`
+	Code           string          `json:"code"`
+	Status         string          `json:"status"`
+	Link           string          `json:"link"`
+	CampaignLink   string          `json:"campaign_link"`
+	PromoCodes     []string        `json:"promo_codes"`
+	PayoutMethod   string          `json:"payout_method"`
+	PayoutType     *string         `json:"payout_type"`
+	PayoutToken    *string         `json:"payout_token"`
+	PostbackURL    string          `json:"postback_url"`
+	Notify         map[string]bool `json:"notify"`
+	Currency       string          `json:"currency"`
+	Stats          partnerStats    `json:"stats"`
+	MinPayoutCents int64           `json:"min_payout_cents"`
+	HoldDays       int             `json:"hold_days"`
+	// PayoutTermDays, PayoutMethods and PayoutTokens are the program's:
+	// Net N after the month a reward was earned, and what partners choose
+	// from (empty: any, in their own words).
+	PayoutTermDays *int             `json:"payout_term_days"`
+	PayoutMethods  []string         `json:"payout_methods"`
+	PayoutTokens   []string         `json:"payout_tokens"`
 	ReadOnly       bool             `json:"read_only"`
 	Program        portalPublicInfo `json:"program"`
 }
@@ -1020,8 +1066,37 @@ func (s *Server) portalMe(w http.ResponseWriter, r *http.Request, c *portalCalle
 	}
 	_ = json.Unmarshal(raw, &notify)
 	writeJSON(w, http.StatusOK, portalMeView{Name: v.Name, Email: v.Email, Code: v.Code, Status: v.Status, Link: v.Link, CampaignLink: v.CampaignLink,
-		PromoCodes: promoCodeNames(v.PromoCodes), PayoutMethod: v.PayoutMethod, PostbackURL: v.PostbackURL, Notify: notify, Currency: v.Currency, Stats: v.Stats,
-		MinPayoutCents: c.program.minPayout, HoldDays: c.program.holdDays, ReadOnly: c.readOnly, Program: c.program.public()})
+		PromoCodes: promoCodeNames(v.PromoCodes), PayoutMethod: v.PayoutMethod, PayoutType: v.PayoutType, PayoutToken: v.PayoutToken, PostbackURL: v.PostbackURL, Notify: notify, Currency: v.Currency, Stats: v.Stats,
+		MinPayoutCents: c.program.minPayout, HoldDays: c.program.holdDays, PayoutTermDays: c.program.payoutTerm,
+		PayoutMethods: c.program.payoutMethods, PayoutTokens: c.program.payoutTokens, ReadOnly: c.readOnly, Program: c.program.public()})
+}
+
+// checkPayoutChoice reports whether a partner may choose this payout method
+// and token: one the program offers (any method when it lists none), and a
+// token only with crypto, from its list when it has one.
+func (p *portalProgram) checkPayoutChoice(typ, token optional[string]) error {
+	if t := typ.Value; t != nil {
+		methods := p.payoutMethods
+		if len(methods) == 0 {
+			methods = partnerPayoutMethods
+		}
+		if !slices.Contains(methods, *t) {
+			return errInvalid("payout_type is one of " + strings.Join(methods, ", "))
+		}
+	}
+	if v := token.Value; v != nil {
+		if typ.Value == nil || *typ.Value != "crypto" {
+			return errInvalid("payout_token goes with payout_type crypto")
+		}
+		t := strings.TrimSpace(*v)
+		if len(p.payoutTokens) > 0 && !slices.Contains(p.payoutTokens, t) {
+			return errInvalid("payout_token is one of " + strings.Join(p.payoutTokens, ", "))
+		}
+		if t == "" || len(t) > 40 {
+			return errInvalid("payout_token is 1 to 40 characters, such as USDC on Base")
+		}
+	}
+	return nil
 }
 
 func promoCodeNames(codes []partnerPromoCode) []string {
@@ -1042,11 +1117,17 @@ func (s *Server) portalUpdateMe(w http.ResponseWriter, r *http.Request, c *porta
 		return
 	}
 	var in struct {
-		PayoutMethod *string         `json:"payout_method"`
-		PostbackURL  *string         `json:"postback_url"`
-		Notify       map[string]bool `json:"notify"`
+		PayoutMethod *string          `json:"payout_method"`
+		PayoutType   optional[string] `json:"payout_type"`
+		PayoutToken  optional[string] `json:"payout_token"`
+		PostbackURL  *string          `json:"postback_url"`
+		Notify       map[string]bool  `json:"notify"`
 	}
 	if !decode(w, r, &in) {
+		return
+	}
+	if err := c.program.checkPayoutChoice(in.PayoutType, in.PayoutToken); err != nil {
+		writeError(w, r, http.StatusBadRequest, "invalid_request", err.Error())
 		return
 	}
 	if in.PayoutMethod != nil && len(*in.PayoutMethod) > 500 {
@@ -1073,6 +1154,9 @@ func (s *Server) portalUpdateMe(w http.ResponseWriter, r *http.Request, c *porta
 				return err
 			}
 		}
+		if err := setPayoutChoice(ctx, tx, c.partner.ID, in.PayoutType, in.PayoutToken); err != nil {
+			return err
+		}
 		if in.PostbackURL != nil {
 			if _, err := tx.Exec(ctx, `UPDATE partner_memberships SET postback_url = $2, updated_at = now() WHERE id = $1`,
 				c.partner.ID, strings.TrimSpace(*in.PostbackURL)); err != nil {
@@ -1086,7 +1170,7 @@ func (s *Server) portalUpdateMe(w http.ResponseWriter, r *http.Request, c *porta
 			}
 		}
 		return partnerRecord(ctx, tx, nil, c.program.ws, "partner.portal_updated", "partner", c.partner.ID,
-			map[string]any{"program_id": c.program.id, "payout_method": in.PayoutMethod != nil, "postback_url": in.PostbackURL != nil, "notify": in.Notify != nil})
+			map[string]any{"program_id": c.program.id, "payout_method": in.PayoutMethod != nil, "payout_type": in.PayoutType.Set, "postback_url": in.PostbackURL != nil, "notify": in.Notify != nil})
 	})
 	if err != nil {
 		s.internal(w, r, err)

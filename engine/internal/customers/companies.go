@@ -121,7 +121,7 @@ func EnsureCompanies(ctx context.Context, tx pgx.Tx, workspaceID string, brand *
 			SELECT gen_random_uuid() AS id, d, n, a::jsonb AS a, s::jsonb AS s FROM unnest($2::text[], $3::text[], $4::text[], $5::text[]) AS t(d, n, a, s)
 		), made AS (
 			INSERT INTO records (id, workspace_id, record_type, brand_id, name, attributes, attribute_sources, origin, acquired_via)
-			SELECT id, $1, 'account', $6, n, a, s, 'prospect', left($7, 64) FROM todo
+			SELECT id, $1, 'account', COALESCE($6, outflare_first_brand($1)), n, a, s, 'prospect', left($7, 64) FROM todo
 		), ids AS (
 			INSERT INTO record_identities (workspace_id, record_id, namespace, value, verified, source)
 			SELECT $1, id, 'domain', d, false, $7 FROM todo

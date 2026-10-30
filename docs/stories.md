@@ -46,14 +46,46 @@ Errors stop approval; warnings are for the person approving to read.
 
 `POST /v1/workspaces/{ws}/stories/{story}/approve` runs the check and, when it passes, marks the story approved. Only a person can approve: tokens and agents get 403, and a release that fails the check gets 409 `check_failed`. Changing an approved story's headline, kind, release or embargo, a quote's words, or removing a fact or the expert moves it back to draft, to be approved again.
 
+## With AI
+
+Two tools use the workspace's own AI model (the **PR stories** task under Settings, AI model). Outflare never uses an AI key of its own: without a connected model they answer 409 `connector_needed`, and they count against the workspace's AI budget.
+
+- **Ideas.** `POST /v1/workspaces/{ws}/stories/ideas` with `brand_id`, `count` (1 to 10, 5 by default) and an optional `brief` suggests story ideas from the brand, its facts, its experts' topics, its recent coverage and the last two weeks of news its topic searches found. Each one is a story with status `idea` and source `ai_ideas`; a reactive idea keeps the article it answers. Ideas never state numbers or quotes: a data idea says which of the brand's numbers to look up.
+- **Drafts.** `POST /v1/workspaces/{ws}/stories/{story}/draft`, with optional `guidance`, writes the release from the story's headline, notes, facts and approved quotes only, never a draft or withdrawn quote, and improves the current release when there is one. The draft replaces the release, moves the story to `draft` and runs the check, so `last_check` shows straight away whether it used a number with no fact or changed a quote. A person still approves it. While it writes, the story's `ai_status` is `drafting`; it is `failed`, with `ai_error`, when it couldn't.
+
+## Pitching
+
+An approved story is pitched to journalists through one of the workspace's own Outreach sequences, from its existing mailboxes and their rules. `POST /v1/workspaces/{ws}/stories/{story}/pitches` with `sequence_id` and up to 50 journalists' person records (`record_ids`, such as from [`/journalists`](news-watch.md)) starts a pitch for each.
+
+- **The sequence** must stop on any reply, have 1 or 2 steps (one follow-up at most) and use `{{custom.opener}}`. `{{custom.story_title}}` holds the headline.
+- **The opener.** The workspace's own AI (the PR stories task) writes 2 to 4 sentences from the story's facts and approved quotes and the journalist's latest article. It is checked like the release: a number in none of the facts or a quote that isn't approved leaves the draft with `reason` `check_failed`, for a person to fix. Without a connected AI model the draft waits with no opener, for a person to write.
+- **A person approves each pitch** (`POST /v1/workspaces/{ws}/story-pitches/{pitch}/approve`, with the opener edited if they like); tokens and agents get 403. Approving makes the journalist a lead and enrolls them, **held until the story's embargo** (`embargo_until`).
+- **Gentle with journalists.** A journalist is pitched once per story, and at most once a week by the workspace, whichever brand. Anyone who asked not to be contacted is refused, and the sequence stops on their reply.
+- **Replies.** The AI reads each reply as `covering`, `wants_data`, `wants_interview`, `not_my_beat`, `declined` or `other`, kept on the pitch as `reply_kind` and tagged in the inbox (`pr: covering it`, `pr: wants the data`, `pr: wants an interview`, `pr: not my beat`, `pr: declined`). Data and interview requests also go to a person (`needs_review`).
+
+## Results
+
+`GET /v1/workspaces/{ws}/stories/results` (`brand`, `days`, 28 by default, `story_id`) gives each story's pitches, replies by kind and coverage in the window, and their total. A story's coverage is coverage a person put on it (`story_id` on [coverage](news-watch.md)), or coverage of its brand written by a journalist it pitched, after the pitch. Home shows the totals for the last 28 days next to the channels.
+
+## Playbooks
+
+Four [playbooks](playbooks.md) run digital PR end to end with these tools, each as a mission a person approves:
+
+- **Data story** (`pr-data-story`): a surprising finding in the brand's own data, as aggregates, written up and pitched to journalists on the topic.
+- **Regional data story** (`pr-regional-data-story`): one finding split by region, each version pitched to that region's journalists.
+- **React to today's news** (`pr-react-to-news`): the expert's approved comment on a story the news watch found, pitched within hours to the journalists covering it.
+- **Expert comment** (`pr-expert-comment`): the expert offered to journalists on their beat, with an approved quote and an interview.
+
+**Turn mentions into links** (`link-unlinked-mentions`) asks coverage that names the brand without linking to add the link.
+
 ## Permissions
 
-Reading experts and stories, and running the check, needs `seo.read`; changing them and approving needs `seo.manage`. A member limited to some brands sees and changes only their brands' experts and stories.
+Reading experts and stories, results, and running the check, needs `seo.read`; changing them and approving needs `seo.manage`. Pitches enroll leads in sequences, so they need `sequences.read` to list and `sequences.manage` to start, change, approve or reject. A member limited to some brands sees and changes only their brands' experts and stories.
 
 ## Events
 
-`pr_expert.created`, `.updated`, `.deleted`; `story.created`, `.updated`, `.deleted`, `.checked` (with `ok`, `errors` and `warnings` counts) and `.approved`; `story_fact.added` and `.removed`; `story_quote.added`, `.approved`, `.withdrawn`, `.reopened` and `.updated`. They carry ids and counts, never the release, facts or quotes.
+`pr_expert.created`, `.updated`, `.deleted`; `story.created`, `.updated`, `.deleted`, `.checked` (with `ok`, `errors` and `warnings` counts) and `.approved`; `story_fact.added` and `.removed`; `story_quote.added`, `.approved`, `.withdrawn`, `.reopened` and `.updated`; `story.ideas_requested`, `.ideas_suggested` (with `ideas`), `.ideas_failed`, `.draft_requested`, `.drafted` (with the check's `ok` and `errors`) and `.draft_failed`, the last two failures with the error code; `story_pitch.started`, `.written` (with whether the opener passed the check), `.write_failed`, `.edited`, `.approved` (with `embargoed`), `.rejected`, `.reply_read` (with `kind`) and `.reply_failed`. They carry ids and counts, never the release, facts or quotes.
 
 ## Agents
 
-Agents use `list_stories`, `get_story`, `create_story`, `update_story`, `add_story_fact`, `add_story_quote`, `check_story`, `list_pr_experts` and `create_pr_expert`. They can draft a story and fix what the check finds; a person approves quotes and releases in Outflare.
+Agents use `list_stories`, `get_story`, `create_story`, `update_story`, `add_story_fact`, `add_story_quote`, `check_story`, `suggest_stories`, `draft_story`, `pitch_story`, `list_story_pitches`, `update_story_pitch`, `reject_story_pitch`, `get_story_results`, `list_pr_experts` and `create_pr_expert`. They can draft a story and fix what the check finds; a person approves quotes and releases in Outflare.

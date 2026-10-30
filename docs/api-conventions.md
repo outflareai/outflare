@@ -55,7 +55,11 @@ Rows about a person or company carry `record_id` (AGENTS.md, Rules). **Now:** le
 
 ## Who may call it
 
-Every operation declares `x-outflare-access`: `scope` (the token scope it needs in the workspace), `brand_limited` (whether a caller kept to some brands may call it), `signed_in` (people only), or `authenticated` (any caller). Operations without it are public. The contract test checks each value against the server.
+Every operation declares `x-outflare-access`: `scope` (the token scope it needs in the workspace), `brand_limited` (whether a caller kept to some brands may call it), `brand` (a `/v1/brands/{brand}/` route, below), `signed_in` (people only), or `authenticated` (any caller). Operations without it are public. The contract test checks each value against the server.
+
+### Brand routes
+
+A brand owns its data, so brand data lives under `/v1/brands/{brand}/`, with the brand's id. Workspace-only things (members, billing, shared connections, the list of brands) stay under `/v1/workspaces/{ws}/`. Register a brand route with `s.onBrand(scope, handler)`: it finds the brand's workspace, checks the caller has `scope` there and may see the brand (a member kept to some brands sees only those, a brand token only its own), answers 404 otherwise, and sets `access.Brand`. The handler keeps every read and write to that brand. Areas move under `/v1/brands/` one at a time; until an area has, its routes stay where they are.
 
 - A new area gets `area.read` and `area.manage` scopes. Any scope in an area includes `area.read` (`auth.Grants`), so check the narrowest scope a route needs and never require both. Split out a scope only when the risk differs, as `suppressions.manage` and `infrastructure.approve` do (one can email people who opted out, the other spends money).
 - Roles are bundles of scopes. The starting roles' defaults are in `engine/internal/auth`: viewers get every `.read` unless it exposes secrets, operators (Members) get the marketing work, admins get everything but `members.remove`. A workspace can change them and add its own ([roles.md](roles.md)), so check scopes (`access.has`), never a role name. A new scope goes into the admin default automatically; add it to the operator or viewer default when they should have it, and to `web/src/lib/rolePermissions.ts` so the role editor shows it in plain words.

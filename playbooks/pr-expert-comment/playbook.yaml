@@ -1,0 +1,59 @@
+id: pr-expert-comment
+version: 1
+title: Offer your expert to journalists on their beat
+summary: Pitch your expert's view on a topic they know to the journalists who cover it, so they come back to you as a source.
+description: |
+  A journalist with a reliable expert to call writes faster. This
+  playbook takes one of your brand's experts and a topic they know, finds
+  the journalists who wrote about it recently, and offers a short, useful
+  view (an approved quote, never an invented one) with the offer of an
+  interview. Replies asking for an interview go straight to a person.
+tier: obvious
+goals: [search, ai_answers]
+publisher: outflare
+author: { github: outflareai }
+needs:
+  data:
+    - { check: mailboxes, label: A mailbox to send pitches from }
+  connections:
+    - capability: web.search
+      label: Geonode, so the news watch finds the journalists on the topic
+      recommended: [geonode]
+    - capability: plan
+      label: An AI model to draft the comment and write openers, unless you run this from your own AI app
+      optional: true
+      recommended: [claude, openai]
+inputs:
+  - name: brand
+    label: Brand
+    example: Northpeak
+  - name: topic
+    label: The topic
+    example: AI agents and web data
+steps:
+  - say: Read the brand's context and pick the expert whose topics fit; make sure a news search follows the topic.
+    tools: [getBrandContext, listPRExperts, listNewsSearches, createNewsSearch]
+  - say: Start a comment story on the topic and draft the expert's view as a quote for them to approve.
+    tools: [createStory, addStoryQuote, addStoryFact]
+  - say: Once the quote is approved, draft the release, check it and fix what the check finds. A person approves it.
+    tools: [draftStory, getStory, updateStory, checkStory]
+  - say: Pick the journalists who covered the topic in the last two months and a short sequence whose first step uses {{custom.opener}}; start a pitch to each, waiting for a person.
+    tools: [listJournalists, listSequences, createSequence, startStoryPitches, listStoryPitches]
+  - say: Report replies, flagging every request for an interview, and the coverage that followed.
+    tools: [getStoryResults, listStoryPitches]
+guardrails:
+  - Quotes the expert only in words they approved; offers an interview rather than promising one.
+  - The release and every pitch wait for a person's approval.
+  - A journalist gets one pitch a week at most, from any brand in the workspace.
+measure:
+  - { metric: Interview requests, how: "Replies read as wants an interview, on the story's results." }
+  - { metric: Articles quoting the expert, how: "Coverage counted for the story within 30 days." }
+prompt: |
+  Run the "Expert comment" playbook for {{brand}} on {{topic}}. Pick the
+  expert whose topics fit, draft their view on {{topic}} as a short quote
+  for them to approve, write and check the release, and offer it, with an
+  interview, to the journalists who covered {{topic}} recently. The
+  release and every pitch wait for my approval.
+example: |
+  Northpeak offered its head of research on AI agents to 15 journalists;
+  4 asked for an interview and 2 quoted her within a month.

@@ -290,7 +290,8 @@ func (s *Server) exportPartnerPayouts(w http.ResponseWriter, r *http.Request) {
 	rows, err := s.pool.Query(ctx, `SELECT o.id::text, p.slug, m.id::text, m.code, COALESCE(rc.name, ''),
 			COALESCE((SELECT i.value FROM record_identities i WHERE i.record_id = m.record_id AND i.namespace = 'email' AND i.valid_to IS NULL
 				ORDER BY i.verified DESC, i.valid_from LIMIT 1), ''),
-			m.payout_method, o.amount_cents, o.currency, o.status, o.reference, o.created_at, o.paid_at
+			m.payout_method, o.amount_cents, o.currency, o.status, o.reference, o.created_at, o.paid_at,
+			COALESCE(m.payout_type, ''), COALESCE(m.payout_token, '')
 		FROM partner_payouts o JOIN partner_memberships m ON m.id = o.membership_id JOIN partner_programs p ON p.id = m.program_id
 		LEFT JOIN records rc ON rc.id = m.record_id
 		WHERE o.workspace_id = $1 AND ($2 = 'all' OR o.status = $2) AND ($3 = '' OR p.id::text = $3 OR p.slug = $3)`+sel.sql("p.brand_id", &args)+`
@@ -301,15 +302,15 @@ func (s *Server) exportPartnerPayouts(w http.ResponseWriter, r *http.Request) {
 	}
 	defer rows.Close()
 	header := []string{"payout_id", "program", "partner_id", "partner_code", "partner_name", "partner_email", "payout_method", "amount",
-		"currency", "status", "reference", "created_at", "paid_at"}
+		"currency", "status", "reference", "created_at", "paid_at", "payout_type", "payout_token"}
 	var out [][]string
 	for rows.Next() {
-		var id, prog, member, code, name, email, cur, st, ref string
+		var id, prog, member, code, name, email, cur, st, ref, typ, token string
 		var sealed []byte
 		var cents int64
 		var created time.Time
 		var paid *time.Time
-		if err := rows.Scan(&id, &prog, &member, &code, &name, &email, &sealed, &cents, &cur, &st, &ref, &created, &paid); err != nil {
+		if err := rows.Scan(&id, &prog, &member, &code, &name, &email, &sealed, &cents, &cur, &st, &ref, &created, &paid, &typ, &token); err != nil {
 			s.internal(w, r, err)
 			return
 		}
@@ -323,7 +324,7 @@ func (s *Server) exportPartnerPayouts(w http.ResponseWriter, r *http.Request) {
 		if paid != nil {
 			paidAt = paid.UTC().Format(time.RFC3339)
 		}
-		out = append(out, []string{id, prog, member, code, name, email, method, decimal(cents), cur, st, ref, created.UTC().Format(time.RFC3339), paidAt})
+		out = append(out, []string{id, prog, member, code, name, email, method, decimal(cents), cur, st, ref, created.UTC().Format(time.RFC3339), paidAt, typ, token})
 	}
 	if err := rows.Err(); err != nil {
 		s.internal(w, r, err)

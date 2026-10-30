@@ -30,7 +30,7 @@ Each run keeps up to 50 results. An article is kept once per workspace, however 
 
 A coverage search keeps an article as the brand's coverage when its title or snippet names every word of the search, and it isn't on the brand's own website or one of its subdomains. Each item is on its outlet's company record (a prospect company when you have none), so everything you know about an outlet is in one place, and each one is recorded as a mention (`mention.found`).
 
-New items wait for a person: **Confirm** or **Dismiss** (`PATCH /v1/workspaces/{ws}/coverage/{coverage}`). Add an article the watch missed with `POST /v1/workspaces/{ws}/coverage`. `linked` says whether the article links to the brand's site; it is empty until someone checks.
+New items wait for a person: **Confirm** or **Dismiss** (`PATCH /v1/workspaces/{ws}/coverage/{coverage}`). Add an article the watch missed with `POST /v1/workspaces/{ws}/coverage`. `linked` says whether the article links to the brand's site; it is empty until someone checks. `story_id` puts it on one of the brand's [stories](stories.md), so the story's results count it.
 
 ## Journalists
 

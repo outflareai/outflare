@@ -924,7 +924,7 @@ func (s *Server) createRecord(w http.ResponseWriter, r *http.Request) {
 		if req.AcquiredVia != nil {
 			via = *req.AcquiredVia
 		}
-		if err := tx.QueryRow(ctx, `INSERT INTO records (workspace_id, record_type, brand_id, name, origin, acquired_via, created_by) VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id::text`,
+		if err := tx.QueryRow(ctx, `INSERT INTO records (workspace_id, record_type, brand_id, name, origin, acquired_via, created_by) VALUES ($1, $2, COALESCE($3, outflare_first_brand($1)), $4, $5, $6, $7) RETURNING id::text`,
 			a.WorkspaceID, t.Key, brand, name, origin, via, nullIfEmpty(a.ActorID)).Scan(&id); err != nil {
 			return err
 		}

@@ -20,6 +20,7 @@ func TestJourneyActions(t *testing.T) {
 	got := track.Capture(t)
 	e := freshEnv(t)
 	owner, ws := setupOwner(t, e.h)
+	guardrailsOff(t, owner, ws)
 	base := "/v1/workspaces/" + ws
 	ctx := context.Background()
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
@@ -236,6 +237,7 @@ func TestJourneyActions(t *testing.T) {
 func TestJourneyDraftExitCriteria(t *testing.T) {
 	e := freshEnv(t)
 	owner, ws := setupOwner(t, e.h)
+	guardrailsOff(t, owner, ws)
 	base := "/v1/workspaces/" + ws
 	steps := []map[string]any{
 		{"id": "tag", "kind": "add_tag", "tag": "trial", "on_error": "oops"},

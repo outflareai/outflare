@@ -76,7 +76,7 @@ func (f *fakeTolt) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	objs, ok := f.data[r.URL.Path]
-	if !ok {
+	if !ok && r.URL.Path != "/clicks" { // no clicks unless a test sets some
 		w.WriteHeader(404)
 		return
 	}
@@ -189,6 +189,10 @@ func TestPartnerToltImport(t *testing.T) {
 		map[string]any{"id": "t1", "customer_id": "cus_c1", "amount": 4900, "billing_type": "subscription", "created_at": day(2)},
 		map[string]any{"id": "t2", "customer_id": "cus_c1", "amount": 4900, "billing_type": "subscription", "status": "refunded", "created_at": day(4)},
 		map[string]any{"id": "t3", "customer_id": "c2", "amount": "1000", "billing_type": "one_time", "created_at": day(5)})
+	tolt.set("/clicks",
+		map[string]any{"id": "k1", "partner_id": "p1", "referrer": "https://blog.example.org/post?utm=x", "created_at": day(1)},
+		map[string]any{"id": "k2", "partner_id": "p1", "created_at": day(2)},
+		map[string]any{"id": "k3", "partner_id": "p9", "created_at": day(2)})
 	tolt.set("/commissions",
 		map[string]any{"id": "m1", "partner_id": "p1", "customer_id": "cus_c1", "transaction_id": "t1", "amount": 980, "status": "paid",
 			"created_at": day(2), "paid_at": day(20), "payout_id": "po_1"},
@@ -246,7 +250,7 @@ func TestPartnerToltImport(t *testing.T) {
 	if p := k["partners"]; p["seen"] != 5.0 || p["created"] != 4.0 || p["skipped"] != 1.0 {
 		t.Fatalf("partners = %v", p)
 	}
-	if want := map[string]int{"no_email": 1, "code_changed": 1, "extra_link": 1, "link_param": 1, "partner_missing": 1, "partner_unavailable": 1, "flow_condition_unsupported": 1}; jsonString(reasons(first)) != jsonString(want) {
+	if want := map[string]int{"no_email": 1, "code_changed": 1, "extra_link": 1, "link_param": 1, "partner_missing": 2, "partner_unavailable": 1, "flow_condition_unsupported": 1}; jsonString(reasons(first)) != jsonString(want) {
 		t.Fatalf("issues = %v", reasons(first))
 	}
 	codes := map[string]string{}
@@ -321,6 +325,12 @@ func TestPartnerToltImport(t *testing.T) {
 		t.Fatalf("reward events = %d", hooks)
 	}
 	st := owner.must(200, "GET", base+"/partners/"+anaID, nil)["stats"].(map[string]any)
+	// Her clicks in Tolt count here, with the referring host only.
+	var host string
+	e.pool.QueryRow(ctx, `SELECT coalesce(max(referrer_host), '') FROM partner_clicks WHERE workspace_id = $1`, ws).Scan(&host) //nolint:errcheck
+	if st["clicks"] != 2.0 || host != "blog.example.org" {
+		t.Fatalf("Ana's clicks %v, referrer %q", st["clicks"], host)
+	}
 	if st["paid_cents"] != 980.0 || st["approved_cents"] != 1000.0 {
 		t.Fatalf("Ana's stats = %v", st)
 	}
@@ -405,6 +415,9 @@ func TestPartnerToltImport(t *testing.T) {
 	}
 	if c := k["commissions"]; c["created"] != 0.0 || c["updated"] != 1.0 || c["unchanged"] != 3.0 {
 		t.Fatalf("commissions again = %v", c)
+	}
+	if c := k["clicks"]; c["created"] != 0.0 || c["unchanged"] != 2.0 || c["skipped"] != 1.0 {
+		t.Fatalf("clicks again = %v", c)
 	}
 	if c := k["transactions"]; c["created"] != 0.0 || c["unchanged"] != 3.0 {
 		t.Fatalf("transactions again = %v", c)

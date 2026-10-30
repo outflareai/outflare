@@ -17,6 +17,12 @@ export const cloudFeatures: CloudFeature[] = [
     name: "Lead finder",
     line: "AI that searches the web for companies that fit your ideal customer, reads their websites and tells you which fit and why.",
   },
+  {
+    tab: "link-autopilot",
+    capability: "link_autopilot",
+    name: "Link autopilot",
+    line: "Set how many new live links you want a month and a budget; Outflare's agent runs the link building playbooks toward it, and you approve each change.",
+  },
 ];
 
 export const cloudFeature = (tab: Tab) => cloudFeatures.find((f) => f.tab === tab);

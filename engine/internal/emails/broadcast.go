@@ -413,6 +413,11 @@ func (s *Service) broadcastEmail(ctx context.Context, tx pgx.Tx, who Who, id str
 	if err != nil {
 		return "", "", err
 	}
+	e.RecordID = p.id
+	g, err := s.Guard(ctx, tx, p.id, &e, GuardOptions{})
+	if err != nil || g.Capped != "" {
+		return "", g.Capped, err
+	}
 	emailID, err := s.Queue(ctx, tx, who, e)
 	return emailID, "", err
 }

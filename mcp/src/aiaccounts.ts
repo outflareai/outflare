@@ -78,6 +78,18 @@ export function registerAIAccountTools(server: McpServer, gtm: MissionClient, wo
   );
 
   server.registerTool(
+    "list_ai_devices",
+    {
+      title: "List computers running Outflare for desktop",
+      description:
+        "Computers linked to Outflare for desktop, which report AI usage: yours, or everyone's with everyone and ai_accounts.read. Each shows when it last reported, whether it is silent (over an hour) and any tool it couldn't read (last_error_code, such as not_signed_in).",
+      inputSchema: { everyone: z.boolean().optional().describe("Everyone's computers (needs ai_accounts.read).") },
+      annotations: read,
+    },
+    (q) => call(() => gtm.GET("/v1/workspaces/{ws}/ai-devices", { params: { path: path(), query: q } })),
+  );
+
+  server.registerTool(
     "get_receipt_forwarding",
     {
       title: "Where to forward AI receipts",

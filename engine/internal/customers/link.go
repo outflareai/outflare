@@ -115,8 +115,8 @@ func EnsurePeople(ctx context.Context, tx pgx.Tx, workspaceID, origin, via strin
 		WITH todo AS MATERIALIZED (
 			SELECT gen_random_uuid() AS id, e, n, a::jsonb AS a, s::jsonb AS s, v FROM unnest($2::text[], $3::text[], $4::text[], $5::text[], $8::text[]) AS t(e, n, a, s, v)
 		), made AS (
-			INSERT INTO records (id, workspace_id, record_type, name, attributes, attribute_sources, origin, acquired_via)
-			SELECT id, $1, 'person', n, a, s, $6, v FROM todo
+			INSERT INTO records (id, workspace_id, record_type, brand_id, name, attributes, attribute_sources, origin, acquired_via)
+			SELECT id, $1, 'person', outflare_first_brand($1), n, a, s, $6, v FROM todo
 		), ids AS (
 			INSERT INTO record_identities (workspace_id, record_id, namespace, value, verified, source)
 			SELECT $1, id, 'email', e, false, $7 FROM todo
@@ -292,7 +292,7 @@ type Ref struct{ Table, Column string }
 // when a column points at records and is neither here nor in Owned, so a
 // new link is never left behind on a merged record.
 var Follows = []Ref{
-	{"customer_events", "record_id"}, {"customer_events", "account_id"}, {"consents", "record_id"},
+	{"customer_events", "record_id"}, {"customer_events", "account_id"}, {"consents", "record_id"}, {"event_inbox", "record_id"},
 	{"leads", "record_id"}, {"messages", "record_id"}, {"inbound_messages", "record_id"},
 	{"meetings", "record_id"}, {"deals", "record_id"}, {"emails", "record_id"},
 	{"support_conversations", "record_id"}, {"support_messages", "record_id"},
@@ -300,11 +300,13 @@ var Follows = []Ref{
 	{"journey_runs", "record_id"}, {"payment_subscriptions", "record_id"}, {"seo_competitors", "record_id"},
 	{"site_sessions", "record_id"}, {"site_visitors", "record_id"}, {"site_visitors", "account_id"},
 	{"ad_conversion_sends", "record_id"}, {"attribution_conversions", "record_id"}, {"link_prospects", "record_id"},
-	{"rule_firings", "record_id"}, {"coverage", "record_id"}, {"static_list_members", "record_id"}, {"news_article_authors", "record_id"}, {"pr_experts", "record_id"},
+	{"rule_firings", "record_id"}, {"coverage", "record_id"}, {"static_list_members", "record_id"}, {"news_article_authors", "record_id"}, {"pr_experts", "record_id"}, {"story_pitches", "record_id"},
 	{"link_prospect_contacts", "record_id"},
 	{"link_pitches", "record_id"},
 	{"partner_memberships", "record_id"}, {"partner_referrals", "record_id"}, {"partner_conversions", "record_id"},
 	{"partner_rewards", "recipient_id"}, {"partner_sign_in_links", "record_id"}, {"partner_sessions", "record_id"},
+	// Privacy exports made for the person.
+	{"privacy_exports", "record_id"},
 }
 
 // followOnce are Follows tables that hold one row per record and parent

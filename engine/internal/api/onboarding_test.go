@@ -27,7 +27,7 @@ func TestOnboardingStepsSkipsAndDismissal(t *testing.T) {
 	if o["done"] != 0.0 || o["total"] != 7.0 || o["next_step"] != "brand" || o["complete"] != false || o["show"] != true || o["dismissed"] != false || o["goal"] != nil {
 		t.Fatalf("new workspace: %v", o)
 	}
-	if st := stepsOf(o)["brand"]; !strings.HasSuffix(st["page"].(string), "/brands") || st["tool"] != "create_brand" || st["walkthrough"] != true {
+	if st := stepsOf(o)["brand"]; !strings.HasSuffix(st["page"].(string), "/brands") || st["tool"] != "update_brand" || st["walkthrough"] != true {
 		t.Fatalf("brand step: %v", st)
 	}
 	if st := stepsOf(o)["team"]; st["walkthrough"] != false {
@@ -50,8 +50,9 @@ func TestOnboardingStepsSkipsAndDismissal(t *testing.T) {
 		t.Fatalf("after picking a goal: %v", o)
 	}
 
-	// Doing a step anywhere ticks it off, skipped or not.
-	owner.must(201, "POST", base+"/brands", map[string]any{"name": "Acme", "website": "acme-com.example"})
+	// Doing a step anywhere ticks it off, skipped or not. Sign-up made the
+	// brand; the step is done once it has its website.
+	owner.must(200, "PATCH", base+"/brands/acme-outbound", map[string]any{"name": "Acme", "handle": "acme", "website": "acme-com.example"})
 	owner.must(201, "POST", base+"/invites", map[string]string{"email": "sam@example.com", "role": "operator"})
 	owner.must(201, "POST", base+"/integrations", map[string]any{"connector": "plausible", "credentials": map[string]string{"api_key": "pk", "site_id": "example.com"}})
 	o = owner.must(200, "GET", base+"/onboarding", nil)

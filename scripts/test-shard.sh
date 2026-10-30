@@ -19,10 +19,12 @@ api=./engine/internal/api
 log=$(mktemp)
 trap 'rm -f "$log" "$log.rc"' EXIT
 
-# run_tests <go test args...>: go test, retrying failed tests once.
+# run_tests <go test args...>: go test, retrying failed tests once. Half the
+# API package under -race runs close to go test's default 10-minute timeout,
+# so a slow runner would panic a part with no test failing; allow 25.
 run_tests() {
 	(
-		if go test -race -count=1 "$@" 2>&1; then echo 0 >"$log.rc"; else echo $? >"$log.rc"; fi
+		if go test -race -count=1 -timeout 25m "$@" 2>&1; then echo 0 >"$log.rc"; else echo $? >"$log.rc"; fi
 	) | tee "$log"
 	[ "$(cat "$log.rc")" = 0 ] && return 0
 	# Top-level failed tests, grouped by the package line that follows them.
@@ -33,7 +35,7 @@ run_tests() {
 	echo "Re-running the failed tests once:" >&2
 	echo "$failed" >&2
 	echo "$failed" | while read -r pkg tests; do
-		go test -race -count=1 -p 1 -run "^($tests)\$" "$pkg" || exit 1
+		go test -race -count=1 -timeout 25m -p 1 -run "^($tests)\$" "$pkg" || exit 1
 	done || return 1
 	if [ -n "${FLAKY_FILE:-}" ]; then
 		echo "$failed" >>"$FLAKY_FILE"

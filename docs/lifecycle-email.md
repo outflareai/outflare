@@ -351,6 +351,41 @@ with the rule's dry run. On a phone the flow is read-only.
   waited, or went yes or no, and how many are on it now (`at_step`). `GET .../journeys/{id}/runs` lists the people
   in it, and one run lists what each of its steps did.
 
+## Guardrails
+
+Marketing email (purpose `lifecycle`) that journeys and broadcasts send
+to a customer record goes through two guardrails, on in every workspace
+by default and changed in Lifecycle settings or with `PATCH
+.../email-guardrails` (`emails.manage`):
+
+- **Frequency cap.** One person gets at most `per_day` marketing emails
+  in any 24 hours (default 1) and `per_week` in any 7 days (default 3).
+  `0` turns a limit off. An email over the cap is not sent: the journey
+  step's outcome is `frequency_cap` and the run moves on, a broadcast
+  skips the person with the reason, and it is `email.capped` on their
+  timeline (with `reason`, `template_id`, `topic_id` and the journey or
+  broadcast id), an `email.capped` event and a log line.
+- **Quiet hours.** An email due between `quiet_start` and `quiet_end`
+  o'clock (default 20 to 8) in the person's time zone (their `timezone`
+  attribute, else the workspace's `time_zone`, default UTC) is queued
+  for when quiet hours end. The journey step's outcome is
+  `quiet_hours`, and the email is `scheduled` until then.
+
+Each journey email step can make its own choices:
+
+- **`ignore_cap: true`** sends even over the frequency cap. Use it for
+  email a person must get, such as a sign-in link or a trial ending. It
+  still counts toward the cap for later emails.
+- **`quiet_hours: "skip"`** doesn't send in quiet hours, where the
+  default (`hold`) waits until they end. The step's outcome is
+  `quiet_hours_skipped`, and like a capped send it is `email.capped`
+  (reason `quiet_hours_skipped`) on the person's timeline, with an event
+  and a log line. The run goes on to the next step.
+
+Transactional email, emails sent with `POST .../emails`, and test sends
+are never capped or held. The journey builder shows the current
+guardrails on each email step, with a link to change them.
+
 ### Webhook steps
 
 A `webhook` step makes one HTTP call per person:
@@ -462,7 +497,8 @@ and consents: `email.sent`, `email.delivered`, `email.bounced` (not soft
 bounces), `email.complained`, `email.rejected` (not sent to them, with
 why) and the first `email.opened` and `email.clicked`. Each has source
 `lifecycle` and the `email_id`, `purpose`, `template` and `topic`, and is
-stored once per email and person. Sending to an address never makes a
+stored once per email and person, and `email.capped` when a guardrail
+stopped one (see Guardrails). Sending to an address never makes a
 record, and test sends stay off the timeline.
 
 ## Scopes and events

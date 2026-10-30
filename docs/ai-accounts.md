@@ -32,6 +32,18 @@ Receipts in another currency are converted to US dollars with the European Centr
 
 API: `GET .../ai-accounts/receipts`, `POST .../ai-accounts/receipts/{id}/assign` and `.../ignore`. MCP: `list_ai_receipts`, `get_receipt_forwarding`, `assign_ai_receipt`, `ignore_ai_receipt`.
 
+## Outflare for desktop
+
+A small app each person installs once, for Mac, Windows and Linux. It sits in the menu bar or system tray, starts when they sign in, and every 10 minutes reads how much of each limit (the 5-hour and weekly windows, monthly requests, credits) their AI tools have used and when each resets: Claude, ChatGPT and Codex, Cursor and GitHub Copilot. It sends only those numbers, the plan and banked resets. Prompts, files and the tools' sign-ins never leave the computer.
+
+It reads each tool two ways, which the app labels: **official** (the tool's own documented way) and **extended** (the endpoints the tool's own app calls, with the sign-in already on the computer). It only reads: it never sends a prompt, uses a reset or buys anything, and backs off when a tool asks it to. The one sign-in it renews is Claude Code's, which Claude Code itself renews only while it runs: when it has expired, the app renews it the same way and saves it back, so Claude Code stays signed in.
+
+**Linking a computer.** The app shows a code like `ABCD-2345` and opens Outflare; sign in, check the code matches and approve it (**Link computer**). The computer is then linked to you in that workspace until you or an admin unlink it under AI accounts → **Computers**, which also shows when each last reported and any tool it couldn't read (sign in to that tool again).
+
+**Where readings go.** To the account signed in with the same email anywhere in the workspace (a shared login adds you to it), else your only account for that tool, else a new account owned by you. Usage then shows on each account and in the **Usage** view, kept for 90 days.
+
+The operator can switch a source off for every computer (a tool changed or asked us to stop) and the apps stop reading it within minutes, without an update. API: `POST /v1/desktop/links`, `POST /v1/desktop/token`, `GET /v1/desktop/config` and `POST /v1/desktop/reports` for the app (with its `ofd_` device token), and `GET`, `POST` and `DELETE .../ai-devices` for people.
+
 ## Accounts and people
 
 An account belongs to one or more people in the workspace: its owner, and others who also sign in to it. When everyone who owns an account has left the workspace, the account stays and shows **owner left**, so someone can cancel it or take it over.
@@ -57,4 +69,4 @@ MCP tools: `list_ai_accounts`, `get_ai_account`, `create_ai_account`, `update_ai
 
 ## Coming next
 
-Outflare for desktop reading live usage and resets from the AI tools, views for which account to use and which plans fit, and the Anthropic and OpenAI admin APIs for API spend.
+Usage history over time (forecasts and plan fit), usage resets on the timeline, and the Anthropic and OpenAI admin APIs for API spend.

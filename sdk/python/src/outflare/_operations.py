@@ -1202,6 +1202,30 @@ class Operations(_Mixin):
             idempotency_key=idempotency_key,
         )
 
+    def approve_ai_device(
+        self,
+        *,
+        ws: str | None = None,
+        user_code: str,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Link a computer.
+
+        Scope: my_ai_accounts.manage, as a person. Approves the code Outflare for desktop shows; the app then gets its token and reports for you in this workspace.
+
+        Needs: the my_ai_accounts.manage scope.
+        POST /v1/workspaces/{ws}/ai-devices
+        """
+        return self._call(
+            "POST",
+            "/v1/workspaces/{ws}/ai-devices",
+            path={"ws": ws},
+            body={"user_code": user_code},
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
     def approve_infra_plan(
         self,
         id: str,
@@ -1509,6 +1533,39 @@ class Operations(_Mixin):
             "POST",
             "/v1/workspaces/{ws}/stories/{story}/approve",
             path={"story": story, "ws": ws},
+            idempotency_key=idempotency_key,
+        )
+
+    def approve_story_pitch(
+        self,
+        pitch: str,
+        *,
+        ws: str | None = None,
+        opener: str | None = None,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Approve a pitch.
+
+        Scope: sequences.manage. Only a person approves (403 for tokens and
+        agents). Checks the opener (edited when `opener` is given) like the
+        release: a number in none of the story's facts or a quote that isn't
+        approved is 409 `check_failed`. Then the journalist becomes a lead
+        with the opener as `custom.opener` and the headline as
+        `custom.story_title`, and is enrolled in the sequence, held until
+        the story's embargo. 409 when the story is no longer approved, the
+        journalist was pitched in the last week, or asked not to be
+        contacted.
+
+        Needs: the sequences.manage scope.
+        POST /v1/workspaces/{ws}/story-pitches/{pitch}/approve
+        """
+        return self._call(
+            "POST",
+            "/v1/workspaces/{ws}/story-pitches/{pitch}/approve",
+            path={"pitch": pitch, "ws": ws},
+            body={"opener": opener},
+            extra_body=extra_body,
             idempotency_key=idempotency_key,
         )
 
@@ -2485,6 +2542,27 @@ class Operations(_Mixin):
             query={"slug": slug},
         )
 
+    def claim_desktop_token(
+        self,
+        *,
+        device_code: str,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Get the computer's token once its link is approved.
+
+        Poll every `interval` seconds. 202 while the person hasn't approved yet; 410 link_expired when it expired or was used; 200 with the device token (shown once) when approved.
+
+        POST /v1/desktop/token
+        """
+        return self._call(
+            "POST",
+            "/v1/desktop/token",
+            body={"device_code": device_code},
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
     def classify_email(
         self,
         *,
@@ -3145,6 +3223,31 @@ class Operations(_Mixin):
             "/v1/workspaces/{ws}/deploy-targets",
             path={"ws": ws},
             body={"integration_id": integration_id, "site_id": site_id, "target": target},
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
+    def create_desktop_link(
+        self,
+        *,
+        app_version: str,
+        name: str,
+        platform: Literal["macos", "windows", "linux"],
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Start linking a computer (Outflare for desktop).
+
+        For Outflare for desktop, before it is linked; anyone may call it. Returns a short `user_code` to show and a
+        `device_code` to poll POST /v1/desktop/token with. The person opens `verification_url`, signs in, and approves
+        the code (POST /v1/workspaces/{ws}/ai-devices). Expires in 15 minutes.
+
+        POST /v1/desktop/links
+        """
+        return self._call(
+            "POST",
+            "/v1/desktop/links",
+            body={"app_version": app_version, "name": name, "platform": platform},
             extra_body=extra_body,
             idempotency_key=idempotency_key,
         )
@@ -4332,6 +4435,8 @@ class Operations(_Mixin):
         name: str | None = None,
         note: str | None = None,
         payout_method: str | None = None,
+        payout_token: str | None = None,
+        payout_type: Literal["paypal", "wise", "bank_transfer", "crypto", "other"] | None = None,
         postback_url: str | None = None,
         program: str | None = None,
         record_id: str | None = None,
@@ -4360,6 +4465,8 @@ class Operations(_Mixin):
                 "name": name,
                 "note": note,
                 "payout_method": payout_method,
+                "payout_token": payout_token,
+                "payout_type": payout_type,
                 "postback_url": postback_url,
                 "program": program,
                 "record_id": record_id,
@@ -4437,7 +4544,7 @@ class Operations(_Mixin):
         only proposes a partner: this call binds it. Identify the customer with customer_id (your own user id),
         email or record_id, the same way each time. external_id (your charge or order id) makes a retry safe and is what
         a refund's refund_of names. Not credited is not an error: the answer is 200 with credited false and a reason
-        (no_partner, partner_inactive, program_inactive, self_referral, sale_not_found or currency). 201 means it was
+        (no_partner, partner_inactive, program_inactive, self_referral, sale_not_found, currency or lead_expired). 201 means it was
         credited, with the rewards it earned.
 
         Needs: the partners.conversions scope.
@@ -4514,7 +4621,8 @@ class Operations(_Mixin):
         fees and adjustments reach the program's minimum, one payout gathers them and partner_payout.created fires.
         Outflare never holds or sends money: pay from your own account or payout tool, then mark it paid.
         An imported partner with no payout details (Tolt's API doesn't give them) waits: their balance stays until they
-        add details on the portal, and waiting_for_details counts them.
+        add details on the portal, and waiting_for_details counts them. With a payout term (payout_term_days, Net N),
+        only rewards earned in a month that ended at least N days ago are gathered; the rest wait for a later payout.
 
         Needs: the partners.manage scope.
         POST /v1/workspaces/{ws}/partner-payouts
@@ -4534,6 +4642,7 @@ class Operations(_Mixin):
         ws: str | None = None,
         auto_accept: bool | None = None,
         auto_approve: bool | None = None,
+        block_self_referrals: bool | None = None,
         brand: str | None = None,
         codes_win: bool | None = None,
         credit_model: Literal["first", "last"] | None = None,
@@ -4542,9 +4651,13 @@ class Operations(_Mixin):
         hold_days: int | None = None,
         kind: Literal["referral", "affiliate", "influencer"] | None = None,
         landing_url: str | None = None,
+        lead_expiry_days: int | None = None,
         min_payout_cents: int | None = None,
         name: str | None = None,
         pay_browser_signups: bool | None = None,
+        payout_methods: list[Literal["paypal", "wise", "bank_transfer", "crypto", "other"]] | None = None,
+        payout_term_days: int | None = None,
+        payout_tokens: list[str] | None = None,
         rules: list[dict[str, Any]] | None = None,
         sales_source: str | None = None,
         slug: str | None = None,
@@ -4571,6 +4684,7 @@ class Operations(_Mixin):
             body={
                 "auto_accept": auto_accept,
                 "auto_approve": auto_approve,
+                "block_self_referrals": block_self_referrals,
                 "brand": brand,
                 "codes_win": codes_win,
                 "credit_model": credit_model,
@@ -4579,9 +4693,13 @@ class Operations(_Mixin):
                 "hold_days": hold_days,
                 "kind": kind,
                 "landing_url": landing_url,
+                "lead_expiry_days": lead_expiry_days,
                 "min_payout_cents": min_payout_cents,
                 "name": name,
                 "pay_browser_signups": pay_browser_signups,
+                "payout_methods": payout_methods,
+                "payout_term_days": payout_term_days,
+                "payout_tokens": payout_tokens,
                 "rules": rules,
                 "sales_source": sales_source,
                 "slug": slug,
@@ -6907,6 +7025,28 @@ class Operations(_Mixin):
             idempotency_key=idempotency_key,
         )
 
+    def download_privacy_export(
+        self,
+        brand: str,
+        export: str,
+    ) -> Any:
+        """Download a privacy export.
+
+        Scope: customers.manage, because the file is someone's personal data in bulk. The export as a gzipped JSON file
+        (privacy-export-{id}.json.gz): {"exported_at", "brand": {"id", "name"}, "record": {...}, "tables": {"table":
+        [rows]}}, each row with every column but secrets. Each download is recorded in the audit log
+        (privacy_export.downloaded). 409 export_not_ready while it is pending or when it failed; 410 export_expired
+        once its 7 days are over.
+
+        Needs: the customers.manage scope.
+        GET /v1/brands/{brand}/privacy-exports/{export}/download
+        """
+        return self._call(
+            "GET",
+            "/v1/brands/{brand}/privacy-exports/{export}/download",
+            path={"brand": brand, "export": export},
+        )
+
     def draft_review_reply(
         self,
         id: str,
@@ -6992,6 +7132,39 @@ class Operations(_Mixin):
             "POST",
             "/v1/workspaces/{ws}/social/items/{id}/draft",
             path={"id": id, "ws": ws},
+            idempotency_key=idempotency_key,
+        )
+
+    def draft_story(
+        self,
+        story: str,
+        *,
+        ws: str | None = None,
+        guidance: str | None = None,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Draft a story's release with AI.
+
+        Scope: seo.manage. Queues the workspace's own AI model to write
+        the story's release from its headline, notes, facts and approved
+        quotes only (never a draft or withdrawn quote), improving the
+        current release when there is one. The draft replaces the
+        release, moves the story to `draft` and is checked like any
+        release; a person still approves it. Follow `ai_status` on the
+        story (drafting, then empty, or failed with `ai_error`). 409 while
+        a draft is being written or the story is archived, and
+        `connector_needed` without a connected model.
+
+        Needs: the seo.manage scope.
+        POST /v1/workspaces/{ws}/stories/{story}/draft
+        """
+        return self._call(
+            "POST",
+            "/v1/workspaces/{ws}/stories/{story}/draft",
+            path={"story": story, "ws": ws},
+            body={"guidance": guidance},
+            extra_body=extra_body,
             idempotency_key=idempotency_key,
         )
 
@@ -7408,7 +7581,7 @@ class Operations(_Mixin):
 
         Scope: partners.manage, because the file holds each partner's payout details. Columns: payout_id, program,
         partner_id, partner_code, partner_name, partner_email, payout_method, amount (a decimal), currency, status, reference,
-        created_at, paid_at. Due payouts unless status says otherwise; at most 10,000 rows. Pay them from your own account or
+        created_at, paid_at, payout_type, payout_token. Due payouts unless status says otherwise; at most 10,000 rows. Pay them from your own account or
         upload the file to a payout tool, then mark each one paid. Recorded in the audit log (partner_payouts.exported).
 
         Needs: the partners.manage scope.
@@ -8394,6 +8567,25 @@ class Operations(_Mixin):
             path={"brand": brand, "ws": ws},
         )
 
+    def get_brand_by_id(
+        self,
+        brand: str,
+    ) -> Any:
+        """Read a brand by its id.
+
+        Scope: workspace.read. A brand owns its data (records, events, journeys and every other area move under
+        /v1/brands/{brand}/ in turn), so a brand's own calls need only its id, never the workspace's. A member kept to
+        some brands, or a token made for one brand, sees only those; any other brand is 404.
+
+        Needs: the workspace.read scope.
+        GET /v1/brands/{brand}
+        """
+        return self._call(
+            "GET",
+            "/v1/brands/{brand}",
+            path={"brand": brand},
+        )
+
     def get_brand_context(
         self,
         brand: str,
@@ -8440,6 +8632,43 @@ class Operations(_Mixin):
             "GET",
             "/v1/workspaces/{ws}/brands/{brand}/dns",
             path={"brand": brand, "ws": ws},
+        )
+
+    def get_brand_event(
+        self,
+        brand: str,
+        event: str,
+    ) -> Any:
+        """Read a received event.
+
+        Scope: customers.read. One event with what happened to it, and raw: the event as sent, with its batch's context merged in.
+
+        Needs: the customers.read scope.
+        GET /v1/brands/{brand}/events/{event}
+        """
+        return self._call(
+            "GET",
+            "/v1/brands/{brand}/events/{event}",
+            path={"brand": brand, "event": event},
+        )
+
+    def get_brand_events_summary(
+        self,
+        brand: str,
+    ) -> Any:
+        """Summarise a brand's received events.
+
+        Scope: customers.read. How many events arrived in the last 24 hours and 7 days by status, how many wait and
+        since when, the rejection codes still kept (with the latest reason and when the first of them is deleted) and
+        the held names waiting for approval.
+
+        Needs: the customers.read scope.
+        GET /v1/brands/{brand}/events/summary
+        """
+        return self._call(
+            "GET",
+            "/v1/brands/{brand}/events/summary",
+            path={"brand": brand},
         )
 
     def get_brand_rules(
@@ -8913,6 +9142,20 @@ class Operations(_Mixin):
             path={"target": target, "ws": ws},
         )
 
+    def get_desktop_config(
+        self,
+    ) -> Any:
+        """Settings for a linked computer.
+
+        With the device token. How often to report, which tools to read, sources switched off for every computer (stop reading them), and whose computer it is. 401 when it was unlinked: link again. 404 while AI Accounts is off for the workspace.
+
+        GET /v1/desktop/config
+        """
+        return self._call(
+            "GET",
+            "/v1/desktop/config",
+        )
+
     def get_digest(
         self,
         id: str,
@@ -9075,6 +9318,33 @@ class Operations(_Mixin):
             "GET",
             "/v1/workspaces/{ws}/email-domains/{domain}",
             path={"domain": domain, "ws": ws},
+        )
+
+    def get_email_guardrails(
+        self,
+        *,
+        ws: str | None = None,
+    ) -> Any:
+        """How much marketing email one person may get.
+
+        Scope: emails.read. Guardrails on marketing (lifecycle) email that
+        journeys and broadcasts send: a frequency cap (per_day in any 24
+        hours, per_week in any 7 days) and quiet hours (quiet_start to
+        quiet_end o'clock in the person's timezone attribute, else
+        time_zone). On by default: 1 a day, 3 a week, 8pm to 8am.
+        Transactional email is never capped or held. A capped email is not
+        sent: the journey step's outcome is frequency_cap, the broadcast
+        skips the person with the reason, and it is recorded as
+        email.capped on their timeline. An email due in quiet hours is
+        held until they end (step outcome quiet_hours).
+
+        Needs: the emails.read scope.
+        GET /v1/workspaces/{ws}/email-guardrails
+        """
+        return self._call(
+            "GET",
+            "/v1/workspaces/{ws}/email-guardrails",
+            path={"ws": ws},
         )
 
     def get_email_overview(
@@ -10335,6 +10605,24 @@ class Operations(_Mixin):
             "GET",
             "/v1/playbooks/{id}",
             path={"id": id},
+        )
+
+    def get_privacy_export(
+        self,
+        brand: str,
+        export: str,
+    ) -> Any:
+        """Read a privacy export.
+
+        Scope: customers.read. An export's status, the rows it holds by table, when it expires and, once ready, its download_url.
+
+        Needs: the customers.read scope.
+        GET /v1/brands/{brand}/privacy-exports/{export}
+        """
+        return self._call(
+            "GET",
+            "/v1/brands/{brand}/privacy-exports/{export}",
+            path={"brand": brand, "export": export},
         )
 
     def get_rank_history(
@@ -11628,6 +11916,33 @@ class Operations(_Mixin):
             path={"story": story, "ws": ws},
         )
 
+    def get_story_results(
+        self,
+        *,
+        ws: str | None = None,
+        brand: str | None = None,
+        days: int | None = None,
+        story_id: str | None = None,
+    ) -> Any:
+        """Results of stories.
+
+        Scope: seo.read. Each story's pitches (approved in the window),
+        replies by kind, and coverage found in the window: coverage a
+        person put on the story, or coverage of its brand by a journalist
+        it pitched, after the pitch. Only stories with a pitch or coverage
+        in the window are listed, most coverage first; `total` sums them.
+        Reads what is stored, so it costs nothing.
+
+        Needs: the seo.read scope.
+        GET /v1/workspaces/{ws}/stories/results
+        """
+        return self._call(
+            "GET",
+            "/v1/workspaces/{ws}/stories/results",
+            path={"ws": ws},
+            query={"brand": brand, "days": days, "story_id": story_id},
+        )
+
     def get_supplier_sync(
         self,
         id: str,
@@ -12052,6 +12367,45 @@ class Operations(_Mixin):
             "/v1/workspaces/{ws}/integrations/{id}/mailboxes/import",
             path={"id": id, "ws": ws},
             body={"all": all, "emails": emails, "external_ids": external_ids},
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
+    def ingest_brand_events(
+        self,
+        brand: str,
+        *,
+        batch: list[dict[str, Any]] | None = None,
+        context: dict[str, Any] | None = None,
+        source: str | None = None,
+        type: Literal["track", "identify", "page", "screen", "group", "alias"] | None = None,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Send product events to a brand.
+
+        Scope: customers.manage. Sends what people do in your product to this brand, in Segment's format: one event,
+        or {"batch": [...]} with up to 500 (5 MB). type is track, identify, page, screen, group or alias; camelCase
+        (userId, anonymousId, messageId) and snake_case both work, so a product already sending to Segment or
+        RudderStack can point here as is. Send it from your servers: the token can change customer records.
+
+        Every event is saved as sent and the answer is 202 at once, with a receipt id per event. Only the envelope is
+        checked here (JSON, size, batch length, source); an event is never refused for its content. A job then
+        processes the events in the order they arrived, usually within seconds, the way POST
+        .../customer-events does: it matches each to a person (userId, then a verified email, then anonymousId),
+        writes identify's traits to catalog fields and links group's company. Each event ends accepted, duplicate (a
+        messageId the brand already has), rejected (code and reason say what to fix; fix it and replay) or held (a
+        track name the catalog hasn't approved yet: approve it, then replay). Follow them with GET .../events or GET
+        .../events/{event}. Events belong to the brand in the URL; a brand_id in the body is ignored.
+
+        Needs: the customers.manage scope.
+        POST /v1/brands/{brand}/events
+        """
+        return self._call(
+            "POST",
+            "/v1/brands/{brand}/events",
+            path={"brand": brand},
+            body={"batch": batch, "context": context, "source": source, "type": type},
             extra_body=extra_body,
             idempotency_key=idempotency_key,
         )
@@ -12581,6 +12935,26 @@ class Operations(_Mixin):
             "/v1/workspaces/{ws}/ai-cohorts",
             path={"ws": ws},
             query={"brand": brand},
+        )
+
+    def list_ai_devices(
+        self,
+        *,
+        ws: str | None = None,
+        everyone: bool | None = None,
+    ) -> Any:
+        """List linked computers.
+
+        Scope: my_ai_accounts.read. Your computers running Outflare for desktop; everyone's with everyone=true and ai_accounts.read. `silent` means no report for over an hour.
+
+        Needs: the my_ai_accounts.read scope.
+        GET /v1/workspaces/{ws}/ai-devices
+        """
+        return self._call(
+            "GET",
+            "/v1/workspaces/{ws}/ai-devices",
+            path={"ws": ws},
+            query={"everyone": everyone},
         )
 
     def list_ai_facts(
@@ -13153,6 +13527,52 @@ class Operations(_Mixin):
                 "offset": offset,
                 "fields": fields,
                 "cursor": cursor,
+            },
+        )
+
+    def list_brand_events(
+        self,
+        brand: str,
+        *,
+        status: Literal["pending", "accepted", "duplicate", "rejected", "held"] | None = None,
+        code: str | None = None,
+        source: str | None = None,
+        batch_id: str | None = None,
+        name: str | None = None,
+        received_after: str | None = None,
+        received_before: str | None = None,
+        limit: int | None = None,
+        before: str | None = None,
+        cursor: str | None = None,
+        fields: list[str] | None = None,
+    ) -> Any:
+        """List a brand's received events.
+
+        Scope: customers.read. Every event sent to POST /v1/brands/{brand}/events, newest first, with what happened to
+        it: pending (waiting to be processed, usually seconds), accepted, duplicate, rejected (code and reason say what
+        to fix) or held (a name the catalog hasn't approved). expires_at is when the event is deleted: 30 days after it
+        arrived when accepted or duplicate, 90 when rejected or held. Read one with GET .../events/{event} to see it as
+        sent.
+
+        Needs: the customers.read scope.
+        GET /v1/brands/{brand}/events
+        """
+        return self._call(
+            "GET",
+            "/v1/brands/{brand}/events",
+            path={"brand": brand},
+            query={
+                "status": status,
+                "code": code,
+                "source": source,
+                "batch_id": batch_id,
+                "name": name,
+                "received_after": received_after,
+                "received_before": received_before,
+                "limit": limit,
+                "before": before,
+                "cursor": cursor,
+                "fields": fields,
             },
         )
 
@@ -15075,6 +15495,26 @@ class Operations(_Mixin):
             },
         )
 
+    def list_link_assets(
+        self,
+        *,
+        ws: str | None = None,
+        brand: str | None = None,
+    ) -> Any:
+        """List published assets.
+
+        Scope: seo.read. Pages marked published to promote, newest first (up to 200). `?brand=` filters.
+
+        Needs: the seo.read scope.
+        GET /v1/workspaces/{ws}/link-building/assets
+        """
+        return self._call(
+            "GET",
+            "/v1/workspaces/{ws}/link-building/assets",
+            path={"ws": ws},
+            query={"brand": brand},
+        )
+
     def list_link_pitches(
         self,
         *,
@@ -16150,6 +16590,38 @@ class Operations(_Mixin):
             query={"brand": brand},
         )
 
+    def list_privacy_exports(
+        self,
+        brand: str,
+        *,
+        record: str | None = None,
+        status: Literal["pending", "ready", "failed", "expired"] | None = None,
+        limit: int | None = None,
+        before: str | None = None,
+        cursor: str | None = None,
+        fields: list[str] | None = None,
+    ) -> Any:
+        """List a brand's privacy exports.
+
+        Scope: customers.read. The brand's privacy exports, newest first, without their files. Filter by record or status.
+
+        Needs: the customers.read scope.
+        GET /v1/brands/{brand}/privacy-exports
+        """
+        return self._call(
+            "GET",
+            "/v1/brands/{brand}/privacy-exports",
+            path={"brand": brand},
+            query={
+                "record": record,
+                "status": status,
+                "limit": limit,
+                "before": before,
+                "cursor": cursor,
+                "fields": fields,
+            },
+        )
+
     def list_query_tables(
         self,
         *,
@@ -16218,6 +16690,7 @@ class Operations(_Mixin):
         status: str | None = None,
         type: str | None = None,
         record: str | None = None,
+        brand: str | None = None,
         limit: int | None = None,
         before: str | None = None,
         cursor: str | None = None,
@@ -16241,6 +16714,7 @@ class Operations(_Mixin):
                 "status": status,
                 "type": type,
                 "record": record,
+                "brand": brand,
                 "limit": limit,
                 "before": before,
                 "cursor": cursor,
@@ -17298,6 +17772,40 @@ class Operations(_Mixin):
             query={
                 "brand": brand,
                 "status": status,
+                "limit": limit,
+                "offset": offset,
+                "fields": fields,
+                "cursor": cursor,
+            },
+        )
+
+    def list_story_pitches(
+        self,
+        *,
+        ws: str | None = None,
+        story_id: str | None = None,
+        status: Literal["writing", "draft", "enrolled", "rejected"] | None = None,
+        brand: str | None = None,
+        limit: int | None = None,
+        offset: int | None = None,
+        fields: list[str] | None = None,
+        cursor: str | None = None,
+    ) -> Any:
+        """List story pitches.
+
+        Scope: sequences.read. Newest first.
+
+        Needs: the sequences.read scope.
+        GET /v1/workspaces/{ws}/story-pitches
+        """
+        return self._call(
+            "GET",
+            "/v1/workspaces/{ws}/story-pitches",
+            path={"ws": ws},
+            query={
+                "story_id": story_id,
+                "status": status,
+                "brand": brand,
                 "limit": limit,
                 "offset": offset,
                 "fields": fields,
@@ -18778,6 +19286,36 @@ class Operations(_Mixin):
             idempotency_key=idempotency_key,
         )
 
+    def publish_link_asset(
+        self,
+        *,
+        ws: str | None = None,
+        title: str | None = None,
+        topic: str | None = None,
+        url: str,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Mark a page of yours published.
+
+        Scope: seo.manage. Records `asset.published` for a page worth
+        promoting (a guide, a study, a tool), which can start the "Promote a
+        new page" playbook on its own (playbook automations). Its SEO site,
+        and so its brand, is the site the URL is on. 409 `conflict` when the
+        page is already marked.
+
+        Needs: the seo.manage scope.
+        POST /v1/workspaces/{ws}/link-building/assets
+        """
+        return self._call(
+            "POST",
+            "/v1/workspaces/{ws}/link-building/assets",
+            path={"ws": ws},
+            body={"title": title, "topic": topic, "url": url},
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
     def push_supplier_mailboxes(
         self,
         id: str,
@@ -19434,6 +19972,31 @@ class Operations(_Mixin):
             idempotency_key=idempotency_key,
         )
 
+    def reject_story_pitch(
+        self,
+        pitch: str,
+        *,
+        ws: str | None = None,
+        reason: str | None = None,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Reject a draft pitch.
+
+        Scope: sequences.manage.
+
+        Needs: the sequences.manage scope.
+        POST /v1/workspaces/{ws}/story-pitches/{pitch}/reject
+        """
+        return self._call(
+            "POST",
+            "/v1/workspaces/{ws}/story-pitches/{pitch}/reject",
+            path={"pitch": pitch, "ws": ws},
+            body={"reason": reason},
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
     def release_mailboxes(
         self,
         *,
@@ -19740,6 +20303,39 @@ class Operations(_Mixin):
             idempotency_key=idempotency_key,
         )
 
+    def replay_brand_events(
+        self,
+        brand: str,
+        *,
+        batch_id: str | None = None,
+        code: str | None = None,
+        ids: list[str] | None = None,
+        name: str | None = None,
+        source: str | None = None,
+        status: Literal["rejected", "held"] | None = None,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Replay rejected or held events.
+
+        Scope: customers.manage. Processes rejected and held events again, after you fixed what they needed (approved
+        the name, changed a property's type, freed an identity): either the ones in ids, or every one matching a
+        filter (status, code, source, batch_id, name), up to 10,000 a call (more is true when there are others). They
+        go back to pending and the job processes them again; each ends with a new status. Accepted, duplicate and
+        pending events are left alone and counted in skipped.
+
+        Needs: the customers.manage scope.
+        POST /v1/brands/{brand}/events/replay
+        """
+        return self._call(
+            "POST",
+            "/v1/brands/{brand}/events/replay",
+            path={"brand": brand},
+            body={"batch_id": batch_id, "code": code, "ids": ids, "name": name, "source": source, "status": status},
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
     def replay_hook_event(
         self,
         event: str,
@@ -19986,6 +20582,37 @@ class Operations(_Mixin):
             "/v1/auth/password-reset",
             body={"email": email},
             extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
+    def request_privacy_export(
+        self,
+        brand: str,
+        record: str,
+        *,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Export everything a brand holds about a person or company.
+
+        Scope: customers.manage. Starts a privacy export of one record, for a person's request to see their data: the
+        record with its fields, and every row that points at it in this brand (its identities, links, field history,
+        merges, product events, consent, emails, messages, replies, meetings, deals, payments, list memberships,
+        journey runs and the rest), as one gzipped JSON file. Only the record's own brand is exported: a person with the
+        same email in another brand is a different person, and a record of another brand is not found. Secrets are
+        never included (columns holding tokens, passwords, hashes or sealed values).
+
+        Answers 202 with the export, pending. A job builds it, usually within seconds; then its status is ready and
+        download_url downloads the file for 7 days, after which it expires and the file is deleted. Over 100 MB
+        uncompressed fails with error_code too_large. Erasing the record deletes its exports. The request, the result
+        and every download are in the audit log; privacy_export.ready is also a webhook event.
+
+        Needs: the customers.manage scope.
+        POST /v1/brands/{brand}/records/{record}/privacy-exports
+        """
+        return self._call(
+            "POST",
+            "/v1/brands/{brand}/records/{record}/privacy-exports",
+            path={"brand": brand, "record": record},
             idempotency_key=idempotency_key,
         )
 
@@ -20622,6 +21249,34 @@ class Operations(_Mixin):
             "/v1/workspaces/{ws}/search",
             path={"ws": ws},
             query={"brand": brand, "q": q, "kinds": kinds, "limit": limit, "mode": mode},
+        )
+
+    def send_desktop_report(
+        self,
+        *,
+        accounts: list[dict[str, Any]] | None = None,
+        app_version: str | None = None,
+        errors: list[dict[str, Any]] | None = None,
+        status: Literal["ok", "attention", "broken"] | None = None,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Report usage from a linked computer.
+
+        With the device token, every `report_every_seconds`. Only numbers: for each AI account signed in on the computer,
+        its limit windows (how much is used, when each resets), plan and banked resets; plus the tools it couldn't read,
+        by code. An empty report is a heartbeat. Readings go on the account signed in with the same email anywhere in the
+        workspace (adding the person to it), else the person's only account for that tool, else a new account owned by
+        the person. Sources switched off are left out (`skipped: source_off`).
+
+        POST /v1/desktop/reports
+        """
+        return self._call(
+            "POST",
+            "/v1/desktop/reports",
+            body={"accounts": accounts, "app_version": app_version, "errors": errors, "status": status},
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
         )
 
     def send_email(
@@ -22083,6 +22738,42 @@ class Operations(_Mixin):
             idempotency_key=idempotency_key,
         )
 
+    def start_story_pitches(
+        self,
+        story: str,
+        *,
+        ws: str | None = None,
+        record_ids: list[str],
+        sequence_id: str,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Pitch an approved story to journalists.
+
+        Scope: sequences.manage. Starts a pitch for each journalist (a
+        person record with an email address) through one of the
+        workspace's own sequences: one that stops on any reply, has 1 or 2
+        steps (one follow-up at most) and uses `{{custom.opener}}`. The
+        workspace's own AI writes each opener from the story and the
+        journalist's latest article, using only the story's facts and
+        approved quotes; it is checked like the release, and a person
+        approves each pitch. Journalists are skipped (`skipped`, with a
+        reason) when they aren't a person, have no address, already have
+        a pitch for this story, or were pitched by the workspace in the
+        last week, whichever brand. 409 unless the story is approved.
+
+        Needs: the sequences.manage scope.
+        POST /v1/workspaces/{ws}/stories/{story}/pitches
+        """
+        return self._call(
+            "POST",
+            "/v1/workspaces/{ws}/stories/{story}/pitches",
+            path={"story": story, "ws": ws},
+            body={"record_ids": record_ids, "sequence_id": sequence_id},
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
     def start_verification(
         self,
         *,
@@ -22274,6 +22965,39 @@ class Operations(_Mixin):
             "/v1/workspaces/{ws}/ab-tests/suggestions",
             path={"ws": ws},
             body={"brand_id": brand_id, "count": count, "goal": goal, "notes": notes, "page": page},
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
+    def suggest_stories(
+        self,
+        *,
+        ws: str | None = None,
+        brand_id: str,
+        brief: str | None = None,
+        count: int | None = None,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Suggest story ideas with AI.
+
+        Scope: seo.manage. Queues the workspace's own AI model (its PR
+        stories task under Settings, AI model) to suggest story ideas
+        from the brand, its facts, its experts' topics, its recent
+        coverage and the last two weeks of news its topic searches found.
+        Each idea is a story with status `idea` and source `ai_ideas`; it
+        never states numbers or quotes. Outflare never uses an AI key of
+        its own: without a connected model this is 409
+        `connector_needed`. The result is the story.ideas_suggested event.
+
+        Needs: the seo.manage scope.
+        POST /v1/workspaces/{ws}/stories/ideas
+        """
+        return self._call(
+            "POST",
+            "/v1/workspaces/{ws}/stories/ideas",
+            path={"ws": ws},
+            body={"brand_id": brand_id, "brief": brief, "count": count},
             extra_body=extra_body,
             idempotency_key=idempotency_key,
         )
@@ -22794,6 +23518,27 @@ class Operations(_Mixin):
         return self._call(
             "POST",
             "/v1/workspaces/{ws}/allocation/changes/{id}/undo",
+            path={"id": id, "ws": ws},
+            idempotency_key=idempotency_key,
+        )
+
+    def unlink_ai_device(
+        self,
+        id: str,
+        *,
+        ws: str | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Unlink a computer.
+
+        Scope: my_ai_accounts.manage for your own, ai_accounts.manage for anyone's. Its token stops working; the app asks to be linked again.
+
+        Needs: the my_ai_accounts.manage scope.
+        DELETE /v1/workspaces/{ws}/ai-devices/{id}
+        """
+        return self._call(
+            "DELETE",
+            "/v1/workspaces/{ws}/ai-devices/{id}",
             path={"id": id, "ws": ws},
             idempotency_key=idempotency_key,
         )
@@ -23801,6 +24546,7 @@ class Operations(_Mixin):
         ws: str | None = None,
         linked: bool | None = None,
         status: Literal["new", "confirmed", "dismissed"] | None = None,
+        story_id: str | None = None,
         extra_body: dict[str, Any] | None = None,
         idempotency_key: str | None = None,
     ) -> Any:
@@ -23818,7 +24564,7 @@ class Operations(_Mixin):
             "PATCH",
             "/v1/workspaces/{ws}/coverage/{coverage}",
             path={"coverage": coverage, "ws": ws},
-            body={"linked": linked, "status": status},
+            body={"linked": linked, "status": status, "story_id": story_id},
             extra_body=extra_body,
             idempotency_key=idempotency_key,
         )
@@ -23999,6 +24745,44 @@ class Operations(_Mixin):
                 "template": template,
                 "topic": topic,
                 "track": track,
+            },
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
+    def update_email_guardrails(
+        self,
+        *,
+        ws: str | None = None,
+        cap_enabled: bool | None = None,
+        per_day: int | None = None,
+        per_week: int | None = None,
+        quiet_end: int | None = None,
+        quiet_hours_enabled: bool | None = None,
+        quiet_start: int | None = None,
+        time_zone: str | None = None,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Change the marketing email guardrails.
+
+        Scope: emails.manage. Send only the fields to change. Recorded as email_guardrails.updated.
+
+        Needs: the emails.manage scope.
+        PATCH /v1/workspaces/{ws}/email-guardrails
+        """
+        return self._call(
+            "PATCH",
+            "/v1/workspaces/{ws}/email-guardrails",
+            path={"ws": ws},
+            body={
+                "cap_enabled": cap_enabled,
+                "per_day": per_day,
+                "per_week": per_week,
+                "quiet_end": quiet_end,
+                "quiet_hours_enabled": quiet_hours_enabled,
+                "quiet_start": quiet_start,
+                "time_zone": time_zone,
             },
             extra_body=extra_body,
             idempotency_key=idempotency_key,
@@ -24847,6 +25631,7 @@ class Operations(_Mixin):
         *,
         ws: str | None = None,
         pitch_cooldown_days: int | None = None,
+        recheck_days: int | None = None,
         weekly_budget_percent: int | None = None,
         weekly_reads: bool | None = None,
         extra_body: dict[str, Any] | None = None,
@@ -24859,7 +25644,12 @@ class Operations(_Mixin):
         `weekly_reads` has the weekly SEO snapshot read who links to pages
         that just went from tracked competitors' sitemaps (default on),
         spending at most `weekly_budget_percent` of the connection's monthly
-        budget a month on it (1 to 100, default 10). Send only what changes.
+        budget a month on it (1 to 100, default 10). `recheck_days` is how
+        often the pages of broken-link prospects nobody has pitched are
+        checked again, so links that break later are found
+        (`outbound_link.broken`): 0 is never, default 30. A check is free
+        apart from the workspace's own AI reading the page. Send only what
+        changes.
 
         Needs: the seo.manage scope.
         PATCH /v1/workspaces/{ws}/link-building/settings
@@ -24870,6 +25660,7 @@ class Operations(_Mixin):
             path={"ws": ws},
             body={
                 "pitch_cooldown_days": pitch_cooldown_days,
+                "recheck_days": recheck_days,
                 "weekly_budget_percent": weekly_budget_percent,
                 "weekly_reads": weekly_reads,
             },
@@ -25292,6 +26083,8 @@ class Operations(_Mixin):
         name: str | None = None,
         note: str | None = None,
         payout_method: str | None = None,
+        payout_token: str | None = None,
+        payout_type: Literal["paypal", "wise", "bank_transfer", "crypto", "other"] | None = None,
         postback_url: str | None = None,
         program: str | None = None,
         record_id: str | None = None,
@@ -25317,6 +26110,8 @@ class Operations(_Mixin):
                 "name": name,
                 "note": note,
                 "payout_method": payout_method,
+                "payout_token": payout_token,
+                "payout_type": payout_type,
                 "postback_url": postback_url,
                 "program": program,
                 "record_id": record_id,
@@ -25360,6 +26155,7 @@ class Operations(_Mixin):
         ws: str | None = None,
         auto_accept: bool | None = None,
         auto_approve: bool | None = None,
+        block_self_referrals: bool | None = None,
         brand: str | None = None,
         codes_win: bool | None = None,
         credit_model: Literal["first", "last"] | None = None,
@@ -25368,9 +26164,13 @@ class Operations(_Mixin):
         hold_days: int | None = None,
         kind: Literal["referral", "affiliate", "influencer"] | None = None,
         landing_url: str | None = None,
+        lead_expiry_days: int | None = None,
         min_payout_cents: int | None = None,
         name: str | None = None,
         pay_browser_signups: bool | None = None,
+        payout_methods: list[Literal["paypal", "wise", "bank_transfer", "crypto", "other"]] | None = None,
+        payout_term_days: int | None = None,
+        payout_tokens: list[str] | None = None,
         rules: list[dict[str, Any]] | None = None,
         sales_source: str | None = None,
         slug: str | None = None,
@@ -25393,6 +26193,7 @@ class Operations(_Mixin):
             body={
                 "auto_accept": auto_accept,
                 "auto_approve": auto_approve,
+                "block_self_referrals": block_self_referrals,
                 "brand": brand,
                 "codes_win": codes_win,
                 "credit_model": credit_model,
@@ -25401,9 +26202,13 @@ class Operations(_Mixin):
                 "hold_days": hold_days,
                 "kind": kind,
                 "landing_url": landing_url,
+                "lead_expiry_days": lead_expiry_days,
                 "min_payout_cents": min_payout_cents,
                 "name": name,
                 "pay_browser_signups": pay_browser_signups,
+                "payout_methods": payout_methods,
+                "payout_term_days": payout_term_days,
+                "payout_tokens": payout_tokens,
                 "rules": rules,
                 "sales_source": sales_source,
                 "slug": slug,
@@ -26441,6 +27246,31 @@ class Operations(_Mixin):
                 "summary": summary,
                 "title": title,
             },
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
+    def update_story_pitch(
+        self,
+        pitch: str,
+        *,
+        ws: str | None = None,
+        opener: str,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Change a draft pitch's opener.
+
+        Scope: sequences.manage. Only a draft pitch.
+
+        Needs: the sequences.manage scope.
+        PATCH /v1/workspaces/{ws}/story-pitches/{pitch}
+        """
+        return self._call(
+            "PATCH",
+            "/v1/workspaces/{ws}/story-pitches/{pitch}",
+            path={"pitch": pitch, "ws": ws},
+            body={"opener": opener},
             extra_body=extra_body,
             idempotency_key=idempotency_key,
         )

@@ -78,10 +78,23 @@ type Account struct {
 	ResetsAvailable *int   `json:"resets_available"`
 	Cancelled       bool   `json:"cancelled"`
 	// OwnerLeft: nobody who owns it is still in the workspace.
-	OwnerLeft bool      `json:"owner_left"`
-	Members   []Member  `json:"members"`
-	CreatedAt time.Time `json:"created_at"`
-	UpdatedAt time.Time `json:"updated_at"`
+	OwnerLeft bool     `json:"owner_left"`
+	Members   []Member `json:"members"`
+	// Usage is the latest reading of each limit window from Outflare for
+	// desktop, in the last week; empty when no computer reads it.
+	Usage     []UsageWindow `json:"usage"`
+	CreatedAt time.Time     `json:"created_at"`
+	UpdatedAt time.Time     `json:"updated_at"`
+}
+
+// UsageWindow is one usage limit as last read: kind (five_hour, weekly,
+// monthly...), how much is used and when it resets.
+type UsageWindow struct {
+	Kind        string     `json:"kind"`
+	UsedPercent float64    `json:"used_percent"`
+	ResetsAt    *time.Time `json:"resets_at"`
+	Source      string     `json:"source"`
+	ObservedAt  time.Time  `json:"observed_at"`
 }
 
 // Input is what a person sets on an account. Fields left out keep their
@@ -223,7 +236,10 @@ func List(ctx context.Context, q Querier, workspaceID string, f Filter) ([]Accou
 	if err != nil {
 		return nil, err
 	}
-	return list, addMembers(ctx, q, workspaceID, list)
+	if err := addMembers(ctx, q, workspaceID, list); err != nil {
+		return nil, err
+	}
+	return list, addUsage(ctx, q, workspaceID, list)
 }
 
 // Get returns one account with its members.
@@ -240,7 +256,42 @@ func Get(ctx context.Context, q Querier, workspaceID, id string) (Account, error
 	if err := addMembers(ctx, q, workspaceID, list); err != nil {
 		return a, err
 	}
+	if err := addUsage(ctx, q, workspaceID, list); err != nil {
+		return a, err
+	}
 	return list[0], nil
+}
+
+// addUsage fills each account's latest reading of each window from the
+// last week.
+func addUsage(ctx context.Context, q Querier, workspaceID string, list []Account) error {
+	if len(list) == 0 {
+		return nil
+	}
+	ids := make([]string, len(list))
+	at := map[string]int{}
+	for i, a := range list {
+		ids[i], at[a.ID] = a.ID, i
+		list[i].Usage = []UsageWindow{}
+	}
+	rows, err := q.Query(ctx, `
+		SELECT DISTINCT ON (account_id, window_kind) account_id::text, window_kind, used_percent::float8, resets_at, source, observed_at
+		FROM ai_usage_readings
+		WHERE workspace_id = $1 AND account_id::text = ANY($2) AND observed_at > now() - interval '7 days'
+		ORDER BY account_id, window_kind, observed_at DESC`, workspaceID, ids)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var id string
+		var w UsageWindow
+		if err := rows.Scan(&id, &w.Kind, &w.UsedPercent, &w.ResetsAt, &w.Source, &w.ObservedAt); err != nil {
+			return err
+		}
+		list[at[id]].Usage = append(list[at[id]].Usage, w)
+	}
+	return rows.Err()
 }
 
 // addMembers fills each account's members and OwnerLeft.

@@ -49,6 +49,8 @@ func (s *Server) registerSocialJobs(q *jobs.Queue) {
 	s.registerReviewJobs(q)
 	s.registerABTestJobs(q)
 	s.registerNewsJobs(q)
+	s.registerStoryJobs(q)
+	s.registerStoryPitchJobs(q)
 }
 
 // enqueueSocialCheck queues a check of a watch; key keeps it to one per

@@ -463,9 +463,10 @@ function Summary({ o, onOpen, onFinish }: { o: Onboarding; onOpen: (s: StepId) =
 }
 
 // The brand step: the website first, then the name (taken from the domain
-// until it is typed) and a line on what it does. It also fills the
-// company's name and website when those are still empty, so agents know
-// them from the first chat.
+// until it is typed) and a line on what it does. Sign-up made the
+// workspace's first brand, so this fills that one in rather than adding
+// another. It also fills the company's name and website when those are
+// still empty, so agents know them from the first chat.
 function BrandStep({ ws, wsName, done, onDone, go }: { ws: string; wsName: string; done: boolean; onDone: () => void; go: (t: Tab) => void }) {
   const [name, setName] = useState(wsName);
   const [named, setNamed] = useState(false);
@@ -476,15 +477,20 @@ function BrandStep({ ws, wsName, done, onDone, go }: { ws: string; wsName: strin
   const [brands, setBrands] = useState<components["schemas"]["Brand"][] | null>(null);
 
   useEffect(() => {
-    if (done) api.GET("/v1/workspaces/{ws}/brands", { params: { path: { ws } } }).then(({ data }) => setBrands(data?.data ?? []));
+    api.GET("/v1/workspaces/{ws}/brands", { params: { path: { ws } } }).then(({ data }) => setBrands(data?.data ?? []));
   }, [ws, done]);
+  // The brand sign-up made, waiting for its website.
+  const starter = brands?.find((b) => !b.website);
 
   async function submit(e: FormEvent) {
     e.preventDefault();
     setBusy(true);
     setError("");
     const path = { params: { path: { ws } } };
-    const { data, error } = await api.POST("/v1/workspaces/{ws}/brands", { ...path, body: { name: name.trim(), website: website.trim() || undefined } });
+    const body = { name: name.trim(), website: website.trim() || undefined };
+    const { data, error } = starter
+      ? await api.PATCH("/v1/workspaces/{ws}/brands/{brand}", { params: { path: { ws, brand: starter.id } }, body })
+      : await api.POST("/v1/workspaces/{ws}/brands", { ...path, body });
     if (error || !data || !("id" in data)) {
       setBusy(false);
       return setError(errorMessage(error));

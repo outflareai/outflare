@@ -24,7 +24,7 @@ func TestSmartLists(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if _, err := e.pool.Exec(ctx, `UPDATE records SET attributes = $2, brand_id = $3 WHERE id = $1`, rec, attrs, brand); err != nil {
+		if _, err := e.pool.Exec(ctx, `UPDATE records SET attributes = $2, brand_id = COALESCE($3, brand_id) WHERE id = $1`, rec, attrs, brand); err != nil {
 			t.Fatal(err)
 		}
 		return rec
@@ -59,9 +59,11 @@ func TestSmartLists(t *testing.T) {
 
 	geo := owner.must(201, "POST", base+"/brands", map[string]any{"name": "Geonode", "website": "https://geonode.com"})["id"].(string)
 	rp := owner.must(201, "POST", base+"/brands", map[string]any{"name": "Repocket", "website": "https://repocket.com"})["id"].(string)
+	// Everyone starts in the workspace's first brand, where a list made
+	// without a brand also goes; Bo and Cy move to their brands below.
 	ana := person("ana@example.org", `{"plan": "pro", "seats": 12, "tags": ["beta", "vip"]}`, nil)
-	bo := person("bo@example.org", `{"plan": "free", "seats": 1}`, &geo)
-	cy := person("cy@example.org", `{"plan": "Pro", "seats": "3"}`, &rp)
+	bo := person("bo@example.org", `{"plan": "free", "seats": 1}`, nil)
+	cy := person("cy@example.org", `{"plan": "Pro", "seats": "3"}`, nil)
 	event(ana, "payment_succeeded", "10 days")
 	event(bo, "payment_succeeded", "200 days")
 	event(cy, "signed_up", "1 day")
@@ -154,13 +156,21 @@ func TestSmartLists(t *testing.T) {
 		t.Fatalf("after downgrade = %+v", res)
 	}
 
-	// A brand's list holds that brand's people and the shared ones.
+	// A brand's list holds that brand's people only.
+	if _, err := e.pool.Exec(ctx, `UPDATE records SET brand_id = CASE WHEN id = $1 THEN $2::uuid ELSE $4::uuid END WHERE id IN ($1, $3)`, bo, geo, cy, rp); err != nil {
+		t.Fatal(err)
+	}
+	refresh(id)
+	if m := members(id); len(m) != 1 || !m["ana@example.org"] {
+		t.Fatalf("first brand's list after Cy moved = %v", m)
+	}
+	person("dee@example.org", `{"plan": "pro"}`, &geo)
 	everyone := owner.must(201, "POST", base+"/smart-lists", map[string]any{"name": "Geonode people", "brand_id": "geonode"})
 	if everyone["brand_id"] != geo {
 		t.Fatalf("brand list = %v", everyone)
 	}
 	refresh(everyone["id"].(string))
-	if m := members(everyone["id"].(string)); len(m) != 2 || !m["ana@example.org"] || !m["bo@example.org"] {
+	if m := members(everyone["id"].(string)); len(m) != 2 || !m["dee@example.org"] || !m["bo@example.org"] {
 		t.Fatalf("geonode members = %v", m)
 	}
 	if ls := owner.must(200, "GET", base+"/smart-lists?brand=geonode", nil)["data"].([]any); len(ls) != 1 {
@@ -169,34 +179,32 @@ func TestSmartLists(t *testing.T) {
 
 	// A lead list feeds a smart list.
 	leads := owner.must(201, "POST", base+"/lead-lists", map[string]any{"name": "Webinar"})["id"].(string)
-	lead := owner.must(201, "POST", base+"/leads", map[string]any{"email": "bo@example.org"})["id"].(string)
+	lead := owner.must(201, "POST", base+"/leads", map[string]any{"email": "ana@example.org"})["id"].(string)
 	owner.must(200, "POST", base+"/lead-lists/"+leads+"/leads", map[string]any{"lead_ids": []string{lead}})
 	in := owner.must(201, "POST", base+"/smart-lists", map[string]any{"name": "Came to the webinar", "rules": []any{map[string]any{"in_list": leads, "op": "exists"}}})
 	refresh(in["id"].(string))
-	if m := members(in["id"].(string)); len(m) != 1 || !m["bo@example.org"] {
+	if m := members(in["id"].(string)); len(m) != 1 || !m["ana@example.org"] {
 		t.Fatalf("in list members = %v", m)
 	}
 
-	// A brand-limited token sees its brand's lists and people only, and
-	// can't change lists that hold every brand.
+	// A brand-limited token sees its brand's lists and people only.
 	scopes := []string{"customers.read", "customers.manage"}
 	tok := owner.must(201, "POST", base+"/api-tokens", map[string]any{"name": "Repocket agent", "scopes": scopes, "brand": "repocket"})
 	agent := &client{t: t, h: e.h, bearer: tok["token"].(string)}
 	agent.must(404, "GET", base+"/smart-lists/"+everyone["id"].(string), nil)
-	if ls := agent.must(200, "GET", base+"/smart-lists", nil)["data"].([]any); len(ls) != 2 {
+	agent.must(404, "GET", base+"/smart-lists/"+id, nil)
+	if ls := agent.must(200, "GET", base+"/smart-lists", nil)["data"].([]any); len(ls) != 0 {
 		t.Fatalf("agent lists = %v", ls)
 	}
-	agent.must(403, "PATCH", base+"/smart-lists/"+id, map[string]any{"name": "Mine"})
 	agent.must(403, "POST", base+"/smart-lists", map[string]any{"name": "Everyone"})
-	if p := agent.must(200, "POST", base+"/smart-lists/preview", map[string]any{}); p["members"] != 2.0 {
+	if p := agent.must(200, "POST", base+"/smart-lists/preview", map[string]any{}); p["members"] != 1.0 {
 		t.Fatalf("agent preview = %v", p)
 	}
-	for _, m := range agent.must(200, "GET", base+"/smart-lists/"+id+"/members", nil)["data"].([]any) {
-		if m.(map[string]any)["email"] == "bo@example.org" {
-			t.Fatalf("agent sees another brand's person: %v", m)
-		}
-	}
 	own := agent.must(201, "POST", base+"/smart-lists", map[string]any{"name": "Repocket people", "brand_id": rp})
+	refresh(own["id"].(string))
+	if m := agent.must(200, "GET", base+"/smart-lists/"+own["id"].(string)+"/members", nil)["data"].([]any); len(m) != 1 || m[0].(map[string]any)["email"] != "cy@example.org" {
+		t.Fatalf("agent's list members = %v", m)
+	}
 	agent.must(202, "POST", base+"/smart-lists/"+own["id"].(string)+"/refresh", nil)
 
 	// Paging.

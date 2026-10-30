@@ -10,10 +10,40 @@ import { Button, CopyButton, field, Input } from "@/ui";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import type { Go } from "@/pages/Lifecycle";
 import { track } from "@/lib/analytics";
+import { guardrailsText, type Guardrails } from "@/pages/EmailGuardrails";
 import { ExclusionPicker, type Exclusion } from "@/components/exclusion-picker";
 import { kindOf, leadsTo, linkOf, opText, outputLabel, outputs, setLink, stepLabel, type Problem, type SettingsSchema, type Step, type StepKind } from "./model";
 
 type EventDefinition = Schemas["EventDefinition"];
+
+// GuardrailsNote says how the workspace's guardrails hold back an email
+// step, with a link to change them, and the step's own choices: send over
+// the cap, and hold or skip in quiet hours.
+function GuardrailsNote({ g, go, s, onChange, disabled }: { g?: Guardrails | null; go: Go; s: Step; onChange: (s: Step) => void; disabled: boolean }) {
+  if (!g) return null;
+  const skip = s.quiet_hours === "skip";
+  return (
+    <div className="space-y-2 rounded-md border border-amber-500/30 bg-amber-500/10 p-3 text-[12px]">
+      <p>
+        {guardrailsText(g)} {s.ignore_cap ? "This step sends even over the cap." : "Over the cap, the step is skipped with the reason (frequency cap)."}{" "}
+        {skip ? "In quiet hours it isn't sent, and the run goes on." : "In quiet hours the email waits until they end."}{" "}
+        <button type="button" className="underline" onClick={() => go("topics")}>Change the guardrails</button>
+      </p>
+      <label className="flex items-start gap-2">
+        <input type="checkbox" className="mt-0.5" checked={!!s.ignore_cap} disabled={disabled} onChange={(e) => onChange({ ...s, ignore_cap: e.target.checked || undefined })} />
+        <span>Send even over the frequency cap<span className="block text-muted-foreground">For email they must get, such as a sign-in link or a trial ending.</span></span>
+      </label>
+      <label className="flex items-center gap-2">
+        <span>In quiet hours</span>
+        <select aria-label="In quiet hours" className={field} value={skip ? "skip" : "hold"} disabled={disabled}
+          onChange={(e) => onChange({ ...s, quiet_hours: e.target.value === "skip" ? "skip" : undefined })}>
+          <option value="hold">hold it until they end</option>
+          <option value="skip">don't send it</option>
+        </select>
+      </label>
+    </div>
+  );
+}
 
 // ---- The catalog: events, their properties and people's fields ----
 
@@ -327,8 +357,10 @@ function NamedValues({ label, hint, value, onChange, disabled }: {
   );
 }
 
-export function StepPanel({ ws, step: s, steps, kinds, templates, catalog, event, problems, editable, go, onChange, onRemove, onClose, extra }: {
+export function StepPanel({ ws, step: s, steps, kinds, templates, catalog, event, problems, editable, go, onChange, onRemove, onClose, extra, guardrails }: {
   ws: string; step: Step; steps: Step[]; kinds: StepKind[]; templates: EmailTemplate[]; catalog: FlowCatalog; event?: string | null; problems: Problem[];
+  // The workspace's marketing email guardrails, shown on email steps.
+  guardrails?: Guardrails | null;
   editable: boolean; go: Go; onChange: (s: Step) => void; onRemove: () => void; onClose: () => void;
   // What the step has done and who is on it, from the journey page.
   extra?: ReactNode;
@@ -364,6 +396,7 @@ export function StepPanel({ ws, step: s, steps, kinds, templates, catalog, event
                 <p className="mb-2 text-[12px] text-muted-foreground">The template can fill these in. Anyone who left its topic or all marketing email is skipped and goes on to the next step.</p>
                 <TemplateFields catalog={catalog} event={event} />
               </div>
+              <GuardrailsNote g={guardrails} go={go} s={s} onChange={onChange} disabled={disabled} />
             </>
           )}
           {s.kind === "wait" && (

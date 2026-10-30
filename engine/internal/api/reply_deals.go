@@ -282,7 +282,7 @@ func moveReplyDeal(ctx context.Context, tx pgx.Tx, c *catalog, shape dealShape, 
 	}
 	var id string
 	if err := tx.QueryRow(ctx, `INSERT INTO records (workspace_id, record_type, brand_id, name, origin, acquired_via)
-		VALUES ($1, $2, $3, $4, 'first_party', $5) RETURNING id::text`, a.WorkspaceID, shape.t.Key, person.BrandID, name, via).Scan(&id); err != nil {
+		VALUES ($1, $2, COALESCE($3, outflare_first_brand($1)), $4, 'first_party', $5) RETURNING id::text`, a.WorkspaceID, shape.t.Key, person.BrandID, name, via).Scan(&id); err != nil {
 		return nil, err
 	}
 	rec := recordView{ID: id, Attributes: map[string]any{}, AttributeSources: map[string]string{}}

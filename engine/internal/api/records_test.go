@@ -304,15 +304,16 @@ func TestRecordsBrandLimited(t *testing.T) {
 
 	tok := owner.must(201, "POST", base+"/api-tokens", map[string]any{"name": "acme", "scopes": []string{"customers.manage"}, "brand": "acme"})
 	agent := &client{t: t, h: h, bearer: tok["token"].(string)}
-	// It adds records to its brand, reads shared ones but cannot change them.
+	// It adds records to its brand. One made without a brand belongs to the
+	// workspace's first brand, which it can't see, like another brand's.
 	mine := agent.must(201, "POST", base+"/records", map[string]any{"type": "person", "name": "Mine"})
 	if mine["brand_id"] != acme {
 		t.Fatalf("brand: %v", mine["brand_id"])
 	}
-	agent.must(200, "GET", base+"/records/"+shared, nil)
-	agent.must(403, "PATCH", base+"/records/"+shared, map[string]any{"name": "X"})
+	agent.must(404, "GET", base+"/records/"+shared, nil)
+	agent.must(404, "PATCH", base+"/records/"+shared, map[string]any{"name": "X"})
 	agent.must(404, "GET", base+"/records/"+theirs, nil)
-	if n := len(agent.must(200, "GET", base+"/records", nil)["data"].([]any)); n != 2 {
+	if n := len(agent.must(200, "GET", base+"/records", nil)["data"].([]any)); n != 1 {
 		t.Fatalf("brand-limited list: %d", n)
 	}
 	// A claim held by a record it cannot see is refused without naming it.

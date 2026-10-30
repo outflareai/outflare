@@ -62,7 +62,9 @@ export const tabNames: Record<Tab, string> = {
   backlinks: "Backlinks",
   competitors: "Competitors",
   "link-building": "Link building",
+  "link-autopilot": "Link autopilot",
   news: "News watch",
+  stories: "Stories",
   reddit: "Reddit",
   "reddit-campaigns": "Reddit campaigns",
   social: "Accounts",
@@ -150,7 +152,9 @@ export const tabBlurbs: Record<Tab, string> = {
   automations: "Every rule and journey in one picture: what sets each off, what it touches, and what needs a look.",
   providers: "Amazon SES, Postmark or Resend, connected step by step, and the domains you send from.",
   "link-building": "Pages that could link to your site, from every way of earning links, followed until the link is live; one website pitched at a time.",
+  "link-autopilot": "An aim of new live links a month and a budget; Outflare's agent runs the link building playbooks toward it, and you approve each change.",
   news: "Saved news searches on your own Geonode: follow a topic and who writes about it, and keep every article about your brand as its coverage.",
+  stories: "Press releases with a source behind every number and only quotes your experts approved, checked before a person approves them.",
   allocation: "Which mailbox sends for which sequence, and which sequences are short of mailboxes.",
   senders: "Who your mailboxes send as, and which team owns which senders and sequences.",
   outcomes: "Meetings and deals your outreach produced, what they cost, and the cost of each.",
@@ -281,7 +285,7 @@ export type Module = { id: string; label: string; icon: IconName; tabs: Tab[] };
 export const modules: Module[] = [
   { id: "crm", label: "CRM", icon: "leads", tabs: ["people", "leads", "lists", "lead-finder", "email-finder", "suppression"] },
   { id: "visitors", label: "Visitors", icon: "visitors", tabs: ["visitors"] },
-  { id: "outreach", label: "Outreach", icon: "sequences", tabs: ["sequences", "link-building", "news", "allocation", "reports"] },
+  { id: "outreach", label: "Outreach", icon: "sequences", tabs: ["sequences", "link-building", "link-autopilot", "news", "stories", "allocation", "reports"] },
   { id: "deliverability", label: "Deliverability", icon: "mailboxes", tabs: ["infrastructure", "mailboxes", "domains", "warmup", "servers", "senders"] },
   { id: "lifecycle", label: "Lifecycle", icon: "lifecycle", tabs: ["lifecycle", "broadcasts", "journeys", "rules", "automations", "templates", "topics", "emails", "providers"] },
   { id: "seo", label: "SEO", icon: "seo", tabs: ["seo-overview", "audits", "fixes", "experiments", "keywords", "seo", "backlinks", "ai-visibility", "competitors"] },
@@ -305,7 +309,7 @@ const allModules = modules;
 
 // Pages that work for someone kept to some brands. The others need every
 // brand (the API answers 403), so they are hidden from them.
-const brandTabs: readonly Tab[] = ["overview", "seo-overview", "audits", "fixes", "experiments", "keywords", "ai-visibility", "backlinks", "competitors", "link-building", "news", "reddit", "reddit-campaigns", "social", "reviews", "ads", "visitors", "tracking", "flags", "ab-tests", "inbox", "sequences", "people", "leads", "lists", "rules", "lead-finder", "suppression", "mailboxes", "domains", "knowledge", "company", "brands", "setup", "ideal-customers", "members", "account", "instance", "ai-accounts", "support", "help-centre"];
+const brandTabs: readonly Tab[] = ["overview", "seo-overview", "audits", "fixes", "experiments", "keywords", "ai-visibility", "backlinks", "competitors", "link-building", "link-autopilot", "news", "stories", "reddit", "reddit-campaigns", "social", "reviews", "ads", "visitors", "tracking", "flags", "ab-tests", "inbox", "sequences", "people", "leads", "lists", "rules", "lead-finder", "suppression", "mailboxes", "domains", "knowledge", "company", "brands", "setup", "ideal-customers", "members", "account", "instance", "ai-accounts", "support", "help-centre"];
 // Pages of parts of Outflare switched on per workspace while they are
 // tested (GET /v1/me lists each workspace's features).
 const featureTabs: Partial<Record<Tab, string>> = { "ai-accounts": "ai_accounts" };
@@ -940,6 +944,8 @@ function callFor(tab: Tab, ws: string, item?: string): Call {
       return { title: "Pages that could link to you", path: "/v1/workspaces/{ws}/link-prospects", params: base, mcp: "list_link_prospects", ask: "Which competitor pages died this month, who links to them, and which of those sites should we ask first?", scope: "seo.read" };
     case "news":
       return { title: "Coverage of your brands", path: "/v1/workspaces/{ws}/coverage", params: base, mcp: "list_coverage", ask: "What was written about us this week, which outlets covered us without a link, and which topics should we comment on?", scope: "seo.read" };
+    case "stories":
+      return { title: "Your stories", path: "/v1/workspaces/{ws}/stories", params: base, mcp: "list_stories", ask: "Suggest three stories we could pitch this week from our coverage and the news, and draft the best one from facts we can source.", scope: "seo.read" };
     case "backlinks":
       return { title: "Links to your sites", path: "/v1/workspaces/{ws}/backlinks", params: base, query: { status: "live" }, mcp: "list_backlinks", ask: "Which strong links did we lose this month, and where did our new links come from?", scope: "seo.read" };
     case "reddit":
@@ -993,7 +999,9 @@ function callFor(tab: Tab, ws: string, item?: string): Call {
     case "people":
       return item && /^[0-9a-f-]{36}$/.test(item)
         ? { title: "One record", path: "/v1/workspaces/{ws}/records/{record}", params: { ...base, record: item }, mcp: "get_record", ask: "Summarise this person's history with us and what to do next.", scope: "customers.read" }
-        : item === "duplicates"
+        : item === "events"
+          ? { title: "A brand's received product events", path: "/v1/brands/{brand}/events/summary", params: { brand: "BRAND_ID" }, mcp: "get_brand_events_summary", ask: "Which of our product events were rejected or held this week, and what should we fix?", scope: "customers.read" }
+          : item === "duplicates"
           ? { title: "Possible duplicates", path: "/v1/workspaces/{ws}/records/duplicates", params: base, mcp: "list_record_duplicates", ask: "Which possible duplicates are safe to merge, and which look like two different people?", scope: "customers.read" }
           : { title: item === "companies" ? "Companies" : "People", path: "/v1/workspaces/{ws}/records", params: base, query: { type: item === "companies" ? "account" : "person", limit: 50 }, mcp: "list_records", ask: "Which customers at fintech companies haven't heard from us this month?", scope: "customers.read" };
     case "leads":
@@ -1002,6 +1010,8 @@ function callFor(tab: Tab, ws: string, item?: string): Call {
       return item
         ? { title: "One lead list", path: "/v1/workspaces/{ws}/lead-lists/{id}", params: { ...base, id: item }, mcp: "get_lead_list", ask: "How many leads did the last refresh add, and what did it skip?", scope: "leads.read" }
         : { title: "Lead lists", path: "/v1/workspaces/{ws}/lead-lists", params: base, mcp: "list_lead_lists", ask: "Build a list of 200 heads of growth at 50-200 person SaaS companies.", scope: "leads.read" };
+    case "link-autopilot":
+      return { title: "Link autopilots", path: "/v1/workspaces/{ws}/cloud/link-autopilot", params: base, ask: "Get us 5 new live links a month for northpeak.example, spending at most $100 a month.", scope: "missions.read" };
     case "lead-finder":
       return { title: "Lead finder runs", path: "/v1/workspaces/{ws}/cloud/lead-finder/runs", params: base, ask: "Find 25 companies that fit our ideal customer profile.", scope: "leads.read" };
     case "email-finder":

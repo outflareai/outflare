@@ -11,6 +11,7 @@ import { plural } from "../format";
 import { DataTable, type ColumnDef } from "@/components/data-table";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import type { Go } from "./Lifecycle";
+import { GuardrailsCard } from "./EmailGuardrails";
 
 const columns: ColumnDef<EmailTopic>[] = [
   {
@@ -99,6 +100,7 @@ export function Topics({ ws, canManage, go }: { ws: string; canManage: boolean; 
           )}
         />
       )}
+      <GuardrailsCard ws={ws} canManage={canManage} />
       {editing && <TopicDialog ws={ws} topic={editing === "new" ? null : editing} onClose={() => setEditing(null)} onSaved={() => { setEditing(null); load(); }} />}
     </div>
   );

@@ -11,6 +11,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/outflareai/outflare/engine/internal/audit"
 	"github.com/outflareai/outflare/engine/internal/connectors"
 )
 
@@ -59,14 +60,17 @@ var moves = []struct {
 
 // CompetitorRun is what a connection's read of one site's competitors did.
 type CompetitorRun struct {
-	SiteID    string  `json:"site_id"`
-	Host      string  `json:"host"`
-	Suggested int     `json:"suggested"`
-	Checked   int     `json:"checked"`
-	Gaps      int     `json:"gaps"`
-	Events    int     `json:"events"`
-	Cost      float64 `json:"cost"`
-	Error     *string `json:"error"`
+	SiteID    string `json:"site_id"`
+	Host      string `json:"host"`
+	Suggested int    `json:"suggested"`
+	Checked   int    `json:"checked"`
+	Gaps      int    `json:"gaps"`
+	Events    int    `json:"events"`
+	// NewLinks are linking domains new among a competitor's since its
+	// previous read (competitor_link.new).
+	NewLinks int     `json:"new_links"`
+	Cost     float64 `json:"cost"`
+	Error    *string `json:"error"`
 }
 
 // SyncSiteCompetitors suggests a site's competitors and snapshots the
@@ -172,6 +176,13 @@ func (s *Syncer) SyncSiteCompetitors(ctx context.Context, o *connectors.Opened, 
 				if _, err := s.store(ctx, ws, o, c.host, day, a.SEOReport); err != nil {
 					return fail(err)
 				}
+				if report == connectors.SEOBacklinks {
+					n, err := s.newCompetitorLinks(ctx, ws, o.ID, conn, site, c.id, c.host, day, target)
+					if err != nil {
+						return fail(err)
+					}
+					run.NewLinks += n
+				}
 			}
 			run.Gaps++
 		}
@@ -191,6 +202,64 @@ func (s *Syncer) SyncSiteCompetitors(ctx context.Context, o *connectors.Opened, 
 		}
 	}
 	return run, nil
+}
+
+// MaxNewCompetitorLinks is how many competitor_link.new events one
+// competitor's read records, strongest first.
+const MaxNewCompetitorLinks = 50
+
+// newCompetitorLinks records competitor_link.new for each domain in a
+// competitor's linking domains read on day that wasn't in its previous
+// read and doesn't link to the site. The first read is the baseline. The
+// read takes a competitor's top linking domains, so a domain can be new to
+// the list rather than newly linking. It costs nothing more: it compares
+// reads the workspace already made.
+func (s *Syncer) newCompetitorLinks(ctx context.Context, ws, integrationID, conn string, site LinkSite, competitorID, host, day, target string) (int, error) {
+	rows, err := s.Pool.Query(ctx, `
+		WITH prev_day AS (
+			SELECT max(day) AS day FROM seo_snapshots WHERE integration_id = $1 AND host = $2 AND report = 'backlinks' AND day < $3),
+		prev AS (
+			SELECT regexp_replace(lower(s.key), '^www\.', '') AS d FROM seo_snapshots s, prev_day
+			WHERE s.integration_id = $1 AND s.host = $2 AND s.report = 'backlinks' AND s.day = prev_day.day),
+		cur AS (
+			SELECT regexp_replace(lower(key), '^www\.', '') AS d, max(url) AS url, max((metrics->>'domain_rating')::float) AS rating
+			FROM seo_snapshots WHERE integration_id = $1 AND host = $2 AND report = 'backlinks' AND day = $3 AND key <> '' GROUP BY 1),
+		comp AS (SELECT host FROM seo_competitors WHERE workspace_id = $4 AND site_id = $5 AND status = 'tracked')
+		SELECT cur.d, COALESCE(cur.url, ''), cur.rating,
+			(SELECT count(DISTINCT x.host)::int FROM seo_snapshots x JOIN comp ON comp.host = x.host
+			 WHERE x.workspace_id = $4 AND x.report = 'backlinks' AND regexp_replace(lower(x.key), '^www\.', '') = cur.d
+			   AND x.day = (SELECT max(day) FROM seo_snapshots y WHERE y.workspace_id = $4 AND y.report = 'backlinks' AND y.host = x.host))
+		FROM cur, prev_day
+		WHERE prev_day.day IS NOT NULL AND cur.d NOT IN (SELECT d FROM prev)
+		  AND cur.d <> $6 AND cur.d NOT LIKE '%.' || $6 AND cur.d NOT IN (SELECT host FROM comp)
+		  AND cur.d NOT IN (SELECT source_domain FROM backlinks WHERE workspace_id = $4 AND site_id = $5 AND status = 'live')
+		ORDER BY cur.rating DESC NULLS LAST, cur.d LIMIT $7`,
+		integrationID, host, day, ws, site.ID, target, MaxNewCompetitorLinks)
+	if err != nil {
+		return 0, err
+	}
+	type found struct {
+		domain, url string
+		rating      *float64
+		competitors int
+	}
+	list, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (found, error) {
+		var f found
+		return f, row.Scan(&f.domain, &f.url, &f.rating, &f.competitors)
+	})
+	if err != nil {
+		return 0, err
+	}
+	for _, f := range list {
+		if err := audit.Record(ctx, s.Pool, audit.Event{WorkspaceID: ws, ActorType: "system", Action: "competitor_link.new",
+			TargetType: "seo_competitor", TargetID: competitorID, Data: map[string]any{
+				"site_id": site.ID, "brand_id": site.BrandID, "competitor_id": competitorID, "competitor": host, "source_domain": f.domain,
+				"source_url": f.url, "source_rating": f.rating, "competitors": f.competitors, "connector": conn, "day": day},
+			Props: map[string]any{"site_id": site.ID, "competitors": f.competitors, "connector": conn}}); err != nil {
+			return 0, err
+		}
+	}
+	return len(list), nil
 }
 
 // moved reports whether a number moved enough to tell anyone: by points,

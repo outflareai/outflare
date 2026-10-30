@@ -262,7 +262,8 @@ func scanPartnerConversion(row pgx.Row) (partnerConversionView, error) {
 type conversionResult struct {
 	Credited bool `json:"credited"`
 	// Reason says why it wasn't credited: no_partner, partner_inactive,
-	// program_inactive, self_referral, sale_not_found or currency.
+	// program_inactive, self_referral, sale_not_found, currency or
+	// lead_expired.
 	Reason     string                 `json:"reason,omitempty"`
 	Duplicate  bool                   `json:"duplicate"`
 	PartnerID  *string                `json:"partner_id"`
@@ -276,17 +277,17 @@ type membershipRow struct {
 	id, programID, recordID, status, programStatus, currency, kind, model string
 	groupID, brandID                                                      *string
 	windowDays, holdDays                                                  int
-	autoApprove, codesWin                                                 bool
+	autoApprove, codesWin, blockSelf                                      bool
 }
 
 const membershipCols = `m.id::text, m.program_id::text, m.record_id::text, m.status, p.status, p.currency, p.kind, p.credit_model,
-	m.group_id::text, p.brand_id::text, p.credit_window_days, p.hold_days, p.auto_approve, p.codes_win
+	m.group_id::text, p.brand_id::text, p.credit_window_days, p.hold_days, p.auto_approve, p.codes_win, p.block_self_referrals
 	FROM partner_memberships m JOIN partner_programs p ON p.id = m.program_id`
 
 func scanMembership(row pgx.Row) (membershipRow, error) {
 	var m membershipRow
 	err := row.Scan(&m.id, &m.programID, &m.recordID, &m.status, &m.programStatus, &m.currency, &m.kind, &m.model,
-		&m.groupID, &m.brandID, &m.windowDays, &m.holdDays, &m.autoApprove, &m.codesWin)
+		&m.groupID, &m.brandID, &m.windowDays, &m.holdDays, &m.autoApprove, &m.codesWin, &m.blockSelf)
 	return m, err
 }
 
@@ -509,15 +510,16 @@ func (c *conversionRun) visited(ctx context.Context, rec string) (*membershipRow
 type referralRow struct {
 	id, membershipID string
 	firstSaleAt      *time.Time
+	createdAt        time.Time
 }
 
 // existingReferral is the customer's referral in a program ("" is any
 // program, the newest first).
 func (c *conversionRun) existingReferral(ctx context.Context, rec, program string) (*referralRow, error) {
 	var f referralRow
-	err := c.tx.QueryRow(ctx, `SELECT id::text, membership_id::text, first_sale_at FROM partner_referrals
+	err := c.tx.QueryRow(ctx, `SELECT id::text, membership_id::text, first_sale_at, created_at FROM partner_referrals
 		WHERE workspace_id = $1 AND record_id = $2 AND ($3 = '' OR program_id::text = $3) ORDER BY created_at DESC LIMIT 1 FOR UPDATE`,
-		c.ws, rec, program).Scan(&f.id, &f.membershipID, &f.firstSaleAt)
+		c.ws, rec, program).Scan(&f.id, &f.membershipID, &f.firstSaleAt, &f.createdAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil
 	}
@@ -563,7 +565,7 @@ func (c *conversionRun) leadOrSale(ctx context.Context) error {
 	case m == nil:
 		c.res.Reason = "no_partner"
 		return nil
-	case m.recordID == rec:
+	case m.recordID == rec && m.blockSelf:
 		c.res.Reason = "self_referral"
 		return nil
 	case m.programStatus != "active":
@@ -575,6 +577,18 @@ func (c *conversionRun) leadOrSale(ctx context.Context) error {
 	case in.Currency != "" && in.Currency != m.currency && in.Type == "sale":
 		c.res.Reason = "currency"
 		return nil
+	}
+	if f != nil && f.firstSaleAt == nil {
+		// A lead who hasn't bought within the program's lead expiration no
+		// longer credits the partner.
+		var days *int
+		if err := tx.QueryRow(ctx, `SELECT lead_expiry_days FROM partner_programs WHERE id = $1`, m.programID).Scan(&days); err != nil {
+			return err
+		}
+		if days != nil && in.at.After(f.createdAt.AddDate(0, 0, *days)) {
+			c.res.Reason = "lead_expired"
+			return nil
+		}
 	}
 	c.res.PartnerID = &m.id
 	if f == nil {

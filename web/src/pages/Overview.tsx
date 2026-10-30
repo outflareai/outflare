@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import type { AttributionChannels, components, WorkspaceStats, WorkspaceStatus } from "@outflare/sdk";
+import type { AttributionChannels, components, StoryResult, WorkspaceStats, WorkspaceStatus } from "@outflare/sdk";
 import { useBrand } from "@/lib/brand";
 import { api } from "../api";
 import { Button, Card, Loading, PageHeader, Stat, Stats } from "../ui";
@@ -14,7 +14,7 @@ import { blockerTone, dotClass, type Tone } from "@/lib/status";
 import { tabNames } from "../shell";
 import { money, num, totals } from "./Channels";
 
-type Go = (tab: "ai" | "get-started" | "members" | "inbox" | "sequences" | "mailboxes" | "domains" | "leads" | "company" | "servers" | "connectors" | "missions" | "allocation" | "infrastructure" | "analytics" | "fixes" | "lifecycle" | "social" | "setup" | "brands" | "channels") => void;
+type Go = (tab: "ai" | "get-started" | "members" | "inbox" | "sequences" | "mailboxes" | "domains" | "leads" | "company" | "servers" | "connectors" | "missions" | "allocation" | "infrastructure" | "analytics" | "fixes" | "lifecycle" | "social" | "setup" | "brands" | "channels" | "stories") => void;
 
 // The page that resolves each area of blocker GET /status reports.
 const areaTab: Record<WorkspaceStatus["blockers"][number]["area"], Parameters<Go>[0]> = {
@@ -197,6 +197,7 @@ export function Overview({ ws, name, isAdmin, go, limited = false }: { ws: strin
       </section>
 
       <ChannelTiles ws={ws} brand={handle} go={go} />
+      <PRTiles ws={ws} brand={handle} go={go} />
 
       <CommunityLinks />
 
@@ -262,6 +263,32 @@ function ChannelTiles({ ws, brand, go }: { ws: string; brand?: string; go: Go })
         <Stat label="Conversions" value={num(t.conversions)} />
         <Stat label="Revenue" value={money(t.revenue)} sub="net of refunds" />
         <Stat label="Cost" value={money(t.cost)} />
+      </Stats>
+    </section>
+  );
+}
+
+// PRTiles is digital PR's line in the CMO view: the last 28 days of story
+// pitches, replies and the coverage that followed. It stays hidden until a
+// story was pitched or covered, and for anyone who can't read stories.
+function PRTiles({ ws, brand, go }: { ws: string; brand?: string; go: Go }) {
+  const [total, setTotal] = useState<Omit<StoryResult, "story_id" | "brand_id" | "title" | "status"> | null>(null);
+  useEffect(() => {
+    api.GET("/v1/workspaces/{ws}/stories/results", { params: { path: { ws }, query: brand ? { brand } : {} } }).then(({ data }) => setTotal(data?.total ?? null));
+  }, [ws, brand]);
+  if (!total || (total.pitched === 0 && total.coverage === 0)) return null;
+  const wanted = (total.reply_kinds.wants_data ?? 0) + (total.reply_kinds.wants_interview ?? 0);
+  return (
+    <section aria-labelledby="home-pr" className="space-y-2">
+      <div className="flex items-center">
+        <h2 id="home-pr" className="flex-1 text-[13px] font-medium text-muted-foreground">Digital PR · 28 days</h2>
+        <button onClick={() => go("stories")} className="font-mono text-[12px] text-muted-foreground hover:text-foreground">By story →</button>
+      </div>
+      <Stats>
+        <Stat label="Journalists pitched" value={num(total.pitched)} />
+        <Stat label="Replies" value={num(total.replied)} sub={wanted ? `${num(wanted)} want data or an interview` : undefined} />
+        <Stat label="Articles" value={num(total.coverage)} />
+        <Stat label="Linked articles" value={num(total.linked)} />
       </Stats>
     </section>
   );

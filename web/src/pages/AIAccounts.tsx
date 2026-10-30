@@ -14,10 +14,11 @@ import { Switch } from "@/components/ui/switch";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { cn } from "@/lib/utils";
 import { track } from "@/lib/analytics";
-import { companyPaid, cycleWord, daysUntil, monthlyCents, owners, shortDay, usd } from "@/lib/aiAccounts";
+import { binding, companyPaid, cycleWord, daysUntil, monthlyCents, owners, readAgo, resetsIn, shortDay, usd, usedTone, windowLabel } from "@/lib/aiAccounts";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { PeopleView, SpendView, TimelineView, UsageView } from "./AIAccountsViews";
 import { ReceiptsView } from "./AIAccountsReceipts";
+import { ComputersView } from "./AIAccountsComputers";
 
 type Props = {
   ws: string;
@@ -63,7 +64,7 @@ const monthly = (list: AIAccount[]) => list.filter(companyPaid).reduce((n, a) =>
 
 // The page's views. Spend and people are for those who see everyone's
 // accounts (spend also needs ai_spend.read).
-type View = "accounts" | "spend" | "people" | "timeline" | "usage" | "receipts";
+type View = "accounts" | "spend" | "people" | "timeline" | "usage" | "computers" | "receipts";
 
 export function AIAccounts({ ws, me, canAdd, seeAll, manageAll, seeSpend, canSetUp, go }: Props) {
   const [accounts, setAccounts] = useState<AIAccount[] | null>(null);
@@ -78,6 +79,7 @@ export function AIAccounts({ ws, me, canAdd, seeAll, manageAll, seeSpend, canSet
     ...(seeAll ? [{ id: "people" as View, label: "People" }] : []),
     { id: "timeline", label: "Timeline" },
     { id: "usage", label: "Usage" },
+    { id: "computers", label: "Computers" },
     { id: "receipts", label: "Receipts" },
   ];
 
@@ -137,6 +139,8 @@ export function AIAccounts({ ws, me, canAdd, seeAll, manageAll, seeSpend, canSet
         <TimelineView accounts={accounts} open={setEditing} />
       ) : view === "usage" ? (
         <UsageView accounts={accounts} />
+      ) : view === "computers" ? (
+        <ComputersView ws={ws} me={me} seeAll={seeAll} manageAll={manageAll} />
       ) : view === "receipts" ? (
         <ReceiptsView ws={ws} accounts={accounts} canSetUp={canSetUp} seeSpend={seeSpend} manageAll={manageAll} open={setEditing} reload={load} />
       ) : accounts.length === 0 ? (
@@ -216,6 +220,10 @@ export function AIAccounts({ ws, me, canAdd, seeAll, manageAll, seeSpend, canSet
                   </span>
                 ),
               },
+              {
+                id: "usage", header: "Usage", accessorFn: (a) => binding(a)?.used_percent ?? -1,
+                cell: ({ row: { original: a } }) => <UsageCell account={a} />,
+              },
               { id: "renews", header: "Renews", accessorFn: (a) => (a.cancelled ? "9999" : a.renews_on ?? "9998"), cell: ({ row: { original: a } }) => renewal(a) },
               { id: "price", header: "Price", accessorFn: (a) => a.price_cents ?? -1, cell: ({ row: { original: a } }) => price(a) },
               { id: "paid", header: "Paid by", accessorFn: (a) => a.paid_by, cell: ({ row: { original: a } }) => (a.paid_by === "person" ? <Badge tone="blue">Person</Badge> : <span className="text-muted-foreground">Company</span>) },
@@ -236,6 +244,22 @@ export function AIAccounts({ ws, me, canAdd, seeAll, manageAll, seeSpend, canSet
         />
       )}
     </div>
+  );
+}
+
+// The binding limit, as last read by Outflare for desktop.
+function UsageCell({ account: a }: { account: AIAccount }) {
+  const b = binding(a);
+  if (!b) return <span className="text-muted-foreground">—</span>;
+  const pct = Math.min(100, Math.round(b.used_percent));
+  return (
+    <span className="block min-w-32" title={`Read ${readAgo(b.observed_at)}${b.source === "extended" ? " (extended)" : ""}`}>
+      <span className="flex items-baseline gap-1.5 whitespace-nowrap">
+        <span className="font-medium tabular-nums">{pct}%</span>
+        <span className="text-[12px] text-muted-foreground">{windowLabel(b.kind)}{b.resets_at ? ` · resets ${resetsIn(b.resets_at)}` : ""}</span>
+      </span>
+      <span className="mt-1 block h-1 overflow-hidden rounded-full bg-muted"><span className={cn("block h-full rounded-full", usedTone(pct))} style={{ width: `${pct}%` }} /></span>
+    </span>
   );
 }
 

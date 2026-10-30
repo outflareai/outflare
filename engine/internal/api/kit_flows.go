@@ -157,8 +157,8 @@ func applyFlows(ctx context.Context, tx pgx.Tx, a *access, k playbooks.Kit, plan
 			refreshed = &smartlists.Never
 		}
 		id := ids["smart_list."+l.Key]
-		if _, err := tx.Exec(ctx, `INSERT INTO smart_lists (id, workspace_id, name, description, kind, rules, match, refreshed_at, created_by, kit_id, kit_key)
-			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`, id, ws, l.Name, l.Description, l.Kind, raw, l.Match, refreshed, createdBy, k.ID, l.Key); err != nil {
+		if _, err := tx.Exec(ctx, `INSERT INTO smart_lists (id, workspace_id, brand_id, name, description, kind, rules, match, refreshed_at, created_by, kit_id, kit_key)
+			VALUES ($1, $2, outflare_first_brand($2), $3, $4, $5, $6, $7, $8, $9, $10, $11)`, id, ws, l.Name, l.Description, l.Kind, raw, l.Match, refreshed, createdBy, k.ID, l.Key); err != nil {
 			return err
 		}
 		if l.Kind == smartlists.KindSmart {

@@ -8,11 +8,12 @@ import { BrandBadge } from "@/components/brand-badge";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useBrand } from "@/lib/brand";
 import { isID } from "@/lib/paths";
-import { ago, stamp } from "../format";
+import { ago, stamp, when } from "../format";
 import type { Tab } from "../App";
 import { displayName, fieldLabelValue, identity, nameItem, namespaces, originPhrases, origins, useCatalog, type CatalogInfo } from "@/lib/records";
 import { AddIdentity, eraseRecord, RecordConsent, RecordDialog } from "./RecordEdit";
 import { Duplicates } from "./Duplicates";
+import { BrandEvents } from "./BrandEvents";
 import { RecordPartners } from "./Partners";
 
 type Rec = Schemas["Record"];
@@ -22,10 +23,11 @@ type Change = Schemas["AttributeChange"];
 type Identity = Schemas["RecordIdentity"];
 type Link = Schemas["RecordRelationship"];
 type Consent = Schemas["Consent"];
+type PrivacyExport = Schemas["PrivacyExport"];
 
 // People and Companies are the two built-in record types; the item part of
-// the URL picks the view: "" for people, "companies", "duplicates", or a
-// record's id.
+// the URL picks the view: "" for people, "companies", "duplicates", "events"
+// (the brand's product events as received), or a record's id.
 type View = "person" | "account";
 const viewOf = (open: string): View => (open === "companies" ? "account" : "person");
 const itemOf = (v: View) => (v === "account" ? "companies" : "");
@@ -37,18 +39,20 @@ const itemOf = (v: View) => (v === "account" ? "companies" : "");
 export function People({ ws, canManage, open, onOpen, go }: { ws: string; canManage: boolean; open: string; onOpen: (item: string) => void; go: (t: Tab) => void }) {
   const cat = useCatalog(ws);
   if (isID(open)) return <RecordPage key={open} ws={ws} id={open} cat={cat} canManage={canManage} onOpen={onOpen} go={go} />;
-  const tabs = <ViewTabs value={open === "duplicates" ? "duplicates" : viewOf(open)} onOpen={onOpen} />;
+  const tabs = <ViewTabs value={open === "duplicates" || open === "events" ? open : viewOf(open)} onOpen={onOpen} />;
   if (open === "duplicates") return <Duplicates ws={ws} cat={cat} canManage={canManage} tabs={tabs} onOpen={onOpen} />;
+  if (open === "events") return <BrandEvents ws={ws} canManage={canManage} tabs={tabs} onOpen={onOpen} />;
   return <RecordList ws={ws} view={viewOf(open)} cat={cat} canManage={canManage} tabs={tabs} onOpen={onOpen} />;
 }
 
-function ViewTabs({ value, onOpen }: { value: View | "duplicates"; onOpen: (item: string) => void }) {
+function ViewTabs({ value, onOpen }: { value: View | "duplicates" | "events"; onOpen: (item: string) => void }) {
   return (
-    <Tabs value={value} onValueChange={(v) => onOpen(v === "duplicates" ? "duplicates" : itemOf(v as View))}>
+    <Tabs value={value} onValueChange={(v) => onOpen(v === "duplicates" || v === "events" ? v : itemOf(v as View))}>
       <TabsList className="h-8">
         <TabsTrigger value="person" className="px-3 text-[12px]">People</TabsTrigger>
         <TabsTrigger value="account" className="px-3 text-[12px]">Companies</TabsTrigger>
         <TabsTrigger value="duplicates" className="px-3 text-[12px]">Duplicates</TabsTrigger>
+        <TabsTrigger value="events" className="px-3 text-[12px]">Events</TabsTrigger>
       </TabsList>
     </Tabs>
   );
@@ -396,6 +400,7 @@ function RecordPage({ ws, id, cat, canManage, onOpen, go }: { ws: string; id: st
           <Links links={links} fields={fields} onOpen={onOpen} />
           {people && <Consents key={`c${tick}`} ws={ws} id={id} canManage={manage} onChange={changed} go={go} />}
           {people && <div className="rounded-md border p-4 text-sm empty:hidden"><RecordPartners ws={ws} record={id} go={() => go("partners")} /></div>}
+          {rec.brand_id && !rec.merged_into && <PrivacyExports key={`p${tick}`} brand={rec.brand_id} record={id} canManage={canManage} />}
         </div>
         <div className="space-y-4 lg:col-span-2">
           <Tabs value={section} onValueChange={(v) => setSection(v as typeof section)}>
@@ -534,6 +539,99 @@ function Consents({ ws, id, canManage, onChange, go }: { ws: string; id: string;
         ))}
       </ul>
       {canManage && <RecordConsent ws={ws} id={id} onAdded={onChange} />}
+    </Card>
+  );
+}
+
+const exportStatus: Record<PrivacyExport["status"], { label: string; tone: "green" | "amber" | "red" | "grey" }> = {
+  pending: { label: "Building", tone: "amber" },
+  ready: { label: "Ready", tone: "green" },
+  failed: { label: "Failed", tone: "red" },
+  expired: { label: "Expired", tone: "grey" },
+};
+
+const exportErrors: Record<string, string> = {
+  too_large: "Over 100 MB: too much to export in one file.",
+  record_gone: "The record was gone before it was built.",
+  internal: "Outflare couldn't build it. Try again.",
+};
+
+function kilobytes(n: number | null | undefined): string {
+  if (!n) return "";
+  return n < 1024 * 1024 ? `${Math.max(1, Math.round(n / 1024))} KB` : `${(n / 1024 / 1024).toFixed(1)} MB`;
+}
+
+// Privacy export: everything this record's brand holds about them, as a
+// file, for a person asking what is kept about them. Exports of other
+// brands' records never show here.
+function PrivacyExports({ brand, record, canManage }: { brand: string; record: string; canManage: boolean }) {
+  const [list, setList] = useState<PrivacyExport[] | null>(null);
+  const [error, setError] = useState("");
+  const [asking, setAsking] = useState(false);
+  const [all, setAll] = useState(false);
+  const load = useCallback(() => {
+    api.GET("/v1/brands/{brand}/privacy-exports", { params: { path: { brand }, query: { record, limit: 20 } } }).then(({ data, error }) => {
+      if (!data) return setError(errorMessage(error));
+      setError("");
+      setList(data.data);
+    });
+  }, [brand, record]);
+  useEffect(load, [load]);
+  // While one is being built, look again every few seconds.
+  const building = list?.some((x) => x.status === "pending") ?? false;
+  useEffect(() => {
+    if (!building) return;
+    const t = setTimeout(load, 2000);
+    return () => clearTimeout(t);
+  }, [building, list, load]);
+
+  async function ask() {
+    setAsking(true);
+    const { error } = await api.POST("/v1/brands/{brand}/records/{record}/privacy-exports", { params: { path: { brand, record } } });
+    setAsking(false);
+    if (error) return toast(errorMessage(error), "error");
+    toast("Building the export. It's ready to download here in a moment.");
+    load();
+  }
+
+  if (error) return <Card title="Privacy export"><ErrorText>{error}</ErrorText></Card>;
+  if (!list) return null;
+  if (list.length === 0 && !canManage) return null;
+  const shown = all ? list : list.slice(0, 3);
+  return (
+    <Card
+      title="Privacy export"
+      description="Everything this brand holds about them, as one file, for a request to see their data. Only this brand's data, never secrets. Downloadable for 7 days."
+      action={canManage && <Button variant="ghost" disabled={asking || building} onClick={ask}>{building ? "Building…" : "Export"}</Button>}
+    >
+      {list.length === 0 && <p className="text-sm text-muted-foreground">None yet.</p>}
+      <ul className="space-y-2 text-sm">
+        {shown.map((x) => {
+          const rows = Object.values(x.counts).reduce((a, b) => a + b, 0);
+          return (
+            <li key={x.id} className="flex items-start justify-between gap-2">
+              <div className="min-w-0">
+                <div title={stamp(x.created_at)}>Asked {ago(x.created_at)}</div>
+                <div className="text-xs text-muted-foreground">
+                  {x.status === "ready" && `${rows} rows · ${kilobytes(x.size_bytes)} · until ${x.expires_at ? when(x.expires_at) : ""}`}
+                  {x.status === "failed" && (exportErrors[x.error_code ?? ""] ?? x.error_code)}
+                  {x.status === "expired" && "The file was deleted after 7 days."}
+                  {x.status === "pending" && "Gathering their data…"}
+                </div>
+              </div>
+              <div className="flex shrink-0 items-center gap-1.5">
+                <Badge tone={exportStatus[x.status].tone}>{exportStatus[x.status].label}</Badge>
+                {x.status === "ready" && canManage && (
+                  <a className="text-xs underline" href={`/v1/brands/${brand}/privacy-exports/${x.id}/download`} download onClick={() => setTimeout(load, 1000)}>
+                    Download
+                  </a>
+                )}
+              </div>
+            </li>
+          );
+        })}
+      </ul>
+      {list.length > 3 && <button className="mt-3 text-xs underline" onClick={() => setAll(!all)}>{all ? "Show fewer" : `Show all ${list.length}`}</button>}
     </Card>
   );
 }

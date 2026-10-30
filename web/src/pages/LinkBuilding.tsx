@@ -909,14 +909,14 @@ function TopPages({ ws, site, canManage }: { ws: string; site: SEOSite; canManag
 
 function Settings({ ws, canManage, brand, go }: { ws: string; canManage: boolean; brand: { brand?: string }; go: (tab: Tab, item?: string) => void }) {
   const [set, setSet] = useState<LinkBuildingSettings | null>(null);
-  const [draft, setDraft] = useState({ cooldown: "60", weekly: true, percent: "10" });
+  const [draft, setDraft] = useState({ cooldown: "60", weekly: true, percent: "10", recheck: "30" });
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   useEffect(() => {
     api.GET("/v1/workspaces/{ws}/link-building/settings", { params: { path: { ws } } }).then(({ data, error }) => {
       if (error || !data) return setError(errorMessage(error));
       setSet(data);
-      setDraft({ cooldown: String(data.pitch_cooldown_days), weekly: data.weekly_reads, percent: String(data.weekly_budget_percent) });
+      setDraft({ cooldown: String(data.pitch_cooldown_days), weekly: data.weekly_reads, percent: String(data.weekly_budget_percent), recheck: String(data.recheck_days) });
     });
   }, [ws]);
   const save = async (e: React.FormEvent) => {
@@ -924,7 +924,7 @@ function Settings({ ws, canManage, brand, go }: { ws: string; canManage: boolean
     setBusy(true);
     const { data, error } = await api.PATCH("/v1/workspaces/{ws}/link-building/settings", {
       params: { path: { ws } },
-      body: { pitch_cooldown_days: Number(draft.cooldown), weekly_reads: draft.weekly, weekly_budget_percent: Number(draft.percent) },
+      body: { pitch_cooldown_days: Number(draft.cooldown), weekly_reads: draft.weekly, weekly_budget_percent: Number(draft.percent), recheck_days: Number(draft.recheck) },
     });
     setBusy(false);
     if (error || !data) return setError(errorMessage(error));
@@ -953,6 +953,14 @@ function Settings({ ws, canManage, brand, go }: { ws: string; canManage: boolean
         <span className="flex items-center gap-1">
           <input className={`${field} w-20`} type="number" min={1} max={100} value={draft.percent} disabled={!canManage || !draft.weekly} onChange={(e) => setDraft({ ...draft, percent: e.target.value })} />
           <span className="text-[13px]">%</span>
+        </span>
+      </label>
+      <label className="block space-y-1">
+        <span className="text-[13px] font-medium">Check broken-link pages again every</span>
+        <span className="block text-[12px] text-muted-foreground">Pages of broken-link prospects nobody has pitched yet, so links that break later are found (and can start the broken-link playbook). Free, apart from your AI reading the page. 0 is never.</span>
+        <span className="flex items-center gap-1">
+          <input className={`${field} w-20`} type="number" min={0} max={365} value={draft.recheck} disabled={!canManage} onChange={(e) => setDraft({ ...draft, recheck: e.target.value })} />
+          <span className="text-[13px]">days</span>
         </span>
       </label>
       {canManage && <Button type="submit" disabled={busy}>Save</Button>}

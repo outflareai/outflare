@@ -51,7 +51,7 @@ func TestLinkProspectPageChecks(t *testing.T) {
 	base := "/v1/workspaces/" + ws
 	owner.must(201, "POST", base+"/integrations", map[string]any{"connector": "claude", "credentials": map[string]any{"api_key": "sk-ant-good"}})
 	siteID := owner.must(201, "POST", base+"/seo-sites", map[string]any{"url": "https://www.example.com/"})["id"].(string)
-	e.runLinkChecks(t)
+	svc := e.runLinkChecks(t)
 
 	res := owner.must(200, "POST", base+"/link-prospects", map[string]any{"site_id": siteID, "prospects": []any{
 		map[string]any{"page_url": "https://blog.example.org/resources", "method": "resource_page", "domain_rating": 40},
@@ -125,6 +125,74 @@ func TestLinkProspectPageChecks(t *testing.T) {
 	owner.must(202, "POST", base+"/link-prospects/"+res[1].(map[string]any)["id"].(string)+"/check", nil)
 	if q := owner.must(202, "POST", base+"/link-prospects/check", map[string]any{"site_id": siteID, "again": true}); q["count"].(float64) != 0 {
 		t.Fatalf("again: %v", q)
+	}
+
+	// Each broken link on a page is an event once, which can start the
+	// broken-link playbook.
+	ctx := context.Background()
+	brokenEvents := func() (n int, first bool) {
+		t.Helper()
+		if err := e.pool.QueryRow(ctx, `SELECT count(*), COALESCE(bool_and((data->>'first_check')::bool), false) FROM audit_events
+			WHERE workspace_id = $1 AND action = 'outbound_link.broken' AND data->>'broken_url' = 'https://tools.example/old-tool'
+			  AND data->>'page_url' = 'https://blog.example.org/resources'`, ws).Scan(&n, &first); err != nil {
+			t.Fatal(err)
+		}
+		return
+	}
+	if n, first := brokenEvents(); n != 1 || !first {
+		t.Fatalf("outbound_link.broken: %d, first %v", n, first)
+	}
+
+	// A broken-link prospect nobody pitched is checked again after
+	// recheck_days (30 by default); a link still broken isn't news again.
+	if s := owner.must(200, "GET", base+"/link-building/settings", nil); s["recheck_days"].(float64) != 30 {
+		t.Fatalf("settings: %v", s)
+	}
+	owner.must(400, "PATCH", base+"/link-building/settings", map[string]any{"recheck_days": 400})
+	pid := res[1].(map[string]any)["id"].(string)
+	if _, err := e.pool.Exec(ctx, `UPDATE link_page_checks SET checked_at = now() - interval '31 days' WHERE prospect_id = $1`, pid); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.pool.Exec(ctx, `UPDATE link_page_checks SET checked_at = now() - interval '31 days' WHERE prospect_id = $1`, res[0].(map[string]any)["id"]); err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.Schedule(ctx, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.Now().Add(15 * time.Second)
+	for {
+		at, _ := time.Parse(time.RFC3339Nano, get(1)["check"].(map[string]any)["checked_at"].(string))
+		if time.Since(at) < time.Hour {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("the broken-link prospect wasn't checked again")
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	// The excluded resource page isn't a broken-link prospect to pitch: not
+	// checked again.
+	at, _ := time.Parse(time.RFC3339Nano, get(0)["check"].(map[string]any)["checked_at"].(string))
+	if time.Since(at) < 24*time.Hour {
+		t.Fatalf("checked again: %v", at)
+	}
+	if n, _ := brokenEvents(); n != 1 {
+		t.Fatalf("outbound_link.broken again: %d", n)
+	}
+	// Off, nothing is checked again.
+	owner.must(200, "PATCH", base+"/link-building/settings", map[string]any{"recheck_days": 0})
+	if _, err := e.pool.Exec(ctx, `UPDATE link_page_checks SET checked_at = now() - interval '400 days' WHERE prospect_id = $1`, pid); err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.Schedule(ctx, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	var queued int
+	if err := e.pool.QueryRow(ctx, `SELECT count(*) FROM jobs WHERE kind = $1 AND payload->>'prospect_id' = $2 AND status IN ('queued', 'running')`, linkbuild.JobCheck, pid).Scan(&queued); err != nil {
+		t.Fatal(err)
+	}
+	if queued != 0 {
+		t.Fatalf("queued with recheck off: %d", queued)
 	}
 
 	got := map[string]bool{}

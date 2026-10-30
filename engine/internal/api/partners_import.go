@@ -869,6 +869,12 @@ func (r *partnerImportRun) page(ctx context.Context, kind string, page connector
 				return err
 			}
 		}
+	case connectors.PartnerKindClicks:
+		for _, c := range page.Clicks {
+			if err := one(func(tx pgx.Tx) (string, error) { return r.click(ctx, tx, c) }, c.ID); err != nil {
+				return err
+			}
+		}
 	}
 	return nil
 }
@@ -1178,6 +1184,35 @@ func (r *partnerImportRun) transaction(ctx context.Context, tx pgx.Tx, t connect
 		}
 	}
 	return result, nil
+}
+
+// click brings over one click on a partner's link, once, so the partner's
+// click count carries over. It starts nothing: no event, no attribution.
+func (r *partnerImportRun) click(ctx context.Context, tx pgx.Tx, c connectors.ImportClick) (string, error) {
+	if c.ID == "" {
+		return "", importSkip("incomplete")
+	}
+	member, ok, err := r.ref(ctx, tx, "partner", c.PartnerID)
+	if err != nil {
+		return "", err
+	}
+	if !ok {
+		return "", importSkip("partner_missing")
+	}
+	var at *time.Time
+	if !c.Created.IsZero() {
+		at = &c.Created
+	}
+	tag, err := tx.Exec(ctx, `INSERT INTO partner_clicks (workspace_id, membership_id, referrer_host, created_at, external_id)
+		VALUES ($1, $2, $3, COALESCE($4, now()), $5) ON CONFLICT (workspace_id, external_id) WHERE external_id IS NOT NULL DO NOTHING`,
+		r.ws, member, c.ReferrerHost, at, r.connector+":"+cutUTF8(c.ID, 180))
+	if err != nil {
+		return "", err
+	}
+	if tag.RowsAffected() == 0 {
+		return "unchanged", nil
+	}
+	return "created", nil
 }
 
 // commission brings over one commission, or the change in its status

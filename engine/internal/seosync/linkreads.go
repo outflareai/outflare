@@ -24,10 +24,13 @@ import (
 
 // LinkSettings are a workspace's link building settings.
 type LinkSettings struct {
-	PitchCooldownDays   int       `json:"pitch_cooldown_days"`
-	WeeklyReads         bool      `json:"weekly_reads"`
-	WeeklyBudgetPercent int       `json:"weekly_budget_percent"`
-	UpdatedAt           time.Time `json:"updated_at"`
+	PitchCooldownDays   int  `json:"pitch_cooldown_days"`
+	WeeklyReads         bool `json:"weekly_reads"`
+	WeeklyBudgetPercent int  `json:"weekly_budget_percent"`
+	// RecheckDays is how often the pages of broken-link prospects nobody
+	// has pitched are checked again (outbound_link.broken); 0 is never.
+	RecheckDays int       `json:"recheck_days"`
+	UpdatedAt   time.Time `json:"updated_at"`
 }
 
 // LoadLinkSettings reads a workspace's settings, making the row with the
@@ -36,10 +39,10 @@ func LoadLinkSettings(ctx context.Context, q jobs.Querier, ws string) (LinkSetti
 	var v LinkSettings
 	err := q.QueryRow(ctx, `
 		WITH ins AS (INSERT INTO link_building_settings (workspace_id) VALUES ($1) ON CONFLICT DO NOTHING
-			RETURNING pitch_cooldown_days, weekly_reads, weekly_budget_percent, updated_at)
+			RETURNING pitch_cooldown_days, weekly_reads, weekly_budget_percent, recheck_days, updated_at)
 		SELECT * FROM ins
-		UNION ALL SELECT pitch_cooldown_days, weekly_reads, weekly_budget_percent, updated_at FROM link_building_settings WHERE workspace_id = $1
-		LIMIT 1`, ws).Scan(&v.PitchCooldownDays, &v.WeeklyReads, &v.WeeklyBudgetPercent, &v.UpdatedAt)
+		UNION ALL SELECT pitch_cooldown_days, weekly_reads, weekly_budget_percent, recheck_days, updated_at FROM link_building_settings WHERE workspace_id = $1
+		LIMIT 1`, ws).Scan(&v.PitchCooldownDays, &v.WeeklyReads, &v.WeeklyBudgetPercent, &v.RecheckDays, &v.UpdatedAt)
 	return v, err
 }
 

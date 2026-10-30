@@ -57,6 +57,8 @@ func (s *Server) routesEmails(mux *http.ServeMux) {
 	mux.HandleFunc("POST /v1/workspaces/{ws}/email-templates/{id}/publish", s.inWorkspace(manage, s.publishEmailTemplate))
 	mux.HandleFunc("GET /v1/workspaces/{ws}/email-templates/{id}/versions", s.inWorkspace(read, s.listEmailTemplateVersions))
 
+	mux.HandleFunc("GET /v1/workspaces/{ws}/email-guardrails", s.inWorkspace(read, s.getEmailGuardrails))
+	mux.HandleFunc("PATCH /v1/workspaces/{ws}/email-guardrails", s.inWorkspace(manage, s.updateEmailGuardrails))
 	mux.HandleFunc("GET /v1/workspaces/{ws}/email-topics", s.inWorkspace(read, s.listEmailTopics))
 	mux.HandleFunc("POST /v1/workspaces/{ws}/email-topics", s.inWorkspace(manage, s.createEmailTopic))
 	mux.HandleFunc("GET /v1/workspaces/{ws}/email-topics/{id}", s.inWorkspace(read, s.getEmailTopic))
