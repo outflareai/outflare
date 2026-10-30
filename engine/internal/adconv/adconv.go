@@ -491,12 +491,7 @@ func (s *Sender) loadRule(ctx context.Context, ws, id string) (rule, error) {
 }
 
 func (s *Sender) consentMode(ctx context.Context, ws string) (string, error) {
-	mode := OptOut
-	err := s.Pool.QueryRow(ctx, `SELECT consent_mode FROM ad_settings WHERE workspace_id = $1`, ws).Scan(&mode)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return OptOut, nil
-	}
-	return mode, err
+	return ConsentMode(ctx, s.Pool, ws)
 }
 
 func (s *Sender) loadQueued(ctx context.Context, ws, ruleID string) ([]queued, error) {
@@ -617,6 +612,33 @@ func (s *Sender) clicks(ctx context.Context, ws string, q queued, cv *connectors
 // Consent says whether a person's conversion may be sent, whether they
 // granted ad data, and why not when it may not.
 func Consent(ctx context.Context, q jobs.Querier, ws string, recordID, anonID *string, mode string) (send, granted bool, reason string, err error) {
+	return consentFor(ctx, q, ws, recordID, anonID, mode, "ad_user_data", "ad data")
+}
+
+// AudienceConsent says whether a person may be added to an ad platform's
+// audience: the same rules as a conversion, for both ad data and ad
+// personalisation, since an audience is for targeting them. granted is
+// true when they granted both.
+func AudienceConsent(ctx context.Context, q jobs.Querier, ws, recordID, mode string) (add, granted bool, reason string, err error) {
+	add, data, reason, err := Consent(ctx, q, ws, &recordID, nil, mode)
+	if err != nil || !add {
+		return false, false, reason, err
+	}
+	add, pers, reason, err := consentFor(ctx, q, ws, &recordID, nil, mode, "ad_personalization", "ad personalisation")
+	return add, add && data && pers, reason, err
+}
+
+// ConsentMode is the workspace's consent_mode: OptOut unless set.
+func ConsentMode(ctx context.Context, q jobs.Querier, ws string) (string, error) {
+	mode := OptOut
+	err := q.QueryRow(ctx, `SELECT consent_mode FROM ad_settings WHERE workspace_id = $1`, ws).Scan(&mode)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return OptOut, nil
+	}
+	return mode, err
+}
+
+func consentFor(ctx context.Context, q jobs.Querier, ws string, recordID, anonID *string, mode, purpose, what string) (send, granted bool, reason string, err error) {
 	var country string
 	err = q.QueryRow(ctx, `SELECT country FROM site_sessions WHERE workspace_id = $1
 		AND (record_id = $2 OR ($3::text IS NOT NULL AND anonymous_id = $3)) AND country <> ''
@@ -629,24 +651,24 @@ func Consent(ctx context.Context, q jobs.Querier, ws string, recordID, anonID *s
 	status := ""
 	if recordID != nil || anonID != nil {
 		err = q.QueryRow(ctx, `SELECT status FROM consents WHERE workspace_id = $1 AND channel = 'ads'
-			AND purpose = 'ad_user_data' AND topic = ''
+			AND purpose = $4 AND topic = ''
 			AND (record_id = $2 OR ($2::uuid IS NULL AND $3::text IS NOT NULL AND anonymous_id = $3))
-			ORDER BY occurred_at DESC, created_at DESC LIMIT 1`, ws, recordID, anonID).Scan(&status)
+			ORDER BY occurred_at DESC, created_at DESC LIMIT 1`, ws, recordID, anonID, purpose).Scan(&status)
 		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 			return false, false, "", err
 		}
 	}
 	switch {
 	case status == "withdrawn":
-		return false, false, "the person withdrew consent for ad data", nil
+		return false, false, "the person withdrew consent for " + what, nil
 	case status == "granted":
 		return true, true, "", nil
 	case country == "":
-		return false, false, "no consent for ad data, and their country is unknown", nil
+		return false, false, "no consent for " + what + ", and their country is unknown", nil
 	case strict[country]:
-		return false, false, "no consent for ad data (needed in the EEA, the UK and Switzerland)", nil
+		return false, false, "no consent for " + what + " (needed in the EEA, the UK and Switzerland)", nil
 	case mode == OptIn:
-		return false, false, "no consent for ad data (this workspace sends only with consent)", nil
+		return false, false, "no consent for " + what + " (this workspace sends only with consent)", nil
 	}
 	return true, false, "", nil
 }

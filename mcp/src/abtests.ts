@@ -41,6 +41,11 @@ const fields = {
     .max(1)
     .optional()
     .describe("The smallest relative change worth detecting: 0.1 (+10%) for a busy site, 0.25 (+25%, the default), 0.5 (+50%) for a bold change. Smaller finds small changes but needs more visitors. Fixed once it starts."),
+  factors: z
+    .array(z.object({ flag: z.string().min(1).describe("Another flag's id or key."), control: z.string().optional().describe('Its control version. Default: "control" if it has one, else its first.') }))
+    .max(2)
+    .optional()
+    .describe("Makes it a multivariate test: up to two other flags (outside this flag's exclusion group), so every combination of versions is measured (get_ab_test_factorial). Fixed once it starts."),
 };
 
 export function registerABTestTools(
@@ -96,6 +101,18 @@ export function registerABTestTools(
       annotations: read,
     },
     ({ test, by }) => call(() => gtm.GET("/v1/workspaces/{ws}/ab-tests/{test}/breakdown", { params: { path: { ...path(), test }, query: { by } } })),
+  );
+
+  server.registerTool(
+    "get_ab_test_factorial",
+    {
+      title: "Read a multivariate A/B test",
+      description:
+        "A multivariate test's first goal for every combination of versions (cell), each against the all-controls cell (corrected for every cell), the best combination, each flag's own effect pooled over the others, and whether the other flags change this flag's effect (interacts).",
+      inputSchema: { test: testRef },
+      annotations: read,
+    },
+    ({ test }) => call(() => gtm.GET("/v1/workspaces/{ws}/ab-tests/{test}/factorial", { params: { path: { ...path(), test } } })),
   );
 
   server.registerTool(

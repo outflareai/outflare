@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"net/url"
 	"strings"
 
@@ -33,8 +34,8 @@ func (MetaAds) Definition() c.Definition {
 	d := def("meta_ads", "Meta Ads", "https://www.facebook.com/business/ads",
 		"https://developers.facebook.com/docs/marketing-api/insights", "https://www.facebook.com/business/help/755172054692222",
 		"Spend, clicks and conversions per campaign from your Facebook and Instagram ad accounts.",
-		"Reads every ad account a token can see, with read-only access. The simplest way: in your Meta Business Settings, Users, System users, create a system user, give it the ad accounts, and generate a token with the ads_read permission. Conversions are Meta's standard events (purchases, leads, registrations, trials, subscriptions). To send conversions back through the Conversions API, also assign the system user to your pixel (Business Settings, Data sources, Datasets).")
-	d.Capabilities = append(d.Capabilities, c.CapAdsConversions)
+		"Reads every ad account a token can see, with read-only access. The simplest way: in your Meta Business Settings, Users, System users, create a system user, give it the ad accounts, and generate a token with the ads_read permission. Conversions are Meta's standard events (purchases, leads, registrations, trials, subscriptions). To send conversions back through the Conversions API, also assign the system user to your pixel (Business Settings, Data sources, Datasets). For journeys to add people to your customer list audiences, give the token ads_management too and accept the Custom Audience terms in your ad account.")
+	d.Capabilities = append(d.Capabilities, c.CapAdsConversions, c.CapAdsAudiences)
 	d.Auth, d.AuthMethods = c.AuthAPIKey, []string{c.AuthAPIKey, c.AuthOAuth2}
 	d.Fields = []c.Field{{Name: "api_key", Label: "System user access token", Secret: true, Placeholder: "EAAB…",
 		Help: "Business Settings, Users, System users: generate a token with ads_read for the ad accounts you want to read."}}
@@ -281,4 +282,51 @@ func (m MetaAds) SendConversions(ctx context.Context, cl *c.Client, creds c.Cred
 		results[i].OK = true
 	}
 	return results, nil
+}
+
+// ---- audiences ----
+
+// Audiences lists the account's custom audiences made from a customer
+// list, the only kind people can be added to by hand.
+func (m MetaAds) Audiences(ctx context.Context, cl *c.Client, creds c.Creds, acct c.AdAccount) ([]c.AdAudience, error) {
+	var out []c.AdAudience
+	err := m.pages(ctx, cl, creds, m.base(cl)+"/act_"+esc(acct.ID)+"/customaudiences?fields=id,name,subtype&limit=100", func(raw json.RawMessage) error {
+		var a struct {
+			ID      string `json:"id"`
+			Name    string `json:"name"`
+			Subtype string `json:"subtype"`
+		}
+		if json.Unmarshal(raw, &a) == nil && a.ID != "" && a.Subtype == "CUSTOM" {
+			out = append(out, c.AdAudience{ID: a.ID, Name: a.Name})
+		}
+		return nil
+	})
+	return out, err
+}
+
+// SyncAudience adds the person's hashed emails and phone numbers to a
+// custom audience, or removes them, one identifier kind per call. Meta
+// matches them on its side and never says whether they matched.
+func (m MetaAds) SyncAudience(ctx context.Context, cl *c.Client, creds c.Creds, acct c.AdAccount, audienceID, change string, p c.AudienceMember) error {
+	method := http.MethodPost
+	if change == c.AudienceRemove {
+		method = http.MethodDelete
+	}
+	for _, k := range []struct {
+		schema string
+		ids    []string
+	}{{"EMAIL_SHA256", p.Emails}, {"PHONE_SHA256", p.PhoneDigits}} {
+		if len(k.ids) == 0 {
+			continue
+		}
+		rows := make([][]string, len(k.ids))
+		for i, id := range k.ids {
+			rows[i] = []string{id}
+		}
+		body := map[string]any{"payload": map[string]any{"schema": []string{k.schema}, "data": rows}}
+		if err := m.call(cl, creds).do(ctx, method, m.base(cl)+"/"+esc(audienceID)+"/users", body, nil); err != nil {
+			return err
+		}
+	}
+	return nil
 }

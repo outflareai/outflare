@@ -146,6 +146,18 @@ Changing the flag while its test runs mixes two experiments into one. The result
 - **Crossovers**: `crossovers` counts visitors who saw more than one version. They count under the first; many of them means something, such as a cache or a server that assigns differently, shows versions inconsistently.
 - **The split check** (above) catches visitors lost or double-counted.
 
+## Multivariate tests
+
+To test two or three parts of a page together, such as a headline, a button and an image, give each its own flag and add up to two of them to a test as **factors** (`factors: [{"flag": "cta"}]` when adding or changing a draft, MCP `create_ab_test`; or **Also test** in the new-test form). Each flag splits visitors on its own, so every combination of versions (a cell) gets visitors: two flags with two versions each make four cells, three make eight. Factors can't be in the test flag's exclusion group, since no visitor would see both, and while the test runs, none of its flags can be in another running test.
+
+The test's own results stay as they are: its flag's versions, everyone counted. **Every combination** (`GET .../ab-tests/{id}/factorial`, MCP `get_ab_test_factorial`) reads the first goal among visitors who saw a version of every factor:
+
+- every cell against the one where every flag shows its control, corrected for the number of cells, and the best cell;
+- each flag's own effect, pooled over the others' versions (its main effect);
+- whether each factor changes the test flag's effect (interacts at p < 0.01). When it does, ship the best cell, not each flag's winner on its own.
+
+Each cell gets a share of the visitors, so a multivariate test needs several times the traffic of a simple one. Keep factors to the changes you expect to matter.
+
 ## Tests at the same time
 
 The checklist warns when another test is running on a flag outside this one's [exclusion group](feature-flags.md#exclusion-groups), since visitors may be in both. Either put the flags in one group so they never share a visitor, or let them overlap and check them.
@@ -164,8 +176,6 @@ The checklist warns when another test is running on a flag outside this one's [e
 Each visitor is grouped by the visit they first saw their version in, so their group never changes. Visitors whose visit isn't known, such as exposures sent by a server, are "unknown". The largest 8 groups are shown, the rest added up as "other".
 
 Every group is another chance of a lucky difference, so each comparison is corrected for every version in every group (`corrected_for`), and a group needs more visitors to be safe to stop than the whole test. Use breakdowns to learn where a change works, such as on mobile only; the winner is always decided on everyone.
-
-Variance reduction (CUPED) and guardrail metrics are planned.
 
 ## AI help
 

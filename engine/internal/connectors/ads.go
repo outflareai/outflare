@@ -193,3 +193,46 @@ func HashID(v string) string {
 	sum := sha256.Sum256([]byte(v))
 	return hex.EncodeToString(sum[:])
 }
+
+// CapAdsAudiences marks a connector that implements AudienceSyncer.
+const CapAdsAudiences = "ads.audiences"
+
+// AdAudience is a customer list audience on the platform: a Meta custom
+// audience from a customer list, a Google Ads Customer Match list.
+type AdAudience struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+}
+
+// AudienceMember is the person an audience change is about. Every
+// identifier is already normalised and hashed with HashID: Phones from
+// E.164 with the plus, PhoneDigits without it (Meta wants digits only).
+type AudienceMember struct {
+	Emails      []string
+	Phones      []string
+	PhoneDigits []string
+	// ConsentGranted is true when the person granted ad data and ad
+	// personalisation; false means it was not asked where the law allows
+	// adding them without it.
+	ConsentGranted bool
+}
+
+// What an audience change does.
+const (
+	AudienceAdd    = "add"
+	AudienceRemove = "remove"
+)
+
+// AudienceSyncer adds people to, and takes them out of, the account's
+// customer list audiences, for journeys' sync_audience steps. Adding
+// someone already in the list, or removing someone who isn't, succeeds,
+// so a retry never changes more than once; the platform matches them on
+// its side, so it never says whether they matched.
+type AudienceSyncer interface {
+	Connector
+	// Audiences lists the account's customer list audiences.
+	Audiences(ctx context.Context, c *Client, creds Creds, acct AdAccount) ([]AdAudience, error)
+	// SyncAudience adds the person to the audience (AudienceAdd) or takes
+	// them out (AudienceRemove).
+	SyncAudience(ctx context.Context, c *Client, creds Creds, acct AdAccount, audienceID, change string, m AudienceMember) error
+}

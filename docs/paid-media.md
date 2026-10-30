@@ -17,7 +17,7 @@ stays off until the workspace connects it.
 | Platform | Connect with | Also needs |
 | --- | --- | --- |
 | Google Ads (`google_ads`) | Sign in with Google (read-only Google Ads access). Manager accounts list the accounts under them. | The workspace's own developer token, from its Google Ads manager account (API Center). |
-| Meta Ads (`meta_ads`) | A system user access token from your own Business Manager with `ads_read`, or sign in with Facebook | Nothing |
+| Meta Ads (`meta_ads`) | A system user access token from your own Business Manager with `ads_read` (and `ads_management` for journeys to fill audiences), or sign in with Facebook | Nothing |
 | Microsoft Advertising (`microsoft_ads`) | Sign in with Microsoft | The workspace's own developer token, from the Microsoft Advertising Developer Portal. |
 | Reddit Ads (`reddit_ads`) | Sign in with Reddit (read-only ads access) | Nothing |
 | X Ads (`x_ads`) | Your own X developer app's API key and secret, plus an access token and secret for the account that runs the ads | Ads API access approved for that app by X |
@@ -206,7 +206,24 @@ Outbrain Ads only reads: the Amplify API has no call that takes conversions.
 Outbrain's click id (`ob_click_id`) is still recorded on each visit, so its
 clicks count in Outflare's own attribution.
 
+## Audiences from journeys
+
+A journey's `sync_audience` step adds a person to a customer list audience on
+one of your ad accounts, or takes them out: a Meta custom audience made from a
+customer list, or a Google Ads Customer Match list that is open. `GET
+.../ads/audiences?account_id=` (MCP `list_ad_audiences`) lists them, live from
+the platform. Make the audience on the platform first; Outflare only fills it.
+
+Only the person's SHA-256 hashed emails and phone numbers are sent, and the
+platform matches them on its side, so it never says who matched. Adding
+follows the same consent rules as conversions (above), for both ad data and ad
+personalisation; removing never needs consent. Each change records
+`ads.audience_synced` on the person. Meta needs the token to have
+`ads_management` as well as `ads_read`, and the Custom Audience terms accepted
+in the ad account. See
+[Lifecycle email](lifecycle-email.md#journeys) for the step itself.
+
 ## Coming next
 
-Syncing audiences from segments, and letting an agent change budgets behind
-mission approval, are planned.
+Syncing whole segments to audiences on a schedule, and letting an agent change
+budgets behind mission approval, are planned.

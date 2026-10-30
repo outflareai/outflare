@@ -349,8 +349,12 @@ func (t Tolt) PartnerPrograms(ctx context.Context, cl *c.Client, creds c.Creds) 
 }
 
 // toltPartnerStatuses are the statuses Tolt's partner list filters by;
-// each is read in turn so none is left out.
-var toltPartnerStatuses = []string{"active", "pending", "rejected", "suspended"}
+// each is read in turn so none is left out. New ones go at the end, since
+// an import's saved cursor holds a status's index. From toltOptionalStatus
+// on, an account whose list refuses the status just has none of them.
+var toltPartnerStatuses = []string{"active", "pending", "rejected", "suspended", "invited"}
+
+const toltOptionalStatus = 4
 
 var toltPaths = map[string]string{
 	c.PartnerKindPartners: "/partners", c.PartnerKindLinks: "/links", c.PartnerKindPromoCodes: "/promotion-codes",
@@ -383,7 +387,16 @@ func (t Tolt) PartnerPage(ctx context.Context, cl *c.Client, creds c.Creds, prog
 		q.Set("starting_after", after)
 	}
 	l, err := t.get(ctx, cl, creds, strings.ReplaceAll(kind, "_", " "), path, q)
-	if err != nil && probed && (c.KindOf(err) == c.ErrInvalid || errors.As(err, new(*c.UnreadableError))) {
+	refused := err != nil && (c.KindOf(err) == c.ErrInvalid || errors.As(err, new(*c.UnreadableError)))
+	if refused && kind == c.PartnerKindPartners && st >= toltOptionalStatus && after == "" {
+		// Tolt doesn't filter by this status here: there are none to read.
+		slog.Info("tolt list refused a status", "status", toltPartnerStatuses[st])
+		if st+1 < len(toltPartnerStatuses) {
+			return page, strconv.Itoa(st+1) + ":", nil
+		}
+		return page, "", nil
+	}
+	if refused && probed {
 		// Tolt refused the extra ask: the list did end there.
 		if kind == c.PartnerKindPartners && st+1 < len(toltPartnerStatuses) {
 			return page, strconv.Itoa(st+1) + ":", nil

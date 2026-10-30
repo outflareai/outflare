@@ -80,6 +80,10 @@ type Step struct {
 	// push_to_crm: the CRM's own properties, by their internal names
 	// there, filled in the same way.
 	Properties map[string]string `json:"properties,omitempty"`
+	// sync_audience: one of the workspace's ad accounts, the platform's id
+	// for a customer list audience on it, and change (add or remove).
+	AdAccountID string `json:"ad_account_id,omitempty"`
+	AudienceID  string `json:"audience_id,omitempty"`
 	// What a failed action does: stop (the default: the run fails),
 	// continue (go on to next) or a step id to go to.
 	// set_consent: granted or withdrawn, for topic (empty: all marketing

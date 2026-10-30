@@ -180,15 +180,68 @@ function ProblemList({ list, go }: { list: Problem[]; go: Go }) {
   );
 }
 
+type Option = { id: string; name: string };
+
+// AdPicker picks an ad account that can fill audiences, or a customer list
+// audience on the step's account (asked of the platform, live). Typing the
+// id stays possible when the list can't be read.
+function AdPicker({ ws, pick, label, hint, step, disabled, onChange }: {
+  ws: string; pick: "ad_account" | "ad_audience"; label: string; hint?: string; step: Step; disabled: boolean; onChange: (id: string | undefined) => void;
+}) {
+  const account = (step.ad_account_id as string | undefined) ?? "";
+  const value = ((pick === "ad_account" ? step.ad_account_id : step.audience_id) as string | undefined) ?? "";
+  const [list, setList] = useState<Option[] | null>(null);
+  const [failed, setFailed] = useState("");
+  useEffect(() => {
+    let live = true;
+    setList(null);
+    setFailed("");
+    if (pick === "ad_account") {
+      api.GET("/v1/workspaces/{ws}/ads/accounts", { params: { path: { ws } } }).then(({ data, error }) => {
+        if (!live) return;
+        if (error) setFailed(error.error.message);
+        setList((data?.data ?? []).filter((a) => a.status === "active" && ["meta_ads", "google_ads"].includes(a.connector))
+          .map((a) => ({ id: a.id, name: `${a.name} (${a.connector === "meta_ads" ? "Meta" : "Google"})` })));
+      });
+    } else if (account) {
+      api.GET("/v1/workspaces/{ws}/ads/audiences", { params: { path: { ws }, query: { account_id: account } } }).then(({ data, error }) => {
+        if (!live) return;
+        if (error) setFailed(error.error.message);
+        setList(data?.data ?? []);
+      });
+    }
+    return () => { live = false; };
+  }, [ws, pick, account]);
+  if (pick === "ad_audience" && !account) return <Row label={label} hint="Pick the ad account first."><select className={`${field} w-full`} disabled><option>Choose…</option></select></Row>;
+  if (failed && !list?.length) {
+    return <Input label={label} hint={`${failed} Type the id instead.`} disabled={disabled} value={value} onChange={(e) => onChange(e.target.value || undefined)} />;
+  }
+  const known = list?.some((o) => o.id === value);
+  return (
+    <Row label={label} hint={list && list.length === 0 ? (pick === "ad_account" ? "Connect Meta Ads or Google Ads under Paid ads first." : "This account has no customer list audiences yet: make one on the platform.") : hint}>
+      <select aria-label={label} className={`${field} w-full`} value={value} disabled={disabled || list === null} onChange={(e) => onChange(e.target.value || undefined)}>
+        <option value="">{list === null ? "Loading…" : "Choose…"}</option>
+        {value && !known && <option value={value}>{value}</option>}
+        {(list ?? []).map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}
+      </select>
+    </Row>
+  );
+}
+
 // SchemaFields draws a simple form for a kind the builder has no form of
 // its own for, from its settings schema.
-function SchemaFields({ schema, step, onChange, disabled }: { schema: SettingsSchema; step: Step; onChange: (s: Step) => void; disabled: boolean }) {
+function SchemaFields({ ws, schema, step, onChange, disabled }: { ws: string; schema: SettingsSchema; step: Step; onChange: (s: Step) => void; disabled: boolean }) {
   return (
     <>
       {Object.entries(schema.properties ?? {}).map(([key, p]) => {
         const title = p.title ?? key;
         const v = step[key];
         const type = Array.isArray(p.type) ? p.type.find((t) => t !== "null") : p.type;
+        const picker = p["x-outflare-picker"];
+        if (picker === "ad_account" || picker === "ad_audience") {
+          return <AdPicker key={key} ws={ws} pick={picker} label={title} hint={p.description} step={step} disabled={disabled}
+            onChange={(id) => onChange(picker === "ad_account" ? { ...step, [key]: id, audience_id: undefined } : { ...step, [key]: id })} />;
+        }
         if (p.enum) {
           return (
             <Row key={key} label={title} hint={p.description}>
@@ -274,8 +327,8 @@ function NamedValues({ label, hint, value, onChange, disabled }: {
   );
 }
 
-export function StepPanel({ step: s, steps, kinds, templates, catalog, event, problems, editable, go, onChange, onRemove, onClose, extra }: {
-  step: Step; steps: Step[]; kinds: StepKind[]; templates: EmailTemplate[]; catalog: FlowCatalog; event?: string | null; problems: Problem[];
+export function StepPanel({ ws, step: s, steps, kinds, templates, catalog, event, problems, editable, go, onChange, onRemove, onClose, extra }: {
+  ws: string; step: Step; steps: Step[]; kinds: StepKind[]; templates: EmailTemplate[]; catalog: FlowCatalog; event?: string | null; problems: Problem[];
   editable: boolean; go: Go; onChange: (s: Step) => void; onRemove: () => void; onClose: () => void;
   // What the step has done and who is on it, from the journey page.
   extra?: ReactNode;
@@ -336,7 +389,7 @@ export function StepPanel({ step: s, steps, kinds, templates, catalog, event, pr
             </div>
           )}
           {s.kind === "exit" && <p className="text-[13px] text-muted-foreground">Ends their run here.</p>}
-          {k && !["email", "wait", "branch", "exit"].includes(s.kind) && <SchemaFields schema={k.settings_schema} step={s} onChange={onChange} disabled={disabled} />}
+          {k && !["email", "wait", "branch", "exit"].includes(s.kind) && <SchemaFields ws={ws} schema={k.settings_schema} step={s} onChange={onChange} disabled={disabled} />}
           {outputs(kinds, s).map((f) => (
             <Row key={f} label={outputLabel(f) ? `${outputLabel(f)}: go to` : "Then"}>
               <select aria-label={outputLabel(f) || "Then"} className={`${field} w-full`} value={(s[f] as string | undefined) ?? ""} disabled={disabled}

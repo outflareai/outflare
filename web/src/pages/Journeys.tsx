@@ -641,7 +641,7 @@ function JourneyDetail({ ws, id, canManage, back, go }: { ws: string; id: string
       {j.stats.entered > 0 && <RunsCard ws={ws} j={j} canManage={canManage} go={go} />}
       {picker && <StepPicker kinds={kinds} onPick={(k) => addStep(picker, k)} onClose={() => setPicker(null)} onConnect={() => go("connectors")} />}
       {open && (
-        <StepPanel step={open} steps={shown.steps} kinds={kinds} templates={templates} catalog={catalog} event={shown.trigger.kind === "event" ? shown.trigger.event : null}
+        <StepPanel ws={ws} step={open} steps={shown.steps} kinds={kinds} templates={templates} catalog={catalog} event={shown.trigger.kind === "event" ? shown.trigger.event : null}
           problems={probs.get(open.id) ?? []} editable={editable} go={go}
           extra={!viewing && <StepResults ws={ws} j={j} step={open} card={stepCard(open, j, kinds, templates, shown.steps, [])} />}
           onChange={(x) => work && setSteps(replace(work.steps, x))} onRemove={() => removeStep(open.id)} onClose={() => setPanel(null)} />

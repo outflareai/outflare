@@ -36,7 +36,7 @@ const (
 	CategoryWarehouse    = "warehouse"    // exporting events and reports
 	CategoryNotification = "notification" // Slack, Teams, webhooks
 	CategoryModel        = "model"        // AI models that plan and run missions
-	CategorySocial       = "social"       // Reddit, X, LinkedIn: find posts, run approved actions on the brand's own accounts
+	CategorySocial       = "social"       // Reddit, X, LinkedIn, Engain: find posts and act on them
 	// Anything else: a generic HTTP API or an MCP server registered by the
 	// workspace, so the long tail needs no code in the engine.
 	CategoryCustom = "custom"

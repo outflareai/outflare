@@ -96,4 +96,4 @@ Each reply's link carries `utm_source=reddit`, `utm_medium=social`, `utm_campaig
 
 ## Engain
 
-Engain's API is only on its top plan, so Outflare uses Reddit's own API for discovery. An Engain discovery source can be added later. Outflare will never use Engain's posting, upvoting or account network.
+[Engain](https://engain.io) posts Reddit comments, replies, posts and threads from its own pool of accounts, and can add upvotes. Connect it on the Connectors page with your own Engain API key (Settings, API in Engain; API access needs Engain's Max plan). Connecting checks the key and shows your projects and credits left; tasks and votes are billed to your Engain credits.

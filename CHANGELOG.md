@@ -6,6 +6,17 @@ Each pull request that changes what Outflare does adds a change note in [changes
 
 ## [Unreleased]
 
+## [0.45.0] - 2026-10-30
+
+### Changed
+
+- The permissions for ideal customer profiles and moving records between brands are now called `profiles.read` and `profiles.manage`, and the API reference lists those endpoints under "profiles" instead of "projects". The old names `projects.read` and `projects.manage` still work: tokens, roles and apps that hold them keep their access, and requests may still send them.
+- Support inbox: forward your support@ address to your brand's support address (such as northpeak-support@) instead of connecting the mailbox. Each email becomes a conversation, and replies go out through your email provider from the address the customer wrote to. On Outflare Cloud.
+
+### Fixed
+
+- Pipelines that verify an address a person already has no longer stall when your email verifier checked it recently: the recent check is used, at no credit. Each check that does spend a credit is now reported to the feature that asked for it.
+
 ## [0.44.0] - 2026-10-30
 
 ### Added

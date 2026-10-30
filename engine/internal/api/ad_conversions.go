@@ -27,6 +27,7 @@ import (
 func (s *Server) routesAdConversions(mux *http.ServeMux) {
 	read, manage := auth.ScopeAnalyticsRead, auth.ScopeIntegrationsManage
 	mux.HandleFunc("GET /v1/workspaces/{ws}/ads/conversion-targets", s.inWorkspace(manage, s.listAdConversionTargets))
+	mux.HandleFunc("GET /v1/workspaces/{ws}/ads/audiences", s.inWorkspace(manage, s.listAdAudiences))
 	mux.HandleFunc("GET /v1/workspaces/{ws}/ads/conversion-rules", s.inWorkspace(read, s.listAdConversionRules))
 	mux.HandleFunc("POST /v1/workspaces/{ws}/ads/conversion-rules", s.inWorkspace(manage, s.createAdConversionRule))
 	mux.HandleFunc("PATCH /v1/workspaces/{ws}/ads/conversion-rules/{id}", s.inWorkspace(manage, s.updateAdConversionRule))
@@ -51,27 +52,8 @@ func trimTo(s string, n int) string {
 // adConversionAccount opens the connection behind an ad account and its
 // conversion sender, answering the error itself when it can't.
 func (s *Server) adConversionAccount(w http.ResponseWriter, r *http.Request, ws, accountID string) (*connectors.Opened, connectors.ConversionSender, connectors.AdAccount, bool) {
-	var acct connectors.AdAccount
-	var integrationID string
-	var meta map[string]string
-	if !isUUID(accountID) {
-		writeError(w, r, http.StatusBadRequest, "invalid_request", "account_id must be an ad account's id")
-		return nil, nil, acct, false
-	}
-	err := s.pool.QueryRow(r.Context(), `SELECT integration_id, external_id, name, currency, time_zone, meta FROM ad_accounts
-		WHERE workspace_id = $1 AND id = $2 AND status = 'active'`, ws, accountID).Scan(&integrationID, &acct.ID, &acct.Name, &acct.Currency, &acct.TimeZone, &meta)
-	if errors.Is(err, pgx.ErrNoRows) {
-		writeError(w, r, http.StatusBadRequest, "invalid_request", "account_id is not an active ad account of this workspace")
-		return nil, nil, acct, false
-	}
-	if err != nil {
-		s.internal(w, r, err)
-		return nil, nil, acct, false
-	}
-	acct.Meta = meta
-	o, err := s.integrations.Open(r.Context(), s.pool, ws, integrationID)
-	if err != nil {
-		s.connectorFailed(w, r, err)
+	o, acct, ok := s.adAccountOpen(w, r, ws, accountID)
+	if !ok {
 		return o, nil, acct, false
 	}
 	sender, ok := o.Connector.(connectors.ConversionSender)
@@ -80,6 +62,35 @@ func (s *Server) adConversionAccount(w http.ResponseWriter, r *http.Request, ws,
 		return o, nil, acct, false
 	}
 	return o, sender, acct, true
+}
+
+// adAccountOpen opens the connection behind one of the workspace's active
+// ad accounts, answering the error itself when it can't.
+func (s *Server) adAccountOpen(w http.ResponseWriter, r *http.Request, ws, accountID string) (*connectors.Opened, connectors.AdAccount, bool) {
+	var acct connectors.AdAccount
+	var integrationID string
+	var meta map[string]string
+	if !isUUID(accountID) {
+		writeError(w, r, http.StatusBadRequest, "invalid_request", "account_id must be an ad account's id")
+		return nil, acct, false
+	}
+	err := s.pool.QueryRow(r.Context(), `SELECT integration_id, external_id, name, currency, time_zone, meta FROM ad_accounts
+		WHERE workspace_id = $1 AND id = $2 AND status = 'active'`, ws, accountID).Scan(&integrationID, &acct.ID, &acct.Name, &acct.Currency, &acct.TimeZone, &meta)
+	if errors.Is(err, pgx.ErrNoRows) {
+		writeError(w, r, http.StatusBadRequest, "invalid_request", "account_id is not an active ad account of this workspace")
+		return nil, acct, false
+	}
+	if err != nil {
+		s.internal(w, r, err)
+		return nil, acct, false
+	}
+	acct.Meta = meta
+	o, err := s.integrations.Open(r.Context(), s.pool, ws, integrationID)
+	if err != nil {
+		s.connectorFailed(w, r, err)
+		return o, acct, false
+	}
+	return o, acct, true
 }
 
 // setupNeededFor lists the optional setup fields a conversion sender still
@@ -130,6 +141,33 @@ func (s *Server) listAdConversionTargets(w http.ResponseWriter, r *http.Request)
 		out = append(out, map[string]any{"id": t.ID, "name": t.Name, "event_types": types})
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"data": out, "setup_needed": need, "integration_id": o.Integration.ID})
+}
+
+// listAdAudiences asks the platform for an account's customer list
+// audiences, for journeys' sync_audience steps.
+func (s *Server) listAdAudiences(w http.ResponseWriter, r *http.Request) {
+	if !s.needIntegrations(w, r) {
+		return
+	}
+	a := accessFrom(r.Context())
+	o, acct, ok := s.adAccountOpen(w, r, a.WorkspaceID, r.URL.Query().Get("account_id"))
+	if !ok {
+		return
+	}
+	syncer, ok := o.Connector.(connectors.AudienceSyncer)
+	if !ok || !o.Connector.Definition().Has(connectors.CapAdsAudiences) {
+		writeError(w, r, http.StatusUnprocessableEntity, "connector_invalid", o.Connector.Definition().Name+" can't add people to audiences yet")
+		return
+	}
+	list, err := syncer.Audiences(r.Context(), o.Client, o.Creds, acct)
+	if err != nil {
+		s.connectorFailed(w, r, err)
+		return
+	}
+	if list == nil {
+		list = []connectors.AdAudience{}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"data": list})
 }
 
 type adConversionRule struct {

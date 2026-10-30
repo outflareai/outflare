@@ -518,13 +518,21 @@ func tally(ctx context.Context, q Querier, ws string, s Spec, g Goal, order []st
 	// A visitor's segment rides along with their variant, after a unit
 	// separator, through every step below.
 	seg, join := "''", ""
-	if key, ok := strings.CutPrefix(dim, "flag:"); ok && flagKeyRe.MatchString(key) {
-		// Another flag's version the visitor saw first during the test, or
-		// none. The key is checked above, so it is safe in the query.
-		seg = `coalesce((SELECT o.properties->>'variant' FROM customer_events o
-			WHERE o.workspace_id = $1 AND o.name = $2 AND o.properties->>'flag' = '` + key + `' AND o.anonymous_id = e.anonymous_id
-				AND o.occurred_at >= ($4::timestamptz[])[1] AND o.occurred_at < ($4::timestamptz[])[2]
-			ORDER BY o.occurred_at LIMIT 1), 'none')`
+	if keys, ok := strings.CutPrefix(dim, "flag:"); ok {
+		// Other flags' versions the visitor saw first during the test,
+		// joined by +, each none when not seen (flag:a,b for several). The
+		// keys are checked, so they are safe in the query.
+		var parts []string
+		for _, key := range strings.Split(keys, ",") {
+			if !flagKeyRe.MatchString(key) {
+				return nil, fmt.Errorf("abtests: bad flag key %q", key)
+			}
+			parts = append(parts, `coalesce((SELECT o.properties->>'variant' FROM customer_events o
+				WHERE o.workspace_id = $1 AND o.name = $2 AND o.properties->>'flag' = '`+key+`' AND o.anonymous_id = e.anonymous_id
+					AND o.occurred_at >= ($4::timestamptz[])[1] AND o.occurred_at < ($4::timestamptz[])[2]
+				ORDER BY o.occurred_at LIMIT 1), 'none')`)
+		}
+		seg = strings.Join(parts, ` || '+' || `)
 	} else if dim != "" {
 		seg = segmentSQL[dim]
 		join = `LEFT JOIN site_sessions ss ON ss.workspace_id = $1

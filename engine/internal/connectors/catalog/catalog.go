@@ -17,6 +17,7 @@ import (
 	"github.com/outflareai/outflare/engine/internal/connectors/dnshosts"
 	"github.com/outflareai/outflare/engine/internal/connectors/emailbison"
 	"github.com/outflareai/outflare/engine/internal/connectors/emailsend"
+	"github.com/outflareai/outflare/engine/internal/connectors/engain"
 	"github.com/outflareai/outflare/engine/internal/connectors/hubspot"
 	"github.com/outflareai/outflare/engine/internal/connectors/instantly"
 	"github.com/outflareai/outflare/engine/internal/connectors/linkedin"
@@ -53,6 +54,7 @@ func Available() []c.Connector {
 	out = append(out, deploys.All()...)
 	out = append(out, ads.All()...)
 	out = append(out, reddit.All()...)
+	out = append(out, engain.All()...)
 	out = append(out, x.All()...)
 	out = append(out, linkedin.All()...)
 	out = append(out, dnshosts.All()...)

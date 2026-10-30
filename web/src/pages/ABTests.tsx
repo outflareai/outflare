@@ -271,6 +271,7 @@ function NewTestSheet({ ws, flags, flag: initial, seed, go, onClose, onSaved, on
   const [goals, setGoals] = useState<ABTestGoal[]>([seed?.goal ?? { kind: "event", name: "" }]);
   const [guardrails, setGuardrails] = useState<ABTestGoal[]>([]);
   const [minEffect, setMinEffect] = useState(0.25);
+  const [factors, setFactors] = useState<string[]>([]);
   const [writing, setWriting] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -285,7 +286,7 @@ function NewTestSheet({ ws, flags, flag: initial, seed, go, onClose, onSaved, on
     e.preventDefault();
     setBusy(true);
     setError("");
-    const { data, error } = await api.POST("/v1/workspaces/{ws}/ab-tests", { params: { path: { ws } }, body: { flag: flagKey, control: ctl, name: name.trim() || undefined, hypothesis, goals, guardrails, min_effect: minEffect } });
+    const { data, error } = await api.POST("/v1/workspaces/{ws}/ab-tests", { params: { path: { ws } }, body: { flag: flagKey, control: ctl, name: name.trim() || undefined, hypothesis, goals, guardrails, min_effect: minEffect, factors: factors.filter((k) => k && k !== flagKey).map((k) => ({ flag: k })) } });
     setBusy(false);
     if (error) return setError(errorMessage(error));
     toast(`Added ${data!.name}. Start it when the pages are ready.`);
@@ -338,6 +339,19 @@ function NewTestSheet({ ws, flags, flag: initial, seed, go, onClose, onSaved, on
             </div>
             <EffectPicker value={minEffect} onChange={setMinEffect} />
             <PlanPanel ws={ws} flag={flagKey} goal={goals[0]} minEffect={minEffect} />
+            <div className="space-y-1">
+              <span className="block font-medium">Also test <span className="font-normal text-muted-foreground">(optional, multivariate)</span></span>
+              {[0, 1].map((i) => (
+                <select key={i} aria-label={`Also test ${i + 1}`} className={`${field} w-full`} value={factors[i] ?? ""} disabled={i > 0 && !factors[0]}
+                  onChange={(e) => setFactors((fs) => { const n = [...fs]; n[i] = e.target.value; return n.filter(Boolean); })}>
+                  <option value="">None</option>
+                  {flags.filter((f) => f.key !== flagKey && f.variants.length > 1 && !(flag?.exclusion_group && f.exclusion_group === flag.exclusion_group)).map((f) => (
+                    <option key={f.key} value={f.key}>{f.name}</option>
+                  ))}
+                </select>
+              ))}
+              <p className="text-[12px] text-muted-foreground">Test up to two other flags at once: every combination of versions gets visitors, and you see which combination does best. Each combination needs enough visitors, so it takes longer.</p>
+            </div>
             <label className="block">
               <span className="mb-1 block font-medium">Name <span className="font-normal text-muted-foreground">(optional)</span></span>
               <input className={`${field} w-full`} maxLength={200} placeholder={flag?.name} value={name} onChange={(e) => setName(e.target.value)} />
@@ -573,6 +587,7 @@ function TestSheet({ ws, test, flag, canManage, onClose, onChanged, onFlagChange
               ))}
               <BreakdownPanel ws={ws} testID={test.id} control={test.control} names={names} />
               <InteractionsPanel ws={ws} testID={test.id} names={names} />
+              {(test.factors ?? []).length > 0 && <FactorialPanel ws={ws} testID={test.id} />}
               <p className="text-[12px] text-muted-foreground">
                 Visitors split {results.result.arms.map((a) => `${a.variant} ${a.visitors.toLocaleString()}`).join(" · ")}
                 {results.result.sample_ratio_mismatch ? " — further from the flag's weights than luck explains." : " — in line with the flag's weights."}{" "}
@@ -663,6 +678,45 @@ const dimensions = [
   { value: "country", label: "Country" },
   { value: "visitor", label: "New or returning" },
 ] as const;
+
+// FactorialPanel shows a multivariate test cell by cell: every combination
+// of versions against the all-controls one, and the best.
+function FactorialPanel({ ws, testID }: { ws: string; testID: string }) {
+  type Cell = { versions: Record<string, string>; arm: { visitors: number; conversions: number; mean?: number }; comparison: { chance_to_beat: number; lift: number; p_value: number } | null };
+  const [data, setData] = useState<{ factors: string[] | null; cells: Cell[]; best: Cell | null; corrected_for: number; metric: string } | null>(null);
+  const [error, setError] = useState("");
+  useEffect(() => {
+    api.GET("/v1/workspaces/{ws}/ab-tests/{test}/factorial", { params: { path: { ws, test: testID } } }).then(({ data, error }) => {
+      setError(error ? errorMessage(error) : "");
+      setData((data?.result as never) ?? null);
+    });
+  }, [ws, testID]);
+  const label = (c: Cell) => (data?.factors ?? []).map((k) => `${k}: ${c.versions[k]}`).join(", ");
+  const value = (c: Cell) => (data?.metric === "conversion" ? `${((c.arm.conversions / Math.max(1, c.arm.visitors)) * 100).toFixed(1)}%` : (c.arm.mean ?? 0).toFixed(2));
+  return (
+    <Card title="Every combination">
+      <div className="space-y-2 text-[12px]">
+        {error && <ErrorText>{error}</ErrorText>}
+        {!data && !error && <Loading />}
+        {data && (
+          <>
+            {data.best && <p className="font-medium">Best so far: {label(data.best)}{data.best.comparison && `, ${signed(data.best.comparison.lift)} over all controls (${Math.round(data.best.comparison.chance_to_beat * 100)}% likely better${data.best.comparison.p_value < 0.05 ? ", safe to stop" : ""})`}.</p>}
+            <p className="text-muted-foreground">Each combination is compared with every flag on its control, corrected for {data.corrected_for} comparisons.</p>
+            {data.cells.map((c) => (
+              <div key={label(c)} className="flex justify-between gap-2 border-t pt-1">
+                <span className="font-mono">{label(c)}</span>
+                <span className="tabular-nums text-muted-foreground">
+                  {c.arm.visitors.toLocaleString()} visitors · {value(c)}
+                  {c.comparison && ` · ${signed(c.comparison.lift)}`}
+                </span>
+              </div>
+            ))}
+          </>
+        )}
+      </div>
+    </Card>
+  );
+}
 
 // InteractionsPanel checks the test against others that ran at the same
 // time, on demand: whether one change altered the other's effect.

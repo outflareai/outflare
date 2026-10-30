@@ -50,6 +50,7 @@ func (s *Server) routesABTests(mux *http.ServeMux) {
 	mux.HandleFunc("GET /v1/workspaces/{ws}/ab-tests/{test}/results", s.inWorkspace(read, s.abTestResults))
 	mux.HandleFunc("GET /v1/workspaces/{ws}/ab-tests/{test}/breakdown", s.inWorkspace(read, s.abTestBreakdown))
 	mux.HandleFunc("GET /v1/workspaces/{ws}/ab-tests/{test}/interactions", s.inWorkspace(read, s.abTestInteractions))
+	mux.HandleFunc("GET /v1/workspaces/{ws}/ab-tests/{test}/factorial", s.inWorkspace(read, s.abTestFactorial))
 }
 
 type abTestView struct {
@@ -69,6 +70,8 @@ type abTestView struct {
 	FrozenAt   *time.Time     `json:"frozen_at"`
 	EndedAt    *time.Time     `json:"ended_at"`
 	Decision   string         `json:"decision"`
+	// Factors are the other flags a multivariate test adds to its own.
+	Factors []abFactor `json:"factors"`
 	// Learning is what a finished test taught, when the AI wrote it.
 	Learning *abLearning `json:"learning"`
 	// Registration is what the test set out to show, kept as it was when
@@ -87,10 +90,13 @@ type abTestInput struct {
 	Goals      *[]abtests.Goal `json:"goals"`
 	Guardrails *[]abtests.Goal `json:"guardrails"`
 	MinEffect  *float64        `json:"min_effect"`
+	// Factors makes it a multivariate test: up to two other flags, each
+	// with its control (default "control", else its first version).
+	Factors *[]abFactorInput `json:"factors"`
 }
 
 const abTestCols = `t.id::text, t.flag_id::text, f.key, t.brand_id::text, t.name, t.hypothesis, t.status, t.control, t.goals, t.guardrails, t.min_effect, t.baselines,
-	t.started_at, t.frozen_at, t.ended_at, t.decision, t.learning, t.registration, t.created_at, t.updated_at, t.result`
+	t.started_at, t.frozen_at, t.ended_at, t.decision, t.factors, t.learning, t.registration, t.created_at, t.updated_at, t.result`
 
 func loadABTests(ctx context.Context, q abtests.Querier, ws, where string, args ...any) ([]abTestView, error) {
 	rows, err := q.Query(ctx, `SELECT `+abTestCols+` FROM ab_tests t JOIN flags f ON f.id = t.flag_id AND f.workspace_id = t.workspace_id
@@ -100,9 +106,12 @@ func loadABTests(ctx context.Context, q abtests.Querier, ws, where string, args 
 	}
 	list, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (abTestView, error) {
 		var v abTestView
-		var goals, guardrails []byte
+		var goals, guardrails, factors []byte
 		if err := row.Scan(&v.ID, &v.FlagID, &v.FlagKey, &v.BrandID, &v.Name, &v.Hypothesis, &v.Status, &v.Control, &goals, &guardrails, &v.MinEffect, &v.Baselines,
-			&v.StartedAt, &v.FrozenAt, &v.EndedAt, &v.Decision, &v.Learning, &v.Registration, &v.CreatedAt, &v.UpdatedAt, &v.result); err != nil {
+			&v.StartedAt, &v.FrozenAt, &v.EndedAt, &v.Decision, &factors, &v.Learning, &v.Registration, &v.CreatedAt, &v.UpdatedAt, &v.result); err != nil {
+			return v, err
+		}
+		if err := json.Unmarshal(factors, &v.Factors); err != nil {
 			return v, err
 		}
 		if err := json.Unmarshal(guardrails, &v.Guardrails); err != nil {
@@ -305,7 +314,7 @@ func abAuditData(t abTestView) map[string]any {
 		kinds[i], metrics[i] = g.Kind, g.MetricOf()
 	}
 	return map[string]any{"flag_id": t.FlagID, "status": t.Status, "goals": len(t.Goals), "goal_kinds": kinds, "goal_metrics": metrics,
-		"guardrails": len(t.Guardrails), "min_effect": t.MinEffect, "brand_id": t.BrandID}
+		"guardrails": len(t.Guardrails), "min_effect": t.MinEffect, "brand_id": t.BrandID, "factors": len(t.Factors)}
 }
 
 func (s *Server) createABTest(w http.ResponseWriter, r *http.Request) {
@@ -347,6 +356,12 @@ func (s *Server) createABTest(w http.ResponseWriter, r *http.Request) {
 			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING id::text`,
 			a.WorkspaceID, t.BrandID, t.FlagID, t.Name, t.Hypothesis, t.Control, goals, guardrails, t.MinEffect, nullIfEmpty(a.ActorID)).Scan(&id); err != nil {
 			return err
+		}
+		t.ID = id
+		if in.Factors != nil {
+			if err := s.setABFactors(ctx, tx, a.WorkspaceID, &t, f, *in.Factors); err != nil {
+				return err
+			}
 		}
 		data := abAuditData(t)
 		return recordWithProps(ctx, tx, &a.principal, a.WorkspaceID, "ab_test.created", "ab_test", id, data, data)
@@ -414,6 +429,11 @@ func (s *Server) updateABTest(w http.ResponseWriter, r *http.Request) {
 		if err := applyABInput(t, f, in); err != nil {
 			return err
 		}
+		if in.Factors != nil {
+			if err := s.setABFactors(ctx, tx, a.WorkspaceID, t, f, *in.Factors); err != nil {
+				return err
+			}
+		}
 		goals, _ := json.Marshal(t.Goals)
 		guardrails, _ := json.Marshal(t.Guardrails)
 		if _, err := tx.Exec(ctx, `UPDATE ab_tests SET name = $3, hypothesis = $4, control = $5, goals = $6, guardrails = $7, min_effect = $8, updated_at = now() WHERE id = $1 AND workspace_id = $2`,
@@ -445,6 +465,12 @@ func (s *Server) startABTest(w http.ResponseWriter, r *http.Request) {
 		}
 		if !a.writes(f.BrandID) {
 			return errDenied(brandLimitedMessage)
+		}
+		if err := abFactorsBusy(ctx, tx, a.WorkspaceID, *t); err != nil {
+			return err
+		}
+		if err := s.startABFactors(ctx, tx, a, *t); err != nil {
+			return err
 		}
 		if f.Status == "off" {
 			if _, err := tx.Exec(ctx, `UPDATE flags SET status = 'on', updated_at = now() WHERE id = $1 AND workspace_id = $2`, f.ID, a.WorkspaceID); err != nil {
@@ -812,6 +838,9 @@ func (s *Server) duplicateABTest(w http.ResponseWriter, r *http.Request) {
 		if err := tx.QueryRow(ctx, `INSERT INTO ab_tests (workspace_id, brand_id, flag_id, name, hypothesis, control, goals, guardrails, min_effect, created_by)
 			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING id::text`,
 			a.WorkspaceID, f.BrandID, f.ID, name, cur.Hypothesis, cur.Control, goals, guardrails, cur.MinEffect, nullIfEmpty(a.ActorID)).Scan(&id); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(ctx, `UPDATE ab_tests SET factors = (SELECT factors FROM ab_tests WHERE id = $3 AND workspace_id = $2) WHERE id = $1 AND workspace_id = $2`, id, a.WorkspaceID, cur.ID); err != nil {
 			return err
 		}
 		t := cur

@@ -7116,6 +7116,34 @@ paths:
         "400": { $ref: "#/components/responses/Error" }
         "422": { $ref: "#/components/responses/Error" }
         default: { $ref: "#/components/responses/Error" }
+  /v1/workspaces/{ws}/ads/audiences:
+    parameters:
+      - { $ref: "#/components/parameters/Workspace" }
+    get:
+      operationId: listAdAudiences
+      x-outflare-access: { scope: integrations.manage }
+      summary: List an ad account's customer list audiences
+      description: |
+        Scope: integrations.manage. Asks the platform, live, for the
+        audiences journeys' sync_audience steps can add people to: Meta
+        custom audiences made from a customer list, and Google Ads Customer
+        Match lists that are open. Other ad platforms answer 422.
+      tags: [ads]
+      parameters:
+        - { name: account_id, in: query, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "200":
+          description: The audiences.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data: { type: array, items: { $ref: "#/components/schemas/AdAudience" } }
+        "400": { $ref: "#/components/responses/Error" }
+        "422": { $ref: "#/components/responses/Error" }
+        default: { $ref: "#/components/responses/Error" }
   /v1/workspaces/{ws}/ads/conversion-rules:
     parameters:
       - { $ref: "#/components/parameters/Workspace" }
@@ -20717,6 +20745,72 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/ABTestResults" }
         default: { $ref: "#/components/responses/Error" }
+  /v1/workspaces/{ws}/ab-tests/{test}/factorial:
+    parameters:
+      - { $ref: "#/components/parameters/Workspace" }
+      - { name: test, in: path, required: true, schema: { type: string, format: uuid } }
+    get:
+      operationId: getABTestFactorial
+      x-outflare-access: { scope: analytics.read }
+      summary: Read a multivariate A/B test cell by cell
+      description: |
+        Scope: analytics.read. The first goal for every combination of versions (cell) among visitors who saw a version of
+        every factor: each cell against the one where every factor shows its control (corrected for every cell), the best
+        cell, each factor's main effect (pooled over the others' versions), and whether each factor changes the test
+        flag's own effect (interacts at p < 0.01). 409 for a test without factors or a draft.
+      tags: [ab-tests]
+      responses:
+        "200":
+          description: The cells.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [test_id, status, result]
+                properties:
+                  test_id: { type: string, format: uuid }
+                  status: { type: string, enum: [running, done] }
+                  result:
+                    type: object
+                    required: [goal, metric, factors, cells, main_effects, best, interactions, corrected_for]
+                    properties:
+                      goal: { $ref: "#/components/schemas/ABTestGoal" }
+                      metric: { type: string, enum: [conversion, count, value] }
+                      factors: { type: [array, "null"], items: { type: string }, description: "Flag keys, the test's own first." }
+                      corrected_for: { type: integer }
+                      cells: { type: array, items: { $ref: "#/components/schemas/ABTestCell" } }
+                      best:
+                        oneOf:
+                          - { $ref: "#/components/schemas/ABTestCell" }
+                          - type: "null"
+                      main_effects:
+                        type: array
+                        items:
+                          type: object
+                          required: [flag_key, arms, comparisons]
+                          properties:
+                            flag_key: { type: string }
+                            arms: { type: array, items: { $ref: "#/components/schemas/ABTestArm" } }
+                            comparisons: { type: [array, "null"], items: { $ref: "#/components/schemas/ABTestComparison" } }
+                      interactions:
+                        type: array
+                        items:
+                          type: object
+                          required: [variant, effects, p_value, interacts]
+                          properties:
+                            variant: { type: string, description: "The test flag's version and the factor, as version × flag." }
+                            p_value: { type: number }
+                            interacts: { type: boolean }
+                            effects:
+                              type: [array, "null"]
+                              items:
+                                type: object
+                                required: [other_variant, visitors, difference]
+                                properties:
+                                  other_variant: { type: string }
+                                  visitors: { type: integer }
+                                  difference: { type: number }
+        default: { $ref: "#/components/responses/Error" }
   /v1/workspaces/{ws}/ab-tests/{test}/interactions:
     parameters:
       - { $ref: "#/components/parameters/Workspace" }
@@ -30297,7 +30391,7 @@ components:
         kind:
           type: string
           enum: [email, wait, branch, exit, set_field, add_tag, remove_tag, add_to_list, remove_from_list, enter_journey, exit_journey,
-            enroll_in_sequence, stop_sequences, suppress, unsubscribe_topic, alert, transactional_email, set_consent, assign_owner, move_deal, slack, webhook, push_to_sequencer, push_to_crm, ai]
+            enroll_in_sequence, stop_sequences, suppress, unsubscribe_topic, alert, transactional_email, set_consent, assign_owner, move_deal, slack, webhook, push_to_sequencer, push_to_crm, sync_audience, ai]
         name: { type: string, maxLength: 100 }
         template: { type: string, description: "email: a lifecycle template's handle or id. transactional_email: a transactional one's." }
         wait_seconds: { type: integer, minimum: 60, maximum: 7776000, description: "wait: how long." }
@@ -30307,7 +30401,7 @@ components:
         else: { type: string, description: "branch: the step when they don't; empty ends the run." }
         next: { type: string, description: "The step after; empty ends the run as completed." }
         field: { type: string, description: "set_field: the field's key." }
-        change: { type: string, enum: [set, clear, increment], description: "set_field: set (the default), clear or increment." }
+        change: { type: string, enum: [set, clear, increment, add, remove], description: "set_field: set (the default), clear or increment. sync_audience: add (the default) or remove." }
         value: { description: "set_field: the value, or {{event.x}}, {{person.x}} or {{vars.x}} to copy one." }
         overwrite_manual: { type: boolean, description: "set_field: overwrite a value a person set by hand. Off by default: the step is then skipped." }
         tag: { type: string, maxLength: 50, description: "add_tag, remove_tag: the tag." }
@@ -30318,6 +30412,8 @@ components:
         allow_elsewhere: { type: boolean, description: "enroll_in_sequence: enroll even when active in another sequence. push_to_sequencer: add them even when they are in another of the sequencer's campaigns (Smartlead, Instantly)." }
         variables: { type: object, maxProperties: 20, additionalProperties: { type: string, maxLength: 500 }, description: "push_to_sequencer: the campaign's own variables, by their name there, with {{person.x}}, {{event.x}} and {{vars.x}} filled in." }
         properties: { type: object, maxProperties: 30, additionalProperties: { type: string, maxLength: 1000 }, description: "push_to_crm: the CRM's own properties by their internal names (such as lifecyclestage), with {{person.x}}, {{event.x}} and {{vars.x}} filled in." }
+        ad_account_id: { type: string, format: uuid, description: "sync_audience: one of the workspace's ad accounts (GET .../ads/accounts)." }
+        audience_id: { type: string, pattern: "^[0-9]{1,30}$", description: "sync_audience: a customer list audience on that account (GET .../ads/audiences)." }
         target: { type: string, enum: [email, domain], description: "suppress: their email addresses (the default) or their work domain." }
         topic: { type: string, description: "unsubscribe_topic: an email topic's key; empty for all marketing email." }
         title: { type: string, maxLength: 120, description: "alert: what it says. slack: a bold line above the message (optional)." }
@@ -31367,6 +31463,16 @@ components:
         goals: { type: array, items: { $ref: "#/components/schemas/ABTestGoal" }, description: The first is the one the test is judged on. }
         guardrails: { type: array, items: { $ref: "#/components/schemas/ABTestGoal" }, description: "Watched alongside, to catch a version that makes something else worse; they never decide the winner." }
         frozen_at: { type: [string, "null"], format: date-time, description: "When new visitors stopped joining; null while they join." }
+        factors:
+          type: array
+          description: "Other flags a multivariate test adds to its own, each with its control; empty for a test of one flag. See getABTestFactorial."
+          items:
+            type: object
+            required: [flag_id, flag_key, control]
+            properties:
+              flag_id: { type: string, format: uuid }
+              flag_key: { type: string }
+              control: { type: string }
         learning:
           description: "What a finished test taught, written by the workspace's AI model when it ended; null until then, or without an AI model."
           oneOf:
@@ -31432,6 +31538,17 @@ components:
           minimum: 0.01
           maximum: 1
           description: "The smallest relative change worth detecting, such as 0.1 (+10%) for a busy site or 0.5 (+50%) for a bold change. Default 0.25. Smaller finds small changes but needs more visitors; fixed once the test starts."
+        factors:
+          type: array
+          maxItems: 2
+          description: "Makes it a multivariate test: up to two other flags (not in the test flag's exclusion group), each with its control, so every combination of versions is measured. [] for one flag. Fixed once the test starts; while it runs, its flags can't be in another running test."
+          items:
+            type: object
+            additionalProperties: false
+            required: [flag]
+            properties:
+              flag: { type: string, description: "The flag's id or key." }
+              control: { type: string, description: 'One of its versions. Default: "control" if it has one, else its first.' }
     ABTestPlan:
       type: object
       required: [flag_id, page, window_days, traffic, plan, warning]
@@ -31494,6 +31611,17 @@ components:
         model: { type: string, description: The model that answered. }
         created_at: { type: string, format: date-time }
         finished_at: { type: [string, "null"], format: date-time }
+    ABTestCell:
+      type: object
+      required: [versions, arm, comparison]
+      properties:
+        versions: { type: object, additionalProperties: { type: string }, description: "Each factor's version, by flag key." }
+        arm: { $ref: "#/components/schemas/ABTestArm" }
+        comparison:
+          description: "Against the all-controls cell; null for that cell."
+          oneOf:
+            - { $ref: "#/components/schemas/ABTestComparison" }
+            - type: "null"
     ABTestArm:
       type: object
       required: [variant, visitors, conversions]
@@ -32023,6 +32151,12 @@ components:
         id: { type: string, description: "A Google conversion action id, a Meta pixel id, a Microsoft goal name or a Reddit account id." }
         name: { type: string }
         event_types: { type: array, items: { type: string }, description: "What the target takes as event_type; empty when the target is the event." }
+    AdAudience:
+      type: object
+      required: [id, name]
+      properties:
+        id: { type: string, description: "The platform's id: a Meta custom audience or a Google Ads user list. A sync_audience step's audience_id." }
+        name: { type: string }
     AdConversionRule:
       type: object
       required: [id, ad_account_id, connector, event_name, conversion, conversion_name, target_id, target_name, event_type, value_property, value_unit, fixed_value_micros, currency, enabled, sent_30d, skipped_30d, failed_30d, queued, last_sent_at, created_at, updated_at]

@@ -5243,6 +5243,32 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/workspaces/{ws}/ads/audiences": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+            };
+            cookie?: never;
+        };
+        /**
+         * List an ad account's customer list audiences
+         * @description Scope: integrations.manage. Asks the platform, live, for the
+         *     audiences journeys' sync_audience steps can add people to: Meta
+         *     custom audiences made from a customer list, and Google Ads Customer
+         *     Match lists that are open. Other ad platforms answer 422.
+         */
+        get: operations["listAdAudiences"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/workspaces/{ws}/ads/conversion-rules": {
         parameters: {
             query?: never;
@@ -15536,6 +15562,33 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/workspaces/{ws}/ab-tests/{test}/factorial": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                test: string;
+            };
+            cookie?: never;
+        };
+        /**
+         * Read a multivariate A/B test cell by cell
+         * @description Scope: analytics.read. The first goal for every combination of versions (cell) among visitors who saw a version of
+         *     every factor: each cell against the one where every factor shows its control (corrected for every cell), the best
+         *     cell, each factor's main effect (pooled over the others' versions), and whether each factor changes the test
+         *     flag's own effect (interacts at p < 0.01). 409 for a test without factors or a draft.
+         */
+        get: operations["getABTestFactorial"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/workspaces/{ws}/ab-tests/{test}/interactions": {
         parameters: {
             query?: never;
@@ -25441,7 +25494,7 @@ export interface components {
         JourneyStep: {
             id: string;
             /** @enum {string} */
-            kind: "email" | "wait" | "branch" | "exit" | "set_field" | "add_tag" | "remove_tag" | "add_to_list" | "remove_from_list" | "enter_journey" | "exit_journey" | "enroll_in_sequence" | "stop_sequences" | "suppress" | "unsubscribe_topic" | "alert" | "transactional_email" | "set_consent" | "assign_owner" | "move_deal" | "slack" | "webhook" | "push_to_sequencer" | "push_to_crm" | "ai";
+            kind: "email" | "wait" | "branch" | "exit" | "set_field" | "add_tag" | "remove_tag" | "add_to_list" | "remove_from_list" | "enter_journey" | "exit_journey" | "enroll_in_sequence" | "stop_sequences" | "suppress" | "unsubscribe_topic" | "alert" | "transactional_email" | "set_consent" | "assign_owner" | "move_deal" | "slack" | "webhook" | "push_to_sequencer" | "push_to_crm" | "sync_audience" | "ai";
             name?: string;
             /** @description email: a lifecycle template's handle or id. transactional_email: a transactional one's. */
             template?: string;
@@ -25463,10 +25516,10 @@ export interface components {
             /** @description set_field: the field's key. */
             field?: string;
             /**
-             * @description set_field: set (the default), clear or increment.
+             * @description set_field: set (the default), clear or increment. sync_audience: add (the default) or remove.
              * @enum {string}
              */
-            change?: "set" | "clear" | "increment";
+            change?: "set" | "clear" | "increment" | "add" | "remove";
             /** @description set_field: the value, or {{event.x}}, {{person.x}} or {{vars.x}} to copy one. */
             value?: unknown;
             /** @description set_field: overwrite a value a person set by hand. Off by default: the step is then skipped. */
@@ -25503,6 +25556,13 @@ export interface components {
             properties?: {
                 [key: string]: string;
             };
+            /**
+             * Format: uuid
+             * @description sync_audience: one of the workspace's ad accounts (GET .../ads/accounts).
+             */
+            ad_account_id?: string;
+            /** @description sync_audience: a customer list audience on that account (GET .../ads/audiences). */
+            audience_id?: string;
             /**
              * @description suppress: their email addresses (the default) or their work domain.
              * @enum {string}
@@ -26895,6 +26955,13 @@ export interface components {
              * @description When new visitors stopped joining; null while they join.
              */
             frozen_at: string | null;
+            /** @description Other flags a multivariate test adds to its own, each with its control; empty for a test of one flag. See getABTestFactorial. */
+            factors?: {
+                /** Format: uuid */
+                flag_id: string;
+                flag_key: string;
+                control: string;
+            }[];
             /** @description What a finished test taught, written by the workspace's AI model when it ended; null until then, or without an AI model. */
             learning?: {
                 headline: string;
@@ -26953,6 +27020,13 @@ export interface components {
             guardrails?: components["schemas"]["ABTestGoal"][];
             /** @description The smallest relative change worth detecting, such as 0.1 (+10%) for a busy site or 0.5 (+50%) for a bold change. Default 0.25. Smaller finds small changes but needs more visitors; fixed once the test starts. */
             min_effect?: number;
+            /** @description Makes it a multivariate test: up to two other flags (not in the test flag's exclusion group), each with its control, so every combination of versions is measured. [] for one flag. Fixed once the test starts; while it runs, its flags can't be in another running test. */
+            factors?: {
+                /** @description The flag's id or key. */
+                flag: string;
+                /** @description One of its versions. Default: "control" if it has one, else its first. */
+                control?: string;
+            }[];
         };
         ABTestPlan: {
             /** Format: uuid */
@@ -27031,6 +27105,15 @@ export interface components {
             created_at: string;
             /** Format: date-time */
             finished_at: string | null;
+        };
+        ABTestCell: {
+            /** @description Each factor's version, by flag key. */
+            versions: {
+                [key: string]: string;
+            };
+            arm: components["schemas"]["ABTestArm"];
+            /** @description Against the all-controls cell; null for that cell. */
+            comparison: components["schemas"]["ABTestComparison"] | null;
         };
         ABTestArm: {
             variant: string;
@@ -27681,6 +27764,11 @@ export interface components {
             name: string;
             /** @description What the target takes as event_type; empty when the target is the event. */
             event_types: string[];
+        };
+        AdAudience: {
+            /** @description The platform's id: a Meta custom audience or a Google Ads user list. A sync_audience step's audience_id. */
+            id: string;
+            name: string;
         };
         AdConversionRule: {
             /** Format: uuid */
@@ -46692,6 +46780,36 @@ export interface operations {
             default: components["responses"]["Error"];
         };
     };
+    listAdAudiences: {
+        parameters: {
+            query: {
+                account_id: string;
+            };
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The audiences. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["AdAudience"][];
+                    };
+                };
+            };
+            400: components["responses"]["Error"];
+            422: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
     listAdConversionRules: {
         parameters: {
             query?: {
@@ -65015,6 +65133,62 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ABTestResults"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    getABTestFactorial: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                test: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The cells. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** Format: uuid */
+                        test_id: string;
+                        /** @enum {string} */
+                        status: "running" | "done";
+                        result: {
+                            goal: components["schemas"]["ABTestGoal"];
+                            /** @enum {string} */
+                            metric: "conversion" | "count" | "value";
+                            /** @description Flag keys, the test's own first. */
+                            factors: string[] | null;
+                            corrected_for: number;
+                            cells: components["schemas"]["ABTestCell"][];
+                            best: components["schemas"]["ABTestCell"] | null;
+                            main_effects: {
+                                flag_key: string;
+                                arms: components["schemas"]["ABTestArm"][];
+                                comparisons: components["schemas"]["ABTestComparison"][] | null;
+                            }[];
+                            interactions: {
+                                /** @description The test flag's version and the factor, as version × flag. */
+                                variant: string;
+                                p_value: number;
+                                interacts: boolean;
+                                effects: {
+                                    other_variant: string;
+                                    visitors: number;
+                                    difference: number;
+                                }[] | null;
+                            }[];
+                        };
+                    };
                 };
             };
             default: components["responses"]["Error"];

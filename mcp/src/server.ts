@@ -2604,6 +2604,19 @@ export function createServer({ client: gtm, workspace, readOnly = false, mission
   );
 
   server.registerTool(
+    "list_ad_audiences",
+    {
+      title: "List an ad account's customer list audiences",
+      description:
+        "Asks the platform live for the audiences a journey's sync_audience step can add people to: Meta custom audiences from a customer list, and Google Ads Customer Match lists. " +
+        "Use an id as the step's audience_id, with the account as its ad_account_id.",
+      inputSchema: { account_id: id },
+      annotations: { ...read, openWorldHint: true },
+    },
+    (q) => call(() => gtm.GET("/v1/workspaces/{ws}/ads/audiences", { params: { path, query: q } })),
+  );
+
+  server.registerTool(
     "list_ad_conversion_rules",
     {
       title: "List rules that send conversions to ad platforms",
@@ -8268,6 +8281,7 @@ export function createServer({ client: gtm, workspace, readOnly = false, mission
             "webhook",
             "push_to_sequencer",
             "push_to_crm",
+            "sync_audience",
             "ai",
           ]),
           name: z.string().optional(),
@@ -8279,7 +8293,7 @@ export function createServer({ client: gtm, workspace, readOnly = false, mission
           else: z.string().optional(),
           next: z.string().optional().describe("The step after; empty ends the run."),
           field: z.string().optional().describe("set_field: the field's key."),
-          change: z.enum(["set", "clear", "increment"]).optional(),
+          change: z.enum(["set", "clear", "increment", "add", "remove"]).optional().describe("set_field: set, clear or increment. sync_audience: add or remove."),
           value: z.unknown().optional().describe("set_field: the value, or {{event.x}}, {{person.x}} or {{vars.x}}."),
           overwrite_manual: z.boolean().optional().describe("set_field: overwrite a value a person set by hand."),
           tag: z.string().optional(),
@@ -8290,6 +8304,8 @@ export function createServer({ client: gtm, workspace, readOnly = false, mission
           allow_elsewhere: z.boolean().optional(),
           variables: z.record(z.string(), z.string()).optional().describe("push_to_sequencer: the campaign's own variables by name; {{person.x}} fills in."),
           properties: z.record(z.string(), z.string()).optional().describe("push_to_crm: HubSpot properties by internal name, such as lifecyclestage; {{person.x}} fills in."),
+          ad_account_id: z.string().optional().describe("sync_audience: one of the workspace's ad accounts (list_ad_accounts)."),
+          audience_id: z.string().optional().describe("sync_audience: a customer list audience on that account (list_ad_audiences)."),
           target: z.enum(["email", "domain"]).optional(),
           topic: z.string().optional(),
           title: z.string().optional().describe("alert: what it says. slack: a bold line above the message."),

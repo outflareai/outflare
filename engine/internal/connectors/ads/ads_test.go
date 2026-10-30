@@ -759,3 +759,80 @@ func TestPinterestAdsConversions(t *testing.T) {
 		t.Fatalf("sends with the conversion token: %v", last.header)
 	}
 }
+
+func TestGoogleAdsAudiences(t *testing.T) {
+	job := "customers/111/offlineUserDataJobs/9"
+	cl, reqs, _ := fake(t, map[string]any{
+		"POST /v23/customers/111/googleAds:search":           map[string]any{"results": []any{map[string]any{"userList": map[string]any{"id": "5", "name": "Trial users"}}}},
+		"POST /v23/customers/111/offlineUserDataJobs:create": map[string]any{"resourceName": job},
+		"POST /v23/" + job + ":addOperations":                map[string]any{},
+		"POST /v23/" + job + ":run":                          map[string]any{},
+	})
+	g, creds, acct := GoogleAds{}, c.Creds{"access_token": "tok", "developer_token": "dev"}, c.AdAccount{ID: "111"}
+	if !g.Definition().Has(c.CapAdsAudiences) {
+		t.Fatal("Google Ads should sync audiences")
+	}
+	as, err := g.Audiences(ctx, cl, creds, acct)
+	if err != nil || len(as) != 1 || as[0].ID != "5" || as[0].Name != "Trial users" {
+		t.Fatalf("audiences %+v %v", as, err)
+	}
+	if q := (*reqs)[0].body; !strings.Contains(q, "CRM_BASED") {
+		t.Fatalf("query %s", q)
+	}
+	em := c.HashID("ana@acme.example")
+	m := c.AudienceMember{Emails: []string{em}, Phones: []string{c.HashID("+15550100")}, ConsentGranted: true}
+	if err := g.SyncAudience(ctx, cl, creds, acct, "5", c.AudienceAdd, m); err != nil {
+		t.Fatal(err)
+	}
+	got := *reqs
+	if len(got) != 4 || !strings.Contains(got[1].body, `"userList":"customers/111/userLists/5"`) || !strings.Contains(got[1].body, `"adPersonalization":"GRANTED"`) ||
+		!strings.Contains(got[2].body, `"create":{"userIdentifiers":[{"hashedEmail":"`+em+`"},{"hashedPhoneNumber":"`) || got[3].path != "/v23/"+job+":run" {
+		t.Fatalf("add calls %+v", got)
+	}
+	m.ConsentGranted = false
+	if err := g.SyncAudience(ctx, cl, creds, acct, "5", c.AudienceRemove, m); err != nil {
+		t.Fatal(err)
+	}
+	got = *reqs
+	if strings.Contains(got[4].body, "consent") || !strings.Contains(got[5].body, `"remove":{"userIdentifiers"`) {
+		t.Fatalf("remove calls %+v", got[4:])
+	}
+	// No identifiers: nothing to do, nothing called.
+	if err := g.SyncAudience(ctx, cl, creds, acct, "5", c.AudienceAdd, c.AudienceMember{}); err != nil || len(*reqs) != 7 {
+		t.Fatalf("empty: %v, %d calls", err, len(*reqs))
+	}
+}
+
+func TestMetaAdsAudiences(t *testing.T) {
+	cl, reqs, _ := fake(t, map[string]any{
+		"GET /v24.0/act_55/customaudiences": map[string]any{"data": []any{
+			map[string]any{"id": "801", "name": "Customers", "subtype": "CUSTOM"},
+			map[string]any{"id": "802", "name": "Site visitors", "subtype": "WEBSITE"}}},
+		"POST /v24.0/801/users":   map[string]any{"audience_id": "801", "num_received": 1},
+		"DELETE /v24.0/801/users": map[string]any{"audience_id": "801", "num_received": 1},
+	})
+	m, creds, acct := MetaAds{}, c.Creds{"api_key": "tok"}, c.AdAccount{ID: "55"}
+	as, err := m.Audiences(ctx, cl, creds, acct)
+	if err != nil || len(as) != 1 || as[0].ID != "801" {
+		t.Fatalf("audiences %+v %v", as, err)
+	}
+	em, ph := c.HashID("ana@acme.example"), c.HashID("15550100")
+	p := c.AudienceMember{Emails: []string{em}, PhoneDigits: []string{ph}}
+	if err := m.SyncAudience(ctx, cl, creds, acct, "801", c.AudienceAdd, p); err != nil {
+		t.Fatal(err)
+	}
+	got := *reqs
+	if len(got) != 3 || got[1].method != "POST" || got[1].body != `{"payload":{"data":[["`+em+`"]],"schema":["EMAIL_SHA256"]}}` ||
+		!strings.Contains(got[2].body, `"PHONE_SHA256"`) || !strings.Contains(got[2].body, ph) {
+		t.Fatalf("add calls %+v", got)
+	}
+	if err := m.SyncAudience(ctx, cl, creds, acct, "801", c.AudienceRemove, c.AudienceMember{Emails: []string{em}}); err != nil {
+		t.Fatal(err)
+	}
+	if got := *reqs; len(got) != 4 || got[3].method != "DELETE" || !strings.Contains(got[3].body, em) {
+		t.Fatalf("remove calls %+v", got)
+	}
+	if err := m.SyncAudience(ctx, cl, c.Creds{"api_key": "bad"}, acct, "801", c.AudienceAdd, p); c.KindOf(err) != c.ErrAuth {
+		t.Fatalf("a refused token: %v", err)
+	}
+}

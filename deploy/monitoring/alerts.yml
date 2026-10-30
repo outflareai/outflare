@@ -185,6 +185,15 @@ groups:
         annotations:
           summary: "Over half the people journeys tried to create or update in {{ $labels.connector }} in 30 minutes failed. One workspace's key expired or a step names a property the CRM doesn't have (the run's history says which); if it is every workspace, {{ $labels.connector }} is down or changed its API. journey_step.called failures with kind push_to_crm in the logs name the journey."
 
+      - alert: OutflareAdAudienceSyncsFailing
+        expr: |
+          sum by (connector) (increase(outflare_ads_audience_syncs_total{outcome="error"}[30m])) > 10
+          and sum by (connector) (increase(outflare_ads_audience_syncs_total{outcome="error"}[30m]))
+            > 0.5 * sum by (connector) (increase(outflare_ads_audience_syncs_total[30m]))
+        labels: { severity: warning }
+        annotations:
+          summary: "Over half the people journeys tried to add to or remove from {{ $labels.connector }} audiences in 30 minutes failed. One workspace's token lacks the permission (Meta needs ads_management and its Custom Audience terms accepted) or a step names an audience that is gone (the run's history says which); if it is every workspace, {{ $labels.connector }} is down or changed its API. journey_step.called failures with kind sync_audience in the logs name the journey."
+
       - alert: OutflareSequencerPushesFailing
         expr: |
           sum by (connector) (increase(outflare_sequencers_leads_pushed_total{outcome="error"}[30m])) > 10

@@ -46,6 +46,26 @@ func (fakeMetaAds) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		metaSent.events = append(metaSent.events, body.Data...)
 		metaSent.Unlock()
 		out = map[string]any{"events_received": len(body.Data)}
+	case "/v24.0/act_55/customaudiences":
+		out = map[string]any{"data": []any{map[string]any{"id": "801", "name": "Trial users", "subtype": "CUSTOM"},
+			map[string]any{"id": "803", "name": "Site visitors", "subtype": "WEBSITE"}}}
+	case "/v24.0/801/users":
+		var body struct {
+			Payload struct {
+				Schema []string   `json:"schema"`
+				Data   [][]string `json:"data"`
+			} `json:"payload"`
+		}
+		json.NewDecoder(r.Body).Decode(&body)
+		metaAudience.Lock()
+		for _, row := range body.Payload.Data {
+			metaAudience.calls = append(metaAudience.calls, r.Method+" "+body.Payload.Schema[0]+" "+row[0])
+		}
+		metaAudience.Unlock()
+		out = map[string]any{"audience_id": "801", "num_received": len(body.Payload.Data)}
+	case "/v24.0/802/users":
+		w.WriteHeader(400)
+		out = map[string]any{"error": map[string]any{"message": "Custom audience terms not accepted", "code": 2650}}
 	case "/v24.0/act_55/insights":
 		var tr struct{ Since, Until string }
 		json.Unmarshal([]byte(r.URL.Query().Get("time_range")), &tr)
@@ -63,6 +83,13 @@ func (fakeMetaAds) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	json.NewEncoder(w).Encode(out)
+}
+
+// metaAudience collects what fakeMetaAds took into audience 801:
+// "METHOD SCHEMA hash".
+var metaAudience struct {
+	sync.Mutex
+	calls []string
 }
 
 // metaSent collects the events fakeMetaAds took through the Conversions API.

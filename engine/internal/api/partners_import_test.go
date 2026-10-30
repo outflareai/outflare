@@ -41,6 +41,9 @@ type fakeTolt struct {
 	// wholeTotal gives the whole partner list's total_count whatever the
 	// status asked.
 	wholeTotal bool
+	// refuseStatus answers 400 to a partner list filtered by this status,
+	// as an account without it might.
+	refuseStatus string
 }
 
 func (f *fakeTolt) set(path string, objs ...map[string]any) {
@@ -82,6 +85,10 @@ func (f *fakeTolt) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// Partners are listed by status, as Tolt's v2 list filters them.
+	if st := r.URL.Query().Get("status"); st != "" && st == f.refuseStatus {
+		w.WriteHeader(400)
+		return
+	}
 	if st := r.URL.Query().Get("status"); st != "" {
 		var only []map[string]any
 		for _, o := range objs {

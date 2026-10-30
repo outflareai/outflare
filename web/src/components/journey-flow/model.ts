@@ -29,6 +29,9 @@ export type SettingsSchema = {
   properties?: Record<string, SettingsSchema>;
   additionalProperties?: SettingsSchema | boolean;
   required?: string[];
+  // What the field picks from, when the builder has a picker for it
+  // (ad_account, ad_audience); others are typed.
+  "x-outflare-picker"?: string;
 };
 
 export type StepKind = {

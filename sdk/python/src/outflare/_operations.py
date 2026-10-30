@@ -2520,6 +2520,7 @@ class Operations(_Mixin):
         *,
         ws: str | None = None,
         control: str | None = None,
+        factors: list[dict[str, Any]] | None = None,
         flag: str | None = None,
         goals: list[dict[str, Any]] | None = None,
         guardrails: list[dict[str, Any]] | None = None,
@@ -2546,6 +2547,7 @@ class Operations(_Mixin):
             path={"ws": ws},
             body={
                 "control": control,
+                "factors": factors,
                 "flag": flag,
                 "goals": goals,
                 "guardrails": guardrails,
@@ -7245,6 +7247,28 @@ class Operations(_Mixin):
             path={"test": test, "ws": ws},
         )
 
+    def get_ab_test_factorial(
+        self,
+        test: str,
+        *,
+        ws: str | None = None,
+    ) -> Any:
+        """Read a multivariate A/B test cell by cell.
+
+        Scope: analytics.read. The first goal for every combination of versions (cell) among visitors who saw a version of
+        every factor: each cell against the one where every factor shows its control (corrected for every cell), the best
+        cell, each factor's main effect (pooled over the others' versions), and whether each factor changes the test
+        flag's own effect (interacts at p < 0.01). 409 for a test without factors or a draft.
+
+        Needs: the analytics.read scope.
+        GET /v1/workspaces/{ws}/ab-tests/{test}/factorial
+        """
+        return self._call(
+            "GET",
+            "/v1/workspaces/{ws}/ab-tests/{test}/factorial",
+            path={"test": test, "ws": ws},
+        )
+
     def get_ab_test_interactions(
         self,
         test: str,
@@ -11647,6 +11671,29 @@ class Operations(_Mixin):
             "/v1/workspaces/{ws}/ads/accounts",
             path={"ws": ws},
             query={"connector": connector, "brand": brand},
+        )
+
+    def list_ad_audiences(
+        self,
+        *,
+        ws: str | None = None,
+        account_id: str,
+    ) -> Any:
+        """List an ad account's customer list audiences.
+
+        Scope: integrations.manage. Asks the platform, live, for the
+        audiences journeys' sync_audience steps can add people to: Meta
+        custom audiences made from a customer list, and Google Ads Customer
+        Match lists that are open. Other ad platforms answer 422.
+
+        Needs: the integrations.manage scope.
+        GET /v1/workspaces/{ws}/ads/audiences
+        """
+        return self._call(
+            "GET",
+            "/v1/workspaces/{ws}/ads/audiences",
+            path={"ws": ws},
+            query={"account_id": account_id},
         )
 
     def list_ad_campaigns(
@@ -21694,6 +21741,7 @@ class Operations(_Mixin):
         *,
         ws: str | None = None,
         control: str | None = None,
+        factors: list[dict[str, Any]] | None = None,
         flag: str | None = None,
         goals: list[dict[str, Any]] | None = None,
         guardrails: list[dict[str, Any]] | None = None,
@@ -21717,6 +21765,7 @@ class Operations(_Mixin):
             path={"test": test, "ws": ws},
             body={
                 "control": control,
+                "factors": factors,
                 "flag": flag,
                 "goals": goals,
                 "guardrails": guardrails,

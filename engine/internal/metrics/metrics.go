@@ -235,6 +235,10 @@ var (
 		Namespace: namespace, Subsystem: "crm", Name: "contacts_pushed_total",
 		Help: "People journeys created or updated in a CRM, by connector (hubspot) and outcome (created, updated, error).",
 	}, []string{"connector", "outcome"})
+	adAudienceSyncs = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Namespace: namespace, Subsystem: "ads", Name: "audience_syncs_total",
+		Help: "People journeys added to or removed from ad platform audiences, by connector (google_ads, meta_ads) and outcome (added, removed, skipped for consent or nothing to match on, error).",
+	}, []string{"connector", "outcome"})
 	sequencerPushes = prometheus.NewCounterVec(prometheus.CounterOpts{
 		Namespace: namespace, Subsystem: "sequencers", Name: "leads_pushed_total",
 		Help: "People journeys added to sequencer campaigns, by connector (smartlead, instantly, emailbison) and outcome (added, already_in, refused by the sequencer, error).",
@@ -460,7 +464,7 @@ var own = []prometheus.Collector{
 	hooksReceived, hookEvents, hookLag,
 	domainConnectLookups, domainConnectDuration,
 	queryRuns, queryDuration, queryRows,
-	ruleEvaluations, journeyCalls, journeyCallDuration, excluded, sequencerPushes, crmContactPushes,
+	ruleEvaluations, journeyCalls, journeyCallDuration, excluded, sequencerPushes, crmContactPushes, adAudienceSyncs,
 	semanticRuns, semanticItems, semanticDuration, semanticAvailable, semanticWorkspaces, knowledgeAsks, knowledgeAskDuration,
 	supportMessages, supportReplies, supportReplyDuration,
 	adConversions, adConversionsOldest,
@@ -635,6 +639,13 @@ func JourneyCalled(kind, outcome string, d time.Duration) {
 // CRM: the connector, and what happened (created, updated, error).
 func CRMContactPushed(connector, outcome string) {
 	crmContactPushes.WithLabelValues(connector, outcome).Inc()
+}
+
+// AdAudienceSynced records one try at adding a person to an ad platform
+// audience or removing them: the connector, and what happened (added,
+// removed, skipped, error).
+func AdAudienceSynced(connector, outcome string) {
+	adAudienceSyncs.WithLabelValues(connector, outcome).Inc()
 }
 
 // SequencerPushed records one try at adding a person to a sequencer

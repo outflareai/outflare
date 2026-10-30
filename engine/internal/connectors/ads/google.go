@@ -23,8 +23,8 @@ func (GoogleAds) Definition() c.Definition {
 	d := def("google_ads", "Google Ads", "https://ads.google.com",
 		"https://developers.google.com/google-ads/api/docs/start", "https://developers.google.com/google-ads/api/docs/get-started/dev-token",
 		"Spend, clicks and conversions per campaign from your Google Ads accounts.",
-		"Signs in with Google and reads every Google Ads account the sign-in can see, including accounts under a manager account. Google also asks for a developer token: create one in your own Google Ads manager account (Admin, API Center) and add it after signing in. It never changes your campaigns; it sends conversions only to the conversion actions you choose under Paid ads.")
-	d.Capabilities = append(d.Capabilities, c.CapAdsConversions)
+		"Signs in with Google and reads every Google Ads account the sign-in can see, including accounts under a manager account. Google also asks for a developer token: create one in your own Google Ads manager account (Admin, API Center) and add it after signing in. It never changes your campaigns; it sends conversions only to the conversion actions you choose under Paid ads, and adds people only to the Customer Match lists your journeys name.")
+	d.Capabilities = append(d.Capabilities, c.CapAdsConversions, c.CapAdsAudiences)
 	d.OAuth = &c.OAuth{
 		AuthURL:  "https://accounts.google.com/o/oauth2/v2/auth",
 		TokenURL: "https://oauth2.googleapis.com/token",
@@ -102,6 +102,10 @@ type gaqlRow struct {
 		ID   flexInt `json:"id"`
 		Name string  `json:"name"`
 	} `json:"conversionAction"`
+	UserList struct {
+		ID   flexInt `json:"id"`
+		Name string  `json:"name"`
+	} `json:"userList"`
 	CampaignBudget struct {
 		AmountMicros flexInt `json:"amountMicros"`
 	} `json:"campaignBudget"`
@@ -348,4 +352,62 @@ func (g GoogleAds) SendConversions(ctx context.Context, cl *c.Client, creds c.Cr
 		results[i].OK = true
 	}
 	return results, nil
+}
+
+// ---- audiences ----
+
+// Audiences lists the account's open Customer Match lists.
+func (g GoogleAds) Audiences(ctx context.Context, cl *c.Client, creds c.Creds, acct c.AdAccount) ([]c.AdAudience, error) {
+	rows, err := g.search(ctx, cl, creds, acct.ID, acct.Meta["login_customer_id"],
+		"SELECT user_list.id, user_list.name FROM user_list WHERE user_list.type = 'CRM_BASED' AND user_list.membership_status = 'OPEN'")
+	if err != nil {
+		return nil, err
+	}
+	out := make([]c.AdAudience, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, c.AdAudience{ID: fmt.Sprint(int64(r.UserList.ID)), Name: r.UserList.Name})
+	}
+	return out, nil
+}
+
+// SyncAudience adds the person to a Customer Match list, or removes them,
+// through an offline user data job: create it, add the one operation,
+// run it. Google processes the job on its own time, and matches the
+// hashed identifiers on its side.
+func (g GoogleAds) SyncAudience(ctx context.Context, cl *c.Client, creds c.Creds, acct c.AdAccount, audienceID, change string, p c.AudienceMember) error {
+	var ids []map[string]string
+	for _, e := range p.Emails {
+		ids = append(ids, map[string]string{"hashedEmail": e})
+	}
+	for _, ph := range p.Phones {
+		ids = append(ids, map[string]string{"hashedPhoneNumber": ph})
+	}
+	if len(ids) == 0 {
+		return nil
+	}
+	meta := map[string]any{"userList": "customers/" + acct.ID + "/userLists/" + audienceID}
+	if p.ConsentGranted {
+		meta["consent"] = map[string]string{"adUserData": "GRANTED", "adPersonalization": "GRANTED"}
+	}
+	k := g.call(cl, creds, acct.Meta["login_customer_id"])
+	var job struct {
+		ResourceName string `json:"resourceName"`
+	}
+	err := k.post(ctx, g.base(cl)+"/customers/"+esc(acct.ID)+"/offlineUserDataJobs:create",
+		map[string]any{"job": map[string]any{"type": "CUSTOMER_MATCH_USER_LIST", "customerMatchUserListMetadata": meta}}, &job)
+	if err != nil {
+		return err
+	}
+	if !strings.HasPrefix(job.ResourceName, "customers/"+acct.ID+"/offlineUserDataJobs/") {
+		return c.Errf(c.ErrUnavailable, "Google Ads made no user data job")
+	}
+	op := "create"
+	if change == c.AudienceRemove {
+		op = "remove"
+	}
+	if err := k.post(ctx, g.base(cl)+"/"+job.ResourceName+":addOperations",
+		map[string]any{"operations": []any{map[string]any{op: map[string]any{"userIdentifiers": ids}}}}, nil); err != nil {
+		return err
+	}
+	return k.post(ctx, g.base(cl)+"/"+job.ResourceName+":run", map[string]any{}, nil)
 }

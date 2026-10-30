@@ -142,7 +142,7 @@ Read (always available):
 | `list_smart_lists`, `get_smart_list`, `list_smart_list_members`, `preview_smart_list` | Smart lists: people on customer records who match rules now (a field, an event in the last N days, being in a lead list), who is in each, and how many a set of rules would pick |
 | `list_ai_accounts`, `get_ai_account`, `get_outflare_ai_account` | AI Accounts: the AI subscriptions and API accounts people pay for (Claude, ChatGPT, Cursor, Copilot, the Anthropic and OpenAI APIs), with plan, price, renewal, who pays, resets available and who they belong to. Your own, or everyone's with `ai_accounts.read`; and what Outflare's own AI spent this month (`ai_spend.read`) |
 | `list_flags`, `get_flag`, `evaluate_flags` | Feature flags: switches and splits (A/B tests) the website script and servers read, and which version a given visitor gets and why |
-| `list_ab_tests`, `get_ab_test`, `get_ab_test_results`, `get_ab_test_breakdown`, `get_ab_test_interactions` | A/B tests of feature flags, and how each version is doing on conversion, count or revenue per visitor: chance to beat the control, lift with its range, whether it is safe to stop, the winner, the results by device, source, country or new and returning visitors, and whether another test running at the same time changes the effect |
+| `list_ab_tests`, `get_ab_test`, `get_ab_test_results`, `get_ab_test_breakdown`, `get_ab_test_interactions`, `get_ab_test_factorial` | A/B tests of feature flags, and how each version is doing on conversion, count or revenue per visitor: chance to beat the control, lift with its range, whether it is safe to stop, the winner, the results by device, source, country or new and returning visitors, whether another test running at the same time changes the effect, and multivariate tests cell by cell |
 | `plan_ab_test`, `get_ab_test_ai_run`, `list_ab_test_learnings` | How long a test would take from the site's real traffic, the answer of an AI run, and the library of what past tests taught |
 | `list_data_providers` | Connected data providers that search, find emails or enrich, and the filters each understands |
 | `list_list_runs`, `get_list_run` | Builds, refreshes and enrichments: found, added, skipped by reason, credits spent |
@@ -382,6 +382,7 @@ Write (left out when `OUTFLARE_MCP_READ_ONLY=1`):
 | `get_ad_tracking_health` | Whether paid traffic is tracked per network, campaigns spending without tracked visits, send-back failures, and what to fix |
 | `sync_ads` | Sync ad platforms now instead of within six hours |
 | `list_ad_conversion_targets` | Where an ad account's conversions can go (conversion actions, pixels, goals) |
+| `list_ad_audiences` | An ad account's customer list audiences, for a journey's sync_audience step |
 | `list_ad_conversion_rules`, `create_ad_conversion_rule`, `update_ad_conversion_rule`, `delete_ad_conversion_rule` | Send a customer event to an ad platform as a conversion |
 | `list_ad_conversion_sends` | What each rule sent, skipped (and why) or failed |
 | `get_ad_settings`, `set_ad_settings` | Who conversions are sent for: unless they opted out, or only with a yes |
