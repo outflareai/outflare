@@ -97,10 +97,11 @@ func Verify(ctx context.Context, r CNAMEResolver, domain, target string) error {
 // certificate is active, so no link goes out that a browser would refuse.
 func BaseURL(ctx context.Context, q Querier, ws, publicURL string) (string, error) {
 	var domain string
-	// A domain tied to a partner program serves its portal, not the
-	// workspace's email links.
+	// A domain tied to a partner program serves its portal, and one tied
+	// to a help centre the help centre, not the workspace's email links.
 	err := q.QueryRow(ctx, `SELECT domain FROM tracking_domains d WHERE workspace_id = $1 AND status = 'verified'
 		AND NOT EXISTS (SELECT 1 FROM partner_programs p WHERE p.portal_domain_id = d.id)
+		AND NOT EXISTS (SELECT 1 FROM help_centres h WHERE h.domain_id = d.id)
 		AND (https_status IS NULL OR https_status = 'active') ORDER BY verified_at LIMIT 1`, ws).Scan(&domain)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return strings.TrimRight(publicURL, "/"), nil

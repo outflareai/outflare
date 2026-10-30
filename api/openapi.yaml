@@ -17969,6 +17969,162 @@ paths:
         "400": { $ref: "#/components/responses/Error" }
         "202": { $ref: "#/components/responses/MissionHeld" }
         default: { $ref: "#/components/responses/Error" }
+  /v1/workspaces/{ws}/help-centres:
+    parameters: [{ $ref: "#/components/parameters/Workspace" }]
+    get:
+      operationId: listHelpCentres
+      x-outflare-access: { scope: workspace.read, brand_limited: true }
+      summary: List help centres
+      description: "Scope: workspace.read. The workspace's help centres: one per brand, or one for everything. Each shows the published knowledge marked for the help centre (visibility public)."
+      tags: [knowledge]
+      parameters: [{ $ref: "#/components/parameters/Brand" }]
+      responses:
+        "200":
+          description: The help centres.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data: { type: array, items: { $ref: "#/components/schemas/HelpCentre" } }
+        default: { $ref: "#/components/responses/Error" }
+    post:
+      operationId: createHelpCentre
+      x-outflare-access: { scope: context.manage, brand_limited: true }
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      summary: Make a help centre
+      description: |
+        Scope: context.manage. A public site for the knowledge marked for the
+        help centre, for a brand (brand_id) or the whole workspace. It starts
+        off, with the brand's (or the company's) logo and colour and good
+        defaults for everything else; turn it on with `enabled: true`.
+      tags: [knowledge]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/HelpCentreInput" }
+      responses:
+        "201":
+          description: The help centre.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/HelpCentre" }
+        "400": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "202": { $ref: "#/components/responses/MissionHeld" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/workspaces/{ws}/help-centres/{id}:
+    parameters:
+      - { $ref: "#/components/parameters/Workspace" }
+      - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+    get:
+      operationId: getHelpCentre
+      x-outflare-access: { scope: workspace.read, brand_limited: true }
+      summary: Get a help centre
+      description: "Scope: workspace.read. Its address, domain and every setting, defaults filled in."
+      tags: [knowledge]
+      responses:
+        "200":
+          description: The help centre.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/HelpCentre" }
+        "404": { $ref: "#/components/responses/Error" }
+        default: { $ref: "#/components/responses/Error" }
+    patch:
+      operationId: updateHelpCentre
+      x-outflare-access: { scope: context.manage, brand_limited: true }
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      summary: Change a help centre
+      description: |
+        Scope: context.manage. Rename it, change its address (slug), turn it
+        on or off, give it a domain (a tracking domain of the workspace that
+        serves nothing else), or change its settings: only the settings
+        given change.
+      tags: [knowledge]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/HelpCentreInput" }
+      responses:
+        "200":
+          description: The help centre.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/HelpCentre" }
+        "400": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "202": { $ref: "#/components/responses/MissionHeld" }
+        default: { $ref: "#/components/responses/Error" }
+    delete:
+      operationId: deleteHelpCentre
+      x-outflare-access: { scope: context.manage, brand_limited: true }
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      summary: Delete a help centre
+      description: "Scope: context.manage. The site goes; the knowledge it showed stays."
+      tags: [knowledge]
+      responses:
+        "204": { description: Deleted. }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "202": { $ref: "#/components/responses/MissionHeld" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/workspaces/{ws}/help-centres/{id}/preview:
+    parameters:
+      - { $ref: "#/components/parameters/Workspace" }
+      - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+    post:
+      operationId: previewHelpCentre
+      x-outflare-access: { scope: workspace.read, brand_limited: true }
+      summary: Preview a help centre page
+      description: |
+        Scope: workspace.read. One page of the help centre as HTML, with the
+        settings given (unsaved) over the saved ones, whether it is on or
+        not: for a live preview. Its links go nowhere and it runs no script.
+      tags: [knowledge]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                settings: { $ref: "#/components/schemas/HelpCentreSettings" }
+                name: { type: string }
+                page: { type: string, enum: [home, collection, article, search], description: Defaults to home. }
+                ref: { type: string, description: "The folder or article, as in its address (the first 8 characters of its id, then its name); the first one when empty." }
+                q: { type: string, description: The search, for the search page. }
+      responses:
+        "200": { description: The page., content: { text/html: { schema: { type: string } } } }
+        "400": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/workspaces/{ws}/help-centres/{id}/stats:
+    parameters:
+      - { $ref: "#/components/parameters/Workspace" }
+      - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+    get:
+      operationId: getHelpCentreStats
+      x-outflare-access: { scope: workspace.read, brand_limited: true }
+      summary: Help centre numbers
+      description: "Scope: workspace.read. Page views and searches by day, searches that found nothing (they also join the knowledge's unanswered questions), and the most read articles with readers' feedback."
+      tags: [knowledge]
+      parameters:
+        - { name: days, in: query, schema: { type: integer, minimum: 1, maximum: 365, default: 30 } }
+      responses:
+        "200":
+          description: The numbers.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/HelpCentreStats" }
+        "400": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        default: { $ref: "#/components/responses/Error" }
   /v1/workspaces/{ws}/status:
     parameters: [{ $ref: "#/components/parameters/Workspace" }]
     get:
@@ -37116,11 +37272,12 @@ components:
         pinned: { type: boolean, description: Pin what every conversation should know. Defaults to false. }
     KnowledgeCollection:
       type: object
-      required: [id, name, description, parent_id, brand_id, position, item_count, created_at, updated_at]
+      required: [id, name, description, icon, parent_id, brand_id, position, item_count, created_at, updated_at]
       properties:
         id: { type: string, format: uuid }
         name: { type: string }
         description: { type: string }
+        icon: { type: string, description: "Its icon on the help centre: book, rocket, card, shield, settings, users, chat, bolt, star, globe, help, tag, box, chart, plug or lock; empty for book." }
         parent_id: { type: [string, "null"], format: uuid, description: The folder it is in; null at the top level. }
         brand_id: { type: [string, "null"], format: uuid, description: "The brand whose knowledge it holds; null for every brand." }
         position: { type: integer, description: Its order among its siblings. }
@@ -37132,6 +37289,7 @@ components:
       properties:
         name: { type: string, minLength: 1, maxLength: 100 }
         description: { type: string, maxLength: 1000 }
+        icon: { type: string, enum: ["", book, rocket, card, shield, settings, users, chat, bolt, star, globe, help, tag, box, chart, plug, lock], description: Its icon on the help centre. }
         parent_id: { type: [string, "null"], format: uuid, description: The folder to put it in; null for the top level. }
         brand_id: { type: [string, "null"], description: "A brand's id or handle; null for every brand." }
         position: { type: integer }
@@ -37364,10 +37522,130 @@ components:
       type: object
       required: [question, asked, customers, last_asked]
       properties:
-        question: { type: string, description: As it was last asked. }
+        question: { type: string, description: As it was most often written. }
         asked: { type: integer, description: How many times. }
         customers: { type: integer, description: How many of those were for a customer. }
         last_asked: { type: string, format: date-time }
+    HelpCentre:
+      type: object
+      required: [id, name, slug, brand_id, enabled, url, domain_id, domain, settings, articles, created_at, updated_at]
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+        slug: { type: string, description: "Its address on this server: /h/{slug}/." }
+        brand_id: { type: [string, "null"], format: uuid, description: "The brand whose knowledge it shows (with the shared knowledge); null for everything." }
+        enabled: { type: boolean, description: Off until turned on; an off help centre answers 404. }
+        url: { type: string, description: "Where customers find it: https://{domain}/ once its domain is verified and has a certificate, else its address on this server." }
+        domain_id: { type: [string, "null"], format: uuid, description: The tracking domain it is served on. }
+        domain: { type: [string, "null"], description: That domain's name, verified or not. }
+        settings: { $ref: "#/components/schemas/HelpCentreSettings" }
+        articles: { type: integer, description: Published articles and quick answers marked for the help centre. }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    HelpCentreInput:
+      type: object
+      additionalProperties: false
+      properties:
+        name: { type: string, minLength: 1, maxLength: 100, description: "Defaults to the brand's (or company's) name and \"Help Center\"." }
+        slug: { type: string, pattern: "^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$", description: Made from the name when left out. }
+        brand_id: { type: [string, "null"], description: "A brand's id or handle, when making one; it can't change later." }
+        enabled: { type: boolean }
+        domain_id: { type: [string, "null"], format: uuid, description: "A tracking domain of the workspace that serves no partner portal or other help centre; null for none." }
+        settings: { $ref: "#/components/schemas/HelpCentreSettings" }
+    HelpLink:
+      type: object
+      additionalProperties: false
+      required: [label, url]
+      properties:
+        label: { type: string, maxLength: 40 }
+        url: { type: string, description: An https or mailto address. }
+    HelpCentreSettings:
+      type: object
+      additionalProperties: false
+      description: Every field has a default; on a change, only the fields given change.
+      properties:
+        template: { type: string, enum: [classic, minimal, bold], description: The preset it started from. }
+        title: { type: string, maxLength: 100, description: "The site's title; the help centre's name when empty." }
+        language: { type: string, description: "The pages' language code, such as en or fr-ca." }
+        indexing: { type: boolean, description: Whether search engines may list it. }
+        social_image_url: { type: string, description: The https image shown when a page is shared. }
+        favicon_url: { type: string, description: The https browser tab icon. }
+        color: { type: string, description: The accent colour (hex) for buttons, links and the header. }
+        background: { type: string, description: The page background (hex). }
+        font: { type: string, enum: [system, inter, roboto, open-sans, lato, source-sans, ibm-plex-sans, dm-sans, nunito, merriweather, lora] }
+        radius: { type: string, enum: [none, small, medium, large], description: How round corners are. }
+        show_authors: { type: boolean, description: "Show each article's owner as its author." }
+        logo_url: { type: string }
+        show_title: { type: boolean, description: Show the title beside the logo. }
+        header_color: { type: string, description: "The header and hero (hex); the accent colour when empty." }
+        header_links: { type: array, maxItems: 4, items: { $ref: "#/components/schemas/HelpLink" } }
+        website_url: { type: string, description: "A \"Go to website\" link in the header." }
+        hero_title: { type: string, maxLength: 120 }
+        hero_subtitle: { type: string, maxLength: 300 }
+        hero_image_url: { type: string, description: An https image behind the hero. }
+        search_placeholder: { type: string, maxLength: 80 }
+        collections_layout: { type: string, enum: [grid, list] }
+        columns: { type: integer, minimum: 1, maximum: 3, description: Collections per row in the grid. }
+        show_popular: { type: boolean, description: The most read articles on the home page. }
+        show_faq: { type: boolean, description: Quick answers as questions and answers on the home page. }
+        contact_title: { type: string, maxLength: 80 }
+        contact_text: { type: string, maxLength: 300 }
+        contact_label: { type: string, maxLength: 40 }
+        contact_url: { type: string, description: "An https or mailto address; no contact block when empty." }
+        show_descriptions: { type: boolean, description: "Folders' descriptions on collection cards and pages." }
+        show_excerpts: { type: boolean, description: "Each article's first lines in lists." }
+        show_counts: { type: boolean, description: How many articles a collection holds. }
+        table_of_contents: { type: boolean, description: An article's headings beside it. }
+        related: { type: boolean, description: Other articles from the same collection under an article. }
+        copy_for_llm: { type: boolean, description: "\"Copy for AI\" and Markdown links on articles." }
+        feedback: { type: boolean, description: "\"Did this answer your question?\" under articles." }
+        show_updated: { type: boolean, description: "When an article was last updated." }
+        footer_layout: { type: string, enum: [simple, columns] }
+        footer_text: { type: string, maxLength: 300 }
+        footer_color: { type: string, description: "The footer (hex); the page background when empty." }
+        footer_links: { type: array, maxItems: 12, items: { $ref: "#/components/schemas/HelpLink" } }
+        social:
+          type: object
+          description: Links to the company's profiles.
+          additionalProperties: false
+          properties:
+            x: { type: string }
+            linkedin: { type: string }
+            youtube: { type: string }
+            facebook: { type: string }
+            instagram: { type: string }
+            github: { type: string }
+    HelpCentreStats:
+      type: object
+      required: [days, views, searches, empty_searches, helpful, unhelpful, by_day, articles]
+      properties:
+        days: { type: integer }
+        views: { type: integer, description: Pages read by people (crawlers aren't counted). }
+        searches: { type: integer }
+        empty_searches: { type: integer, description: Searches that found nothing. }
+        helpful: { type: integer, description: "Readers who said an article answered their question." }
+        unhelpful: { type: integer }
+        by_day:
+          type: array
+          items:
+            type: object
+            required: [day, views, searches]
+            properties:
+              day: { type: string, format: date }
+              views: { type: integer }
+              searches: { type: integer }
+        articles:
+          type: array
+          description: The most read articles, up to 20.
+          items:
+            type: object
+            required: [item_id, title, views, helpful, unhelpful]
+            properties:
+              item_id: { type: string, format: uuid }
+              title: { type: string }
+              views: { type: integer }
+              helpful: { type: integer }
+              unhelpful: { type: integer }
     WorkspaceStatus:
       type: object
       required: [summary, can_send, setup, blockers, checked_at]
@@ -38491,7 +38769,7 @@ components:
         updated_at: { type: string, format: date-time }
     TrackingDomain:
       type: object
-      required: [id, domain, status, error, target, last_checked_at, verified_at, created_at, dns_install, dns_connections, https_status, https_error, partner_program_id]
+      required: [id, domain, status, error, target, last_checked_at, verified_at, created_at, dns_install, dns_connections, https_status, https_error, partner_program_id, help_centre_id]
       properties:
         id: { type: string, format: uuid }
         domain: { type: string, example: links.acme-com.example }
@@ -38509,6 +38787,7 @@ components:
           description: "The HTTPS certificate the server is getting for the domain once its CNAME checks out: pending, active or failed. Links use the domain only once it is active. null when the server has no certificate provider and its own proxy serves HTTPS (self-hosted)."
         https_error: { type: string, description: "What to fix when https_status is failed, or why it is still pending." }
         partner_program_id: { type: [string, "null"], format: uuid, description: "The partner program whose portal the domain serves (at its root); null for the workspace's email and partner links." }
+        help_centre_id: { type: [string, "null"], format: uuid, description: "The help centre the domain serves (at its root)." }
     EnrollmentStatus:
       type: string
       enum: [active, completed, stopped, unsubscribed, bounced, replied, blocked, failed]

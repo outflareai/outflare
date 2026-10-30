@@ -113,6 +113,8 @@ export type UiEvent =
   | "ui.knowledge_formatted" // formatting used in the knowledge editor (command: h2, bold, ul, table, ...; how: toolbar, slash, key)
   | "ui.knowledge_pasted" // formatted text pasted into the knowledge editor and kept as Markdown
   | "ui.knowledge_audience_picked" // the Ask box switched who the answer is for (audience: team, customers)
+  | "ui.help_centre_template_picked" // a template applied in the help centre's Configure and style (template: classic, minimal, bold)
+  | "ui.help_centre_brand_imported" // Import your brand in the help centre editor (found_logo, found_color)
   | "ui.support_address_made" // a support forwarding address made from Support settings (brand: whether it is a brand's)
   | "ui.support_address_renamed" // a support forwarding address renamed (brand)
   | "ui.support_mailbox_picked" // a mailbox chosen for support from the Support settings (first: whether it was the first)

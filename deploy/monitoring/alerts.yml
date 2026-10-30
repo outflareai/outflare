@@ -425,6 +425,28 @@ groups:
         annotations:
           summary: "Answers from the knowledge base take over 20 seconds at the 95th percentile; the AI providers are slow, or the workspaces' Knowledge answers model is a slow one (Settings, AI model)."
 
+      - alert: OutflareHelpCentreErrors
+        # Public help centre pages failing: usually the database.
+        expr: sum(increase(outflare_help_centre_requests_total{outcome="error"}[15m])) > 10 and sum(increase(outflare_help_centre_requests_total{outcome="error"}[15m])) / sum(increase(outflare_help_centre_requests_total[15m])) > 0.05
+        for: 10m
+        labels: { severity: warning }
+        annotations:
+          summary: "Over 5% of public help centre pages fail; look for internal errors on /h/ routes in the engine log (usually the database)."
+
+      - alert: OutflareHelpCentreViewsNotCounted
+        expr: sum(increase(outflare_help_centre_requests_total{outcome="count_failed"}[30m])) > 20
+        for: 15m
+        labels: { severity: info }
+        annotations:
+          summary: "Help centre views, searches or unanswered searches aren't being stored; readers still see the pages. Look for \"help centre view not counted\" in the engine log."
+
+      - alert: OutflareHelpCentreSlow
+        expr: histogram_quantile(0.95, sum by (le) (rate(outflare_help_centre_render_seconds_bucket[15m]))) > 1 and sum(increase(outflare_help_centre_requests_total[15m])) > 50
+        for: 15m
+        labels: { severity: info }
+        annotations:
+          summary: "Help centre pages take over a second to build at the 95th percentile; a workspace with very many public articles, or a slow database."
+
       - alert: OutflareSupportRepliesFailing
         # Replies to customers aren't going out: the support mailboxes'
         # servers refuse them, or the mailboxes were paused or removed.

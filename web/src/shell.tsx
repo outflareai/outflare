@@ -97,6 +97,7 @@ export const tabNames: Record<Tab, string> = {
   providers: "Email providers",
   support: "Support inbox",
   knowledge: "Library",
+  "help-centre": "Help centre",
   company: "About your company",
   brands: "Brands",
   "ideal-customers": "Ideal customers",
@@ -177,6 +178,7 @@ export const tabBlurbs: Record<Tab, string> = {
   connectors: "The services Outflare can use, connected once for the whole workspace.",
   support: "Customers who write to your support mailbox, as conversations your team assigns, answers and closes.",
   knowledge: "Articles and quick answers your team writes once: products, prices, policies and stock answers. Your team and every AI in Outflare answer from them.",
+  "help-centre": "A public site where customers read and search what you've marked for the help centre, styled like your brand.",
   company: "What Outflare knows about your company, so people and agents never have to repeat it.",
   brands: "The businesses you market from this workspace, each with its own website, context, links and mailboxes.",
   "ideal-customers": "Who you sell to, described once for lead lists and the lead finder.",
@@ -292,7 +294,7 @@ export const modules: Module[] = [
   { id: "support", label: "Support", icon: "support", tabs: ["support"] },
   // What the business knows: knowledge, company context and memories, which
   // every module and agent reads.
-  { id: "knowledge", label: "Knowledge", icon: "book", tabs: ["knowledge", "company"] },
+  { id: "knowledge", label: "Knowledge", icon: "book", tabs: ["knowledge", "help-centre", "company"] },
   // The company hub: its brands, their setup and who it sells to.
   { id: "company", label: "Company", icon: "company", tabs: ["brands", "setup", "ideal-customers"] },
 ];
@@ -301,7 +303,7 @@ const allModules = modules;
 
 // Pages that work for someone kept to some brands. The others need every
 // brand (the API answers 403), so they are hidden from them.
-const brandTabs: readonly Tab[] = ["overview", "seo-overview", "audits", "fixes", "experiments", "keywords", "ai-visibility", "backlinks", "competitors", "link-building", "news", "reddit", "social", "reviews", "ads", "visitors", "tracking", "flags", "ab-tests", "inbox", "sequences", "people", "leads", "lists", "rules", "lead-finder", "suppression", "mailboxes", "domains", "knowledge", "company", "brands", "setup", "ideal-customers", "members", "account", "instance", "ai-accounts", "support"];
+const brandTabs: readonly Tab[] = ["overview", "seo-overview", "audits", "fixes", "experiments", "keywords", "ai-visibility", "backlinks", "competitors", "link-building", "news", "reddit", "social", "reviews", "ads", "visitors", "tracking", "flags", "ab-tests", "inbox", "sequences", "people", "leads", "lists", "rules", "lead-finder", "suppression", "mailboxes", "domains", "knowledge", "company", "brands", "setup", "ideal-customers", "members", "account", "instance", "ai-accounts", "support", "help-centre"];
 // Pages of parts of Outflare switched on per workspace while they are
 // tested (GET /v1/me lists each workspace's features).
 const featureTabs: Partial<Record<Tab, string>> = { "ai-accounts": "ai_accounts" };
@@ -1052,6 +1054,8 @@ function callFor(tab: Tab, ws: string, item?: string): Call {
         : { title: "Support inbox", path: "/v1/workspaces/{ws}/support/conversations", params: base, mcp: "list_support_conversations", ask: "Which customers have waited longest for an answer, and what do they want?", scope: "inbox.read" };
     case "knowledge":
       return { title: "Knowledge", path: "/v1/workspaces/{ws}/knowledge/items", params: base, mcp: "search_knowledge", ask: "Write down our refund policy: full refunds within 30 days, no questions asked.", scope: "workspace.read" };
+    case "help-centre":
+      return { title: "Help centres", path: "/v1/workspaces/{ws}/help-centres", params: base, mcp: "list_help_centres", ask: "Set up our help centre with our brand colours, a contact link to support, and the refund articles on it.", scope: "workspace.read" };
     case "company":
       return { title: "What Outflare knows about the company", path: "/v1/workspaces/{ws}/context", params: base, mcp: "get_context", ask: "What do you know about my company, and what is blocking my outreach?", scope: "workspace.read" };
     case "brands":

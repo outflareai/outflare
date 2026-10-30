@@ -301,6 +301,14 @@ var (
 		Namespace: namespace, Subsystem: "knowledge", Name: "ask_seconds",
 		Help: "Time to answer a question from knowledge: finding passages and the AI model's answer.", Buckets: []float64{.1, .25, .5, 1, 2.5, 5, 10, 20, 30, 60},
 	})
+	helpPages = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Namespace: namespace, Subsystem: "help_centre", Name: "requests_total",
+		Help: "Requests to public help centres, by page (home, collection, article, search, feedback, markdown, sitemap, llms) and outcome (ok, not_found, limited, count_failed, error).",
+	}, []string{"page", "outcome"})
+	helpRender = prometheus.NewHistogram(prometheus.HistogramOpts{
+		Namespace: namespace, Subsystem: "help_centre", Name: "render_seconds",
+		Help: "Time to build a help centre page, its database reads included.", Buckets: []float64{.005, .01, .025, .05, .1, .25, .5, 1, 2.5},
+	})
 	semanticAvailable = prometheus.NewGauge(prometheus.GaugeOpts{
 		Namespace: namespace, Subsystem: "semantic_search", Name: "available",
 		Help: "1 when the database has pgvector, so meaning-based search can run; 0 when it hasn't.",
@@ -470,6 +478,7 @@ var own = []prometheus.Collector{
 	queryRuns, queryDuration, queryRows,
 	ruleEvaluations, journeyCalls, journeyCallDuration, journeyEntriesRefused, excluded, sequencerPushes, crmContactPushes, adAudienceSyncs,
 	semanticRuns, semanticItems, semanticDuration, semanticAvailable, semanticWorkspaces, knowledgeAsks, knowledgeAskDuration,
+	helpPages, helpRender,
 	supportMessages, supportReplies, supportReplyDuration,
 	adConversions, adConversionsOldest,
 	meetingEvents, meetingEventsPending,
@@ -701,6 +710,16 @@ func SemanticEmbedded(outcome string, items int, d time.Duration) {
 func KnowledgeAsked(outcome string, d time.Duration) {
 	knowledgeAsks.WithLabelValues(outcome).Inc()
 	knowledgeAskDuration.Observe(d.Seconds())
+}
+
+// HelpCentrePage records one request to a public help centre.
+func HelpCentrePage(page, outcome string) {
+	helpPages.WithLabelValues(page, outcome).Inc()
+}
+
+// HelpCentreRender records how long a help centre page took to build.
+func HelpCentreRender(d time.Duration) {
+	helpRender.Observe(d.Seconds())
 }
 
 // SupportMessage records one support inbox message: kind in, out or note,

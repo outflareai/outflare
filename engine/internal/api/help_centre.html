@@ -1,0 +1,335 @@
+{{define "page"}}<!doctype html>
+<html lang="{{.Lang}}">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{.Title}}</title>
+{{if .Description}}<meta name="description" content="{{.Description}}">{{end}}
+{{if not .Set.Indexing}}<meta name="robots" content="noindex">{{end}}
+{{if .Canonical}}<link rel="canonical" href="{{.Canonical}}">{{end}}
+<meta property="og:title" content="{{.Title}}">
+<meta property="og:type" content="{{if .Article}}article{{else}}website{{end}}">
+{{if .Description}}<meta property="og:description" content="{{.Description}}">{{end}}
+{{if .Canonical}}<meta property="og:url" content="{{.Canonical}}">{{end}}
+{{if .Set.SocialImageURL}}<meta property="og:image" content="{{.Set.SocialImageURL}}"><meta name="twitter:card" content="summary_large_image">{{end}}
+{{if .Set.FaviconURL}}<link rel="icon" href="{{.Set.FaviconURL}}">{{end}}
+{{if .FontURL}}<link rel="stylesheet" href="{{.FontURL}}">{{end}}
+{{if and .Article (not .Preview)}}<script type="application/ld+json">{"@context":"https://schema.org","@type":"Article","headline":{{.Article.Title}},"dateModified":{{.Article.Updated.Format "2006-01-02T15:04:05Z07:00"}}{{if .Canonical}},"mainEntityOfPage":{{.Canonical}}{{end}}}</script>{{end}}
+<style>
+:root{ {{.Style}} }
+*{box-sizing:border-box}
+html{-webkit-text-size-adjust:100%}
+body{margin:0;font-family:var(--font);background:var(--bg);color:var(--ink);line-height:1.6;font-size:16px;-webkit-font-smoothing:antialiased}
+a{color:inherit}
+img{max-width:100%}
+.wrap{max-width:1080px;margin:0 auto;padding:0 24px}
+.muted{opacity:.68}
+.sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)}
+/* Header and hero */
+.top{background:var(--header);color:var(--header-ink);background-size:cover;background-position:center;position:relative}
+.top.has-image::before{content:"";position:absolute;inset:0;background:var(--header);opacity:.72}
+.top>*{position:relative}
+.nav{display:flex;align-items:center;gap:20px;min-height:68px}
+.brand{display:flex;align-items:center;gap:10px;text-decoration:none;font-weight:600;font-size:17px;min-width:0}
+.brand img{height:30px;width:auto;display:block}
+.links{margin-left:auto;display:flex;align-items:center;gap:18px;font-size:14px;flex-wrap:wrap;justify-content:flex-end}
+.links a{text-decoration:none;opacity:.88}
+.links a:hover{opacity:1;text-decoration:underline}
+.site{border:1px solid currentColor;border-radius:999px;padding:5px 12px;opacity:.92}
+.hero{padding-top:44px;padding-bottom:64px;text-align:center}
+.hero h1{margin:0 0 8px;font-size:clamp(28px,4vw,40px);line-height:1.15;letter-spacing:-.02em;font-weight:700}
+.hero p{margin:0 auto 26px;max-width:620px;font-size:17px;opacity:.85}
+.slim .hero{padding-top:12px;padding-bottom:36px}
+.slim .hero h1,.slim .hero p{display:none}
+.search{display:flex;max-width:640px;margin:0 auto;background:#fff;border-radius:calc(var(--radius) + 4px);box-shadow:0 8px 30px rgba(0,0,0,.14);overflow:hidden}
+.search input{flex:1;border:0;padding:16px 18px;font:inherit;font-size:16px;color:#111827;background:transparent;min-width:0;outline:none}
+.search button{border:0;background:transparent;color:#4b5563;padding:0 18px;cursor:pointer}
+.t-minimal .search{box-shadow:none;border:1px solid rgba(0,0,0,.14)}
+.t-bold .top:not(.slim) .hero{padding-top:72px;padding-bottom:96px}
+.t-bold .top:not(.slim) .hero h1{font-size:clamp(34px,5vw,54px)}
+/* Sections */
+main.wrap{padding-top:40px;padding-bottom:64px}
+section+section{margin-top:52px}
+h2.sec{font-size:20px;margin:0 0 18px;letter-spacing:-.01em}
+.grid{display:grid;gap:16px;grid-template-columns:repeat(var(--cols),minmax(0,1fr))}
+.card{display:block;text-decoration:none;border:1px solid rgba(127,127,127,.22);border-radius:var(--radius);padding:22px;background:rgba(127,127,127,.03);transition:border-color .15s,box-shadow .15s,transform .15s}
+.card:hover{border-color:var(--accent-text);box-shadow:0 6px 24px rgba(0,0,0,.07);transform:translateY(-1px)}
+.ico{width:44px;height:44px;border-radius:calc(var(--radius) * .8);display:flex;align-items:center;justify-content:center;background:color-mix(in srgb,var(--accent) 14%,transparent);color:var(--accent-text);margin-bottom:14px}
+.card h3{margin:0 0 4px;font-size:17px}
+.card p{margin:0 0 10px;font-size:14.5px;opacity:.75}
+.count{font-size:13px;opacity:.6}
+.l-list .grid{grid-template-columns:1fr}
+.l-list .card{display:flex;align-items:center;gap:16px;padding:16px 20px}
+.l-list .card .ico{margin:0}
+.l-list .card p{margin:0}
+.rows{list-style:none;margin:0;padding:0;border:1px solid rgba(127,127,127,.22);border-radius:var(--radius);overflow:hidden}
+.rows li+li{border-top:1px solid rgba(127,127,127,.18)}
+.rows a{display:flex;gap:12px;align-items:flex-start;padding:15px 20px;text-decoration:none}
+.rows a:hover{background:rgba(127,127,127,.06)}
+.rows a:hover strong{color:var(--accent-text)}
+.rows strong{display:block;font-weight:600}
+.rows span{display:block;font-size:14.5px;opacity:.7;margin-top:2px}
+.rows svg{flex:none;margin-top:3px;opacity:.5}
+.two{display:grid;grid-template-columns:1fr 1fr;gap:0 24px}
+.two.rows{border:0}
+.two.rows li{border-top:1px solid rgba(127,127,127,.18)!important}
+.two.rows a{padding:13px 4px}
+details{border:1px solid rgba(127,127,127,.22);border-radius:var(--radius);padding:0 18px;background:rgba(127,127,127,.03)}
+details+details{margin-top:10px}
+summary{cursor:pointer;padding:15px 0;font-weight:600;list-style:none;display:flex;justify-content:space-between;gap:12px}
+summary::-webkit-details-marker{display:none}
+summary::after{content:"+";font-weight:400;opacity:.6;font-size:20px;line-height:1}
+details[open] summary::after{content:"–"}
+details .prose{padding-bottom:14px}
+.contact{margin-top:48px;display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:16px;border-radius:var(--radius);padding:26px 28px;background:color-mix(in srgb,var(--accent) 10%,transparent);border:1px solid color-mix(in srgb,var(--accent-text) 30%,transparent)}
+.contact h2{margin:0 0 2px;font-size:19px}
+.contact p{margin:0;opacity:.75}
+.btn{display:inline-flex;align-items:center;gap:8px;background:var(--accent);color:var(--accent-ink);text-decoration:none;border:0;border-radius:var(--radius);padding:10px 18px;font:inherit;font-weight:600;font-size:15px;cursor:pointer}
+.btn.ghost{background:transparent;color:inherit;border:1px solid rgba(127,127,127,.35);font-weight:500;font-size:14px;padding:7px 12px}
+/* Collection and article */
+.crumbs{display:flex;flex-wrap:wrap;gap:6px;font-size:14px;opacity:.7;margin-bottom:20px}
+.crumbs a{text-decoration:none}
+.crumbs a:hover{text-decoration:underline}
+.head{display:flex;gap:18px;align-items:flex-start;margin-bottom:28px}
+.head .ico{width:56px;height:56px;margin:0}
+.head h1{margin:0 0 6px;font-size:30px;line-height:1.2;letter-spacing:-.015em}
+.head p{margin:0;opacity:.75}
+.article{display:grid;grid-template-columns:minmax(0,1fr) 240px;gap:56px}
+.article.no-toc{grid-template-columns:minmax(0,760px)}
+.article h1{font-size:clamp(28px,3.4vw,36px);line-height:1.2;margin:0 0 10px;letter-spacing:-.02em}
+.meta{display:flex;flex-wrap:wrap;align-items:center;gap:8px 16px;font-size:14px;opacity:.75;margin-bottom:28px}
+.meta .tools{margin-left:auto;display:flex;gap:8px;opacity:1}
+.toc{position:sticky;top:24px;align-self:start;font-size:14px;border-left:2px solid rgba(127,127,127,.2);padding-left:16px}
+.toc p{margin:0 0 8px;font-weight:600;font-size:13px;text-transform:uppercase;letter-spacing:.04em;opacity:.6}
+.toc a{display:block;text-decoration:none;opacity:.75;padding:4px 0}
+.toc a:hover{opacity:1;color:var(--accent-text)}
+.toc .l3{padding-left:12px}
+.prose{font-size:16.5px;line-height:1.75}
+.prose h2{font-size:23px;margin:36px 0 10px;letter-spacing:-.01em;line-height:1.3}
+.prose h3{font-size:19px;margin:28px 0 8px}
+.prose p{margin:0 0 16px}
+.prose a{color:var(--accent-text);text-underline-offset:2px}
+.prose ul,.prose ol{padding-left:24px;margin:0 0 16px}
+.prose li{margin:4px 0}
+.prose li>p{margin:0}
+.prose blockquote{margin:0 0 16px;padding:10px 18px;border-left:3px solid var(--accent);background:rgba(127,127,127,.06);border-radius:0 var(--radius) var(--radius) 0}
+.prose code{font-size:.9em;background:rgba(127,127,127,.12);padding:2px 5px;border-radius:4px}
+.prose pre{background:#0f172a;color:#e2e8f0;padding:16px;border-radius:var(--radius);overflow:auto;font-size:14px}
+.prose pre code{background:none;padding:0}
+.prose table{border-collapse:collapse;width:100%;margin:0 0 20px;font-size:15px;display:block;overflow-x:auto}
+.prose th,.prose td{border:1px solid rgba(127,127,127,.25);padding:8px 12px;text-align:left}
+.prose th{background:rgba(127,127,127,.07)}
+.prose img{border-radius:var(--radius)}
+.prose hr{border:0;border-top:1px solid rgba(127,127,127,.25);margin:28px 0}
+.prose>*:first-child{margin-top:0}
+.feedback{margin-top:44px;padding:22px;border-top:1px solid rgba(127,127,127,.2);text-align:center}
+.feedback p{margin:0 0 12px;font-weight:600}
+.feedback form{display:inline-flex;gap:10px}
+.related{margin-top:44px}
+.related h2{font-size:18px;margin:0 0 12px}
+.empty{text-align:center;padding:48px 0}
+.empty h1{font-size:26px;margin:0 0 8px}
+/* Footer */
+footer{background:var(--footer);color:var(--footer-ink);border-top:1px solid rgba(127,127,127,.18);padding:36px 0;font-size:14px}
+.fsimple{text-align:center}
+.fsimple .brand{justify-content:center;margin-bottom:14px}
+.flinks{display:flex;flex-wrap:wrap;gap:8px 20px;justify-content:center;margin-bottom:14px}
+.flinks a{text-decoration:none;opacity:.8}
+.flinks a:hover{opacity:1;text-decoration:underline}
+.social{display:flex;gap:14px;justify-content:center;margin-bottom:12px}
+.social a{opacity:.7}
+.social a:hover{opacity:1}
+.fcols{display:flex;flex-wrap:wrap;justify-content:space-between;gap:28px}
+.fcols .flinks{flex-direction:column;align-items:flex-start;gap:8px;margin:0}
+.fcols .social{justify-content:flex-start;margin-top:14px}
+.fcols .brand{margin-bottom:10px}
+.ftext{opacity:.65;margin:0}
+.powered{opacity:.45;font-size:12px;margin-top:14px}
+@media (max-width:860px){.grid{grid-template-columns:1fr 1fr}.article{grid-template-columns:1fr}.toc{display:none}.two{grid-template-columns:1fr}}
+@media (max-width:560px){.meta .tools{margin-left:0;width:100%}.grid{grid-template-columns:1fr}.links a:not(.site){display:none}.wrap{padding:0 16px}.head{flex-direction:column}}
+</style>
+</head>
+<body class="t-{{.Set.Template}}">
+<a class="sr" href="#main">Skip to content</a>
+<header class="top{{if ne .Page "home"}} slim{{end}}{{if and .Set.HeroImageURL (eq .Page "home")}} has-image{{end}}"{{if and .Set.HeroImageURL (eq .Page "home")}} style="background-image:url('{{.Set.HeroImageURL}}')"{{end}}>
+  <div class="wrap nav">
+    <a class="brand" href="{{.Base}}">{{if .Set.LogoURL}}<img src="{{.Set.LogoURL}}" alt="{{.Name}}">{{end}}{{if or .Set.ShowTitle (not .Set.LogoURL)}}<span>{{.Name}}</span>{{end}}</a>
+    <nav class="links" aria-label="Links">
+      {{range .Set.HeaderLinks}}<a href="{{.URL}}">{{.Label}}</a>{{end}}
+      {{if .Set.WebsiteURL}}<a class="site" href="{{.Set.WebsiteURL}}">Go to website →</a>{{end}}
+    </nav>
+  </div>
+  <div class="wrap hero">
+    <h1>{{.Set.HeroTitle}}</h1>
+    {{if .Set.HeroSubtitle}}<p>{{.Set.HeroSubtitle}}</p>{{end}}
+    <form class="search" role="search" method="get" action="{{.Base}}search">
+      <label class="sr" for="q">Search</label>
+      <input id="q" name="q" type="search" value="{{.Query}}" placeholder="{{.Set.SearchPlaceholder}}" autocomplete="off"{{if .Preview}} readonly{{end}}>
+      <button type="submit" aria-label="Search"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg></button>
+    </form>
+  </div>
+</header>
+<main id="main" class="wrap">
+{{if eq .Page "home"}}{{template "home" .}}
+{{else if eq .Page "collection"}}{{template "collection" .}}
+{{else if eq .Page "article"}}{{template "article" .}}
+{{else if eq .Page "search"}}{{template "search" .}}
+{{else}}{{template "notfound" .}}{{end}}
+</main>
+{{template "footer" .}}
+{{if and .Article .Set.CopyForLLM}}<script nonce="{{.Nonce}}">
+document.querySelectorAll("[data-copy]").forEach(function(b){b.addEventListener("click",function(){fetch(b.getAttribute("data-copy")).then(function(r){return r.text()}).then(function(t){return navigator.clipboard.writeText(t)}).then(function(){var l=b.textContent;b.textContent="Copied";setTimeout(function(){b.textContent=l},2000)})})})
+</script>{{end}}
+</body>
+</html>{{end}}
+
+{{define "home"}}
+{{if .Folders}}
+<section class="l-{{.Set.CollectionsLayout}}" aria-labelledby="collections">
+  <h2 class="sec sr" id="collections">Collections</h2>
+  <div class="grid" style="--cols:{{.Set.Columns}}">
+    {{range .Folders}}{{template "folderCard" (pair $ .)}}{{end}}
+  </div>
+</section>
+{{end}}
+{{if .Loose}}
+<section aria-labelledby="more">
+  <h2 class="sec" id="more">{{if .Folders}}More articles{{else}}Articles{{end}}</h2>
+  <ul class="rows">{{range .Loose}}{{template "row" (pair $ .)}}{{end}}</ul>
+</section>
+{{end}}
+{{if and .Set.ShowPopular .Popular}}
+<section aria-labelledby="popular">
+  <h2 class="sec" id="popular">Popular articles</h2>
+  <ul class="rows two">{{range .Popular}}<li><a href="{{$.Base}}articles/{{.Ref}}">{{template "doc"}}<strong>{{.Title}}</strong></a></li>{{end}}</ul>
+</section>
+{{end}}
+{{if and .Set.ShowFAQ .FAQ}}
+<section aria-labelledby="faq">
+  <h2 class="sec" id="faq">Frequently asked questions</h2>
+  {{range .FAQ}}<details><summary>{{.Title}}</summary><div class="prose">{{.Answer}}</div></details>{{end}}
+</section>
+{{end}}
+{{if not (or .Folders .Loose .FAQ)}}
+<div class="empty"><h1>Nothing here yet</h1><p class="muted">Articles appear here once they're published for the help centre.</p></div>
+{{end}}
+{{template "contact" .}}
+{{end}}
+
+{{define "folderCard"}}{{$d := index . 0}}{{$f := index . 1}}
+<a class="card" href="{{$d.Base}}collections/{{$f.Ref}}">
+  <div class="ico">{{icon $f.Icon}}</div>
+  <div>
+    <h3>{{$f.Name}}</h3>
+    {{if and $d.Set.ShowDescriptions $f.Description}}<p>{{$f.Description}}</p>{{end}}
+    {{if $d.Set.ShowCounts}}<span class="count">{{plural $f.Count "article" "articles"}}</span>{{end}}
+  </div>
+</a>{{end}}
+
+{{define "doc"}}<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/><path d="M16 13H8M16 17H8M10 9H8"/></svg>{{end}}
+
+{{define "row"}}{{$d := index . 0}}{{$a := index . 1}}<li><a href="{{$d.Base}}articles/{{$a.Ref}}">{{template "doc"}}<div><strong>{{$a.Title}}</strong>{{if and $d.Set.ShowExcerpts $a.Excerpt}}<span>{{$a.Excerpt}}</span>{{end}}</div></a></li>{{end}}
+
+{{define "crumbs"}}<nav class="crumbs" aria-label="Breadcrumb"><a href="{{.Base}}">All collections</a>{{range .Crumbs}}<span aria-hidden="true">›</span><a href="{{$.Base}}collections/{{.Ref}}">{{.Name}}</a>{{end}}</nav>{{end}}
+
+{{define "collection"}}
+<nav class="crumbs" aria-label="Breadcrumb"><a href="{{.Base}}">All collections</a>{{range .Crumbs}}<span aria-hidden="true">›</span><a href="{{$.Base}}collections/{{.Ref}}">{{.Name}}</a>{{end}}<span aria-hidden="true">›</span><span aria-current="page">{{.Folder.Name}}</span></nav>
+<div class="head">
+  <div class="ico">{{icon .Folder.Icon}}</div>
+  <div>
+    <h1>{{.Folder.Name}}</h1>
+    {{if and .Set.ShowDescriptions .Folder.Description}}<p>{{.Folder.Description}}</p>{{end}}
+    {{if .Set.ShowCounts}}<p class="count">{{plural .Folder.Count "article" "articles"}}</p>{{end}}
+  </div>
+</div>
+{{if .Folder.Children}}
+<section class="l-list"><div class="grid">{{range .Folder.Children}}{{template "folderCard" (pair $ .)}}{{end}}</div></section>
+{{end}}
+{{if .Articles}}<section><ul class="rows">{{range .Articles}}{{template "row" (pair $ .)}}{{end}}</ul></section>{{end}}
+{{if .Snippets}}
+<section aria-labelledby="faq"><h2 class="sec" id="faq">Questions and answers</h2>
+{{range .Snippets}}<details><summary>{{.Title}}</summary><div class="prose">{{.Answer}}</div></details>{{end}}
+</section>
+{{end}}
+{{end}}
+
+{{define "article"}}
+{{template "crumbs" .}}
+<div class="article{{if not .TOC}} no-toc{{end}}">
+  <article>
+    <h1>{{.Article.Title}}</h1>
+    <div class="meta">
+      {{if and .Set.ShowAuthors .Article.Owner}}<span>Written by {{.Article.Owner}}</span>{{end}}
+      {{if .Set.ShowUpdated}}<span>Updated {{date .Article.Updated}}</span>{{end}}
+      {{if .Set.CopyForLLM}}<span class="tools"><button type="button" class="btn ghost" data-copy="{{.Base}}articles/{{.Article.Ref}}.md">Copy for AI</button><a class="btn ghost" href="{{.Base}}articles/{{.Article.Ref}}.md">Markdown</a></span>{{end}}
+    </div>
+    <div class="prose">{{.Body}}</div>
+    {{if .Set.Feedback}}
+    <div class="feedback" id="feedback">
+      {{if .Thanks}}<p>Thanks for letting us know.</p>{{else}}
+      <p>Did this answer your question?</p>
+      <form method="post" action="{{.Base}}articles/{{.Article.Ref}}/feedback">
+        <button class="btn ghost" name="helpful" value="yes">👍 Yes</button>
+        <button class="btn ghost" name="helpful" value="no">👎 No</button>
+      </form>{{end}}
+    </div>
+    {{end}}
+    {{if .Related}}
+    <div class="related"><h2>Related articles</h2><ul class="rows">{{range .Related}}<li><a href="{{$.Base}}articles/{{.Ref}}">{{template "doc"}}<strong>{{.Title}}</strong></a></li>{{end}}</ul></div>
+    {{end}}
+  </article>
+  {{if .TOC}}<nav class="toc" aria-label="On this page"><p>On this page</p>{{range .TOC}}<a class="l{{.Level}}" href="#{{.ID}}">{{.Text}}</a>{{end}}</nav>{{end}}
+</div>
+{{template "contact" .}}
+{{end}}
+
+{{define "search"}}
+<nav class="crumbs" aria-label="Breadcrumb"><a href="{{.Base}}">All collections</a><span aria-hidden="true">›</span><span>Search</span></nav>
+{{if .Query}}
+  {{if .Results}}
+  <h1 class="sec">{{plural (len .Results) "result" "results"}} for “{{.Query}}”</h1>
+  <ul class="rows">{{range .Results}}<li><a href="{{$.Base}}articles/{{.Ref}}">{{template "doc"}}<div><strong>{{.Title}}</strong><span>{{.Excerpt}}</span></div></a></li>{{end}}</ul>
+  {{else}}
+  <div class="empty"><h1>No results for “{{.Query}}”</h1><p class="muted">Try other words, or browse the collections.</p></div>
+  {{end}}
+{{else}}
+  <div class="empty"><h1>Search the help centre</h1><p class="muted">Type a question or a few words above.</p></div>
+{{end}}
+{{template "contact" .}}
+{{end}}
+
+{{define "notfound"}}
+<div class="empty"><h1>We couldn't find that page</h1><p class="muted">It may have moved. Try searching, or go back to <a href="{{.Base}}">all collections</a>.</p></div>
+{{template "contact" .}}
+{{end}}
+
+{{define "contact"}}{{if .Contact}}
+<section class="contact" aria-labelledby="contact">
+  <div><h2 id="contact">{{.Set.ContactTitle}}</h2>{{if .Set.ContactText}}<p>{{.Set.ContactText}}</p>{{end}}</div>
+  <a class="btn" href="{{.Set.ContactURL}}">{{.Set.ContactLabel}}</a>
+</section>
+{{end}}{{end}}
+
+{{define "footer"}}
+<footer>
+  {{if eq .Set.FooterLayout "columns"}}
+  <div class="wrap fcols">
+    <div>
+      <a class="brand" href="{{.Base}}">{{if .Set.LogoURL}}<img src="{{.Set.LogoURL}}" alt="{{.Name}}">{{else}}<span>{{.Name}}</span>{{end}}</a>
+      {{if .Set.FooterText}}<p class="ftext">{{.Set.FooterText}}</p>{{end}}
+      {{template "social" .}}
+    </div>
+    {{if .Set.FooterLinks}}<nav class="flinks" aria-label="Footer">{{range .Set.FooterLinks}}<a href="{{.URL}}">{{.Label}}</a>{{end}}</nav>{{end}}
+  </div>
+  {{else}}
+  <div class="wrap fsimple">
+    <a class="brand" href="{{.Base}}">{{if .Set.LogoURL}}<img src="{{.Set.LogoURL}}" alt="{{.Name}}">{{else}}<span>{{.Name}}</span>{{end}}</a>
+    {{if .Set.FooterLinks}}<nav class="flinks" aria-label="Footer">{{range .Set.FooterLinks}}<a href="{{.URL}}">{{.Label}}</a>{{end}}</nav>{{end}}
+    {{template "social" .}}
+    {{if .Set.FooterText}}<p class="ftext">{{.Set.FooterText}}</p>{{end}}
+  </div>
+  {{end}}
+</footer>
+{{end}}
+
+{{define "social"}}{{if .Social}}<div class="social">{{range .Social}}<a href="{{index $.Set.Social .}}" aria-label="{{socialName .}}">{{social .}}</a>{{end}}</div>{{end}}{{end}}

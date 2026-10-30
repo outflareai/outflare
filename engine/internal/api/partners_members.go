@@ -149,7 +149,8 @@ func (s *Server) partnerLinkBase(ctx context.Context, ws, program string) (strin
 		return "https://" + *sub + "." + s.partnersDomain + "/r/", nil
 	}
 	err = s.pool.QueryRow(ctx, `SELECT domain FROM tracking_domains d WHERE workspace_id = $1 AND status = 'verified'
-		AND NOT EXISTS (SELECT 1 FROM partner_programs p WHERE p.portal_domain_id = d.id) ORDER BY created_at LIMIT 1`, ws).Scan(&domain)
+		AND NOT EXISTS (SELECT 1 FROM partner_programs p WHERE p.portal_domain_id = d.id)
+		AND NOT EXISTS (SELECT 1 FROM help_centres h WHERE h.domain_id = d.id) ORDER BY created_at LIMIT 1`, ws).Scan(&domain)
 	if err == nil {
 		return "https://" + domain + "/r/", nil
 	}

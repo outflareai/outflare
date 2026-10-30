@@ -39,12 +39,15 @@ type trackingDomainView struct {
 	// PartnerProgramID is the partner program whose portal the domain
 	// serves; null for the workspace's email and partner links.
 	PartnerProgramID *string `json:"partner_program_id"`
+	// HelpCentreID is the help centre the domain serves.
+	HelpCentreID *string `json:"help_centre_id"`
 }
 
 func (s *Server) trackingDomains(ctx context.Context, ws string, id *string) ([]trackingDomainView, error) {
 	rows, err := s.pool.Query(ctx, `
 		SELECT id, domain, status, error, last_checked_at, verified_at, created_at, dns_install, https_status, https_error,
-			(SELECT p.id::text FROM partner_programs p WHERE p.portal_domain_id = d.id) FROM tracking_domains d
+			(SELECT p.id::text FROM partner_programs p WHERE p.portal_domain_id = d.id),
+			(SELECT h.id::text FROM help_centres h WHERE h.domain_id = d.id) FROM tracking_domains d
 		WHERE workspace_id = $1 AND ($2::uuid IS NULL OR id = $2) ORDER BY created_at`, ws, id)
 	if err != nil {
 		return nil, err
@@ -52,7 +55,7 @@ func (s *Server) trackingDomains(ctx context.Context, ws string, id *string) ([]
 	target := s.trackingHost()
 	list, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (trackingDomainView, error) {
 		v := trackingDomainView{Domain: tracking.Domain{Target: target}}
-		err := row.Scan(&v.ID, &v.Domain.Domain, &v.Status, &v.Error, &v.LastCheckedAt, &v.VerifiedAt, &v.CreatedAt, &v.DNSInstall, &v.HTTPSStatus, &v.HTTPSError, &v.PartnerProgramID)
+		err := row.Scan(&v.ID, &v.Domain.Domain, &v.Status, &v.Error, &v.LastCheckedAt, &v.VerifiedAt, &v.CreatedAt, &v.DNSInstall, &v.HTTPSStatus, &v.HTTPSError, &v.PartnerProgramID, &v.HelpCentreID)
 		return v, err
 	})
 	if err != nil || len(list) == 0 {

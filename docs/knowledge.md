@@ -1,17 +1,27 @@
 # Knowledge
 
-Knowledge is what your business knows, written down once: your products, prices, policies, processes, stock answers and how to talk about them. Your team reads it, and every AI in Outflare uses it: agents over MCP, missions and the built-in agent, and, as they ship, support replies, the chat widget, drafts and the help centre.
+Knowledge is what your business knows, written down once: your products, prices, policies, processes, stock answers and how to talk about them. Your team reads it, and every AI in Outflare uses it: agents over MCP, missions and the built-in agent, the [help centre](help-centre.md), and, as they ship, support replies, the chat widget and drafts.
 
 It sits beside your [company context and memories](agent-memory.md) in the **Knowledge** section of the app. Context says who you are; memories are one-line notes; knowledge holds anything longer.
 
 ## In the app
 
-**Knowledge** in the sidebar has two pages: **Knowledge** (articles, quick answers, folders and the bin) and **About your company** (company context and memories).
+**Knowledge** in the sidebar has three pages: **Library** (your knowledge), **Help centre** (the public site, see [Help centre](help-centre.md)) and **About your company** (company context and memories).
 
-- **Write an article** or add a **Quick answer** from the top of the page. A new workspace starts with ready-made outlines: what you sell, pricing and plans, refunds, handling objections.
+The Library opens on an **Overview**:
+
+- **Add content**: an article, a quick answer, or an article from a template (what you sell, pricing and plans, refunds, handling objections) with the headings filled in.
+- **Where your knowledge is used**: how many items reach your team and agents, AI talking to customers, and the help centre.
+- **How it's answering**: questions asked of your knowledge in the last 30 days, the share it answered, and the unanswered ones, each one click from **Write the answer**.
+- **Needs a look**: drafts and items due a check. **Recently updated** lists the latest changes.
+
+The rest of the Library:
+
+- **Content** (all, articles, quick answers, or a folder) is a table: status (Live, Draft, Check due), whether customers and the help centre get it, its folder, how many answers used it in the last 30 days and when it changed. Search and filter by status and by who uses it.
+- Clicking a row opens the item beside the list: read it, switch **AI talking to customers** and **Help centre** on or off, make it Live or a draft, and change its folder, brand, owner and check-by date. Each change saves at once. **Edit** opens the editor; **History** shows its versions.
+- **Unanswered questions** lists what people, agents and help centre readers asked that nothing answered, the most asked first. **Write the answer** starts a quick answer with the question filled in, and saving it takes the question off the list; **Dismiss** sets one aside.
+- **Test an answer** asks a question the way an agent would, for your team or for a customer.
 - The editor works like a document: a toolbar, `/` at the start of a line for headings, lists, checklists, quotes, tables, code and dividers, Ctrl or Cmd with B, I, K and S, and pasting from Google Docs, Word or a web page keeps headings, lists, links and tables. It saves Markdown, which every AI reads as it is.
-- On the right: who can see it, draft or published, folder, brand, owner and a check-by date (with one click for 3, 6 or 12 months).
-- Folders sit on the left; each one's menu renames it, adds a folder inside or deletes it. Each item's menu moves it to another folder or deletes it.
 
 ## What you can keep
 
@@ -21,9 +31,9 @@ It sits beside your [company context and memories](agent-memory.md) in the **Kno
 
 Each item has:
 
-- **Who can see it** (`visibility`):
-  - **Public** (`public`): for the help centre, and AI may tell customers.
-  - **Customers via AI** (`customers_ai`): AI may use it to answer customers, but it isn't published.
+- **Who uses it** (`visibility`), shown as switches in the app:
+  - **Help centre** (`public`): on the [help centre](help-centre.md), and AI may tell customers.
+  - **AI talking to customers** (`customers_ai`): AI may use it to answer customers, but it isn't published.
   - **Team only** (`team`, the default): your team, and AI working for your team. Never shown or told to a customer.
 - **Draft or published**: a draft is only for the people editing it.
 - **A brand**, or none to share it with every brand. A folder of a brand holds only that brand's knowledge, and an item put in one takes its brand. People and API keys limited to some brands see their brands' knowledge and the shared knowledge, and change only their brands'.
@@ -41,7 +51,7 @@ Every AI in Outflare reads the knowledge base the same way, so what you write is
 
 - **Passages.** Each item is split into passages: a quick answer is one, an article one per section (each heading starts a new one), with long sections cut at paragraphs. They are rebuilt whenever the text changes.
 - **Finding them.** A question finds passages by its words (title, section heading and text, any of the question's words) and, when [meaning-based search](workspace-search.md#meaning-based-search) runs, by what it means, so "is it expensive?" finds the section on pricing. With no AI connection that makes embeddings, words alone still work. Passages of knowledge in the bin or in draft are never found.
-- **Who it's for.** Every question is asked for the team (every item) or for customers (only **Public** and **Customers via AI** items). An answer meant for a customer can't see **Team only** knowledge at all: it is left out before the AI model reads anything.
+- **Who it's for.** Every question is asked for the team (every item) or for customers (only items on the **Help centre** or for **AI talking to customers**). An answer meant for a customer can't see **Team only** knowledge at all: it is left out before the AI model reads anything.
 - **Brands.** A brand's question finds that brand's knowledge and the shared knowledge, never another brand's.
 - **Answers.** Asking has the workspace's own AI model (the **Knowledge answers** task under Settings, AI model, on your own key and AI limit) write a short answer from the passages it found and nothing else, citing them. When they don't cover the question, it says so instead of guessing: that is a gap worth writing.
 - **Agents.** `get_context` and a mission's check-in say how much knowledge there is and to check it before stating facts; the built-in agent is told to as well.

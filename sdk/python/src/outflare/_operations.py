@@ -3444,6 +3444,45 @@ class Operations(_Mixin):
             idempotency_key=idempotency_key,
         )
 
+    def create_help_centre(
+        self,
+        *,
+        ws: str | None = None,
+        brand_id: str | None = None,
+        domain_id: str | None = None,
+        enabled: bool | None = None,
+        name: str | None = None,
+        settings: dict[str, Any] | None = None,
+        slug: str | None = None,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Make a help centre.
+
+        Scope: context.manage. A public site for the knowledge marked for the
+        help centre, for a brand (brand_id) or the whole workspace. It starts
+        off, with the brand's (or the company's) logo and colour and good
+        defaults for everything else; turn it on with `enabled: true`.
+
+        Needs: the context.manage scope.
+        POST /v1/workspaces/{ws}/help-centres
+        """
+        return self._call(
+            "POST",
+            "/v1/workspaces/{ws}/help-centres",
+            path={"ws": ws},
+            body={
+                "brand_id": brand_id,
+                "domain_id": domain_id,
+                "enabled": enabled,
+                "name": name,
+                "settings": settings,
+                "slug": slug,
+            },
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
     def create_inbound_address(
         self,
         *,
@@ -3740,6 +3779,7 @@ class Operations(_Mixin):
         ws: str | None = None,
         brand_id: str | None = None,
         description: str | None = None,
+        icon: str | None = None,
         name: str | None = None,
         parent_id: str | None = None,
         position: int | None = None,
@@ -3761,6 +3801,7 @@ class Operations(_Mixin):
             body={
                 "brand_id": brand_id,
                 "description": description,
+                "icon": icon,
                 "name": name,
                 "parent_id": parent_id,
                 "position": position,
@@ -5580,6 +5621,27 @@ class Operations(_Mixin):
             "DELETE",
             "/v1/workspaces/{ws}/fix-guidelines/{guideline}",
             path={"guideline": guideline, "ws": ws},
+            idempotency_key=idempotency_key,
+        )
+
+    def delete_help_centre(
+        self,
+        id: str,
+        *,
+        ws: str | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Delete a help centre.
+
+        Scope: context.manage. The site goes; the knowledge it showed stays.
+
+        Needs: the context.manage scope.
+        DELETE /v1/workspaces/{ws}/help-centres/{id}
+        """
+        return self._call(
+            "DELETE",
+            "/v1/workspaces/{ws}/help-centres/{id}",
+            path={"id": id, "ws": ws},
             idempotency_key=idempotency_key,
         )
 
@@ -9019,6 +9081,46 @@ class Operations(_Mixin):
             "GET",
             "/v1/workspaces/{ws}/mailbox-health/settings",
             path={"ws": ws},
+        )
+
+    def get_help_centre(
+        self,
+        id: str,
+        *,
+        ws: str | None = None,
+    ) -> Any:
+        """Get a help centre.
+
+        Scope: workspace.read. Its address, domain and every setting, defaults filled in.
+
+        Needs: the workspace.read scope.
+        GET /v1/workspaces/{ws}/help-centres/{id}
+        """
+        return self._call(
+            "GET",
+            "/v1/workspaces/{ws}/help-centres/{id}",
+            path={"id": id, "ws": ws},
+        )
+
+    def get_help_centre_stats(
+        self,
+        id: str,
+        *,
+        ws: str | None = None,
+        days: int | None = None,
+    ) -> Any:
+        """Help centre numbers.
+
+        Scope: workspace.read. Page views and searches by day, searches that found nothing (they also join the knowledge's unanswered questions), and the most read articles with readers' feedback.
+
+        Needs: the workspace.read scope.
+        GET /v1/workspaces/{ws}/help-centres/{id}/stats
+        """
+        return self._call(
+            "GET",
+            "/v1/workspaces/{ws}/help-centres/{id}/stats",
+            path={"id": id, "ws": ws},
+            query={"days": days},
         )
 
     def get_import(
@@ -13576,6 +13678,26 @@ class Operations(_Mixin):
             query={"brand": brand, "status": status},
         )
 
+    def list_help_centres(
+        self,
+        *,
+        ws: str | None = None,
+        brand: str | None = None,
+    ) -> Any:
+        """List help centres.
+
+        Scope: workspace.read. The workspace's help centres: one per brand, or one for everything. Each shows the published knowledge marked for the help centre (visibility public).
+
+        Needs: the workspace.read scope.
+        GET /v1/workspaces/{ws}/help-centres
+        """
+        return self._call(
+            "GET",
+            "/v1/workspaces/{ws}/help-centres",
+            path={"ws": ws},
+            query={"brand": brand},
+        )
+
     def list_hook_events(
         self,
         *,
@@ -17528,6 +17650,37 @@ class Operations(_Mixin):
             "/v1/workspaces/{ws}/email-templates/preview",
             path={"ws": ws},
             body={"data": data, "html": html, "subject": subject, "text": text, "variables": variables},
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
+    def preview_help_centre(
+        self,
+        id: str,
+        *,
+        ws: str | None = None,
+        name: str | None = None,
+        page: Literal["home", "collection", "article", "search"] | None = None,
+        q: str | None = None,
+        ref: str | None = None,
+        settings: dict[str, Any] | None = None,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Preview a help centre page.
+
+        Scope: workspace.read. One page of the help centre as HTML, with the
+        settings given (unsaved) over the saved ones, whether it is on or
+        not: for a live preview. Its links go nowhere and it runs no script.
+
+        Needs: the workspace.read scope.
+        POST /v1/workspaces/{ws}/help-centres/{id}/preview
+        """
+        return self._call(
+            "POST",
+            "/v1/workspaces/{ws}/help-centres/{id}/preview",
+            path={"id": id, "ws": ws},
+            body={"name": name, "page": page, "q": q, "ref": ref, "settings": settings},
             extra_body=extra_body,
             idempotency_key=idempotency_key,
         )
@@ -23209,6 +23362,46 @@ class Operations(_Mixin):
             idempotency_key=idempotency_key,
         )
 
+    def update_help_centre(
+        self,
+        id: str,
+        *,
+        ws: str | None = None,
+        brand_id: str | None = None,
+        domain_id: str | None = None,
+        enabled: bool | None = None,
+        name: str | None = None,
+        settings: dict[str, Any] | None = None,
+        slug: str | None = None,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Change a help centre.
+
+        Scope: context.manage. Rename it, change its address (slug), turn it
+        on or off, give it a domain (a tracking domain of the workspace that
+        serves nothing else), or change its settings: only the settings
+        given change.
+
+        Needs: the context.manage scope.
+        PATCH /v1/workspaces/{ws}/help-centres/{id}
+        """
+        return self._call(
+            "PATCH",
+            "/v1/workspaces/{ws}/help-centres/{id}",
+            path={"id": id, "ws": ws},
+            body={
+                "brand_id": brand_id,
+                "domain_id": domain_id,
+                "enabled": enabled,
+                "name": name,
+                "settings": settings,
+                "slug": slug,
+            },
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
     def update_inbound_message(
         self,
         id: str,
@@ -23501,6 +23694,7 @@ class Operations(_Mixin):
         ws: str | None = None,
         brand_id: str | None = None,
         description: str | None = None,
+        icon: str | None = None,
         name: str | None = None,
         parent_id: str | None = None,
         position: int | None = None,
@@ -23521,6 +23715,7 @@ class Operations(_Mixin):
             body={
                 "brand_id": brand_id,
                 "description": description,
+                "icon": icon,
                 "name": name,
                 "parent_id": parent_id,
                 "position": position,

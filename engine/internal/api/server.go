@@ -122,6 +122,10 @@ type Server struct {
 	siteInbox        bool
 	inboxWake        chan struct{}
 	siteVisitorLimit *rateLimiter
+	// Help centre pages per reader's network, and what a reader may record
+	// (feedback, searches with no answer) per hour.
+	helpIPLimit    *rateLimiter
+	helpWriteLimit *rateLimiter
 	// portalLimit caps partner portal sign-ups and sign-in emails per address.
 	portalLimit *rateLimiter
 	// siteFlagLimit caps the website script's flag requests per key.
@@ -338,6 +342,8 @@ func NewServer(pool *pgxpool.Pool, log *slog.Logger, opts Options) *Server {
 		siteIPLimit:      &rateLimiter{name: "site_ip", limit: 300, window: time.Minute},
 		siteKeyLimit:     &rateLimiter{name: "site_key", limit: 6000, window: time.Minute},
 		siteVisitorLimit: &rateLimiter{name: "site_visitor", limit: 600, window: time.Minute},
+		helpIPLimit:      &rateLimiter{name: "help_ip", limit: 300, window: time.Minute},
+		helpWriteLimit:   &rateLimiter{name: "help_write", limit: 30, window: time.Hour},
 		portalLimit:      &rateLimiter{name: "partner_portal", limit: 20, window: time.Minute},
 		siteFlagLimit:    &rateLimiter{name: "site_flags", limit: 6000, window: time.Minute},
 		siteConsentLimit: &rateLimiter{name: "site_consent", limit: 6000, window: time.Minute},
@@ -532,6 +538,8 @@ func (s *Server) buildHandler() http.Handler {
 	s.routesKnowledgeRetrieval(mux)
 	s.routesSupport(mux)
 	s.routesKnowledgeInsights(mux)
+	s.routesHelpCentres(mux)
+	s.routesHelpCentreSite(mux)
 	s.routesInboundEmail(mux)
 	s.routesVerification(mux)
 	s.routesClassify(mux)

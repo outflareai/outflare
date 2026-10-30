@@ -67,6 +67,7 @@ import { Instance } from "./pages/Instance";
 import { Account } from "./pages/Account";
 import { Company } from "./pages/Company";
 import { Knowledge } from "./pages/Knowledge";
+import { HelpCentre } from "./pages/HelpCentre";
 import { Support } from "./pages/Support";
 import { Brands } from "./pages/Brands";
 import { BrandSetup } from "./pages/BrandSetup";
@@ -597,6 +598,7 @@ function Shell({ me, onSignOut, onReload }: { me: Me; onSignOut: () => void; onR
         {ready && ws && tab === "connectors" && <Connectors key={ws.id} ws={ws.id} canManage={isAdmin} canVerify={writer} canImport={writer} open={item} setOpen={setItem} go={setTab} />}
         {ready && ws && tab === "support" && <Support key={ws.id} ws={ws.id} canManage={writer} canSetUp={can("mailboxes.manage")} myId={me.user.id ?? ""} open={item} setOpen={setItem} go={setTab} />}
         {ready && ws && tab === "knowledge" && <Knowledge key={ws.id} ws={ws.id} canManage={writer} open={item} setOpen={setItem} go={setTab} />}
+        {ready && ws && tab === "help-centre" && <HelpCentre key={ws.id} ws={ws.id} canManage={writer} go={setTab} />}
         {ready && ws && tab === "company" && <Company key={ws.id} ws={ws.id} canManage={writer} />}
         {ready && ws && tab === "brands" && <Brands key={ws.id} ws={ws.id} canManage={writer} canEdit={writer} open={item} setOpen={setItem} go={setTab} />}
         {isSettings(tab) && (

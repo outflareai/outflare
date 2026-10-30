@@ -37,7 +37,10 @@ type trackingHostEntry struct {
 	// program is the partner program whose portal the host serves: its
 	// subdomain of the partners domain, or a verified domain tied to it.
 	program string
-	until   time.Time
+	// centre is the slug of the help centre a verified domain tied to it
+	// serves.
+	centre string
+	until  time.Time
 }
 
 func requestHost(r *http.Request) string {
@@ -71,6 +74,14 @@ func (s *Server) trackingHostsOnly(next http.Handler) http.Handler {
 			return
 		}
 		tracking := e.tracking
+		if e.centre != "" {
+			// A help centre's domain serves only the help centre, at its root.
+			r2 := r.Clone(context.WithValue(r.Context(), ctxHelpHostKey{}, true))
+			r2.URL.Path = "/h/" + e.centre + r.URL.Path
+			r2.URL.RawPath = ""
+			next.ServeHTTP(w, r2)
+			return
+		}
 		if e.program != "" {
 			// A partner portal's host serves only its portal, at its root.
 			r2 := r.Clone(context.WithValue(r.Context(), ctxPortalHostKey{}, true))
@@ -105,7 +116,7 @@ func (s *Server) isTrackingHost(r *http.Request, host string) (bool, error) {
 
 // hostEntry looks up what host serves: a tracking domain (verified or
 // not), a partner program's portal (open or closed: a closed one still
-// serves its referral widget and short links), or neither. The answer is kept for a
+// serves its referral widget and short links), a help centre, or neither. The answer is kept for a
 // minute.
 func (s *Server) hostEntry(r *http.Request, host string) (trackingHostEntry, error) {
 	c := &s.trackingHosts
@@ -117,14 +128,18 @@ func (s *Server) hostEntry(r *http.Request, host string) (trackingHostEntry, err
 		return e, nil
 	}
 	e = trackingHostEntry{}
-	var program *string
-	err := s.pool.QueryRow(r.Context(), `SELECT true, CASE WHEN d.status = 'verified' THEN p.id::text END
-		FROM tracking_domains d LEFT JOIN partner_programs p ON p.portal_domain_id = d.id WHERE d.domain = $1`, host).Scan(&e.tracking, &program)
+	var program, centre *string
+	err := s.pool.QueryRow(r.Context(), `SELECT true, CASE WHEN d.status = 'verified' THEN p.id::text END, CASE WHEN d.status = 'verified' THEN h.slug END
+		FROM tracking_domains d LEFT JOIN partner_programs p ON p.portal_domain_id = d.id LEFT JOIN help_centres h ON h.domain_id = d.id
+		WHERE d.domain = $1`, host).Scan(&e.tracking, &program, &centre)
 	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 		return e, err
 	}
 	if program != nil {
 		e.program = *program
+	}
+	if centre != nil {
+		e.centre = *centre
 	}
 	if sub, ok := strings.CutSuffix(host, "."+s.partnersDomain); ok && s.partnersDomain != "" && !e.tracking && !strings.Contains(sub, ".") {
 		err := s.pool.QueryRow(r.Context(), `SELECT id::text FROM partner_programs WHERE portal_subdomain = $1`, sub).Scan(&e.program)

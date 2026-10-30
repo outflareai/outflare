@@ -45,6 +45,7 @@ jobs:
     outputs:
       tested: ${{ steps.tree.outputs.tested }}
       go: ${{ steps.scope.outputs.go }}
+      migrations: ${{ steps.scope.outputs.migrations }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         if: github.event_name == 'push'
@@ -90,7 +91,17 @@ jobs:
           # A batch always runs everything. A release pull request changes
           # only CHANGELOG.md, so it skips the Go tests like any docs change:
           # its code is main's, which main's own CI tests.
-          case "$HEAD_REF" in batch/*) echo "go=true" >> "$GITHUB_OUTPUT"; exit 0;; esac
+          case "$HEAD_REF" in batch/*) echo "go=true" >> "$GITHUB_OUTPUT"; echo "migrations=true" >> "$GITHUB_OUTPUT"; exit 0;; esac
+          if ! files=$(gh api --paginate "repos/$GITHUB_REPOSITORY/pulls/$PR/files" --jq '.[].filename'); then
+            echo "go=true" >> "$GITHUB_OUTPUT"; echo "migrations=true" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+          # The migrations job checks only migration files and the tool that
+          # checks them, so a pull request that touches neither skips it. The
+          # release pull request runs it anyway: Cloud's release merge job
+          # waits for its pass.
+          if [ "$HEAD_REF" = release/next ] || grep -qE '^(engine/internal/db/migrations/|scripts/checkmigrations/)' <<<"$files"; then
+            echo "migrations=true" >> "$GITHUB_OUTPUT"
+          fi
           if [ "$DRAFT" = true ]; then
             echo "::notice::Draft: the Go tests run when this is marked ready for review."
             echo "go=false" >> "$GITHUB_OUTPUT"; exit 0
@@ -98,9 +109,6 @@ jobs:
           # Files no Go test reads. web/ is TypeScript, and its one Go check
           # (ownkeys) also runs in web-and-sdk. Anything else, or a list we
           # can't read, runs the tests.
-          if ! files=$(gh api --paginate "repos/$GITHUB_REPOSITORY/pulls/$PR/files" --jq '.[].filename'); then
-            echo "go=true" >> "$GITHUB_OUTPUT"; exit 0
-          fi
           other=$(printf '%s\n' "$files" | grep -vE '^(docs/|changes/|web/|[^/]+\.md$)' || true)
           if [ -n "$files" ] && [ -z "$other" ]; then
             echo "::notice::Only docs, change notes or web/ changed; the Go tests are skipped."
@@ -341,7 +349,10 @@ jobs:
   # Every deploy must be safe to roll back, and must not break the version
   # still serving while it starts (docs/migrations.md).
   migrations:
-    if: github.event_name == 'pull_request'
+    needs: same-files
+    # Only pull requests that change migrations (above). Runs if same-files
+    # fails.
+    if: ${{ !cancelled() && github.event_name == 'pull_request' && (needs.same-files.outputs.migrations == 'true' || needs.same-files.result != 'success') }}
     runs-on: ubuntu-latest
     timeout-minutes: 45
     services:
@@ -367,13 +378,33 @@ jobs:
       - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
         with:
           go-version-file: go.mod
-      - name: Append-only, unique numbers, expand-only
-        run: go run ./scripts/checkmigrations -base "$BASE"
+          cache: false
       - name: Does this change add migrations?
         id: added
         run: |
           n=$(git diff --name-only --diff-filter=A "$BASE"...HEAD -- engine/internal/db/migrations | wc -l)
           echo "count=$n" >> "$GITHUB_OUTPUT"
+      # The engine job's Go build cache (see there), so the previous
+      # version's tests compile only what changed since main's last fill.
+      - name: Make room for the Go build cache
+        if: steps.added.outputs.count != '0'
+        run: |
+          df -h /
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/.ghcup /usr/share/swift
+          df -h /
+      - name: Restore the Go build cache
+        if: steps.added.outputs.count != '0'
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: |
+            ~/.cache/go-build
+            ~/go/pkg/mod
+          key: go-build-v2-${{ runner.os }}-${{ hashFiles('go.sum') }}-${{ env.BASE }}
+          restore-keys: |
+            go-build-v2-${{ runner.os }}-${{ hashFiles('go.sum') }}-
+            go-build-v2-${{ runner.os }}-
+      - name: Append-only, unique numbers, expand-only
+        run: go run ./scripts/checkmigrations -base "$BASE"
       - name: Apply this branch's migrations
         if: steps.added.outputs.count != '0'
         run: go run ./engine/cmd/outflare migrate

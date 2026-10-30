@@ -13355,6 +13355,121 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/workspaces/{ws}/help-centres": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+            };
+            cookie?: never;
+        };
+        /**
+         * List help centres
+         * @description Scope: workspace.read. The workspace's help centres: one per brand, or one for everything. Each shows the published knowledge marked for the help centre (visibility public).
+         */
+        get: operations["listHelpCentres"];
+        put?: never;
+        /**
+         * Make a help centre
+         * @description Scope: context.manage. A public site for the knowledge marked for the
+         *     help centre, for a brand (brand_id) or the whole workspace. It starts
+         *     off, with the brand's (or the company's) logo and colour and good
+         *     defaults for everything else; turn it on with `enabled: true`.
+         */
+        post: operations["createHelpCentre"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/workspaces/{ws}/help-centres/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        /**
+         * Get a help centre
+         * @description Scope: workspace.read. Its address, domain and every setting, defaults filled in.
+         */
+        get: operations["getHelpCentre"];
+        put?: never;
+        post?: never;
+        /**
+         * Delete a help centre
+         * @description Scope: context.manage. The site goes; the knowledge it showed stays.
+         */
+        delete: operations["deleteHelpCentre"];
+        options?: never;
+        head?: never;
+        /**
+         * Change a help centre
+         * @description Scope: context.manage. Rename it, change its address (slug), turn it
+         *     on or off, give it a domain (a tracking domain of the workspace that
+         *     serves nothing else), or change its settings: only the settings
+         *     given change.
+         */
+        patch: operations["updateHelpCentre"];
+        trace?: never;
+    };
+    "/v1/workspaces/{ws}/help-centres/{id}/preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Preview a help centre page
+         * @description Scope: workspace.read. One page of the help centre as HTML, with the
+         *     settings given (unsaved) over the saved ones, whether it is on or
+         *     not: for a live preview. Its links go nowhere and it runs no script.
+         */
+        post: operations["previewHelpCentre"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/workspaces/{ws}/help-centres/{id}/stats": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        /**
+         * Help centre numbers
+         * @description Scope: workspace.read. Page views and searches by day, searches that found nothing (they also join the knowledge's unanswered questions), and the most read articles with readers' feedback.
+         */
+        get: operations["getHelpCentreStats"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/workspaces/{ws}/status": {
         parameters: {
             query?: never;
@@ -33888,6 +34003,8 @@ export interface components {
             id: string;
             name: string;
             description: string;
+            /** @description Its icon on the help centre: book, rocket, card, shield, settings, users, chat, bolt, star, globe, help, tag, box, chart, plug or lock; empty for book. */
+            icon: string;
             /**
              * Format: uuid
              * @description The folder it is in; null at the top level.
@@ -33910,6 +34027,11 @@ export interface components {
         KnowledgeCollectionInput: {
             name?: string;
             description?: string;
+            /**
+             * @description Its icon on the help centre.
+             * @enum {string}
+             */
+            icon?: "" | "book" | "rocket" | "card" | "shield" | "settings" | "users" | "chat" | "bolt" | "star" | "globe" | "help" | "tag" | "box" | "chart" | "plug" | "lock";
             /**
              * Format: uuid
              * @description The folder to put it in; null for the top level.
@@ -34270,7 +34392,7 @@ export interface components {
             gaps: number;
         };
         KnowledgeGap: {
-            /** @description As it was last asked. */
+            /** @description As it was most often written. */
             question: string;
             /** @description How many times. */
             asked: number;
@@ -34278,6 +34400,170 @@ export interface components {
             customers: number;
             /** Format: date-time */
             last_asked: string;
+        };
+        HelpCentre: {
+            /** Format: uuid */
+            id: string;
+            name: string;
+            /** @description Its address on this server: /h/{slug}/. */
+            slug: string;
+            /**
+             * Format: uuid
+             * @description The brand whose knowledge it shows (with the shared knowledge); null for everything.
+             */
+            brand_id: string | null;
+            /** @description Off until turned on; an off help centre answers 404. */
+            enabled: boolean;
+            /** @description Where customers find it: https://{domain}/ once its domain is verified and has a certificate, else its address on this server. */
+            url: string;
+            /**
+             * Format: uuid
+             * @description The tracking domain it is served on.
+             */
+            domain_id: string | null;
+            /** @description That domain's name */
+            domain: string | null;
+            settings: components["schemas"]["HelpCentreSettings"];
+            /** @description Published articles and quick answers marked for the help centre. */
+            articles: number;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            updated_at: string;
+        };
+        HelpCentreInput: {
+            /** @description Defaults to the brand's (or company's) name and "Help Center". */
+            name?: string;
+            /** @description Made from the name when left out. */
+            slug?: string;
+            /** @description A brand's id or handle, when making one; it can't change later. */
+            brand_id?: string | null;
+            enabled?: boolean;
+            /**
+             * Format: uuid
+             * @description A tracking domain of the workspace that serves no partner portal or other help centre; null for none.
+             */
+            domain_id?: string | null;
+            settings?: components["schemas"]["HelpCentreSettings"];
+        };
+        HelpLink: {
+            label: string;
+            /** @description An https or mailto address. */
+            url: string;
+        };
+        /** @description Every field has a default; on a change, only the fields given change. */
+        HelpCentreSettings: {
+            /**
+             * @description The preset it started from.
+             * @enum {string}
+             */
+            template?: "classic" | "minimal" | "bold";
+            /** @description The site's title; the help centre's name when empty. */
+            title?: string;
+            /** @description The pages' language code, such as en or fr-ca. */
+            language?: string;
+            /** @description Whether search engines may list it. */
+            indexing?: boolean;
+            /** @description The https image shown when a page is shared. */
+            social_image_url?: string;
+            /** @description The https browser tab icon. */
+            favicon_url?: string;
+            /** @description The accent colour (hex) for buttons */
+            color?: string;
+            /** @description The page background (hex). */
+            background?: string;
+            /** @enum {string} */
+            font?: "system" | "inter" | "roboto" | "open-sans" | "lato" | "source-sans" | "ibm-plex-sans" | "dm-sans" | "nunito" | "merriweather" | "lora";
+            /**
+             * @description How round corners are.
+             * @enum {string}
+             */
+            radius?: "none" | "small" | "medium" | "large";
+            /** @description Show each article's owner as its author. */
+            show_authors?: boolean;
+            logo_url?: string;
+            /** @description Show the title beside the logo. */
+            show_title?: boolean;
+            /** @description The header and hero (hex); the accent colour when empty. */
+            header_color?: string;
+            header_links?: components["schemas"]["HelpLink"][];
+            /** @description A "Go to website" link in the header. */
+            website_url?: string;
+            hero_title?: string;
+            hero_subtitle?: string;
+            /** @description An https image behind the hero. */
+            hero_image_url?: string;
+            search_placeholder?: string;
+            /** @enum {string} */
+            collections_layout?: "grid" | "list";
+            /** @description Collections per row in the grid. */
+            columns?: number;
+            /** @description The most read articles on the home page. */
+            show_popular?: boolean;
+            /** @description Quick answers as questions and answers on the home page. */
+            show_faq?: boolean;
+            contact_title?: string;
+            contact_text?: string;
+            contact_label?: string;
+            /** @description An https or mailto address; no contact block when empty. */
+            contact_url?: string;
+            /** @description Folders' descriptions on collection cards and pages. */
+            show_descriptions?: boolean;
+            /** @description Each article's first lines in lists. */
+            show_excerpts?: boolean;
+            /** @description How many articles a collection holds. */
+            show_counts?: boolean;
+            /** @description An article's headings beside it. */
+            table_of_contents?: boolean;
+            /** @description Other articles from the same collection under an article. */
+            related?: boolean;
+            /** @description "Copy for AI" and Markdown links on articles. */
+            copy_for_llm?: boolean;
+            /** @description "Did this answer your question?" under articles. */
+            feedback?: boolean;
+            /** @description When an article was last updated. */
+            show_updated?: boolean;
+            /** @enum {string} */
+            footer_layout?: "simple" | "columns";
+            footer_text?: string;
+            /** @description The footer (hex); the page background when empty. */
+            footer_color?: string;
+            footer_links?: components["schemas"]["HelpLink"][];
+            /** @description Links to the company's profiles. */
+            social?: {
+                x?: string;
+                linkedin?: string;
+                youtube?: string;
+                facebook?: string;
+                instagram?: string;
+                github?: string;
+            };
+        };
+        HelpCentreStats: {
+            days: number;
+            /** @description Pages read by people (crawlers aren't counted). */
+            views: number;
+            searches: number;
+            /** @description Searches that found nothing. */
+            empty_searches: number;
+            /** @description Readers who said an article answered their question. */
+            helpful: number;
+            unhelpful: number;
+            by_day: {
+                /** Format: date */
+                day: string;
+                views: number;
+                searches: number;
+            }[];
+            /** @description The most read articles, up to 20. */
+            articles: {
+                /** Format: uuid */
+                item_id: string;
+                title: string;
+                views: number;
+                helpful: number;
+                unhelpful: number;
+            }[];
         };
         WorkspaceStatus: {
             /** @description One sentence to repeat to the person. */
@@ -35838,6 +36124,11 @@ export interface components {
              * @description The partner program whose portal the domain serves (at its root); null for the workspace's email and partner links.
              */
             partner_program_id: string | null;
+            /**
+             * Format: uuid
+             * @description The help centre the domain serves (at its root).
+             */
+            help_centre_id: string | null;
         };
         /**
          * @description replied means the lead answered and the sequence stops on reply. unsubscribed also covers a reply asking to be removed.
@@ -61456,6 +61747,247 @@ export interface operations {
             };
             202: components["responses"]["MissionHeld"];
             400: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    listHelpCentres: {
+        parameters: {
+            query?: {
+                /** @description Only records of this brand: its id or handle, none for records shared by every brand, or all (the default). */
+                brand?: components["parameters"]["Brand"];
+            };
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The help centres. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["HelpCentre"][];
+                    };
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    createHelpCentre: {
+        parameters: {
+            query?: never;
+            header?: {
+                /**
+                 * @description Makes the write safe to retry. A repeat with the same key from the same caller within 24 hours gets the first
+                 *     answer back (with `Idempotent-Replayed: true`) instead of running again. The same key for a different request
+                 *     is refused with 422 `idempotency_key_reused`; while the first is still running, 409 `idempotency_in_progress`.
+                 *     Use a new random key, such as a UUID, for each distinct write.
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["HelpCentreInput"];
+            };
+        };
+        responses: {
+            /** @description The help centre. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HelpCentre"];
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            400: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    getHelpCentre: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The help centre. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HelpCentre"];
+                };
+            };
+            404: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    deleteHelpCentre: {
+        parameters: {
+            query?: never;
+            header?: {
+                /**
+                 * @description Makes the write safe to retry. A repeat with the same key from the same caller within 24 hours gets the first
+                 *     answer back (with `Idempotent-Replayed: true`) instead of running again. The same key for a different request
+                 *     is refused with 422 `idempotency_key_reused`; while the first is still running, 409 `idempotency_in_progress`.
+                 *     Use a new random key, such as a UUID, for each distinct write.
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            202: components["responses"]["MissionHeld"];
+            /** @description Deleted. */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    updateHelpCentre: {
+        parameters: {
+            query?: never;
+            header?: {
+                /**
+                 * @description Makes the write safe to retry. A repeat with the same key from the same caller within 24 hours gets the first
+                 *     answer back (with `Idempotent-Replayed: true`) instead of running again. The same key for a different request
+                 *     is refused with 422 `idempotency_key_reused`; while the first is still running, 409 `idempotency_in_progress`.
+                 *     Use a new random key, such as a UUID, for each distinct write.
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["HelpCentreInput"];
+            };
+        };
+        responses: {
+            /** @description The help centre. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HelpCentre"];
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            400: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    previewHelpCentre: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    settings?: components["schemas"]["HelpCentreSettings"];
+                    name?: string;
+                    /**
+                     * @description Defaults to home.
+                     * @enum {string}
+                     */
+                    page?: "home" | "collection" | "article" | "search";
+                    /** @description The folder or article, as in its address (the first 8 characters of its id, then its name); the first one when empty. */
+                    ref?: string;
+                    /** @description The search */
+                    q?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The page. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/html": string;
+                };
+            };
+            400: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    getHelpCentreStats: {
+        parameters: {
+            query?: {
+                days?: number;
+            };
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The numbers. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HelpCentreStats"];
+                };
+            };
+            400: components["responses"]["Error"];
+            404: components["responses"]["Error"];
             default: components["responses"]["Error"];
         };
     };

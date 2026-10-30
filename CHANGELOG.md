@@ -6,6 +6,16 @@ Each pull request that changes what Outflare does adds a change note in [changes
 
 ## [Unreleased]
 
+## [0.47.0] - 2026-10-30
+
+### Added
+
+- Journeys can wait until something happens, like an order over $50, with a timeout, and split people by who they are or at random, with an optional holdout. You can also cap how many people start a journey each hour or day.
+
+### Changed
+
+- The last numbers from Outflare's old built-in warm-up are gone: `GET /mailboxes/{id}/warmup`, the 7-day warm-up counts and inbox rates on mailboxes, domains, stats, reports, mailbox health and the infrastructure overview, and the ignored `daily_target` and `reply_rate` settings. Warm-up runs in a connected sequencer, and its score is on each mailbox's `warmup.platform`.
+
 ## [0.46.0] - 2026-10-30
 
 ### Added

@@ -156,6 +156,31 @@ export function registerKnowledgeTools(
     (q) => call(() => gtm.GET("/v1/workspaces/{ws}/knowledge/stats", { params: { path: path(), query: withBrand(q) } })),
   );
 
+  server.registerTool(
+    "list_help_centres",
+    {
+      title: "List help centres",
+      description:
+        "The workspace's public help centres (one per brand, or one for everything): their address, whether they are on, and every setting. " +
+        "A help centre shows the published knowledge whose visibility is public.",
+      inputSchema: { brand: z.string().optional().describe("A brand's handle or id.") },
+      annotations: read,
+    },
+    (q) => call(() => gtm.GET("/v1/workspaces/{ws}/help-centres", { params: { path: path(), query: withBrand(q) } })),
+  );
+
+  server.registerTool(
+    "get_help_centre_stats",
+    {
+      title: "Help centre numbers",
+      description: "Page views and searches by day, searches that found nothing, and the most read articles with readers' feedback (did it answer their question).",
+      inputSchema: { help_centre_id: id, days: z.number().int().min(1).max(365).optional() },
+      annotations: read,
+    },
+    ({ help_centre_id, days }) =>
+      call(() => gtm.GET("/v1/workspaces/{ws}/help-centres/{id}/stats", { params: { path: { ws: workspace(), id: help_centre_id }, query: { days } } })),
+  );
+
   if (readOnly) return;
 
   server.registerTool(
@@ -274,5 +299,50 @@ export function registerKnowledgeTools(
     },
     ({ item_id, version }) =>
       call(() => gtm.POST("/v1/workspaces/{ws}/knowledge/items/{id}/versions/{version}/restore", { params: { path: { ...item(item_id), version } } })),
+  );
+  const helpSettings = z
+    .record(z.string(), z.unknown())
+    .optional()
+    .describe(
+      "Settings to change, such as hero_title, hero_subtitle, color, header_color, font, radius, logo_url, website_url, header_links, " +
+        "collections_layout, columns, show_popular, show_faq, contact_title, contact_url, table_of_contents, related, copy_for_llm, feedback, " +
+        "footer_layout, footer_text, footer_links, social, indexing, language. Only the fields given change.",
+    );
+
+  server.registerTool(
+    "create_help_centre",
+    {
+      title: "Make a help centre",
+      description:
+        "A public help centre for a brand (or the whole workspace), showing the published knowledge marked public. It starts off, with the brand's logo and colour; " +
+        "turn it on with enabled true once it looks right.",
+      inputSchema: {
+        name: z.string().min(1).max(100).optional(),
+        brand_id: z.string().optional().describe("A brand's handle or id; leave out for the whole workspace."),
+        enabled: z.boolean().optional(),
+        settings: helpSettings,
+      },
+      annotations: write,
+    },
+    (body) => call(() => gtm.POST("/v1/workspaces/{ws}/help-centres", { params: { path: path() }, body: body as never })),
+  );
+
+  server.registerTool(
+    "update_help_centre",
+    {
+      title: "Change a help centre",
+      description: "Rename it, turn it on or off, change its address (slug) or domain (domain_id, a tracking domain), or change its look and layout.",
+      inputSchema: {
+        help_centre_id: id,
+        name: z.string().min(1).max(100).optional(),
+        slug: z.string().optional(),
+        enabled: z.boolean().optional(),
+        domain_id: z.string().nullable().optional(),
+        settings: helpSettings,
+      },
+      annotations: { ...write, idempotentHint: true },
+    },
+    ({ help_centre_id, ...body }) =>
+      call(() => gtm.PATCH("/v1/workspaces/{ws}/help-centres/{id}", { params: { path: { ws: workspace(), id: help_centre_id } }, body: body as never })),
   );
 }

@@ -34,6 +34,23 @@ func (l *rateLimiter) over(key string) bool {
 	return l.counts != nil && time.Since(l.start) < l.window && l.counts[key] >= l.limit
 }
 
+// hit counts one for key and reports whether it is still within the
+// limit, without answering or setting headers: for quiet limits on what
+// a public page records.
+func (l *rateLimiter) hit(key string) bool {
+	if l == nil || l.limit <= 0 {
+		return true
+	}
+	now := time.Now()
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if l.counts == nil || now.Sub(l.start) >= l.window {
+		l.start, l.counts = now.Truncate(l.window), map[string]int{}
+	}
+	l.counts[key]++
+	return l.counts[key] <= l.limit
+}
+
 // allow counts a request for key and sets the headers. It reports false,
 // having answered 429, when the caller is over its limit.
 func (l *rateLimiter) allow(w http.ResponseWriter, r *http.Request, key string) bool {

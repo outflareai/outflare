@@ -57,19 +57,21 @@ func (s *Server) routesKnowledge(mux *http.ServeMux) {
 // Collections
 
 type knowledgeCollectionView struct {
-	ID          string    `json:"id"`
-	Name        string    `json:"name"`
-	Description string    `json:"description"`
-	ParentID    *string   `json:"parent_id"`
-	BrandID     *string   `json:"brand_id"`
-	Position    int       `json:"position"`
-	ItemCount   int       `json:"item_count"`
-	CreatedAt   time.Time `json:"created_at"`
-	UpdatedAt   time.Time `json:"updated_at"`
+	ID          string `json:"id"`
+	Name        string `json:"name"`
+	Description string `json:"description"`
+	// Icon is its icon on the help centre: a name such as book or rocket.
+	Icon      string    `json:"icon"`
+	ParentID  *string   `json:"parent_id"`
+	BrandID   *string   `json:"brand_id"`
+	Position  int       `json:"position"`
+	ItemCount int       `json:"item_count"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
 }
 
 const knowledgeCollectionSelect = `
-	SELECT c.id::text, c.name, c.description, c.parent_id::text, c.brand_id::text, c.position,
+	SELECT c.id::text, c.name, c.description, c.icon, c.parent_id::text, c.brand_id::text, c.position,
 	       (SELECT count(*)::int FROM knowledge_items i WHERE i.collection_id = c.id AND i.deleted_at IS NULL),
 	       c.created_at, c.updated_at
 	FROM knowledge_collections c
@@ -77,7 +79,7 @@ const knowledgeCollectionSelect = `
 
 func scanKnowledgeCollection(row pgx.Row) (knowledgeCollectionView, error) {
 	var v knowledgeCollectionView
-	err := row.Scan(&v.ID, &v.Name, &v.Description, &v.ParentID, &v.BrandID, &v.Position, &v.ItemCount, &v.CreatedAt, &v.UpdatedAt)
+	err := row.Scan(&v.ID, &v.Name, &v.Description, &v.Icon, &v.ParentID, &v.BrandID, &v.Position, &v.ItemCount, &v.CreatedAt, &v.UpdatedAt)
 	return v, err
 }
 
@@ -121,6 +123,7 @@ func knowledgeCollectionFor(ctx context.Context, q pgx.Tx, a *access, id string)
 type knowledgeCollectionInput struct {
 	Name        *string          `json:"name"`
 	Description *string          `json:"description"`
+	Icon        *string          `json:"icon"`
 	ParentID    optional[string] `json:"parent_id"`
 	// A brand's id or handle; null for every brand.
 	BrandID  optional[string] `json:"brand_id"`
@@ -133,6 +136,9 @@ func (in *knowledgeCollectionInput) validate() error {
 		if *in.Name == "" || utf8.RuneCountInString(*in.Name) > 100 {
 			return errInvalid("name must be 1 to 100 characters")
 		}
+	}
+	if in.Icon != nil && *in.Icon != "" && !slices.Contains(helpIconNames, *in.Icon) {
+		return errInvalid("icon is one of " + strings.Join(helpIconNames, ", ") + ", or empty")
 	}
 	if in.Description != nil {
 		*in.Description = strings.TrimSpace(*in.Description)
@@ -247,9 +253,9 @@ func (s *Server) createKnowledgeCollection(w http.ResponseWriter, r *http.Reques
 		}
 		var id string
 		if err := tx.QueryRow(ctx, `
-			INSERT INTO knowledge_collections (workspace_id, brand_id, parent_id, name, description, position, created_by)
-			VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id::text`,
-			a.WorkspaceID, brand, in.ParentID.Value, *in.Name, deref(in.Description), pos, nullIfEmpty(a.ActorID)).Scan(&id); err != nil {
+			INSERT INTO knowledge_collections (workspace_id, brand_id, parent_id, name, description, icon, position, created_by)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id::text`,
+			a.WorkspaceID, brand, in.ParentID.Value, *in.Name, deref(in.Description), deref(in.Icon), pos, nullIfEmpty(a.ActorID)).Scan(&id); err != nil {
 			return err
 		}
 		if err := record(ctx, tx, &a.principal, a.WorkspaceID, "knowledge_collection.created", "knowledge_collection", id,
@@ -317,9 +323,9 @@ func (s *Server) updateKnowledgeCollection(w http.ResponseWriter, r *http.Reques
 		}
 		if _, err := tx.Exec(ctx, `
 			UPDATE knowledge_collections SET name = COALESCE($3, name), description = COALESCE($4, description),
-				parent_id = $5, brand_id = $6, position = COALESCE($7, position), updated_at = now()
+				parent_id = $5, brand_id = $6, position = COALESCE($7, position), icon = COALESCE($8, icon), updated_at = now()
 			WHERE workspace_id = $1 AND id = $2`,
-			a.WorkspaceID, cur.ID, in.Name, in.Description, parent, brand, in.Position); err != nil {
+			a.WorkspaceID, cur.ID, in.Name, in.Description, parent, brand, in.Position, in.Icon); err != nil {
 			return err
 		}
 		if err := record(ctx, tx, &a.principal, a.WorkspaceID, "knowledge_collection.updated", "knowledge_collection", cur.ID,

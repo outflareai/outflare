@@ -7839,6 +7839,134 @@
           "sort": "desc"
         }
       }
+    },
+    {
+      "type": "row",
+      "title": "Help centres (public knowledge sites)",
+      "id": 420,
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 589
+      },
+      "panels": []
+    },
+    {
+      "type": "timeseries",
+      "title": "Help centre requests, by page and outcome",
+      "description": "Requests per minute to public help centres (/h/ and their own domains): home, collection, article, search, feedback, markdown, sitemap and llms pages, by outcome. Normal is almost all ok, some not_found (old links, closed help centres); limited is one network reading too fast; any steady error or count_failed means the database is struggling.",
+      "id": 421,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 590
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (page, outcome) (rate(outflare_help_centre_requests_total{job=\"$job\"}[5m])) * 60",
+          "legendFormat": "{{page}} {{outcome}}",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "fillOpacity": 10,
+            "stacking": {
+              "mode": "normal"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "mean",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Time to build a help centre page",
+      "description": "How long the server takes to build a help centre page, its database reads included. Normal is well under 100 ms; over a second at the 95th percentile means a very large help centre or a slow database.",
+      "id": 422,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 590
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "histogram_quantile(0.5, sum by (le) (rate(outflare_help_centre_render_seconds_bucket{job=\"$job\"}[5m])))",
+          "legendFormat": "p50",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          }
+        },
+        {
+          "refId": "B",
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(outflare_help_centre_render_seconds_bucket{job=\"$job\"}[5m])))",
+          "legendFormat": "p95",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "custom": {
+            "fillOpacity": 10,
+            "stacking": {
+              "mode": "none"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "mean",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
     }
   ]
 }
