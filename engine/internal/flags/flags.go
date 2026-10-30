@@ -6,6 +6,11 @@
 // the same visitor gets the same variant on every page, every server and
 // every process, with nothing stored per visitor. Changing the weights of a
 // running flag moves only the visitors near the boundaries it shifts.
+//
+// Flags in the same exclusion group split the group's visitors between
+// them: each owns a fixed slice of the group's buckets, from a hash of the
+// group's name and the visitor's id, and is off for everyone outside its
+// slice, so no visitor is in two of the group's tests.
 package flags
 
 import (
@@ -27,8 +32,10 @@ const (
 	MaxPayload     = 4 << 10
 	MaxDescription = 1000
 	// Buckets a visitor's hash falls into: weights and rollout are in
-	// hundredths of a percent of these.
+	// hundredths of a percent of these. An exclusion group's slices are
+	// whole percents of them.
 	buckets = 10_000
+	Buckets = buckets
 )
 
 var (
@@ -67,6 +74,10 @@ type Flag struct {
 	Rollout  int
 	Rules    []Rule
 	Salt     string
+	// Group is the flag's exclusion group ("" for none), and GroupFrom to
+	// GroupTo the buckets of the group it owns.
+	Group              string
+	GroupFrom, GroupTo int
 }
 
 // Visitor is who is asking and from where.
@@ -88,8 +99,9 @@ type Visitor struct {
 type Result struct {
 	Variant string
 	Payload json.RawMessage
-	// Why: off (the flag is off), rules (a rule failed), rollout (outside
-	// it), no_subject (no id to hash), or match.
+	// Why: off (the flag is off), rules (a rule failed), group (in
+	// another flag's slice of its exclusion group), rollout (outside it),
+	// no_subject (no id to hash), or match.
 	Reason string
 }
 
@@ -105,6 +117,11 @@ func Evaluate(f Flag, v Visitor) Result {
 	for _, r := range f.Rules {
 		if !r.holds(attrs) {
 			return Result{Reason: "rules"}
+		}
+	}
+	if f.Group != "" {
+		if g := GroupBucket(f.Group, v.Subject); g < f.GroupFrom || g >= f.GroupTo {
+			return Result{Reason: "group"}
 		}
 	}
 	if bucket(f.Salt+":rollout:"+v.Subject) >= f.Rollout*100 {
@@ -127,6 +144,32 @@ func Evaluate(f Flag, v Visitor) Result {
 		}
 	}
 	return Result{Reason: "off"}
+}
+
+// GroupBucket is where a visitor falls in exclusion group g: the same for
+// every flag in it, so the flags' slices never overlap for one visitor.
+func GroupBucket(g, subject string) int { return bucket("group:" + g + ":" + subject) }
+
+// Allocate finds the first free slice of share percent in a group whose
+// flags hold taken (bucket ranges [from, to)), or ok false when no gap is
+// that wide.
+func Allocate(taken [][2]int, share int) (from, to int, ok bool) {
+	size := share * 100
+	if share < 1 || share > 100 {
+		return 0, 0, false
+	}
+	slices.SortFunc(taken, func(a, b [2]int) int { return a[0] - b[0] })
+	at := 0
+	for _, t := range taken {
+		if t[0]-at >= size {
+			return at, at + size, true
+		}
+		at = max(at, t[1])
+	}
+	if buckets-at >= size {
+		return at, at + size, true
+	}
+	return 0, 0, false
 }
 
 // bucket maps s to 0..buckets-1, the same everywhere.

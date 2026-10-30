@@ -52,6 +52,9 @@ func (fakeFinder) Resolve(_ context.Context, _ string, req emailfind.FindRequest
 			r = emailfind.ItemResult{Ref: it.Ref, Code: emailfind.CodeNotFound}
 		case "Maybe":
 			r.Code, r.Confidence = emailfind.CodeRisky, 40
+		case "Ana":
+			// Checked on the workspace's paid verifier.
+			r.Code, r.Cost = emailfind.CodeVerified, emailfind.Cost{Provider: "acme_verify", Connection: "conn-1", Units: 1}
 		}
 		out.Items = append(out.Items, r)
 	}
@@ -107,6 +110,7 @@ func TestPeopleSteps(t *testing.T) {
 	linked := map[string][]string{}
 	records := map[string]string{}
 	stops := map[string]string{}
+	spent := map[string]int{}
 	r := pipeline.NewRunner(pool, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	r.PollInterval = 20 * time.Millisecond
 	for _, s := range Stages(pool, fakeFinder{}, Config{
@@ -121,6 +125,12 @@ func TestPeopleSteps(t *testing.T) {
 			mu.Lock()
 			defer mu.Unlock()
 			people[it.Ref].Email, people[it.Ref].Risky = email, code == emailfind.CodeRisky
+			return nil
+		},
+		Spent: func(_ context.Context, it pipeline.Item, cost emailfind.Cost) error {
+			mu.Lock()
+			defer mu.Unlock()
+			spent[it.Ref] += cost.Units
 			return nil
 		},
 		Linked: func(_ context.Context, _ pgx.Tx, it pipeline.Item, id string, warnings []string) error {
@@ -168,6 +178,9 @@ func TestPeopleSteps(t *testing.T) {
 		time.Sleep(20 * time.Millisecond)
 	}
 
+	if len(spent) != 1 || spent["ana"] != 1 {
+		t.Fatalf("spent: %v", spent)
+	}
 	if stops["bea"] != OptedOut || stops["cal"] != Bounced || stops["nobody"] != NotFound || len(stops) != 3 {
 		t.Fatalf("stops: %v", stops)
 	}

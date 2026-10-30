@@ -102,6 +102,10 @@ type siteTouch struct {
 	// ad is the ad the tracking template named (adtrack.AdParams).
 	ad       map[string]string
 	ref, ofc string
+	// ofclk is the redirect click that led here (redirect_links.go). It
+	// doesn't start a visit by itself: the page it lands on carries the
+	// campaign's tags, which do.
+	ofclk string
 	// cookies are the network pixels' cookies (adtrack.Cookies). They are
 	// kept with the click ids but say who the browser is, not how it
 	// arrived, so they never start a visit.
@@ -158,7 +162,8 @@ func touchOf(props, ctxObj map[string]any) siteTouch {
 	}
 	camp, _ := ctxObj["campaign"].(map[string]any)
 	t := siteTouch{source: str(camp, "source"), medium: str(camp, "medium"), campaign: str(camp, "name"),
-		term: str(camp, "term"), content: str(camp, "content"), ref: cutUTF8(str(props, "ref"), 200), ofc: cutUTF8(str(props, "ofc"), 200)}
+		term: str(camp, "term"), content: str(camp, "content"), ref: cutUTF8(str(props, "ref"), 200), ofc: cutUTF8(str(props, "ofc"), 200),
+		ofclk: str(props, "ofclk")}
 	strs := func(key string) map[string]string {
 		obj, _ := props[key].(map[string]any)
 		var out map[string]string
@@ -253,6 +258,7 @@ func siteSession(ctx context.Context, tx pgx.Tx, a *access, v siteVisitor, m eve
 			touch.ref, touch.ofc, zoneCountry[tz], cutUTF8(tz, 100), v.device, v.browser, v.os, ad).Scan(&id); err != nil {
 			return false, err
 		}
+
 	} else {
 		// A pixel often sets its cookie after the first page view: the
 		// visit takes it from a later event.
@@ -271,6 +277,11 @@ func siteSession(ctx context.Context, tx pgx.Tx, a *access, v siteVisitor, m eve
 		if _, err := tx.Exec(ctx, `UPDATE site_sessions SET last_seen_at = $2, events = events + 1, pageviews = pageviews + $3,
 				click_ids = click_ids || $4::jsonb WHERE id = $1`,
 			id, now, boolInt(page), cookies); err != nil {
+			return false, err
+		}
+	}
+	if touch.ofclk != "" {
+		if err := claimRedirectClick(ctx, tx, a.WorkspaceID, touch.ofclk, id, now); err != nil {
 			return false, err
 		}
 	}

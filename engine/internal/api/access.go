@@ -744,6 +744,7 @@ func limitMemberTokens(ctx context.Context, tx pgx.Tx, p *principal, ws, userID 
 	list, err := pgx.CollectRows(rows, func(r pgx.CollectableRow) (token, error) {
 		var t token
 		err := r.Scan(&t.id, &t.scopes, &t.brand)
+		t.scopes = auth.Rename(t.scopes)
 		return t, err
 	})
 	if err != nil {
@@ -1170,6 +1171,7 @@ func scanToken(row pgx.Row) (tokenView, error) {
 	var v tokenView
 	err := row.Scan(&v.ID, &v.Name, &v.Prefix, &v.Scopes, &v.CreatedAt, &v.ExpiresAt, &v.LastUsedAt, &v.BrandID,
 		&v.DailySendBudget, &v.MaxPriority, &v.MayTakeMailboxes, &v.DefaultTeamID)
+	v.Scopes = auth.Rename(v.Scopes)
 	return v, err
 }
 
@@ -1270,6 +1272,7 @@ func (s *Server) createToken(w http.ResponseWriter, r *http.Request) {
 		writeError(w, r, http.StatusBadRequest, "invalid_request", "scopes must list at least one scope")
 		return
 	}
+	req.Scopes = auth.Rename(req.Scopes)
 	for _, sc := range req.Scopes {
 		if !auth.ValidScope(sc) {
 			writeError(w, r, http.StatusBadRequest, "invalid_request", "unknown scope "+sc)
@@ -1377,6 +1380,7 @@ func (s *Server) updateTokenLimits(w http.ResponseWriter, r *http.Request) {
 		writeError(w, r, http.StatusBadRequest, "invalid_request", "scopes must list at least one scope; revoke the token to take everything away")
 		return
 	}
+	req.Scopes = auth.Rename(req.Scopes)
 	for _, sc := range req.Scopes {
 		if !auth.ValidScope(sc) {
 			writeError(w, r, http.StatusBadRequest, "invalid_request", "unknown scope "+sc)
@@ -1399,6 +1403,7 @@ func (s *Server) updateTokenLimits(w http.ResponseWriter, r *http.Request) {
 			daily_send_budget, CASE max_priority WHEN 0 THEN 'low' WHEN 1 THEN 'normal' WHEN 2 THEN 'high' END, may_take_mailboxes, default_team_id::text
 			FROM api_tokens WHERE id = $1 AND workspace_id = $2 AND revoked_at IS NULL FOR UPDATE`, id, a.WorkspaceID).
 			Scan(&name, &actorID, &scopes, &app, &cur.DailySendBudget, &cur.MaxPriority, &cur.MayTakeMailboxes, &cur.DefaultTeamID)
+		scopes = auth.Rename(scopes)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return errNotFound
 		}

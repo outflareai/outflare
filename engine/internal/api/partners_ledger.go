@@ -32,6 +32,8 @@ type rewardEntry struct {
 	currency, action, note                     string
 	actionData                                 map[string]any
 	hold                                       time.Time
+	// autoApprove is the flow's approval; nil follows the program.
+	autoApprove *bool
 }
 
 func insertPartnerReward(ctx context.Context, tx pgx.Tx, ws string, e rewardEntry) (string, error) {
@@ -44,10 +46,10 @@ func insertPartnerReward(ctx context.Context, tx pgx.Tx, ws string, e rewardEntr
 	}
 	var id string
 	err = tx.QueryRow(ctx, `INSERT INTO partner_rewards (workspace_id, program_id, membership_id, side, recipient_id, kind, conversion_id, rule_id,
-		reverses_id, amount_cents, currency, action, action_data, hold_until, note)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, GREATEST(now(), $14), $15) RETURNING id::text`,
+		reverses_id, amount_cents, currency, action, action_data, hold_until, note, auto_approve)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, GREATEST(now(), $14), $15, $16) RETURNING id::text`,
 		ws, e.program, e.membership, e.side, e.recipient, e.kind, e.conversion, e.rule, e.reverses, e.amount, e.currency, e.action,
-		string(data), e.hold, e.note).Scan(&id)
+		string(data), e.hold, e.note, e.autoApprove).Scan(&id)
 	if err == nil {
 		metrics.PartnerRewards(e.kind, "created", 1)
 	}
@@ -715,7 +717,7 @@ func (s *Server) RunPartnerRewards(ctx context.Context) {
 func (s *Server) approveDuePartnerRewards(ctx context.Context) error {
 	rows, err := s.pool.Query(ctx, `SELECT w.workspace_id::text, w.id::text, w.hold_until FROM partner_rewards w
 		JOIN partner_programs p ON p.id = w.program_id JOIN partner_memberships m ON m.id = w.membership_id
-		WHERE w.status = 'pending' AND w.hold_until <= now() AND p.auto_approve AND m.status = 'active'
+		WHERE w.status = 'pending' AND w.hold_until <= now() AND COALESCE(w.auto_approve, p.auto_approve) AND m.status = 'active'
 		ORDER BY w.hold_until LIMIT $1`, partnerApproveBatch)
 	if err != nil {
 		return err

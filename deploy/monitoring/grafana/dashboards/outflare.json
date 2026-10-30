@@ -6723,6 +6723,59 @@
       }
     },
     {
+      "type": "timeseries",
+      "title": "Redirect clicks reaching the site, by outcome",
+      "description": "Page views per minute that carried a redirect click's key (ofclk), so the site's script could tie the visit to the click: claimed means the visit took the click, unmatched a reload of the same landing page or a key from another workspace. Claimed should follow counted redirect clicks for sites that run the script; claimed near zero while clicks are counted means site.js isn't reading ofclk (an old saved copy, or the landing pages don't load the script).",
+      "id": 149,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 487
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (outcome) (rate(outflare_redirect_landings_total{job=\"$job\"}[5m])) * 60",
+          "legendFormat": "{{outcome}}",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "fillOpacity": 10,
+            "stacking": {
+              "mode": "normal"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "mean",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
       "type": "row",
       "title": "Ad tracking health (paid clicks arriving on sites)",
       "id": 143,

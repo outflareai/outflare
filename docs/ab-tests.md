@@ -49,13 +49,20 @@ A goal's `metric` says what is measured for each visitor, and the versions are c
 A draft's **Before you start** checklist (`GET .../ab-tests/{id}/checklist`, MCP `get_ab_test_checklist`) says what would stop the test measuring anything useful:
 
 - the flag: archived, one version or a missing control can't start; a flag that's off is turned on when the test starts;
-- another running test of the same flag, which must end first;
+- another running test of the same flag, which must end first, and tests of other flags running at the same time outside this flag's exclusion group ([below](#tests-at-the-same-time));
 - whether pages showed the flag's versions in the last 7 days, so visitors will join;
 - how long visitors waited for their version, once at least 20 were timed: a warning when one in ten waited over 400 ms, since they may have seen the original first, with what to do ([decide on your server, or hide the page](feature-flags.md#no-flicker));
 - whether visitors reach the first goal, and how long the test is likely to take;
+- whether a person previewed every version (below): a version marked broken can't start, and one nobody has checked since its content changed warns;
 - guardrails, if there are none.
 
 `ready` is false while anything fails; warnings still let it start.
+
+### Preview and QA
+
+**Preview** (`GET .../ab-tests/{id}/previews`, MCP `get_ab_test_previews`) gives a link per version for the pages that showed the flag most in the last 28 days, or for any page you give (`?page=`). With no such page it uses the test's brand website. A link adds `?of_flag=key:version` to the page: the site script then shows you that version for the rest of your visit, and counts nothing, so previewing never changes the results. It works for flags sent to the site's script ("On the site"); a page that reads the flag on your server doesn't take the link.
+
+Open each version, then mark it **Looks right** or **Broken**, with a note if something is off (`POST .../ab-tests/{id}/checks` with `variant`, `status` `ok` or `broken`, and `note`; MCP `check_ab_test_version`). A check holds for the version's content as it was: change the content and the check is stale until someone looks again. Checks stop once the test ends.
 
 ## How long it will take
 
@@ -138,6 +145,12 @@ Changing the flag while its test runs mixes two experiments into one. The result
 - **Bots** never reach a test: the website script doesn't send bots' events.
 - **Crossovers**: `crossovers` counts visitors who saw more than one version. They count under the first; many of them means something, such as a cache or a server that assigns differently, shows versions inconsistently.
 - **The split check** (above) catches visitors lost or double-counted.
+
+## Tests at the same time
+
+The checklist warns when another test is running on a flag outside this one's [exclusion group](feature-flags.md#exclusion-groups), since visitors may be in both. Either put the flags in one group so they never share a visitor, or let them overlap and check them.
+
+**Interactions** (`GET .../ab-tests/{id}/interactions`, MCP `get_ab_test_interactions`) checks a started test against each test of another flag that ran at the same time, up to 10. For each, it gives how many visitors saw both, and each version's effect on the first goal within each of the other test's versions. A heterogeneity test (Cochran's Q) asks whether those effects differ more than chance allows; below p = 0.01 the version **interacts**. That means its effect depends on the other change: a bolder button that helps only with the new headline, say. Read the effects before shipping either, and ship the combination that did best. With no interaction, each test's result stands on its own.
 
 ## Breakdowns
 

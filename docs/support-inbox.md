@@ -12,7 +12,9 @@ The support inbox is where a team answers customers who write in. Each email fro
 
 `DELETE` on the same path sends its mail back to the sales inbox. Its conversations stay, but can't be answered by email until a support mailbox is set again.
 
-**A forwarding address** (coming next): forward `support@yourdomain` to an Outflare address instead of connecting the mailbox. It uses the same forwarding addresses as the rest of Outflare and will feed the same conversations.
+**A forwarding address** (Outflare Cloud): keep `support@yourdomain` where it is and forward it to your support address at the inbound domain. Support addresses read like support inboxes: the brand's handle and `-support`, such as `northpeak-support@`, one per brand, so mail lands under its brand; rename one under Support, Settings. Set up forwarding in Google Workspace (a routing rule that adds the address as a recipient), a Google Group (add the address as a member), Microsoft 365 (forward and keep a copy) or Gmail; when Gmail asks to confirm forwarding, the confirmation shows on the address for an admin to open. Outflare reads the customer from the forwarded email (and from Reply-To when a Google Group rewrites the sender), and remembers the address they wrote to. See [inbound email](inbound-email.md).
+
+Replies to forwarded conversations go out through the workspace's own email provider (Amazon SES, Postmark or Resend, under Lifecycle), from the address the customer wrote to, threaded under their email, with replies coming back to that address. The address's domain must be a verified sending domain with the provider; until it is, a reply says so (`no_email_provider` or `email_domain_not_verified`). The reply's status is the email's: sent once the provider takes it, failed if it bounces or is refused.
 
 ## Conversations
 

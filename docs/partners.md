@@ -161,6 +161,25 @@ Each rule also has:
 
 Action rules all pay, but only one cash rule (percent or fixed) pays per conversion, whatever order the rules are in. The one that pays is, in this order: a partner's own rule over their group's over one for everyone; then the highest tier reached; then the narrower sale (first sale, then first months, then every sale); then a rule for named products over one for all; then the one paying more. So with 10% on the first sale and 2% on every sale, the first sale pays 10% and later ones 2%. Tiers, group rates and partners' own rates replace the base rate instead of adding to it.
 
+### Flows
+
+Rules are flows, as in Tolt (the Flows tab, or `PUT .../rules`). Each flow has:
+
+- a trigger: a sale or payment, a sign-up, or a custom event
+- an action: a share of the sale (`percent`), a fixed amount (`fixed`), an action for your own system (`action`), or moving the partner to another group (`group`, with `target_group_id`)
+- who it's for: every partner, a group (`group_id`) or one partner (`partner_id`)
+- conditions (`conditions`): groups of conditions, all (AND) or any (OR) of which must hold, on
+  - the partner: sales, customers who bought, referred customers, revenue, earnings, country, id
+  - the customer: earlier sales, what they paid so far, first sale and referral date within N days, months or years
+  - the transaction: amount, product or plan id, renewal or not
+- approval (`approval`): the program's hold (`program`, the default), at once (`auto`), after N days (`after_days`, `approval_days`), or by a person (`manual`)
+- for cash, `stacking`: `exclusive` (the default) flows compete and one pays, as above; `adds` pays on top
+- other rates inside the flow (`overrides`) for one partner or one product or plan; a partner's beats a product's
+
+New flow starts from a template: one-time (a share of the first sale), recurring (every sale), the first 12 months, 10% of the first sale then 2% for 12 months (two flows: the first-sale one wins on the first sale, as the narrower one), or a fixed amount per sign-up. Every field stays editable.
+
+Rules made before flows keep working: they have no conditions, follow the program's approval and are exclusive. A group move is recorded as `partner.group_switched`.
+
 ### Groups
 
 Each partner is in one group at most, such as Gold or Agencies, and a group's own rules (`group_id`) apply to its partners. On the Groups tab you add, rename and remove groups, give a group its own rate (Commission rate), and make one the default that new partners join (`default` on `POST .../groups` or `PATCH .../groups/{group}`). To move partners, pick them on the Partners tab and choose Move to, or call `POST .../groups/{group}/partners` with up to 1,000 `partner_ids` (`none` takes them out of every group). Removing a group removes its rules and moves its partners to no group.

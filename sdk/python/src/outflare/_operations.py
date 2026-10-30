@@ -977,14 +977,14 @@ class Operations(_Mixin):
     ) -> Any:
         """Move domains, mailboxes, lists, sequences or missions into a brand.
 
-        Scope: projects.manage, plus mailboxes.manage for domains and
+        Scope: profiles.manage, plus mailboxes.manage for domains and
         mailboxes, leads.manage for lists, sequences.manage for sequences
         and missions.run for missions. Records in another brand move to
         this one. A domain brings
         its mailboxes unless `with_mailboxes` is false. A brand's mailboxes
         send for any of that brand's sequences.
 
-        Needs: the projects.manage scope.
+        Needs: the profiles.manage scope.
         POST /v1/workspaces/{ws}/brands/{brand}/add
         """
         return self._call(
@@ -1933,6 +1933,35 @@ class Operations(_Mixin):
             idempotency_key=idempotency_key,
         )
 
+    def check_ab_test_version(
+        self,
+        test: str,
+        *,
+        ws: str | None = None,
+        note: str | None = None,
+        status: Literal["ok", "broken"],
+        variant: str,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Record a check of an A/B test version.
+
+        Scope: analytics.manage. Records that a person previewed a version: it renders right (ok) or is broken, with an
+        optional note. A check holds for the version's content as it was: once the content changes it is stale. A
+        broken version fails the checklist. 409 once the test has ended.
+
+        Needs: the analytics.manage scope.
+        POST /v1/workspaces/{ws}/ab-tests/{test}/checks
+        """
+        return self._call(
+            "POST",
+            "/v1/workspaces/{ws}/ab-tests/{test}/checks",
+            path={"test": test, "ws": ws},
+            body={"note": note, "status": status, "variant": variant},
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
     def check_all_sending_domains(
         self,
         *,
@@ -2711,7 +2740,7 @@ class Operations(_Mixin):
         may_take_mailboxes: bool | None = None,
         name: str,
         project_id: str | None = None,
-        scopes: list[str],
+        scopes: list[Any],
         extra_body: dict[str, Any] | None = None,
         idempotency_key: str | None = None,
     ) -> Any:
@@ -2915,9 +2944,9 @@ class Operations(_Mixin):
     ) -> Any:
         """Create an ideal customer profile.
 
-        Scope: projects.manage. Link it to lead lists with their `profile_id`. At most 500 per workspace.
+        Scope: profiles.manage. Link it to lead lists with their `profile_id`. At most 500 per workspace.
 
-        Needs: the projects.manage scope.
+        Needs: the profiles.manage scope.
         POST /v1/workspaces/{ws}/ideal-customer-profiles
         """
         return self._call(
@@ -3340,6 +3369,8 @@ class Operations(_Mixin):
         ws: str | None = None,
         brand_id: str | None = None,
         description: str | None = None,
+        exclusion_group: str | None = None,
+        group_share: int | None = None,
         key: str | None = None,
         name: str | None = None,
         on_site: bool | None = None,
@@ -3367,6 +3398,8 @@ class Operations(_Mixin):
             body={
                 "brand_id": brand_id,
                 "description": description,
+                "exclusion_group": exclusion_group,
+                "group_share": group_share,
                 "key": key,
                 "name": name,
                 "on_site": on_site,
@@ -4609,7 +4642,7 @@ class Operations(_Mixin):
         ws: str | None = None,
         description: str | None = None,
         name: str,
-        scopes: list[str] | None = None,
+        scopes: list[Any] | None = None,
         extra_body: dict[str, Any] | None = None,
         idempotency_key: str | None = None,
     ) -> Any:
@@ -7199,8 +7232,9 @@ class Operations(_Mixin):
         Scope: analytics.read. What would stop the test measuring anything useful: the flag (fail when archived, has one
         version or lost the control; warn when off), another running test of the flag (fail), whether pages showed its
         versions in the last 7 days, how long visitors waited for their version (delivery, once 20 were timed: warn
-        when one in ten waited over 400 ms), whether visitors reach the first goal, how long it is likely to take, and
-        guardrails. ready is false while any check fails.
+        when one in ten waited over 400 ms), whether visitors reach the first goal, how long it is likely to take, whether
+        a person previewed every version (qa: fail when one is marked broken, warn when one is unchecked or changed
+        since), and guardrails. ready is false while any check fails.
 
         Needs: the analytics.read scope.
         GET /v1/workspaces/{ws}/ab-tests/{test}/checklist
@@ -7209,6 +7243,52 @@ class Operations(_Mixin):
             "GET",
             "/v1/workspaces/{ws}/ab-tests/{test}/checklist",
             path={"test": test, "ws": ws},
+        )
+
+    def get_ab_test_interactions(
+        self,
+        test: str,
+        *,
+        ws: str | None = None,
+    ) -> Any:
+        """Check an A/B test against tests that overlapped it.
+
+        Scope: analytics.read. For each other test (of another flag, outside this flag's exclusion group) that ran while
+        this one did, up to 10, the most recent first: how many of this test's visitors also saw the other flag, and each
+        version's effect on the first goal within each of the other flag's versions. p_value is Cochran's Q test that the
+        effects are the same; interacts is true below 0.01, meaning one change alters the other's effect. 409 for a draft.
+
+        Needs: the analytics.read scope.
+        GET /v1/workspaces/{ws}/ab-tests/{test}/interactions
+        """
+        return self._call(
+            "GET",
+            "/v1/workspaces/{ws}/ab-tests/{test}/interactions",
+            path={"test": test, "ws": ws},
+        )
+
+    def get_ab_test_previews(
+        self,
+        test: str,
+        *,
+        ws: str | None = None,
+        page: str | None = None,
+    ) -> Any:
+        """Preview an A/B test's versions.
+
+        Scope: analytics.read. Links that show each version to the person who opens them, on the pages that showed the
+        flag most in the last 28 days (without their query strings), or on page when given; with no such page, the
+        test's brand website. A link adds of_flag=key:variant, which the site script reads: it shows that version for
+        the rest of the visit and counts nothing. Also each version's check, from checkABTestVersion.
+
+        Needs: the analytics.read scope.
+        GET /v1/workspaces/{ws}/ab-tests/{test}/previews
+        """
+        return self._call(
+            "GET",
+            "/v1/workspaces/{ws}/ab-tests/{test}/previews",
+            path={"test": test, "ws": ws},
+            query={"page": page},
         )
 
     def get_ab_test_results(
@@ -8374,9 +8454,9 @@ class Operations(_Mixin):
     ) -> Any:
         """Get an ideal customer profile.
 
-        Scope: projects.read.
+        Scope: profiles.read.
 
-        Needs: the projects.read scope.
+        Needs: the profiles.read scope.
         GET /v1/workspaces/{ws}/ideal-customer-profiles/{id}
         """
         return self._call(
@@ -12765,11 +12845,11 @@ class Operations(_Mixin):
     ) -> Any:
         """List ideal customer profiles.
 
-        Scope: projects.read. Who the workspace sells to: each profile is a description in words plus filters in the
+        Scope: profiles.read. Who the workspace sells to: each profile is a description in words plus filters in the
         same vocabulary as lead searches. Lead lists, lead list fit scores and the lead finder read them. Active ones by
         default, by name.
 
-        Needs: the projects.read scope.
+        Needs: the profiles.read scope.
         GET /v1/workspaces/{ws}/ideal-customer-profiles
         """
         return self._call(
@@ -18339,9 +18419,9 @@ class Operations(_Mixin):
     ) -> Any:
         """Make a brand's records shared by every brand again.
 
-        Scope: projects.manage, plus the scopes addToBrand needs for each kind of record. Only records in this brand change.
+        Scope: profiles.manage, plus the scopes addToBrand needs for each kind of record. Only records in this brand change.
 
-        Needs: the projects.manage scope.
+        Needs: the profiles.manage scope.
         POST /v1/workspaces/{ws}/brands/{brand}/remove
         """
         return self._call(
@@ -18618,9 +18698,10 @@ class Operations(_Mixin):
     ) -> Any:
         """Reply to a customer.
 
-        Scope: inbox.manage. Emails the customer from the support mailbox the conversation came in on, in the same
-        thread. It is sent in the background: the message's `status` goes from sending to sent or failed (with
-        `error`). The address must pass the policy check for mail a person asked for: an unsubscribe from marketing
+        Scope: inbox.manage. Emails the customer in the same thread: from the support mailbox the conversation came in
+        on, or, for one that came by forwarding, through the workspace's email provider from the address the customer
+        wrote to (409 `no_email_provider` or `email_domain_not_verified` until that is set up). It is sent in the
+        background: the message's `status` goes from sending to sent or failed (with `error`). The address must pass the policy check for mail a person asked for: an unsubscribe from marketing
         doesn't stop it, a bounce or a block does (409 `blocked`). The conversation becomes pending (waiting on the
         customer) unless `status` says otherwise, and the first reply sets `first_reply_at`.
 
@@ -20124,8 +20205,9 @@ class Operations(_Mixin):
         Scope: partners.manage. Every action rule a conversion matches gives a reward, but only one cash rule (percent
         or fixed) pays, whatever the rules' order: a partner's own rule (partner_id) beats their group's, which beats one
         for everyone; then the highest tier (min_sales) reached; then the narrower recurrence (first, then months, then
-        every); then a rule for named product_ids; then the one paying more. [] makes the program track only. Rewards
-        already in the ledger keep what they earned.
+        every); then a rule for named product_ids; then the one paying more. A cash flow with stacking adds pays on top.
+        Flows can also have conditions, their own approval, overrides per partner or product, and kind group (move the
+        partner to a group). [] makes the program track only. Rewards already in the ledger keep what they earned.
 
         Needs: the partners.manage scope.
         PUT /v1/workspaces/{ws}/partner-programs/{id}/rules
@@ -21717,7 +21799,7 @@ class Operations(_Mixin):
         *,
         ws: str | None = None,
         require_mission: bool | None = None,
-        scopes: list[str] | None = None,
+        scopes: list[Any] | None = None,
         extra_body: dict[str, Any] | None = None,
         idempotency_key: str | None = None,
     ) -> Any:
@@ -22098,7 +22180,7 @@ class Operations(_Mixin):
         max_priority: Literal["low", "normal", "high"] | None = None,
         may_take_mailboxes: bool | None = None,
         name: str | None = None,
-        scopes: list[str] | None = None,
+        scopes: list[Any] | None = None,
         extra_body: dict[str, Any] | None = None,
         idempotency_key: str | None = None,
     ) -> Any:
@@ -22586,9 +22668,9 @@ class Operations(_Mixin):
     ) -> Any:
         """Edit, archive or restore an ideal customer profile.
 
-        Scope: projects.manage. A change to description or filters bumps the profile's `version`.
+        Scope: profiles.manage. A change to description or filters bumps the profile's `version`.
 
-        Needs: the projects.manage scope.
+        Needs: the profiles.manage scope.
         PATCH /v1/workspaces/{ws}/ideal-customer-profiles/{id}
         """
         return self._call(
@@ -23051,6 +23133,8 @@ class Operations(_Mixin):
         ws: str | None = None,
         brand_id: str | None = None,
         description: str | None = None,
+        exclusion_group: str | None = None,
+        group_share: int | None = None,
         key: str | None = None,
         name: str | None = None,
         on_site: bool | None = None,
@@ -23077,6 +23161,8 @@ class Operations(_Mixin):
             body={
                 "brand_id": brand_id,
                 "description": description,
+                "exclusion_group": exclusion_group,
+                "group_share": group_share,
                 "key": key,
                 "name": name,
                 "on_site": on_site,
@@ -24328,7 +24414,7 @@ class Operations(_Mixin):
         ws: str | None = None,
         description: str | None = None,
         name: str | None = None,
-        scopes: list[str] | None = None,
+        scopes: list[Any] | None = None,
         extra_body: dict[str, Any] | None = None,
         idempotency_key: str | None = None,
     ) -> Any:

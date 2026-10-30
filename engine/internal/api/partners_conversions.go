@@ -635,8 +635,14 @@ func (c *conversionRun) leadOrSale(ctx context.Context) error {
 	if in.Type == "custom" {
 		trigger = in.EventName
 	}
+	var facts partners.Facts
+	if partners.NeedsFacts(rules) {
+		if facts, err = conversionFacts(ctx, tx, m, f.id, conv, prior, amount, in); err != nil {
+			return err
+		}
+	}
 	earned := partners.Rewards(rules, partners.Conversion{Trigger: trigger, AmountCents: amount, ProductID: in.ProductID,
-		PartnerID: m.id, GroupID: m.groupID, PriorSales: prior, FirstSaleAt: f.firstSaleAt, At: in.at})
+		PartnerID: m.id, GroupID: m.groupID, PriorSales: prior, FirstSaleAt: f.firstSaleAt, At: in.at, Facts: facts})
 	if c.source == "browser" {
 		// Anyone can call outflare.signup(): it makes the lead, and pays
 		// only when the program trusts it to.
@@ -648,8 +654,14 @@ func (c *conversionRun) leadOrSale(ctx context.Context) error {
 			earned = nil
 		}
 	}
-	hold := in.at.AddDate(0, 0, m.holdDays)
 	for _, e := range earned {
+		if e.Kind == "group" {
+			if err := c.switchGroup(ctx, m, e.Rule); err != nil {
+				return err
+			}
+			continue
+		}
+		hold, auto := rewardApproval(e.Rule, in.at, m)
 		recipient := m.recordID
 		if e.Side == "referred" {
 			recipient = rec
@@ -657,7 +669,7 @@ func (c *conversionRun) leadOrSale(ctx context.Context) error {
 		ruleID := e.Rule.ID
 		id, err := insertPartnerReward(ctx, tx, c.ws, rewardEntry{program: m.programID, membership: m.id, side: e.Side, recipient: recipient,
 			kind: e.Kind, conversion: &conv, rule: &ruleID, amount: e.AmountCents, currency: m.currency, action: e.Rule.Action,
-			actionData: e.Rule.ActionData, hold: hold})
+			actionData: e.Rule.ActionData, hold: hold, autoApprove: auto})
 		if err != nil {
 			return err
 		}
@@ -668,13 +680,13 @@ func (c *conversionRun) leadOrSale(ctx context.Context) error {
 		if err := c.audit(ctx, "partner_reward.created", "partner_reward", id, d); err != nil {
 			return err
 		}
-		if m.autoApprove && !hold.After(time.Now()) {
+		if (auto == nil && m.autoApprove || auto != nil && *auto) && !hold.After(time.Now()) {
 			if err := approvePartnerReward(ctx, tx, c.p, c.ws, id, "auto"); err != nil {
 				return err
 			}
 		}
 	}
-	if slices.ContainsFunc(earned, func(e partners.Earned) bool { return e.Side == "partner" }) {
+	if slices.ContainsFunc(earned, func(e partners.Earned) bool { return e.Side == "partner" && e.Kind != "group" }) {
 		if err := enqueuePartnerNotify(ctx, tx, c.ws, partnerNotify{Kind: "conversion", PartnerID: m.id, Ref: conv}); err != nil {
 			return err
 		}
@@ -1115,4 +1127,75 @@ func (s *Server) listPartnerReferrals(w http.ResponseWriter, r *http.Request) {
 		list = []partnerReferralView{}
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"data": list, "next_before": next})
+}
+
+// rewardApproval is when a flow's reward is due and whether it is then
+// approved on its own (nil: as the program says).
+func rewardApproval(r partners.Rule, at time.Time, m *membershipRow) (time.Time, *bool) {
+	yes, no := true, false
+	switch r.Approval {
+	case partners.ApprovalAuto:
+		return at, &yes
+	case partners.ApprovalAfterDays:
+		if r.ApprovalDays != nil {
+			return at.AddDate(0, 0, *r.ApprovalDays), &yes
+		}
+	case partners.ApprovalManual:
+		return at, &no
+	}
+	return at.AddDate(0, 0, m.holdDays), nil
+}
+
+// switchGroup moves the partner to a group flow's target group.
+func (c *conversionRun) switchGroup(ctx context.Context, m *membershipRow, r partners.Rule) error {
+	tag, err := c.tx.Exec(ctx, `UPDATE partner_memberships SET group_id = $2, updated_at = now() WHERE id = $1 AND group_id IS DISTINCT FROM $2::uuid`,
+		m.id, r.TargetGroupID)
+	if err != nil || tag.RowsAffected() == 0 {
+		return err
+	}
+	m.groupID = r.TargetGroupID
+	return c.audit(ctx, "partner.group_switched", "partner", m.id, map[string]any{"program_id": m.programID, "group_id": r.TargetGroupID,
+		"rule_id": r.ID, "by": "flow"})
+}
+
+// conversionFacts are what flow conditions test for a conversion, read
+// after it was stored: the partner's totals, the customer's history before
+// it, and the transaction itself.
+func conversionFacts(ctx context.Context, tx pgx.Tx, m *membershipRow, referral, conv string, prior int, amount int64, in conversionInput) (partners.Facts, error) {
+	var country *string
+	var customers, leads int
+	var revenue, earnings, custPaid int64
+	var custSales int
+	var firstSale *time.Time
+	var signedUp time.Time
+	err := tx.QueryRow(ctx, `SELECT
+		(SELECT r.attributes->>'country' FROM records r WHERE r.id = $2),
+		(SELECT count(*) FILTER (WHERE status = 'customer') FROM partner_referrals WHERE membership_id = $1)::int,
+		(SELECT count(*) FROM partner_referrals WHERE membership_id = $1)::int,
+		(SELECT COALESCE(sum(CASE WHEN v.type = 'sale' THEN v.amount_cents WHEN v.type = 'refund' THEN -v.amount_cents ELSE 0 END), 0)
+			FROM partner_conversions v JOIN partner_referrals f ON f.id = v.referral_id WHERE f.membership_id = $1)::bigint,
+		(SELECT COALESCE(sum(amount_cents), 0) FROM partner_rewards WHERE membership_id = $1 AND side = 'partner'
+			AND kind IN ('cash', 'fee', 'adjustment') AND status <> 'rejected')::bigint,
+		(SELECT count(*) FROM partner_conversions WHERE referral_id = $3 AND type = 'sale' AND id <> $4)::int,
+		(SELECT COALESCE(sum(CASE WHEN type = 'sale' THEN amount_cents WHEN type = 'refund' THEN -amount_cents ELSE 0 END), 0)
+			FROM partner_conversions WHERE referral_id = $3 AND id <> $4)::bigint,
+		f.first_sale_at, f.created_at
+		FROM partner_referrals f WHERE f.id = $3`, m.id, m.recordID, referral, conv).
+		Scan(&country, &customers, &leads, &revenue, &earnings, &custSales, &custPaid, &firstSale, &signedUp)
+	if err != nil {
+		return nil, err
+	}
+	facts := partners.Facts{
+		"partner.id": m.id, "partner.transactions": float64(prior), "partner.customers": float64(customers),
+		"partner.leads": float64(leads), "partner.revenue_cents": float64(revenue), "partner.earnings_cents": float64(earnings),
+		"customer.transactions": float64(custSales), "customer.total_paid_cents": float64(custPaid), "customer.signed_up_at": signedUp,
+		"transaction.amount_cents": float64(amount), "transaction.product_id": in.ProductID, "transaction.recurring": in.Recurring,
+	}
+	if country != nil && *country != "" {
+		facts["partner.country"] = *country
+	}
+	if firstSale != nil {
+		facts["customer.first_sale_at"] = *firstSale
+	}
+	return facts, nil
 }

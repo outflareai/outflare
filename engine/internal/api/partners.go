@@ -174,14 +174,17 @@ type partnerQuerier interface {
 // partnerRules loads a program's rules in order.
 func partnerRules(ctx context.Context, q partnerQuerier, ws, program string) ([]partners.Rule, error) {
 	rows, err := q.Query(ctx, `SELECT id::text, group_id::text, membership_id::text, trigger, side, kind, percent_bp, amount_cents, action, action_data,
-		recurrence, months, min_sales, product_ids FROM partner_reward_rules WHERE workspace_id = $1 AND program_id = $2 ORDER BY created_at, id`, ws, program)
+		recurrence, months, min_sales, product_ids, name, conditions, approval, approval_days, stacking, overrides, target_group_id::text FROM partner_reward_rules WHERE workspace_id = $1 AND program_id = $2 ORDER BY created_at, id`, ws, program)
 	if err != nil {
 		return nil, err
 	}
 	return pgx.CollectRows(rows, func(row pgx.CollectableRow) (partners.Rule, error) {
 		var r partners.Rule
 		err := row.Scan(&r.ID, &r.GroupID, &r.PartnerID, &r.Trigger, &r.Side, &r.Kind, &r.PercentBP, &r.AmountCents, &r.Action, &r.ActionData,
-			&r.Recurrence, &r.Months, &r.MinSales, &r.ProductIDs)
+			&r.Recurrence, &r.Months, &r.MinSales, &r.ProductIDs, &r.Name, &r.Conditions, &r.Approval, &r.ApprovalDays, &r.Stacking, &r.Overrides, &r.TargetGroupID)
+		if r.Overrides == nil {
+			r.Overrides = []partners.Override{}
+		}
 		return r, err
 	})
 }
@@ -597,6 +600,14 @@ type partnerRuleIn struct {
 	Months      *int           `json:"months"`
 	MinSales    int            `json:"min_sales"`
 	ProductIDs  []string       `json:"product_ids"`
+
+	Name          string              `json:"name"`
+	Conditions    partners.Conditions `json:"conditions"`
+	Approval      string              `json:"approval"`
+	ApprovalDays  *int                `json:"approval_days"`
+	Stacking      string              `json:"stacking"`
+	Overrides     []partners.Override `json:"overrides"`
+	TargetGroupID *string             `json:"target_group_id"`
 }
 
 var (
@@ -629,8 +640,12 @@ func checkPartnerRules(in []partnerRuleIn, groups, members []string) ([]partners
 			return nil, bad("trigger is signup, sale or a custom conversion's event name, such as trial_started")
 		case r.Side != "partner" && r.Side != "referred":
 			return nil, bad("side is partner or referred")
-		case !slices.Contains([]string{"percent", "fixed", "action"}, r.Kind):
-			return nil, bad("kind is percent, fixed or action")
+		case !slices.Contains([]string{"percent", "fixed", "action", "group"}, r.Kind):
+			return nil, bad("kind is percent, fixed, action, or group (move the partner to target_group_id)")
+		case r.Kind == "group" && (r.TargetGroupID == nil || !slices.Contains(groups, *r.TargetGroupID)):
+			return nil, bad("a group flow moves the partner to target_group_id, a group of this program")
+		case r.Kind == "group" && r.Side == "referred":
+			return nil, bad("a group flow moves the partner, so its side is partner")
 		case r.Side == "referred" && r.Kind != "action":
 			return nil, bad("a reward for the referred customer is an action, such as granting credit in your product")
 		case r.Kind == "percent" && (r.PercentBP == nil || *r.PercentBP < 1 || *r.PercentBP > 10000):
@@ -657,6 +672,49 @@ func checkPartnerRules(in []partnerRuleIn, groups, members []string) ([]partners
 			return nil, bad("partner_id is not a partner in this program")
 		case r.Partner != nil && r.Group != nil:
 			return nil, bad("a rule is for one partner (partner_id) or a group (group_id), not both")
+		case len(r.Name) > 120:
+			return nil, bad("name is at most 120 characters")
+		case r.Approval != "" && !slices.Contains([]string{partners.ApprovalProgram, partners.ApprovalAuto, partners.ApprovalAfterDays, partners.ApprovalManual}, r.Approval):
+			return nil, bad("approval is program, auto, after_days or manual")
+		case (r.Approval == partners.ApprovalAfterDays) != (r.ApprovalDays != nil):
+			return nil, bad("approval_days is set exactly when approval is after_days")
+		case r.ApprovalDays != nil && (*r.ApprovalDays < 0 || *r.ApprovalDays > 365):
+			return nil, bad("approval_days is 0 to 365")
+		case r.Stacking != "" && r.Stacking != partners.StackExclusive && r.Stacking != partners.StackAdds:
+			return nil, bad("stacking is exclusive or adds")
+		case len(r.Overrides) > 50:
+			return nil, bad("at most 50 overrides")
+		}
+		if err := r.Conditions.Check(); err != nil {
+			return nil, bad(err.Error())
+		}
+		for j, o := range r.Overrides {
+			switch {
+			case r.Kind != "percent" && r.Kind != "fixed":
+				return nil, bad("only percent and fixed flows take overrides")
+			case (o.PartnerID == nil) == (o.ProductID == nil):
+				return nil, bad(fmt.Sprintf("overrides[%d] names a partner_id or a product_id", j))
+			case o.PartnerID != nil && !slices.Contains(members, *o.PartnerID):
+				return nil, bad(fmt.Sprintf("overrides[%d].partner_id is not a partner in this program", j))
+			case o.ProductID != nil && (*o.ProductID == "" || len(*o.ProductID) > 200):
+				return nil, bad(fmt.Sprintf("overrides[%d].product_id is 1 to 200 characters", j))
+			case r.Kind == "percent" && (o.PercentBP == nil || *o.PercentBP < 1 || *o.PercentBP > 10000 || o.AmountCents != nil):
+				return nil, bad(fmt.Sprintf("overrides[%d] of a percent flow sets percent_bp, 1 to 10000", j))
+			case r.Kind == "fixed" && (o.AmountCents == nil || *o.AmountCents < 1 || o.PercentBP != nil):
+				return nil, bad(fmt.Sprintf("overrides[%d] of a fixed flow sets amount_cents above 0", j))
+			}
+		}
+		if r.Approval == "" {
+			r.Approval = partners.ApprovalProgram
+		}
+		if r.Stacking == "" {
+			r.Stacking = partners.StackExclusive
+		}
+		if r.Overrides == nil {
+			r.Overrides = []partners.Override{}
+		}
+		if r.Kind != "group" {
+			r.TargetGroupID = nil
 		}
 		if r.Trigger != "sale" {
 			r.Recurrence, r.Months = "every", nil
@@ -670,6 +728,9 @@ func checkPartnerRules(in []partnerRuleIn, groups, members []string) ([]partners
 		if r.Kind != "action" {
 			r.Action, r.ActionData = "", nil
 		}
+		if r.Kind == "group" {
+			r.Stacking, r.Overrides = partners.StackExclusive, []partners.Override{}
+		}
 		if r.ActionData == nil {
 			r.ActionData = map[string]any{}
 		}
@@ -681,7 +742,8 @@ func checkPartnerRules(in []partnerRuleIn, groups, members []string) ([]partners
 		}
 		out = append(out, partners.Rule{GroupID: r.Group, PartnerID: r.Partner, Trigger: r.Trigger, Side: r.Side, Kind: r.Kind, PercentBP: r.PercentBP,
 			AmountCents: r.AmountCents, Action: r.Action, ActionData: r.ActionData, Recurrence: r.Recurrence, Months: r.Months,
-			MinSales: r.MinSales, ProductIDs: r.ProductIDs})
+			MinSales: r.MinSales, ProductIDs: r.ProductIDs, Name: strings.TrimSpace(r.Name), Conditions: r.Conditions, Approval: r.Approval,
+			ApprovalDays: r.ApprovalDays, Stacking: r.Stacking, Overrides: r.Overrides, TargetGroupID: r.TargetGroupID})
 	}
 	return out, nil
 }
@@ -692,6 +754,11 @@ func (s *Server) ruleMembers(ctx context.Context, program string, in []partnerRu
 	for _, r := range in {
 		if r.Partner != nil && validUUID(*r.Partner) {
 			ids = append(ids, *r.Partner)
+		}
+		for _, o := range r.Overrides {
+			if o.PartnerID != nil && validUUID(*o.PartnerID) {
+				ids = append(ids, *o.PartnerID)
+			}
 		}
 	}
 	if len(ids) == 0 {
@@ -708,11 +775,23 @@ func insertPartnerRules(ctx context.Context, tx pgx.Tx, ws, program string, rule
 	for i, r := range rules {
 		data, _ := json.Marshal(r.ActionData)
 		// created_at orders them, so each is a microsecond after the last.
+		if r.Approval == "" {
+			r.Approval = partners.ApprovalProgram
+		}
+		if r.Stacking == "" {
+			r.Stacking = partners.StackExclusive
+		}
+		if r.Overrides == nil {
+			r.Overrides = []partners.Override{}
+		}
 		if _, err := tx.Exec(ctx, `INSERT INTO partner_reward_rules (workspace_id, program_id, group_id, trigger, side, kind, percent_bp,
-			amount_cents, action, action_data, recurrence, months, min_sales, product_ids, created_at, membership_id)
-			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, now() + make_interval(secs => $15::float8 / 1000000), $16)`,
+			amount_cents, action, action_data, recurrence, months, min_sales, product_ids, created_at, membership_id,
+			name, conditions, approval, approval_days, stacking, overrides, target_group_id)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, now() + make_interval(secs => $15::float8 / 1000000), $16,
+			$17, $18, $19, $20, $21, $22, $23)`,
 			ws, program, r.GroupID, r.Trigger, r.Side, r.Kind, r.PercentBP, r.AmountCents, r.Action, string(data), r.Recurrence,
-			r.Months, r.MinSales, r.ProductIDs, i, r.PartnerID); err != nil {
+			r.Months, r.MinSales, r.ProductIDs, i, r.PartnerID, r.Name, r.Conditions, r.Approval, r.ApprovalDays, r.Stacking, r.Overrides,
+			r.TargetGroupID); err != nil {
 			return err
 		}
 	}

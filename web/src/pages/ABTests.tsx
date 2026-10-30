@@ -4,7 +4,7 @@
 // version wins, in plain words.
 
 import { useCallback, useEffect, useState, type FormEvent } from "react";
-import type { ABTest, ABTestBreakdown, ABTestComparison, ABTestGoal, ABTestResults, Flag } from "@outflare/sdk";
+import type { ABTest, ABTestBreakdown, ABTestComparison, ABTestGoal, ABTestPreviews, ABTestResults, Flag } from "@outflare/sdk";
 import { api, errorMessage } from "../api";
 import { Badge, Button, Card, confirmAction, Empty, ErrorText, field, Loading, PageHeader, toast, type tones } from "../ui";
 import { ago } from "../format";
@@ -389,6 +389,7 @@ function TestSheet({ ws, test, flag, canManage, onClose, onChanged, onFlagChange
   const [guardrails, setGuardrails] = useState<ABTestGoal[]>(test.guardrails);
   const [minEffect, setMinEffect] = useState(test.min_effect);
   const [decision, setDecision] = useState("");
+  const [checked, setChecked] = useState(0);
 
   useEffect(() => {
     setResults(null);
@@ -510,7 +511,8 @@ function TestSheet({ ws, test, flag, canManage, onClose, onChanged, onFlagChange
                   <VersionsPanel ws={ws} flag={flag} onAdded={onFlagChanged} />
                 </div>
               )}
-              <ChecklistPanel ws={ws} testID={test.id} deps={JSON.stringify([goals, guardrails, minEffect])} />
+              <PreviewPanel ws={ws} testID={test.id} canManage={canManage} onChecked={() => setChecked((n) => n + 1)} />
+              <ChecklistPanel ws={ws} testID={test.id} deps={JSON.stringify([goals, guardrails, minEffect, checked])} />
               <p className="text-muted-foreground">Make sure the pages read the flag (<span className="font-mono">outflare.flag("{test.flag_key}")</span>, or <span className="font-mono">data-flags</span> and its class), so visitors join when they see their version.</p>
               {canManage && (
                 <div className="flex gap-2 border-t pt-4">
@@ -570,6 +572,7 @@ function TestSheet({ ws, test, flag, canManage, onClose, onChanged, onFlagChange
                 </Card>
               ))}
               <BreakdownPanel ws={ws} testID={test.id} control={test.control} names={names} />
+              <InteractionsPanel ws={ws} testID={test.id} names={names} />
               <p className="text-[12px] text-muted-foreground">
                 Visitors split {results.result.arms.map((a) => `${a.variant} ${a.visitors.toLocaleString()}`).join(" · ")}
                 {results.result.sample_ratio_mismatch ? " — further from the flag's weights than luck explains." : " — in line with the flag's weights."}{" "}
@@ -661,6 +664,55 @@ const dimensions = [
   { value: "visitor", label: "New or returning" },
 ] as const;
 
+// InteractionsPanel checks the test against others that ran at the same
+// time, on demand: whether one change altered the other's effect.
+function InteractionsPanel({ ws, testID, names }: { ws: string; testID: string; names: (v: string) => string }) {
+  type Data = { interactions: { test_id: string; name: string; flag_key: string; overlap: number; versions: { variant: string; p_value: number; interacts: boolean; effects: { other_variant: string; visitors: number; difference: number }[] }[] }[] };
+  const [data, setData] = useState<Data | null>(null);
+  const [error, setError] = useState("");
+  const [asked, setAsked] = useState(false);
+  const check = () => {
+    setAsked(true);
+    api.GET("/v1/workspaces/{ws}/ab-tests/{test}/interactions", { params: { path: { ws, test: testID } } }).then(({ data, error }) => {
+      setError(error ? errorMessage(error) : "");
+      setData((data as Data | undefined) ?? null);
+    });
+  };
+  return (
+    <Card title="Tests at the same time">
+      <div className="space-y-3 text-[12px]">
+        {!asked && (
+          <div className="flex items-center gap-2">
+            <span className="text-muted-foreground">Did another test running at the same time change this one's effect?</span>
+            <Button variant="ghost" onClick={check}>Check</Button>
+          </div>
+        )}
+        {error && <ErrorText>{error}</ErrorText>}
+        {asked && !data && !error && <Loading />}
+        {data && data.interactions.length === 0 && <p className="text-muted-foreground">No other test of another flag ran at the same time, outside this flag's exclusion group.</p>}
+        {data?.interactions.map((x) => (
+          <div key={x.test_id} className="space-y-1 rounded-md border p-2">
+            <div className="font-medium">
+              {x.name} <span className="font-mono text-muted-foreground">{x.flag_key}</span> · {x.overlap.toLocaleString()} visitors saw both
+            </div>
+            {x.versions.map((v) => (
+              <div key={v.variant}>
+                <span className="font-mono">{names(v.variant)}</span>:{" "}
+                {v.interacts ? (
+                  <Badge tone="amber">Interacts (p = {v.p_value.toFixed(3)})</Badge>
+                ) : (
+                  <span className="text-muted-foreground">no clear interaction (p = {v.p_value.toFixed(2)})</span>
+                )}{" "}
+                <span className="text-muted-foreground">{v.effects.map((e) => `with ${e.other_variant}: ${e.difference >= 0 ? "+" : ""}${e.difference.toFixed(3)}`).join(", ")}</span>
+              </div>
+            ))}
+          </div>
+        ))}
+      </div>
+    </Card>
+  );
+}
+
 // BreakdownPanel shows the first goal group by group, on demand: where a
 // change works, corrected so a lucky group doesn't mislead.
 function BreakdownPanel({ ws, testID, control, names }: { ws: string; testID: string; control: string; names: (v: string) => string }) {
@@ -721,6 +773,101 @@ function segmentLabel(by: string, key: string): string {
 }
 
 const checkTone = { ok: "green", warn: "amber", fail: "red" } as const;
+
+// PreviewPanel gives a link per version on the pages that show the flag,
+// and lets a person mark each version as looking right or broken.
+function PreviewPanel({ ws, testID, canManage, onChecked }: { ws: string; testID: string; canManage: boolean; onChecked: () => void }) {
+  const [data, setData] = useState<ABTestPreviews | null>(null);
+  const [page, setPage] = useState("");
+  const [notes, setNotes] = useState<Record<string, string>>({});
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState("");
+  const load = useCallback(
+    (url?: string) => {
+      setError("");
+      api.GET("/v1/workspaces/{ws}/ab-tests/{test}/previews", { params: { path: { ws, test: testID }, query: url ? { page: url } : {} } }).then(({ data, error }) => {
+        if (error) setError(errorMessage(error));
+        else setData(data);
+      });
+    },
+    [ws, testID],
+  );
+  useEffect(() => load(), [load]);
+  const check = async (variant: string, status: "ok" | "broken") => {
+    setBusy(variant);
+    setError("");
+    const { data: out, error } = await api.POST("/v1/workspaces/{ws}/ab-tests/{test}/checks", {
+      params: { path: { ws, test: testID } },
+      body: { variant, status, note: notes[variant] ?? "" },
+    });
+    setBusy("");
+    if (error) return setError(errorMessage(error));
+    // Keep the pages already shown (they may come from a typed address).
+    setData((cur) => (cur && out ? { ...out, pages: cur.pages } : out ?? null));
+    onChecked();
+  };
+  if (!data) return error ? <ErrorText>{error}</ErrorText> : null;
+  return (
+    <div className="space-y-3 rounded-md border p-3">
+      <span className="block font-medium">Preview and check each version</span>
+      <p className="text-muted-foreground text-[12px]">{data.hint}</p>
+      <ErrorText>{error}</ErrorText>
+      {data.pages.map((p) => (
+        <div key={p.url} className="space-y-1">
+          <span className="block truncate font-mono text-[12px]" title={p.url}>
+            {p.url}
+            {p.visitors > 0 && <span className="text-muted-foreground"> · {p.visitors} visitors</span>}
+          </span>
+          <div className="flex flex-wrap gap-2">
+            {p.links.map((l) => (
+              <a key={l.variant} href={l.url} target="_blank" rel="noreferrer" className="text-primary text-[12px] underline">
+                {l.variant}
+              </a>
+            ))}
+          </div>
+        </div>
+      ))}
+      <form
+        className="flex gap-2"
+        onSubmit={(e) => {
+          e.preventDefault();
+          load(page.trim());
+        }}
+      >
+        <input className={field} placeholder="https://… another page that reads the flag" value={page} onChange={(e) => setPage(e.target.value)} />
+        <Button variant="ghost" disabled={!page.trim()}>Get links</Button>
+      </form>
+      <div className="space-y-2 border-t pt-3">
+        {data.versions.map((v) => (
+          <div key={v.key} className="space-y-1">
+            <div className="flex flex-wrap items-center gap-2 text-[12px]">
+              <span className="font-mono">{v.key}</span>
+              {v.control && <Badge>Control</Badge>}
+              {v.check && !v.check.stale && <Badge tone={v.check.status === "ok" ? "green" : "red"}>{v.check.status === "ok" ? "Looks right" : "Broken"}</Badge>}
+              {v.check?.stale && <Badge tone="amber">Changed since checked</Badge>}
+              {!v.check && <span className="text-muted-foreground">Not checked</span>}
+              {v.check && <span className="text-muted-foreground">{ago(v.check.checked_at)}</span>}
+            </div>
+            {v.check?.note && <p className="text-muted-foreground text-[12px]">{v.check.note}</p>}
+            {canManage && (
+              <div className="flex gap-2">
+                <input
+                  className={field}
+                  placeholder="Note (optional)"
+                  maxLength={1000}
+                  value={notes[v.key] ?? ""}
+                  onChange={(e) => setNotes((n) => ({ ...n, [v.key]: e.target.value }))}
+                />
+                <Button variant="ghost" disabled={busy !== ""} onClick={() => check(v.key, "ok")}>Looks right</Button>
+                <Button variant="ghost" disabled={busy !== ""} onClick={() => check(v.key, "broken")}>Broken</Button>
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
 
 // RegistrationCard shows what the test set out to show when it started.
 function RegistrationCard({ reg }: { reg: NonNullable<ABTest["registration"]> }) {

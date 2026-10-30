@@ -92,6 +92,11 @@ type Config struct {
 	// Found records the address find_email settled on for an item, with
 	// its code (found, verified or risky) and confidence (0-100).
 	Found func(ctx context.Context, it pipeline.Item, email string, code emailfind.Code, confidence int) error
+	// Spent records what finding or verifying an item's address cost on
+	// the workspace's own paid verifier (Units credits on Connection),
+	// before Found or Stopped. Called only when it cost something; a
+	// cached check costs nothing. Optional.
+	Spent func(ctx context.Context, it pipeline.Item, cost emailfind.Cost) error
 	// Linked records, in tx, that an item's person is recordID. Warnings
 	// are opt-out list entries that let them through, and risky_email.
 	Linked func(ctx context.Context, tx pgx.Tx, it pipeline.Item, recordID string, warnings []string) error
@@ -228,6 +233,11 @@ func (s steps) findEmail(ctx context.Context, items []pipeline.Item) ([]pipeline
 
 // found turns one finder answer into what happens to the item.
 func (s steps) found(ctx context.Context, it pipeline.Item, r emailfind.ItemResult) pipeline.Result {
+	if s.c.Spent != nil && (r.Cost.Units > 0 || r.Cost.Cents > 0) {
+		if err := s.c.Spent(ctx, it, r.Cost); err != nil {
+			return retry(it, err)
+		}
+	}
 	switch r.Code {
 	case emailfind.CodeFound, emailfind.CodeVerified, emailfind.CodeRisky:
 		if err := s.c.Found(ctx, it, r.Email, r.Code, r.Confidence); err != nil {

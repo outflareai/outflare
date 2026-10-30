@@ -171,6 +171,7 @@ func (s *Server) authenticateSession(r *http.Request) (*principal, error) {
 			RETURNING id, actor_id, workspace_id, scopes, brand_id::text, coalesce(created_by::text, ''),
 				coalesce((SELECT g.id::text FROM oauth_grants g WHERE g.api_token_id = api_tokens.id), ''), require_mission`, hash,
 		).Scan(&p.TokenID, &p.ActorID, &p.TokenWorkspaceID, &p.TokenScopes, &p.TokenBrandID, &p.TokenOwnerID, &p.TokenGrantID, &p.TokenRequiresMission)
+		p.TokenScopes = auth.Rename(p.TokenScopes)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, nil
 		}

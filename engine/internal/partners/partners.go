@@ -55,6 +55,18 @@ type Rule struct {
 	// this many earlier sales in the program.
 	MinSales   int      `json:"min_sales"`
 	ProductIDs []string `json:"product_ids"`
+
+	// Name says what the flow is for, such as "Launch bonus".
+	Name       string     `json:"name"`
+	Conditions Conditions `json:"conditions"`
+	// Approval is program, auto, after_days (ApprovalDays) or manual.
+	Approval     string `json:"approval"`
+	ApprovalDays *int   `json:"approval_days"`
+	// Stacking is exclusive or adds, for cash flows.
+	Stacking  string     `json:"stacking"`
+	Overrides []Override `json:"overrides"`
+	// TargetGroupID is where a group flow moves the partner.
+	TargetGroupID *string `json:"target_group_id"`
 }
 
 // Preset is what a new program of a kind starts with.
@@ -101,6 +113,9 @@ type Conversion struct {
 	PartnerID string
 	// GroupID is the partner's group, if any.
 	GroupID *string
+	// Facts are what conditions test; gathered only when a rule has
+	// conditions (NeedsFacts).
+	Facts Facts
 	// PriorSales is how many sales the partner made in the program before
 	// this one.
 	PriorSales int
@@ -114,7 +129,7 @@ type Conversion struct {
 type Earned struct {
 	Rule        Rule
 	Side        string
-	Kind        string // cash or action
+	Kind        string // cash, action, or group (move the partner to Rule.TargetGroupID)
 	AmountCents int64
 }
 
@@ -132,6 +147,9 @@ func (r Rule) matches(c Conversion) bool {
 		return false
 	}
 	if len(r.ProductIDs) > 0 && !slices.Contains(r.ProductIDs, c.ProductID) {
+		return false
+	}
+	if !r.Conditions.Holds(c.Facts, c.At) {
 		return false
 	}
 	if r.Trigger == "sale" {
@@ -180,25 +198,27 @@ func better(a, b Rule, c Conversion) bool {
 // narrowness ranks recurrences: the narrower one is the more specific rule.
 var narrowness = map[string]int{"every": 0, "months": 1, "first": 2}
 
-// pays is the cash a cash rule gives for a conversion.
+// pays is the cash a cash rule gives for a conversion, after overrides.
 func (r Rule) pays(c Conversion) int64 {
+	bp, cents := r.rate(c)
 	switch {
-	case r.Kind == "percent" && r.PercentBP != nil:
-		return Percent(c.AmountCents, *r.PercentBP)
-	case r.Kind == "fixed" && r.AmountCents != nil:
-		return *r.AmountCents
+	case r.Kind == "percent" && bp != nil:
+		return Percent(c.AmountCents, *bp)
+	case r.Kind == "fixed" && cents != nil:
+		return *cents
 	}
 	return 0
 }
 
 // Rewards returns what a conversion earns under rules, in rule order.
-// Rules stack, except that only the best cash rule counts (see better),
-// so tiers, group rates and partners' own rates replace the base rate
-// instead of adding to it.
+// Every matching rule pays, except that among exclusive cash rules for
+// the partner only the best counts (see better), so tiers, group rates and
+// partners' own rates replace the base rate instead of adding to it. A
+// cash rule that adds pays on top.
 func Rewards(rules []Rule, c Conversion) []Earned {
 	best := -1
 	for i, r := range rules {
-		if r.Side == "partner" && r.cash() && r.matches(c) && (best < 0 || better(r, rules[best], c)) {
+		if r.Side == "partner" && r.cash() && r.Stacking != StackAdds && r.matches(c) && (best < 0 || better(r, rules[best], c)) {
 			best = i
 		}
 	}
@@ -208,15 +228,15 @@ func Rewards(rules []Rule, c Conversion) []Earned {
 			continue
 		}
 		switch {
-		case r.cash() && i != best:
-		case r.Kind == "percent":
-			if amt := Percent(c.AmountCents, *r.PercentBP); amt > 0 {
+		case r.cash() && r.Side == "partner" && r.Stacking != StackAdds && i != best:
+		case r.cash():
+			if amt := r.pays(c); amt > 0 {
 				out = append(out, Earned{Rule: r, Side: r.Side, Kind: "cash", AmountCents: amt})
 			}
-		case r.Kind == "fixed":
-			out = append(out, Earned{Rule: r, Side: r.Side, Kind: "cash", AmountCents: *r.AmountCents})
 		case r.Kind == "action":
 			out = append(out, Earned{Rule: r, Side: r.Side, Kind: "action"})
+		case r.Kind == "group" && r.TargetGroupID != nil:
+			out = append(out, Earned{Rule: r, Side: "partner", Kind: "group"})
 		}
 	}
 	return out

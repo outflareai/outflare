@@ -397,6 +397,7 @@ func NewServer(pool *pgxpool.Pool, log *slog.Logger, opts Options) *Server {
 	if s.seoSyncer != nil && s.seoSyncer.Store != nil {
 		s.seoSyncer.Watch()
 	}
+	s.registerSupportForwarding()
 	return s
 }
 

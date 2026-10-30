@@ -317,6 +317,8 @@
     });
     if (anyAd) p.ad = ad;
     if (q.get("ofc")) p.ofc = q.get("ofc");
+    // A redirect link's click key, so the visit can claim the click.
+    if (/^[a-z0-9]{16}$/.test(q.get("ofclk") || "")) p.ofclk = q.get("ofclk");
     var ref = q.get("ref") || q.get("via");
     if (ref) p.ref = ref;
     return p;

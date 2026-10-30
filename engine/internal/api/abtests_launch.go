@@ -84,6 +84,12 @@ func (s *Server) abChecklist(ctx context.Context, ws string, t abTestView, f fla
 		}
 	}
 
+	if c, ok, err := s.abOverlapCheck(ctx, ws, t, f); err != nil {
+		return nil, err
+	} else if ok && t.Status == "draft" {
+		out = append(out, c)
+	}
+
 	// Pages show the flag's versions: seen in the last 7 days.
 	var seen int64
 	if err := s.pool.QueryRow(ctx, `SELECT count(DISTINCT anonymous_id) FROM customer_events
@@ -136,6 +142,12 @@ func (s *Server) abChecklist(ctx context.Context, ws string, t abTestView, f fla
 			add("duration", "ok", fmt.Sprintf("Likely safe to stop in about %.0f week(s) if the change is +%.0f%%.", max(1, plan.Weeks), t.MinEffect*100))
 		}
 	}
+
+	qa, err := s.abQACheck(ctx, ws, t, f)
+	if err != nil {
+		return nil, err
+	}
+	out = append(out, qa)
 
 	if len(t.Guardrails) == 0 {
 		add("guardrails", "warn", "No guardrails: add one for what a winner mustn't hurt, such as errors or refunds.")

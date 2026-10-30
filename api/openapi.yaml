@@ -1147,7 +1147,7 @@ paths:
               properties:
                 name: { type: string, minLength: 1, maxLength: 60 }
                 description: { type: string, maxLength: 300 }
-                scopes: { type: array, items: { $ref: "#/components/schemas/Scope" } }
+                scopes: { type: array, items: { $ref: "#/components/schemas/ScopeInput" } }
       responses:
         "201":
           description: Created.
@@ -1177,7 +1177,7 @@ paths:
               properties:
                 name: { type: string, minLength: 1, maxLength: 60 }
                 description: { type: string, maxLength: 300 }
-                scopes: { type: array, items: { $ref: "#/components/schemas/Scope" } }
+                scopes: { type: array, items: { $ref: "#/components/schemas/ScopeInput" } }
       responses:
         "200":
           description: Changed.
@@ -1307,7 +1307,7 @@ paths:
                 name: { type: string }
                 scopes:
                   type: array
-                  items: { $ref: "#/components/schemas/Scope" }
+                  items: { $ref: "#/components/schemas/ScopeInput" }
                 expires_in_days: { type: integer, minimum: 1, maximum: 3650 }
                 daily_send_budget: { type: [integer, "null"], minimum: 1, maximum: 1000000 }
                 max_priority: { type: [string, "null"], enum: [low, normal, high, null] }
@@ -1402,7 +1402,7 @@ paths:
             schema:
               type: object
               properties:
-                scopes: { type: array, items: { $ref: "#/components/schemas/Scope" }, description: "The write scopes to allow. Empty is read only. Left out keeps them as they are." }
+                scopes: { type: array, items: { $ref: "#/components/schemas/ScopeInput" }, description: "The write scopes to allow. Empty is read only. Left out keeps them as they are." }
                 require_mission: { type: boolean, description: "Whether the app's changes need a mission a person approved. Left out keeps it as it is." }
       responses:
         "200":
@@ -17682,9 +17682,10 @@ paths:
       x-outflare-access: { scope: inbox.manage, brand_limited: true }
       summary: Reply to a customer
       description: |
-        Scope: inbox.manage. Emails the customer from the support mailbox the conversation came in on, in the same
-        thread. It is sent in the background: the message's `status` goes from sending to sent or failed (with
-        `error`). The address must pass the policy check for mail a person asked for: an unsubscribe from marketing
+        Scope: inbox.manage. Emails the customer in the same thread: from the support mailbox the conversation came in
+        on, or, for one that came by forwarding, through the workspace's email provider from the address the customer
+        wrote to (409 `no_email_provider` or `email_domain_not_verified` until that is set up). It is sent in the
+        background: the message's `status` goes from sending to sent or failed (with `error`). The address must pass the policy check for mail a person asked for: an unsubscribe from marketing
         doesn't stop it, a bounce or a block does (409 `blocked`). The conversation becomes pending (waiting on the
         customer) unless `status` says otherwise, and the first reply sets `first_reply_at`.
       tags: [support]
@@ -17994,13 +17995,13 @@ paths:
     parameters: [{ $ref: "#/components/parameters/Workspace" }]
     get:
       operationId: listCustomerProfiles
-      x-outflare-access: { scope: projects.read, brand_limited: true }
+      x-outflare-access: { scope: profiles.read, brand_limited: true }
       summary: List ideal customer profiles
       description: |
-        Scope: projects.read. Who the workspace sells to: each profile is a description in words plus filters in the
+        Scope: profiles.read. Who the workspace sells to: each profile is a description in words plus filters in the
         same vocabulary as lead searches. Lead lists, lead list fit scores and the lead finder read them. Active ones by
         default, by name.
-      tags: [projects]
+      tags: [profiles]
       parameters:
         - { name: status, in: query, schema: { type: string, enum: [active, archived, all] } }
         - { name: brand, in: query, description: "A brand's id or handle, none for shared profiles, or all.", schema: { type: string } }
@@ -18019,11 +18020,11 @@ paths:
         default: { $ref: "#/components/responses/Error" }
     post:
       operationId: createCustomerProfile
-      x-outflare-access: { scope: projects.manage, brand_limited: true }
+      x-outflare-access: { scope: profiles.manage, brand_limited: true }
       parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
       summary: Create an ideal customer profile
-      description: "Scope: projects.manage. Link it to lead lists with their `profile_id`. At most 500 per workspace."
-      tags: [projects]
+      description: "Scope: profiles.manage. Link it to lead lists with their `profile_id`. At most 500 per workspace."
+      tags: [profiles]
       requestBody:
         required: true
         content:
@@ -18044,10 +18045,10 @@ paths:
       - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
     get:
       operationId: getCustomerProfile
-      x-outflare-access: { scope: projects.read, brand_limited: true }
+      x-outflare-access: { scope: profiles.read, brand_limited: true }
       summary: Get an ideal customer profile
-      description: "Scope: projects.read."
-      tags: [projects]
+      description: "Scope: profiles.read."
+      tags: [profiles]
       responses:
         "200":
           description: The profile.
@@ -18058,12 +18059,12 @@ paths:
         default: { $ref: "#/components/responses/Error" }
     patch:
       operationId: updateCustomerProfile
-      x-outflare-access: { scope: projects.manage, brand_limited: true }
+      x-outflare-access: { scope: profiles.manage, brand_limited: true }
       parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
       summary: Edit, archive or restore an ideal customer profile
       description: |
-        Scope: projects.manage. A change to description or filters bumps the profile's `version`.
-      tags: [projects]
+        Scope: profiles.manage. A change to description or filters bumps the profile's `version`.
+      tags: [profiles]
       requestBody:
         required: true
         content:
@@ -20564,8 +20565,9 @@ paths:
         Scope: analytics.read. What would stop the test measuring anything useful: the flag (fail when archived, has one
         version or lost the control; warn when off), another running test of the flag (fail), whether pages showed its
         versions in the last 7 days, how long visitors waited for their version (delivery, once 20 were timed: warn
-        when one in ten waited over 400 ms), whether visitors reach the first goal, how long it is likely to take, and
-        guardrails. ready is false while any check fails.
+        when one in ten waited over 400 ms), whether visitors reach the first goal, how long it is likely to take, whether
+        a person previewed every version (qa: fail when one is marked broken, warn when one is unchecked or changed
+        since), and guardrails. ready is false while any check fails.
       tags: [ab-tests]
       responses:
         "200":
@@ -20584,7 +20586,7 @@ paths:
                       type: object
                       required: [id, status, text]
                       properties:
-                        id: { type: string, enum: [flag, one_at_a_time, exposures, delivery, goal, duration, guardrails] }
+                        id: { type: string, enum: [flag, one_at_a_time, overlap, exposures, delivery, goal, duration, qa, guardrails] }
                         status: { type: string, enum: [ok, warn, fail] }
                         text: { type: string }
         default: { $ref: "#/components/responses/Error" }
@@ -20617,6 +20619,62 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/ABTest" }
+        "202": { $ref: "#/components/responses/MissionHeld" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/workspaces/{ws}/ab-tests/{test}/previews:
+    parameters:
+      - { $ref: "#/components/parameters/Workspace" }
+      - { name: test, in: path, required: true, schema: { type: string, format: uuid } }
+    get:
+      operationId: getABTestPreviews
+      x-outflare-access: { scope: analytics.read }
+      summary: Preview an A/B test's versions
+      description: |
+        Scope: analytics.read. Links that show each version to the person who opens them, on the pages that showed the
+        flag most in the last 28 days (without their query strings), or on page when given; with no such page, the
+        test's brand website. A link adds of_flag=key:variant, which the site script reads: it shows that version for
+        the rest of the visit and counts nothing. Also each version's check, from checkABTestVersion.
+      tags: [ab-tests]
+      parameters:
+        - { name: page, in: query, required: false, schema: { type: string, maxLength: 2000 }, description: "A page of your site (http or https) to give links for." }
+      responses:
+        "200":
+          description: The links and checks.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ABTestPreviews" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/workspaces/{ws}/ab-tests/{test}/checks:
+    parameters:
+      - { $ref: "#/components/parameters/Workspace" }
+      - { name: test, in: path, required: true, schema: { type: string, format: uuid } }
+    post:
+      operationId: checkABTestVersion
+      x-outflare-access: { scope: analytics.manage }
+      summary: Record a check of an A/B test version
+      description: |
+        Scope: analytics.manage. Records that a person previewed a version: it renders right (ok) or is broken, with an
+        optional note. A check holds for the version's content as it was: once the content changes it is stale. A
+        broken version fails the checklist. 409 once the test has ended.
+      tags: [ab-tests]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [variant, status]
+              properties:
+                variant: { type: string, description: One of the flag's versions. }
+                status: { type: string, enum: [ok, broken] }
+                note: { type: string, maxLength: 1000 }
+      responses:
+        "200":
+          description: The links and checks, with this one.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ABTestPreviews" }
         "202": { $ref: "#/components/responses/MissionHeld" }
         default: { $ref: "#/components/responses/Error" }
   /v1/workspaces/{ws}/ab-tests/{test}/duplicate:
@@ -20658,6 +20716,61 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/ABTestResults" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/workspaces/{ws}/ab-tests/{test}/interactions:
+    parameters:
+      - { $ref: "#/components/parameters/Workspace" }
+      - { name: test, in: path, required: true, schema: { type: string, format: uuid } }
+    get:
+      operationId: getABTestInteractions
+      x-outflare-access: { scope: analytics.read }
+      summary: Check an A/B test against tests that overlapped it
+      description: |
+        Scope: analytics.read. For each other test (of another flag, outside this flag's exclusion group) that ran while
+        this one did, up to 10, the most recent first: how many of this test's visitors also saw the other flag, and each
+        version's effect on the first goal within each of the other flag's versions. p_value is Cochran's Q test that the
+        effects are the same; interacts is true below 0.01, meaning one change alters the other's effect. 409 for a draft.
+      tags: [ab-tests]
+      responses:
+        "200":
+          description: The interactions.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [test_id, interactions]
+                properties:
+                  test_id: { type: string, format: uuid }
+                  interactions:
+                    type: array
+                    items:
+                      type: object
+                      required: [test_id, name, flag_key, status, other_flag, overlap, versions]
+                      properties:
+                        test_id: { type: string, format: uuid, description: The other test. }
+                        name: { type: string }
+                        flag_key: { type: string }
+                        status: { type: string, enum: [running, done] }
+                        other_flag: { type: string }
+                        overlap: { type: integer, description: "This test's visitors who also saw the other flag." }
+                        versions:
+                          type: array
+                          items:
+                            type: object
+                            required: [variant, effects, p_value, interacts]
+                            properties:
+                              variant: { type: string }
+                              p_value: { type: number, minimum: 0, maximum: 1 }
+                              interacts: { type: boolean }
+                              effects:
+                                type: array
+                                items:
+                                  type: object
+                                  required: [other_variant, visitors, difference]
+                                  properties:
+                                    other_variant: { type: string }
+                                    visitors: { type: integer }
+                                    difference: { type: number, description: "The version's mean per visitor minus the control's, among these visitors." }
         default: { $ref: "#/components/responses/Error" }
   /v1/workspaces/{ws}/ab-tests/{test}/breakdown:
     parameters:
@@ -21345,11 +21458,11 @@ paths:
       - { $ref: "#/components/parameters/BrandRef" }
     post:
       operationId: addToBrand
-      x-outflare-access: { scope: projects.manage }
+      x-outflare-access: { scope: profiles.manage }
       parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
       summary: Move domains, mailboxes, lists, sequences or missions into a brand
       description: |
-        Scope: projects.manage, plus mailboxes.manage for domains and
+        Scope: profiles.manage, plus mailboxes.manage for domains and
         mailboxes, leads.manage for lists, sequences.manage for sequences
         and missions.run for missions. Records in another brand move to
         this one. A domain brings
@@ -21423,10 +21536,10 @@ paths:
       - { $ref: "#/components/parameters/BrandRef" }
     post:
       operationId: removeFromBrand
-      x-outflare-access: { scope: projects.manage }
+      x-outflare-access: { scope: profiles.manage }
       parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
       summary: Make a brand's records shared by every brand again
-      description: "Scope: projects.manage, plus the scopes addToBrand needs for each kind of record. Only records in this brand change."
+      description: "Scope: profiles.manage, plus the scopes addToBrand needs for each kind of record. Only records in this brand change."
       tags: [brands]
       requestBody:
         required: true
@@ -24476,8 +24589,9 @@ paths:
         Scope: partners.manage. Every action rule a conversion matches gives a reward, but only one cash rule (percent
         or fixed) pays, whatever the rules' order: a partner's own rule (partner_id) beats their group's, which beats one
         for everyone; then the highest tier (min_sales) reached; then the narrower recurrence (first, then months, then
-        every); then a rule for named product_ids; then the one paying more. [] makes the program track only. Rewards
-        already in the ledger keep what they earned.
+        every); then a rule for named product_ids; then the one paying more. A cash flow with stacking adds pays on top.
+        Flows can also have conditions, their own approval, overrides per partner or product, and kind group (move the
+        partner to a group). [] makes the program track only. Rewards already in the ledger keep what they earned.
       tags: [partners]
       requestBody:
         required: true
@@ -29441,14 +29555,16 @@ components:
         credits: { type: array, items: { $ref: "#/components/schemas/AttributionCredit" } }
     PartnerRule:
       type: object
-      required: [id, group_id, partner_id, trigger, side, kind, percent_bp, amount_cents, action, action_data, recurrence, months, min_sales, product_ids]
+      description: A reward flow, Tolt-style. Rules made before flows behave as before (no conditions, the program's approval, exclusive).
+      required: [id, group_id, partner_id, trigger, side, kind, percent_bp, amount_cents, action, action_data, recurrence, months, min_sales, product_ids,
+        name, conditions, approval, approval_days, stacking, overrides, target_group_id]
       properties:
         id: { type: string, format: uuid }
         group_id: { type: [string, "null"], format: uuid, description: "Only partners in this group; null is everyone." }
         partner_id: { type: [string, "null"], format: uuid, description: "Only this partner: their own rate. It beats their group's rule and the program's; null is everyone (or the group)." }
         trigger: { type: string, description: "The conversion that earns it: signup, sale, or a custom conversion's event_name (such as trial_started)." }
         side: { type: string, enum: [partner, referred], description: "partner: the person who referred. referred: the customer they brought (two-sided rewards; always an action)." }
-        kind: { type: string, enum: [percent, fixed, action] }
+        kind: { type: string, enum: [percent, fixed, action, group], description: "group: move the partner to target_group_id." }
         percent_bp: { type: [integer, "null"], description: "percent: basis points of the conversion's value (2500 is 25%). Not for sign-ups." }
         amount_cents: { type: [integer, "null"], format: int64, description: "fixed: the amount per conversion." }
         action: { type: string, description: "action: what your system should do, such as grant_credit, delivered by partner_reward.approved." }
@@ -29457,6 +29573,51 @@ components:
         months: { type: [integer, "null"] }
         min_sales: { type: integer, description: "A tier: applies once the partner has made this many earlier sales in the program." }
         product_ids: { type: array, items: { type: string }, description: Only these products; empty is all. }
+        name: { type: string }
+        conditions: { $ref: "#/components/schemas/PartnerFlowConditions" }
+        approval: { type: string, enum: [program, auto, after_days, manual], description: "program: the program's hold and auto-approve. auto: approved at once. after_days: approved approval_days after the conversion. manual: a person approves it." }
+        approval_days: { type: [integer, "null"] }
+        stacking: { type: string, enum: [exclusive, adds], description: "Cash flows: exclusive ones compete and one pays (see setPartnerRules); one that adds pays on top." }
+        overrides: { type: array, items: { $ref: "#/components/schemas/PartnerFlowOverride" } }
+        target_group_id: { type: [string, "null"], format: uuid, description: "kind group: the group the partner moves to." }
+    PartnerFlowConditions:
+      type: object
+      description: |
+        Groups of conditions; match says whether all or any must hold, for the groups and inside each. Empty always holds.
+        Fields: partner.id, partner.country (text); partner.transactions, partner.customers, partner.leads, partner.revenue_cents,
+        partner.earnings_cents (numbers); customer.transactions and customer.total_paid_cents (numbers, before this conversion);
+        customer.first_sale_at and customer.signed_up_at (dates); transaction.amount_cents (number), transaction.product_id (text),
+        transaction.recurring (true or false). Ops: numbers eq, neq, gt, gte, lt, lte; text eq, neq, in, not_in (case-insensitive);
+        true or false eq; dates within or not_within, with {"amount": N, "unit": "days" | "months" | "years"} back from the conversion.
+        A fact that isn't known (no country, no first sale yet) fails every test but neq, not_in and not_within.
+      properties:
+        match: { type: string, enum: [all, any] }
+        groups:
+          type: array
+          maxItems: 10
+          items:
+            type: object
+            required: [conditions]
+            properties:
+              match: { type: string, enum: [all, any] }
+              conditions:
+                type: array
+                maxItems: 20
+                items:
+                  type: object
+                  required: [field, op, value]
+                  properties:
+                    field: { type: string }
+                    op: { type: string, enum: [eq, neq, gt, gte, lt, lte, in, not_in, within, not_within] }
+                    value: { description: "A number, text, a list of text, true or false, or {amount, unit} for dates." }
+    PartnerFlowOverride:
+      type: object
+      description: Another rate inside a percent or fixed flow, for one partner (beats a product's) or one product.
+      properties:
+        partner_id: { type: string, format: uuid }
+        product_id: { type: string }
+        percent_bp: { type: integer, minimum: 1, maximum: 10000 }
+        amount_cents: { type: integer, format: int64, minimum: 1 }
     PartnerRuleInput:
       type: object
       required: [trigger, kind]
@@ -29465,7 +29626,7 @@ components:
         partner_id: { type: [string, "null"], format: uuid, description: "A partner in this program, for their own rate. Not with group_id. A program's new rules can't name partners yet." }
         trigger: { type: string, maxLength: 80, description: "signup (or lead), sale, or a custom conversion's event_name." }
         side: { type: string, enum: [partner, referred], description: "partner when left out." }
-        kind: { type: string, enum: [percent, fixed, action] }
+        kind: { type: string, enum: [percent, fixed, action, group] }
         percent_bp: { type: integer, minimum: 1, maximum: 10000 }
         amount_cents: { type: integer, format: int64, minimum: 1 }
         action: { type: string, maxLength: 60 }
@@ -29474,6 +29635,13 @@ components:
         months: { type: integer, minimum: 1, maximum: 120 }
         min_sales: { type: integer, minimum: 0 }
         product_ids: { type: array, maxItems: 50, items: { type: string } }
+        name: { type: string, maxLength: 120 }
+        conditions: { $ref: "#/components/schemas/PartnerFlowConditions" }
+        approval: { type: string, enum: [program, auto, after_days, manual], description: "program when left out." }
+        approval_days: { type: integer, minimum: 0, maximum: 365, description: "With approval after_days." }
+        stacking: { type: string, enum: [exclusive, adds], description: "exclusive when left out." }
+        overrides: { type: array, maxItems: 50, items: { $ref: "#/components/schemas/PartnerFlowOverride" } }
+        target_group_id: { type: string, format: uuid, description: "kind group: a group of this program." }
     PartnerGroup:
       type: object
       required: [id, name, partners, default]
@@ -29820,7 +29988,7 @@ components:
         created_at: { type: string, format: date-time }
     TrackingCampaign:
       type: object
-      required: [id, name, slug, code, channel, source, medium, brand_id, object_kind, object_id, landing_url, landing_link, redirect_links, status, links, clicks, created_at, updated_at]
+      required: [id, name, slug, code, channel, source, medium, brand_id, object_kind, object_id, landing_url, landing_link, redirect_links, status, links, clicks, landed, created_at, updated_at]
       properties:
         id: { type: string, format: uuid }
         name: { type: string }
@@ -29838,6 +30006,7 @@ components:
         status: { type: string, enum: [active, archived] }
         links: { type: integer, description: Links made in it. }
         clicks: { type: integer, description: "Clicks on the campaign's redirect links, without link scanners and previews." }
+        landed: { type: integer, description: "How many of those clicks reached a page running the website tracking snippet, which claims a click from the ofclk the redirect adds." }
         created_at: { type: string, format: date-time }
         updated_at: { type: string, format: date-time }
     TrackingCampaignInput:
@@ -29853,7 +30022,7 @@ components:
         redirect_links: { type: boolean, description: "Give new links a short redirect link unless a link says otherwise. Links made before keep what they have." }
     TrackingLink:
       type: object
-      required: [id, campaign_id, url, content, term, tagged_url, redirect_url, clicks, created_at]
+      required: [id, campaign_id, url, content, term, tagged_url, redirect_url, clicks, landed, created_at]
       properties:
         id: { type: string, format: uuid }
         campaign_id: { type: string, format: uuid }
@@ -29863,6 +30032,7 @@ components:
         tagged_url: { type: string, description: "The link to share: the page with the campaign's tags." }
         redirect_url: { type: [string, "null"], description: "The short redirect link (/l/{code}, on the workspace's tracking domain when it has one) that counts a click and sends the person to tagged_url; null when the link has none. Share it where the tracking snippet can't run." }
         clicks: { type: integer, description: "Clicks on the redirect link, without link scanners and previews; 0 without one." }
+        landed: { type: integer, description: "How many of those clicks reached a page running the website tracking snippet; the rest left before the page loaded, or landed where the snippet doesn't run." }
         created_at: { type: string, format: date-time }
     Exclusion:
       type: object
@@ -31057,6 +31227,9 @@ components:
         rollout: { type: integer, minimum: 0, maximum: 100, description: "Percent of visitors who pass the rules that get a variant at all." }
         rules: { type: array, items: { $ref: "#/components/schemas/FlagRule" }, description: Every rule must hold. }
         on_site: { type: boolean, description: "Whether the website script gets it. Off keeps a flag only your servers read out of the page." }
+        exclusion_group: { type: string, description: "The exclusion group it shares visitors with (\"\" for none): flags in one group split the group's visitors, so no visitor is in two of their A/B tests." }
+        group_share: { type: integer, minimum: 0, maximum: 100, description: "Percent of the group's visitors it owns; it is off for the rest. 0 without a group." }
+        group_start: { type: integer, minimum: 0, maximum: 100, description: Where its slice of the group starts, in percent. }
         created_at: { type: string, format: date-time }
         updated_at: { type: string, format: date-time }
         archived_at: { type: [string, "null"], format: date-time }
@@ -31087,6 +31260,8 @@ components:
         rollout: { type: integer, minimum: 0, maximum: 100 }
         rules: { type: array, maxItems: 20, items: { $ref: "#/components/schemas/FlagRule" } }
         on_site: { type: boolean }
+        exclusion_group: { type: string, maxLength: 64, description: "Join this exclusion group (lowercase letters, digits, - and _), or \"\" to leave. Fixed while the flag's A/B test runs." }
+        group_share: { type: integer, minimum: 1, maximum: 100, description: "Percent of the group's visitors to take, from the first free slice that wide (default 50). 409 when the group has no room." }
     FlagChange:
       type: object
       required: [selector]
@@ -31119,7 +31294,7 @@ components:
         payloads: { type: object, additionalProperties: true, description: "The payload of each variant given that has one, by flag key." }
         reasons:
           type: object
-          additionalProperties: { type: string, enum: [match, rules, rollout, off, no_subject] }
+          additionalProperties: { type: string, enum: [match, rules, group, rollout, off, no_subject] }
           description: Why, by flag key (evaluate only).
     ABTestGoal:
       type: object
@@ -31136,6 +31311,47 @@ components:
         window_hours: { type: integer, minimum: 0, maximum: 8784, description: "Count only what happens within this many hours of the visitor first seeing their version; 0 or absent: until the test ends." }
         cap: { type: number, minimum: 0, description: "For count and value goals: the most one visitor can add, so a few huge orders can't swing the result; 0 or absent: no cap." }
         better: { type: string, enum: [higher, lower], description: "Guardrails only: which way is good. higher (the default) or lower, such as for an error event or refunds." }
+    ABTestPreviews:
+      type: object
+      required: [test_id, pages, versions, hint]
+      properties:
+        test_id: { type: string, format: uuid }
+        pages:
+          type: array
+          items:
+            type: object
+            required: [url, visitors, links]
+            properties:
+              url: { type: string }
+              visitors: { type: integer, format: int64, description: Visitors the page showed a version to in the last 28 days. }
+              links:
+                type: array
+                items:
+                  type: object
+                  required: [variant, url]
+                  properties:
+                    variant: { type: string }
+                    url: { type: string }
+        versions:
+          type: array
+          items:
+            type: object
+            required: [key, control, check]
+            properties:
+              key: { type: string }
+              control: { type: boolean }
+              check:
+                oneOf:
+                  - type: object
+                    required: [status, note, checked_by, checked_at, stale]
+                    properties:
+                      status: { type: string, enum: [ok, broken] }
+                      note: { type: string }
+                      checked_by: { type: [string, "null"], format: uuid, description: The actor who checked it. }
+                      checked_at: { type: string, format: date-time }
+                      stale: { type: boolean, description: The version's content changed after it was checked. }
+                  - type: "null"
+        hint: { type: string, description: What the links can and can't preview. }
     ABTest:
       type: object
       required: [id, flag_id, flag_key, brand_id, name, hypothesis, status, control, goals, guardrails, min_effect, baselines, started_at, frozen_at, ended_at, decision, created_at, updated_at]
@@ -35423,7 +35639,13 @@ components:
         invites: { type: integer, description: Pending invites for this role. }
     Scope:
       type: string
-      enum: [workspace.read, workspace.manage, context.manage, members.read, members.manage, members.remove, roles.manage, tokens.manage, audit.read, mailboxes.read, mailboxes.manage, leads.read, leads.manage, suppressions.manage, sequences.read, sequences.manage, inbox.read, inbox.manage, integrations.read, integrations.manage, outcomes.read, outcomes.manage, projects.read, projects.manage, infrastructure.read, infrastructure.manage, infrastructure.approve, analytics.read, analytics.manage, missions.read, missions.run, missions.approve, seo.read, seo.manage, social.read, social.manage, social.post, partners.read, partners.manage, partners.conversions, my_ai_accounts.read, my_ai_accounts.manage, ai_accounts.read, ai_accounts.manage, ai_spend.read, webhooks.read, webhooks.manage, emails.read, emails.send, emails.manage, customers.read, customers.manage, catalog.manage]
+      description: "profiles.read and profiles.manage were called projects.read and projects.manage until projects were removed. Requests may still send the old names (ScopeInput); responses always use the new names."
+      enum: [workspace.read, workspace.manage, context.manage, members.read, members.manage, members.remove, roles.manage, tokens.manage, audit.read, mailboxes.read, mailboxes.manage, leads.read, leads.manage, suppressions.manage, sequences.read, sequences.manage, inbox.read, inbox.manage, integrations.read, integrations.manage, outcomes.read, outcomes.manage, profiles.read, profiles.manage, infrastructure.read, infrastructure.manage, infrastructure.approve, analytics.read, analytics.manage, missions.read, missions.run, missions.approve, seo.read, seo.manage, social.read, social.manage, social.post, partners.read, partners.manage, partners.conversions, my_ai_accounts.read, my_ai_accounts.manage, ai_accounts.read, ai_accounts.manage, ai_spend.read, webhooks.read, webhooks.manage, emails.read, emails.send, emails.manage, customers.read, customers.manage, catalog.manage]
+    ScopeInput:
+      description: A scope in a request. projects.read and projects.manage, the old names of profiles.read and profiles.manage, are still accepted and mean the new ones.
+      anyOf:
+        - { $ref: "#/components/schemas/Scope" }
+        - { type: string, enum: [projects.read, projects.manage], deprecated: true }
     Workspace:
       type: object
       required: [id, name, slug, test]
@@ -35502,7 +35724,7 @@ components:
       type: object
       properties:
         name: { type: string, description: "A new name. It shows in the audit log next to everything the token does." }
-        scopes: { type: array, minItems: 1, items: { $ref: "#/components/schemas/Scope" }, description: "Replaces the token's scopes. Takes effect on its next request." }
+        scopes: { type: array, minItems: 1, items: { $ref: "#/components/schemas/ScopeInput" }, description: "Replaces the token's scopes. Takes effect on its next request." }
         daily_send_budget: { type: [integer, "null"], minimum: 1, maximum: 1000000 }
         max_priority: { type: [string, "null"], enum: [low, normal, high, null] }
         may_take_mailboxes: { type: boolean }
@@ -36912,7 +37134,7 @@ components:
         name: { type: string }
     SupportConversation:
       type: object
-      required: [id, brand_id, record_id, contact, mailbox_id, mailbox_email, channel, subject, status, assignee, team, tags,
+      required: [id, brand_id, record_id, contact, mailbox_id, mailbox_email, via, inbound_address, reply_from, channel, subject, status, assignee, team, tags,
         unread, last_from, preview, messages, first_message_at, first_reply_at, closed_at, last_message_at, created_at]
       properties:
         id: { type: string, format: uuid }
@@ -36926,6 +37148,9 @@ components:
             email: { type: string }
         mailbox_id: { type: [string, "null"], format: uuid, description: "The support mailbox it came in on; null once that mailbox is removed." }
         mailbox_email: { type: [string, "null"] }
+        via: { type: string, enum: [mailbox, forwarding], description: "How it came in: a connected support mailbox, or forwarding to the brand's support address." }
+        inbound_address: { type: [string, "null"], description: "Forwarding: the support address it was forwarded to." }
+        reply_from: { type: [string, "null"], description: "Forwarding: the business's own address the customer wrote to, which replies go out from through the email provider." }
         channel: { type: string, enum: [email] }
         subject: { type: string }
         status: { type: string, enum: [open, pending, closed], description: "open waits on the team, pending on the customer." }

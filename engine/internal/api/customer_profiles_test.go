@@ -1,6 +1,8 @@
 package api_test
 
 import (
+	"context"
+	"slices"
 	"testing"
 
 	"github.com/outflareai/outflare/engine/internal/track"
@@ -66,5 +68,33 @@ func TestIdealCustomerProfiles(t *testing.T) {
 		if !seen[name] {
 			t.Fatalf("no %s event", name)
 		}
+	}
+}
+
+// Tokens saved before profiles.* replaced projects.* keep their access and
+// show the new names.
+func TestProfileScopesRenamed(t *testing.T) {
+	e := freshEnv(t)
+	owner, ws := setupOwner(t, e.h)
+	base := "/v1/workspaces/" + ws
+	tok := owner.must(201, "POST", base+"/api-tokens", map[string]any{"name": "ICP bot", "scopes": []string{"workspace.read", "projects.manage"}})
+	view := tok["api_token"].(map[string]any)
+	if got := view["scopes"].([]any); !slices.Contains(got, any("profiles.manage")) || slices.Contains(got, any("projects.manage")) {
+		t.Fatalf("new token scopes = %v", got)
+	}
+	// As an older version stored it.
+	if _, err := e.pool.Exec(context.Background(), `UPDATE api_tokens SET scopes = '{workspace.read,projects.manage}' WHERE id = $1`, view["id"]); err != nil {
+		t.Fatal(err)
+	}
+	bot := &client{t: t, h: e.h, bearer: tok["token"].(string)}
+	bot.must(201, "POST", base+"/ideal-customer-profiles", map[string]any{"name": "AU CFOs"})
+	bot.must(200, "GET", base+"/ideal-customer-profiles", nil)
+	for _, x := range owner.must(200, "GET", base+"/api-tokens", nil)["data"].([]any) {
+		if got := x.(map[string]any)["scopes"].([]any); slices.Contains(got, any("projects.manage")) {
+			t.Fatalf("listed scopes = %v", got)
+		}
+	}
+	if got := bot.must(200, "GET", "/v1/whoami", nil)["token"].(map[string]any)["scopes"].([]any); !slices.Contains(got, any("profiles.manage")) {
+		t.Fatalf("whoami scopes = %v", got)
 	}
 }

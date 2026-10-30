@@ -630,6 +630,7 @@ func (s *Server) approveAgentAuthorization(w http.ResponseWriter, r *http.Reques
 	// The consent screen's toggles send the exact scopes: the role's reads
 	// always, plus whichever of its writes the person left on.
 	if req.Scopes != nil {
+		req.Scopes = auth.Rename(req.Scopes)
 		allowed := agentScopes(ws.scopes, "full", true)
 		for _, sc := range req.Scopes {
 			if !slices.Contains(allowed, sc) {
@@ -736,6 +737,7 @@ func (s *Server) exchangeCode(w http.ResponseWriter, r *http.Request) {
 		err := tx.QueryRow(ctx, `SELECT client_id, user_id, workspace_id, scopes, redirect_uri, code_challenge, brand_id::text, expires_at, used_at
 			FROM oauth_codes WHERE code_hash = $1 FOR UPDATE`, auth.HashToken(f.Get("code"))).
 			Scan(&clientID, &userID, &wsID, &scopes, &redirect, &challenge, &brand, &expires, &used)
+		scopes = auth.Rename(scopes)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return &errOAuth{"invalid_grant", "the code is not valid"}
 		}
@@ -928,6 +930,7 @@ func (s *Server) refreshAgentToken(w http.ResponseWriter, r *http.Request) {
 			FROM oauth_grants g JOIN api_tokens t ON t.id = g.api_token_id JOIN oauth_clients c ON c.id = g.client_id
 			WHERE g.refresh_hash = $1 OR g.previous_refresh_hash = $1 FOR UPDATE OF g`, hash).
 			Scan(&grantID, &wsID, &clientID, &userID, &tokenID, &current, &rotated, &expires, &revoked, &scopes, &brand, &redirect, &verifiedAt)
+		scopes = auth.Rename(scopes)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return &errOAuth{"invalid_grant", "the refresh token is not valid; connect the app again"}
 		}
@@ -1066,6 +1069,7 @@ func (s *Server) listAgentApps(w http.ResponseWriter, r *http.Request) {
 		var redirect string
 		var verifiedAt *time.Time
 		err := row.Scan(&v.ID, &v.TokenID, &v.Name, &redirect, &v.URI, &v.Scopes, &v.UserID, &v.UserName, &v.CreatedAt, &v.LastUsedAt, &verifiedAt, &v.RequireMission, &v.ClientID)
+		v.Scopes = auth.Rename(v.Scopes)
 		v.App = appKind(redirect)
 		v.Verified = appVerified(v.App, verifiedAt)
 		return v, err
@@ -1153,6 +1157,7 @@ func (s *Server) updateAgentApp(w http.ResponseWriter, r *http.Request) {
 			JOIN users u ON u.id = g.user_id
 			WHERE g.id = $1 AND g.workspace_id = $2 AND t.revoked_at IS NULL AND g.expires_at > now()
 			FOR UPDATE OF t`, id, a.WorkspaceID).Scan(&tokenID, &scopes, &v.UserID, &v.Name, &redirect, &v.URI, &v.UserName, &v.CreatedAt, &v.LastUsedAt, &verifiedAt, &requireMission, &v.ClientID)
+		scopes = auth.Rename(scopes)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return errNotFound
 		}
@@ -1174,6 +1179,7 @@ func (s *Server) updateAgentApp(w http.ResponseWriter, r *http.Request) {
 		if !verified {
 			writes = []string{}
 		}
+		req.Scopes = auth.Rename(req.Scopes)
 		if req.Scopes == nil {
 			// Only require_mission changes: keep its writes (none, unverified).
 			req.Scopes = []string{}

@@ -92,7 +92,8 @@ func (s *Service) waterfall(ctx context.Context, ws string, r ItemResult, hasVer
 	r.Evidence = "provider:" + v.Provider
 	r.Cost = Cost{Provider: v.Provider}
 	if v.IntegrationID != nil {
-		r.Cost.Connection = *v.IntegrationID
+		// One credit an address, as the spend ledger books it.
+		r.Cost.Connection, r.Cost.Units = *v.IntegrationID, 1
 	}
 	if v.Score != nil {
 		r.Confidence = *v.Score

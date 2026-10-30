@@ -890,6 +890,10 @@ func siteMessageOf(raw json.RawMessage, ua string, excluded []string) (eventMess
 	} else {
 		delete(props, "click_ids")
 	}
+	// A redirect link's click key, on the page it landed on only.
+	if k, _ := props["ofclk"].(string); kind != "page" || !clickKeyRe.MatchString(k) {
+		delete(props, "ofclk")
+	}
 	// The ad the tracking template named, with the network's own ids. Only
 	// page views carry it: a track event's ad is the site's own property.
 	adKept, adSkipped := 0, 0

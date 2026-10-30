@@ -113,6 +113,8 @@ export type UiEvent =
   | "ui.knowledge_formatted" // formatting used in the knowledge editor (command: h2, bold, ul, table, ...; how: toolbar, slash, key)
   | "ui.knowledge_pasted" // formatted text pasted into the knowledge editor and kept as Markdown
   | "ui.knowledge_audience_picked" // the Ask box switched who the answer is for (audience: team, customers)
+  | "ui.support_address_made" // a support forwarding address made from Support settings (brand: whether it is a brand's)
+  | "ui.support_address_renamed" // a support forwarding address renamed (brand)
   | "ui.support_mailbox_picked" // a mailbox chosen for support from the Support settings (first: whether it was the first)
   | "ui.knowledge_started" // the knowledge editor opened for something new (kind: article, snippet; template: none or a starter's id)
   | "ui.playbook_opened" // a playbook opened on the Playbooks page (playbook_id, ready)

@@ -31,6 +31,12 @@ func SetPartnerPostbackClient(c *http.Client) func() {
 	return func() { partnerPostbackClient = old }
 }
 
+// ApproveDuePartnerRewards runs one pass of the loop that approves rewards
+// whose hold ended.
+func (s *Server) ApproveDuePartnerRewards(ctx context.Context) error {
+	return s.approveDuePartnerRewards(ctx)
+}
+
 // SetReviewJobTimes makes review page jobs poll every poll and a round
 // wait up to wait for one, so a test covers a slow job in milliseconds. It
 // returns the undo.

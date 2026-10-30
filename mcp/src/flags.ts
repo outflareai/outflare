@@ -33,6 +33,8 @@ const fields = {
   rollout: z.number().int().min(0).max(100).optional().describe("Percent of visitors who pass the rules that get it (default 100)."),
   rules: z.array(rule).max(20).optional().describe("Conditions every one of which must hold."),
   on_site: z.boolean().optional().describe("Send it to the website script (default true). false keeps a flag only servers read out of the page."),
+  exclusion_group: z.string().max(64).optional().describe('Join an exclusion group (such as homepage), so no visitor is in this flag\'s A/B test and another flag\'s in the same group; "" leaves it. Fixed while its test runs.'),
+  group_share: z.number().int().min(1).max(100).optional().describe("Percent of the group's visitors this flag takes (default 50); it is off for the rest."),
 };
 
 export function registerFlagTools(

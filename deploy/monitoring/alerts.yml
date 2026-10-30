@@ -566,11 +566,13 @@ groups:
       - alert: OutflareSocialAccountsStuck
         # An account that failed 3 reads in a row, same-day retries included,
         # with an error Outflare has to fix: the profile page changed (the
-        # parser in engine/internal/sociallinks), the site blocks the page
-        # reader, or the read couldn't be saved. Errors a workspace fixes
-        # itself (its key, credits, a wrong address) show on its Social page
-        # instead and don't alert. Each missed day is a gap in follower growth.
-        expr: sum by (channel, code) (outflare_social_stuck_accounts{code=~"blocked|slow_page|no_follower_count|save_failed|unknown"}) > 0
+        # parser in engine/internal/sociallinks), the page is slower than
+        # the page reader allows, or the read couldn't be saved. A site that
+        # blocks the page reader (blocked) is the reader's to get past, not
+        # Outflare's, and errors a workspace fixes itself (its key, credits,
+        # a wrong address) show on its Social page instead; neither alerts.
+        # Each missed day is a gap in follower growth.
+        expr: sum by (channel, code) (outflare_social_stuck_accounts{code=~"slow_page|no_follower_count|save_failed|unknown"}) > 0
         for: 30m
         labels: { severity: warning }
         annotations:

@@ -8,6 +8,7 @@ import { cn } from "@/lib/utils";
 import { track } from "@/lib/analytics";
 import { useBrand } from "@/lib/brand";
 import type { Tab } from "../App";
+import { SupportForwarding } from "@/components/support-forwarding";
 
 // The support inbox: customers who write to a support mailbox, as
 // conversations the team works through. Folders on the left, the list in
@@ -124,6 +125,8 @@ export function Support({
   const [list, setList] = useState<SupportConversation[] | null>(null);
   const [counts, setCounts] = useState<SupportCounts | null>(null);
   const [mailboxes, setMailboxes] = useState<SupportMailbox[] | null>(null);
+  // Support addresses mail is forwarded to (Outflare Cloud).
+  const [forwarding, setForwarding] = useState<string[] | null>(null);
   const [stats, setStats] = useState<{ median_first_reply_seconds: number | null; median_resolution_seconds: number | null; conversations: number } | null>(null);
   const [error, setError] = useState("");
   const [settings, setSettings] = useState(false);
@@ -134,6 +137,9 @@ export function Support({
 
   useEffect(() => {
     api.GET("/v1/workspaces/{ws}/support/mailboxes", { params: { path: { ws } } }).then(({ data }) => setMailboxes(data?.data ?? []));
+    api.GET("/v1/workspaces/{ws}/inbound-addresses", { params: { path: { ws } } }).then(({ data }) =>
+      setForwarding((data?.data ?? []).filter((a) => a.purpose === "support").map((a) => a.email)),
+    );
     api.GET("/v1/workspaces/{ws}/support/stats", { params: { path: { ws }, query: brandQ } }).then(({ data }) => data && setStats(data));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ws, tick, brand?.id]);
@@ -158,9 +164,9 @@ export function Support({
   }, [ws, folder, q, tick, brand?.id]);
 
   const frame = useFillHeight();
-  if (mailboxes === null || (list === null && !error)) return <Loading />;
+  if (mailboxes === null || forwarding === null || (list === null && !error)) return <Loading />;
 
-  const setUp = mailboxes.length > 0;
+  const setUp = mailboxes.length > 0 || forwarding.length > 0;
   if (settings || (!setUp && !list?.length)) {
     return <Settings ws={ws} canSetUp={canSetUp} mailboxes={mailboxes} first={!setUp} onBack={setUp ? () => setSettings(false) : undefined} onChanged={refresh} go={go} />;
   }
@@ -260,7 +266,7 @@ export function Support({
             <div className="max-w-xs space-y-2">
               <Icon name="support" className="mx-auto size-8 opacity-40" />
               <p>Pick a conversation to read and answer it.</p>
-              <p className="text-xs">Mail to {mailboxes.map((m) => m.email).join(", ")} lands here.</p>
+              <p className="text-xs">Mail to {[...mailboxes.map((m) => m.email), ...forwarding].join(", ")} lands here.</p>
             </div>
           </div>
         )}
@@ -351,7 +357,8 @@ function Conversation({ ws, id, canManage, myId, onBack, onChanged, go }: { ws: 
   if (error) return <div className="p-6"><ErrorText>{error}</ErrorText></div>;
   if (!conv) return <div className="flex-1"><Loading /></div>;
   const closed = conv.status === "closed";
-  const canReply = !!conv.mailbox_id;
+  const forwarded = conv.via === "forwarding";
+  const canReply = !!conv.mailbox_id || (forwarded && !!conv.reply_from);
 
   return (
     <div className="flex h-full min-w-0 flex-1">
@@ -410,7 +417,13 @@ function Conversation({ ws, id, canManage, myId, onBack, onChanged, go }: { ws: 
                   </button>
                 ))}
                 <span className="ml-1 truncate text-[11px] text-muted-foreground">
-                  {mode === "note" ? "Only your team sees notes" : canReply ? `To ${conv.contact.email}, from ${conv.mailbox_email}` : "This conversation's support mailbox was removed"}
+                  {mode === "note"
+                    ? "Only your team sees notes"
+                    : canReply
+                      ? `To ${conv.contact.email}, from ${forwarded ? conv.reply_from : conv.mailbox_email}`
+                      : forwarded
+                        ? "Outflare doesn't know which of your addresses they wrote to"
+                        : "This conversation's support mailbox was removed"}
                 </span>
                 <span className="flex-1" />
                 {mode === "reply" && (
@@ -617,7 +630,15 @@ function Details({
           <span>{conv.first_reply_at ? duration((Date.parse(conv.first_reply_at) - Date.parse(conv.first_message_at)) / 1000) + " after" : "Not yet"}</span>
         </p>
         {conv.closed_at && <p className="flex justify-between"><span className="text-muted-foreground">Closed</span><span title={stamp(conv.closed_at)}>{ago(conv.closed_at)}</span></p>}
-        <p className="flex justify-between"><span className="text-muted-foreground">Via</span><span className="truncate pl-2">{conv.mailbox_email ?? "removed mailbox"}</span></p>
+        {conv.via === "forwarding" ? (
+          <>
+            <p className="flex justify-between gap-2"><span className="shrink-0 text-muted-foreground">Wrote to</span><span className="truncate" title={conv.reply_from ?? undefined}>{conv.reply_from ?? "unknown"}</span></p>
+            <p className="flex justify-between gap-2"><span className="shrink-0 text-muted-foreground">Forwarded to</span><span className="truncate" title={conv.inbound_address ?? undefined}>{conv.inbound_address ?? "a removed address"}</span></p>
+            <p className="text-[11px] text-muted-foreground">Replies go out through your email provider.</p>
+          </>
+        ) : (
+          <p className="flex justify-between gap-2"><span className="shrink-0 text-muted-foreground">Via</span><span className="truncate">{conv.mailbox_email ?? "removed mailbox"}</span></p>
+        )}
       </section>
 
       {others.length > 0 && (
@@ -701,15 +722,15 @@ function Settings({
         <h1 className="text-xl font-semibold">{first ? "Answer your customers here" : "Support settings"}</h1>
         <p className="text-[13px] text-muted-foreground">
           {first
-            ? "Choose the mailbox customers write to, such as support@ or help@. Every email to it becomes a conversation your team can assign, answer in the same thread and close, with your knowledge one click away."
-            : "Mail to these mailboxes comes to Support instead of the sales inbox, and replies go out from them. Sequences never send from a support mailbox."}
+            ? "Bring in the mailbox customers write to, such as support@ or help@: connect it, or forward it to your support address. Every email to it becomes a conversation your team can assign, answer in the same thread and close, with your knowledge one click away."
+            : "Bring customers' mail in by connecting your support mailbox or forwarding it to your support address. A connected support mailbox no longer goes to the sales inbox, and sequences never send from it."}
         </p>
       </div>
 
       {first && (
         <ol className="grid gap-3 sm:grid-cols-3">
           {[
-            ["Choose a mailbox", "One you've connected with its login, used only for support."],
+            ["Connect or forward", "Connect your support mailbox, or forward it to your support address below."],
             ["Customers write in", "Each email becomes a conversation, threaded with replies."],
             ["Answer as a team", "Assign, leave notes, suggest a reply from knowledge, and close."],
           ].map(([t, d], i) => (
@@ -742,7 +763,7 @@ function Settings({
 
       {canSetUp ? (
         <div className="space-y-2 rounded-lg border p-4">
-          <p className="text-[13px] font-medium">{mailboxes.length ? "Add another mailbox" : "Your support mailbox"}</p>
+          <p className="text-[13px] font-medium">{mailboxes.length ? "Add another mailbox" : "Connect your support mailbox"}</p>
           {all === null ? (
             <Loading />
           ) : candidates.length === 0 ? (
@@ -762,12 +783,13 @@ function Settings({
           )}
           {error && <ErrorText>{error}</ErrorText>}
           <p className="text-xs text-muted-foreground">
-            A mailbox that sends cold email can't be used: take it off its sequences first, so customers' mail never mixes with replies to outreach. Forwarding from your own support address is coming next.
+            A mailbox that sends cold email can't be used: take it off its sequences first, so customers' mail never mixes with replies to outreach.
           </p>
         </div>
       ) : (
         <p className="text-[13px] text-muted-foreground">Ask someone who manages mailboxes to choose the support mailbox.</p>
       )}
+      <SupportForwarding ws={ws} canSetUp={canSetUp} go={go} onChanged={onChanged} />
     </div>
   );
 }

@@ -13112,9 +13112,10 @@ export interface paths {
         put?: never;
         /**
          * Reply to a customer
-         * @description Scope: inbox.manage. Emails the customer from the support mailbox the conversation came in on, in the same
-         *     thread. It is sent in the background: the message's `status` goes from sending to sent or failed (with
-         *     `error`). The address must pass the policy check for mail a person asked for: an unsubscribe from marketing
+         * @description Scope: inbox.manage. Emails the customer in the same thread: from the support mailbox the conversation came in
+         *     on, or, for one that came by forwarding, through the workspace's email provider from the address the customer
+         *     wrote to (409 `no_email_provider` or `email_domain_not_verified` until that is set up). It is sent in the
+         *     background: the message's `status` goes from sending to sent or failed (with `error`). The address must pass the policy check for mail a person asked for: an unsubscribe from marketing
          *     doesn't stop it, a bounce or a block does (409 `blocked`). The conversation becomes pending (waiting on the
          *     customer) unless `status` says otherwise, and the first reply sets `first_reply_at`.
          */
@@ -13395,7 +13396,7 @@ export interface paths {
         };
         /**
          * List ideal customer profiles
-         * @description Scope: projects.read. Who the workspace sells to: each profile is a description in words plus filters in the
+         * @description Scope: profiles.read. Who the workspace sells to: each profile is a description in words plus filters in the
          *     same vocabulary as lead searches. Lead lists, lead list fit scores and the lead finder read them. Active ones by
          *     default, by name.
          */
@@ -13403,7 +13404,7 @@ export interface paths {
         put?: never;
         /**
          * Create an ideal customer profile
-         * @description Scope: projects.manage. Link it to lead lists with their `profile_id`. At most 500 per workspace.
+         * @description Scope: profiles.manage. Link it to lead lists with their `profile_id`. At most 500 per workspace.
          */
         post: operations["createCustomerProfile"];
         delete?: never;
@@ -13425,7 +13426,7 @@ export interface paths {
         };
         /**
          * Get an ideal customer profile
-         * @description Scope: projects.read.
+         * @description Scope: profiles.read.
          */
         get: operations["getCustomerProfile"];
         put?: never;
@@ -13435,7 +13436,7 @@ export interface paths {
         head?: never;
         /**
          * Edit, archive or restore an ideal customer profile
-         * @description Scope: projects.manage. A change to description or filters bumps the profile's `version`.
+         * @description Scope: profiles.manage. A change to description or filters bumps the profile's `version`.
          */
         patch: operations["updateCustomerProfile"];
         trace?: never;
@@ -15392,8 +15393,9 @@ export interface paths {
          * @description Scope: analytics.read. What would stop the test measuring anything useful: the flag (fail when archived, has one
          *     version or lost the control; warn when off), another running test of the flag (fail), whether pages showed its
          *     versions in the last 7 days, how long visitors waited for their version (delivery, once 20 were timed: warn
-         *     when one in ten waited over 400 ms), whether visitors reach the first goal, how long it is likely to take, and
-         *     guardrails. ready is false while any check fails.
+         *     when one in ten waited over 400 ms), whether visitors reach the first goal, how long it is likely to take, whether
+         *     a person previewed every version (qa: fail when one is marked broken, warn when one is unchecked or changed
+         *     since), and guardrails. ready is false while any check fails.
          */
         get: operations["getABTestChecklist"];
         put?: never;
@@ -15424,6 +15426,59 @@ export interface paths {
          *     results; a finished test's decision changes. 409 for a draft.
          */
         post: operations["shipABTest"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/workspaces/{ws}/ab-tests/{test}/previews": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                test: string;
+            };
+            cookie?: never;
+        };
+        /**
+         * Preview an A/B test's versions
+         * @description Scope: analytics.read. Links that show each version to the person who opens them, on the pages that showed the
+         *     flag most in the last 28 days (without their query strings), or on page when given; with no such page, the
+         *     test's brand website. A link adds of_flag=key:variant, which the site script reads: it shows that version for
+         *     the rest of the visit and counts nothing. Also each version's check, from checkABTestVersion.
+         */
+        get: operations["getABTestPreviews"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/workspaces/{ws}/ab-tests/{test}/checks": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                test: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Record a check of an A/B test version
+         * @description Scope: analytics.manage. Records that a person previewed a version: it renders right (ok) or is broken, with an
+         *     optional note. A check holds for the version's content as it was: once the content changes it is stale. A
+         *     broken version fails the checklist. 409 once the test has ended.
+         */
+        post: operations["checkABTestVersion"];
         delete?: never;
         options?: never;
         head?: never;
@@ -15473,6 +15528,33 @@ export interface paths {
          *     doesn't make a false winner more likely.
          */
         get: operations["getABTestResults"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/workspaces/{ws}/ab-tests/{test}/interactions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                test: string;
+            };
+            cookie?: never;
+        };
+        /**
+         * Check an A/B test against tests that overlapped it
+         * @description Scope: analytics.read. For each other test (of another flag, outside this flag's exclusion group) that ran while
+         *     this one did, up to 10, the most recent first: how many of this test's visitors also saw the other flag, and each
+         *     version's effect on the first goal within each of the other flag's versions. p_value is Cochran's Q test that the
+         *     effects are the same; interacts is true below 0.01, meaning one change alters the other's effect. 409 for a draft.
+         */
+        get: operations["getABTestInteractions"];
         put?: never;
         post?: never;
         delete?: never;
@@ -16009,7 +16091,7 @@ export interface paths {
         put?: never;
         /**
          * Move domains, mailboxes, lists, sequences or missions into a brand
-         * @description Scope: projects.manage, plus mailboxes.manage for domains and
+         * @description Scope: profiles.manage, plus mailboxes.manage for domains and
          *     mailboxes, leads.manage for lists, sequences.manage for sequences
          *     and missions.run for missions. Records in another brand move to
          *     this one. A domain brings
@@ -16070,7 +16152,7 @@ export interface paths {
         put?: never;
         /**
          * Make a brand's records shared by every brand again
-         * @description Scope: projects.manage, plus the scopes addToBrand needs for each kind of record. Only records in this brand change.
+         * @description Scope: profiles.manage, plus the scopes addToBrand needs for each kind of record. Only records in this brand change.
          */
         post: operations["removeFromBrand"];
         delete?: never;
@@ -18531,8 +18613,9 @@ export interface paths {
          * @description Scope: partners.manage. Every action rule a conversion matches gives a reward, but only one cash rule (percent
          *     or fixed) pays, whatever the rules' order: a partner's own rule (partner_id) beats their group's, which beats one
          *     for everyone; then the highest tier (min_sales) reached; then the narrower recurrence (first, then months, then
-         *     every); then a rule for named product_ids; then the one paying more. [] makes the program track only. Rewards
-         *     already in the ledger keep what they earned.
+         *     every); then a rule for named product_ids; then the one paying more. A cash flow with stacking adds pays on top.
+         *     Flows can also have conditions, their own approval, overrides per partner or product, and kind group (move the
+         *     partner to a group). [] makes the program track only. Rewards already in the ledger keep what they earned.
          */
         put: operations["setPartnerRules"];
         post?: never;
@@ -24236,6 +24319,7 @@ export interface components {
             matched_by: "record" | "anonymous" | "none";
             credits: components["schemas"]["AttributionCredit"][];
         };
+        /** @description A reward flow, Tolt-style. Rules made before flows behave as before (no conditions, the program's approval, exclusive). */
         PartnerRule: {
             /** Format: uuid */
             id: string;
@@ -24256,8 +24340,11 @@ export interface components {
              * @enum {string}
              */
             side: "partner" | "referred";
-            /** @enum {string} */
-            kind: "percent" | "fixed" | "action";
+            /**
+             * @description group: move the partner to target_group_id.
+             * @enum {string}
+             */
+            kind: "percent" | "fixed" | "action" | "group";
             /** @description percent: basis points of the conversion's value (2500 is 25%). Not for sign-ups. */
             percent_bp: number | null;
             /**
@@ -24281,6 +24368,58 @@ export interface components {
             min_sales: number;
             /** @description Only these products; empty is all. */
             product_ids: string[];
+            name: string;
+            conditions: components["schemas"]["PartnerFlowConditions"];
+            /**
+             * @description program: the program's hold and auto-approve. auto: approved at once. after_days: approved approval_days after the conversion. manual: a person approves it.
+             * @enum {string}
+             */
+            approval: "program" | "auto" | "after_days" | "manual";
+            approval_days: number | null;
+            /**
+             * @description Cash flows: exclusive ones compete and one pays (see setPartnerRules); one that adds pays on top.
+             * @enum {string}
+             */
+            stacking: "exclusive" | "adds";
+            overrides: components["schemas"]["PartnerFlowOverride"][];
+            /**
+             * Format: uuid
+             * @description kind group: the group the partner moves to.
+             */
+            target_group_id: string | null;
+        };
+        /**
+         * @description Groups of conditions; match says whether all or any must hold, for the groups and inside each. Empty always holds.
+         *     Fields: partner.id, partner.country (text); partner.transactions, partner.customers, partner.leads, partner.revenue_cents,
+         *     partner.earnings_cents (numbers); customer.transactions and customer.total_paid_cents (numbers, before this conversion);
+         *     customer.first_sale_at and customer.signed_up_at (dates); transaction.amount_cents (number), transaction.product_id (text),
+         *     transaction.recurring (true or false). Ops: numbers eq, neq, gt, gte, lt, lte; text eq, neq, in, not_in (case-insensitive);
+         *     true or false eq; dates within or not_within, with {"amount": N, "unit": "days" | "months" | "years"} back from the conversion.
+         *     A fact that isn't known (no country, no first sale yet) fails every test but neq, not_in and not_within.
+         */
+        PartnerFlowConditions: {
+            /** @enum {string} */
+            match?: "all" | "any";
+            groups?: {
+                /** @enum {string} */
+                match?: "all" | "any";
+                conditions: {
+                    field: string;
+                    /** @enum {string} */
+                    op: "eq" | "neq" | "gt" | "gte" | "lt" | "lte" | "in" | "not_in" | "within" | "not_within";
+                    /** @description A number, text, a list of text, true or false, or {amount, unit} for dates. */
+                    value: unknown;
+                }[];
+            }[];
+        };
+        /** @description Another rate inside a percent or fixed flow, for one partner (beats a product's) or one product. */
+        PartnerFlowOverride: {
+            /** Format: uuid */
+            partner_id?: string;
+            product_id?: string;
+            percent_bp?: number;
+            /** Format: int64 */
+            amount_cents?: number;
         };
         PartnerRuleInput: {
             /** Format: uuid */
@@ -24298,7 +24437,7 @@ export interface components {
              */
             side?: "partner" | "referred";
             /** @enum {string} */
-            kind: "percent" | "fixed" | "action";
+            kind: "percent" | "fixed" | "action" | "group";
             percent_bp?: number;
             /** Format: int64 */
             amount_cents?: number;
@@ -24314,6 +24453,26 @@ export interface components {
             months?: number;
             min_sales?: number;
             product_ids?: string[];
+            name?: string;
+            conditions?: components["schemas"]["PartnerFlowConditions"];
+            /**
+             * @description program when left out.
+             * @enum {string}
+             */
+            approval?: "program" | "auto" | "after_days" | "manual";
+            /** @description With approval after_days. */
+            approval_days?: number;
+            /**
+             * @description exclusive when left out.
+             * @enum {string}
+             */
+            stacking?: "exclusive" | "adds";
+            overrides?: components["schemas"]["PartnerFlowOverride"][];
+            /**
+             * Format: uuid
+             * @description kind group: a group of this program.
+             */
+            target_group_id?: string;
         };
         PartnerGroup: {
             /** Format: uuid */
@@ -24891,6 +25050,8 @@ export interface components {
             links: number;
             /** @description Clicks on the campaign's redirect links, without link scanners and previews. */
             clicks: number;
+            /** @description How many of those clicks reached a page running the website tracking snippet, which claims a click from the ofclk the redirect adds. */
+            landed: number;
             /** Format: date-time */
             created_at: string;
             /** Format: date-time */
@@ -24932,6 +25093,8 @@ export interface components {
             redirect_url: string | null;
             /** @description Clicks on the redirect link, without link scanners and previews; 0 without one. */
             clicks: number;
+            /** @description How many of those clicks reached a page running the website tracking snippet; the rest left before the page loaded, or landed where the snippet doesn't run. */
+            landed: number;
             /** Format: date-time */
             created_at: string;
         };
@@ -26538,6 +26701,12 @@ export interface components {
             rules: components["schemas"]["FlagRule"][];
             /** @description Whether the website script gets it. Off keeps a flag only your servers read out of the page. */
             on_site: boolean;
+            /** @description The exclusion group it shares visitors with ("" for none): flags in one group split the group's visitors, so no visitor is in two of their A/B tests. */
+            exclusion_group?: string;
+            /** @description Percent of the group's visitors it owns; it is off for the rest. 0 without a group. */
+            group_share?: number;
+            /** @description Where its slice of the group starts */
+            group_start?: number;
             /** Format: date-time */
             created_at: string;
             /** Format: date-time */
@@ -26575,6 +26744,10 @@ export interface components {
             rollout?: number;
             rules?: components["schemas"]["FlagRule"][];
             on_site?: boolean;
+            /** @description Join this exclusion group (lowercase letters, digits, - and _), or "" to leave. Fixed while the flag's A/B test runs. */
+            exclusion_group?: string;
+            /** @description Percent of the group's visitors to take, from the first free slice that wide (default 50). 409 when the group has no room. */
+            group_share?: number;
         };
         /** @description One visual change: a CSS selector and exactly one action (src and alt may go together). */
         FlagChange: {
@@ -26619,7 +26792,7 @@ export interface components {
             };
             /** @description Why, by flag key (evaluate only). */
             reasons?: {
-                [key: string]: "match" | "rules" | "rollout" | "off" | "no_subject";
+                [key: string]: "match" | "rules" | "group" | "rollout" | "off" | "no_subject";
             };
         };
         ABTestGoal: {
@@ -26657,6 +26830,42 @@ export interface components {
              * @enum {string}
              */
             better?: "higher" | "lower";
+        };
+        ABTestPreviews: {
+            /** Format: uuid */
+            test_id: string;
+            pages: {
+                url: string;
+                /**
+                 * Format: int64
+                 * @description Visitors the page showed a version to in the last 28 days.
+                 */
+                visitors: number;
+                links: {
+                    variant: string;
+                    url: string;
+                }[];
+            }[];
+            versions: {
+                key: string;
+                control: boolean;
+                check: {
+                    /** @enum {string} */
+                    status: "ok" | "broken";
+                    note: string;
+                    /**
+                     * Format: uuid
+                     * @description The actor who checked it.
+                     */
+                    checked_by: string | null;
+                    /** Format: date-time */
+                    checked_at: string;
+                    /** @description The version's content changed after it was checked. */
+                    stale: boolean;
+                } | null;
+            }[];
+            /** @description What the links can and can't preview. */
+            hint: string;
         };
         ABTest: {
             /** Format: uuid */
@@ -31892,8 +32101,13 @@ export interface components {
             /** @description Pending invites for this role. */
             invites: number;
         };
-        /** @enum {string} */
-        Scope: "workspace.read" | "workspace.manage" | "context.manage" | "members.read" | "members.manage" | "members.remove" | "roles.manage" | "tokens.manage" | "audit.read" | "mailboxes.read" | "mailboxes.manage" | "leads.read" | "leads.manage" | "suppressions.manage" | "sequences.read" | "sequences.manage" | "inbox.read" | "inbox.manage" | "integrations.read" | "integrations.manage" | "outcomes.read" | "outcomes.manage" | "projects.read" | "projects.manage" | "infrastructure.read" | "infrastructure.manage" | "infrastructure.approve" | "analytics.read" | "analytics.manage" | "missions.read" | "missions.run" | "missions.approve" | "seo.read" | "seo.manage" | "social.read" | "social.manage" | "social.post" | "partners.read" | "partners.manage" | "partners.conversions" | "my_ai_accounts.read" | "my_ai_accounts.manage" | "ai_accounts.read" | "ai_accounts.manage" | "ai_spend.read" | "webhooks.read" | "webhooks.manage" | "emails.read" | "emails.send" | "emails.manage" | "customers.read" | "customers.manage" | "catalog.manage";
+        /**
+         * @description profiles.read and profiles.manage were called projects.read and projects.manage until projects were removed. Requests may still send the old names (ScopeInput); responses always use the new names.
+         * @enum {string}
+         */
+        Scope: "workspace.read" | "workspace.manage" | "context.manage" | "members.read" | "members.manage" | "members.remove" | "roles.manage" | "tokens.manage" | "audit.read" | "mailboxes.read" | "mailboxes.manage" | "leads.read" | "leads.manage" | "suppressions.manage" | "sequences.read" | "sequences.manage" | "inbox.read" | "inbox.manage" | "integrations.read" | "integrations.manage" | "outcomes.read" | "outcomes.manage" | "profiles.read" | "profiles.manage" | "infrastructure.read" | "infrastructure.manage" | "infrastructure.approve" | "analytics.read" | "analytics.manage" | "missions.read" | "missions.run" | "missions.approve" | "seo.read" | "seo.manage" | "social.read" | "social.manage" | "social.post" | "partners.read" | "partners.manage" | "partners.conversions" | "my_ai_accounts.read" | "my_ai_accounts.manage" | "ai_accounts.read" | "ai_accounts.manage" | "ai_spend.read" | "webhooks.read" | "webhooks.manage" | "emails.read" | "emails.send" | "emails.manage" | "customers.read" | "customers.manage" | "catalog.manage";
+        /** @description A scope in a request. projects.read and projects.manage, the old names of profiles.read and profiles.manage, are still accepted and mean the new ones. */
+        ScopeInput: components["schemas"]["Scope"] | ("projects.read" | "projects.manage");
         Workspace: {
             /** Format: uuid */
             id: string;
@@ -32028,7 +32242,7 @@ export interface components {
             /** @description A new name. It shows in the audit log next to everything the token does. */
             name?: string;
             /** @description Replaces the token's scopes. Takes effect on its next request. */
-            scopes?: components["schemas"]["Scope"][];
+            scopes?: components["schemas"]["ScopeInput"][];
             daily_send_budget?: number | null;
             /** @enum {string|null} */
             max_priority?: "low" | "normal" | "high" | null;
@@ -33880,6 +34094,15 @@ export interface components {
              */
             mailbox_id: string | null;
             mailbox_email: string | null;
+            /**
+             * @description How it came in: a connected support mailbox, or forwarding to the brand's support address.
+             * @enum {string}
+             */
+            via: "mailbox" | "forwarding";
+            /** @description Forwarding: the support address it was forwarded to. */
+            inbound_address: string | null;
+            /** @description Forwarding: the business's own address the customer wrote to, which replies go out from through the email provider. */
+            reply_from: string | null;
             /** @enum {string} */
             channel: "email";
             subject: string;
@@ -37905,7 +38128,7 @@ export interface operations {
                 "application/json": {
                     name: string;
                     description?: string;
-                    scopes?: components["schemas"]["Scope"][];
+                    scopes?: components["schemas"]["ScopeInput"][];
                 };
             };
         };
@@ -37986,7 +38209,7 @@ export interface operations {
                 "application/json": {
                     name?: string;
                     description?: string;
-                    scopes?: components["schemas"]["Scope"][];
+                    scopes?: components["schemas"]["ScopeInput"][];
                 };
             };
         };
@@ -38165,7 +38388,7 @@ export interface operations {
             content: {
                 "application/json": {
                     name: string;
-                    scopes: components["schemas"]["Scope"][];
+                    scopes: components["schemas"]["ScopeInput"][];
                     expires_in_days?: number;
                     daily_send_budget?: number | null;
                     /** @enum {string|null} */
@@ -38358,7 +38581,7 @@ export interface operations {
             content: {
                 "application/json": {
                     /** @description The write scopes to allow. Empty is read only. Left out keeps them as they are. */
-                    scopes?: components["schemas"]["Scope"][];
+                    scopes?: components["schemas"]["ScopeInput"][];
                     /** @description Whether the app's changes need a mission a person approved. Left out keeps it as it is. */
                     require_mission?: boolean;
                 };
@@ -64638,7 +64861,7 @@ export interface operations {
                         ready: boolean;
                         checks: {
                             /** @enum {string} */
-                            id: "flag" | "one_at_a_time" | "exposures" | "delivery" | "goal" | "duration" | "guardrails";
+                            id: "flag" | "one_at_a_time" | "overlap" | "exposures" | "delivery" | "goal" | "duration" | "qa" | "guardrails";
                             /** @enum {string} */
                             status: "ok" | "warn" | "fail";
                             text: string;
@@ -64676,6 +64899,70 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ABTest"];
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            default: components["responses"]["Error"];
+        };
+    };
+    getABTestPreviews: {
+        parameters: {
+            query?: {
+                /** @description A page of your site (http or https) to give links for. */
+                page?: string;
+            };
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                test: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The links and checks. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ABTestPreviews"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    checkABTestVersion: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                test: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @description One of the flag's versions. */
+                    variant: string;
+                    /** @enum {string} */
+                    status: "ok" | "broken";
+                    note?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The links and checks, with this one. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ABTestPreviews"];
                 };
             };
             202: components["responses"]["MissionHeld"];
@@ -64728,6 +65015,59 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ABTestResults"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    getABTestInteractions: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                test: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The interactions. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** Format: uuid */
+                        test_id: string;
+                        interactions: {
+                            /**
+                             * Format: uuid
+                             * @description The other test.
+                             */
+                            test_id: string;
+                            name: string;
+                            flag_key: string;
+                            /** @enum {string} */
+                            status: "running" | "done";
+                            other_flag: string;
+                            /** @description This test's visitors who also saw the other flag. */
+                            overlap: number;
+                            versions: {
+                                variant: string;
+                                p_value: number;
+                                interacts: boolean;
+                                effects: {
+                                    other_variant: string;
+                                    visitors: number;
+                                    /** @description The version's mean per visitor minus the control's, among these visitors. */
+                                    difference: number;
+                                }[];
+                            }[];
+                        }[];
+                    };
                 };
             };
             default: components["responses"]["Error"];

@@ -13,13 +13,14 @@ import { useBrand } from "@/lib/brand";
 import { Badge, Button, CopyButton, Empty, ErrorText, field, Input, Loading, Menu, PageHeader, Stat, Stats, ask, toast } from "../ui";
 import { ago, plural } from "../format";
 import { DataTable, type ColumnDef } from "@/components/data-table";
+import { Flows } from "./PartnerFlows";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { PartnerInstall } from "./PartnerInstall";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 
 type Props = { ws: string; canManage: boolean };
-type Section = "partners" | "groups" | "conversions" | "rewards" | "payouts";
+type Section = "partners" | "groups" | "flows" | "conversions" | "rewards" | "payouts";
 type Kind = PartnerProgram["kind"];
 
 const kinds: { id: Kind; label: string; blurb: string }[] = [
@@ -88,6 +89,7 @@ export function Partners({ ws, canManage }: Props) {
             <TabsList>
               <TabsTrigger value="partners" className="px-3 text-[12px]">Partners</TabsTrigger>
               <TabsTrigger value="groups" className="px-3 text-[12px]">Groups</TabsTrigger>
+              <TabsTrigger value="flows" className="px-3 text-[12px]">Flows</TabsTrigger>
               <TabsTrigger value="conversions" className="px-3 text-[12px]">Conversions</TabsTrigger>
               <TabsTrigger value="rewards" className="px-3 text-[12px]">Rewards</TabsTrigger>
               <TabsTrigger value="payouts" className="px-3 text-[12px]">Payouts</TabsTrigger>
@@ -95,6 +97,7 @@ export function Partners({ ws, canManage }: Props) {
           </Tabs>
           {section === "partners" && <PartnerList key={current.id} ws={ws} program={current} canManage={canManage} />}
           {section === "groups" && <Groups key={current.id} ws={ws} program={current} canManage={canManage} onChanged={load} />}
+          {section === "flows" && <Flows key={current.id} ws={ws} program={current} canManage={canManage} onChanged={load} />}
           {section === "conversions" && <Conversions key={current.id} ws={ws} program={current} />}
           {section === "rewards" && <Rewards key={current.id} ws={ws} program={current} canManage={canManage} />}
           {section === "payouts" && <Payouts key={current.id} ws={ws} program={current} canManage={canManage} />}
@@ -106,7 +109,8 @@ export function Partners({ ws, canManage }: Props) {
   );
 }
 
-function ruleText(r: PartnerProgram["rules"][number], currency: string): string {
+export function ruleText(r: PartnerProgram["rules"][number], currency: string): string {
+  if (r.kind === "group") return r.name || "Moves the partner to a group";
   const what = r.kind === "percent" ? `${(r.percent_bp ?? 0) / 100}%` : r.kind === "fixed" ? money(r.amount_cents ?? 0, currency) : r.action;
   const when = r.trigger === "signup" ? "per sign-up" : r.trigger !== "sale" ? `per ${r.trigger}` : r.recurrence === "first" ? "on the first sale" : r.recurrence === "months" ? `on sales for ${r.months} months` : "on every sale";
   const who = r.side === "referred" ? " for the friend" : "";
@@ -124,11 +128,13 @@ function rulesSummary(p: PartnerProgram): string {
 }
 
 // toRuleInput is a saved rule as PUT .../rules takes it back.
-function toRuleInput(r: PartnerProgram["rules"][number]): PartnerRuleInput {
+export function toRuleInput(r: PartnerProgram["rules"][number]): PartnerRuleInput {
   return {
     trigger: r.trigger, side: r.side, kind: r.kind, recurrence: r.recurrence, months: r.months ?? undefined, min_sales: r.min_sales,
     action: r.action, action_data: r.action_data, group_id: r.group_id, partner_id: r.partner_id, product_ids: r.product_ids,
     percent_bp: r.percent_bp ?? undefined, amount_cents: r.amount_cents ?? undefined,
+    name: r.name, conditions: r.conditions, approval: r.approval, approval_days: r.approval_days ?? undefined, stacking: r.stacking,
+    overrides: r.overrides, target_group_id: r.target_group_id ?? undefined,
   };
 }
 
@@ -806,18 +812,6 @@ function NewProgram({ ws, onClose, onSaved }: { ws: string; onClose: () => void;
   );
 }
 
-type RuleRow = PartnerRuleInput & { amount: string };
-
-// toRows is the rules the settings edit: groups' and partners' own rates
-// are set on the Groups tab and the partner's menu, and kept as they are.
-function toRows(p: PartnerProgram): RuleRow[] {
-  return p.rules.filter((r) => !r.partner_id && !r.group_id).map((r) => ({
-    trigger: r.trigger, side: r.side, kind: r.kind, recurrence: r.recurrence, months: r.months ?? undefined, min_sales: r.min_sales,
-    action: r.action, action_data: r.action_data, group_id: r.group_id, product_ids: r.product_ids,
-    amount: r.kind === "percent" ? String((r.percent_bp ?? 0) / 100) : r.kind === "fixed" ? String((r.amount_cents ?? 0) / 100) : "",
-  }));
-}
-
 function ProgramSettings({ ws, program: p, canManage, onClose }: { ws: string; program: PartnerProgram; canManage: boolean; onClose: () => void }) {
   const [landing, setLanding] = useState(p.landing_url);
   const [windowDays, setWindowDays] = useState(String(p.credit_window_days));
@@ -827,7 +821,6 @@ function ProgramSettings({ ws, program: p, canManage, onClose }: { ws: string; p
   const [payBrowser, setPayBrowser] = useState(p.pay_browser_signups);
   const [minPayout, setMinPayout] = useState(String(p.min_payout_cents / 100));
   const [salesSource, setSalesSource] = useState(p.sales_source);
-  const [rules, setRules] = useState<RuleRow[]>(toRows(p));
   const [postback, setPostback] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -840,20 +833,9 @@ function ProgramSettings({ ws, program: p, canManage, onClose }: { ws: string; p
       params: { path: { ws, id: p.id } },
       body: { landing_url: landing.trim(), credit_window_days: Number(windowDays), credit_model: model, hold_days: Number(hold), auto_approve: auto, pay_browser_signups: payBrowser, min_payout_cents: Math.round(Number(minPayout) * 100), sales_source: salesSource },
     });
-    if (error) {
-      setBusy(false);
-      return setError(errorMessage(error));
-    }
-    const body = [...rules.map(({ amount, ...r }) => ({
-      ...r,
-      percent_bp: r.kind === "percent" ? Math.round(Number(amount) * 100) : undefined,
-      amount_cents: r.kind === "fixed" ? Math.round(Number(amount) * 100) : undefined,
-      months: r.recurrence === "months" ? r.months ?? 12 : undefined,
-    })), ...p.rules.filter((r) => r.partner_id || r.group_id).map(toRuleInput)];
-    const res = await api.PUT("/v1/workspaces/{ws}/partner-programs/{id}/rules", { params: { path: { ws, id: p.id } }, body: { rules: body } });
     setBusy(false);
-    if (res.error) return setError(errorMessage(res.error));
-    toast("Saved. Rewards already earned keep their amounts.");
+    if (error) return setError(errorMessage(error));
+    toast("Saved.");
     onClose();
   }
   async function setStatus(status: PartnerProgram["status"]) {
@@ -867,7 +849,6 @@ function ProgramSettings({ ws, program: p, canManage, onClose }: { ws: string; p
     if (error || !data) return toast(errorMessage(error), "error");
     setPostback(data.url);
   }
-  const set = (i: number, patch: Partial<RuleRow>) => setRules(rules.map((r, j) => (j === i ? { ...r, ...patch } : r)));
 
   return (
     <Sheet open onOpenChange={(o) => !o && onClose()}>
@@ -901,43 +882,7 @@ function ProgramSettings({ ws, program: p, canManage, onClose }: { ws: string; p
               <input type="checkbox" checked={salesSource === "stripe"} onChange={(e) => setSalesSource(e.target.checked ? "stripe" : "")} /> Also take sales and refunds from connected Stripe
             </label>
           </fieldset>
-          <div className="space-y-2">
-            <h3 className="text-[13px] font-medium">Rewards</h3>
-            <p className="text-[12px] text-muted-foreground">Every action rule a sale matches pays, but only one cash rule (percent or fixed) does, whatever the order here: a partner's own rate, then their group's, then the highest tier, then the narrower sale (first sale, then first months, then every sale), then the one paying more. So 10% on the first sale with 2% on every sale pays 10% once, then 2%. No rules means track only. An action is something your own system does, sent by the partner_reward.approved webhook.</p>
-            {rules.map((r, i) => (
-              <div key={i} className="grid grid-cols-2 gap-2 rounded-md border p-2 sm:grid-cols-4">
-                <input aria-label="When" list="partner-triggers" className={field} value={r.trigger} disabled={!canManage} onChange={(e) => set(i, { trigger: e.target.value.trim() })} />
-                <select aria-label="Kind" className={field} value={r.kind} disabled={!canManage} onChange={(e) => set(i, { kind: e.target.value as RuleRow["kind"], side: e.target.value === "action" ? r.side : "partner" })}>
-                  <option value="percent">Percent</option>
-                  <option value="fixed">Fixed amount</option>
-                  <option value="action">Action</option>
-                </select>
-                {r.kind === "action" ? (
-                  <input aria-label="Action" className={field} value={r.action ?? ""} disabled={!canManage} placeholder="grant_credit" onChange={(e) => set(i, { action: e.target.value })} />
-                ) : (
-                  <input aria-label="Amount" className={field} type="number" step="0.01" value={r.amount} disabled={!canManage} placeholder={r.kind === "percent" ? "20" : "10"} onChange={(e) => set(i, { amount: e.target.value })} />
-                )}
-                <select aria-label="Which sales" className={field} value={r.recurrence ?? "every"} disabled={!canManage || r.trigger !== "sale"} onChange={(e) => set(i, { recurrence: e.target.value as RuleRow["recurrence"] })}>
-                  <option value="every">Every sale</option>
-                  <option value="first">First sale</option>
-                  <option value="months">First months</option>
-                </select>
-                {r.trigger === "sale" && r.recurrence === "months" && (
-                  <input aria-label="Months" className={field} type="number" min={1} max={120} value={r.months ?? 12} disabled={!canManage}
-                    onChange={(e) => set(i, { months: e.target.value === "" ? undefined : Number(e.target.value) })} placeholder="12" />
-                )}
-                {r.kind === "action" && (
-                  <select aria-label="Who" className={field} value={r.side ?? "partner"} disabled={!canManage} onChange={(e) => set(i, { side: e.target.value as RuleRow["side"] })}>
-                    <option value="partner">For the partner</option>
-                    <option value="referred">For the friend</option>
-                  </select>
-                )}
-                {canManage && <Button type="button" variant="ghost" onClick={() => setRules(rules.filter((_, j) => j !== i))}>Remove</Button>}
-              </div>
-            ))}
-            <datalist id="partner-triggers"><option value="sale">On a sale</option><option value="signup">On a sign-up</option></datalist>
-            {canManage && <Button type="button" variant="ghost" onClick={() => setRules([...rules, { trigger: "sale", kind: "percent", recurrence: "every", side: "partner", amount: "20" }])}>Add a rule</Button>}
-          </div>
+          <p className="text-[12px] text-muted-foreground">Rewards are flows: set them on the Flows tab.</p>
           <ErrorText>{error}</ErrorText>
           {canManage && <Button disabled={busy}>Save</Button>}
           <div className="space-y-2 border-t pt-4">

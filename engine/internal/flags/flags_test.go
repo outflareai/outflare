@@ -167,6 +167,44 @@ func TestChecks(t *testing.T) {
 	}
 }
 
+// Flags in one exclusion group never both take the same visitor, and each
+// takes about its share of the group.
+func TestExclusionGroup(t *testing.T) {
+	vs := []Variant{{Key: "control", Weight: 50}, {Key: "new", Weight: 50}}
+	a := Flag{Key: "hero", Status: "on", Variants: vs, Rollout: 100, Salt: "s1", Group: "homepage", GroupFrom: 0, GroupTo: 3000}
+	b := Flag{Key: "cta", Status: "on", Variants: vs, Rollout: 100, Salt: "s2", Group: "homepage", GroupFrom: 3000, GroupTo: 10000}
+	inA, inB := 0, 0
+	for i := range 20000 {
+		v := Visitor{Subject: fmt.Sprintf("visitor-%d", i)}
+		ra, rb := Evaluate(a, v), Evaluate(b, v)
+		if ra.Variant != "" && rb.Variant != "" {
+			t.Fatalf("%s is in both tests", v.Subject)
+		}
+		if ra.Variant == "" && ra.Reason != "group" || rb.Variant == "" && rb.Reason != "group" {
+			t.Fatalf("left out for %s/%s", ra.Reason, rb.Reason)
+		}
+		if ra.Variant != "" {
+			inA++
+		} else {
+			inB++
+		}
+	}
+	if inA < 5600 || inA > 6400 || inA+inB != 20000 {
+		t.Fatalf("hero took %d of 20000, want about 30%%", inA)
+	}
+
+	// Slices are handed out from the first gap wide enough.
+	if f, to, ok := Allocate([][2]int{{0, 3000}, {5000, 10000}}, 20); !ok || f != 3000 || to != 5000 {
+		t.Fatalf("gap: %d %d %v", f, to, ok)
+	}
+	if _, _, ok := Allocate([][2]int{{0, 3000}, {5000, 10000}}, 21); ok {
+		t.Fatal("a slice wider than any gap was given")
+	}
+	if f, to, ok := Allocate(nil, 100); !ok || f != 0 || to != 10000 {
+		t.Fatalf("empty group: %d %d %v", f, to, ok)
+	}
+}
+
 // A version's visual changes are checked: one thing each, safe addresses,
 // a selector that can't break out of a style rule.
 func TestCheckChanges(t *testing.T) {

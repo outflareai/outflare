@@ -24,7 +24,10 @@ import (
 // script still sees the campaign and a later conversion can name the click.
 // The site's script stays the default; a redirect link is opt-in.
 
-var redirectCodeRe = regexp.MustCompile(`^[a-z0-9]{8}$`)
+var (
+	redirectCodeRe = regexp.MustCompile(`^[a-z0-9]{8}$`)
+	clickKeyRe     = regexp.MustCompile(`^[a-z0-9]{16}$`)
+)
 
 const (
 	redirectCodeLen = 8
@@ -123,4 +126,21 @@ func withParam(raw, k, v string) string {
 		u.RawQuery += "&" + p
 	}
 	return u.String()
+}
+
+// claimRedirectClick ties a redirect click to the visit its landing page
+// started, once: site.js sends the ofclk it found, and only a click of the
+// same workspace that no visit has claimed yet is taken.
+func claimRedirectClick(ctx context.Context, tx pgx.Tx, ws, key, session string, now time.Time) error {
+	tag, err := tx.Exec(ctx, `UPDATE tracking_link_clicks SET session_id = $3, landed_at = $4
+		WHERE workspace_id = $1 AND click_key = $2 AND landed_at IS NULL`, ws, key, session, now)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() > 0 {
+		metrics.RedirectLanding("claimed")
+	} else {
+		metrics.RedirectLanding("unmatched")
+	}
+	return nil
 }

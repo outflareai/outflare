@@ -20,7 +20,7 @@ import (
 const maxProfiles = 500
 
 func (s *Server) routesCustomerProfiles(mux *http.ServeMux) {
-	read, manage := auth.ScopeProjectsRead, auth.ScopeProjectsManage
+	read, manage := auth.ScopeProfilesRead, auth.ScopeProfilesManage
 	mux.HandleFunc("GET /v1/workspaces/{ws}/ideal-customer-profiles", s.inBrand(read, s.listCustomerProfiles))
 	mux.HandleFunc("POST /v1/workspaces/{ws}/ideal-customer-profiles", s.inBrand(manage, s.createCustomerProfile))
 	mux.HandleFunc("GET /v1/workspaces/{ws}/ideal-customer-profiles/{id}", s.inBrand(read, s.getCustomerProfile))

@@ -99,6 +99,18 @@ export function registerABTestTools(
   );
 
   server.registerTool(
+    "get_ab_test_interactions",
+    {
+      title: "Check an A/B test for interactions",
+      description:
+        "For each other test of another flag that ran at the same time (outside this flag's exclusion group): how many visitors saw both, and whether each version's effect on the first goal differs by the other test's version (interacts, at p < 0.01). An interaction means one change alters the other's effect; read the effects before shipping either.",
+      inputSchema: { test: testRef },
+      annotations: read,
+    },
+    ({ test }) => call(() => gtm.GET("/v1/workspaces/{ws}/ab-tests/{test}/interactions", { params: { path: { ...path(), test } } })),
+  );
+
+  server.registerTool(
     "plan_ab_test",
     {
       title: "Plan an A/B test",
@@ -253,6 +265,36 @@ export function registerABTestTools(
       annotations: read,
     },
     ({ test }) => call(() => gtm.GET("/v1/workspaces/{ws}/ab-tests/{test}/checklist", { params: { path: { ...path(), test } } })),
+  );
+
+  server.registerTool(
+    "get_ab_test_previews",
+    {
+      title: "Preview an A/B test's versions",
+      description:
+        "Links that show each version of a test to whoever opens them, on the pages that showed its flag most lately (or on page), without counting them; and whether a person has checked each version. Give the links to the person to look at: an agent can't judge how a page renders.",
+      inputSchema: { test: testRef, page: z.string().url().optional().describe("A page of the site to give links for.") },
+      annotations: read,
+    },
+    ({ test, page }) => call(() => gtm.GET("/v1/workspaces/{ws}/ab-tests/{test}/previews", { params: { path: { ...path(), test }, query: { page } } })),
+  );
+
+  server.registerTool(
+    "check_ab_test_version",
+    {
+      title: "Record a check of an A/B test version",
+      description:
+        "Record what the person saw when they previewed a version: ok when it renders right, broken when it doesn't (a broken version stops the test passing its checklist). Only record what the person told you.",
+      inputSchema: {
+        test: testRef,
+        variant: z.string().min(1),
+        status: z.enum(["ok", "broken"]),
+        note: z.string().max(1000).optional().describe("What was wrong, or anything worth knowing."),
+      },
+      annotations: write,
+    },
+    ({ test, variant, status, note }) =>
+      call(() => gtm.POST("/v1/workspaces/{ws}/ab-tests/{test}/checks", { params: { path: { ...path(), test } }, body: { variant, status, note } })),
   );
 
   server.registerTool(

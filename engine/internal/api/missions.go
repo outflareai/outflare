@@ -1414,6 +1414,7 @@ func (s *Server) replay(ctx context.Context, ws, missionID string, act missionAc
 			WHERE id = $1 AND revoked_at IS NULL AND (expires_at IS NULL OR expires_at > now())
 			  AND NOT EXISTS (SELECT 1 FROM users u WHERE u.id = api_tokens.created_by AND u.disabled_at IS NOT NULL)`, *act.tokenID).
 			Scan(&p.TokenID, &p.ActorID, &p.TokenWorkspaceID, &p.TokenScopes)
+		p.TokenScopes = auth.Rename(p.TokenScopes)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return 0, nil, errors.New("the agent's token was revoked or expired, so the request was not run")
 		}

@@ -107,11 +107,45 @@ func (s *Service) VerifyEmails(ctx context.Context, ws string, req VerifyRequest
 		}
 		return FindResult{}, err
 	}
+	// Addresses checked recently enough aren't checked again: answer them
+	// from the stored result, at no cost.
+	paid := map[string]bool{} // checked now, on a paid verifier
+	for _, res := range results {
+		paid[res.Email] = res.IntegrationID != nil
+	}
+	var cached []string
+	for _, e := range emails {
+		if _, ok := paid[e]; !ok {
+			cached = append(cached, e)
+		}
+	}
+	if len(cached) > 0 {
+		set, err := verify.LoadSettings(ctx, s.Pool, ws)
+		if err != nil {
+			return FindResult{}, err
+		}
+		stored, err := verify.List(ctx, s.Pool, ws, "", cached, len(cached), 0)
+		if err != nil {
+			return FindResult{}, err
+		}
+		// One that failed and will be checked again has no fresh result
+		// and gets no answer yet: the runner retries it.
+		now := time.Now()
+		for _, r := range stored {
+			if set.Fresh(r, now) {
+				results = append(results, r)
+			}
+		}
+	}
 	out := FindResult{Items: make([]ItemResult, 0, len(results))}
 	for _, res := range results {
 		it := ItemResult{Ref: byEmail[res.Email], Email: res.Email,
 			Code: verifyCode(res.Status), Evidence: EvidenceHistory,
 			Cost: Cost{Provider: res.Provider}}
+		if paid[res.Email] {
+			// One credit an address, as the spend ledger books it.
+			it.Cost.Connection, it.Cost.Units = *res.IntegrationID, 1
+		}
 		if res.Score != nil {
 			it.Confidence = *res.Score
 		}

@@ -45,8 +45,11 @@ func (s *Server) routesABTests(mux *http.ServeMux) {
 	mux.HandleFunc("POST /v1/workspaces/{ws}/ab-tests/{test}/duplicate", s.inWorkspace(manage, s.duplicateABTest))
 	mux.HandleFunc("GET /v1/workspaces/{ws}/ab-tests/{test}/checklist", s.inWorkspace(read, s.abTestChecklist))
 	mux.HandleFunc("POST /v1/workspaces/{ws}/ab-tests/{test}/ship", s.inWorkspace(manage, s.shipABTest))
+	mux.HandleFunc("GET /v1/workspaces/{ws}/ab-tests/{test}/previews", s.inWorkspace(read, s.abTestPreviews))
+	mux.HandleFunc("POST /v1/workspaces/{ws}/ab-tests/{test}/checks", s.inWorkspace(manage, s.checkABTestVersion))
 	mux.HandleFunc("GET /v1/workspaces/{ws}/ab-tests/{test}/results", s.inWorkspace(read, s.abTestResults))
 	mux.HandleFunc("GET /v1/workspaces/{ws}/ab-tests/{test}/breakdown", s.inWorkspace(read, s.abTestBreakdown))
+	mux.HandleFunc("GET /v1/workspaces/{ws}/ab-tests/{test}/interactions", s.inWorkspace(read, s.abTestInteractions))
 }
 
 type abTestView struct {

@@ -43,7 +43,7 @@ type Run = {
   provider_cents: number; ai_cents: number; error_code: string | null; error: string | null; created_at: string; finished_at: string | null;
   // Only on a single run (and the front page's latest runs).
   pipeline?: Pipeline; contacts?: Counts; campaign?: RunCampaign;
-  spend?: { ai_cents: number; web_cents: number; web_tokens: number; people_credits: number };
+  spend?: { ai_cents: number; web_cents: number; web_tokens: number; people_credits: number; verify_credits?: number };
   results?: { in_campaign: number; sent: number; replied: number; meetings?: number };
   to_review?: number;
 };
@@ -1046,14 +1046,15 @@ function Spend({ run }: { run: Run }) {
   const inCampaign = run.contacts?.enrolled ?? 0;
   return (
     <div className="space-y-3">
-      <Stats cols={4}>
+      <Stats cols={5}>
         <Stat label="AI" value={money(sp.ai_cents)} sub={`your AI key, up to ${money(run.max_ai_cents)}`} />
         <Stat label="Web (Geonode)" value={sp.web_cents ? money(sp.web_cents) : `${n(sp.web_tokens)} tokens`} sub={`${plural(run.searches, "search", "searches")}, ${plural(run.pages, "page")}`} />
         <Stat label="Data provider" value={`${n(sp.people_credits)}`} sub="credits for people searches" />
+        <Stat label="Email verifier" value={`${n(sp.verify_credits ?? 0)}`} sub="credits for checking addresses" />
         <Stat label="Per result" value={run.results?.meetings ? money(money$ / run.results.meetings) : inCampaign ? usd(money$ / inCampaign) : fit ? usd(money$ / fit) : "–"}
           sub={run.results?.meetings ? "a meeting" : inCampaign ? "a person in the campaign" : "a company that fits"} />
       </Stats>
-      <p className="text-[12px] text-muted-foreground">Everything runs on your own accounts. Email checks use your verifier's credits, which show on the Connectors page.</p>
+      <p className="text-[12px] text-muted-foreground">Everything runs on your own accounts. Credits are what your data provider and email verifier count; checks your verifier already made recently, and the free built-in checks, cost none.</p>
     </div>
   );
 }

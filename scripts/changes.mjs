@@ -147,14 +147,22 @@ function list(from, to) {
 	console.log(JSON.stringify({ edition, from, to, notes: [...byText.values()] }, null, 2));
 }
 
-// The commit that released the newest version: the first-parent commit that
-// added CHANGELOG.md's newest "## [x.y.z]" heading. Notes added after it are
-// not released yet.
+// The commit that released the newest version: the release commit that added
+// CHANGELOG.md's newest "## [x.y.z]" heading on its own branch, not main's merge
+// of it. Its parent is the commit the release was cut from, so a pull request
+// that merged into main after the cut, before the release landed, is not in its
+// tree and its note goes into the next release. The release commit is named
+// "Release vx.y.z"; without one, the oldest commit that touched the heading is
+// the one that added it, so a later edit to that line doesn't count.
 function lastRelease() {
 	const log = join(dir, 'CHANGELOG.md');
 	const v = existsSync(log) && readFileSync(log, 'utf8').match(/^## \[(\d+\.\d+\.\d+)\]/m)?.[1];
 	if (!v) return '';
-	return git('log', '-1', '--first-parent', '--format=%H', `-G^## \\[${v.replace(/\./g, '\\.')}\\]`, '--', 'CHANGELOG.md');
+	const heading = `-G^## \\[${v.replace(/\./g, '\\.')}\\]`;
+	return (
+		git('log', '-1', '--format=%H', heading, `--grep=^Release v${v.replace(/\./g, '\\.')}$`, '--', 'CHANGELOG.md') ||
+		git('log', '--reverse', '--format=%H', heading, '--', 'CHANGELOG.md').split('\n')[0]
+	);
 }
 
 // Adds the notes not released yet to CHANGELOG.md's Unreleased section, under
@@ -162,10 +170,13 @@ function lastRelease() {
 // runs this before it turns Unreleased into the next version (docs/releasing.md).
 function fold() {
 	const since = lastRelease();
-	const range = since ? [`${since}..HEAD`] : ['HEAD'];
+	// The notes in HEAD's tree that weren't in the release's: a tree diff, not a
+	// commit range, so a note first written in a merge commit counts too.
+	const added = since
+		? git('diff', '--no-renames', '--diff-filter=A', '--name-only', since, 'HEAD', '--', 'changes')
+		: git('ls-tree', '-r', '--name-only', 'HEAD', '--', 'changes');
 	const notes = [];
-	const added = git('log', '--diff-filter=A', '--no-renames', '--format=', '--name-only', ...range, '--', 'changes');
-	for (const f of [...new Set(added.split('\n').filter(isNote))]) {
+	for (const f of added.split('\n').filter(isNote)) {
 		if (!existsSync(join(dir, f))) continue;
 		const n = parse(readFileSync(join(dir, f), 'utf8'), f);
 		if (!n.problems.length) notes.push(n);

@@ -28,7 +28,9 @@ const (
 
 // Cost is what one find or verify spent. Native, first-party work is free, so
 // Cents and Units are zero and Provider is "outflare"; a workspace's own paid
-// verifier reports its spend and which connection answered.
+// verifier reports its spend and which connection answered: one credit an
+// address checked (Units), as the spend ledger books it. An answer from
+// the cache costs nothing.
 type Cost struct {
 	Cents      int    `json:"cents"`
 	Units      int    `json:"units"`

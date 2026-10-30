@@ -64,10 +64,16 @@ type flagView struct {
 	Rollout     int             `json:"rollout"`
 	Rules       []flags.Rule    `json:"rules"`
 	OnSite      bool            `json:"on_site"`
-	CreatedAt   time.Time       `json:"created_at"`
-	UpdatedAt   time.Time       `json:"updated_at"`
-	ArchivedAt  *time.Time      `json:"archived_at"`
-	salt        string
+	// ExclusionGroup is the group whose visitors the flag shares with its
+	// other flags ("" for none); GroupShare is the percent of them it
+	// owns, and GroupStart where its slice begins.
+	ExclusionGroup string     `json:"exclusion_group"`
+	GroupShare     int        `json:"group_share"`
+	GroupStart     int        `json:"group_start"`
+	CreatedAt      time.Time  `json:"created_at"`
+	UpdatedAt      time.Time  `json:"updated_at"`
+	ArchivedAt     *time.Time `json:"archived_at"`
+	salt           string
 }
 
 type flagInput struct {
@@ -80,16 +86,25 @@ type flagInput struct {
 	Rollout     *int             `json:"rollout"`
 	Rules       *[]flags.Rule    `json:"rules"`
 	OnSite      *bool            `json:"on_site"`
+	// ExclusionGroup joins a group ("" leaves it); GroupShare is the
+	// percent of the group's visitors to take (default 50).
+	ExclusionGroup *string `json:"exclusion_group"`
+	GroupShare     *int    `json:"group_share"`
 }
 
-const flagCols = `id::text, key, name, description, brand_id::text, status, variants, rollout, rules, on_site, created_at, updated_at, archived_at, salt`
+const flagCols = `id::text, key, name, description, brand_id::text, status, variants, rollout, rules, on_site, exclusion_group, group_from, group_to, created_at, updated_at, archived_at, salt`
 
 func scanFlag(row pgx.Row) (flagView, error) {
 	var v flagView
 	var variants, rules []byte
-	err := row.Scan(&v.ID, &v.Key, &v.Name, &v.Description, &v.BrandID, &v.Status, &variants, &v.Rollout, &rules, &v.OnSite, &v.CreatedAt, &v.UpdatedAt, &v.ArchivedAt, &v.salt)
+	var from, to int
+	err := row.Scan(&v.ID, &v.Key, &v.Name, &v.Description, &v.BrandID, &v.Status, &variants, &v.Rollout, &rules, &v.OnSite,
+		&v.ExclusionGroup, &from, &to, &v.CreatedAt, &v.UpdatedAt, &v.ArchivedAt, &v.salt)
 	if err != nil {
 		return v, err
+	}
+	if v.ExclusionGroup != "" {
+		v.GroupStart, v.GroupShare = from/100, (to-from)/100
 	}
 	if err := json.Unmarshal(variants, &v.Variants); err != nil {
 		return v, err
@@ -257,6 +272,56 @@ func (s *Server) applyFlagInput(ctx context.Context, a *access, f *flagView, in 
 	if in.OnSite != nil {
 		f.OnSite = *in.OnSite
 	}
+	if in.ExclusionGroup != nil {
+		g := strings.TrimSpace(*in.ExclusionGroup)
+		if g != "" && !flags.ValidKey(g) {
+			return errInvalid("exclusion_group is a name of lowercase letters, digits, - and _, such as homepage; \"\" leaves the group")
+		}
+		if g != f.ExclusionGroup {
+			f.ExclusionGroup, f.GroupShare, f.GroupStart = g, 0, 0
+		}
+	}
+	if in.GroupShare != nil {
+		if *in.GroupShare < 1 || *in.GroupShare > 100 {
+			return errInvalid("group_share is the percent of the group's visitors the flag takes, 1 to 100")
+		}
+		if f.ExclusionGroup == "" {
+			return errInvalid("group_share needs an exclusion_group")
+		}
+		if *in.GroupShare != f.GroupShare {
+			f.GroupShare, f.GroupStart = *in.GroupShare, -1
+		}
+	}
+	if f.ExclusionGroup != "" && f.GroupShare == 0 {
+		f.GroupShare, f.GroupStart = 50, -1
+	}
+	return nil
+}
+
+// placeInGroup gives f a slice of its exclusion group when it needs one
+// (GroupStart -1, or a group just joined), inside tx with the group's
+// flags locked, so two flags can't take the same slice.
+func placeInGroup(ctx context.Context, tx pgx.Tx, ws string, f *flagView) error {
+	if f.ExclusionGroup == "" || f.GroupStart >= 0 && f.GroupShare > 0 {
+		return nil
+	}
+	rows, err := tx.Query(ctx, `SELECT group_from, group_to FROM flags
+		WHERE workspace_id = $1 AND exclusion_group = $2 AND status <> 'archived' AND id::text <> $3 FOR UPDATE`, ws, f.ExclusionGroup, f.ID)
+	if err != nil {
+		return err
+	}
+	taken, err := pgx.CollectRows(rows, func(r pgx.CollectableRow) ([2]int, error) {
+		var t [2]int
+		return t, r.Scan(&t[0], &t[1])
+	})
+	if err != nil {
+		return err
+	}
+	from, _, ok := flags.Allocate(taken, f.GroupShare)
+	if !ok {
+		return errABConflict(fmt.Sprintf("exclusion group %s has no free %d%% left: give this flag a smaller group_share, or take a flag out of the group", f.ExclusionGroup, f.GroupShare))
+	}
+	f.GroupStart = from / 100
 	return nil
 }
 
@@ -265,6 +330,11 @@ var errFlagKeyTaken = errors.New("flag key taken")
 func (s *Server) flagWriteError(w http.ResponseWriter, r *http.Request, err error) bool {
 	if errors.Is(err, errFlagKeyTaken) || isUnique(err) {
 		writeError(w, r, http.StatusConflict, "conflict", "another flag has this key: keys name one live flag")
+		return true
+	}
+	var c errABConflict
+	if errors.As(err, &c) {
+		writeError(w, r, http.StatusConflict, "conflict", string(c))
 		return true
 	}
 	return s.allocError(w, r, err)
@@ -293,9 +363,13 @@ func (s *Server) createFlag(w http.ResponseWriter, r *http.Request) {
 		if n >= maxFlags {
 			return errInvalid("a workspace can have at most 200 flags; archive the ones you no longer use")
 		}
-		if err := tx.QueryRow(ctx, `INSERT INTO flags (workspace_id, brand_id, key, name, description, status, variants, rollout, rules, on_site, salt, created_by)
-			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12) RETURNING id::text`,
-			a.WorkspaceID, f.BrandID, f.Key, f.Name, f.Description, f.Status, variants, f.Rollout, rules, f.OnSite, newID(), nullIfEmpty(a.ActorID)).Scan(&id); err != nil {
+		if err := placeInGroup(ctx, tx, a.WorkspaceID, &f); err != nil {
+			return err
+		}
+		from, to := groupRange(f)
+		if err := tx.QueryRow(ctx, `INSERT INTO flags (workspace_id, brand_id, key, name, description, status, variants, rollout, rules, on_site, exclusion_group, group_from, group_to, salt, created_by)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15) RETURNING id::text`,
+			a.WorkspaceID, f.BrandID, f.Key, f.Name, f.Description, f.Status, variants, f.Rollout, rules, f.OnSite, f.ExclusionGroup, from, to, newID(), nullIfEmpty(a.ActorID)).Scan(&id); err != nil {
 			return err
 		}
 		return record(ctx, tx, &a.principal, a.WorkspaceID, "flag.created", "flag", id, flagAuditData(f))
@@ -315,7 +389,16 @@ func (s *Server) createFlag(w http.ResponseWriter, r *http.Request) {
 // flagAuditData is what the audit log and product events keep of a flag:
 // its shape, never its key, name or payloads.
 func flagAuditData(f flagView) map[string]any {
-	return map[string]any{"status": f.Status, "brand_id": f.BrandID, "variants": len(f.Variants), "rollout": f.Rollout, "rules": len(f.Rules), "on_site": f.OnSite}
+	return map[string]any{"status": f.Status, "brand_id": f.BrandID, "variants": len(f.Variants), "rollout": f.Rollout, "rules": len(f.Rules), "on_site": f.OnSite,
+		"in_exclusion_group": f.ExclusionGroup != "", "group_share": f.GroupShare}
+}
+
+// groupRange is f's slice of its exclusion group in buckets, or 0, 0.
+func groupRange(f flagView) (int, int) {
+	if f.ExclusionGroup == "" {
+		return 0, 0
+	}
+	return f.GroupStart * 100, (f.GroupStart + f.GroupShare) * 100
 }
 
 func (s *Server) updateFlag(w http.ResponseWriter, r *http.Request) {
@@ -344,8 +427,25 @@ func (s *Server) updateFlag(w http.ResponseWriter, r *http.Request) {
 	variants, _ := json.Marshal(f.Variants)
 	rules, _ := json.Marshal(f.Rules)
 	err := pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
-		if _, err := tx.Exec(ctx, `UPDATE flags SET name = $3, description = $4, brand_id = $5, status = $6, variants = $7, rollout = $8, rules = $9, on_site = $10, updated_at = now()
-			WHERE id = $1 AND workspace_id = $2`, cur.ID, a.WorkspaceID, f.Name, f.Description, f.BrandID, f.Status, variants, f.Rollout, rules, f.OnSite); err != nil {
+		// Who a running test's visitors are can't change under it.
+		if f.ExclusionGroup != cur.ExclusionGroup || f.GroupShare != cur.GroupShare {
+			var running bool
+			if err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM ab_tests WHERE workspace_id = $1 AND flag_id = $2 AND status = 'running')`,
+				a.WorkspaceID, cur.ID).Scan(&running); err != nil {
+				return err
+			}
+			if running {
+				return errABConflict("this flag's A/B test is running: its exclusion group and share are fixed until it ends, so the visitors it measures don't change")
+			}
+		}
+		if err := placeInGroup(ctx, tx, a.WorkspaceID, &f); err != nil {
+			return err
+		}
+		from, to := groupRange(f)
+		if _, err := tx.Exec(ctx, `UPDATE flags SET name = $3, description = $4, brand_id = $5, status = $6, variants = $7, rollout = $8, rules = $9, on_site = $10,
+				exclusion_group = $11, group_from = $12, group_to = $13, updated_at = now()
+			WHERE id = $1 AND workspace_id = $2`, cur.ID, a.WorkspaceID, f.Name, f.Description, f.BrandID, f.Status, variants, f.Rollout, rules, f.OnSite,
+			f.ExclusionGroup, from, to); err != nil {
 			return err
 		}
 		data := flagAuditData(f)
@@ -438,7 +538,8 @@ func (s *Server) liveFlags(ctx context.Context, ws string) ([]liveFlag, error) {
 	}
 	out := make([]liveFlag, 0, len(list))
 	for _, f := range list {
-		out = append(out, liveFlag{Flag: flags.Flag{Key: f.Key, Status: f.Status, Variants: f.Variants, Rollout: f.Rollout, Rules: f.Rules, Salt: f.salt},
+		out = append(out, liveFlag{Flag: flags.Flag{Key: f.Key, Status: f.Status, Variants: f.Variants, Rollout: f.Rollout, Rules: f.Rules, Salt: f.salt,
+			Group: f.ExclusionGroup, GroupFrom: f.GroupStart * 100, GroupTo: (f.GroupStart + f.GroupShare) * 100},
 			brandID: f.BrandID, onSite: f.OnSite})
 	}
 	c.mu.Lock()

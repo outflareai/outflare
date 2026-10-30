@@ -12,6 +12,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net/mail"
 	"strings"
 	"time"
 
@@ -20,6 +21,7 @@ import (
 
 	"github.com/outflareai/outflare/engine/internal/audit"
 	"github.com/outflareai/outflare/engine/internal/customers"
+	"github.com/outflareai/outflare/engine/internal/emails"
 	"github.com/outflareai/outflare/engine/internal/jobs"
 	"github.com/outflareai/outflare/engine/internal/mailbox"
 	"github.com/outflareai/outflare/engine/internal/metrics"
@@ -58,14 +60,19 @@ type Email struct {
 	// stores it twice. UID is 0 for mail that came another way.
 	MailboxID        string
 	UIDValidity, UID int64
-	MessageID        string
-	InReplyTo        string
-	References       []string
-	From, FromName   string
-	To               string
-	Subject, Body    string
-	Received         time.Time
-	AutoReply        bool
+	// Or the support address it was forwarded to (inbound email), the
+	// forwarded message, and the business's own address the customer
+	// wrote to, which replies go out from.
+	InboundAddressID, InboundEmailID string
+	ReplyFrom                        string
+	MessageID                        string
+	InReplyTo                        string
+	References                       []string
+	From, FromName                   string
+	To                               string
+	Subject, Body                    string
+	Received                         time.Time
+	AutoReply                        bool
 }
 
 // Received is what Intake did with an email.
@@ -136,9 +143,10 @@ func Intake(ctx context.Context, tx pgx.Tx, e Email) (Received, error) {
 	}
 	if conv == "" && from != "" {
 		err := tx.QueryRow(ctx, `SELECT id::text FROM support_conversations
-			WHERE workspace_id = $1 AND mailbox_id = $2 AND contact_email = $3 AND lower(subject) = lower($4)
+			WHERE workspace_id = $1 AND mailbox_id IS NOT DISTINCT FROM $2::uuid AND inbound_address_id IS NOT DISTINCT FROM $6::uuid
+			  AND contact_email = $3 AND lower(subject) = lower($4)
 			  AND last_message_at > $5 ORDER BY last_message_at DESC LIMIT 1`,
-			ws, e.MailboxID, from, baseSubject(e.Subject), e.Received.Add(-threadFor)).Scan(&conv)
+			ws, nilIfEmpty(e.MailboxID), from, baseSubject(e.Subject), e.Received.Add(-threadFor), nilIfEmpty(e.InboundAddressID)).Scan(&conv)
 		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 			return out, err
 		}
@@ -157,9 +165,10 @@ func Intake(ctx context.Context, tx pgx.Tx, e Email) (Received, error) {
 		out.Started = true
 		err := tx.QueryRow(ctx, `
 			INSERT INTO support_conversations (workspace_id, brand_id, record_id, mailbox_id, subject, contact_email,
-				first_message_at, last_message_at)
-			VALUES ($1, $2, $3, $4, $5, $6, $7, $7) RETURNING id::text`,
-			ws, e.BrandID, record, nilIfEmpty(e.MailboxID), truncate(baseSubject(e.Subject), 1000), from, e.Received).Scan(&conv)
+				first_message_at, last_message_at, inbound_address_id, reply_from)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $7, $8, $9) RETURNING id::text`,
+			ws, e.BrandID, record, nilIfEmpty(e.MailboxID), truncate(baseSubject(e.Subject), 1000), from, e.Received,
+			nilIfEmpty(e.InboundAddressID), nilIfEmpty(truncate(strings.ToLower(e.ReplyFrom), 320))).Scan(&conv)
 		if err != nil {
 			return out, err
 		}
@@ -168,8 +177,8 @@ func Intake(ctx context.Context, tx pgx.Tx, e Email) (Received, error) {
 		if _, err := tx.Exec(ctx, `
 			UPDATE support_conversations SET last_message_at = GREATEST(last_message_at, $2), last_from = 'customer', unread = true,
 				status = CASE WHEN $3 THEN status ELSE 'open' END,
-				record_id = COALESCE(record_id, $4), updated_at = now()
-			WHERE id = $1`, conv, e.Received, e.AutoReply, record); err != nil {
+				record_id = COALESCE(record_id, $4), reply_from = COALESCE(reply_from, $5), updated_at = now()
+			WHERE id = $1`, conv, e.Received, e.AutoReply, record, nilIfEmpty(truncate(strings.ToLower(e.ReplyFrom), 320))); err != nil {
 			return out, err
 		}
 	}
@@ -179,10 +188,11 @@ func Intake(ctx context.Context, tx pgx.Tx, e Email) (Received, error) {
 	}
 	err := tx.QueryRow(ctx, `
 		INSERT INTO support_messages (workspace_id, conversation_id, kind, record_id, from_email, from_name, to_email, subject, body,
-			message_id, in_reply_to, references_ids, auto_reply, status, mailbox_id, uidvalidity, uid, created_at)
-		VALUES ($1, $2, 'in', $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, 'received', $13, $14, $15, $16) RETURNING id::text`,
+			message_id, in_reply_to, references_ids, auto_reply, status, mailbox_id, uidvalidity, uid, created_at, inbound_email_id)
+		VALUES ($1, $2, 'in', $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, 'received', $13, $14, $15, $16, $17) RETURNING id::text`,
 		ws, conv, record, from, truncate(e.FromName, 300), strings.ToLower(e.To), truncate(e.Subject, 1000), truncate(e.Body, 200000),
 		cleanID(e.MessageID), cleanID(e.InReplyTo), strings.Join(ids, " "), e.AutoReply, nilIfEmpty(e.MailboxID), uv, uid, e.Received,
+		nilIfEmpty(e.InboundEmailID),
 	).Scan(&out.MessageID)
 	if err != nil {
 		return out, err
@@ -193,10 +203,14 @@ func Intake(ctx context.Context, tx pgx.Tx, e Email) (Received, error) {
 		action = "support.conversation_started"
 	}
 	metrics.SupportMessage("in", "success")
+	via := "mailbox"
+	if e.InboundAddressID != "" {
+		via = "forwarding"
+	}
 	return out, audit.Record(ctx, tx, audit.Event{WorkspaceID: ws, ActorType: "system", Action: action,
 		TargetType: "support_conversation", TargetID: conv,
-		Data:  map[string]any{"message_id": out.MessageID, "auto_reply": e.AutoReply, "channel": "email"},
-		Props: map[string]any{"auto_reply": e.AutoReply, "channel": "email"}})
+		Data:  map[string]any{"message_id": out.MessageID, "auto_reply": e.AutoReply, "channel": "email", "via": via},
+		Props: map[string]any{"auto_reply": e.AutoReply, "channel": "email", "via": via}})
 }
 
 // Reply is an answer the team writes to a conversation.
@@ -207,6 +221,17 @@ type Reply struct {
 	// Status to set the conversation to once the reply is queued:
 	// pending (the default) or closed.
 	Status string
+	// Provider sends replies to conversations that came in by forwarding,
+	// through the workspace's email provider; Who is who asked.
+	Provider Provider
+	Who      emails.Who
+}
+
+// Provider queues email through the workspace's email provider (package
+// emails).
+type Provider interface {
+	Compose(ctx context.Context, q jobs.Querier, d emails.Draft) (emails.NewEmail, error)
+	Queue(ctx context.Context, tx pgx.Tx, who emails.Who, e emails.NewEmail) (string, error)
 }
 
 // ErrNotFound means no such conversation in the workspace.
@@ -217,36 +242,54 @@ type ErrBlocked struct{ Reason string }
 
 func (e ErrBlocked) Error() string { return e.Reason }
 
+// ErrProvider is an email provider's refusal to take a reply, with the
+// API's status and code (no provider, an unverified sending domain).
+type ErrProvider struct{ *emails.ComposeError }
+
 // Blocked reasons, for the API's error codes.
 const (
 	BlockedNoMailbox = "the mailbox this conversation came in on was removed or no longer answers support: connect it again, or reply from your own email"
 	BlockedInactive  = "the support mailbox is not active: reconnect it under Settings, Mailboxes"
+	BlockedNoReplyTo = "Outflare doesn't know which of your addresses this customer wrote to, so it can't reply from it"
 )
 
-// QueueReply checks a reply, stores it as sending and queues the job
-// that sends it, in tx. It answers the new message's id.
+// QueueReply checks a reply, stores it as sending and queues what sends
+// it, in tx: the support job for a conversation from a mailbox, or an
+// email through the workspace's provider for one that was forwarded. It
+// answers the new message's id.
 func QueueReply(ctx context.Context, tx pgx.Tx, r Reply) (string, error) {
-	var mailboxID, contact, subject, status, mbStatus, mbPurpose, mbEmail, mbName *string
+	var mailboxID, inboundID, replyFrom, brandID *string
+	var contact, subject string
+	var mbStatus, mbPurpose, mbEmail, mbName *string
 	err := tx.QueryRow(ctx, `
-		SELECT c.mailbox_id::text, c.contact_email, c.subject, c.status, m.status, m.purpose, m.email, m.display_name
+		SELECT c.mailbox_id::text, c.inbound_address_id::text, c.reply_from, c.brand_id::text, c.contact_email, c.subject,
+			m.status, m.purpose, m.email, m.display_name
 		FROM support_conversations c LEFT JOIN mailboxes m ON m.id = c.mailbox_id
 		WHERE c.id = $1 AND c.workspace_id = $2 FOR UPDATE OF c`, r.ConversationID, r.WorkspaceID,
-	).Scan(&mailboxID, &contact, &subject, &status, &mbStatus, &mbPurpose, &mbEmail, &mbName)
+	).Scan(&mailboxID, &inboundID, &replyFrom, &brandID, &contact, &subject, &mbStatus, &mbPurpose, &mbEmail, &mbName)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return "", ErrNotFound
 	}
 	if err != nil {
 		return "", err
 	}
-	if mailboxID == nil || mbPurpose == nil || *mbPurpose != PurposeSupport {
+	forwarded := mailboxID == nil && inboundID != nil
+	switch {
+	case forwarded:
+		if replyFrom == nil {
+			return "", ErrBlocked{BlockedNoReplyTo}
+		}
+		if r.Provider == nil {
+			return "", ErrBlocked{"replies through your email provider aren't available here"}
+		}
+	case mailboxID == nil || mbPurpose == nil || *mbPurpose != PurposeSupport:
 		return "", ErrBlocked{BlockedNoMailbox}
-	}
-	if *mbStatus != "active" {
+	case *mbStatus != "active":
 		return "", ErrBlocked{BlockedInactive}
 	}
 	// Answering someone who wrote in is mail they asked for: an unsubscribe
 	// from marketing doesn't stop it, a bounce or a block does.
-	d, err := policy.CheckPurpose(ctx, tx, r.WorkspaceID, policy.PurposeTransactional, []string{*contact})
+	d, err := policy.CheckPurpose(ctx, tx, r.WorkspaceID, policy.PurposeTransactional, []string{contact})
 	if err != nil {
 		return "", err
 	}
@@ -264,19 +307,50 @@ func QueueReply(ctx context.Context, tx pgx.Tx, r Reply) (string, error) {
 	if inReplyTo != "" {
 		refs = strings.TrimSpace(refs + " " + inReplyTo)
 	}
-	email := *mbEmail
-	msgID := newID() + "@" + email[strings.LastIndexByte(email, '@')+1:]
-	subj := "Re: " + *subject
-	if *subject == "" {
+	subj := "Re: " + subject
+	if subject == "" {
 		subj = "Re: your message"
 	}
-	var id string
+
+	var id, from, fromName, msgID string
+	var emailID, mbID *string
+	if forwarded {
+		from = *replyFrom
+		if err := tx.QueryRow(ctx, `SELECT COALESCE((SELECT name FROM brands WHERE id = $2), (SELECT name FROM workspaces WHERE id = $1))`,
+			r.WorkspaceID, brandID).Scan(&fromName); err != nil {
+			return "", err
+		}
+		e, err := r.Provider.Compose(ctx, tx, emails.Draft{
+			NewEmail: emails.NewEmail{WorkspaceID: r.WorkspaceID, Purpose: policy.PurposeTransactional, BrandID: brandID,
+				From: mailAddress(fromName, from), To: []string{contact}, ReplyTo: []string{from},
+				Trigger: "system", TriggerRef: "support:" + r.ConversationID, InReplyTo: inReplyTo, References: refs},
+			// The text goes in as data, so nothing in it is read as a
+			// template.
+			Subject: ptr("{{subject}}"), Text: ptr("{{{body}}}"),
+			Data: map[string]any{"subject": subj, "body": r.Body},
+		})
+		var ce *emails.ComposeError
+		if errors.As(err, &ce) {
+			return "", ErrProvider{ce}
+		}
+		if err != nil {
+			return "", err
+		}
+		eid, err := r.Provider.Queue(ctx, tx, r.Who, e)
+		if err != nil {
+			return "", err
+		}
+		emailID = &eid
+	} else {
+		from, fromName, mbID = *mbEmail, *mbName, mailboxID
+		msgID = newID() + "@" + from[strings.LastIndexByte(from, '@')+1:]
+	}
 	err = tx.QueryRow(ctx, `
 		INSERT INTO support_messages (workspace_id, conversation_id, kind, record_id, author_id, from_email, from_name, to_email,
-			subject, body, message_id, in_reply_to, references_ids, status, mailbox_id)
-		SELECT $1, $2, 'out', c.record_id, $3, $4, $5, $6, $7, $8, $9, $10, $11, 'sending', $12
+			subject, body, message_id, in_reply_to, references_ids, status, mailbox_id, email_id)
+		SELECT $1, $2, 'out', c.record_id, $3, $4, $5, $6, $7, $8, $9, $10, $11, 'sending', $12, $13
 		FROM support_conversations c WHERE c.id = $2 RETURNING id::text`,
-		r.WorkspaceID, r.ConversationID, nilIfEmpty(r.AuthorID), email, *mbName, *contact, subj, r.Body, msgID, inReplyTo, refs, *mailboxID,
+		r.WorkspaceID, r.ConversationID, nilIfEmpty(r.AuthorID), from, fromName, contact, subj, r.Body, msgID, inReplyTo, refs, mbID, emailID,
 	).Scan(&id)
 	if err != nil {
 		return "", err
@@ -292,10 +366,24 @@ func QueueReply(ctx context.Context, tx pgx.Tx, r Reply) (string, error) {
 		WHERE id = $1`, r.ConversationID, next); err != nil {
 		return "", err
 	}
+	if forwarded {
+		// The provider sends it; its status is the email's.
+		return id, nil
+	}
 	_, err = jobs.Enqueue(ctx, tx, jobs.NewJob{Kind: JobSend, WorkspaceID: &r.WorkspaceID,
 		Payload: map[string]string{"message_id": id}, IdempotencyKey: "support-send:" + id, MaxAttempts: 5})
 	return id, err
 }
+
+// mailAddress is "Name <address>", quoting the name when it needs it.
+func mailAddress(name, addr string) string {
+	if name = strings.TrimSpace(strings.NewReplacer("\r", " ", "\n", " ", "\"", "", "<", "", ">", "").Replace(name)); name == "" {
+		return addr
+	}
+	return (&mail.Address{Name: name, Address: addr}).String()
+}
+
+func ptr(s string) *string { return &s }
 
 // Sender runs JobSend.
 type Sender struct {

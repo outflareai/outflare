@@ -300,7 +300,7 @@ function CampaignSheet({ ws, campaign: c, channelLabel, canManage, onClose }: { 
                     <span className="min-w-0 flex-1">
                       <span className="block truncate text-[13px]">{l.url}</span>
                       <span className="block truncate text-[12px] text-muted-foreground">
-                        {[l.content, l.term].filter(Boolean).join(" · ") || "No content or term"} · {l.redirect_url ? `${plural(l.clicks, "click")} · ` : ""}{ago(l.created_at)}
+                        {[l.content, l.term].filter(Boolean).join(" · ") || "No content or term"} · {l.redirect_url ? `${plural(l.clicks, "click")}${l.clicks > 0 ? `, ${l.landed} reached the site` : ""} · ` : ""}{ago(l.created_at)}
                       </span>
                     </span>
                     {l.redirect_url && <CopyButton text={l.redirect_url} label="Redirect" />}

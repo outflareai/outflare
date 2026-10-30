@@ -11,7 +11,7 @@ export type Area = { id: string; label: string; help: string; read: Scope[]; wri
 export const areas: Area[] = [
   { id: "context", label: "Company context and memories", help: "What Outflare knows about your company.", read: ["workspace.read"], write: ["context.manage"] },
   { id: "leads", label: "Leads and lists", help: "Import leads, build lists and record outcomes.", read: ["leads.read", "outcomes.read"], write: ["leads.manage", "outcomes.manage"] },
-  { id: "sequences", label: "Sequences and customer profiles", help: "Write, start and pause sequences, and describe who you sell to.", read: ["sequences.read", "projects.read"], write: ["sequences.manage", "projects.manage"] },
+  { id: "sequences", label: "Sequences and customer profiles", help: "Write, start and pause sequences, and describe who you sell to.", read: ["sequences.read", "profiles.read"], write: ["sequences.manage", "profiles.manage"] },
   { id: "replies", label: "Replies", help: "Answer and label replies in your inbox.", read: ["inbox.read"], write: ["inbox.manage"] },
   { id: "infra", label: "Mailboxes, domains and connectors", help: "Plan and set up sending infrastructure.", read: ["mailboxes.read", "infrastructure.read", "integrations.read"], write: ["mailboxes.manage", "infrastructure.manage", "integrations.manage"] },
   { id: "customers", label: "Customers", help: "People, companies and other records, their emails and ids, product events and consent, and the fields they share.", read: ["customers.read"], write: ["customers.manage", "catalog.manage"] },

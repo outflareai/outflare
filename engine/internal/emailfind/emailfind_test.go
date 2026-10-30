@@ -8,14 +8,17 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/outflareai/outflare/engine/internal/connectors/verifiers"
 	"github.com/outflareai/outflare/engine/internal/db"
+	"github.com/outflareai/outflare/engine/internal/verify"
 )
 
 // noMX is a resolver that finds no mail servers, so provider detection stays
 // out of the way in tests (no real DNS).
 type noMX struct{}
 
-func (noMX) LookupMX(context.Context, string) ([]*net.MX, error) { return nil, nil }
+func (noMX) LookupMX(context.Context, string) ([]*net.MX, error)  { return nil, nil }
+func (noMX) LookupHost(context.Context, string) ([]string, error) { return nil, nil }
 
 func testPool(t *testing.T) *pgxpool.Pool {
 	t.Helper()
@@ -151,5 +154,32 @@ func TestFindEmailsNoDomainIsNotFound(t *testing.T) {
 	}
 	if res.Items[0].Code != CodeNotFound {
 		t.Errorf("code = %q, want not_found", res.Items[0].Code)
+	}
+}
+
+func TestVerifyEmailsAnswersFromFreshChecks(t *testing.T) {
+	pool := testPool(t)
+	ctx := context.Background()
+	ws := newWS(t, pool)
+	// Ana was checked an hour ago, Bo a year ago: only Bo is checked again.
+	if _, err := pool.Exec(ctx, `INSERT INTO email_verifications (workspace_id, email, status, provider, checked_at) VALUES
+		($1, 'ana@acme.example', 'deliverable', 'builtin', now() - interval '1 hour'),
+		($1, 'bo@acme.example', 'deliverable', 'builtin', now() - interval '1 year')`, ws); err != nil {
+		t.Fatal(err)
+	}
+	s := &Service{Pool: pool, Verify: &verify.Service{Pool: pool, Builtin: verifiers.Builtin{Resolver: noMX{}}}}
+	res, err := s.VerifyEmails(ctx, ws, VerifyRequest{Items: []VerifyItem{{Ref: "a", Email: "Ana@acme.example"}, {Ref: "b", Email: "bo@acme.example"}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := map[string]ItemResult{}
+	for _, r := range res.Items {
+		got[r.Ref] = r
+	}
+	if a := got["a"]; a.Code != CodeVerified || a.Cost.Units != 0 {
+		t.Fatalf("ana from the stored check: %+v", a)
+	}
+	if b, ok := got["b"]; !ok || b.Code == CodeVerified || b.Cost.Units != 0 {
+		t.Fatalf("bo checked again with the free checks: %+v", got)
 	}
 }

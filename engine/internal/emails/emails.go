@@ -345,6 +345,10 @@ type NewEmail struct {
 	TopicID *string
 	// The broadcast it is part of.
 	BroadcastID string
+	// Threading, for a reply: the Message-ID it answers and those before
+	// it (without angle brackets, space separated), sent as In-Reply-To
+	// and References.
+	InReplyTo, References string
 }
 
 // Queue inserts an email and its send job in tx, and returns its id. who
@@ -397,12 +401,15 @@ func (s *Service) Queue(ctx context.Context, tx pgx.Tx, who Who, e NewEmail) (st
 	_, err := tx.Exec(ctx, `
 		INSERT INTO emails (id, workspace_id, brand_id, provider_id, purpose, from_address, to_addresses, cc, bcc, reply_to,
 			subject, html, text_body, template_id, template_version, tags, metadata, status, test, send_at, created_by,
-			trigger_kind, trigger_ref, request_id, surface, token_id, mission_id, track_opens, track_clicks, recipients, topic_id, broadcast_id)
+			trigger_kind, trigger_ref, request_id, surface, token_id, mission_id, track_opens, track_clicks, recipients, topic_id, broadcast_id,
+			in_reply_to, references_ids)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21,
-			$22, NULLIF($23, ''), NULLIF($24, ''), NULLIF($25, ''), NULLIF($26, '')::uuid, NULLIF($27, '')::uuid, $28, $29, $30, $31, NULLIF($32, '')::uuid)`,
+			$22, NULLIF($23, ''), NULLIF($24, ''), NULLIF($25, ''), NULLIF($26, '')::uuid, NULLIF($27, '')::uuid, $28, $29, $30, $31, NULLIF($32, '')::uuid,
+			NULLIF($33, ''), NULLIF($34, ''))`,
 		id, e.WorkspaceID, e.BrandID, e.ProviderID, e.Purpose, e.From, e.To, nonNil(e.Cc), nonNil(e.Bcc), nonNil(e.ReplyTo),
 		e.Subject, e.HTML, e.Text, e.TemplateID, e.TemplateVersion, nonNil(e.Tags), meta, status, e.Test, e.SendAt, createdBy,
-		trigger, e.TriggerRef, who.RequestID, e.Surface, e.TokenID, who.MissionID, e.TrackOpens, e.TrackClicks, recipients, e.TopicID, e.BroadcastID)
+		trigger, e.TriggerRef, who.RequestID, e.Surface, e.TokenID, who.MissionID, e.TrackOpens, e.TrackClicks, recipients, e.TopicID, e.BroadcastID,
+		e.InReplyTo, e.References)
 	if err != nil {
 		return "", err
 	}
@@ -464,6 +471,7 @@ type queued struct {
 	TopicID                                                 *string
 	To, Cc, Bcc, ReplyTo, Tags                              []string
 	Sealed                                                  []byte
+	InReplyTo, References                                   string
 }
 
 // Send hands a queued email to its provider. last is true on the final
@@ -477,12 +485,14 @@ func (s *Service) Send(ctx context.Context, id string, last bool) error {
 		err := tx.QueryRow(ctx, `
 			SELECT e.workspace_id, e.purpose, e.status, e.from_address, e.subject, e.html, e.text_body,
 			       e.to_addresses, e.cc, e.bcc, e.reply_to, e.tags,
-			       p.id, p.integration_id, p.connector, p.status, p.secrets, e.topic_id
+			       p.id, p.integration_id, p.connector, p.status, p.secrets, e.topic_id,
+			       COALESCE(e.in_reply_to, ''), COALESCE(e.references_ids, '')
 			FROM emails e LEFT JOIN email_providers p ON p.id = e.provider_id
 			WHERE e.id = $1 FOR UPDATE OF e`, id).
 			Scan(&q.WorkspaceID, &q.Purpose, &q.Status, &q.From, &q.Subject, &q.HTML, &q.Text,
 				&q.To, &q.Cc, &q.Bcc, &q.ReplyTo, &q.Tags,
-				&q.ProviderID, &q.IntegrationID, &q.Connector, &q.ProviderStatus, &q.Sealed, &q.TopicID)
+				&q.ProviderID, &q.IntegrationID, &q.Connector, &q.ProviderStatus, &q.Sealed, &q.TopicID,
+				&q.InReplyTo, &q.References)
 		if errors.Is(err, pgx.ErrNoRows) {
 			skip = true
 			return nil
@@ -585,6 +595,17 @@ func (s *Service) Send(ctx context.Context, id string, last bool) error {
 	m := connectors.OutboundEmail{ID: id, From: q.From, To: q.To, Cc: q.Cc, Bcc: q.Bcc, ReplyTo: q.ReplyTo,
 		Subject: q.Subject, HTML: q.HTML, Text: q.Text, Tags: q.Tags, Config: p.Secrets,
 		Headers: map[string]string{"X-Outflare-Email-ID": id}}
+	if q.InReplyTo != "" {
+		// A reply, threaded under what it answers.
+		m.Headers["In-Reply-To"] = "<" + q.InReplyTo + ">"
+		refs := []string{}
+		for _, r := range strings.Fields(q.References + " " + q.InReplyTo) {
+			if r = "<" + strings.Trim(r, "<>") + ">"; !slices.Contains(refs, r) {
+				refs = append(refs, r)
+			}
+		}
+		m.Headers["References"] = strings.Join(refs, " ")
+	}
 	if q.Purpose == policy.PurposeLifecycle {
 		// One-click unsubscribe (RFC 8058), which Gmail and Yahoo require
 		// of bulk senders.

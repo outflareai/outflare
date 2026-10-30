@@ -63,10 +63,11 @@ const (
 	// Managing them is logging meetings, deals and spend by hand.
 	ScopeOutcomesRead   = "outcomes.read"
 	ScopeOutcomesManage = "outcomes.manage"
-	// Customer profiles and moving records between brands. The names are
-	// from projects, which were removed; tokens keep them, so they stay.
-	ScopeProjectsRead   = "projects.read"
-	ScopeProjectsManage = "projects.manage"
+	// Ideal customer profiles and moving records between brands. They were
+	// projects.read and projects.manage until projects were removed; those
+	// names are still accepted (renamed).
+	ScopeProfilesRead   = "profiles.read"
+	ScopeProfilesManage = "profiles.manage"
 	// Infrastructure plans: reading them, drafting and changing them, and
 	// approving one, which may buy domains and mailboxes with the
 	// customer's money. Approving is its own scope so an agent can draft
@@ -160,8 +161,8 @@ var AllScopes = []string{
 	ScopeIntegrationsManage,
 	ScopeOutcomesRead,
 	ScopeOutcomesManage,
-	ScopeProjectsRead,
-	ScopeProjectsManage,
+	ScopeProfilesRead,
+	ScopeProfilesManage,
 	ScopeInfraRead,
 	ScopeInfraManage,
 	ScopeInfraApprove,
@@ -209,8 +210,8 @@ var roleScopes = map[string][]string{
 	RoleOwner: AllScopes,
 	// Admins do everything except take people's access away.
 	RoleAdmin:    slices.DeleteFunc(slices.Clone(AllScopes), func(s string) bool { return s == ScopeMembersRemove }),
-	RoleOperator: {ScopeWorkspaceRead, ScopeContextManage, ScopeMembersRead, ScopeMailboxesRead, ScopeMailboxesManage, ScopeLeadsRead, ScopeLeadsManage, ScopeSequencesRead, ScopeSequencesManage, ScopeInboxRead, ScopeInboxManage, ScopeIntegrationsRead, ScopeIntegrationsManage, ScopeOutcomesRead, ScopeOutcomesManage, ScopeProjectsRead, ScopeProjectsManage, ScopeInfraRead, ScopeInfraManage, ScopeAnalyticsRead, ScopeAnalyticsManage, ScopeMissionsRead, ScopeMissionsRun, ScopeMissionsApprove, ScopeSEORead, ScopeSEOManage, ScopeWebhooksRead, ScopeEmailsRead, ScopeEmailsSend, ScopeEmailsManage, ScopeCustomersRead, ScopeCustomersManage, ScopeSocialRead, ScopeSocialManage, ScopeSocialPost, ScopePartnersRead, ScopePartnersManage, ScopePartnersConversions, ScopeMyAIAccountsManage},
-	RoleViewer:   {ScopeWorkspaceRead, ScopeMembersRead, ScopeMailboxesRead, ScopeLeadsRead, ScopeSequencesRead, ScopeInboxRead, ScopeIntegrationsRead, ScopeOutcomesRead, ScopeProjectsRead, ScopeInfraRead, ScopeAnalyticsRead, ScopeMissionsRead, ScopeSEORead, ScopeWebhooksRead, ScopeEmailsRead, ScopeCustomersRead, ScopeSocialRead, ScopePartnersRead, ScopeMyAIAccountsManage},
+	RoleOperator: {ScopeWorkspaceRead, ScopeContextManage, ScopeMembersRead, ScopeMailboxesRead, ScopeMailboxesManage, ScopeLeadsRead, ScopeLeadsManage, ScopeSequencesRead, ScopeSequencesManage, ScopeInboxRead, ScopeInboxManage, ScopeIntegrationsRead, ScopeIntegrationsManage, ScopeOutcomesRead, ScopeOutcomesManage, ScopeProfilesRead, ScopeProfilesManage, ScopeInfraRead, ScopeInfraManage, ScopeAnalyticsRead, ScopeAnalyticsManage, ScopeMissionsRead, ScopeMissionsRun, ScopeMissionsApprove, ScopeSEORead, ScopeSEOManage, ScopeWebhooksRead, ScopeEmailsRead, ScopeEmailsSend, ScopeEmailsManage, ScopeCustomersRead, ScopeCustomersManage, ScopeSocialRead, ScopeSocialManage, ScopeSocialPost, ScopePartnersRead, ScopePartnersManage, ScopePartnersConversions, ScopeMyAIAccountsManage},
+	RoleViewer:   {ScopeWorkspaceRead, ScopeMembersRead, ScopeMailboxesRead, ScopeLeadsRead, ScopeSequencesRead, ScopeInboxRead, ScopeIntegrationsRead, ScopeOutcomesRead, ScopeProfilesRead, ScopeInfraRead, ScopeAnalyticsRead, ScopeMissionsRead, ScopeSEORead, ScopeWebhooksRead, ScopeEmailsRead, ScopeCustomersRead, ScopeSocialRead, ScopePartnersRead, ScopeMyAIAccountsManage},
 }
 
 // workspaceWide are scopes about the whole workspace: settings, people,
@@ -226,14 +227,45 @@ func BrandLimitable(scopes []string) bool {
 
 // Within reports whether every scope in inner is also in outer.
 func Within(inner, outer []string) bool {
-	return !slices.ContainsFunc(inner, func(s string) bool { return !slices.Contains(outer, s) })
+	outer = CleanScopes(outer)
+	return !slices.ContainsFunc(inner, func(s string) bool { return !slices.Contains(outer, Canonical(s)) })
 }
 
-// CleanScopes keeps the known scopes in display order, without repeats.
+// renamed maps old scope names to the ones that replaced them. Tokens,
+// roles and clients may still hold or ask for the old names, so they are
+// accepted everywhere a scope is and mean the new one.
+var renamed = map[string]string{
+	"projects.read":   ScopeProfilesRead,
+	"projects.manage": ScopeProfilesManage,
+}
+
+// Canonical returns the current name of scope s, which may be an old name.
+func Canonical(s string) string {
+	if to, ok := renamed[s]; ok {
+		return to
+	}
+	return s
+}
+
+// Rename replaces old scope names in scopes with their current ones,
+// keeping the order and anything unknown, for checking a request.
+func Rename(scopes []string) []string {
+	if scopes == nil {
+		return nil
+	}
+	out := make([]string, len(scopes))
+	for i, s := range scopes {
+		out[i] = Canonical(s)
+	}
+	return out
+}
+
+// CleanScopes keeps the known scopes in display order, without repeats,
+// with old names replaced by their current ones.
 func CleanScopes(scopes []string) []string {
 	out := []string{}
 	for _, s := range AllScopes {
-		if slices.Contains(scopes, s) {
+		if slices.ContainsFunc(scopes, func(sc string) bool { return Canonical(sc) == s }) {
 			out = append(out, s)
 		}
 	}
@@ -259,6 +291,7 @@ var narrower = map[string]string{
 // A scope over everyone's records includes the one over the caller's own
 // (narrower).
 func Grants(scopes []string, want string) bool {
+	scopes, want = CleanScopes(scopes), Canonical(want)
 	if slices.Contains(scopes, want) {
 		return true
 	}
@@ -274,8 +307,8 @@ func Grants(scopes []string, want string) bool {
 	return slices.ContainsFunc(scopes, func(s string) bool { return strings.HasPrefix(s, area+".") })
 }
 
-// ValidScope reports whether s is a known scope.
-func ValidScope(s string) bool { return slices.Contains(AllScopes, s) }
+// ValidScope reports whether s is a known scope, by its current or old name.
+func ValidScope(s string) bool { return slices.Contains(AllScopes, Canonical(s)) }
 
 // RoleRank orders roles so that managers cannot act on someone above them.
 func RoleRank(role string) int {

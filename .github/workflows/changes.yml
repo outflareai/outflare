@@ -28,3 +28,5 @@ jobs:
           BASE: ${{ github.event.pull_request.base.sha }}
           PR_LABELS: ${{ join(github.event.pull_request.labels.*.name, ',') }}
         run: node scripts/changes.mjs check "$BASE"
+      - name: Release folding picks up every note
+        run: node --test scripts/changes.test.mjs

@@ -6,6 +6,75 @@ Each pull request that changes what Outflare does adds a change note in [changes
 
 ## [Unreleased]
 
+## [0.44.0] - 2026-10-30
+
+### Added
+
+- Tracking health on the Paid ads page shows, for your workspace, how each network's paid clicks arrive (with their click id, only the template's ad ids, or untracked), which campaigns spend without a tracked visit, and which platform is refusing the conversions you send back, each with what to fix.
+- Tracking templates: paste one into Google, Meta, Microsoft, LinkedIn, Reddit, TikTok, Snapchat, Pinterest, Taboola or Outbrain (Paid ads → Tracking templates) so each paid click lands with its campaign, ad set and ad ids. Website tracking now reads TikTok, Snapchat, Pinterest, Taboola, Outbrain, Quora and Impact click ids, and with consent the Meta and Google pixel cookies.
+- Alerts: a hot reply or a hot website visitor raises an alert under Settings → Alerts, sent as the `alert.raised` webhook, counted in the digest and emailed to the person it is for or to owners and admins. Choose who hears about each kind, per workspace or brand, and mute a kind for yourself.
+- Your own attribution models: start from any of the five and give each channel its own window (paid ads 7 days, say), leave channels out, or set the position weights and time-decay half-life. Each change is a new version, and reports say which one they used. The default look-back is now 30 days instead of 90 for workspaces that never changed it.
+- Define your own conversions: any event, filtered on its properties (a call over a minute, a Pro plan payment), with a fixed value or one from the event, and each ad network's name for it. Start from a preset for SaaS, booked calls, e-commerce or lead generation. Attribution credits channels with them.
+- Exclusions: journeys, broadcasts and sequences can leave out people on chosen lists, with chosen tags, or at a tagged company, such as "Competitors" or "Active deal: hands off". Excluded people are skipped with the reason, and a broadcast shows how many it leaves out before you send.
+- Feedback and What's new: the Feedback button in the top bar turns a bug, idea or question into a GitHub issue or discussion under your own account, and a post on X, with links to good first issues for anyone who wants to build it. What's new lists every release, day by day.
+- Fix tickets: every problem a site audit finds becomes one ticket with all the pages it affects. Your own AI model writes it like an issue for a developer, you approve, reject or ask for changes, and the reasons you give become guidelines every later ticket follows. Copy any ticket as an issue for GitHub, Linear or a coding agent.
+- Change a page for one version of a split without code: Edit visually opens a page of your site with that version and an editor over it, where you click anything to change its text, hide it, or change a link or an image. Visitors in the version see the changes, and seeing them counts the visitor in the version's A/B test.
+- Playbooks can now set up a whole automation for you: its email drafts, lists, rules and journeys, all as drafts you check and turn on. Four to start: activate new trials, save failed payments and win back cancelled customers, hand off warm prospects the moment they say yes, and catch key accounts at risk. Tell it which events to use, and the journey builder shows where each draft came from.
+- HubSpot reply push: pick reply labels on your HubSpot connection, such as hot, and each matching reply adds the contact with a note quoting the reply and a link back, plus, if you choose, a follow-up task for the lead's owner.
+- Journeys can now act, not just email: update a field, add or remove a tag, put people in or out of a static list, start or leave another journey, add them to a sequence or stop their whole company's sequences, suppress or unsubscribe them, and alert their owner. Exit criteria end a run at once. People and companies get tags and an owner.
+- Journeys can ask your own AI model about a person: sort them into choices such as hot, warm or cold, or write a short note. Later steps branch on the answer or use it in emails and webhooks. It uses your own key and AI spend limits.
+- Journeys can create or update people in your HubSpot. A "Create or update in your CRM" step sends their name, company and website, plus any HubSpot properties you fill from their details, through your own HubSpot connection. Deals aren't touched.
+- Reviews, a page of its own: your brands' Trustpilot, G2, Capterra and Google reviews, read every day with your own Geonode, a review score that weights stars by how many and how recent, its direction (growing, steady, slipping), and Draft answer with your own AI model for a person to post.
+- Slack connector: connect your own Slack and post each kind of alert, such as hot replies, to a channel you pick under Settings → Alerts.
+- Snapchat Ads: sign in with Snapchat to read each ad account's campaigns and daily spend, impressions, swipes and purchases, and send your conversions back to a Snap Pixel through the Conversions API.
+
+### Changed
+
+- A/B tests: a checklist before you start says what would stop a test measuring anything, such as pages that don't show the flag yet, and one click ships the winner to everyone and ends the test.
+- A/B tests are registered when they start: the hypothesis, goals, plan and the flag's versions and shares are kept as they were, and the hypothesis can no longer change. If the flag is changed while its test runs, the results say exactly what changed, so a test can't quietly measure two different things.
+- Make your own attribution models and define your conversions in the web app, under Analytics → Channels: windows per channel, channels left out and weights for a model, and for a conversion its event, conditions, value and each ad network's name for it, or start from a preset.
+- Site audits have full crawl settings: how deep to go, whether to read sitemaps, follow nofollow links or ignore URL parameters, which pages to include or leave out, whether to run pages' scripts (through your own Geonode connection, on a proved site), and the hour, day and time zone a scheduled crawl starts. Each crawl shows the settings it ran with.
+- Removes the database tables left over from agency accounts, which were removed in v0.26.0.
+- Get started and Home now offer "Follow the builder": follow the person building Outflare in public on X. Feedback posted to X greets the builder and tags @outflareai.
+- Journeys can send a transactional email, record a person's consent to a topic, assign an owner (one member, or spread evenly across several), and open or move their deal to a stage. A deal only ever moves forward, never over a stage a person set.
+- CRM → Lead finder is rebuilt for big runs: a front page with what needs you and each search's results, and runs whose companies and people load a page at a time with filters and bulk actions. You can also pause a run and keep people out of its campaign.
+- Meetings are now events on each person's timeline: meeting.booked, meeting.held, meeting.no_show and meeting.canceled, from your calendars, CRM, the app or the API. Add meeting.booked or meeting.held to your conversion events to credit booked or held calls to the channels that brought them, or start a journey on one.
+- Partners: partners who haven't given payout details are easy to find ("No payout details" on the Partners tab, and a `payout_details` filter in the API), and the portal asks them to add theirs. Imported partners (Tolt's API has no payout details) keep their balance until they do, instead of getting a payout nobody can send.
+- Site audits start from your selected brand: its website is filled in, and Outflare first looks for a proof you already have (Search Console owning the site, or your Outflare tracking tag on it), so most sites are proved with nothing to add and get the larger crawl limits. You can now change a site's start address in its settings.
+- Visitors who haven't consented to analytics keep one id for their whole visit, in the tab's session storage and never in a cookie, so every page counts as the same visitor and shows them the same A/B test version. It is gone when the tab closes.
+- Website tracking shows one script per brand with a copy button. Edit sites changes which domains it records and which query parameters it leaves out, in place. Page views now keep the whole query string and the host, so reports can filter on any parameter; sign-in tokens, passwords, codes and email addresses are always left out.
+- Partners: New flow starts from a template: one-time, recurring, first 12 months, "10% of the first sale, then 2% for 12 months", or a fixed amount per sign-up.
+- Partners: reward rules are now flows, as in Tolt. Each has AND/OR conditions on the partner, the customer and the transaction, its own approval (automatic, after N days or manual), whether it adds to other cash flows or competes with them, other rates for some partners or plans, and can move the partner to another group. A Flows tab edits them. Existing rules keep working unchanged.
+- Redirect links: the website tracking snippet ties each click on a redirect link to the visit it started, and every link and campaign shows how many of its clicks reached your site.
+
+### Fixed
+
+- Partners: a program's figures count every partner, not just the first 500, and the partner, conversion, reward and payout lists load 100 at a time with Load more.
+- Partners: the Tolt import shows how many of each kind it read beside how many Tolt reports, asks Tolt once more when a list seems to stop early, and says how many partners Tolt's list left out and whether any of them has referrals. A promo code whose partner the import can't find is listed with its field names, and a partner Tolt won't give by id with Tolt's answer.
+- Partners: the Tolt import also brings over partners Tolt leaves out of its partner list (those who haven't finished onboarding or were only invited), reading each one that a link, customer or commission names.
+
+### Upgrading
+
+- runs migration 0216.
+- migration 0284 drops the `agencies`, `agency_members`, `agency_tokens` and `agency_events` tables and the `workspaces.agency_id` column. Take a backup first if you want to keep that data.
+- runs migration 0220.
+- `OUTFLARE_BUILDER_URL` sets the builder's X profile (by default Outflare's founder); `off` leaves it out.
+- runs migration 0219.
+- runs migration 0212.
+- to offer one-click Slack sign-in, set `CONNECTOR_SLACK_CLIENT_ID` and `CONNECTOR_SLACK_CLIENT_SECRET` from a Slack app of your own. Without them, people connect with their Slack app's bot token.
+- runs migration 0218.
+- runs migration 0304.
+
+## [0.43.0] - 2026-10-29
+
+### Added
+
+- Exclusion groups for feature flags: flags in one group split its visitors, so no visitor is in two of their A/B tests at once. The A/B test checklist warns when another test runs at the same time outside the group, and a new interactions check shows whether two overlapping tests changed each other's results.
+
+### Changed
+
+- A/B tests: preview links show you each version on the pages that run the test, without counting you, and you can mark each version as looking right or broken. A broken version stops the test passing its checklist, and a check expires when the version's content changes.
+
 ## [0.42.0] - 2026-10-29
 
 ### Added

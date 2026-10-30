@@ -493,6 +493,9 @@ func count(ctx context.Context, q Querier, ws string, s Spec, g Goal, order []st
 	return by[""], err
 }
 
+// flagKeyRe is a flag's key, as the flags package allows.
+var flagKeyRe = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]{0,63}$`)
+
 // segmentSQL is the segment of a visitor, by dimension, from the visit
 // (site_sessions ss) they first saw their version in; "unknown" when that
 // visit isn't known (an exposure sent by a server).
@@ -515,7 +518,14 @@ func tally(ctx context.Context, q Querier, ws string, s Spec, g Goal, order []st
 	// A visitor's segment rides along with their variant, after a unit
 	// separator, through every step below.
 	seg, join := "''", ""
-	if dim != "" {
+	if key, ok := strings.CutPrefix(dim, "flag:"); ok && flagKeyRe.MatchString(key) {
+		// Another flag's version the visitor saw first during the test, or
+		// none. The key is checked above, so it is safe in the query.
+		seg = `coalesce((SELECT o.properties->>'variant' FROM customer_events o
+			WHERE o.workspace_id = $1 AND o.name = $2 AND o.properties->>'flag' = '` + key + `' AND o.anonymous_id = e.anonymous_id
+				AND o.occurred_at >= ($4::timestamptz[])[1] AND o.occurred_at < ($4::timestamptz[])[2]
+			ORDER BY o.occurred_at LIMIT 1), 'none')`
+	} else if dim != "" {
 		seg = segmentSQL[dim]
 		join = `LEFT JOIN site_sessions ss ON ss.workspace_id = $1
 				AND ss.id = CASE WHEN e.context->>'sessionId' ~ '^[0-9a-fA-F-]{36}$' THEN (e.context->>'sessionId')::uuid END`

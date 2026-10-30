@@ -82,6 +82,7 @@ type (
 	PeopleSteps = peoplesteps.Config
 	Contact     = peoplesteps.Contact
 	EmailCode   = emailfind.Code
+	EmailCost   = emailfind.Cost
 	// EmailFinder is what PeopleSteps.Finder replaces the engine's email
 	// finder with, in tests.
 	EmailFinder        = peoplesteps.Finder

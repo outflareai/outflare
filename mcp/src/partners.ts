@@ -20,7 +20,7 @@ const rule = z.object({
   partner_id: z.string().uuid().nullable().optional().describe("Only this partner (from list_partners): their own rate, which beats their group's and the program's. Not with group_id."),
   trigger: z.string().max(80).describe("signup, sale, or a custom conversion's event_name such as trial_started."),
   side: z.enum(["partner", "referred"]).optional().describe("referred: the customer they brought (two-sided rewards), always an action."),
-  kind: z.enum(["percent", "fixed", "action"]),
+  kind: z.enum(["percent", "fixed", "action", "group"]).describe("group: move the partner to target_group_id."),
   percent_bp: z.number().int().min(1).max(10000).optional().describe("percent: basis points of the sale (2500 is 25%)."),
   amount_cents: z.number().int().min(1).optional().describe("fixed: per lead or sale."),
   action: z.string().max(60).optional().describe("action: what the workspace's system does, such as grant_credit."),
@@ -29,6 +29,36 @@ const rule = z.object({
   months: z.number().int().min(1).max(120).optional(),
   min_sales: z.number().int().min(0).optional().describe("A tier: applies once the partner has made this many sales."),
   product_ids: z.array(z.string()).max(50).optional(),
+  name: z.string().max(120).optional().describe("What the flow is for, such as Launch bonus."),
+  conditions: z
+    .object({
+      match: z.enum(["all", "any"]).optional(),
+      groups: z
+        .array(
+          z.object({
+            match: z.enum(["all", "any"]).optional(),
+            conditions: z
+              .array(z.object({ field: z.string(), op: z.enum(["eq", "neq", "gt", "gte", "lt", "lte", "in", "not_in", "within", "not_within"]), value: z.unknown() }))
+              .max(20),
+          }),
+        )
+        .max(10),
+    })
+    .optional()
+    .describe(
+      "AND/OR groups of conditions. Fields: partner.id, partner.country, partner.transactions, partner.customers, partner.leads, " +
+        "partner.revenue_cents, partner.earnings_cents, customer.transactions, customer.total_paid_cents, customer.first_sale_at, " +
+        'customer.signed_up_at, transaction.amount_cents, transaction.product_id, transaction.recurring. Dates take within {"amount": 3, "unit": "months"}.',
+    ),
+  approval: z.enum(["program", "auto", "after_days", "manual"]).optional().describe("program (the default) follows the program's hold and auto-approve."),
+  approval_days: z.number().int().min(0).max(365).optional().describe("With approval after_days."),
+  stacking: z.enum(["exclusive", "adds"]).optional().describe("Cash flows: exclusive ones compete and one pays; adds pays on top."),
+  overrides: z
+    .array(z.object({ partner_id: z.string().uuid().optional(), product_id: z.string().optional(), percent_bp: z.number().int().optional(), amount_cents: z.number().int().optional() }))
+    .max(50)
+    .optional()
+    .describe("Another rate inside the flow for one partner or product."),
+  target_group_id: z.string().uuid().optional().describe("kind group: the group the partner moves to."),
 });
 
 const programSettings = {

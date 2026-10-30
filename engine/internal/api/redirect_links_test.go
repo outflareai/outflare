@@ -77,8 +77,45 @@ func TestRedirectLinks(t *testing.T) {
 		t.Fatalf("clicks = %d, bots = %d, %v", stored, bots, err)
 	}
 	list := owner.must(200, "GET", links, nil)["data"].([]any)
-	if len(list) != 1 || list[0].(map[string]any)["clicks"] != float64(1) || list[0].(map[string]any)["redirect_url"] != ru {
+	if len(list) != 1 || list[0].(map[string]any)["clicks"] != float64(1) || list[0].(map[string]any)["redirect_url"] != ru ||
+		list[0].(map[string]any)["landed"] != float64(0) {
 		t.Fatalf("links = %v", list)
+	}
+
+	// The landing page's script sends ofclk, and the visit claims the
+	// click once: a reload, a track event or a made-up key changes nothing.
+	sk := owner.must(201, "POST", base+"/site-keys", map[string]any{"name": "Northpeak", "origins": []string{"https://northpeak.example"}})
+	clk := loc.Query().Get("ofclk")
+	landing := func(anon, kind, key string) {
+		t.Helper()
+		ev := map[string]any{"type": kind, "anonymousId": anon, "properties": map[string]any{"ofclk": key},
+			"context": map[string]any{"page": map[string]any{"url": loc.String(), "path": loc.Path},
+				"campaign": map[string]any{"source": "podcast", "medium": "referral", "name": c["slug"]}}}
+		if kind == "track" {
+			ev["event"] = "Signed up"
+		}
+		if code, out := sendSite(t, e.h, "https://northpeak.example", sk["key"].(string), ev); code != 200 {
+			t.Fatalf("site event = %d %v", code, out)
+		}
+	}
+	landing("v-1", "track", clk)
+	landing("v-2", "page", "zzzzzzzzzzzzzzzz")
+	if l := owner.must(200, "GET", links, nil)["data"].([]any)[0].(map[string]any); l["landed"] != float64(0) {
+		t.Fatalf("claimed without a landing: %v", l)
+	}
+	landing("v-1", "page", clk)
+	landing("v-1", "page", clk)
+	landing("v-3", "page", clk)
+	var claimed int
+	if err := e.pool.QueryRow(context.Background(), `SELECT count(*) FROM tracking_link_clicks k JOIN site_sessions s ON s.id = k.session_id
+		WHERE k.workspace_id = $1 AND k.click_key = $2 AND s.anonymous_id = 'v-1'`, ws, clk).Scan(&claimed); err != nil || claimed != 1 {
+		t.Fatalf("claimed = %d, %v", claimed, err)
+	}
+	if l := owner.must(200, "GET", links, nil)["data"].([]any)[0].(map[string]any); l["landed"] != float64(1) || l["clicks"] != float64(1) {
+		t.Fatalf("landed = %v", l)
+	}
+	if v := owner.must(200, "GET", base+"/tracking-campaigns/"+code, nil); v["landed"] != float64(1) {
+		t.Fatalf("campaign landed = %v", v)
 	}
 
 	// The campaign's default gives every new link one; a link can say no.

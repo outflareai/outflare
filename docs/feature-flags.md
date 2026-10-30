@@ -22,6 +22,12 @@ The version comes from a hash of the flag's own salt and the visitor's id, so th
 
 The website script uses the visitor's `anonymousId`. A server should pass the same id (`outflare.anonymousId()` in the page, or the `of_aid` cookie) as `anonymous_id`, so the server and the page agree. With only a `user_id`, the version follows the user instead.
 
+## Exclusion groups
+
+Two A/B tests running at once on the same pages can share visitors, and one change can alter the other's effect. Put their flags in one **exclusion group** (`exclusion_group`, such as `homepage`) to keep them apart. Each flag takes a share of the group's visitors (`group_share`, a percent, 50 by default) from the first free slice that wide, and is off for everyone else in the group. So no visitor is in two of the group's tests, and each test measures its own change cleanly. Which slice a visitor falls in comes from a hash of the group's name and their id, so it is the same on every page and server.
+
+A group holds 100%: a flag asking for more than is free gets a 409, and you can give it a smaller share or take a flag out. A flag's group and share are fixed while its A/B test runs, since changing them would change who the test measures. The flag's `exclusion_group`, `group_share` and `group_start` show where it sits, and server evaluation says `group` when a visitor fell in another flag's slice.
+
 ## On your website
 
 Add `data-flags` to the tracking script's tag:

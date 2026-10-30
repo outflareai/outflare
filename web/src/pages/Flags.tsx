@@ -121,7 +121,7 @@ export function Flags({ ws, canManage, go }: Props) {
               id: "name", header: "Flag", accessorFn: (f) => `${f.name} ${f.key}`,
               cell: ({ row: { original: f } }) => (
                 <div>
-                  <div className="font-medium">{f.name} <BrandBadge id={f.brand_id} /> {!f.on_site && <Badge tone="blue" title="Not sent to the website script">Servers only</Badge>}</div>
+                  <div className="font-medium">{f.name} <BrandBadge id={f.brand_id} /> {!f.on_site && <Badge tone="blue" title="Not sent to the website script">Servers only</Badge>} {f.exclusion_group && <Badge title="Exclusion group: no visitor is in two of its flags' tests">{f.exclusion_group} · {f.group_share}%</Badge>}</div>
                   <div className="font-mono text-[12px] text-muted-foreground">{f.key}</div>
                 </div>
               ),
@@ -198,6 +198,8 @@ function FlagSheet({ ws, flag, onClose, onSaved }: { ws: string; flag: Flag | nu
   const [rollout, setRollout] = useState(flag?.rollout ?? 100);
   const [rules, setRules] = useState<FlagRule[]>(flag?.rules ?? []);
   const [onSite, setOnSite] = useState(flag?.on_site ?? true);
+  const [group, setGroup] = useState(flag?.exclusion_group ?? "");
+  const [groupShare, setGroupShare] = useState(flag?.group_share || 50);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [editPage, setEditPage] = useState("");
@@ -237,7 +239,8 @@ function FlagSheet({ ws, flag, onClose, onSaved }: { ws: string; flag: Flag | nu
       }
     }
     setBusy(true);
-    const body = { name, description, brand_id: brandID || null, variants: vs, rollout, rules, on_site: onSite };
+    const g = split ? group.trim() : "";
+    const body = { name, description, brand_id: brandID || null, variants: vs, rollout, rules, on_site: onSite, exclusion_group: g, ...(g ? { group_share: groupShare } : {}) };
     const res = flag
       ? await api.PATCH("/v1/workspaces/{ws}/flags/{flag}", { params: { path: { ws, flag: flag.id } }, body })
       : await api.POST("/v1/workspaces/{ws}/flags", { params: { path: { ws } }, body: { ...body, key } });
@@ -313,6 +316,18 @@ function FlagSheet({ ws, flag, onClose, onSaved }: { ws: string; flag: Flag | nu
                   </label>
                 )}
                 {flag && flag.status === "on" && <p className="text-[12px] text-muted-foreground">Changing the split while it's on moves some visitors to another version.</p>}
+                <div className="space-y-1 rounded-md border p-2">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <input aria-label="Exclusion group" className={`${field} w-40 font-mono`} pattern="[a-z0-9][a-z0-9_\-]{0,63}" placeholder="exclusion group" value={group} onChange={(e) => setGroup(e.target.value)} />
+                    {group.trim() && (
+                      <>
+                        <input aria-label="Share of the group" type="number" min={1} max={100} className={`${field} w-20`} value={groupShare} onChange={(e) => setGroupShare(Number(e.target.value))} />
+                        <span className="text-muted-foreground">% of the group's visitors</span>
+                      </>
+                    )}
+                  </div>
+                  <p className="text-[12px] text-muted-foreground">Flags in one exclusion group never share a visitor, so their A/B tests can run at the same time without affecting each other. Fixed while this flag's test runs.</p>
+                </div>
               </div>
             )}
           </div>

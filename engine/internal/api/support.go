@@ -51,8 +51,14 @@ type supportConversationView struct {
 		Name  string `json:"name"`
 		Email string `json:"email"`
 	} `json:"contact"`
-	MailboxID      *string        `json:"mailbox_id"`
-	MailboxEmail   *string        `json:"mailbox_email"`
+	MailboxID    *string `json:"mailbox_id"`
+	MailboxEmail *string `json:"mailbox_email"`
+	// How it came in: mailbox (a connected support mailbox) or forwarding
+	// (the brand's support address); for forwarding, the address and the
+	// business's own address replies go out from.
+	Via            string         `json:"via"`
+	InboundAddress *string        `json:"inbound_address"`
+	ReplyFrom      *string        `json:"reply_from"`
 	Channel        string         `json:"channel"`
 	Subject        string         `json:"subject"`
 	Status         string         `json:"status"`
@@ -72,7 +78,8 @@ type supportConversationView struct {
 
 const supportConversationSelect = `
 	SELECT c.id::text, c.brand_id::text, c.record_id::text, COALESCE(NULLIF(r.name, ''), ''), c.contact_email,
-		c.mailbox_id::text, m.email, c.channel, c.subject, c.status,
+		c.mailbox_id::text, m.email, CASE WHEN c.inbound_address_id IS NOT NULL AND c.mailbox_id IS NULL THEN 'forwarding' ELSE 'mailbox' END,
+		ia.local_part, c.reply_from, c.channel, c.subject, c.status,
 		c.assignee_id::text, COALESCE(NULLIF(u.name, ''), u.email), c.team_id::text, t.name,
 		c.tags, c.unread, c.last_from,
 		COALESCE((SELECT left(regexp_replace(sm.body, '\s+', ' ', 'g'), 160) FROM support_messages sm
@@ -82,14 +89,15 @@ const supportConversationSelect = `
 	FROM support_conversations c
 	LEFT JOIN records r ON r.id = c.record_id
 	LEFT JOIN mailboxes m ON m.id = c.mailbox_id
+	LEFT JOIN inbound_addresses ia ON ia.id = c.inbound_address_id
 	LEFT JOIN users u ON u.id = c.assignee_id
 	LEFT JOIN teams t ON t.id = c.team_id`
 
-func scanSupportConversation(row pgx.CollectableRow) (supportConversationView, error) {
+func (s *Server) scanSupportConversation(row pgx.CollectableRow) (supportConversationView, error) {
 	var v supportConversationView
 	var assigneeID, assigneeName, teamID, teamName *string
 	err := row.Scan(&v.ID, &v.BrandID, &v.RecordID, &v.Contact.Name, &v.Contact.Email, &v.MailboxID, &v.MailboxEmail,
-		&v.Channel, &v.Subject, &v.Status, &assigneeID, &assigneeName, &teamID, &teamName, &v.Tags, &v.Unread, &v.LastFrom,
+		&v.Via, &v.InboundAddress, &v.ReplyFrom, &v.Channel, &v.Subject, &v.Status, &assigneeID, &assigneeName, &teamID, &teamName, &v.Tags, &v.Unread, &v.LastFrom,
 		&v.Preview, &v.Messages, &v.FirstMessageAt, &v.FirstReplyAt, &v.ClosedAt, &v.LastMessageAt, &v.CreatedAt)
 	if assigneeID != nil {
 		v.Assignee = &supportPerson{ID: *assigneeID, Name: deref(assigneeName)}
@@ -99,6 +107,10 @@ func scanSupportConversation(row pgx.CollectableRow) (supportConversationView, e
 	}
 	if v.Tags == nil {
 		v.Tags = []string{}
+	}
+	if v.InboundAddress != nil && s.inboundEmail.Enabled() {
+		full := *v.InboundAddress + "@" + s.inboundEmail.Domain()
+		v.InboundAddress = &full
 	}
 	return v, err
 }
@@ -200,7 +212,7 @@ func (s *Server) listSupportConversations(w http.ResponseWriter, r *http.Request
 		s.internal(w, r, err)
 		return
 	}
-	list, err := pgx.CollectRows(rows, scanSupportConversation)
+	list, err := pgx.CollectRows(rows, s.scanSupportConversation)
 	if err != nil {
 		s.internal(w, r, err)
 		return
@@ -273,7 +285,7 @@ func (s *Server) supportConversation(ctx context.Context, a *access, id string) 
 	if err != nil {
 		return nil, err
 	}
-	v, err := pgx.CollectExactlyOneRow(rows, scanSupportConversation)
+	v, err := pgx.CollectExactlyOneRow(rows, s.scanSupportConversation)
 	if errors.Is(err, pgx.ErrNoRows) || err == nil && !a.sees(v.BrandID) {
 		return nil, errNotFound
 	}
@@ -289,8 +301,15 @@ func (s *Server) getSupportConversation(w http.ResponseWriter, r *http.Request) 
 	}
 	rows, err := s.pool.Query(ctx, `
 		SELECT m.id::text, m.kind, m.author_id::text, COALESCE(NULLIF(u.name, ''), u.email), m.from_email, m.from_name, m.to_email,
-			m.subject, m.body, m.auto_reply, m.status, m.error, m.created_at, m.sent_at
-		FROM support_messages m LEFT JOIN users u ON u.id = m.author_id
+			m.subject, m.body, m.auto_reply,
+			-- A reply sent through the email provider has the email's status.
+			CASE WHEN e.id IS NULL THEN m.status
+			     WHEN e.status IN ('sent', 'delivered') THEN 'sent'
+			     WHEN e.status IN ('bounced', 'complained', 'suppressed', 'failed', 'cancelled') THEN 'failed'
+			     ELSE 'sending' END,
+			COALESCE(m.error, CASE WHEN e.status IN ('bounced', 'complained', 'suppressed', 'failed', 'cancelled') THEN COALESCE(e.status_reason, e.status) END),
+			m.created_at, COALESCE(m.sent_at, e.sent_at)
+		FROM support_messages m LEFT JOIN users u ON u.id = m.author_id LEFT JOIN emails e ON e.id = m.email_id
 		WHERE m.conversation_id = $1 AND m.workspace_id = $2 ORDER BY m.created_at, m.id`, c.ID, a.WorkspaceID)
 	if err != nil {
 		s.internal(w, r, err)
@@ -328,7 +347,7 @@ func (s *Server) getSupportConversation(w http.ResponseWriter, r *http.Request) 
 			s.internal(w, r, err)
 			return
 		}
-		if other, err = pgx.CollectRows(rows, scanSupportConversation); err != nil {
+		if other, err = pgx.CollectRows(rows, s.scanSupportConversation); err != nil {
 			s.internal(w, r, err)
 			return
 		}
@@ -350,9 +369,12 @@ func (s *Server) supportWrites(w http.ResponseWriter, r *http.Request, a *access
 func (s *Server) supportError(w http.ResponseWriter, r *http.Request, err error) bool {
 	var inv errInvalid
 	var blocked support.ErrBlocked
+	var provider support.ErrProvider
 	switch {
 	case err == nil:
 		return false
+	case errors.As(err, &provider):
+		writeError(w, r, provider.Status, provider.Code, provider.Message)
 	case errors.Is(err, errNotFound), errors.Is(err, support.ErrNotFound):
 		writeError(w, r, http.StatusNotFound, "not_found", "conversation not found")
 	case errors.As(err, &inv):
@@ -515,8 +537,12 @@ func (s *Server) replySupportConversation(w http.ResponseWriter, r *http.Request
 	var id string
 	err = pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
 		var err error
-		id, err = support.QueueReply(ctx, tx, support.Reply{WorkspaceID: a.WorkspaceID, ConversationID: c.ID,
-			AuthorID: a.UserID, Body: req.Body, Status: req.Status})
+		reply := support.Reply{WorkspaceID: a.WorkspaceID, ConversationID: c.ID, AuthorID: a.UserID, Body: req.Body, Status: req.Status,
+			Who: s.emailWho(ctx, a)}
+		if s.emails != nil {
+			reply.Provider = s.emails
+		}
+		id, err = support.QueueReply(ctx, tx, reply)
 		if err != nil {
 			return err
 		}

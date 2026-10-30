@@ -22,7 +22,7 @@ export const roleGroups: RoleGroup[] = [
       { label: "Partners", help: "Referral, affiliate and influencer programs, rewards and payouts", read: "partners.read", manage: "partners.manage" },
       { label: "Analytics", help: "Reports and campaign links", read: "analytics.read", manage: "analytics.manage" },
       { label: "Outcomes", help: "Meetings, deals and spend", read: "outcomes.read", manage: "outcomes.manage" },
-      { label: "Customer profiles", help: "Ideal customer profiles, and moving records between brands", read: "projects.read", manage: "projects.manage" },
+      { label: "Customer profiles", help: "Ideal customer profiles, and moving records between brands", read: "profiles.read", manage: "profiles.manage" },
       { label: "AI missions", help: "Run Outflare's agent", read: "missions.read", manage: "missions.run" },
       { label: "Infrastructure", help: "Plans for domains and mailboxes", read: "infrastructure.read", manage: "infrastructure.manage" },
     ],

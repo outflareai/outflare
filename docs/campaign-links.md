@@ -77,7 +77,11 @@ https://links.northpeak.example/l/k7m2pq9x
 - The redirect link uses the workspace's tracking domain when it has one,
   and this server's address otherwise.
 - The person lands on the tagged page with `ofclk`, the click's key, added,
-  so the snippet still sees the campaign.
+  so the snippet still sees the campaign. The snippet sends `ofclk` with
+  the page view, and the visit claims the click once (a reload doesn't
+  count again). Each link and campaign shows `landed`: how many of its
+  counted clicks reached a page running the snippet. Clicks that didn't
+  left before the page loaded, or went to a page without the snippet.
 - Clicks from link scanners and previews (Slack, mail security filters)
   are kept but not counted. Each link and campaign shows its `clicks`.
 - No address or browser details are stored with a click: only when it

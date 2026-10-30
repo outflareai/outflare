@@ -1059,7 +1059,7 @@ function callFor(tab: Tab, ws: string, item?: string): Call {
         ? { title: "A brand's context", path: "/v1/workspaces/{ws}/brands/{brand}/context", params: { ...base, brand: item }, mcp: "get_brand_context", ask: "Read this brand's website and fill in what it is, who it's for and how it sounds.", scope: "workspace.read" }
         : { title: "Brands", path: "/v1/workspaces/{ws}/brands", params: base, mcp: "list_brands", ask: "Which brands do we market, and what belongs to each?", scope: "workspace.read" };
     case "ideal-customers":
-      return { title: "Ideal customer profiles", path: "/v1/workspaces/{ws}/ideal-customer-profiles", params: base, mcp: "list_ideal_customer_profiles", ask: "Write an ideal customer profile from our best customers and use it for the AU lead list.", scope: "projects.read" };
+      return { title: "Ideal customer profiles", path: "/v1/workspaces/{ws}/ideal-customer-profiles", params: base, mcp: "list_ideal_customer_profiles", ask: "Write an ideal customer profile from our best customers and use it for the AU lead list.", scope: "profiles.read" };
     case "workspace":
       return { title: "The workspace", path: "/v1/workspaces/{ws}", params: base, scope: "workspace.read" };
     case "members":
