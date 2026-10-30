@@ -316,6 +316,38 @@ export function registerRecordTools(server: McpServer, gtm: MissionClient, works
     ({ brand, ...q }) => call(() => onBrand(brand, (b) => gtm.GET("/v1/brands/{brand}/privacy-exports", { params: { path: { brand: b }, query: q } }))),
   );
 
+  server.registerTool(
+    "list_recently_deleted",
+    {
+      title: "List what was deleted in the last 7 days",
+      description:
+        "A brand's Recently deleted: what each delete removed (a record with its identities, links and events, or one field value, " +
+        "identity, link or product event), newest first, with who deleted it and when it is purged for good (purge_after, 7 days later). " +
+        "Restore one with restore_deletion.",
+      inputSchema: {
+        brand: brandRef,
+        kind: z.enum(["record", "field_value", "identity", "relationship", "event"]).optional(),
+        record: id.optional().describe("Only deletions about this record."),
+        limit: z.number().int().min(1).max(200).optional(),
+        cursor: z.string().optional(),
+      },
+      annotations: read,
+    },
+    ({ brand, ...q }) => call(() => onBrand(brand, (b) => gtm.GET("/v1/brands/{brand}/recently-deleted", { params: { path: { brand: b }, query: q } }))),
+  );
+
+  server.registerTool(
+    "get_deletion",
+    {
+      title: "Read a deletion",
+      description: "One deletion from Recently deleted: what it holds, who deleted it, when it is purged, and what a restore couldn't bring back and why.",
+      inputSchema: { brand: brandRef, deletion: id.describe("The deletion's id, from list_recently_deleted or a delete tool.") },
+      annotations: read,
+    },
+    ({ brand, deletion }) =>
+      call(() => onBrand(brand, (b) => gtm.GET("/v1/brands/{brand}/recently-deleted/{deletion}", { params: { path: { brand: b, deletion } } }))),
+  );
+
   if (readOnly) return;
 
   server.registerTool(
@@ -678,6 +710,137 @@ export function registerRecordTools(server: McpServer, gtm: MissionClient, works
       annotations: write,
     },
     ({ brand, ...body }) => call(() => onBrand(brand, (b) => gtm.POST("/v1/brands/{brand}/events/replay", { params: { path: { brand: b } }, body }))),
+  );
+
+  // The 7-day recovery window: these deletes hide the data everywhere at
+  // once and can be undone with restore_deletion for 7 days.
+  const recoverable = { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: false } as const;
+  const version = z.number().int().optional().describe("The record's version, from get_record; required for agents.");
+  const recordBrand = async (record: string, brand: string | undefined): Promise<string | CallToolResult> => {
+    if (brand) return brand;
+    const found = await gtm.GET("/v1/workspaces/{ws}/records/{record}", { params: { path: recordPath(record) } });
+    if (!found.data) return call(async () => found);
+    return found.data.brand_id ?? { isError: true, content: [{ type: "text" as const, text: "This record has no brand; pass brand." }] };
+  };
+  const brandOpt = brandRef.optional().describe("The record's brand (handle or id). Leave out to use the brand the record belongs to.");
+
+  server.registerTool(
+    "soft_delete_record",
+    {
+      title: "Delete a person or company (restorable for 7 days)",
+      description:
+        "Deletes a record with its identities, links and product events: hidden everywhere at once (lists, search, Query, smart lists, " +
+        "rules, journeys, sends), its journeys end, and it can be restored with restore_deletion for 7 days, then it is purged. Reports " +
+        "that counted its events change. Not for an erasure request: that is delete_record, permanent at once. Only when the user asked.",
+      inputSchema: { record_id: id, brand: brandOpt, version },
+      annotations: recoverable,
+    },
+    async ({ record_id, brand, version }) => {
+      const ref = await recordBrand(record_id, brand);
+      if (typeof ref !== "string") return ref;
+      return call(() =>
+        onBrand(ref, (b) => gtm.POST("/v1/brands/{brand}/records/{record}/delete", { params: { path: { brand: b, record: record_id } }, body: { version } })),
+      );
+    },
+  );
+
+  server.registerTool(
+    "delete_field_value",
+    {
+      title: "Delete a field's value (restorable for 7 days)",
+      description:
+        "Removes one wrong value from a record (a reference field's links too) without firing rules or journeys; restore_deletion puts it " +
+        "back within 7 days unless the field was set again. Computed fields can't be deleted. To change a value, use update_record instead.",
+      inputSchema: { record_id: id, field: z.string().min(1).describe("The field's key."), brand: brandOpt, version },
+      annotations: recoverable,
+    },
+    async ({ record_id, field, brand, version }) => {
+      const ref = await recordBrand(record_id, brand);
+      if (typeof ref !== "string") return ref;
+      return call(() =>
+        onBrand(ref, (b) =>
+          gtm.POST("/v1/brands/{brand}/records/{record}/fields/{field}/delete", { params: { path: { brand: b, record: record_id, field } }, body: { version } }),
+        ),
+      );
+    },
+  );
+
+  server.registerTool(
+    "delete_record_identity",
+    {
+      title: "Delete a wrong identity (restorable for 7 days)",
+      description:
+        "Deletes an email, phone or id that was wrong, leaving no history (unlike close_record_identity, for one that changed). Its value is " +
+        "free for another record at once; restore_deletion brings it back within 7 days unless another record verified it since.",
+      inputSchema: { record_id: id, identity: id.describe("The identity's id, from get_record or list_record_identities."), brand: brandOpt, version },
+      annotations: recoverable,
+    },
+    async ({ record_id, identity, brand, version }) => {
+      const ref = await recordBrand(record_id, brand);
+      if (typeof ref !== "string") return ref;
+      return call(() =>
+        onBrand(ref, (b) =>
+          gtm.POST("/v1/brands/{brand}/records/{record}/identities/{identity}/delete", {
+            params: { path: { brand: b, record: record_id, identity } },
+            body: { version },
+          }),
+        ),
+      );
+    },
+  );
+
+  server.registerTool(
+    "delete_record_link",
+    {
+      title: "Delete a wrong link (restorable for 7 days)",
+      description:
+        "Deletes a link between two records that was wrong, leaving no history (unlike end_record_link, for one that ended). A link that is a " +
+        "reference field's value goes with delete_field_value instead. restore_deletion brings it back within 7 days.",
+      inputSchema: { record_id: id, relationship: id.describe("The link's id, from list_record_links."), brand: brandOpt, version },
+      annotations: recoverable,
+    },
+    async ({ record_id, relationship, brand, version }) => {
+      const ref = await recordBrand(record_id, brand);
+      if (typeof ref !== "string") return ref;
+      return call(() =>
+        onBrand(ref, (b) =>
+          gtm.POST("/v1/brands/{brand}/records/{record}/relationships/{relationship}/delete", {
+            params: { path: { brand: b, record: record_id, relationship } },
+            body: { version },
+          }),
+        ),
+      );
+    },
+  );
+
+  server.registerTool(
+    "delete_customer_event",
+    {
+      title: "Delete a product event or payment (restorable for 7 days)",
+      description:
+        "Deletes one product event of a brand, such as a test payment, with its attribution and ad conversion sends. Reports, attribution " +
+        "and rule history that counted it change; a payment's billing fields are worked out again. Nothing already sent is taken back. " +
+        "restore_deletion brings it back within 7 days without firing rules or journeys. Only when the user asked.",
+      inputSchema: { brand: brandRef, event: id.describe("The event's id, from list_customer_events or get_record_timeline.") },
+      annotations: recoverable,
+    },
+    ({ brand, event }) =>
+      call(() => onBrand(brand, (b) => gtm.POST("/v1/brands/{brand}/customer-events/{event}/delete", { params: { path: { brand: b, event } } }))),
+  );
+
+  server.registerTool(
+    "restore_deletion",
+    {
+      title: "Restore something deleted",
+      description:
+        "Puts back everything a deletion holds (from list_recently_deleted), as it was, within its 7 days. Nothing fires or is sent again: " +
+        "no rule, journey, webhook or email. What can't come back stays in the deletion with a reason (taken: its email or id belongs to " +
+        "another record now; gone: the other end was erased; changed: the field was set again; record_deleted: restore the record first).",
+      inputSchema: { brand: brandRef, deletion: id },
+      annotations: write,
+    },
+    ({ brand, deletion }) =>
+      call(() => onBrand(brand, (b) => gtm.POST("/v1/brands/{brand}/recently-deleted/{deletion}/restore", { params: { path: { brand: b, deletion } } }))),
   );
 
   server.registerTool(

@@ -11,9 +11,10 @@ import { isID } from "@/lib/paths";
 import { ago, stamp, when } from "../format";
 import type { Tab } from "../App";
 import { displayName, fieldLabelValue, identity, nameItem, namespaces, originPhrases, origins, useCatalog, type CatalogInfo } from "@/lib/records";
-import { AddIdentity, eraseRecord, RecordConsent, RecordDialog } from "./RecordEdit";
+import { AddIdentity, eraseRecord, RecordConsent, RecordDialog, softDeleteEvent, softDeleteRecord } from "./RecordEdit";
 import { Duplicates } from "./Duplicates";
 import { BrandEvents } from "./BrandEvents";
+import { RecentlyDeleted } from "./RecentlyDeleted";
 import { RecordPartners } from "./Partners";
 
 type Rec = Schemas["Record"];
@@ -27,7 +28,8 @@ type PrivacyExport = Schemas["PrivacyExport"];
 
 // People and Companies are the two built-in record types; the item part of
 // the URL picks the view: "" for people, "companies", "duplicates", "events"
-// (the brand's product events as received), or a record's id.
+// (the brand's product events as received), "deleted" (Recently deleted,
+// restorable for 7 days), or a record's id.
 type View = "person" | "account";
 const viewOf = (open: string): View => (open === "companies" ? "account" : "person");
 const itemOf = (v: View) => (v === "account" ? "companies" : "");
@@ -39,20 +41,22 @@ const itemOf = (v: View) => (v === "account" ? "companies" : "");
 export function People({ ws, canManage, open, onOpen, go }: { ws: string; canManage: boolean; open: string; onOpen: (item: string) => void; go: (t: Tab) => void }) {
   const cat = useCatalog(ws);
   if (isID(open)) return <RecordPage key={open} ws={ws} id={open} cat={cat} canManage={canManage} onOpen={onOpen} go={go} />;
-  const tabs = <ViewTabs value={open === "duplicates" || open === "events" ? open : viewOf(open)} onOpen={onOpen} />;
+  const tabs = <ViewTabs value={open === "duplicates" || open === "events" || open === "deleted" ? open : viewOf(open)} onOpen={onOpen} />;
   if (open === "duplicates") return <Duplicates ws={ws} cat={cat} canManage={canManage} tabs={tabs} onOpen={onOpen} />;
   if (open === "events") return <BrandEvents ws={ws} canManage={canManage} tabs={tabs} onOpen={onOpen} />;
+  if (open === "deleted") return <RecentlyDeleted ws={ws} canManage={canManage} tabs={tabs} onOpen={onOpen} />;
   return <RecordList ws={ws} view={viewOf(open)} cat={cat} canManage={canManage} tabs={tabs} onOpen={onOpen} />;
 }
 
-function ViewTabs({ value, onOpen }: { value: View | "duplicates" | "events"; onOpen: (item: string) => void }) {
+function ViewTabs({ value, onOpen }: { value: View | "duplicates" | "events" | "deleted"; onOpen: (item: string) => void }) {
   return (
-    <Tabs value={value} onValueChange={(v) => onOpen(v === "duplicates" || v === "events" ? v : itemOf(v as View))}>
+    <Tabs value={value} onValueChange={(v) => onOpen(v === "duplicates" || v === "events" || v === "deleted" ? v : itemOf(v as View))}>
       <TabsList className="h-8">
         <TabsTrigger value="person" className="px-3 text-[12px]">People</TabsTrigger>
         <TabsTrigger value="account" className="px-3 text-[12px]">Companies</TabsTrigger>
         <TabsTrigger value="duplicates" className="px-3 text-[12px]">Duplicates</TabsTrigger>
         <TabsTrigger value="events" className="px-3 text-[12px]">Events</TabsTrigger>
+        <TabsTrigger value="deleted" className="px-3 text-[12px]">Recently deleted</TabsTrigger>
       </TabsList>
     </Tabs>
   );
@@ -325,6 +329,10 @@ function RecordPage({ ws, id, cat, canManage, onOpen, go }: { ws: string; id: st
     if (await eraseRecord(ws, rec!, displayName(rec!))) onOpen(list);
   }
 
+  async function softDelete() {
+    if (await softDeleteRecord(rec!, displayName(rec!))) onOpen(list);
+  }
+
   return (
     <div className="space-y-6">
       <PageHeader
@@ -353,7 +361,8 @@ function RecordPage({ ws, id, cat, canManage, onOpen, go }: { ws: string; id: st
                 aria={`More actions for ${displayName(rec)}`}
                 items={[
                   rec.archived ? { label: "Restore", onClick: () => archive(false) } : { label: "Archive", onClick: () => archive(true) },
-                  { label: "Delete for good…", onClick: erase, danger: true },
+                  ...(rec.brand_id ? [{ label: "Delete…", onClick: softDelete, danger: true }] : []),
+                  { label: "Erase permanently…", onClick: erase, danger: true },
                 ]}
               />
             </>
@@ -409,7 +418,7 @@ function RecordPage({ ws, id, cat, canManage, onOpen, go }: { ws: string; id: st
               <TabsTrigger value="history" className="px-3 text-[12px]">Field history</TabsTrigger>
             </TabsList>
           </Tabs>
-          {section === "timeline" && <Timeline key={tick} ws={ws} rec={rec} cat={cat} names={names} onOpen={onOpen} />}
+          {section === "timeline" && <Timeline key={tick} ws={ws} rec={rec} cat={cat} names={names} onOpen={onOpen} canManage={manage} />}
           {section === "history" && <History key={tick} ws={ws} rec={rec} cat={cat} names={names} onOpen={onOpen} />}
         </div>
       </div>
@@ -649,7 +658,7 @@ const kinds: Record<TimelineItem["kind"], string> = {
   journey: "Journey",
 };
 
-function Timeline({ ws, rec, cat, names, onOpen }: { ws: string; rec: Rec; cat: CatalogInfo; names: Record<string, string>; onOpen: (item: string) => void }) {
+function Timeline({ ws, rec, cat, names, onOpen, canManage }: { ws: string; rec: Rec; cat: CatalogInfo; names: Record<string, string>; onOpen: (item: string) => void; canManage: boolean }) {
   const [items, setItems] = useState<TimelineItem[] | null>(null);
   const [next, setNext] = useState<string | null>(null);
   const [kind, setKind] = useState("");
@@ -704,6 +713,17 @@ function Timeline({ ws, rec, cat, names, onOpen }: { ws: string; rec: Rec; cat: 
                   <button className="text-xs underline" onClick={() => onOpen(it.record_id)}>{names[it.record_id] ?? "One of their people"}</button>
                 )}
               </div>
+              {canManage && it.kind === "event" && rec.brand_id && it.record_id === rec.id && (
+                <button
+                  className="shrink-0 self-start text-xs text-muted-foreground underline"
+                  aria-label="Delete this event"
+                  onClick={async () => {
+                    if (await softDeleteEvent(rec.brand_id!, it.id, it.title)) setItems((prev) => prev?.filter((x) => !(x.kind === it.kind && x.id === it.id)) ?? null);
+                  }}
+                >
+                  Delete
+                </button>
+              )}
             </li>
           ))}
         </ol>

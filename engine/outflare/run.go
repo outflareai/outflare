@@ -694,6 +694,12 @@ func Run(ctx context.Context, log *slog.Logger, cmd string, exts ...Extension) e
 			defer wg.Done()
 			apiServer.RunPrivacyExports(ctx)
 		}()
+		// Deletions are purged for good after their 7 days.
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			apiServer.RunRecoveryWindow(ctx)
+		}()
 		wg.Add(1)
 		go func() {
 			defer wg.Done()

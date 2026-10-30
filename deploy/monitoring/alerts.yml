@@ -436,6 +436,15 @@ groups:
         annotations:
           summary: "A privacy export failed for Outflare's own reasons in the last hour (privacy_export.build_failed and job.failed for privacy_export.build in the engine log; Privacy exports panels in the event inbox row). The person's data request waits until someone asks for a new export."
 
+      - alert: OutflareRecoveryPurgeBehind
+        # Deleted customer data is purged once its 7 days in Recently
+        # deleted are over; the purge runs every ten minutes.
+        expr: max(outflare_recovery_purge_overdue_seconds) > 21600
+        for: 30m
+        labels: { severity: warning }
+        annotations:
+          summary: "Deleted customer data has stayed over 6 hours past its 7 days in Recently deleted: the purge is failing or can't keep up (deletion.purge_failed in the engine log; Recovery window purge panel in the event inbox row). Data people deleted is kept longer than promised until it catches up."
+
       - alert: OutflareSemanticSearchNoPgvector
         # Workspaces have meaning-based search on, but the database can't
         # store vectors, so it does nothing for them.

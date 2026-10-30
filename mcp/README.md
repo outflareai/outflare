@@ -255,6 +255,8 @@ Write (left out when `OUTFLARE_MCP_READ_ONLY=1`):
 | `list_record_duplicates` | Pairs of records that may be the same human (a shared email or phone), with both records |
 | `create_record`, `update_record` | Add or change a record; values are checked against the catalog, and a higher-precedence source's values are kept |
 | `delete_record` | Erase a person or company for good, with their activity, for an erasure request; optionally never contact them again |
+| `soft_delete_record`, `delete_field_value`, `delete_record_identity`, `delete_record_link`, `delete_customer_event` | Delete a person or company (with their identities, links and events), a wrong field value, identity or link, or a product event such as a test payment: hidden everywhere at once and restorable for 7 days, then purged |
+| `list_recently_deleted`, `get_deletion`, `restore_deletion` | See what was deleted in the last 7 days and restore it as it was, without firing rules, journeys, webhooks or emails again |
 | `add_record_identity`, `close_record_identity` | Add, verify or change an email, phone or id (`replaces` for a changed email), or remove one |
 | `link_records`, `end_record_link` | Link two records, such as partner_of, or end a link |
 | `create_record_type`, `update_record_type`, `create_field`, `update_field` | Add or change record types and fields in the shared catalog |

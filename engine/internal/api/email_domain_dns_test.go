@@ -26,6 +26,40 @@ func TestEmailDomainDNS(t *testing.T) {
 	rs := httptest.NewServer(&fakeResend{})
 	defer rs.Close()
 	e.integrations.Client.BaseURLs["resend"] = rs.URL
+	// Cloudflare holds the zone, with an SPF record already on send. Its
+	// fake is set up before the job queue starts: BaseURLs is a plain map
+	// the jobs read, so writing it while they run is a data race.
+	var mu sync.Mutex
+	cfRecords := []map[string]any{{"type": "TXT", "name": "send.example.com", "content": `"v=spf1 include:_spf.example.net ~all"`}}
+	cf := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		defer mu.Unlock()
+		switch {
+		case r.URL.Path == "/zones":
+			if name := r.URL.Query().Get("name"); name == "" || name == "example.com" {
+				json.NewEncoder(w).Encode(map[string]any{"result": []any{map[string]any{"id": "z1", "name": "example.com"}}})
+				return
+			}
+			json.NewEncoder(w).Encode(map[string]any{"result": []any{}})
+		case r.URL.Path == "/zones/z1/dns_records" && r.Method == "GET":
+			out := []any{}
+			for _, rec := range cfRecords {
+				if rec["name"] == r.URL.Query().Get("name") && rec["type"] == r.URL.Query().Get("type") {
+					out = append(out, rec)
+				}
+			}
+			json.NewEncoder(w).Encode(map[string]any{"result": out})
+		case r.URL.Path == "/zones/z1/dns_records" && r.Method == "POST":
+			var rec map[string]any
+			json.NewDecoder(r.Body).Decode(&rec)
+			cfRecords = append(cfRecords, rec)
+			json.NewEncoder(w).Encode(map[string]any{"result": rec})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer cf.Close()
+	e.integrations.Client.BaseURLs["cloudflare"] = cf.URL
 	owner, ws := setupOwner(t, e.h)
 	base := "/v1/workspaces/" + ws
 	ctx := context.Background()
@@ -66,38 +100,6 @@ func TestEmailDomainDNS(t *testing.T) {
 		t.Fatalf("no DNS connection yet: %v", d)
 	}
 
-	// Cloudflare holds the zone, with an SPF record already on send.
-	var mu sync.Mutex
-	cfRecords := []map[string]any{{"type": "TXT", "name": "send.example.com", "content": `"v=spf1 include:_spf.example.net ~all"`}}
-	cf := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		mu.Lock()
-		defer mu.Unlock()
-		switch {
-		case r.URL.Path == "/zones":
-			if name := r.URL.Query().Get("name"); name == "" || name == "example.com" {
-				json.NewEncoder(w).Encode(map[string]any{"result": []any{map[string]any{"id": "z1", "name": "example.com"}}})
-				return
-			}
-			json.NewEncoder(w).Encode(map[string]any{"result": []any{}})
-		case r.URL.Path == "/zones/z1/dns_records" && r.Method == "GET":
-			out := []any{}
-			for _, rec := range cfRecords {
-				if rec["name"] == r.URL.Query().Get("name") && rec["type"] == r.URL.Query().Get("type") {
-					out = append(out, rec)
-				}
-			}
-			json.NewEncoder(w).Encode(map[string]any{"result": out})
-		case r.URL.Path == "/zones/z1/dns_records" && r.Method == "POST":
-			var rec map[string]any
-			json.NewDecoder(r.Body).Decode(&rec)
-			cfRecords = append(cfRecords, rec)
-			json.NewEncoder(w).Encode(map[string]any{"result": rec})
-		default:
-			http.NotFound(w, r)
-		}
-	}))
-	defer cf.Close()
-	e.integrations.Client.BaseURLs["cloudflare"] = cf.URL
 	cfConn := owner.must(201, "POST", base+"/integrations", map[string]any{"connector": "cloudflare", "credentials": map[string]string{"api_token": "cf_test_not_a_real_token"}})["id"].(string)
 	d = owner.must(200, "GET", base+"/email-provider-domains/"+did, nil)
 	if c := d["dns_connections"].([]any); len(c) != 1 || c[0] != cfConn {

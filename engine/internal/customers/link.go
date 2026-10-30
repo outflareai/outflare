@@ -335,6 +335,10 @@ var Owned = []Ref{
 	// record kept has its own state, so it neither fires again nor misses
 	// its own timers.
 	{"rule_states", "record_id"},
+	// What was deleted from the record and can be restored for 7 days
+	// (the recovery window): it stays the record's. Erasing the record
+	// deletes it (ON DELETE CASCADE); a privacy export includes it.
+	{"deletions", "record_id"}, {"deleted_rows", "record_id"},
 }
 
 // Follow moves every Follows column from one record to another and

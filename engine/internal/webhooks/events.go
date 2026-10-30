@@ -159,6 +159,8 @@ var Catalog = []Event{
 	{"consent.withdrawn", "customers", "A person withdrew consent, such as by unsubscribing from any email. data has channel, purpose, source and topic, as for consent.granted."},
 	{"consent.bulk_withdrawn", "customers", "Many people withdrew consent at once, such as unsubscribes imported from another sequencer. data.count says how many."},
 	{"privacy_export.ready", "customers", "A privacy export of a person or company is ready to download. The target is the export; data has record_id, brand_id, size_bytes (gzipped), rows, counts (rows by table) and expires_at (7 days later). GET /v1/brands/{brand}/privacy-exports/{id} has its download_url."},
+	{"record.soft_deleted", "customers", "A person or company was deleted into Recently deleted: hidden everywhere, restorable for 7 days. The target is the record; data has type, record_id, brand_id, deletion_id and counts (rows it holds, by table). Erasure is not a webhook event."},
+	{"deletion.restored", "customers", "Something in Recently deleted was restored. The target is the deletion; data has kind (record, field_value, identity, relationship, event), record_id, brand_id, restored (rows by table), not_restored (how many couldn't come back) and outcome. Nothing else is sent again for what came back."},
 	// Brands
 	{"brand.created", "brands", "A brand was added to the workspace."},
 	{"brand.updated", "brands", "A brand's name, website or settings changed. data.fields lists what changed."},

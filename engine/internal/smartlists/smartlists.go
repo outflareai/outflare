@@ -373,8 +373,10 @@ func Members(ctx context.Context, q Querier, ws, listID string, seen []string, a
 	if err != nil {
 		return nil, err
 	}
+	// A deleted person (Recently deleted) keeps their place, hidden, so
+	// restoring them isn't joining again.
 	rows, err := q.Query(ctx, `SELECT `+personCols+`, m.entered_at FROM `+table+` m JOIN records r ON r.id = m.record_id
-		WHERE m.workspace_id = $1 AND m.list_id = $2`+cond+` ORDER BY m.entered_at DESC, m.record_id DESC LIMIT $3`, args...)
+		WHERE m.workspace_id = $1 AND m.list_id = $2 AND r.deleted_at IS NULL`+cond+` ORDER BY m.entered_at DESC, m.record_id DESC LIMIT $3`, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -399,7 +401,9 @@ type Result struct {
 var ErrGone = errors.New("smart list not found")
 
 // Refresh brings one list's members up to date in tx and reports who
-// joined and left.
+// joined and left. A deleted person (Recently deleted) neither leaves nor
+// counts: they keep their place, hidden, so restoring them doesn't fire
+// the list's enter rules again.
 func Refresh(ctx context.Context, tx pgx.Tx, ws, listID string) (Result, error) {
 	var res Result
 	var raw []byte
@@ -442,7 +446,8 @@ func Refresh(ctx context.Context, tx pgx.Tx, ws, listID string) (Result, error) 
 	var joined, left []string
 	err = tx.QueryRow(ctx, `WITH want AS (SELECT r.id FROM records r WHERE `+where+`),
 		gone AS (DELETE FROM smart_list_members m WHERE m.list_id = `+l+`
-			AND NOT EXISTS (SELECT 1 FROM want w WHERE w.id = m.record_id) RETURNING m.record_id),
+			AND NOT EXISTS (SELECT 1 FROM want w WHERE w.id = m.record_id)
+			AND NOT EXISTS (SELECT 1 FROM records d WHERE d.id = m.record_id AND d.deleted_at IS NOT NULL) RETURNING m.record_id),
 		added AS (INSERT INTO smart_list_members (workspace_id, list_id, record_id) SELECT $1, `+l+`, id FROM want
 			ON CONFLICT (list_id, record_id) DO NOTHING RETURNING record_id)
 		SELECT (SELECT count(*) FROM added)::int, (SELECT count(*) FROM gone)::int, (SELECT count(*) FROM want)::int, `+who, args...).

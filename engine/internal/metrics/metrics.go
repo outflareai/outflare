@@ -564,6 +564,25 @@ var (
 		Help: "Privacy exports whose file was deleted 7 days after it was ready.",
 	})
 
+	// The 7-day recovery window: deletions of customer data that can be
+	// restored, then are purged.
+	recoveryDeleted = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Namespace: namespace, Subsystem: "recovery", Name: "deleted_total",
+		Help: "Customer data deleted into the 7-day recovery window, by kind (record, field_value, identity, relationship, event).",
+	}, []string{"kind"})
+	recoveryRestored = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Namespace: namespace, Subsystem: "recovery", Name: "restored_total",
+		Help: "Deletions restored, by kind and outcome (restored, partly_restored, not_restored).",
+	}, []string{"kind", "outcome"})
+	recoveryPurged = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Namespace: namespace, Subsystem: "recovery", Name: "purged_total",
+		Help: "Deletions purged for good after their 7 days, by kind.",
+	}, []string{"kind"})
+	recoveryPurgeOverdue = prometheus.NewGauge(prometheus.GaugeOpts{
+		Namespace: namespace, Subsystem: "recovery", Name: "purge_overdue_seconds",
+		Help: "How long past its 7 days the oldest deletion still waiting for the purge is, as of this process's last round.",
+	})
+
 	inboundPurged = prometheus.NewCounter(prometheus.CounterOpts{
 		Namespace: namespace, Subsystem: "inbound_email", Name: "raw_purged_total",
 		Help: "Raw inbound messages deleted after 30 days (their details stay).",
@@ -645,6 +664,7 @@ var own = []prometheus.Collector{
 	inboundReceived, inboundProcessed, inboundBytes, inboundPurged,
 	eventInboxReceived, eventInboxProcessed, eventInboxRejected, eventInboxDuration, eventInboxPending, eventInboxOldest, eventInboxPurged, eventInboxPurgeOverdue,
 	privacyExportsBuilt, privacyExportSeconds, privacyExportBytes, privacyExportsExpired,
+	recoveryDeleted, recoveryRestored, recoveryPurged, recoveryPurgeOverdue,
 	ratesFetched, ratesAge, receiptsConverted,
 	desktopLinks, desktopReports, desktopReadings, desktopReadFailures, desktopDevices, desktopPurged,
 	buildInfo,
@@ -1198,6 +1218,19 @@ func PrivacyExportBuilt(outcome string, d time.Duration, size int64) {
 
 // PrivacyExportsExpired counts privacy exports whose file was deleted.
 func PrivacyExportsExpired(n int) { privacyExportsExpired.Add(float64(n)) }
+
+// RecoveryDeleted counts customer data deleted into the recovery window.
+func RecoveryDeleted(kind string) { recoveryDeleted.WithLabelValues(kind).Inc() }
+
+// RecoveryRestored counts a deletion restored, with its outcome.
+func RecoveryRestored(kind, outcome string) { recoveryRestored.WithLabelValues(kind, outcome).Inc() }
+
+// RecoveryPurged counts a deletion purged after its 7 days.
+func RecoveryPurged(kind string) { recoveryPurged.WithLabelValues(kind).Inc() }
+
+// SetRecoveryPurgeOverdue records how far past its 7 days the oldest
+// deletion waiting for the purge is.
+func SetRecoveryPurgeOverdue(d time.Duration) { recoveryPurgeOverdue.Set(max(d, 0).Seconds()) }
 
 // RatesFetched counts one fetch of exchange rates, success or error, and
 // on success sets the newest rate's age.

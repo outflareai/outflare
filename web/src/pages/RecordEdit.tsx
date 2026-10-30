@@ -1,7 +1,7 @@
 import { useEffect, useState, type FormEvent } from "react";
 import type { Schemas } from "@outflare/sdk";
 import { api, errorMessage } from "../api";
-import { ask, Button, ErrorText, field, toast } from "../ui";
+import { ask, Button, confirmAction, ErrorText, field, toast } from "../ui";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { track } from "@/lib/analytics";
 import { plural } from "../format";
@@ -303,26 +303,88 @@ export function RecordDialog({ ws, type, rec, cat, names, onClose, onSaved }: {
   );
 }
 
+// softDeleteRecord asks, then deletes a record into Recently deleted: hidden
+// everywhere now, restorable for 7 days. True when it went.
+export async function softDeleteRecord(rec: Rec, label: string): Promise<boolean> {
+  if (!rec.brand_id) {
+    toast("This record has no brand, so it can only be archived or erased.", "error");
+    return false;
+  }
+  const person = rec.type === "person";
+  const ok = await confirmAction(
+    `Delete ${label}?`,
+    <>
+      <p>
+        {person ? "They are" : "It is"} hidden everywhere at once: lists, search, Query, smart lists, rules and journeys, with {person ? "their" : "its"} emails
+        and ids, links and product events. {person ? "Their journeys stop, and nothing more is sent to them." : ""}
+      </p>
+      <p>
+        Reports and rule history that counted {person ? "their" : "its"} events change while {person ? "they are" : "it is"} deleted. You can restore{" "}
+        {person ? "them" : "it"}, as {person ? "they were" : "it was"} and without sending anything again, from People → Recently deleted for 7 days; then{" "}
+        {person ? "they are" : "it is"} gone for good.
+      </p>
+      <p>For a request to erase someone's data, use Erase permanently instead: it can't be undone.</p>
+    </>,
+    "Delete",
+  );
+  if (!ok) return false;
+  const { error } = await api.POST("/v1/brands/{brand}/records/{record}/delete", {
+    params: { path: { brand: rec.brand_id, record: rec.id } },
+    body: { version: rec.version },
+  });
+  if (error) {
+    toast(errorMessage(error), "error");
+    return false;
+  }
+  toast(`Deleted ${label}. Restore ${person ? "them" : "it"} from Recently deleted within 7 days.`);
+  return true;
+}
+
+// softDeleteEvent asks, then deletes one product event (a payment is one)
+// into Recently deleted. True when it went.
+export async function softDeleteEvent(brand: string, event: string, name: string): Promise<boolean> {
+  const payment = name.startsWith("payment.");
+  const ok = await confirmAction(
+    `Delete this ${payment ? "payment" : "event"}?`,
+    <>
+      <p>
+        {name} is hidden everywhere at once. Reports, attribution and rule history that counted it change{payment ? ", and their lifetime revenue is worked out again" : ""}.
+        Nothing already sent because of it is taken back.
+      </p>
+      <p>You can restore it from People → Recently deleted for 7 days, without firing rules or journeys again; then it is gone for good.</p>
+    </>,
+    "Delete",
+  );
+  if (!ok) return false;
+  const { error } = await api.POST("/v1/brands/{brand}/customer-events/{event}/delete", { params: { path: { brand, event } } });
+  if (error) {
+    toast(errorMessage(error), "error");
+    return false;
+  }
+  toast("Deleted. Restore it from Recently deleted within 7 days.");
+  return true;
+}
+
 // eraseRecord asks, then deletes a record for good. True when it went.
 export async function eraseRecord(ws: string, rec: Rec, label: string): Promise<boolean> {
   const person = rec.type === "person";
   const r = await ask({
-    title: `Delete ${label} for good?`,
+    title: `Erase ${label} permanently?`,
     body: (
       <>
         <p>
           {person
             ? "This erases them: their record and emails and ids, their leads, the emails sent to them and their replies, meetings, product events, website visits and consent. Deals and payments stay, without their name."
             : "This erases the company's record, its fields and history. Its people and deals stay, no longer linked to it."}{" "}
-          It can't be undone. To hide {person ? "them" : "it"} and keep the history, archive instead.
+          It can't be undone, also not from Recently deleted: use it for a request to erase someone's data. To remove {person ? "them" : "it"} and keep 7 days to change your mind, use Delete instead.
         </p>
         <p>{person ? "If they asked never to be contacted, also add their emails to the do-not-contact list, so a later import can't email them again." : "Adding its domains to the do-not-contact list stops email to anyone there."}</p>
       </>
     ),
     choices: [
       { label: "Cancel", value: "cancel", variant: "ghost" },
-      { label: "Delete", value: "delete", variant: "ghost" },
-      { label: "Delete and never contact", value: "suppress", variant: "danger-solid" },
+      { label: "Erase", value: "delete", variant: "ghost" },
+      { label: "Erase and never contact", value: "suppress", variant: "danger-solid" },
     ],
   });
   if (!r || r.choice === "cancel") return false;
@@ -335,7 +397,7 @@ export async function eraseRecord(ws: string, rec: Rec, label: string): Promise<
   }
   if (!data || !("erased" in data)) return true; // held for a mission's approval
   const activity = Object.entries(data.erased).filter(([t]) => t !== "records").reduce((n, [, c]) => n + c, 0);
-  toast(`Deleted ${label}${activity ? ` and ${plural(activity, "thing")} about ${person ? "them" : "it"}` : ""}${data.suppressed ? `; ${(person ? plural(data.suppressed, "address", "addresses") : plural(data.suppressed, "domain"))} added to do not contact` : ""}.`);
+  toast(`Erased ${label}${activity ? ` and ${plural(activity, "thing")} about ${person ? "them" : "it"}` : ""}${data.suppressed ? `; ${(person ? plural(data.suppressed, "address", "addresses") : plural(data.suppressed, "domain"))} added to do not contact` : ""}.`);
   return true;
 }
 

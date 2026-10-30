@@ -97,6 +97,8 @@ var errorCodes = []errorCode{
 	{"used", []int{410}, "The link was already used.", false},
 	{"export_expired", []int{410}, "The privacy export expired (7 days after it was ready) and its file was deleted. Ask for a new one.", false},
 	{"export_not_ready", []int{409}, "The privacy export is still being built, or failed (its error_code says why). Download it once its status is ready.", false},
+	{"nothing_to_restore", []int{409}, "Everything in this deletion was already restored. GET .../recently-deleted lists what can still be.", false},
+	{"deletion_expired", []int{410}, "The deletion is past its 7 days and is being purged for good; it can no longer be restored.", false},
 	{"mission_required", []int{403}, "This app or token makes changes only inside a mission. Start one, and once a person approves it send its id in the Outflare-Mission header. Reads need no mission.", false},
 	{"not_a_member", []int{403}, "The link is for members of the workspace that made it. Sign in with the account you use there, or ask an admin to invite you.", false},
 

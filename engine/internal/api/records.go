@@ -175,12 +175,13 @@ func withIdentities(ctx context.Context, q pgx.Tx, list []recordView) error {
 	return withContactability(ctx, q, list)
 }
 
-// loadRecord reads one record the caller can see, with its identities.
+// loadRecord reads one record the caller can see, with its identities. A
+// deleted record (in Recently deleted) is not found.
 func loadRecord(ctx context.Context, q pgx.Tx, a *access, id string) (recordView, error) {
 	if !validUUID(id) {
 		return recordView{}, errNotFound
 	}
-	v, err := scanRecord(q.QueryRow(ctx, `SELECT `+recordColumns+` FROM records r WHERE r.id = $1 AND r.workspace_id = $2`, id, a.WorkspaceID))
+	v, err := scanRecord(q.QueryRow(ctx, `SELECT `+recordColumns+` FROM records r WHERE r.id = $1 AND r.workspace_id = $2 AND r.deleted_at IS NULL`, id, a.WorkspaceID))
 	if errors.Is(err, pgx.ErrNoRows) || (err == nil && !a.sees(v.BrandID)) {
 		return v, errNotFound
 	}
@@ -192,12 +193,20 @@ func loadRecord(ctx context.Context, q pgx.Tx, a *access, id string) (recordView
 	return list[0], err
 }
 
-// lockRecord locks a record the caller may change.
+// lockRecord locks a record the caller may change. A deleted record (in
+// Recently deleted) is not found: it is restored first.
 func lockRecord(ctx context.Context, tx pgx.Tx, a *access, id string) (recordView, error) {
+	return lockRecordIn(ctx, tx, a, id, false)
+}
+
+// lockRecordIn is lockRecord that also finds a deleted record when
+// deleted is true: erasure works on records in Recently deleted too.
+func lockRecordIn(ctx context.Context, tx pgx.Tx, a *access, id string, deleted bool) (recordView, error) {
 	if !validUUID(id) {
 		return recordView{}, errNotFound
 	}
-	v, err := scanRecord(tx.QueryRow(ctx, `SELECT `+recordColumns+` FROM records r WHERE r.id = $1 AND r.workspace_id = $2 FOR UPDATE`, id, a.WorkspaceID))
+	v, err := scanRecord(tx.QueryRow(ctx, `SELECT `+recordColumns+` FROM records r WHERE r.id = $1 AND r.workspace_id = $2
+		AND ($3 OR r.deleted_at IS NULL) FOR UPDATE`, id, a.WorkspaceID, deleted))
 	if errors.Is(err, pgx.ErrNoRows) || (err == nil && !a.sees(v.BrandID)) {
 		return v, errNotFound
 	}
@@ -519,6 +528,11 @@ func attributeChanged(ctx context.Context, tx pgx.Tx, a *access, id, key string,
 	if _, err := tx.Exec(ctx, `INSERT INTO attribute_changes (workspace_id, record_id, field_key, old_value, new_value, source, actor_id, request_id)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`, a.WorkspaceID, id, key, old, now, source, nullIfEmpty(a.ActorID), RequestID(ctx)); err != nil {
 		return err
+	}
+	// Billing worked out again after a payment was deleted or restored
+	// fires nothing (the recovery window).
+	if isQuiet(ctx) {
+		return nil
 	}
 	return customers.FieldChanged(ctx, tx, a.WorkspaceID, customers.FieldChange{RecordID: id, Field: key, Old: prev, HadOld: had, Source: source})
 }
@@ -1107,7 +1121,8 @@ func (s *Server) deleteRecord(w http.ResponseWriter, r *http.Request) {
 	}
 	var out map[string]any
 	err := pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
-		rec, err := lockRecord(ctx, tx, a, r.PathValue("record"))
+		// A record in Recently deleted can be erased too.
+		rec, err := lockRecordIn(ctx, tx, a, r.PathValue("record"), true)
 		if err != nil {
 			return err
 		}
@@ -1129,8 +1144,12 @@ func (s *Server) deleteRecord(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			return err
 		}
-		rows, err = tx.Query(ctx, `SELECT DISTINCT namespace, value FROM record_identities
-			WHERE workspace_id = $1 AND record_id = ANY($2) AND namespace IN ('email', 'domain')`, a.WorkspaceID, ids)
+		// With the identities a deletion holds, for a record in Recently
+		// deleted.
+		rows, err = tx.Query(ctx, `SELECT namespace, value FROM record_identities
+			WHERE workspace_id = $1 AND record_id = ANY($2) AND namespace IN ('email', 'domain')
+			UNION SELECT data->>'namespace', data->>'value' FROM deleted_rows
+			WHERE workspace_id = $1 AND record_id = ANY($2) AND source_table = 'record_identities' AND data->>'namespace' IN ('email', 'domain')`, a.WorkspaceID, ids)
 		if err != nil {
 			return err
 		}
@@ -1189,7 +1208,7 @@ func (s *Server) listRecords(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	args := []any{a.WorkspaceID}
-	where := `r.workspace_id = $1 AND r.merged_into IS NULL`
+	where := `r.workspace_id = $1 AND r.merged_into IS NULL AND r.deleted_at IS NULL`
 	if t := q.Get("type"); t != "" {
 		args = append(args, t)
 		where += fmt.Sprintf(` AND r.record_type = $%d`, len(args))

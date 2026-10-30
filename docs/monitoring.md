@@ -172,6 +172,10 @@ Every Outflare metric starts with `outflare_`, so it is easy to keep only those 
 | `outflare_playbooks_automation_lag_seconds` | | How long the most overdue active playbook automation has waited past its run time, at the last pass. |
 | `outflare_build_info` | `version`, `role` | The running version and role (`OUTFLARE_ROLE`); the dashboard marks each change of version as a deploy. |
 | `outflare_metrics_scrape_errors`, `outflare_metrics_scrape_duration_seconds` | | Database queries that failed in the last scrape, and how long it took. |
+| `outflare_recovery_deleted_total` | `kind` (`record`, `field_value`, `identity`, `relationship`, `event`) | Customer data deleted into Recently deleted, restorable for 7 days ([customers.md](customers.md#deleting-and-restoring)). |
+| `outflare_recovery_restored_total` | `kind`, `outcome` (`restored`, `partly_restored`, `not_restored`) | Deletions restored. |
+| `outflare_recovery_purged_total` | `kind` | Deletions purged for good after their 7 days. |
+| `outflare_recovery_purge_overdue_seconds` | | How far past its 7 days the oldest deletion still waiting for the purge is. |
 | `go_*`, `process_*` | | Go runtime and process: CPU seconds, resident memory, heap, goroutines, garbage collection, open files. |
 
 The database numbers are read when Prometheus scrapes, at most once every 10 seconds whatever the number of scrapers, with a 5-second limit, using the partial indexes on queued and running jobs.
@@ -278,6 +282,7 @@ The database numbers are read when Prometheus scrapes, at most once every 10 sec
 - help centre views not being counted (info)
 - help centre pages taking over a second to build at the 95th percentile (info)
 - a privacy export failing for Outflare's own reasons (`OutflarePrivacyExportsFailing`)
+- deleted customer data staying over 6 hours past its 7 days in Recently deleted (`OutflareRecoveryPurgeBehind`: the purge is failing)
 - adjust them in your copy
 
 For product events sent to brands (the event inbox), alerts fire when an event has waited over 5 minutes to be processed (warning), when over half of the events processed in an hour were rejected (info: a sender broke; the rejected-by-code panel and each brand's Events page say what to fix), and when rows stay over 6 hours past their retention (info: the sweep is failing).

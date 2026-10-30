@@ -189,6 +189,19 @@ When someone asks what you hold about them, a privacy export gathers it into one
 - **Limits.** Over 100 MB uncompressed, an export fails with `too_large`. After 7 days the file is deleted and the export shows as expired (a download answers 410); ask for a new one.
 - **Kept on record.** Asking (`privacy_export.requested`), the result (`privacy_export.ready` or `privacy_export.failed`) and every download (`privacy_export.downloaded`) are in the audit log; `privacy_export.ready` is also a webhook event. Erasing the record deletes its exports with it.
 
+## Deleting and restoring
+
+Bad data can be deleted and, for 7 days, brought back as it was: the recovery window. Legal erasure is separate.
+
+- **What can be deleted.** A person or company (with their emails and ids, links and product events), one field's value, one identity, one link, or one product event. Payments and refunds are product events, so a test payment is deleted the same way. Each delete is one *deletion*, restored together.
+- **Hidden everywhere at once.** A deleted record is gone from the record API, lists (also Archived), search, Query, smart lists, rules, journeys and sends; its active journey runs end (`exit_reason` `deleted`) and stay ended. Its identities, links and events, and a deleted identity, link or event on its own, move out of their tables while deleted, so nothing reads them, ClickHouse drops them, and their values (an email, an event's message id) are free: a sync or event with the same email makes a new person. A deleted field value leaves the record without firing rules or journeys.
+- **Deleting events changes reports.** Reports, attribution, A/B test results and rule history that counted a deleted event change while it is deleted; a payment's lifetime revenue is worked out again. Nothing already sent because of it is taken back. The delete flow says so.
+- **Recently deleted.** People → Recently deleted, `GET /v1/brands/{brand}/recently-deleted` or the MCP tool `list_recently_deleted` lists the brand's deletions, newest first, with who deleted each and when it goes for good. `customers.read` sees them; deleting and restoring need `customers.manage`.
+- **Restoring** (`POST /v1/brands/{brand}/recently-deleted/{deletion}/restore`, `restore_deletion`) puts everything back with its ids, history and links, and fires nothing: no rule, journey, webhook or email for what came back, and a person kept their place on smart lists, so they don't join again. What can't come back stays in the deletion with a reason, and the rest is restored: `taken` (another record verified the email since, or the same event arrived again), `gone` (the other end of a link was erased), `changed` (the field was set again) or `record_deleted` (restore the record first). Fix it and restore again.
+- **Purged after 7 days.** Then the deletion goes for good, and a deleted person or company is erased as below (with their leads, so the link job can't make them again). A restore after that answers 410 `deletion_expired`.
+- **Erasure is permanent.** For a request to erase someone's data, use Erase permanently on the record's page, `DELETE /v1/workspaces/{ws}/records/{record}` or `delete_record`: it is final at once, also for a record in Recently deleted (its deletions go with it), and `suppress=true` adds their emails to the do-not-contact list so a later import or sync can't bring them back.
+- **On record.** `record.soft_deleted`, `field_value.deleted`, `identity.deleted`, `relationship.deleted`, `customer_event.deleted`, `deletion.restored` and `deletion.purged` are in the audit log; `record.soft_deleted` and `deletion.restored` are also webhook events. A privacy export includes what is in Recently deleted, since it is still held.
+
 ## Scopes
 
 | Scope | Allows | Roles |

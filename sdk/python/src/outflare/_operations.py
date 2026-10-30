@@ -5890,6 +5890,31 @@ class Operations(_Mixin):
             idempotency_key=idempotency_key,
         )
 
+    def delete_customer_event(
+        self,
+        brand: str,
+        event: str,
+        *,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Delete a product event or payment, restorable for 7 days.
+
+        Scope: customers.manage. Deletes one product event of the brand, with its ad conversion sends and attribution.
+        Payments and refunds are product events: deleting one works the person's billing fields (lifetime revenue,
+        customer since) out again, without firing rules. Reports, attribution and rule history that counted the event
+        change while it is deleted; nothing already sent is taken back. Restorable for 7 days from Recently deleted;
+        restoring never fires rules or journeys again.
+
+        Needs: the customers.manage scope.
+        POST /v1/brands/{brand}/customer-events/{event}/delete
+        """
+        return self._call(
+            "POST",
+            "/v1/brands/{brand}/customer-events/{event}/delete",
+            path={"brand": brand, "event": event},
+            idempotency_key=idempotency_key,
+        )
+
     def delete_deal(
         self,
         id: str,
@@ -5995,6 +6020,35 @@ class Operations(_Mixin):
             idempotency_key=idempotency_key,
         )
 
+    def delete_field_value(
+        self,
+        brand: str,
+        record: str,
+        field: str,
+        *,
+        version: int | None = None,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Delete a field's value, restorable for 7 days.
+
+        Scope: customers.manage. Removes one field's value from a record (for a record reference field, its links
+        too) as bad data: no rule or journey hears of it, and its field history records the change. It shows in
+        Recently deleted and can be restored for 7 days, onto the field as long as nothing set it since. 404 when the
+        field has no value; computed fields can't be deleted (delete what they are worked out from).
+
+        Needs: the customers.manage scope.
+        POST /v1/brands/{brand}/records/{record}/fields/{field}/delete
+        """
+        return self._call(
+            "POST",
+            "/v1/brands/{brand}/records/{record}/fields/{field}/delete",
+            path={"brand": brand, "record": record, "field": field},
+            body={"version": version},
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
     def delete_fix_guideline(
         self,
         guideline: str,
@@ -6034,6 +6088,35 @@ class Operations(_Mixin):
             "DELETE",
             "/v1/workspaces/{ws}/help-centres/{id}",
             path={"id": id, "ws": ws},
+            idempotency_key=idempotency_key,
+        )
+
+    def delete_identity(
+        self,
+        brand: str,
+        record: str,
+        identity: str,
+        *,
+        version: int | None = None,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Delete an identity, restorable for 7 days.
+
+        Scope: customers.manage. Deletes one of a record's emails, phones or ids, open or closed, as wrong data: unlike
+        closing it (POST .../identities/{identity}/close), it leaves no history and the value is free for another
+        record at once. Restorable for 7 days from Recently deleted, unless another record has verified the value
+        since (reported as taken).
+
+        Needs: the customers.manage scope.
+        POST /v1/brands/{brand}/records/{record}/identities/{identity}/delete
+        """
+        return self._call(
+            "POST",
+            "/v1/brands/{brand}/records/{record}/identities/{identity}/delete",
+            path={"brand": brand, "record": record, "identity": identity},
+            body={"version": version},
+            extra_body=extra_body,
             idempotency_key=idempotency_key,
         )
 
@@ -6498,7 +6581,9 @@ class Operations(_Mixin):
         """Erase a customer record.
 
         Scope: customers.manage. Deletes a person or company for good, such as for an erasure request; to hide one
-        and keep its history, archive it instead (PATCH with archived: true). Goes with it: the records merged into
+        and keep its history, archive it instead (PATCH with archived: true), and to delete one with 7 days to
+        change your mind, use POST /v1/brands/{brand}/records/{record}/delete. Works on a record in Recently deleted
+        too, and its deletions go with it. Goes with it: the records merged into
         it, its identities, links, field history and consents and, for a person, everything about them: their
         leads (also any lead with one of their emails), the cold email sent to them and their replies, meetings,
         lifecycle email sent to them alone, product events, website visits, journey runs, partner referrals and
@@ -6537,6 +6622,34 @@ class Operations(_Mixin):
             "DELETE",
             "/v1/workspaces/{ws}/spend-recurring/{id}",
             path={"id": id, "ws": ws},
+            idempotency_key=idempotency_key,
+        )
+
+    def delete_relationship(
+        self,
+        brand: str,
+        record: str,
+        relationship: str,
+        *,
+        version: int | None = None,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Delete a link between records, restorable for 7 days.
+
+        Scope: customers.manage. Deletes one of a record's links, either way round, as wrong data: unlike ending it
+        (POST .../relationships/{relationship}/end) it leaves no history. A link that is a reference field's current
+        value is deleted with that field's value instead (400). Restorable for 7 days from Recently deleted.
+
+        Needs: the customers.manage scope.
+        POST /v1/brands/{brand}/records/{record}/relationships/{relationship}/delete
+        """
+        return self._call(
+            "POST",
+            "/v1/brands/{brand}/records/{record}/relationships/{relationship}/delete",
+            path={"brand": brand, "record": record, "relationship": relationship},
+            body={"version": version},
+            extra_body=extra_body,
             idempotency_key=idempotency_key,
         )
 
@@ -9123,6 +9236,24 @@ class Operations(_Mixin):
             "GET",
             "/v1/workspaces/{ws}/deals/{id}",
             path={"id": id, "ws": ws},
+        )
+
+    def get_deletion(
+        self,
+        brand: str,
+        deletion: str,
+    ) -> Any:
+        """Read a deletion.
+
+        Scope: customers.read. One deletion, restored or not, until it is purged.
+
+        Needs: the customers.read scope.
+        GET /v1/brands/{brand}/recently-deleted/{deletion}
+        """
+        return self._call(
+            "GET",
+            "/v1/brands/{brand}/recently-deleted/{deletion}",
+            path={"brand": brand, "deletion": deletion},
         )
 
     def get_deploy_target(
@@ -16662,6 +16793,41 @@ class Operations(_Mixin):
             path={"site": site, "ws": ws},
         )
 
+    def list_recently_deleted(
+        self,
+        brand: str,
+        *,
+        kind: Literal["record", "field_value", "identity", "relationship", "event"] | None = None,
+        record: str | None = None,
+        limit: int | None = None,
+        before: str | None = None,
+        cursor: str | None = None,
+        fields: list[str] | None = None,
+    ) -> Any:
+        """List what was deleted in the last 7 days.
+
+        Scope: customers.read. The brand's deletions that can still be restored, newest first: each is what one
+        delete removed (a record with its identities, links and events, or one field value, identity, link or event),
+        restored together. A deletion partly restored stays listed with what couldn't come back. purge_after is when
+        it goes for good.
+
+        Needs: the customers.read scope.
+        GET /v1/brands/{brand}/recently-deleted
+        """
+        return self._call(
+            "GET",
+            "/v1/brands/{brand}/recently-deleted",
+            path={"brand": brand},
+            query={
+                "kind": kind,
+                "record": record,
+                "limit": limit,
+                "before": before,
+                "cursor": cursor,
+                "fields": fields,
+            },
+        )
+
     def list_record_consents(
         self,
         record: str,
@@ -20713,6 +20879,33 @@ class Operations(_Mixin):
             idempotency_key=idempotency_key,
         )
 
+    def restore_deletion(
+        self,
+        brand: str,
+        deletion: str,
+        *,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Restore a deletion.
+
+        Scope: customers.manage. Puts back everything the deletion holds, as it was: no rule, journey, webhook or
+        email fires or is sent again for it (only deletion.restored is recorded). What can't come back stays in the
+        deletion with a reason, and the rest is restored: taken (a unique value, such as a verified email or an
+        event's message id, belongs to another record or event now), gone (what it points at was erased),
+        changed (the field has a new value since) or record_deleted (its record is deleted: restore that first).
+        Fix that and restore again. 409 nothing_to_restore once it was fully restored; 410 deletion_expired after
+        its 7 days.
+
+        Needs: the customers.manage scope.
+        POST /v1/brands/{brand}/recently-deleted/{deletion}/restore
+        """
+        return self._call(
+            "POST",
+            "/v1/brands/{brand}/recently-deleted/{deletion}/restore",
+            path={"brand": brand, "deletion": deletion},
+            idempotency_key=idempotency_key,
+        )
+
     def restore_knowledge_item(
         self,
         id: str,
@@ -22329,6 +22522,41 @@ class Operations(_Mixin):
                 "name": name,
                 "subject": subject,
             },
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
+    def soft_delete_record(
+        self,
+        brand: str,
+        record: str,
+        *,
+        version: int | None = None,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Delete a person or company, restorable for 7 days.
+
+        Scope: customers.manage. Deletes a record of the brand with its identities, links and product events (with
+        what hangs off them: ad conversion sends and attribution). It is hidden everywhere at once: the record API,
+        lists, Query, search, smart lists, rules, journeys and sends. Its active journey runs end (exit_reason deleted)
+        and stay ended. It shows in Recently deleted and can be restored for 7 days
+        (POST /v1/brands/{brand}/recently-deleted/{deletion}/restore); then it is purged as if erased. Reports and rule
+        history that counted its events change while it is deleted.
+
+        This is not legal erasure: for an erasure request, use DELETE /v1/workspaces/{ws}/records/{record}, which is
+        permanent at once and also works on a record in Recently deleted. While a record is deleted its identities
+        belong to nobody, so a sync or event with the same email makes a new record; restoring then reports that
+        identity as taken. Answers the deletion. In the audit log as record.soft_deleted, also a webhook event.
+
+        Needs: the customers.manage scope.
+        POST /v1/brands/{brand}/records/{record}/delete
+        """
+        return self._call(
+            "POST",
+            "/v1/brands/{brand}/records/{record}/delete",
+            path={"brand": brand, "record": record},
+            body={"version": version},
             extra_body=extra_body,
             idempotency_key=idempotency_key,
         )
