@@ -569,8 +569,6 @@ func (s *Server) listMemories(w http.ResponseWriter, r *http.Request) {
 type memoryInput struct {
 	Kind *string `json:"kind"`
 	Text *string `json:"text"`
-	// Ignored: projects were removed. Accepted so older clients still work.
-	ProjectID optional[string] `json:"project_id"`
 	// A brand's id or handle.
 	BrandID optional[string] `json:"brand_id"`
 	Pinned  *bool            `json:"pinned"`

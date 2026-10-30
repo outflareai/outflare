@@ -1,5 +1,5 @@
 id: link-resource-pages
-version: 2
+version: 3
 title: Get listed on resource pages
 summary: Find pages that list the best resources on your topic and ask to be added, with a note about why your page belongs there.
 description: |
@@ -46,6 +46,9 @@ steps:
     tools: [startLinkPitch, listLinkPitches]
   - say: Report what was pitched and, later, what replied, agreed and went live.
     tools: [getLinkResults, listLinkProspects]
+automation:
+  schedule: monthly
+  events: []
 guardrails:
   - Never offers or agrees to pay for a link; a reply asking for money waits for a person.
   - Every pitch waits for a person's approval, unless they turned approval off for that sequence.

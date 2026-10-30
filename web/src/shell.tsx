@@ -64,6 +64,7 @@ export const tabNames: Record<Tab, string> = {
   "link-building": "Link building",
   news: "News watch",
   reddit: "Reddit",
+  "reddit-campaigns": "Reddit campaigns",
   social: "Accounts",
   reviews: "Reviews",
   ads: "Paid ads",
@@ -174,6 +175,7 @@ export const tabBlurbs: Record<Tab, string> = {
   social: "Confirm your brands' X and LinkedIn accounts, then follow their followers, posts and engagement every day.",
   reviews: "Every review of your brands on Trustpilot, G2, Capterra and Google, your review score and its direction, and answers drafted for you to post.",
   reddit: "Find threads where your brand can help, reply with a disclosure from its own account, and count the sign-ups.",
+  "reddit-campaigns": "Comments, replies, posts and upvotes placed through Engain within each brand's budget, and how long each mention stayed live.",
   seo: "Domain rating, backlinks and the keywords your sites rank for, from DataForSEO or Ahrefs.",
   connectors: "The services Outflare can use, connected once for the whole workspace.",
   support: "Customers who write to your support mailbox, as conversations your team assigns, answers and closes.",
@@ -283,7 +285,7 @@ export const modules: Module[] = [
   { id: "deliverability", label: "Deliverability", icon: "mailboxes", tabs: ["infrastructure", "mailboxes", "domains", "warmup", "servers", "senders"] },
   { id: "lifecycle", label: "Lifecycle", icon: "lifecycle", tabs: ["lifecycle", "broadcasts", "journeys", "rules", "automations", "templates", "topics", "emails", "providers"] },
   { id: "seo", label: "SEO", icon: "seo", tabs: ["seo-overview", "audits", "fixes", "experiments", "keywords", "seo", "backlinks", "ai-visibility", "competitors"] },
-  { id: "social", label: "Social", icon: "social", tabs: ["social", "reddit"] },
+  { id: "social", label: "Social", icon: "social", tabs: ["social", "reddit", "reddit-campaigns"] },
   { id: "reviews", label: "Reviews", icon: "reviews", tabs: ["reviews"] },
   { id: "ads", label: "Paid ads", icon: "ads", tabs: ["ads"] },
   { id: "partners", label: "Partners", icon: "partners", tabs: ["partners"] },
@@ -303,7 +305,7 @@ const allModules = modules;
 
 // Pages that work for someone kept to some brands. The others need every
 // brand (the API answers 403), so they are hidden from them.
-const brandTabs: readonly Tab[] = ["overview", "seo-overview", "audits", "fixes", "experiments", "keywords", "ai-visibility", "backlinks", "competitors", "link-building", "news", "reddit", "social", "reviews", "ads", "visitors", "tracking", "flags", "ab-tests", "inbox", "sequences", "people", "leads", "lists", "rules", "lead-finder", "suppression", "mailboxes", "domains", "knowledge", "company", "brands", "setup", "ideal-customers", "members", "account", "instance", "ai-accounts", "support", "help-centre"];
+const brandTabs: readonly Tab[] = ["overview", "seo-overview", "audits", "fixes", "experiments", "keywords", "ai-visibility", "backlinks", "competitors", "link-building", "news", "reddit", "reddit-campaigns", "social", "reviews", "ads", "visitors", "tracking", "flags", "ab-tests", "inbox", "sequences", "people", "leads", "lists", "rules", "lead-finder", "suppression", "mailboxes", "domains", "knowledge", "company", "brands", "setup", "ideal-customers", "members", "account", "instance", "ai-accounts", "support", "help-centre"];
 // Pages of parts of Outflare switched on per workspace while they are
 // tested (GET /v1/me lists each workspace's features).
 const featureTabs: Partial<Record<Tab, string>> = { "ai-accounts": "ai_accounts" };
@@ -942,6 +944,8 @@ function callFor(tab: Tab, ws: string, item?: string): Call {
       return { title: "Links to your sites", path: "/v1/workspaces/{ws}/backlinks", params: base, query: { status: "live" }, mcp: "list_backlinks", ask: "Which strong links did we lose this month, and where did our new links come from?", scope: "seo.read" };
     case "reddit":
       return { title: "Reddit drafts waiting for approval", path: "/v1/workspaces/{ws}/social/actions", params: base, query: { channel: "reddit", status: "draft" }, mcp: "list_social_replies", ask: "Find Reddit threads this week where we can genuinely help, and draft replies that disclose we work here.", scope: "social.read" };
+    case "reddit-campaigns":
+      return { title: "Reddit mentions, links, cost and lifespan", path: "/v1/workspaces/{ws}/reddit/report", params: base, query: { group_by: "strategy" }, mcp: "get_reddit_report", ask: "Run Reddit marketing for our brand within this month's budget: read get_reddit_guide, test one idea, and report what stayed live.", scope: "social.read" };
     case "social":
       return { title: "Social growth by channel", path: "/v1/workspaces/{ws}/social/growth", params: base, mcp: "get_social_growth", ask: "How did our followers and engagement on X and LinkedIn move this month, and which posts did best?", scope: "social.read" };
     case "reviews":

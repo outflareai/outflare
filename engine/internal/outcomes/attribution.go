@@ -3,6 +3,7 @@ package outcomes
 import (
 	"context"
 	"errors"
+	"slices"
 	"strings"
 	"time"
 
@@ -38,6 +39,17 @@ var freeMail = map[string]bool{
 
 // IsFreeMail reports whether domain is a personal mail provider.
 func IsFreeMail(domain string) bool { return freeMail[strings.ToLower(domain)] }
+
+// FreeMailDomains lists the personal mail providers IsFreeMail knows,
+// sorted.
+func FreeMailDomains() []string {
+	out := make([]string, 0, len(freeMail))
+	for d := range freeMail {
+		out = append(out, d)
+	}
+	slices.Sort(out)
+	return out
+}
 
 func domainOf(email string) string {
 	at := strings.LastIndexByte(email, '@')

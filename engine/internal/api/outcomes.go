@@ -297,7 +297,7 @@ func (s *Server) updateMeeting(w http.ResponseWriter, r *http.Request) {
 			return err
 		}
 		return record(r.Context(), tx, &a.principal, a.WorkspaceID, "meeting.updated", "meeting", m.ID,
-			map[string]any{"status": m.Status, "sequence_id": m.SequenceID, "project_id": nil, "attribution": m.Attribution})
+			map[string]any{"status": m.Status, "sequence_id": m.SequenceID, "attribution": m.Attribution})
 	})
 	if s.outcomeError(w, r, err, "meeting") {
 		return
@@ -422,7 +422,7 @@ func (s *Server) updateDeal(w http.ResponseWriter, r *http.Request) {
 			return err
 		}
 		return record(r.Context(), tx, &a.principal, a.WorkspaceID, "deal.updated", "deal", d.ID,
-			map[string]any{"state": d.State, "amount_cents": d.AmountCents, "sequence_id": d.SequenceID, "project_id": nil})
+			map[string]any{"state": d.State, "amount_cents": d.AmountCents, "sequence_id": d.SequenceID})
 	})
 	if s.outcomeError(w, r, err, "deal") {
 		return
@@ -509,8 +509,6 @@ func (s *Server) getSpend(w http.ResponseWriter, r *http.Request) {
 }
 
 type spendInput struct {
-	// Ignored: projects were removed. Accepted so older clients still work.
-	ProjectID     *string    `json:"project_id"`
 	SequenceID    *string    `json:"sequence_id"`
 	MissionID     *string    `json:"mission_id"`
 	MailboxID     *string    `json:"mailbox_id"`

@@ -262,14 +262,3 @@ func TestBuildListFromSearchWithWaterfall(t *testing.T) {
 	owner.must(204, "DELETE", base+"/lead-lists/"+listID, nil)
 	owner.must(404, "GET", base+"/lead-lists/"+listID, nil)
 }
-
-// Projects were removed: an older client's project_id is accepted and ignored.
-func TestListProjectIDIsIgnored(t *testing.T) {
-	e := freshListEnv(t)
-	owner, ws := setupOwner(t, e.h)
-	base := "/v1/workspaces/" + ws
-	l := owner.must(201, "POST", base+"/lead-lists", map[string]any{"name": "Old client", "project_id": "00000000-0000-0000-0000-000000000000"})
-	if _, ok := l["project_id"]; ok {
-		t.Fatalf("list still has a project: %v", l)
-	}
-}

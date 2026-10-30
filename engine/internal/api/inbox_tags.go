@@ -260,7 +260,7 @@ type inboxView struct {
 
 // viewFilters are the inbox list's query parameters a view can save.
 var viewFilters = []string{"status", "kind", "category", "group", "source", "tag", "assigned_to", "mailbox_id",
-	"sequence_id", "project_id", "brand", "unread", "needs_review", "min_confidence", "q"}
+	"sequence_id", "brand", "unread", "needs_review", "min_confidence", "q"}
 
 // cleanFilters checks a view's filters: known keys, short string values.
 // The list endpoint checks the values themselves when the view is used.

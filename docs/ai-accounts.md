@@ -20,6 +20,18 @@ A workspace can change what its roles allow under Settings → Members → Roles
 - **Timeline**: renewals on a calendar. Usage limit resets join them once Outflare for desktop reports them.
 - **Usage**: which account to use, what runs out before it resets and which plans are too small or too big. It needs readings from Outflare for desktop; until then it can show an example, marked as one.
 
+## Receipts (Outflare Cloud)
+
+Forward the receipts of your AI subscriptions to the workspace's [inbound address](inbound-email.md) and Outflare reads them: the AI company, plan, seats, amount and the period paid for. Only receipts signed by the company that sent them (or the Stripe, Apple or Google receipt naming it) are read.
+
+Each receipt is matched to an account, in this order: the account email it names, the receipt number or card of an earlier receipt, the only account of that AI tool belonging to whoever forwarded it, and the only account due to renew around the charge. The account's next renewal, plan, seats and US price follow it. Receipts it can't place wait under **Needs review**: add a new account from one, assign it to an account (later receipts like it then match by themselves), or ignore it.
+
+The **Receipts** tab has the forwarding address and the steps for Gmail (a filter file to import, the search to paste, or instructions to give an agent), a Google Workspace admin rule that covers every inbox, and Outlook. Members link the personal addresses they forward from, and confirm Gmail's forwarding there with one click.
+
+Receipts in another currency are converted to US dollars with the European Central Bank's reference rate for the day they were charged (or the last working day before it), and show both: `$14.80 · charged as S$20.00`. The dollar amount becomes the account's price like any other receipt. A receipt that arrives before that day's rate is published keeps only its amount as charged until the rate arrives, within 6 hours of publication.
+
+API: `GET .../ai-accounts/receipts`, `POST .../ai-accounts/receipts/{id}/assign` and `.../ignore`. MCP: `list_ai_receipts`, `get_receipt_forwarding`, `assign_ai_receipt`, `ignore_ai_receipt`.
+
 ## Accounts and people
 
 An account belongs to one or more people in the workspace: its owner, and others who also sign in to it. When everyone who owns an account has left the workspace, the account stays and shows **owner left**, so someone can cancel it or take it over.
@@ -45,4 +57,4 @@ MCP tools: `list_ai_accounts`, `get_ai_account`, `create_ai_account`, `update_ai
 
 ## Coming next
 
-Receipts forwarded to one address per workspace, Outflare for desktop reading live usage and resets from the AI tools, views for which account to use and which plans fit, and the Anthropic and OpenAI admin APIs for API spend.
+Outflare for desktop reading live usage and resets from the AI tools, views for which account to use and which plans fit, and the Anthropic and OpenAI admin APIs for API spend.

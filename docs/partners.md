@@ -74,6 +74,7 @@ Use a token with only the `partners.conversions` scope. It can report conversion
 
 - **The customer** is `customer_id` (your own user id), `email` or `record_id`. Send the same one each time, so later sales and refunds find them.
 - **`recurring: true`** marks a sale as a subscription renewal rather than a new purchase. Rules decide renewals by `recurrence`.
+- **`payment_source`** (the payment provider, such as `stripe` or `paddle`; Tolt calls it `source`) and **`interval`** (`day`, `week`, `month`, `year` or `one_time`) are kept on the conversion as you send them, so flows can pay on them (`transaction.payment_source`, `transaction.interval`). Postback URLs take `source` and `interval` too.
 - **`external_id`** is your charge or order id. A retry with the same one is stored once. A refund names its sale with `refund_of` (the sale's `external_id`). Without `amount_cents`, a refund takes back what is left of the sale.
 - **How the partner is found**, in order:
   1. What the call carries: `promo_code` (ahead of the rest when the program's `codes_win` is on), `ref` (keep it in a cookie from the landing page) and `click_id` (the `ref_click` value).
@@ -171,7 +172,7 @@ Rules are flows, as in Tolt (the Flows tab, or `PUT .../rules`). Each flow has:
 - conditions (`conditions`): groups of conditions, all (AND) or any (OR) of which must hold, on
   - the partner: sales, customers who bought, referred customers, revenue, earnings, country, id
   - the customer: earlier sales, what they paid so far, first sale and referral date within N days, months or years
-  - the transaction: amount, product or plan id, renewal or not
+  - the transaction: amount, product or plan id, renewal or not, billing interval, payment provider
 - approval (`approval`): the program's hold (`program`, the default), at once (`auto`), after N days (`after_days`, `approval_days`), or by a person (`manual`)
 - for cash, `stacking`: `exclusive` (the default) flows compete and one pays, as above; `adds` pays on top
 - other rates inside the flow (`overrides`) for one partner or one product or plan; a partner's beats a product's
@@ -183,6 +184,8 @@ Rules made before flows keep working: they have no conditions, follow the progra
 ### Groups
 
 Each partner is in one group at most, such as Gold or Agencies, and a group's own rules (`group_id`) apply to its partners. On the Groups tab you add, rename and remove groups, give a group its own rate (Commission rate), and make one the default that new partners join (`default` on `POST .../groups` or `PATCH .../groups/{group}`). To move partners, pick them on the Partners tab and choose Move to, or call `POST .../groups/{group}/partners` with up to 1,000 `partner_ids` (`none` takes them out of every group). Removing a group removes its rules and moves its partners to no group.
+
+**Sign-up link per group.** Each group has its own link to the portal's application form (`signup_url`, the portal address with `?group=<id>`; Groups tab → Copy link). Partners who apply through it join that group instead of the default, with the program's usual review (`auto_accept`). Anyone with the link can apply into the group, so share it only with those you'd put there. A link to a group that has since been removed signs partners up into the default group.
 
 To give one affiliate a better deal, open their menu and choose Commission rate (a percent of each sale), or add a rule with their `partner_id` through `PUT .../rules`. Rewards already earned keep their amounts.
 

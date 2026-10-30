@@ -47,6 +47,7 @@ func (s *Server) routesPartners(mux *http.ServeMux) {
 	mux.HandleFunc("DELETE /v1/workspaces/{ws}/partner-programs/{id}/groups/{group}", s.inBrand(manage, s.deletePartnerGroup))
 	mux.HandleFunc("POST /v1/workspaces/{ws}/partner-programs/{id}/groups/{group}/partners", s.inBrand(manage, s.assignPartnerGroup))
 	mux.HandleFunc("POST /v1/workspaces/{ws}/partner-programs/{id}/postback", s.inBrand(manage, s.rotatePartnerPostback))
+	mux.HandleFunc("POST /v1/workspaces/{ws}/partner-programs/{id}/switch-over", s.inBrand(manage, s.switchOverPartnerProgram))
 
 	mux.HandleFunc("GET /v1/workspaces/{ws}/partners", s.inBrand(read, s.listPartners))
 	mux.HandleFunc("POST /v1/workspaces/{ws}/partners", s.inBrand(manage, s.createPartner))
@@ -105,6 +106,14 @@ type partnerGroupView struct {
 	Partners int `json:"partners"`
 	// Default is the group new partners join.
 	Default bool `json:"default"`
+	// SignupURL is the portal's sign-up page for this group: partners who
+	// apply through it join the group.
+	SignupURL string `json:"signup_url" db:"-"`
+}
+
+// groupSignupURL is the portal address that signs partners up into group.
+func groupSignupURL(portal, group string) string {
+	return portal + "?group=" + group
 }
 
 type partnerProgramView struct {
@@ -141,17 +150,24 @@ type partnerProgramView struct {
 	Rules     []partners.Rule    `json:"rules"`
 	Groups    []partnerGroupView `json:"groups"`
 	// DefaultGroupID is the group new partners join; null is none.
-	DefaultGroupID *string   `json:"default_group_id"`
-	Partners       int       `json:"partners"`
-	CreatedAt      time.Time `json:"created_at"`
-	UpdatedAt      time.Time `json:"updated_at"`
+	DefaultGroupID *string `json:"default_group_id"`
+	Partners       int     `json:"partners"`
+	// ImportedFrom is the platform the program was last imported from
+	// ("" when never), and SwitchedOverAt when that platform stopped
+	// paying it. Until then its imported commissions stay as they are there.
+	ImportedFrom   string     `json:"imported_from"`
+	SwitchedOverAt *time.Time `json:"switched_over_at"`
+	CreatedAt      time.Time  `json:"created_at"`
+	UpdatedAt      time.Time  `json:"updated_at"`
 }
 
 const partnerProgramSelect = `
 	SELECT p.id::text, p.name, p.slug, p.kind, p.status, p.brand_id::text, p.landing_url, p.currency, p.credit_window_days, p.credit_model,
 	       p.codes_win, p.hold_days, p.auto_approve, p.auto_accept, p.pay_browser_signups, p.min_payout_cents, p.terms_url, p.sales_source, p.postback_hint,
 	       p.portal_enabled, p.portal_subdomain, p.portal, p.default_group_id::text,
-	       (SELECT count(*) FROM partner_memberships m WHERE m.program_id = p.id)::int, p.created_at, p.updated_at
+	       (SELECT count(*) FROM partner_memberships m WHERE m.program_id = p.id)::int,
+	       COALESCE((SELECT i.connector FROM partner_imports i WHERE i.program_id = p.id AND i.workspace_id = p.workspace_id AND i.status = 'done'
+	                 ORDER BY i.created_at DESC LIMIT 1), ''), p.switched_over_at, p.created_at, p.updated_at
 	FROM partner_programs p WHERE p.workspace_id = $1`
 
 func scanPartnerProgram(row pgx.Row) (partnerProgramView, error) {
@@ -159,7 +175,7 @@ func scanPartnerProgram(row pgx.Row) (partnerProgramView, error) {
 	var portal []byte
 	err := row.Scan(&v.ID, &v.Name, &v.Slug, &v.Kind, &v.Status, &v.BrandID, &v.LandingURL, &v.Currency, &v.CreditWindowDays, &v.CreditModel,
 		&v.CodesWin, &v.HoldDays, &v.AutoApprove, &v.AutoAccept, &v.PayBrowserSignups, &v.MinPayoutCents, &v.TermsURL, &v.SalesSource, &v.PostbackHint,
-		&v.PortalEnabled, &v.PortalSubdomain, &portal, &v.DefaultGroupID, &v.Partners, &v.CreatedAt, &v.UpdatedAt)
+		&v.PortalEnabled, &v.PortalSubdomain, &portal, &v.DefaultGroupID, &v.Partners, &v.ImportedFrom, &v.SwitchedOverAt, &v.CreatedAt, &v.UpdatedAt)
 	if err == nil {
 		v.Portal = portalFor(v.Kind, portal)
 	}
@@ -228,6 +244,9 @@ func (s *Server) findPartnerProgram(w http.ResponseWriter, r *http.Request, ws, 
 	if v.PortalURL, err = s.portalBase(ctx, v.ID, v.PortalSubdomain); err != nil {
 		s.internal(w, r, err)
 		return nil, false
+	}
+	for i := range v.Groups {
+		v.Groups[i].SignupURL = groupSignupURL(v.PortalURL, v.Groups[i].ID)
 	}
 	return &v, true
 }
@@ -467,7 +486,7 @@ func (s *Server) createPartnerProgram(w http.ResponseWriter, r *http.Request) {
 				return err
 			}
 		}
-		if err := insertPartnerRules(ctx, tx, a.WorkspaceID, id, rules); err != nil {
+		if _, err := insertPartnerRules(ctx, tx, a.WorkspaceID, id, rules); err != nil {
 			return err
 		}
 		return partnerRecord(ctx, tx, &a.principal, a.WorkspaceID, "partner_program.created", "partner_program", id,
@@ -771,7 +790,8 @@ func (s *Server) ruleMembers(ctx context.Context, program string, in []partnerRu
 	return pgx.CollectRows(rows, pgx.RowTo[string])
 }
 
-func insertPartnerRules(ctx context.Context, tx pgx.Tx, ws, program string, rules []partners.Rule) error {
+func insertPartnerRules(ctx context.Context, tx pgx.Tx, ws, program string, rules []partners.Rule) ([]string, error) {
+	ids := make([]string, 0, len(rules))
 	for i, r := range rules {
 		data, _ := json.Marshal(r.ActionData)
 		// created_at orders them, so each is a microsecond after the last.
@@ -784,18 +804,20 @@ func insertPartnerRules(ctx context.Context, tx pgx.Tx, ws, program string, rule
 		if r.Overrides == nil {
 			r.Overrides = []partners.Override{}
 		}
-		if _, err := tx.Exec(ctx, `INSERT INTO partner_reward_rules (workspace_id, program_id, group_id, trigger, side, kind, percent_bp,
+		var id string
+		if err := tx.QueryRow(ctx, `INSERT INTO partner_reward_rules (workspace_id, program_id, group_id, trigger, side, kind, percent_bp,
 			amount_cents, action, action_data, recurrence, months, min_sales, product_ids, created_at, membership_id,
 			name, conditions, approval, approval_days, stacking, overrides, target_group_id)
 			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, now() + make_interval(secs => $15::float8 / 1000000), $16,
-			$17, $18, $19, $20, $21, $22, $23)`,
+			$17, $18, $19, $20, $21, $22, $23) RETURNING id::text`,
 			ws, program, r.GroupID, r.Trigger, r.Side, r.Kind, r.PercentBP, r.AmountCents, r.Action, string(data), r.Recurrence,
 			r.Months, r.MinSales, r.ProductIDs, i, r.PartnerID, r.Name, r.Conditions, r.Approval, r.ApprovalDays, r.Stacking, r.Overrides,
-			r.TargetGroupID); err != nil {
-			return err
+			r.TargetGroupID).Scan(&id); err != nil {
+			return nil, err
 		}
+		ids = append(ids, id)
 	}
-	return nil
+	return ids, nil
 }
 
 // setPartnerRules replaces a program's reward rules. Rewards already in
@@ -834,7 +856,7 @@ func (s *Server) setPartnerRules(w http.ResponseWriter, r *http.Request) {
 		if _, err := tx.Exec(ctx, `DELETE FROM partner_reward_rules WHERE workspace_id = $1 AND program_id = $2`, a.WorkspaceID, cur.ID); err != nil {
 			return err
 		}
-		if err := insertPartnerRules(ctx, tx, a.WorkspaceID, cur.ID, rules); err != nil {
+		if _, err := insertPartnerRules(ctx, tx, a.WorkspaceID, cur.ID, rules); err != nil {
 			return err
 		}
 		if _, err := tx.Exec(ctx, `UPDATE partner_programs SET updated_at = now() WHERE id = $1`, cur.ID); err != nil {
@@ -900,6 +922,7 @@ func (s *Server) createPartnerGroup(w http.ResponseWriter, r *http.Request) {
 	if s.allocError(w, r, err) {
 		return
 	}
+	g.SignupURL = groupSignupURL(cur.PortalURL, g.ID)
 	writeJSON(w, http.StatusCreated, g)
 }
 
@@ -956,4 +979,48 @@ func (s *Server) rotatePartnerPostback(w http.ResponseWriter, r *http.Request) {
 		"url":  strings.TrimRight(s.publicURL, "/") + "/v1/partner-postbacks/" + secret,
 		"hint": hint,
 	})
+}
+
+// heldAtSource is true for a reward (alias w) that an import brought in
+// from a platform that still pays the program: it keeps that platform's
+// status until the program switches over, so it is never approved after
+// Outflare's hold or put in a payout here.
+const heldAtSource = `(EXISTS (SELECT 1 FROM partner_import_refs f WHERE f.local_id = w.id AND f.kind = 'commission')
+	AND (SELECT pp.switched_over_at FROM partner_programs pp WHERE pp.id = w.program_id) IS NULL)`
+
+// switchOverPartnerProgram records that the platform a program was
+// imported from no longer pays it. From then on its imported, unpaid
+// commissions are approved and paid here like any other.
+func (s *Server) switchOverPartnerProgram(w http.ResponseWriter, r *http.Request) {
+	a := accessFrom(r.Context())
+	cur, ok := s.findPartnerProgram(w, r, a.WorkspaceID, r.PathValue("id"))
+	if !ok {
+		return
+	}
+	if cur.SwitchedOverAt != nil {
+		writeError(w, r, http.StatusConflict, "conflict", "the program has already switched over")
+		return
+	}
+	ctx := r.Context()
+	var held int
+	err := pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
+		if err := tx.QueryRow(ctx, `SELECT count(*) FROM partner_rewards w WHERE w.workspace_id = $1 AND w.program_id = $2
+			AND w.status IN ('pending', 'approved') AND w.payout_id IS NULL AND `+heldAtSource, a.WorkspaceID, cur.ID).Scan(&held); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(ctx, `UPDATE partner_programs SET switched_over_at = now(), updated_at = now() WHERE workspace_id = $1 AND id = $2`,
+			a.WorkspaceID, cur.ID); err != nil {
+			return err
+		}
+		return partnerRecord(ctx, tx, &a.principal, a.WorkspaceID, "partner_program.switched_over", "partner_program", cur.ID,
+			map[string]any{"imported_from": cur.ImportedFrom, "rewards_released": held})
+	})
+	if s.allocError(w, r, err) {
+		return
+	}
+	v, ok := s.findPartnerProgram(w, r, a.WorkspaceID, cur.ID)
+	if !ok {
+		return
+	}
+	writeJSON(w, http.StatusOK, v)
 }

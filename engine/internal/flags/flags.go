@@ -150,10 +150,10 @@ func Evaluate(f Flag, v Visitor) Result {
 // every flag in it, so the flags' slices never overlap for one visitor.
 func GroupBucket(g, subject string) int { return bucket("group:" + g + ":" + subject) }
 
-// Allocate finds the first free slice of share percent in a group whose
-// flags hold taken (bucket ranges [from, to)), or ok false when no gap is
-// that wide.
-func Allocate(taken [][2]int, share int) (from, to int, ok bool) {
+// Allocate finds the first free slice of share percent below limit (the
+// group's buckets less its holdout) in a group whose flags hold taken
+// (bucket ranges [from, to)), or ok false when no gap is that wide.
+func Allocate(taken [][2]int, share, limit int) (from, to int, ok bool) {
 	size := share * 100
 	if share < 1 || share > 100 {
 		return 0, 0, false
@@ -166,10 +166,19 @@ func Allocate(taken [][2]int, share int) (from, to int, ok bool) {
 		}
 		at = max(at, t[1])
 	}
-	if buckets-at >= size {
+	if limit-at >= size {
 		return at, at + size, true
 	}
 	return 0, 0, false
+}
+
+// GroupBucketSQL is GroupBucket in Postgres, for group (an SQL text
+// expression) and subject: the first 8 bytes of the same sha256 as an
+// unsigned number, mod Buckets. bigint is signed, so a negative value
+// gets 2^64 mod 10,000 (1616) added back.
+func GroupBucketSQL(group, subject string) string {
+	x := `('x' || substr(encode(sha256(convert_to('group:' || ` + group + ` || ':' || ` + subject + `, 'UTF8')), 'hex'), 1, 16))::bit(64)::bigint`
+	return `(CASE WHEN ` + x + ` >= 0 THEN ` + x + ` % 10000 ELSE ((` + x + ` % 10000) + 10000 + 1616) % 10000 END)`
 }
 
 // bucket maps s to 0..buckets-1, the same everywhere.

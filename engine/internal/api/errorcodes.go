@@ -111,6 +111,7 @@ var errorCodes = []errorCode{
 	{"mission_paused", []int{409}, "The mission is paused, so calls inside it are refused.", false},
 	{"mission_ended", []int{409}, "The mission is finished or stopped.", false},
 	{"mission_state", []int{409}, "The mission is not in a state that allows this.", false},
+	{"automation_state", []int{409}, "The playbook automation is not in a state that allows this: not approved yet, already running, or held by a limit (the message says which).", false},
 	{"context_changed", []int{409}, "The company context changed since you loaded it. Reload it and apply your edit again.", false},
 	{"plan_failed", []int{502}, "The AI model could not draft a plan. Reword the goal, or retry.", true},
 
@@ -150,6 +151,9 @@ var errorCodes = []errorCode{
 	{"query_unavailable", []int{503}, "Query couldn't set up its read-only database role. The server's log says why; the database user needs to be able to create roles.", true},
 
 	// Search.
+	{"data_network_unavailable", []int{409}, "The data network isn't available for this workspace. Everything else about the email finder works without it.", false},
+	{"data_network_allowance", []int{429}, "The workspace has used this month's data network lookups. The email finder carries on without the network; joining gives unlimited lookups.", false},
+	{"data_network_limit", []int{429}, "Today's data network lookups for this domain are used up. The email finder carries on without the network; try again tomorrow.", false},
 	{"semantic_search_unavailable", []int{503}, "Meaning-based search needs the pgvector extension in the server's Postgres database, and it isn't there. Word search works without it.", false},
 	{"semantic_search_off", []int{409}, "Meaning-based search is off in this workspace. An admin turns it on with PUT .../semantic-search.", false},
 

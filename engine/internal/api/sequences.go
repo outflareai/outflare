@@ -257,9 +257,7 @@ func (s *Server) findSequence(w http.ResponseWriter, r *http.Request, ws, id str
 // sequenceSettings are the fields shared by create and update. Pointers are
 // "leave as is" when absent.
 type sequenceSettings struct {
-	Name *string `json:"name"`
-	// Ignored: projects were removed. Accepted so older clients still work.
-	ProjectID     optional[string] `json:"project_id"`
+	Name          *string          `json:"name"`
 	PoolID        optional[string] `json:"pool_id"`
 	Timezone      *string          `json:"timezone"`
 	SendDays      []int            `json:"send_days"`

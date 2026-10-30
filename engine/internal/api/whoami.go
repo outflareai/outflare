@@ -29,7 +29,6 @@ func (s *Server) whoami(w http.ResponseWriter, r *http.Request) {
 	type tokenView struct {
 		ID          string     `json:"id"`
 		Name        string     `json:"name"`
-		Kind        string     `json:"kind"`
 		WorkspaceID *string    `json:"workspace_id"`
 		Workspace   *wsRef     `json:"workspace"`
 		BrandID     *string    `json:"brand_id"`
@@ -53,7 +52,7 @@ func (s *Server) whoami(w http.ResponseWriter, r *http.Request) {
 	out.Actor.ID, out.Actor.Type = p.ActorID, p.ActorType
 	switch {
 	case p.TokenID != "":
-		t := &tokenView{ID: p.TokenID, Kind: "workspace", WorkspaceID: &p.TokenWorkspaceID, Scopes: p.TokenScopes,
+		t := &tokenView{ID: p.TokenID, WorkspaceID: &p.TokenWorkspaceID, Scopes: p.TokenScopes,
 			Workspace: &wsRef{ID: p.TokenWorkspaceID}, BrandID: p.TokenBrandID}
 		var handle, name *string
 		if err := s.pool.QueryRow(ctx, `SELECT t.name, t.expires_at, w.slug, w.name, w.test, b.handle, b.name FROM api_tokens t JOIN workspaces w ON w.id = t.workspace_id

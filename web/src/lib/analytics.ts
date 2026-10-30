@@ -90,6 +90,8 @@ export type UiEvent =
   | "ui.ai_accounts_view_opened" // a view of AI accounts opened (view: accounts, spend, people, timeline, usage)
   | "ui.ai_accounts_example_shown" // the example usage data on AI accounts' Usage view turned on
   | "ui.copied" // a copy button
+  | "ui.data_network_previewed" // the owner opened what joining the data network would share (addresses)
+  | "ui.data_network_join_cancelled" // the owner closed that preview without joining (addresses)
   | "ui.partner_install_viewed" // a tab of a partner program's install steps opened (step: script or conversions; way: html, nextjs, gtm, curl, node, postback, browser)
   | "ui.partners_filtered" // a program's partner list filtered (filter: payout_details, value: missing or all)
   | "ui.journey_step_picker_opened" // the journey builder's step picker opened (from: start, link, rule)
@@ -103,7 +105,8 @@ export type UiEvent =
   | "ui.journey_test_opened" // test mode opened in the journey builder (version: live or draft, status)
   | "ui.automation_map_node_picked" // a node picked on the automation map, lighting up what it sets off and what sets it off (kind)
   | "ui.automation_map_flag_opened" // a flag on the automation map shown on the map (flag: loop, overlap, unheard or never_fires)
-  | "ui.automation_map_filtered" // the automation map switched between everything and only what's live (show)
+  | "ui.automation_map_filtered" // the automation map switched between everything and only what's live (show), or narrowed to what touches a sequence, list or tag (touches: its kind)
+  | "ui.automation_map_person_picked" // a person picked on the automation map, to light up what they reached
   | "ui.journey_test_path_switched" // a test sent a branch the other way (to: yes or no)
   | "ui.kit_export_opened" // the export panel opened on a journey (status)
   | "ui.kit_downloaded" // an exported kit file downloaded (journeys, rules, inputs)

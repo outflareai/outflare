@@ -51,9 +51,11 @@ func TestListenForwardsSignedEvents(t *testing.T) {
 	go func() {
 		done <- Run(ctx, env, []string{"listen", "--forward-to", recv.URL + "/hooks", "--types", "lead.*", "--secret", secret, "--interval", "100ms"})
 	}()
-	// Stop once the receiver's answer has been reported.
+	// Stop once the receiver's answer has been reported. Match the whole
+	// status, not "204" alone: the first line names the receiver's URL and
+	// the secret, and a random port such as 42045 contains "204" too.
 	go func() {
-		for !strings.Contains(errb.String(), "204") {
+		for !strings.Contains(errb.String(), "204 No Content") {
 			time.Sleep(10 * time.Millisecond)
 		}
 		cancel()
@@ -83,7 +85,7 @@ func TestListenForwardsSignedEvents(t *testing.T) {
 	if q := (*got)[1].query; !strings.Contains(q, "types=lead.%2A") || !strings.Contains(q, "after=evt_7") {
 		t.Fatalf("second poll %q", q)
 	}
-	if !strings.Contains(errb.String(), "204") || !strings.Contains(errb.String(), secret) {
+	if !strings.Contains(errb.String(), "204 No Content") || !strings.Contains(errb.String(), secret) {
 		t.Fatalf("stderr %q", errb.String())
 	}
 }

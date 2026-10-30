@@ -12,6 +12,10 @@
 #   daily, so a new advisory doesn't block unrelated pull requests.
 #
 # A failed run on main is filed as an issue for the maintainers.
+#
+# In the private engine repository a pull request's secrets, fake-data and
+# workflows checks run in pr-checks.yml, one job with the other quick checks,
+# so they are skipped here; the public repository runs them here.
 # Known false positives go in .gitleaksignore, never in a wider allowlist.
 name: Security
 
@@ -37,6 +41,7 @@ env:
 
 jobs:
   secrets:
+    if: github.event_name != 'pull_request' || github.repository != 'outflareai/engine'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
@@ -71,7 +76,7 @@ jobs:
           gitleaks git --no-banner --redact --log-opts="$range" .
 
   fake-data:
-    if: github.event_name == 'pull_request'
+    if: github.event_name == 'pull_request' && github.repository != 'outflareai/engine'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
@@ -87,6 +92,7 @@ jobs:
         run: node scripts/check-fake-data.mjs "$BASE" "$HEAD"
 
   workflows:
+    if: github.event_name != 'pull_request' || github.repository != 'outflareai/engine'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0

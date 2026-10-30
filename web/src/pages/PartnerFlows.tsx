@@ -33,6 +33,8 @@ const fields: { id: string; label: string; kind: "number" | "money" | "text" | "
   { id: "transaction.amount_cents", label: "Transaction: amount", kind: "money" },
   { id: "transaction.product_id", label: "Transaction: product or plan id", kind: "text" },
   { id: "transaction.recurring", label: "Transaction: a renewal", kind: "bool" },
+  { id: "transaction.interval", label: "Transaction: billing interval (day, week, month, year, one_time)", kind: "text" },
+  { id: "transaction.payment_source", label: "Transaction: payment provider (stripe, paddle…)", kind: "text" },
 ];
 const opsFor: Record<string, { id: Cond["op"]; label: string }[]> = {
   number: [{ id: "gte", label: "at least" }, { id: "gt", label: "more than" }, { id: "lte", label: "at most" }, { id: "lt", label: "less than" }, { id: "eq", label: "is" }, { id: "neq", label: "is not" }],

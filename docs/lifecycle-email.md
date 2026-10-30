@@ -427,7 +427,11 @@ a rule fired, how many people entered a journey. Pick a card to light up
 everything it sets off and everything that sets it off, then **Open** it.
 **Only what's live** hides draft and paused rules and journeys, and the
 brand picked in the sidebar limits it to that brand's automations and
-the shared ones.
+the shared ones. **Touches** narrows it to what leads to one sequence,
+list or tag. Pick a person to see what reaches them: the events they did,
+the lists they're in, the rules that fired for them and the journeys
+they went through are marked, and everything those set off next lights
+up.
 
 Above the map, **What needs a look** lists:
 
@@ -443,7 +447,7 @@ Above the map, **What needs a look** lists:
 
 `GET /v1/workspaces/{ws}/automation-map` (MCP `get_automation_map`)
 returns the same graph, so an agent can explain a workspace's automations
-before changing them. It needs `emails.read` and `customers.read`.
+before changing them; `?record=` marks what one person reached. It needs `emails.read` and `customers.read`.
 
 ## One person's history
 

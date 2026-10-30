@@ -2893,6 +2893,112 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/workspaces/{ws}/data-network": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+            };
+            cookie?: never;
+        };
+        /**
+         * Read the workspace's place in the data network
+         * @description Scope: leads.read. Internal: the data network is turned on only for workspaces the server's operator chose;
+         *     for every other workspace available is false and nothing else applies. When it is on, the email finder can
+         *     check and find addresses using what member workspaces learned, answering only about an address, or a name
+         *     and domain, the asker brought. A workspace that hasn't joined gets a few lookups a month (allowance);
+         *     members get unlimited lookups and share whether the addresses their sequences email deliver or bounce, and
+         *     their address shapes. Names, lists, replies and message text are never shared.
+         */
+        get: operations["getDataNetwork"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/workspaces/{ws}/data-network/preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+            };
+            cookie?: never;
+        };
+        /**
+         * Count what joining the data network would share
+         * @description Scope: leads.read. What the workspace would share if it joined now: the addresses its sequences emailed
+         *     at least settle_days ago, by outcome, and how many domains they are at. Addresses or domains anyone opted
+         *     out or blocked, and personal mail providers such as gmail.com, are left out. Counts only. 409
+         *     data_network_unavailable when the data network isn't on for this workspace.
+         */
+        get: operations["previewDataNetwork"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/workspaces/{ws}/data-network/join": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Join the data network
+         * @description Scope: integrations.manage, and only the workspace's owner, signed in: an API token or another role gets
+         *     403. Send confirm: true after showing the preview. From then on the workspace shares whether the addresses
+         *     its sequences email deliver or bounce, and their address shapes, starting with its past sends, and gets
+         *     unlimited lookups. Every owner and admin is emailed. Returns 409 data_network_unavailable when the data
+         *     network isn't on for this workspace. Joining again does nothing.
+         */
+        post: operations["joinDataNetwork"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/workspaces/{ws}/data-network/leave": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Leave the data network
+         * @description Scope: integrations.manage. Sharing stops at once and lookups fall back to the monthly allowance.
+         *     Everything the workspace shared is withdrawn from the network by withdraw_by, 30 days at most. Every owner
+         *     and admin is emailed. Leaving when not a member does nothing.
+         */
+        post: operations["leaveDataNetwork"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/workspaces/{ws}/mailboxes/{id}/test-send": {
         parameters: {
             query?: never;
@@ -3551,8 +3657,7 @@ export interface paths {
         /**
          * Save the reply rules for the workspace or a sequence
          * @description Scope inbox.manage. Replaces the set for the workspace (no id) or a
-         *     sequence (sequence_id). A project_id is refused with 400: projects
-         *     were removed. Labels left out
+         *     sequence (sequence_id). Labels left out
          *     follow the next set up; an empty rules object removes the set and
          *     answers {"cleared": true}. Every action can be undone: a snoozed
          *     reply can be woken, a restarted or enrolled lead stopped.
@@ -11628,6 +11733,174 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/workspaces/{ws}/playbook-automations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+            };
+            cookie?: never;
+        };
+        /**
+         * List playbook automations
+         * @description Scope missions.read. Playbooks set to start by themselves, on a schedule or an event, newest first (up to 200).
+         */
+        get: operations["listPlaybookAutomations"];
+        put?: never;
+        /**
+         * Set a playbook to run on a schedule or an event
+         * @description Scope missions.run. Creates a draft: nothing runs until a person
+         *     approves it (POST .../approve). What is left out comes from the
+         *     playbook's suggestion (Playbook.automation), then from the defaults
+         *     (approve_writes, Outflare's agent, 09:00 UTC). An agent's
+         *     automation runs its missions itself unless it asks for the
+         *     built-in runner.
+         */
+        post: operations["createPlaybookAutomation"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/workspaces/{ws}/playbook-automations/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        /** Get a playbook automation */
+        get: operations["getPlaybookAutomation"];
+        put?: never;
+        post?: never;
+        /**
+         * Delete a playbook automation
+         * @description Scope missions.run. Its past runs stay as missions.
+         */
+        delete: operations["deletePlaybookAutomation"];
+        options?: never;
+        head?: never;
+        /**
+         * Change a playbook automation
+         * @description Scope missions.run. Changing anything but the name changes what a
+         *     person approved, so the automation goes back to draft and waits for
+         *     approval again.
+         */
+        patch: operations["updatePlaybookAutomation"];
+        trace?: never;
+    };
+    "/v1/workspaces/{ws}/playbook-automations/{id}/approve": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Approve a playbook automation, so it runs by itself
+         * @description Scope missions.approve, and a person only: every run starts a
+         *     mission carrying their approval, and acts with their rights at the
+         *     time it runs. Also turns a paused or held automation back on. Needs
+         *     the playbook's connections, and the workspace's AI model when
+         *     Outflare's agent runs it (409 connector_needed, or the AI errors).
+         *     Events from before approval never start a run, except for a held
+         *     automation, whose events waited.
+         */
+        post: operations["approvePlaybookAutomation"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/workspaces/{ws}/playbook-automations/{id}/pause": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Pause a playbook automation
+         * @description Scope missions.run. Runs already started carry on; a person approves it again to turn it back on.
+         */
+        post: operations["pausePlaybookAutomation"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/workspaces/{ws}/playbook-automations/{id}/run": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Start a run of an active automation now
+         * @description Scope missions.run. Starts a run inside the approved limits, as if
+         *     its time had come, without moving its schedule. 409
+         *     automation_state when it isn't active, or when a limit or a missing
+         *     connection holds it.
+         */
+        post: operations["runPlaybookAutomation"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/workspaces/{ws}/playbook-automations/{id}/runs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        /**
+         * The missions an automation started
+         * @description Scope missions.read. The latest 50, newest first.
+         */
+        get: operations["listPlaybookAutomationRuns"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/kits": {
         parameters: {
             query?: never;
@@ -13207,6 +13480,134 @@ export interface paths {
         get: operations["listInboundEmails"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/workspaces/{ws}/inbound-forwarders": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+            };
+            cookie?: never;
+        };
+        /**
+         * List linked forwarding addresses
+         * @description Scope: my_ai_accounts.read. Personal addresses you linked to forward from, with Gmail's forwarding confirmation
+         *     once it arrives (open `confirmation_url` to confirm). Everyone's with everyone=true and ai_accounts.read. Members' own
+         *     work addresses can always forward and aren't listed.
+         */
+        get: operations["listInboundForwarders"];
+        put?: never;
+        /**
+         * Link a personal address to forward from
+         * @description Scope: my_ai_accounts.manage, as a person. Lets mail you forward from this address (your own Gmail, say) reach the workspace; do it before adding the forwarding address in Gmail.
+         */
+        post: operations["linkInboundForwarder"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/workspaces/{ws}/inbound-forwarders/{email}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                email: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Unlink a forwarding address
+         * @description Scope: my_ai_accounts.manage for your own, ai_accounts.manage for anyone's. Mail forwarded from it is refused after.
+         */
+        delete: operations["unlinkInboundForwarder"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/workspaces/{ws}/ai-accounts/receipts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+            };
+            cookie?: never;
+        };
+        /**
+         * List AI receipts
+         * @description Scope: ai_spend.read. Receipts people forwarded to the workspace's inbound address (Outflare Cloud), newest first:
+         *     what each says and the AI account it was matched to, and how (account_email, known_id, forwarder,
+         *     expected_renewal, or person). status=needs_review lists those waiting for someone to assign or ignore.
+         */
+        get: operations["listAIReceipts"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/workspaces/{ws}/ai-accounts/receipts/{id}/assign": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Assign a receipt to an AI account
+         * @description Scope: ai_accounts.manage. For a receipt that needs review: the account's renewal, plan, seats and price follow it,
+         *     and its receipt number and card are remembered so the next one matches by itself. Add a new account with POST
+         *     .../ai-accounts first when it has none.
+         */
+        post: operations["assignAIReceipt"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/workspaces/{ws}/ai-accounts/receipts/{id}/ignore": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Ignore a receipt
+         * @description Scope: ai_accounts.manage. A receipt that needs review but isn't for an account to track.
+         */
+        post: operations["ignoreAIReceipt"];
         delete?: never;
         options?: never;
         head?: never;
@@ -15406,6 +15807,82 @@ export interface paths {
          *     visitor's id: the same on every page and server. At most 200 live flags per workspace.
          */
         post: operations["createFlag"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/workspaces/{ws}/flag-groups": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+            };
+            cookie?: never;
+        };
+        /**
+         * List exclusion groups
+         * @description Scope: analytics.read. Every exclusion group, with its holdout, its flags and their slices, and the share still free.
+         */
+        get: operations["listFlagGroups"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/workspaces/{ws}/flag-groups/{group}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                group: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Set an exclusion group's holdout
+         * @description Scope: analytics.manage. The holdout is the percent of the group's visitors (the top slice) kept out of every flag
+         *     in it, so they see the default experience wherever its tests run; compare them with everyone else on a goal
+         *     (getFlagGroupHoldout) to see what the group's changes did together. 409 when a flag's slice reaches into it.
+         *     Needs access to every brand, since a group spans them.
+         */
+        put: operations["setFlagGroup"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/workspaces/{ws}/flag-groups/{group}/holdout": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                group: string;
+            };
+            cookie?: never;
+        };
+        /**
+         * Compare an exclusion group's holdout with everyone else
+         * @description Scope: analytics.read. Every visitor who viewed a page of the site in the last days, split by whether they fall in
+         *     the group's holdout (the same hash the flags use), and the goal after their first view: what the group's changes
+         *     did together. 409 when the group has no holdout.
+         */
+        get: operations["getFlagGroupHoldout"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -18414,7 +18891,10 @@ export interface paths {
          *     - `never_fires`: a live journey whose trigger event hasn't happened in 30 days
          *
          *     `brand` limits it to one brand's automations and the shared ones.
-         *     Changes nothing.
+         *     With `record`, a person, each node says what they have to do with
+         *     it in `reached`: an event they did, a list they are in, a rule that
+         *     fired for them, a journey they are in or went through. Changes
+         *     nothing.
          */
         get: operations["getAutomationMap"];
         put?: never;
@@ -19217,6 +19697,34 @@ export interface paths {
          * @description Scope: partners.manage. A partner is in one group at a time; its rules (group_id) apply to them. Partners of other programs are left alone.
          */
         post: operations["assignPartnerGroup"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/workspaces/{ws}/partner-programs/{id}/switch-over": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                /** @description A program's id or slug. */
+                id: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Switch a program over from the platform it was imported from
+         * @description Scope: partners.manage. Say that the platform the program was imported from (Tolt) no longer pays it. Until then,
+         *     commissions the import brought in keep that platform's status, re-runs bring its changes, and Outflare never approves
+         *     them after its hold or puts them in a payout, so nobody is paid twice. From now on they are approved and paid here like
+         *     any other. 409 when it has already switched over.
+         */
+        post: operations["switchOverPartnerProgram"];
         delete?: never;
         options?: never;
         head?: never;
@@ -21323,69 +21831,6 @@ export interface webhooks {
         patch?: never;
         trace?: never;
     };
-    "project.created": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * A project was created.
-         * @deprecated
-         * @description No longer sent, since projects were removed. Listed so existing subscriptions stay valid.
-         */
-        post: operations["webhook_project_created"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "project.updated": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * A project's brief or settings changed.
-         * @deprecated
-         * @description No longer sent, since projects were removed. Listed so existing subscriptions stay valid.
-         */
-        post: operations["webhook_project_updated"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "project.deleted": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * A project was deleted.
-         * @deprecated
-         * @description No longer sent, since projects were removed. Listed so existing subscriptions stay valid.
-         */
-        post: operations["webhook_project_deleted"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "mission.created": {
         parameters: {
             query?: never;
@@ -21567,6 +22012,142 @@ export interface webhooks {
         put?: never;
         /** A held mission write was rejected. */
         post: operations["webhook_mission_action_rejected"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "playbook.started": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** A playbook was started as a mission, by hand or by an automation. */
+        post: operations["webhook_playbook_started"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "playbook_automation.created": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** A playbook automation was set up; it waits for a person's approval. */
+        post: operations["webhook_playbook_automation_created"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "playbook_automation.updated": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** A playbook automation's settings changed. */
+        post: operations["webhook_playbook_automation_updated"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "playbook_automation.approved": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** A person approved a playbook automation, so it runs by itself. */
+        post: operations["webhook_playbook_automation_approved"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "playbook_automation.paused": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** A playbook automation was paused. */
+        post: operations["webhook_playbook_automation_paused"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "playbook_automation.held": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** A playbook automation stopped by itself until a person looks. */
+        post: operations["webhook_playbook_automation_held"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "playbook_automation.ran": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** A playbook automation started a run. */
+        post: operations["webhook_playbook_automation_ran"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "playbook_automation.deleted": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** A playbook automation was deleted. */
+        post: operations["webhook_playbook_automation_deleted"];
         delete?: never;
         options?: never;
         head?: never;
@@ -23214,7 +23795,7 @@ export interface webhooks {
         };
         get?: never;
         put?: never;
-        /** A sign-up, sale, refund or custom conversion was recorded for a referred customer. data has program_id, partner_id, referral_id, record_id, type, event_name (custom only), recurring, amount_cents, currency, product_id, source and, for a refund, refund_of. */
+        /** A sign-up, sale, refund or custom conversion was recorded for a referred customer. data has program_id, partner_id, referral_id, record_id, type, event_name (custom only), recurring, amount_cents, currency, product_id, source, payment_source, interval and, for a refund, refund_of. */
         post: operations["webhook_partner_conversion_created"];
         delete?: never;
         options?: never;
@@ -23630,7 +24211,7 @@ export interface components {
              */
             id: string;
             /** @enum {string} */
-            type: "lead.replied" | "lead.unsubscribed" | "inbox.replied" | "inbox.updated" | "inbox.classified" | "lead.bounced" | "mailbox.auto_paused" | "lead.created" | "lead.updated" | "lead.deleted" | "leads.imported" | "suppressions.added" | "suppression.removed" | "lead_list.created" | "lead_list.leads_added" | "lead_list.run_started" | "lead_list.build_done" | "lead_list.build_failed" | "lead_list.refresh_done" | "lead_list.refresh_failed" | "lead_list.enrich_done" | "lead_list.enrich_failed" | "import.done" | "import.failed" | "sequence.created" | "sequence.updated" | "sequence.activated" | "sequence.paused" | "sequence.archived" | "sequence.deleted" | "sequence.steps_updated" | "sequence.leads_enrolled" | "enrollment.stopped" | "mailbox.imported" | "mailbox.updated" | "mailbox.paused" | "mailbox.resumed" | "mailbox.stage_changed" | "mailbox.deleted" | "domain.added" | "domain.paused" | "domain.resumed" | "domain.removed" | "email.queued" | "email.sent" | "email.delivered" | "email.bounced" | "email.complained" | "email.failed" | "email.suppressed" | "email.cancelled" | "email.unsubscribed" | "email.opened" | "email.clicked" | "email.preferences_changed" | "email_domain.verified" | "email_domain.verification_failed" | "email_provider.events_failed" | "email_template.published" | "meeting.created" | "meeting.updated" | "meeting.deleted" | "deal.created" | "deal.updated" | "deal.deleted" | "spend.recorded" | "integration.connected" | "integration.updated" | "integration.disconnected" | "connect_request.created" | "deploy.detected" | "deploy.failed" | "digest.ready" | "ai_budget.warned" | "ai_budget.reached" | "connection_limit.warned" | "connection_limit.reached" | "experiment.started" | "experiment.concluded" | "project.created" | "project.updated" | "project.deleted" | "mission.created" | "mission.updated" | "mission.submitted" | "mission.approved" | "mission.paused" | "mission.resumed" | "mission.stopped" | "mission.completed" | "mission.action_held" | "mission.action_approved" | "mission.action_rejected" | "infra.plan_created" | "infra.plan_approved" | "infra.ordered" | "infra.order_failed" | "infra.domains_bought" | "infra.mailbox_joined" | "infra.plan_warming" | "infra.plan_ready" | "infra.plan_cancelled" | "fix.found" | "fix.updated" | "fix.started" | "fix.verify_requested" | "fix.confirmed" | "fix.reopened" | "record.created" | "record.bulk_created" | "record.bulk_updated" | "record.updated" | "record.merged" | "identity.verified" | "identity.closed" | "relationship.added" | "relationship.ended" | "consent.granted" | "consent.withdrawn" | "consent.bulk_withdrawn" | "brand.created" | "brand.updated" | "knowledge.created" | "knowledge.updated" | "knowledge.deleted" | "knowledge.restored" | "email_broadcast.created" | "email_broadcast.started" | "email_broadcast.sent" | "email_broadcast.failed" | "email_broadcast.cancelled" | "journey.created" | "journey.updated" | "journey_run.entered" | "journey_run.exited" | "rule.created" | "rule.updated" | "rule.activated" | "rule.paused" | "rule.archived" | "rule.fired" | "brand_setup.installed" | "brand_setup.install_failed" | "install.issue_opened" | "install.issue_resolved" | "seo_site.created" | "seo_site.verified" | "seo_site.unverified" | "seo_site.deleted" | "crawl.started" | "crawl.stopped" | "crawl.done" | "link_pitch.drafted" | "link_pitch.approved" | "link_pitch.rejected" | "link_prospect.overdue" | "backlink.new" | "backlink.lost" | "backlink.regained" | "competitor.page_removed" | "link_prospect.found" | "link_prospect.checked" | "link_prospect.excluded" | "link_prospect.pitched" | "link_prospect.replied" | "link_prospect.agreed" | "link_prospect.live" | "link_prospect.declined" | "link_prospect.removed" | "link_prospect.reopened" | "link_prospect.updated" | "link_prospect.deleted" | "social_action.drafted" | "social_action.approved" | "social_action.rejected" | "social_action.done" | "social_action.failed" | "review.posted" | "review.replied" | "review.reply_drafted" | "review_momentum.changed" | "alert.raised" | "visitor.became_hot" | "partner_program.created" | "partner_program.updated" | "partner_program.rules_updated" | "partner.created" | "partner.updated" | "partner_referral.created" | "partner_conversion.created" | "partner_reward.created" | "partner_reward.approved" | "partner_reward.rejected" | "partner_reward.reversed" | "partner_reward.fulfilled" | "partner_payout.created" | "partner_payout.paid" | "partner_payout.canceled" | "workspace.updated" | "webhook.test";
+            type: "lead.replied" | "lead.unsubscribed" | "inbox.replied" | "inbox.updated" | "inbox.classified" | "lead.bounced" | "mailbox.auto_paused" | "lead.created" | "lead.updated" | "lead.deleted" | "leads.imported" | "suppressions.added" | "suppression.removed" | "lead_list.created" | "lead_list.leads_added" | "lead_list.run_started" | "lead_list.build_done" | "lead_list.build_failed" | "lead_list.refresh_done" | "lead_list.refresh_failed" | "lead_list.enrich_done" | "lead_list.enrich_failed" | "import.done" | "import.failed" | "sequence.created" | "sequence.updated" | "sequence.activated" | "sequence.paused" | "sequence.archived" | "sequence.deleted" | "sequence.steps_updated" | "sequence.leads_enrolled" | "enrollment.stopped" | "mailbox.imported" | "mailbox.updated" | "mailbox.paused" | "mailbox.resumed" | "mailbox.stage_changed" | "mailbox.deleted" | "domain.added" | "domain.paused" | "domain.resumed" | "domain.removed" | "email.queued" | "email.sent" | "email.delivered" | "email.bounced" | "email.complained" | "email.failed" | "email.suppressed" | "email.cancelled" | "email.unsubscribed" | "email.opened" | "email.clicked" | "email.preferences_changed" | "email_domain.verified" | "email_domain.verification_failed" | "email_provider.events_failed" | "email_template.published" | "meeting.created" | "meeting.updated" | "meeting.deleted" | "deal.created" | "deal.updated" | "deal.deleted" | "spend.recorded" | "integration.connected" | "integration.updated" | "integration.disconnected" | "connect_request.created" | "deploy.detected" | "deploy.failed" | "digest.ready" | "ai_budget.warned" | "ai_budget.reached" | "connection_limit.warned" | "connection_limit.reached" | "experiment.started" | "experiment.concluded" | "mission.created" | "mission.updated" | "mission.submitted" | "mission.approved" | "mission.paused" | "mission.resumed" | "mission.stopped" | "mission.completed" | "mission.action_held" | "mission.action_approved" | "mission.action_rejected" | "playbook.started" | "playbook_automation.created" | "playbook_automation.updated" | "playbook_automation.approved" | "playbook_automation.paused" | "playbook_automation.held" | "playbook_automation.ran" | "playbook_automation.deleted" | "infra.plan_created" | "infra.plan_approved" | "infra.ordered" | "infra.order_failed" | "infra.domains_bought" | "infra.mailbox_joined" | "infra.plan_warming" | "infra.plan_ready" | "infra.plan_cancelled" | "fix.found" | "fix.updated" | "fix.started" | "fix.verify_requested" | "fix.confirmed" | "fix.reopened" | "record.created" | "record.bulk_created" | "record.bulk_updated" | "record.updated" | "record.merged" | "identity.verified" | "identity.closed" | "relationship.added" | "relationship.ended" | "consent.granted" | "consent.withdrawn" | "consent.bulk_withdrawn" | "brand.created" | "brand.updated" | "knowledge.created" | "knowledge.updated" | "knowledge.deleted" | "knowledge.restored" | "email_broadcast.created" | "email_broadcast.started" | "email_broadcast.sent" | "email_broadcast.failed" | "email_broadcast.cancelled" | "journey.created" | "journey.updated" | "journey_run.entered" | "journey_run.exited" | "rule.created" | "rule.updated" | "rule.activated" | "rule.paused" | "rule.archived" | "rule.fired" | "brand_setup.installed" | "brand_setup.install_failed" | "install.issue_opened" | "install.issue_resolved" | "seo_site.created" | "seo_site.verified" | "seo_site.unverified" | "seo_site.deleted" | "crawl.started" | "crawl.stopped" | "crawl.done" | "link_pitch.drafted" | "link_pitch.approved" | "link_pitch.rejected" | "link_prospect.overdue" | "backlink.new" | "backlink.lost" | "backlink.regained" | "competitor.page_removed" | "link_prospect.found" | "link_prospect.checked" | "link_prospect.excluded" | "link_prospect.pitched" | "link_prospect.replied" | "link_prospect.agreed" | "link_prospect.live" | "link_prospect.declined" | "link_prospect.removed" | "link_prospect.reopened" | "link_prospect.updated" | "link_prospect.deleted" | "social_action.drafted" | "social_action.approved" | "social_action.rejected" | "social_action.done" | "social_action.failed" | "review.posted" | "review.replied" | "review.reply_drafted" | "review_momentum.changed" | "alert.raised" | "visitor.became_hot" | "partner_program.created" | "partner_program.updated" | "partner_program.rules_updated" | "partner.created" | "partner.updated" | "partner_referral.created" | "partner_conversion.created" | "partner_reward.created" | "partner_reward.approved" | "partner_reward.rejected" | "partner_reward.reversed" | "partner_reward.fulfilled" | "partner_payout.created" | "partner_payout.paid" | "partner_payout.canceled" | "workspace.updated" | "webhook.test";
             /** Format: date-time */
             created_at: string;
             /** Format: uuid */
@@ -23736,12 +24317,6 @@ export interface components {
         MissionPlanInput: {
             /** @example Book 10 meetings with CFOs at Australian fintechs with 50 to 500 staff by 30 November */
             goal: string;
-            /**
-             * Format: uuid
-             * @deprecated
-             * @description Ignored: projects were removed.
-             */
-            project_id?: string;
         };
         /** @description What the planner proposed. The mission holds the same values; this keeps the parts a mission has no field for. */
         MissionDraft: {
@@ -23770,12 +24345,6 @@ export interface components {
         };
         MissionInput: {
             name?: string;
-            /**
-             * Format: uuid
-             * @deprecated
-             * @description Ignored: projects were removed.
-             */
-            project_id?: string | null;
             /** @description The goal in words. */
             goal?: string;
             /**
@@ -23858,11 +24427,6 @@ export interface components {
             calls: number;
             /** Format: date-time */
             last_call_at: string | null;
-            /**
-             * @deprecated
-             * @description Always null for missions approved after projects were removed.
-             */
-            brief_version: number | null;
             /** Format: uuid */
             approved_by: string | null;
             approved_by_name: string | null;
@@ -23883,6 +24447,11 @@ export interface components {
              */
             runner: "builtin" | "external";
             turns: components["schemas"]["MissionTurns"];
+            /**
+             * Format: uuid
+             * @description The playbook automation that started it (GET .../playbook-automations/{id}), if any.
+             */
+            automation_id?: string | null;
             /** @description The playbook it was started from (GET /v1/playbooks/{id}). */
             playbook_id: string | null;
             playbook_version: number | null;
@@ -23946,6 +24515,23 @@ export interface components {
              * @example creators-partnerships
              */
             kit?: string;
+            /** @description How the playbook suggests running by itself (POST /v1/workspaces/{ws}/playbook-automations). Only a default; people choose. */
+            automation?: {
+                /** @enum {string} */
+                schedule?: "daily" | "weekly" | "monthly";
+                /**
+                 * @description Events from the webhook catalog (GET /v1/webhook-events) that can start it.
+                 * @example [
+                 *       "backlink.lost"
+                 *     ]
+                 */
+                events: string[];
+                /**
+                 * @description each starts a run per event; hourly and daily gather the events into one run.
+                 * @enum {string}
+                 */
+                gather?: "each" | "hourly" | "daily";
+            };
             /**
              * Format: uri
              * @description The playbook's file on GitHub.
@@ -23991,12 +24577,6 @@ export interface components {
             mode?: "dry_run" | "approve_writes" | "autonomous";
             /**
              * Format: uuid
-             * @deprecated
-             * @description Ignored: projects were removed.
-             */
-            project_id?: string | null;
-            /**
-             * Format: uuid
              * @description The API token that runs the mission.
              */
             token_id?: string | null;
@@ -24004,6 +24584,131 @@ export interface components {
             max_spend_cents?: number | null;
             /** @description Apply the playbook's setup kit in the same step. Needs catalog.manage, and emails.manage when the kit adds email drafts. */
             apply_kit?: boolean;
+        };
+        /**
+         * @description A playbook that starts by itself, on a schedule or when an event
+         *     happens. A person approves it once; each run is then a mission
+         *     started from the playbook and approved with this mode, runner and
+         *     spend limits, acting with that person's current rights.
+         */
+        PlaybookAutomation: {
+            /** Format: uuid */
+            id: string;
+            /** @example link-reclaim-lost-links */
+            playbook_id: string;
+            name: string;
+            /**
+             * Format: uuid
+             * @description Runs for this brand only; null for every brand. Event automations then take only that brand's events.
+             */
+            brand_id: string | null;
+            inputs: {
+                [key: string]: string;
+            };
+            /** @enum {string} */
+            kind: "schedule" | "event";
+            /** @enum {string|null} */
+            cadence: "daily" | "weekly" | "monthly" | null;
+            /** @description The UTC hour schedules (and daily gathered events) run at. */
+            run_hour: number;
+            /** @description Weekly schedules: the weekday, 0 is Sunday. */
+            run_weekday: number;
+            /** @description Monthly schedules. */
+            run_monthday: number;
+            /** @description An event from the webhook catalog (GET /v1/webhook-events). */
+            event_type: string | null;
+            /**
+             * @description each: a run per event, at most daily_cap a day (the rest wait for the next day). hourly, daily: the events gathered into one run.
+             * @enum {string}
+             */
+            gather: "each" | "hourly" | "daily";
+            daily_cap: number;
+            /**
+             * @description The mode every run's mission runs in.
+             * @enum {string}
+             */
+            mode: "dry_run" | "approve_writes" | "autonomous";
+            /**
+             * @description builtin: Outflare's agent runs each mission with the workspace's AI model. external: the agent with token_id does.
+             * @enum {string}
+             */
+            runner: "builtin" | "external";
+            /** Format: uuid */
+            token_id: string | null;
+            /** Format: int64 */
+            max_spend_cents_per_run: number | null;
+            /**
+             * Format: int64
+             * @description Reaching it holds the automation until a person looks.
+             */
+            max_spend_cents_per_month: number | null;
+            /**
+             * Format: int64
+             * @description What this month's runs spent, from the outcomes ledger.
+             */
+            spent_this_month_cents: number;
+            /**
+             * @description draft waits for a person to approve it; held stopped by itself (held_reason says why).
+             * @enum {string}
+             */
+            status: "draft" | "active" | "paused" | "held";
+            held_reason: string;
+            /** Format: date-time */
+            next_run_at: string | null;
+            /** Format: date-time */
+            last_run_at: string | null;
+            /** Format: uuid */
+            last_mission_id: string | null;
+            runs: number;
+            /**
+             * Format: uuid
+             * @description The user whose approval the runs carry.
+             */
+            approved_by: string | null;
+            /** Format: date-time */
+            approved_at: string | null;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            updated_at: string;
+        };
+        /** @description What the playbook suggests (Playbook.automation) fills what is left out on create. */
+        PlaybookAutomationInput: {
+            /** @description Required on create; can't change. */
+            playbook_id?: string;
+            name?: string;
+            /** Format: uuid */
+            brand_id?: string | null;
+            inputs?: {
+                [key: string]: string;
+            };
+            /** @enum {string} */
+            kind?: "schedule" | "event";
+            /** @enum {string|null} */
+            cadence?: "daily" | "weekly" | "monthly" | null;
+            run_hour?: number;
+            run_weekday?: number;
+            run_monthday?: number;
+            event_type?: string | null;
+            /** @enum {string} */
+            gather?: "each" | "hourly" | "daily";
+            daily_cap?: number;
+            /**
+             * @description Defaults to approve_writes.
+             * @enum {string}
+             */
+            mode?: "dry_run" | "approve_writes" | "autonomous";
+            /**
+             * @description Defaults to builtin, or external with the caller's own token for an agent.
+             * @enum {string}
+             */
+            runner?: "builtin" | "external";
+            /** Format: uuid */
+            token_id?: string | null;
+            /** Format: int64 */
+            max_spend_cents_per_run?: number | null;
+            /** Format: int64 */
+            max_spend_cents_per_month?: number | null;
         };
         /** @description A setup kit from the repository's playbooks/kits folder (playbooks/README.md has the format). */
         Kit: components["schemas"]["KitFile"] & {
@@ -24908,8 +25613,8 @@ export interface components {
          * @description Groups of conditions; match says whether all or any must hold, for the groups and inside each. Empty always holds.
          *     Fields: partner.id, partner.country (text); partner.transactions, partner.customers, partner.leads, partner.revenue_cents,
          *     partner.earnings_cents (numbers); customer.transactions and customer.total_paid_cents (numbers, before this conversion);
-         *     customer.first_sale_at and customer.signed_up_at (dates); transaction.amount_cents (number), transaction.product_id (text),
-         *     transaction.recurring (true or false). Ops: numbers eq, neq, gt, gte, lt, lte; text eq, neq, in, not_in (case-insensitive);
+         *     customer.first_sale_at and customer.signed_up_at (dates); transaction.amount_cents (number), transaction.product_id,
+         *     transaction.payment_source and transaction.interval (text), transaction.recurring (true or false). Ops: numbers eq, neq, gt, gte, lt, lte; text eq, neq, in, not_in (case-insensitive);
          *     true or false eq; dates within or not_within, with {"amount": N, "unit": "days" | "months" | "years"} back from the conversion.
          *     A fact that isn't known (no country, no first sale yet) fails every test but neq, not_in and not_within.
          */
@@ -24998,6 +25703,8 @@ export interface components {
             partners: number;
             /** @description New partners join this group. */
             default: boolean;
+            /** @description The portal's sign-up page for this group (portal_url with ?group=<id>): partners who apply through it join the group. Share it only with those you'd put in the group. */
+            signup_url: string;
         };
         PartnerProgram: {
             /** Format: uuid */
@@ -25057,6 +25764,13 @@ export interface components {
              */
             default_group_id?: string | null;
             partners: number;
+            /** @description The platform the program was last imported from (tolt), or empty. */
+            imported_from: string;
+            /**
+             * Format: date-time
+             * @description When the platform it was imported from stopped paying it (switchOverPartnerProgram). Until then, imported commissions keep that platform's status: they are never approved after the hold here or put in a payout.
+             */
+            switched_over_at: string | null;
             /** Format: date-time */
             created_at: string;
             /** Format: date-time */
@@ -25108,7 +25822,7 @@ export interface components {
                 /** @description Per kind, in the order they are read. */
                 kinds: {
                     /** @enum {string} */
-                    kind: "links" | "partners" | "promo_codes" | "customers" | "transactions" | "commissions";
+                    kind: "groups" | "links" | "partners" | "flows" | "promo_codes" | "customers" | "transactions" | "commissions";
                     seen: number;
                     created: number;
                     /** @description A status brought over */
@@ -25121,6 +25835,10 @@ export interface components {
                     reported?: number;
                     /** @description reported per part, when the platform lists the kind in parts (Tolt's partners, by status). */
                     reported_by?: {
+                        [key: string]: number;
+                    };
+                    /** @description Partners only: how many were read with each status there (active, pending, rejected, suspended). */
+                    by_status?: {
                         [key: string]: number;
                     };
                 }[];
@@ -25229,7 +25947,7 @@ export interface components {
             paid_cents: number;
             /**
              * Format: int64
-             * @description Approved, not yet in a payout: what the next payout gathers.
+             * @description Approved, not yet in a payout: what the next payout gathers. Commissions imported from a platform that still pays the program are left out until it switches over.
              */
             balance_cents: number;
             /** @description Approved action rewards your system hasn't fulfilled. */
@@ -25428,6 +26146,13 @@ export interface components {
              * @enum {string}
              */
             source: "api" | "postback" | "billing" | "manual" | "import" | "browser";
+            /** @description The payment provider your backend named, such as stripe; '' when it didn't. */
+            payment_source: string;
+            /**
+             * @description How the sale bills, as your backend said; '' when it didn't.
+             * @enum {string}
+             */
+            interval: "" | "day" | "week" | "month" | "year" | "one_time";
             /** Format: date-time */
             occurred_at: string;
             /** Format: date-time */
@@ -25475,6 +26200,13 @@ export interface components {
             anonymous_id?: string;
             /** @description RFC 3339 or Unix seconds; now when left out. */
             occurred_at?: string;
+            /** @description The payment provider, such as stripe or paddle (Tolt's source). Flows can test it (transaction.payment_source). */
+            payment_source?: string;
+            /**
+             * @description How it bills; monthly, yearly and annual are stored as month and year. Flows can test it (transaction.interval).
+             * @enum {string}
+             */
+            interval?: "day" | "week" | "month" | "year" | "one_time" | "monthly" | "yearly" | "annual";
         };
         PartnerConversionResult: {
             credited: boolean;
@@ -26316,6 +27048,11 @@ export interface components {
                 volume: number | null;
                 /** @description A line about it, such as a list's size. */
                 detail?: string;
+                /**
+                 * @description With record: an event they did, a list they are in, a rule that fired for them, a journey they are in now or went through.
+                 * @enum {string}
+                 */
+                reached?: "did" | "member" | "fired" | "in" | "entered";
             }[];
             edges: {
                 from: string;
@@ -26337,6 +27074,11 @@ export interface components {
             }[];
             /** @example 7 */
             window_days: number;
+            /**
+             * Format: uuid
+             * @description The person record named
+             */
+            record_id: string | null;
         };
         JourneyTest: {
             /** @enum {string} */
@@ -26954,11 +27696,6 @@ export interface components {
                 key: string;
                 /** @description What to show: the sequence name, mailbox address, "Step 2". */
                 name: string;
-                /**
-                 * @deprecated
-                 * @description The same as name; use name.
-                 */
-                label: string;
             })[];
         };
         HealthSignal: {
@@ -27615,6 +28352,21 @@ export interface components {
             created_at: string;
             /** Format: date-time */
             finished_at: string | null;
+        };
+        FlagGroup: {
+            name: string;
+            /** @description Percent of the group's visitors kept out of every flag in it (the top slice). */
+            holdout: number;
+            /** @description Percent no flag or holdout holds. */
+            free: number;
+            flags: {
+                key: string;
+                name: string;
+                /** @enum {string} */
+                status: "on" | "off";
+                share: number;
+                start: number;
+            }[];
         };
         ABTestCell: {
             /** @description Each factor's version, by flag key. */
@@ -32544,12 +33296,6 @@ export interface components {
             attendee_name?: string;
             /** Format: uuid */
             sequence_id?: string;
-            /**
-             * Format: uuid
-             * @deprecated
-             * @description Ignored: projects were removed.
-             */
-            project_id?: string | null;
             /** Format: uuid */
             mission_id?: string;
             title?: string;
@@ -32576,12 +33322,6 @@ export interface components {
             starts_at?: string;
             /** Format: uuid */
             sequence_id?: string;
-            /**
-             * Format: uuid
-             * @deprecated
-             * @description Ignored: projects were removed.
-             */
-            project_id?: string | null;
             /** @description An id, or empty to clear. */
             mission_id?: string;
             /** @description Not from outreach; pins that. */
@@ -32636,12 +33376,6 @@ export interface components {
             meeting_id?: string;
             /** Format: uuid */
             sequence_id?: string;
-            /**
-             * Format: uuid
-             * @deprecated
-             * @description Ignored: projects were removed.
-             */
-            project_id?: string | null;
             /** Format: uuid */
             mission_id?: string;
             stage?: string;
@@ -32670,12 +33404,6 @@ export interface components {
             closed_at?: string;
             /** Format: uuid */
             sequence_id?: string;
-            /**
-             * Format: uuid
-             * @deprecated
-             * @description Ignored: projects were removed.
-             */
-            project_id?: string | null;
             mission_id?: string;
             unattributed?: boolean;
         };
@@ -32726,12 +33454,6 @@ export interface components {
             currency?: string;
             /** Format: date-time */
             occurred_at?: string;
-            /**
-             * Format: uuid
-             * @deprecated
-             * @description Ignored: projects were removed.
-             */
-            project_id?: string | null;
             /** Format: uuid */
             sequence_id?: string;
             /** Format: uuid */
@@ -32763,12 +33485,6 @@ export interface components {
             starts_on?: string;
             /** Format: date */
             ends_on?: string | null;
-            /**
-             * Format: uuid
-             * @deprecated
-             * @description Ignored: projects were removed.
-             */
-            project_id?: string | null;
             /** Format: uuid */
             sequence_id?: string | null;
             note?: string;
@@ -32903,13 +33619,8 @@ export interface components {
             /** @description Pending invites for this role. */
             invites: number;
         };
-        /**
-         * @description profiles.read and profiles.manage were called projects.read and projects.manage until projects were removed. Requests may still send the old names (ScopeInput); responses always use the new names.
-         * @enum {string}
-         */
+        /** @enum {string} */
         Scope: "workspace.read" | "workspace.manage" | "context.manage" | "members.read" | "members.manage" | "members.remove" | "roles.manage" | "tokens.manage" | "audit.read" | "mailboxes.read" | "mailboxes.manage" | "leads.read" | "leads.manage" | "suppressions.manage" | "sequences.read" | "sequences.manage" | "inbox.read" | "inbox.manage" | "integrations.read" | "integrations.manage" | "outcomes.read" | "outcomes.manage" | "profiles.read" | "profiles.manage" | "infrastructure.read" | "infrastructure.manage" | "infrastructure.approve" | "analytics.read" | "analytics.manage" | "missions.read" | "missions.run" | "missions.approve" | "seo.read" | "seo.manage" | "social.read" | "social.manage" | "social.post" | "partners.read" | "partners.manage" | "partners.conversions" | "my_ai_accounts.read" | "my_ai_accounts.manage" | "ai_accounts.read" | "ai_accounts.manage" | "ai_spend.read" | "webhooks.read" | "webhooks.manage" | "emails.read" | "emails.send" | "emails.manage" | "customers.read" | "customers.manage" | "catalog.manage";
-        /** @description A scope in a request. projects.read and projects.manage, the old names of profiles.read and profiles.manage, are still accepted and mean the new ones. */
-        ScopeInput: components["schemas"]["Scope"] | ("projects.read" | "projects.manage");
         Workspace: {
             /** Format: uuid */
             id: string;
@@ -33044,7 +33755,7 @@ export interface components {
             /** @description A new name. It shows in the audit log next to everything the token does. */
             name?: string;
             /** @description Replaces the token's scopes. Takes effect on its next request. */
-            scopes?: components["schemas"]["ScopeInput"][];
+            scopes?: components["schemas"]["Scope"][];
             daily_send_budget?: number | null;
             /** @enum {string|null} */
             max_priority?: "low" | "normal" | "high" | null;
@@ -33608,12 +34319,6 @@ export interface components {
             description?: string;
             /**
              * Format: uuid
-             * @deprecated
-             * @description Ignored: projects were removed.
-             */
-            project_id?: string | null;
-            /**
-             * Format: uuid
              * @description The ideal customer profile people are scored against, under the list's own filters. Null scores against the filters alone.
              */
             profile_id?: string | null;
@@ -34061,13 +34766,48 @@ export interface components {
             email?: string;
             confidence: number;
             code: components["schemas"]["EmailFindCode"];
-            /** @description Where the confidence came from: history, pattern or default. */
+            /** @description Where the confidence came from: history, pattern, default, network (the data network) or provider:<connector>. */
             evidence?: string;
             cost: components["schemas"]["EmailFindCost"];
             /** @description An error-catalog code when code is stop. */
             stop_code?: string;
             /** @description Nanoseconds to wait before re-calling, set when code is pending or retry. */
             retry_after?: number;
+        };
+        DataNetwork: {
+            /** @description Whether the data network is on for this workspace. When false, nothing is shared or looked up. */
+            available: boolean;
+            /** @enum {string} */
+            status: "not_joined" | "joined" | "left";
+            /** Format: date-time */
+            joined_at: string | null;
+            /** Format: date-time */
+            left_at: string | null;
+            /**
+             * Format: date-time
+             * @description After leaving: when what the workspace shared will be gone at the latest. Null once withdrawn.
+             */
+            withdraw_by: string | null;
+            /** @description Lookups this month; null when the data network isn't on for this workspace. */
+            allowance: null | {
+                unlimited: boolean;
+                /** @description Lookups a month; null when unlimited. */
+                limit: number | null;
+                used: number;
+                /** Format: date-time */
+                resets_at: string | null;
+            };
+        };
+        DataNetworkPreview: {
+            /** @description Addresses that would be shared. */
+            addresses: number;
+            delivered: number;
+            bounced: number;
+            domains: number;
+            /** @description A send is shared once it is this many days old, so a bounce has had time to come back. */
+            settle_days: number;
+            /** @description After leaving, what was shared is gone within this many days. */
+            withdraw_days: number;
         };
         EmailFindResult: {
             items: components["schemas"]["EmailFindItemResult"][];
@@ -34564,12 +35304,6 @@ export interface components {
              * @enum {string}
              */
             kind?: "preference" | "decision" | "fact" | "feedback";
-            /**
-             * Format: uuid
-             * @deprecated
-             * @description Ignored: projects were removed.
-             */
-            project_id?: string | null;
             /** @description The brand it is true for: a brand's id or handle. Null: true for the whole company. */
             brand_id?: string | null;
             /** @description Pin what every conversation should know. Defaults to false. */
@@ -34663,6 +35397,62 @@ export interface components {
             status: "received" | "processed" | "ignored" | "rejected" | "failed";
             reason: string | null;
             size_bytes: number;
+        };
+        InboundForwarder: {
+            email: string;
+            /** Format: uuid */
+            user_id: string;
+            /** @description Gmail's forwarding confirmation code, once its email arrived. */
+            confirmation_code: string | null;
+            /** @description Open it to confirm forwarding in Gmail. Outflare never opens it itself. */
+            confirmation_url: string | null;
+            /** Format: date-time */
+            confirmation_at: string | null;
+            /** Format: date-time */
+            last_email_at: string | null;
+            /** Format: date-time */
+            created_at: string;
+        };
+        AIReceipt: {
+            /** Format: uuid */
+            id: string;
+            /** @enum {string} */
+            vendor: "anthropic" | "openai" | "cursor" | "github";
+            /** @description The AI tool it is for */
+            provider: string | null;
+            /** @description The member who forwarded it. */
+            forwarded_by: string | null;
+            /** Format: date */
+            charged_on: string | null;
+            /**
+             * Format: int64
+             * @description What was charged
+             */
+            amount_minor: number | null;
+            /** @example USD */
+            currency: string | null;
+            /**
+             * Format: int64
+             * @description The charge in US cents; null until another currency is converted.
+             */
+            usd_cents: number | null;
+            /** @example Max 20x */
+            plan: string | null;
+            seats: number | null;
+            /** Format: date */
+            period_start: string | null;
+            /** Format: date */
+            period_end: string | null;
+            account_email: string | null;
+            /** Format: uuid */
+            account_id: string | null;
+            account_name: string | null;
+            /** @enum {string|null} */
+            matched_by: "account_email" | "known_id" | "forwarder" | "expected_renewal" | "person" | null;
+            /** @enum {string} */
+            status: "matched" | "needs_review" | "ignored";
+            /** Format: date-time */
+            created_at: string;
         };
         KnowledgeItem: {
             /** Format: uuid */
@@ -36294,11 +37084,6 @@ export interface components {
         };
         BrandMembers: {
             /**
-             * @deprecated
-             * @description Ignored: projects were removed.
-             */
-            project_ids?: string[];
-            /**
              * @example [
              *       "repocket-mail.com"
              *     ]
@@ -36535,12 +37320,6 @@ export interface components {
         };
         SequenceSettings: {
             name?: string;
-            /**
-             * Format: uuid
-             * @deprecated
-             * @description Ignored: projects were removed.
-             */
-            project_id?: string | null;
             /**
              * Format: uuid
              * @description Restrict allocation to mailboxes in this pool. Null allows any mailbox.
@@ -37312,12 +38091,6 @@ export interface components {
              * @description The brand the plan is for: its new domains and mailboxes join it. Null: shared by every brand.
              */
             brand_id?: string | null;
-            /**
-             * Format: uuid
-             * @deprecated
-             * @description Ignored: projects were removed.
-             */
-            project_id?: string | null;
             /** @description manual (you buy; the plan waits for you), or a supplier connector such as cheapinboxes. See `suppliers` on GET /infrastructure. */
             supplier?: string;
             /**
@@ -37735,12 +38508,10 @@ export interface operations {
                             /** Format: uuid */
                             id: string;
                             name: string;
-                            /** @enum {string} */
-                            kind: "workspace";
                             /** Format: uuid */
-                            workspace_id: string | null;
+                            workspace_id: string;
                             /** @description The token's workspace, with its slug and name. */
-                            workspace: null | {
+                            workspace: {
                                 /** Format: uuid */
                                 id: string;
                                 /** @example acme */
@@ -39031,7 +39802,7 @@ export interface operations {
                 "application/json": {
                     name: string;
                     description?: string;
-                    scopes?: components["schemas"]["ScopeInput"][];
+                    scopes?: components["schemas"]["Scope"][];
                 };
             };
         };
@@ -39112,7 +39883,7 @@ export interface operations {
                 "application/json": {
                     name?: string;
                     description?: string;
-                    scopes?: components["schemas"]["ScopeInput"][];
+                    scopes?: components["schemas"]["Scope"][];
                 };
             };
         };
@@ -39291,7 +40062,7 @@ export interface operations {
             content: {
                 "application/json": {
                     name: string;
-                    scopes: components["schemas"]["ScopeInput"][];
+                    scopes: components["schemas"]["Scope"][];
                     expires_in_days?: number;
                     daily_send_budget?: number | null;
                     /** @enum {string|null} */
@@ -39299,12 +40070,6 @@ export interface operations {
                     may_take_mailboxes?: boolean;
                     /** Format: uuid */
                     default_team_id?: string | null;
-                    /**
-                     * Format: uuid
-                     * @deprecated
-                     * @description Projects were removed: a token with a project_id is refused with 400. Limit it to a brand with `brand` instead.
-                     */
-                    project_id?: string | null;
                     /**
                      * @description Binds the token to one brand, by id or handle: it sees that brand's records and the shared ones, changes only that brand's, and endpoints that need every brand refuse it. Fixed for the token's life.
                      * @example repocket
@@ -39484,7 +40249,7 @@ export interface operations {
             content: {
                 "application/json": {
                     /** @description The write scopes to allow. Empty is read only. Left out keeps them as they are. */
-                    scopes?: components["schemas"]["ScopeInput"][];
+                    scopes?: components["schemas"]["Scope"][];
                     /** @description Whether the app's changes need a mission a person approved. Left out keeps it as it is. */
                     require_mission?: boolean;
                 };
@@ -42043,12 +42808,6 @@ export interface operations {
                     filters: components["schemas"]["PeopleFilter"];
                     /**
                      * Format: uuid
-                     * @deprecated
-                     * @description Ignored: projects were removed. Use profile_id.
-                     */
-                    project_id?: string | null;
-                    /**
-                     * Format: uuid
                      * @description Score the sample against this ideal customer profile.
                      */
                     profile_id?: string | null;
@@ -43296,6 +44055,115 @@ export interface operations {
             default: components["responses"]["Error"];
         };
     };
+    getDataNetwork: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The workspace's membership and lookups. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DataNetwork"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    previewDataNetwork: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The counts. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DataNetworkPreview"];
+                };
+            };
+            409: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    joinDataNetwork: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @description Must be true: the owner has seen what will be shared. */
+                    confirm: boolean;
+                };
+            };
+        };
+        responses: {
+            /** @description The workspace's membership and lookups. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DataNetwork"];
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            400: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    leaveDataNetwork: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The workspace's membership and lookups. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DataNetwork"];
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            default: components["responses"]["Error"];
+        };
+    };
     testSendMailbox: {
         parameters: {
             query?: never;
@@ -44039,11 +44907,6 @@ export interface operations {
                 assigned_to?: string;
                 /** @description A tag, or several separated by commas for replies with any of them. */
                 tag?: string;
-                /**
-                 * @deprecated
-                 * @description The older name for tag.
-                 */
-                label?: string;
                 /** @description Search sender, subject and text. */
                 q?: string;
                 /** @description Only records of this brand: its id or handle, none for records shared by every brand, or all (the default). */
@@ -44748,12 +45611,6 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": {
-                    /**
-                     * Format: uuid
-                     * @deprecated
-                     * @description Refused with 400: projects were removed.
-                     */
-                    project_id?: string;
                     /** Format: uuid */
                     sequence_id?: string;
                     rules: components["schemas"]["ReplyRules"];
@@ -59603,6 +60460,271 @@ export interface operations {
             default: components["responses"]["Error"];
         };
     };
+    listPlaybookAutomations: {
+        parameters: {
+            query?: {
+                /** @description Only this playbook's automations. */
+                playbook_id?: string;
+                /** @description Only this brand's automations: its id or handle, none for those shared by every brand, or all. */
+                brand?: string;
+            };
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The automations. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["PlaybookAutomation"][];
+                    };
+                };
+            };
+            403: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    createPlaybookAutomation: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PlaybookAutomationInput"];
+            };
+        };
+        responses: {
+            /** @description The automation */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PlaybookAutomation"];
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            400: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    getPlaybookAutomation: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The automation. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PlaybookAutomation"];
+                };
+            };
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    deletePlaybookAutomation: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            202: components["responses"]["MissionHeld"];
+            /** @description Deleted. */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    updatePlaybookAutomation: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PlaybookAutomationInput"];
+            };
+        };
+        responses: {
+            /** @description The automation. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PlaybookAutomation"];
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            400: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    approvePlaybookAutomation: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The automation */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PlaybookAutomation"];
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    pausePlaybookAutomation: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The automation. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PlaybookAutomation"];
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    runPlaybookAutomation: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The run's mission */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Mission"];
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    listPlaybookAutomationRuns: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The missions. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["Mission"][];
+                    };
+                };
+            };
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
     listKitCatalog: {
         parameters: {
             query?: never;
@@ -62107,6 +63229,188 @@ export interface operations {
                     };
                 };
             };
+            default: components["responses"]["Error"];
+        };
+    };
+    listInboundForwarders: {
+        parameters: {
+            query?: {
+                everyone?: boolean;
+            };
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The addresses. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["InboundForwarder"][];
+                    };
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    linkInboundForwarder: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    email: string;
+                };
+            };
+        };
+        responses: {
+            /** @description Your linked addresses. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["InboundForwarder"][];
+                    };
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            400: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    unlinkInboundForwarder: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                email: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            202: components["responses"]["MissionHeld"];
+            /** @description Unlinked. */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    listAIReceipts: {
+        parameters: {
+            query?: {
+                status?: "matched" | "needs_review" | "ignored";
+            };
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The receipts. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["AIReceipt"][];
+                    };
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    assignAIReceipt: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** Format: uuid */
+                    account_id: string;
+                };
+            };
+        };
+        responses: {
+            /** @description Assigned. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        id: string;
+                        /** @enum {string} */
+                        status: "matched" | "ignored";
+                    };
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            400: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    ignoreAIReceipt: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Ignored. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        id: string;
+                        /** @enum {string} */
+                        status: "matched" | "ignored";
+                    };
+                };
+            };
+            202: components["responses"]["MissionHeld"];
             default: components["responses"]["Error"];
         };
     };
@@ -65948,6 +67252,109 @@ export interface operations {
                 };
             };
             202: components["responses"]["MissionHeld"];
+            default: components["responses"]["Error"];
+        };
+    };
+    listFlagGroups: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The groups. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["FlagGroup"][];
+                    };
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    setFlagGroup: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                group: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    holdout: number;
+                };
+            };
+        };
+        responses: {
+            /** @description The group. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FlagGroup"];
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            default: components["responses"]["Error"];
+        };
+    };
+    getFlagGroupHoldout: {
+        parameters: {
+            query?: {
+                /** @description The goal: an event name. */
+                event?: string;
+                /** @description The goal: a page path (a trailing * for a section). One of event or page. */
+                page?: string;
+                days?: number;
+            };
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                group: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The comparison. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        group: string;
+                        holdout: number;
+                        goal: components["schemas"]["ABTestGoal"];
+                        /** @enum {string} */
+                        metric: "conversion" | "count" | "value";
+                        /** @description The holdout first, then everyone_else. */
+                        arms: components["schemas"]["ABTestArm"][];
+                        /** @description Everyone else against the holdout: the lift is what the group's changes did together. */
+                        comparison: components["schemas"]["ABTestComparison"] | null;
+                        /** Format: date-time */
+                        from: string;
+                        /** Format: date-time */
+                        to: string;
+                    };
+                };
+            };
             default: components["responses"]["Error"];
         };
     };
@@ -71092,6 +72499,8 @@ export interface operations {
             query?: {
                 /** @description Only records of this brand: its id or handle, none for records shared by every brand, or all (the default). */
                 brand?: components["parameters"]["Brand"];
+                /** @description A person's record id: mark what they have reached (404 if it isn't a person here). */
+                record?: string;
             };
             header?: never;
             path: {
@@ -72576,6 +73985,35 @@ export interface operations {
             202: components["responses"]["MissionHeld"];
             400: components["responses"]["Error"];
             404: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    switchOverPartnerProgram: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                /** @description A program's id or slug. */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The program. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PartnerProgram"];
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
             default: components["responses"]["Error"];
         };
     };
@@ -75815,72 +77253,6 @@ export interface operations {
             };
         };
     };
-    webhook_project_created: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["WebhookEvent"];
-            };
-        };
-        responses: {
-            /** @description Any 2xx answer means received; anything else is retried. */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-        };
-    };
-    webhook_project_updated: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["WebhookEvent"];
-            };
-        };
-        responses: {
-            /** @description Any 2xx answer means received; anything else is retried. */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-        };
-    };
-    webhook_project_deleted: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["WebhookEvent"];
-            };
-        };
-        responses: {
-            /** @description Any 2xx answer means received; anything else is retried. */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-        };
-    };
     webhook_mission_created: {
         parameters: {
             query?: never;
@@ -76102,6 +77474,182 @@ export interface operations {
         };
     };
     webhook_mission_action_rejected: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["WebhookEvent"];
+            };
+        };
+        responses: {
+            /** @description Any 2xx answer means received; anything else is retried. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    webhook_playbook_started: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["WebhookEvent"];
+            };
+        };
+        responses: {
+            /** @description Any 2xx answer means received; anything else is retried. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    webhook_playbook_automation_created: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["WebhookEvent"];
+            };
+        };
+        responses: {
+            /** @description Any 2xx answer means received; anything else is retried. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    webhook_playbook_automation_updated: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["WebhookEvent"];
+            };
+        };
+        responses: {
+            /** @description Any 2xx answer means received; anything else is retried. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    webhook_playbook_automation_approved: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["WebhookEvent"];
+            };
+        };
+        responses: {
+            /** @description Any 2xx answer means received; anything else is retried. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    webhook_playbook_automation_paused: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["WebhookEvent"];
+            };
+        };
+        responses: {
+            /** @description Any 2xx answer means received; anything else is retried. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    webhook_playbook_automation_held: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["WebhookEvent"];
+            };
+        };
+        responses: {
+            /** @description Any 2xx answer means received; anything else is retried. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    webhook_playbook_automation_ran: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["WebhookEvent"];
+            };
+        };
+        responses: {
+            /** @description Any 2xx answer means received; anything else is retried. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    webhook_playbook_automation_deleted: {
         parameters: {
             query?: never;
             header?: never;

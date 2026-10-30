@@ -339,7 +339,7 @@ func handleProblem(h string) string {
 // brand's handle is the part of the app's URLs after the workspace, before
 // the page, so it can't be one of them. TestBrandHandlesAreNotPages keeps
 // the two lists the same.
-var pageNames = []string{"overview", "get-started", "setup", "ai", "ai-usage", "ai-accounts", "tools", "reports", "analytics", "tracking", "links", "seo", "seo-overview", "audits", "fixes", "experiments", "keywords", "ai-visibility", "backlinks", "competitors", "reddit", "social", "ads", "partners", "visitors", "inbox", "missions", "playbooks", "outcomes", "sequences", "link-building", "news", "infrastructure", "mailboxes", "domains", "warmup", "servers", "allocation", "lifecycle", "emails", "broadcasts", "journeys", "rules", "automations", "templates", "topics", "providers", "people", "leads", "lists", "suppression", "knowledge", "company", "brands", "ideal-customers", "workspace", "members", "alerts", "digests", "senders", "connectors", "webhooks", "tokens", "logs", "audit", "instance", "account", "email-finder", "lead-finder", "reviews", "flags", "channels", "ab-tests", "support", "help-centre"}
+var pageNames = []string{"overview", "get-started", "setup", "ai", "ai-usage", "ai-accounts", "tools", "reports", "analytics", "tracking", "links", "seo", "seo-overview", "audits", "fixes", "experiments", "keywords", "ai-visibility", "backlinks", "competitors", "reddit", "reddit-campaigns", "social", "ads", "partners", "visitors", "inbox", "missions", "playbooks", "outcomes", "sequences", "link-building", "news", "infrastructure", "mailboxes", "domains", "warmup", "servers", "allocation", "lifecycle", "emails", "broadcasts", "journeys", "rules", "automations", "templates", "topics", "providers", "people", "leads", "lists", "suppression", "knowledge", "company", "brands", "ideal-customers", "workspace", "members", "alerts", "digests", "senders", "connectors", "webhooks", "tokens", "logs", "audit", "instance", "account", "email-finder", "lead-finder", "reviews", "flags", "channels", "ab-tests", "support", "help-centre"}
 
 // handleFrom makes a handle from a brand's name: "Repocket Games" becomes
 // "repocket-games".
@@ -839,8 +839,6 @@ func (s *Server) updateBrandContext(w http.ResponseWriter, r *http.Request) {
 
 // brandMembers names records to move into or out of a brand.
 type brandMembers struct {
-	// Ignored: projects were removed. Accepted so older clients still work.
-	ProjectIDs  []string `json:"project_ids"`
 	Domains     []string `json:"domains"`
 	MailboxIDs  []string `json:"mailbox_ids"`
 	LeadListIDs []string `json:"lead_list_ids"`

@@ -6845,6 +6845,103 @@ export function createServer({ client: gtm, workspace, readOnly = false, mission
     ({ playbook_id, ...body }) => call(() => gtm.POST("/v1/workspaces/{ws}/playbooks/{id}/runs", { params: { path: { ws, id: playbook_id } }, body })),
   );
 
+  const automationSettings = {
+    name: z.string().min(1).max(200).optional(),
+    brand_id: id.nullable().optional().describe("Run for one brand only, taking only its events. Null for every brand."),
+    inputs: z.record(z.string(), z.string().max(500)).optional().describe("Values for the playbook's inputs, by name (get_playbook lists them)."),
+    kind: z.enum(["schedule", "event"]).optional().describe("schedule: every day, week or month. event: when an event from the webhook catalog happens."),
+    cadence: z.enum(["daily", "weekly", "monthly"]).nullable().optional(),
+    run_hour: z.number().int().min(0).max(23).optional().describe("UTC hour schedules and daily gathered events run at."),
+    run_weekday: z.number().int().min(0).max(6).optional().describe("Weekly: 0 is Sunday."),
+    run_monthday: z.number().int().min(1).max(28).optional(),
+    event_type: z.string().max(100).nullable().optional().describe("An event type from list_webhook_events, such as backlink.lost."),
+    gather: z.enum(["each", "hourly", "daily"]).optional().describe("each: a run per event, at most daily_cap a day. hourly, daily: the events gathered into one run."),
+    daily_cap: z.number().int().min(1).max(100).optional(),
+    mode: z.enum(["dry_run", "approve_writes", "autonomous"]).optional().describe("The mode each run's mission runs in. Defaults to approve_writes."),
+    runner: z.enum(["builtin", "external"]).optional().describe("builtin: Outflare's agent runs each mission. external: your own token does (the default for an agent)."),
+    max_spend_cents_per_run: z.number().int().min(0).nullable().optional(),
+    max_spend_cents_per_month: z.number().int().min(0).nullable().optional().describe("Reaching it holds the automation until a person looks."),
+  };
+
+  server.registerTool(
+    "list_playbook_automations",
+    {
+      title: "List playbook automations",
+      description: "Playbooks set to run by themselves on a schedule or an event, with their status (draft waits for a person's approval; held says why in held_reason), next run and this month's spend.",
+      inputSchema: { playbook_id: z.string().max(60).optional() },
+      annotations: read,
+    },
+    ({ playbook_id }) => call(() => gtm.GET("/v1/workspaces/{ws}/playbook-automations", { params: { path: { ws }, query: { playbook_id } } })),
+  );
+
+  server.registerTool(
+    "create_playbook_automation",
+    {
+      title: "Set a playbook to run on a schedule or an event",
+      description:
+        "Creates a draft automation; nothing runs until a person approves it in Outflare (agents can't). Left out settings come from the playbook's suggestion (get_playbook, automation). " +
+        "Each run is a mission from the playbook, approved with this mode and the spend limits; with your own token as runner, pick the runs up with use_mission.",
+      inputSchema: { playbook_id: z.string().min(1).max(60), ...automationSettings },
+      annotations: write,
+    },
+    (body) => call(() => gtm.POST("/v1/workspaces/{ws}/playbook-automations", { params: { path: { ws } }, body })),
+  );
+
+  server.registerTool(
+    "update_playbook_automation",
+    {
+      title: "Change a playbook automation",
+      description: "Anything but the name sends it back to draft, to wait for a person's approval again.",
+      inputSchema: { automation_id: id, ...automationSettings },
+      annotations: write,
+    },
+    ({ automation_id, ...body }) => call(() => gtm.PATCH("/v1/workspaces/{ws}/playbook-automations/{id}", { params: { path: { ws, id: automation_id } }, body })),
+  );
+
+  server.registerTool(
+    "pause_playbook_automation",
+    {
+      title: "Pause a playbook automation",
+      description: "Stops new runs; runs already started carry on. A person approves it again to turn it back on.",
+      inputSchema: { automation_id: id },
+      annotations: { ...write, idempotentHint: true },
+    },
+    ({ automation_id }) => call(() => gtm.POST("/v1/workspaces/{ws}/playbook-automations/{id}/pause", { params: { path: { ws, id: automation_id } } })),
+  );
+
+  server.registerTool(
+    "run_playbook_automation",
+    {
+      title: "Run an automation now",
+      description: "Starts a run of an active automation now, inside its approved limits, without moving its schedule. Answers with the run's mission.",
+      inputSchema: { automation_id: id },
+      annotations: write,
+    },
+    ({ automation_id }) => call(() => gtm.POST("/v1/workspaces/{ws}/playbook-automations/{id}/run", { params: { path: { ws, id: automation_id } } })),
+  );
+
+  server.registerTool(
+    "list_playbook_automation_runs",
+    {
+      title: "An automation's runs",
+      description: "The missions an automation started, newest first, with their status, progress and report.",
+      inputSchema: { automation_id: id },
+      annotations: read,
+    },
+    ({ automation_id }) => call(() => gtm.GET("/v1/workspaces/{ws}/playbook-automations/{id}/runs", { params: { path: { ws, id: automation_id } } })),
+  );
+
+  server.registerTool(
+    "delete_playbook_automation",
+    {
+      title: "Delete a playbook automation",
+      description: "No more runs. Its past runs stay as missions.",
+      inputSchema: { automation_id: id },
+      annotations: { ...write, destructiveHint: true, idempotentHint: true },
+    },
+    ({ automation_id }) => call(() => gtm.DELETE("/v1/workspaces/{ws}/playbook-automations/{id}", { params: { path: { ws, id: automation_id } } })),
+  );
+
   server.registerTool(
     "preview_kit",
     {
@@ -8403,7 +8500,10 @@ export function createServer({ client: gtm, workspace, readOnly = false, mission
       description:
         "Every automation in the workspace as one graph: what sets each rule and journey off (events, field changes, smart lists), the events rules emit, and what journeys touch (lists, sequences, tags, other journeys), with each node's volume for the last 7 days. " +
         "flags say what needs a look: loops, two journeys emailing the same people within a day, events nothing listens to, and live journeys whose trigger never fires. Use it to explain how a workspace's automations fit together before changing them.",
-      inputSchema: { brand: z.string().optional().describe("A brand's id or handle: only its automations and the shared ones.") },
+      inputSchema: {
+        brand: z.string().optional().describe("A brand's id or handle: only its automations and the shared ones."),
+        record: z.string().uuid().optional().describe("A person's record id: each node's reached says what they have to do with it (an event they did, a list they're in, a rule that fired for them, a journey they're in or went through)."),
+      },
       annotations: read,
     },
     (query) => call(() => gtm.GET("/v1/workspaces/{ws}/automation-map", { params: { path, query } })),

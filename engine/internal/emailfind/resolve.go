@@ -13,8 +13,9 @@ import (
 const highConfidence = 75
 
 // Resolve runs the full waterfall for a batch of people. Free, first-party
-// tiers run first: a proven first-party history, then the learned pattern
-// checked with the free built-in checks. Only when we cannot prove an address
+// tiers run first: a proven first-party history, then the data network
+// when the server has one, then the learned pattern checked with the free
+// built-in checks. Only when we cannot prove an address
 // and confidence stays low does it roll up to the workspace's own connected
 // verifier, which is BYO-key and billed to that workspace's account. Every
 // tier is logged to the training corpus. One item never spends another's
@@ -26,7 +27,7 @@ func (s *Service) Resolve(ctx context.Context, ws string, req FindRequest) (Find
 	}
 	hasVerifier := set.IntegrationID != nil
 
-	native, err := FindEmails(ctx, s.Pool, s.Resolver, ws, req)
+	native, err := s.Find(ctx, ws, req)
 	if err != nil {
 		return FindResult{}, err
 	}
@@ -44,11 +45,13 @@ func (s *Service) waterfall(ctx context.Context, ws string, r ItemResult, hasVer
 		_ = logCheck(ctx, s.Pool, ws, r.Email, "history", connectors.Deliverable, intPtr(r.Confidence), nil)
 		return r
 	}
-	if r.Code == CodeNotFound || r.Email == "" {
+	if r.Code == CodeNotFound || r.Code == CodeUndeliverable || r.Email == "" {
 		return r
 	}
-	_ = logCheck(ctx, s.Pool, ws, r.Email, EvidencePattern, "", intPtr(r.Confidence),
-		map[string]any{"guess": true})
+	if r.Evidence != EvidenceNetwork { // the network's answer is logged already
+		_ = logCheck(ctx, s.Pool, ws, r.Email, EvidencePattern, "", intPtr(r.Confidence),
+			map[string]any{"guess": true})
+	}
 
 	// Free built-in check: syntax, MX, disposable, role. Can only prove an
 	// address undeliverable, never that it exists.

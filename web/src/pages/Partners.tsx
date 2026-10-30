@@ -643,6 +643,34 @@ function Rewards({ ws, program, canManage }: { ws: string; program: PartnerProgr
   );
 }
 
+// SwitchOver warns, while the platform a program was imported from still
+// pays it, that its imported commissions are paid there, and records the
+// day that stops.
+function SwitchOver({ ws, program, canManage, onDone }: { ws: string; program: PartnerProgram; canManage: boolean; onDone: () => void }) {
+  const [at, setAt] = useState(program.switched_over_at);
+  if (!program.imported_from || at) return null;
+  const from = program.imported_from === "tolt" ? "Tolt" : program.imported_from;
+  async function switchOver() {
+    const r = await ask({
+      title: `Stop paying through ${from}?`,
+      body: `Only once ${from} no longer pays this program. Its imported commissions that are still unpaid are then approved after the hold and paid here like any other.`,
+      choices: [{ label: "Cancel", value: "cancel", variant: "ghost" }, { label: "Switch over", value: "ok" }],
+    });
+    if (r?.choice !== "ok") return;
+    const { data, error } = await api.POST("/v1/workspaces/{ws}/partner-programs/{id}/switch-over", { params: { path: { ws, id: program.id } } });
+    if (error || !data) return toast(errorMessage(error), "error");
+    setAt(data.switched_over_at);
+    toast(`Switched over from ${from}. Imported commissions are paid here from now on.`);
+    onDone();
+  }
+  return (
+    <div className="flex flex-wrap items-center gap-3 rounded-md border border-amber-500/40 bg-amber-500/10 p-3 text-[13px]">
+      <span className="min-w-0 flex-1">{from} still pays this program. Commissions imported from {from} keep its status and are never put in a payout here, so nobody is paid twice. New ones Outflare credits are paid here.</span>
+      {canManage && <Button variant="ghost" onClick={switchOver}>Switch over</Button>}
+    </div>
+  );
+}
+
 function Payouts({ ws, program, canManage }: { ws: string; program: PartnerProgram; canManage: boolean }) {
   const get = useCallback(async (before?: string): Promise<Page<PartnerPayout>> => {
     const { data, error } = await api.GET("/v1/workspaces/{ws}/partner-payouts", { params: { path: { ws }, query: { program: program.id, limit: pageSize, ...(before ? { before } : {}) } } });
@@ -705,6 +733,7 @@ function Payouts({ ws, program, canManage }: { ws: string; program: PartnerProgr
   return (
     <div className="space-y-3">
       <p className="text-[13px] text-muted-foreground">Outflare never holds or sends money. Make the payouts that are due, pay them from your own account or payout tool (the partner_payout.created webhook can start it), then mark each paid with its reference.</p>
+      <SwitchOver ws={ws} program={program} canManage={canManage} onDone={load} />
       <DataTable
         columns={columns}
         data={list}
@@ -927,6 +956,19 @@ const importReasons: Record<string, string> = {
   already_referred: "another partner already has this customer here",
   status_conflict: "rejected in Tolt after it was approved here",
   unreadable: "Tolt's answer couldn't be read, so this kind didn't come over; the others did",
+  customer_id_taken: "another customer here already has this Tolt customer id",
+  too_many_groups: "the program already has 50 groups",
+  group_missing: "its group didn't come over",
+  flow_condition_unsupported: "a flow with a condition Outflare can't read yet: add it on the Flows tab",
+  flow_action_unsupported: "a flow whose action Outflare can't read yet: add it on the Flows tab",
+  flow_trigger_unsupported: "a flow whose trigger Outflare can't read yet: add it on the Flows tab",
+  flow_duration_unsupported: "a flow whose duration Outflare can't read yet: add it on the Flows tab",
+  flow_approval_unsupported: "a flow whose approval Outflare can't read yet: add it on the Flows tab",
+  flow_custom_rate_unsupported: "a flow with a custom rate Outflare can't read yet: add it on the Flows tab",
+  flow_invalid: "a flow Outflare can't accept as it is: add it on the Flows tab",
+  groups_unavailable: "Tolt didn't list groups for this account, so none came over",
+  flows_unavailable: "Tolt didn't list flows for this account, so none came over: add them on the Flows tab",
+  custom_rate_partner_missing: "a flow's custom rate for a partner who didn't come over (the flow came over without it)",
   partner_id_missing: "a promo code that names no partner where Outflare reads it: send us the fields below",
   partners_unlisted: "Tolt reported more partners than came over",
 };
@@ -1017,7 +1059,7 @@ function ImportSection({ ws, program: p, canManage }: { ws: string; program: Par
           </div>
           {r.error && <p className="text-destructive">{r.error}</p>}
           <p className="text-muted-foreground">
-            {r.summary.kinds.filter((k) => k.kind !== "links" && (k.seen > 0 || k.reported)).map((k) => `${k.kind.replace("_", " ")}: ${k.seen} read${k.reported ? ` of ${k.reported} Tolt reports` : ""}, ${k.created} new, ${k.updated} updated${k.skipped ? `, ${k.skipped} skipped` : ""}`).join(" · ") || "Nothing read yet."}
+            {r.summary.kinds.filter((k) => k.kind !== "links" && (k.seen > 0 || k.reported)).map((k) => `${k.kind.replace("_", " ")}: ${k.seen} read${k.reported ? ` of ${k.reported} Tolt reports` : ""}, ${k.created} new, ${k.updated} updated${k.skipped ? `, ${k.skipped} skipped` : ""}${k.by_status ? ` (${Object.entries(k.by_status).map(([s, n]) => `${n} ${s}`).join(", ")})` : ""}`).join(" · ") || "Nothing read yet."}
           </p>
           {r.summary.issues.length > 0 && (
             <details>
@@ -1201,6 +1243,7 @@ function Groups({ ws, program, canManage, onChanged }: { ws: string; program: Pa
     { id: "name", header: "Group", accessorFn: (g) => g.name, cell: ({ row: { original: g } }) => <span className="flex items-center gap-2"><span className="font-medium">{g.name}</span>{g.default && <Badge tone="blue">default</Badge>}</span> },
     { id: "partners", header: "Partners", accessorFn: (g) => g.partners },
     { id: "rate", header: "Rate", accessorFn: (g) => rateOf(g)?.percent_bp ?? 0, cell: ({ row: { original: g } }) => { const r = rateOf(g); return r ? ruleText(r, p.currency) : <span className="text-muted-foreground">The program's</span>; } },
+    { id: "signup", header: "Sign-up link", enableSorting: false, cell: ({ row: { original: g } }) => <CopyButton text={g.signup_url} label="Copy link" /> },
     ...(canManage ? [{
       id: "actions", header: "", enableSorting: false,
       cell: ({ row: { original: g } }: { row: { original: PartnerGroup } }) => (
@@ -1217,7 +1260,7 @@ function Groups({ ws, program, canManage, onChanged }: { ws: string; program: Pa
   ];
   return (
     <div className="space-y-3">
-      <p className="text-[13px] text-muted-foreground">Each partner is in one group at most. New partners join the default group, and a group's rate replaces the program's for its partners. Move partners from the Partners tab: pick them, then Move to.</p>
+      <p className="text-[13px] text-muted-foreground">Each partner is in one group at most. New partners join the default group, and a group's rate replaces the program's for its partners. Move partners from the Partners tab: pick them, then Move to. A group's sign-up link opens the portal's application form, and partners who apply through it join that group, so share it only with those you'd put there.</p>
       {p.groups.length === 0 ? (
         <Empty title="No groups yet" action={canManage && <Button onClick={create}>New group</Button>}>
           Groups give some partners a different rate, such as Gold for your best affiliates or Agencies.

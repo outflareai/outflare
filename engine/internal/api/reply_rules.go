@@ -59,17 +59,10 @@ func (s *Server) getReplyRules(w http.ResponseWriter, r *http.Request) {
 func (s *Server) setReplyRules(w http.ResponseWriter, r *http.Request) {
 	a := accessFrom(r.Context())
 	var req struct {
-		// Refused: projects were removed. Ignoring it would change the
-		// workspace's rules instead.
-		ProjectID  *string       `json:"project_id"`
 		SequenceID *string       `json:"sequence_id"`
 		Rules      inbox.RuleSet `json:"rules"`
 	}
 	if !decode(w, r, &req) {
-		return
-	}
-	if req.ProjectID != nil {
-		writeError(w, r, http.StatusBadRequest, "invalid_request", "project_id: projects were removed; set rules for the workspace or for a sequence (sequence_id)")
 		return
 	}
 	if req.Rules == nil {

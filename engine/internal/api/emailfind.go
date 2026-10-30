@@ -63,7 +63,7 @@ func (s *Server) emailFinderFind(w http.ResponseWriter, r *http.Request) {
 		writeError(w, r, http.StatusBadRequest, "invalid_request", "items must hold 1 to 50 people")
 		return
 	}
-	out, err := emailfind.FindEmails(r.Context(), s.emailFinder.Pool, s.emailFinder.Resolver, accessFrom(r.Context()).WorkspaceID, req)
+	out, err := s.emailFinder.Find(r.Context(), accessFrom(r.Context()).WorkspaceID, req)
 	if err != nil {
 		s.internal(w, r, err)
 		return

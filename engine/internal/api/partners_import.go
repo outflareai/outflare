@@ -81,6 +81,9 @@ type partnerImportCount struct {
 	Updated   int    `json:"updated"`
 	Unchanged int    `json:"unchanged"`
 	Skipped   int    `json:"skipped"`
+	// ByStatus counts the partners read by their status there (active,
+	// pending, rejected, suspended), to check against the platform.
+	ByStatus map[string]int `json:"by_status,omitempty"`
 	// Reported is how many the platform said its lists hold, when it says,
 	// to reconcile with Seen.
 	Reported int `json:"reported,omitempty"`
@@ -101,9 +104,12 @@ type partnerImportIssue struct {
 }
 
 type partnerImportProgress struct {
-	Kind  int    `json:"kind"`  // index into connectors.PartnerImportKinds
-	After string `json:"after"` // the page cursor
-	Steps int    `json:"steps"`
+	Kind int `json:"kind"` // index into connectors.PartnerImportKinds
+	// KindName is the kind being read; an import saved before it was
+	// kept counted Kind in connectors.LegacyPartnerImportKinds.
+	KindName string `json:"kind_name,omitempty"`
+	After    string `json:"after"` // the page cursor
+	Steps    int    `json:"steps"`
 	// Codes is each partner's code, from their first link, until the
 	// partners are read.
 	Codes map[string]string `json:"codes,omitempty"`
@@ -445,18 +451,31 @@ func (r *partnerImportRun) step(ctx context.Context, program string, integration
 	}
 	deadline := time.Now().Add(partnerImportStep)
 	kinds := connectors.PartnerImportKinds
+	if r.progress.KindName == "" && r.progress.Kind > 0 && r.progress.Kind < len(connectors.LegacyPartnerImportKinds) {
+		r.progress.KindName = connectors.LegacyPartnerImportKinds[r.progress.Kind]
+	}
+	if i := slices.Index(kinds, r.progress.KindName); i >= 0 {
+		r.progress.Kind = i
+	}
 	for r.progress.Kind < len(kinds) {
 		if time.Now().After(deadline) {
 			return false, nil
 		}
 		kind := kinds[r.progress.Kind]
 		page, next, err := r.imp.PartnerPage(ctx, r.o.Client, r.o.Creds, r.source, kind, r.progress.After)
+		if errors.Is(err, connectors.ErrPartnerKindUnavailable) {
+			r.warn(kind, "", kind+"_unavailable")
+			page, next, err = connectors.PartnerObjects{}, "", nil
+		}
 		if err != nil {
 			if !r.kindFailed(ctx, kind, err, last) {
 				return false, err
 			}
 			r.progress.Kind++
 			r.progress.After = ""
+			if r.progress.Kind < len(kinds) {
+				r.progress.KindName = kinds[r.progress.Kind]
+			}
 			continue
 		}
 		if err := r.page(ctx, kind, page); err != nil {
@@ -470,6 +489,9 @@ func (r *partnerImportRun) step(ctx context.Context, program string, integration
 		r.progress.After = next
 		if next == "" {
 			r.progress.Kind++
+			if r.progress.Kind < len(kinds) {
+				r.progress.KindName = kinds[r.progress.Kind]
+			}
 		}
 	}
 	return true, nil
@@ -747,15 +769,19 @@ func (r *partnerImportRun) missingPartners(ctx context.Context, page connectors.
 // page stores one page, each object in its own transaction, so one that
 // can't come over never holds up the rest.
 func (r *partnerImportRun) page(ctx context.Context, kind string, page connectors.PartnerObjects) error {
-	r.sum.count(kind).Seen += page.Len()
+	c := r.sum.count(kind)
+	c.Seen += page.Len()
 	for _, p := range page.Partners {
+		if c.ByStatus == nil {
+			c.ByStatus = map[string]int{}
+		}
+		c.ByStatus[p.Status]++
 		if r.progress.Listed == nil {
 			r.progress.Listed = map[string]bool{}
 		}
 		r.progress.Listed[p.ID] = true
 	}
 	if page.Reported != nil {
-		c := r.sum.count(kind)
 		if page.ReportedFor == "" {
 			c.Reported += *page.Reported
 		} else {
@@ -789,6 +815,18 @@ func (r *partnerImportRun) page(ctx context.Context, kind string, page connector
 		return err
 	}
 	switch kind {
+	case connectors.PartnerKindGroups:
+		for _, g := range page.Groups {
+			if err := one(func(tx pgx.Tx) (string, error) { return r.group(ctx, tx, g) }, g.ID); err != nil {
+				return err
+			}
+		}
+	case connectors.PartnerKindFlows:
+		for _, f := range page.Flows {
+			if err := one(func(tx pgx.Tx) (string, error) { return r.flow(ctx, tx, f) }, f.ID); err != nil {
+				return err
+			}
+		}
 	case connectors.PartnerKindLinks:
 		for _, l := range page.Links {
 			r.link(l)
@@ -892,9 +930,13 @@ func (r *partnerImportRun) partner(ctx context.Context, tx pgx.Tx, p connectors.
 		return "", err
 	}
 	if ok {
-		// Bring over a status change, unless someone changed it here.
+		// Bring over a status or group change, unless someone changed it here.
 		tag, err := tx.Exec(ctx, `UPDATE partner_memberships SET status = $2, updated_at = now() WHERE id = $1 AND status <> $2 AND source = 'import'`, id, p.Status)
-		if err != nil || tag.RowsAffected() == 0 {
+		if err != nil {
+			return "", err
+		}
+		moved, err := r.partnerGroup(ctx, tx, id, p.GroupID, true)
+		if err != nil || (tag.RowsAffected() == 0 && !moved) {
 			return "unchanged", err
 		}
 		return "updated", nil
@@ -940,6 +982,9 @@ func (r *partnerImportRun) partner(ctx context.Context, tx pgx.Tx, p connectors.
 		if _, err := tx.Exec(ctx, `UPDATE partner_memberships SET created_at = $2 WHERE id = $1`, id, p.Created); err != nil {
 			return "", err
 		}
+	}
+	if _, err := r.partnerGroup(ctx, tx, id, p.GroupID, false); err != nil {
+		return "", err
 	}
 	return "created", r.keep(ctx, tx, "partner", p.ID, id)
 }
@@ -1097,10 +1142,10 @@ func (r *partnerImportRun) transaction(ctx context.Context, tx pgx.Tx, t connect
 	result := "unchanged"
 	var sale string
 	err = tx.QueryRow(ctx, `INSERT INTO partner_conversions (workspace_id, program_id, referral_id, record_id, type, recurring, external_id,
-			amount_cents, currency, source, occurred_at)
-		SELECT $1, $2, f.id, f.record_id, 'sale', $4, $5, $6, $7, 'import', $8 FROM partner_referrals f WHERE f.id = $3
+			amount_cents, currency, source, occurred_at, payment_source, billing_interval)
+		SELECT $1, $2, f.id, f.record_id, 'sale', $4, $5, $6, $7, 'import', $8, $9, $10 FROM partner_referrals f WHERE f.id = $3
 		ON CONFLICT (program_id, type, external_id) WHERE external_id <> '' DO NOTHING RETURNING id::text`,
-		r.ws, r.prog.ID, referral, t.Recurring, ext, max(t.AmountCents, 0), cur, at).Scan(&sale)
+		r.ws, r.prog.ID, referral, t.Recurring, ext, max(t.AmountCents, 0), cur, at, t.PaymentSource, t.Interval).Scan(&sale)
 	switch {
 	case err == nil:
 		result = "created"
@@ -1281,4 +1326,137 @@ func (r *partnerImportRun) payInPayout(ctx context.Context, tx pgx.Tx, c connect
 	}
 	_, err = tx.Exec(ctx, `UPDATE partner_rewards SET status = 'paid', payout_id = $2, updated_at = now() WHERE id = $1`, id, payout)
 	return err
+}
+
+// group brings over a platform group: one of the program's groups with the
+// same name, else a new one. The platform's default group becomes the
+// program's default when it has none.
+func (r *partnerImportRun) group(ctx context.Context, tx pgx.Tx, g connectors.ImportGroup) (string, error) {
+	name := strings.TrimSpace(cutUTF8(g.Name, 80))
+	if g.ID == "" || name == "" {
+		return "", importSkip("incomplete")
+	}
+	if _, ok, err := r.ref(ctx, tx, "group", g.ID); err != nil || ok {
+		return "unchanged", err
+	}
+	var id string
+	result := "unchanged"
+	err := tx.QueryRow(ctx, `SELECT id::text FROM partner_groups WHERE program_id = $1 AND lower(name) = lower($2)`, r.prog.ID, name).Scan(&id)
+	if errors.Is(err, pgx.ErrNoRows) {
+		var n int
+		if err := tx.QueryRow(ctx, `SELECT count(*) FROM partner_groups WHERE program_id = $1`, r.prog.ID).Scan(&n); err != nil {
+			return "", err
+		}
+		if n >= maxPartnerGroups {
+			return "", importSkip("too_many_groups")
+		}
+		err = tx.QueryRow(ctx, `INSERT INTO partner_groups (workspace_id, program_id, name) VALUES ($1, $2, $3) RETURNING id::text`, r.ws, r.prog.ID, name).Scan(&id)
+		result = "created"
+	}
+	if err != nil {
+		return "", err
+	}
+	if g.Default {
+		if _, err := tx.Exec(ctx, `UPDATE partner_programs SET default_group_id = $2 WHERE id = $1 AND default_group_id IS NULL`, r.prog.ID, id); err != nil {
+			return "", err
+		}
+	}
+	return result, r.keep(ctx, tx, "group", g.ID, id)
+}
+
+// partnerGroup puts an imported partner in their platform group's group
+// here. On a later run (again) it follows the platform only for partners
+// the import made.
+func (r *partnerImportRun) partnerGroup(ctx context.Context, tx pgx.Tx, member, platformGroup string, again bool) (bool, error) {
+	if platformGroup == "" {
+		return false, nil
+	}
+	group, ok, err := r.ref(ctx, tx, "group", platformGroup)
+	if err != nil || !ok {
+		return false, err
+	}
+	q := `UPDATE partner_memberships SET group_id = $2, updated_at = now() WHERE id = $1 AND group_id IS DISTINCT FROM $2::uuid`
+	if again {
+		q += ` AND source = 'import'`
+	}
+	tag, err := tx.Exec(ctx, q, member, group)
+	return tag.RowsAffected() > 0, err
+}
+
+// flow brings over a platform flow as a flow here, after the program's
+// own. One with anything Outflare can't map isn't imported at all, so
+// nothing pays that shouldn't; the issue says what to add by hand.
+func (r *partnerImportRun) flow(ctx context.Context, tx pgx.Tx, f connectors.ImportFlow) (string, error) {
+	if f.ID == "" {
+		return "", importSkip("incomplete")
+	}
+	if _, ok, err := r.ref(ctx, tx, "flow", f.ID); err != nil || ok {
+		return "unchanged", err
+	}
+	if len(f.Unsupported) > 0 {
+		slices.Sort(f.Unsupported)
+		return "", importSkip("flow_" + slices.Compact(f.Unsupported)[0] + "_unsupported")
+	}
+	in := partnerRuleIn{Trigger: f.Trigger, Side: "partner", Kind: f.Kind, PercentBP: f.PercentBP, AmountCents: f.AmountCents,
+		Recurrence: f.Recurrence, Months: f.Months, Name: cutUTF8(f.Name, 120), Conditions: f.Conditions, Approval: f.Approval,
+		ApprovalDays: f.ApprovalDays}
+	if f.GroupID != "" {
+		g, ok, err := r.ref(ctx, tx, "group", f.GroupID)
+		if err != nil {
+			return "", err
+		}
+		if !ok {
+			return "", importSkip("group_missing")
+		}
+		in.Group = &g
+	}
+	if f.Kind == "group" {
+		g, ok, err := r.ref(ctx, tx, "group", f.TargetGroupID)
+		if err != nil {
+			return "", err
+		}
+		if !ok {
+			return "", importSkip("group_missing")
+		}
+		in.TargetGroupID = &g
+	}
+	for _, o := range f.Overrides {
+		if o.PartnerID != nil {
+			m, ok, err := r.ref(ctx, tx, "partner", *o.PartnerID)
+			if err != nil {
+				return "", err
+			}
+			if !ok {
+				r.warn("flows", f.ID, "custom_rate_partner_missing")
+				continue
+			}
+			o.PartnerID = &m
+		}
+		in.Overrides = append(in.Overrides, o)
+	}
+	groups, members := []string{}, []string{}
+	rows, err := tx.Query(ctx, `SELECT id::text FROM partner_groups WHERE program_id = $1`, r.prog.ID)
+	if err != nil {
+		return "", err
+	}
+	if groups, err = pgx.CollectRows(rows, pgx.RowTo[string]); err != nil {
+		return "", err
+	}
+	for _, o := range in.Overrides {
+		if o.PartnerID != nil {
+			members = append(members, *o.PartnerID)
+		}
+	}
+	rules, err := checkPartnerRules([]partnerRuleIn{in}, groups, members)
+	if errors.As(err, new(errInvalid)) {
+		return "", importSkip("flow_invalid")
+	}
+	if err != nil {
+		return "", err
+	}
+	ids, err := insertPartnerRules(ctx, tx, r.ws, r.prog.ID, rules)
+	if err != nil {
+		return "", err
+	}
+	return "created", r.keep(ctx, tx, "flow", f.ID, ids[0])
 }

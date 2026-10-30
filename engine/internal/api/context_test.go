@@ -93,14 +93,13 @@ func TestCompanyContextAndMemories(t *testing.T) {
 	reader.must(403, "PATCH", base+"/context", map[string]any{"company": "Nope"})
 	owner.must(201, "POST", base+"/brands", map[string]any{"name": "Agencies"})
 	owner.must(201, "POST", base+"/memories", map[string]any{"text": "Agencies hate long emails", "brand_id": "agencies"})
-	owner.must(400, "POST", base+"/api-tokens", map[string]any{"name": "p", "scopes": []string{"workspace.read"}, "project_id": bid})
 	btok := owner.must(201, "POST", base+"/api-tokens", map[string]any{"name": "b", "scopes": []string{"workspace.read", "context.manage"}, "brand": "fintech"})
 	agent := &client{t: t, h: h, bearer: btok["token"].(string)}
 	if n := agent.must(200, "GET", base+"/memories", nil)["total"]; n != 2.0 {
 		t.Fatalf("brand token sees %v memories", n)
 	}
 	mine := agent.must(201, "POST", base+"/memories", map[string]any{"text": "CFOs reply on Tuesdays"})
-	if mine["brand_id"] != bid || mine["project_id"] != nil {
+	if mine["brand_id"] != bid {
 		t.Fatalf("brand token saved outside its brand: %v", mine)
 	}
 	agent.must(403, "DELETE", base+"/memories/"+id, nil)

@@ -86,7 +86,50 @@ export function registerFlagTools(
     (body) => call(() => gtm.POST("/v1/workspaces/{ws}/flags/evaluate", { params: { path: path() }, body })),
   );
 
+  server.registerTool(
+    "list_flag_groups",
+    {
+      title: "List exclusion groups",
+      description: "Every exclusion group: its flags and the slice of visitors each owns, its holdout, and the share still free.",
+      inputSchema: {},
+      annotations: read,
+    },
+    () => call(() => gtm.GET("/v1/workspaces/{ws}/flag-groups", { params: { path: path() } })),
+  );
+
+  server.registerTool(
+    "get_flag_group_holdout",
+    {
+      title: "Compare an exclusion group's holdout with everyone else",
+      description:
+        "What the group's changes did together: visitors kept out of every flag in the group (its holdout) against everyone else, on a goal, over the last days. The lift is the combined effect.",
+      inputSchema: {
+        group: z.string().describe("The group's name."),
+        event: z.string().optional().describe("The goal: an event name such as signup_started."),
+        page: z.string().optional().describe("Or a page path, such as /thanks (a trailing * for a section)."),
+        days: z.number().int().min(1).max(180).optional().describe("How far back (default 28)."),
+      },
+      annotations: read,
+    },
+    ({ group, event, page, days }) => {
+      if (!event && !page) return { isError: true, content: [{ type: "text" as const, text: "Give the goal: event or page." }] };
+      return call(() => gtm.GET("/v1/workspaces/{ws}/flag-groups/{group}/holdout", { params: { path: { ...path(), group }, query: { event, page, days } } }));
+    },
+  );
+
   if (readOnly) return;
+
+  server.registerTool(
+    "set_flag_group_holdout",
+    {
+      title: "Set an exclusion group's holdout",
+      description:
+        "Keep a percent of the group's visitors (0 to 50) out of every flag in it, so they see the default experience and the group's combined effect can be measured against them. It can't reach into a flag's slice.",
+      inputSchema: { group: z.string().describe("The group's name."), holdout: z.number().int().min(0).max(50) },
+      annotations: write,
+    },
+    ({ group, holdout }) => call(() => gtm.PUT("/v1/workspaces/{ws}/flag-groups/{group}", { params: { path: { ...path(), group } }, body: { holdout } })),
+  );
 
   server.registerTool(
     "create_flag",

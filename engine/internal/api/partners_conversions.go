@@ -8,6 +8,7 @@ import (
 	"math"
 	"net/http"
 	"net/url"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -34,6 +35,9 @@ import (
 // is answered with credited false and a reason, never an error, so a
 // backend can report every sale and let Outflare pick the referred ones.
 
+// paymentSourceRE is a payment provider's name, such as stripe.
+var paymentSourceRE = regexp.MustCompile(`^[a-z0-9][a-z0-9_.-]{0,39}$`)
+
 // conversionInput is a conversion as the API, a postback or an import
 // reports it.
 type conversionInput struct {
@@ -58,7 +62,12 @@ type conversionInput struct {
 	// customer's own visits do once the product identifies them.
 	AnonymousID string  `json:"anonymous_id"`
 	OccurredAt  *string `json:"occurred_at"`
-	at          time.Time
+	// PaymentSource is the payment provider (stripe, paddle, ...); Tolt
+	// calls it source. Interval is how it bills: day, week, month, year
+	// or one_time.
+	PaymentSource string `json:"payment_source"`
+	Interval      string `json:"interval"`
+	at            time.Time
 }
 
 func (in *conversionInput) check(now time.Time) error {
@@ -70,7 +79,15 @@ func (in *conversionInput) check(now time.Time) error {
 	in.Currency = strings.ToUpper(strings.TrimSpace(in.Currency))
 	in.Ref, in.PromoCode = strings.TrimSpace(in.Ref), strings.TrimSpace(in.PromoCode)
 	in.CustomerID, in.ExternalID, in.RefundOf = strings.TrimSpace(in.CustomerID), strings.TrimSpace(in.ExternalID), strings.TrimSpace(in.RefundOf)
+	in.PaymentSource, in.Interval = strings.ToLower(strings.TrimSpace(in.PaymentSource)), strings.ToLower(strings.TrimSpace(in.Interval))
+	if in.Interval == "monthly" || in.Interval == "yearly" || in.Interval == "annual" {
+		in.Interval = map[string]string{"monthly": "month", "yearly": "year", "annual": "year"}[in.Interval]
+	}
 	switch {
+	case in.PaymentSource != "" && !paymentSourceRE.MatchString(in.PaymentSource):
+		return errInvalid("payment_source is the payment provider, such as stripe or paddle: lowercase letters, digits, dots, hyphens and underscores, at most 40")
+	case in.Interval != "" && !slices.Contains([]string{"day", "week", "month", "year", "one_time"}, in.Interval):
+		return errInvalid("interval is day, week, month, year or one_time")
 	case !slices.Contains([]string{"signup", "sale", "refund", "custom"}, in.Type):
 		return errInvalid("type is signup (or lead), sale, refund or custom")
 	case in.Type == "custom" && (!conversionEventRE.MatchString(in.EventName) || slices.Contains(reservedConversionEvents, in.EventName)):
@@ -207,32 +224,37 @@ func scanPartnerReward(row pgx.Row) (partnerRewardView, error) {
 }
 
 type partnerConversionView struct {
-	ID          string    `json:"id"`
-	ProgramID   string    `json:"program_id"`
-	PartnerID   string    `json:"partner_id"`
-	ReferralID  string    `json:"referral_id"`
-	RecordID    string    `json:"record_id"`
-	Type        string    `json:"type"`
-	EventName   string    `json:"event_name"`
-	Recurring   bool      `json:"recurring"`
-	ExternalID  string    `json:"external_id"`
-	RefundOf    *string   `json:"refund_of"`
-	AmountCents int64     `json:"amount_cents"`
-	Currency    string    `json:"currency"`
-	ProductID   string    `json:"product_id"`
-	Source      string    `json:"source"`
-	OccurredAt  time.Time `json:"occurred_at"`
-	CreatedAt   time.Time `json:"created_at"`
+	ID          string  `json:"id"`
+	ProgramID   string  `json:"program_id"`
+	PartnerID   string  `json:"partner_id"`
+	ReferralID  string  `json:"referral_id"`
+	RecordID    string  `json:"record_id"`
+	Type        string  `json:"type"`
+	EventName   string  `json:"event_name"`
+	Recurring   bool    `json:"recurring"`
+	ExternalID  string  `json:"external_id"`
+	RefundOf    *string `json:"refund_of"`
+	AmountCents int64   `json:"amount_cents"`
+	Currency    string  `json:"currency"`
+	ProductID   string  `json:"product_id"`
+	Source      string  `json:"source"`
+	// PaymentSource and Interval are what the backend said: the payment
+	// provider and the billing interval, "" when it didn't.
+	PaymentSource string    `json:"payment_source"`
+	Interval      string    `json:"interval"`
+	OccurredAt    time.Time `json:"occurred_at"`
+	CreatedAt     time.Time `json:"created_at"`
 }
 
 const partnerConversionSelect = `SELECT v.id::text, v.program_id::text, f.membership_id::text, v.referral_id::text, v.record_id::text, v.type,
-	v.event_name, v.recurring, v.external_id, v.refund_of::text, v.amount_cents, v.currency, v.product_id, v.source, v.occurred_at, v.created_at
+	v.event_name, v.recurring, v.external_id, v.refund_of::text, v.amount_cents, v.currency, v.product_id, v.source, v.payment_source,
+	v.billing_interval, v.occurred_at, v.created_at
 	FROM partner_conversions v JOIN partner_referrals f ON f.id = v.referral_id`
 
 func scanPartnerConversion(row pgx.Row) (partnerConversionView, error) {
 	var v partnerConversionView
 	err := row.Scan(&v.ID, &v.ProgramID, &v.PartnerID, &v.ReferralID, &v.RecordID, &v.Type, &v.EventName, &v.Recurring, &v.ExternalID, &v.RefundOf, &v.AmountCents,
-		&v.Currency, &v.ProductID, &v.Source, &v.OccurredAt, &v.CreatedAt)
+		&v.Currency, &v.ProductID, &v.Source, &v.PaymentSource, &v.Interval, &v.OccurredAt, &v.CreatedAt)
 	return v, err
 }
 
@@ -611,8 +633,10 @@ func (c *conversionRun) leadOrSale(ctx context.Context) error {
 	}
 	var conv string
 	if err := tx.QueryRow(ctx, `INSERT INTO partner_conversions (workspace_id, program_id, referral_id, record_id, type, event_name, recurring,
-		external_id, amount_cents, currency, product_id, source, occurred_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13) RETURNING id::text`,
-		c.ws, m.programID, f.id, rec, in.Type, in.EventName, in.Recurring, in.ExternalID, amount, m.currency, in.ProductID, c.source, in.at).Scan(&conv); err != nil {
+		external_id, amount_cents, currency, product_id, source, occurred_at, payment_source, billing_interval)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15) RETURNING id::text`,
+		c.ws, m.programID, f.id, rec, in.Type, in.EventName, in.Recurring, in.ExternalID, amount, m.currency, in.ProductID, c.source, in.at,
+		in.PaymentSource, in.Interval).Scan(&conv); err != nil {
 		return err
 	}
 	if in.Type == "sale" {
@@ -624,7 +648,7 @@ func (c *conversionRun) leadOrSale(ctx context.Context) error {
 	if err := c.audit(ctx, "partner_conversion.created", "partner_conversion", conv, map[string]any{"program_id": m.programID,
 		"partner_id": m.id, "referral_id": f.id, "record_id": rec, "type": in.Type, "event_name": in.EventName, "recurring": in.Recurring,
 		"amount_cents": amount, "currency": m.currency,
-		"product_id": in.ProductID, "source": c.source}); err != nil {
+		"product_id": in.ProductID, "source": c.source, "payment_source": in.PaymentSource, "interval": in.Interval}); err != nil {
 		return err
 	}
 	rules, err := partnerRules(ctx, tx, c.ws, m.programID)
@@ -993,6 +1017,9 @@ func postbackInput(v url.Values) (conversionInput, error) {
 		Currency:   get("currency"),
 		ProductID:  get("product_id", "product"),
 		SubID:      get("sub_id", "sub", "subid"),
+		// Tolt's transactions call the payment provider source.
+		PaymentSource: get("payment_source", "source"),
+		Interval:      get("interval", "billing_interval"),
 	}
 	if t := get("occurred_at", "timestamp"); t != "" {
 		in.OccurredAt = &t
@@ -1190,6 +1217,12 @@ func conversionFacts(ctx context.Context, tx pgx.Tx, m *membershipRow, referral,
 		"partner.leads": float64(leads), "partner.revenue_cents": float64(revenue), "partner.earnings_cents": float64(earnings),
 		"customer.transactions": float64(custSales), "customer.total_paid_cents": float64(custPaid), "customer.signed_up_at": signedUp,
 		"transaction.amount_cents": float64(amount), "transaction.product_id": in.ProductID, "transaction.recurring": in.Recurring,
+	}
+	if in.PaymentSource != "" {
+		facts["transaction.payment_source"] = in.PaymentSource
+	}
+	if in.Interval != "" {
+		facts["transaction.interval"] = in.Interval
 	}
 	if country != nil && *country != "" {
 		facts["partner.country"] = *country

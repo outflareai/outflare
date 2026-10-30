@@ -41,7 +41,7 @@ func TestCheck(t *testing.T) {
 	files := []string{d + "/0001_init.sql", d + "/0002_a.sql", d + "/0002_b.sql", d + "/0003_Bad-Name.sql"}
 	changes := []change{{"M", d + "/0001_init.sql"}, {"A", d + "/0002_b.sql"}, {"A", d + "/0003_Bad-Name.sql"}}
 	added := map[string][]byte{d + "/0002_b.sql": []byte("DROP TABLE x;"), d + "/0003_Bad-Name.sql": nil}
-	got := strings.Join(check(changes, files, added), "\n")
+	got := strings.Join(check(changes, files, added, nil), "\n")
 	for _, want := range []string{"0001_init.sql: shipped migrations are append-only", "number 0002 is used by 0002_a.sql and 0002_b.sql", "0003_Bad-Name.sql: name it", "0002_b.sql: DROP TABLE"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("missing %q in:\n%s", want, got)
@@ -74,5 +74,30 @@ func TestShippedMigrationsPass(t *testing.T) {
 	}
 	if len(p) > 0 {
 		t.Errorf("shipped migrations fail the check:\n%s", strings.Join(p, "\n"))
+	}
+}
+
+func TestCommentOnlyEdits(t *testing.T) {
+	d := "m"
+	files := []string{d + "/0001_init.sql", d + "/0002_a.sql"}
+	changes := []change{{"M", d + "/0001_init.sql"}, {"M", d + "/0002_a.sql"}}
+	got := check(changes, files, nil, map[string]bool{d + "/0001_init.sql": true})
+	if len(got) != 1 || !strings.Contains(got[0], "0002_a.sql: shipped migrations are append-only") {
+		t.Errorf("check = %v", got)
+	}
+	cases := []struct {
+		a, b string
+		same bool
+	}{
+		{"-- why\nCREATE TABLE a (id int);", "-- a better why\nCREATE TABLE a (id int);", true},
+		{"CREATE TABLE a (id int); /* x */", "CREATE  TABLE a\n(id int);", true},
+		{"CREATE TABLE a (id int);", "CREATE TABLE b (id int);", false},
+		{"INSERT INTO a VALUES ('x -- y');", "INSERT INTO a VALUES ('x -- z');", false},
+		{"INSERT INTO a VALUES ('it''s');", "INSERT INTO a VALUES ('it''s'); -- note", true},
+	}
+	for _, c := range cases {
+		if got := sameStatements([]byte(c.a), []byte(c.b)); got != c.same {
+			t.Errorf("sameStatements(%q, %q) = %v", c.a, c.b, got)
+		}
 	}
 }

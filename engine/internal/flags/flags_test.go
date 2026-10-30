@@ -194,14 +194,21 @@ func TestExclusionGroup(t *testing.T) {
 	}
 
 	// Slices are handed out from the first gap wide enough.
-	if f, to, ok := Allocate([][2]int{{0, 3000}, {5000, 10000}}, 20); !ok || f != 3000 || to != 5000 {
+	if f, to, ok := Allocate([][2]int{{0, 3000}, {5000, 10000}}, 20, Buckets); !ok || f != 3000 || to != 5000 {
 		t.Fatalf("gap: %d %d %v", f, to, ok)
 	}
-	if _, _, ok := Allocate([][2]int{{0, 3000}, {5000, 10000}}, 21); ok {
+	if _, _, ok := Allocate([][2]int{{0, 3000}, {5000, 10000}}, 21, Buckets); ok {
 		t.Fatal("a slice wider than any gap was given")
 	}
-	if f, to, ok := Allocate(nil, 100); !ok || f != 0 || to != 10000 {
+	if f, to, ok := Allocate(nil, 100, Buckets); !ok || f != 0 || to != 10000 {
 		t.Fatalf("empty group: %d %d %v", f, to, ok)
+	}
+	// A 10% holdout leaves 90% for flags.
+	if _, _, ok := Allocate([][2]int{{0, 5000}}, 50, 9000); ok {
+		t.Fatal("a slice ran into the holdout")
+	}
+	if f, to, ok := Allocate([][2]int{{0, 5000}}, 40, 9000); !ok || f != 5000 || to != 9000 {
+		t.Fatalf("up to the holdout: %d %d %v", f, to, ok)
 	}
 }
 

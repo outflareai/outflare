@@ -9,7 +9,7 @@ A profile has:
 - **filters** in the same vocabulary as lead searches: job titles, seniority, industries, company size (employee ranges), locations and keywords;
 - an optional **brand**, when it describes one brand's customers. A profile without a brand fits every brand.
 
-Find them under **Company → Ideal customers**, at `/v1/workspaces/{ws}/ideal-customer-profiles`, or with the MCP tools `list_ideal_customer_profiles`, `get_ideal_customer_profile`, `create_ideal_customer_profile` and `update_ideal_customer_profile`. Reading needs `profiles.read`; making and changing them needs `profiles.manage` (called `projects.read` and `projects.manage` before projects were removed; tokens holding the old names keep working).
+Find them under **Company → Ideal customers**, at `/v1/workspaces/{ws}/ideal-customer-profiles`, or with the MCP tools `list_ideal_customer_profiles`, `get_ideal_customer_profile`, `create_ideal_customer_profile` and `update_ideal_customer_profile`. Reading needs `profiles.read`; making and changing them needs `profiles.manage`.
 
 ## Profiles and lead lists
 

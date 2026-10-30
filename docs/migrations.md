@@ -11,7 +11,7 @@ So every migration must leave a schema that the version before it still works on
 
 ## Rules
 
-1. **Append only.** Never edit, rename or delete a migration that is on main. Fix a mistake with a new migration.
+1. **Append only.** Never edit, rename or delete a migration that is on main. Fix a mistake with a new migration. The one exception is its comments: a change that leaves every statement as it was runs nothing new (migrations are recorded by name), so a comment can be reworded, for example when a release's review stops on it. The check compares the statements, with comments and whitespace removed.
 2. **One number each.** Name the file `NNNN_what_it_does.sql` with the next free number. Parallel branches collide: check main and the open pull requests before you pick one, and renumber if someone merges first. (A few early files share a number; they stay as they are, because renaming would run them again.)
 3. **Expand, then contract.** A migration may add tables, columns, indexes and constraints the old code doesn't break. It may not, in the same release as the code that stops using them:
    - drop or rename a table, column, view, type or function;

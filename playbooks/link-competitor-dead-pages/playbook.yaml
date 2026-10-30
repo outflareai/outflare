@@ -1,5 +1,5 @@
 id: link-competitor-dead-pages
-version: 2
+version: 3
 title: Take the links to your competitors' dead pages
 summary: When a competitor deletes a page that others link to, show those sites what it said and offer your page instead.
 description: |
@@ -43,6 +43,9 @@ steps:
     tools: [startLinkPitch, listLinkPitches]
   - say: Report what was pitched and, later, what replied, agreed and went live.
     tools: [getLinkResults, listLinkProspects]
+automation:
+  events: [competitor.page_removed]
+  gather: daily
 guardrails:
   - Never offers or agrees to pay for a link; a reply asking for money waits for a person.
   - Every pitch waits for a person's approval, unless they turned approval off for that sequence.

@@ -2,7 +2,10 @@ package connectors
 
 import (
 	"context"
+	"errors"
 	"time"
+
+	"github.com/outflareai/outflare/engine/internal/partners"
 )
 
 // Partner platforms are where a workspace ran its referral or affiliate
@@ -16,9 +19,12 @@ const (
 )
 
 // Kinds of objects a PartnerImporter lists, in the order an import reads
-// them, so each finds what it points at already stored. Links come first:
-// a partner joins with the code of their link.
+// them, so each finds what it points at already stored. Groups come first,
+// then links: a partner joins their group with the code of their link.
+// Flows come after partners, whose own rates they can hold.
 const (
+	PartnerKindGroups       = "groups"
+	PartnerKindFlows        = "flows"
 	PartnerKindPartners     = "partners"
 	PartnerKindLinks        = "links"
 	PartnerKindPromoCodes   = "promo_codes"
@@ -28,8 +34,18 @@ const (
 )
 
 // PartnerImportKinds is every kind, in import order.
-var PartnerImportKinds = []string{PartnerKindLinks, PartnerKindPartners, PartnerKindPromoCodes, PartnerKindCustomers,
+var PartnerImportKinds = []string{PartnerKindGroups, PartnerKindLinks, PartnerKindPartners, PartnerKindFlows, PartnerKindPromoCodes,
+	PartnerKindCustomers, PartnerKindTransactions, PartnerKindCommissions}
+
+// LegacyPartnerImportKinds is the order before groups and flows, for an
+// import whose saved progress counted in it.
+var LegacyPartnerImportKinds = []string{PartnerKindLinks, PartnerKindPartners, PartnerKindPromoCodes, PartnerKindCustomers,
 	PartnerKindTransactions, PartnerKindCommissions}
+
+// ErrPartnerKindUnavailable is a kind the platform doesn't list (it has no
+// such endpoint, or not on the account's plan). The import notes it and
+// goes on with the next kind.
+var ErrPartnerKindUnavailable = errors.New("the partner platform doesn't list these")
 
 // PartnerImporter reads a partner platform's program, one page at a time.
 type PartnerImporter interface {
@@ -88,6 +104,8 @@ type PartnerProgram struct {
 
 // PartnerObjects is one page; only the slice for the kind read is set.
 type PartnerObjects struct {
+	Groups []ImportGroup
+	Flows  []ImportFlow
 	// Reported is how many objects the platform says the list holds, from
 	// the first page of a list (nil when it doesn't say), to reconcile with
 	// how many an import read.
@@ -105,7 +123,7 @@ type PartnerObjects struct {
 
 // Len is how many objects the page holds.
 func (p PartnerObjects) Len() int {
-	return len(p.Partners) + len(p.Links) + len(p.PromoCodes) + len(p.Customers) + len(p.Transactions) + len(p.Commissions)
+	return len(p.Groups) + len(p.Flows) + len(p.Partners) + len(p.Links) + len(p.PromoCodes) + len(p.Customers) + len(p.Transactions) + len(p.Commissions)
 }
 
 type ImportPartner struct {
@@ -116,7 +134,45 @@ type ImportPartner struct {
 	Status string
 	// PayoutMethod is the payout details the platform holds, as text.
 	PayoutMethod string
-	Created      time.Time
+	// GroupID is the platform's group they are in, if any.
+	GroupID string
+	Created time.Time
+}
+
+// ImportGroup is a group of partners with its own flows.
+type ImportGroup struct {
+	ID   string
+	Name string
+	// Default is the group new partners join.
+	Default bool
+}
+
+// ImportFlow is a reward flow, already in Outflare's terms. Unsupported
+// lists what the platform's flow has that Outflare couldn't map (a
+// condition on an unknown attribute, say); such a flow isn't imported, so
+// nothing pays that shouldn't.
+type ImportFlow struct {
+	ID string
+	// GroupID is the platform group the flow applies to; "" is everyone.
+	GroupID string
+	Name    string
+	// Trigger is sale or signup.
+	Trigger string
+	// Kind is percent, fixed, or group (move to TargetGroupID).
+	Kind          string
+	PercentBP     *int
+	AmountCents   *int64
+	TargetGroupID string
+	// Recurrence is every, first or months (Months).
+	Recurrence string
+	Months     *int
+	// Approval is program, auto, after_days (ApprovalDays) or manual.
+	Approval     string
+	ApprovalDays *int
+	Conditions   partners.Conditions
+	// Overrides name the platform's partner ids (PartnerID) or products.
+	Overrides   []partners.Override
+	Unsupported []string
 }
 
 // ImportLink is a partner's tracking link: ?param=value on the site.
@@ -158,6 +214,10 @@ type ImportTransaction struct {
 	AmountCents int64
 	Currency    string // "" for the program's
 	Recurring   bool
+	// PaymentSource is the payment provider in Outflare's form (stripe),
+	// and Interval day, week, month, year or one_time; "" when unknown.
+	PaymentSource string
+	Interval      string
 	// RefundedCents is how much was refunded, 0 for none.
 	RefundedCents int64
 	Created       time.Time

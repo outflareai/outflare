@@ -25,6 +25,8 @@ type Service struct {
 	Verify   *verify.Service
 	Resolver Resolver
 	Log      *slog.Logger
+	// Network is the data network, or nil (internal/datanetwork).
+	Network NetworkLookup
 }
 
 type rebuildPayload struct {
@@ -93,12 +95,21 @@ func (s *Service) VerifyEmails(ctx context.Context, ws string, req VerifyRequest
 		byEmail[e] = it.Ref
 		emails = append(emails, e)
 	}
+	// The data network answers what it is sure of, free; a forced check
+	// goes to the verifier.
+	var fromNetwork []ItemResult
+	if !req.Force {
+		fromNetwork, emails = s.verifyByNetwork(ctx, ws, emails, byEmail)
+	}
+	if len(emails) == 0 {
+		return FindResult{Items: append([]ItemResult{}, fromNetwork...)}, nil
+	}
 	results, err := s.Verify.Verify(ctx, ws, emails, req.Force)
 	if err != nil {
 		// A refused key or exhausted quota is a stop, not a crash: the caller
 		// pauses the run with a plain reason.
 		if k := connectors.KindOf(err); k == connectors.ErrAuth || k == connectors.ErrQuota {
-			out := FindResult{Items: make([]ItemResult, 0, len(emails))}
+			out := FindResult{Items: append(make([]ItemResult, 0, len(emails)+len(fromNetwork)), fromNetwork...)}
 			for _, e := range emails {
 				out.Items = append(out.Items, ItemResult{Ref: byEmail[e], Email: e,
 					Code: CodeStop, StopCode: stopCode(k)})
@@ -137,7 +148,7 @@ func (s *Service) VerifyEmails(ctx context.Context, ws string, req VerifyRequest
 			}
 		}
 	}
-	out := FindResult{Items: make([]ItemResult, 0, len(results))}
+	out := FindResult{Items: append(make([]ItemResult, 0, len(results)+len(fromNetwork)), fromNetwork...)}
 	for _, res := range results {
 		it := ItemResult{Ref: byEmail[res.Email], Email: res.Email,
 			Code: verifyCode(res.Status), Evidence: EvidenceHistory,

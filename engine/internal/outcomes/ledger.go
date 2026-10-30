@@ -74,9 +74,7 @@ func DeleteSpend(ctx context.Context, tx pgx.Tx, ws, id string) error {
 
 // Recurring is a cost that repeats every month or year.
 type Recurring struct {
-	ID string `json:"id"`
-	// Ignored: projects were removed. Accepted so older clients still work.
-	ProjectID   *string   `json:"project_id,omitempty"`
+	ID          string    `json:"id"`
 	SequenceID  *string   `json:"sequence_id"`
 	Category    string    `json:"category"`
 	Provider    string    `json:"provider"`

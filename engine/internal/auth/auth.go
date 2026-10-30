@@ -63,9 +63,7 @@ const (
 	// Managing them is logging meetings, deals and spend by hand.
 	ScopeOutcomesRead   = "outcomes.read"
 	ScopeOutcomesManage = "outcomes.manage"
-	// Ideal customer profiles and moving records between brands. They were
-	// projects.read and projects.manage until projects were removed; those
-	// names are still accepted (renamed).
+	// Ideal customer profiles and moving records between brands.
 	ScopeProfilesRead   = "profiles.read"
 	ScopeProfilesManage = "profiles.manage"
 	// Infrastructure plans: reading them, drafting and changing them, and
@@ -228,44 +226,14 @@ func BrandLimitable(scopes []string) bool {
 // Within reports whether every scope in inner is also in outer.
 func Within(inner, outer []string) bool {
 	outer = CleanScopes(outer)
-	return !slices.ContainsFunc(inner, func(s string) bool { return !slices.Contains(outer, Canonical(s)) })
+	return !slices.ContainsFunc(inner, func(s string) bool { return !slices.Contains(outer, s) })
 }
 
-// renamed maps old scope names to the ones that replaced them. Tokens,
-// roles and clients may still hold or ask for the old names, so they are
-// accepted everywhere a scope is and mean the new one.
-var renamed = map[string]string{
-	"projects.read":   ScopeProfilesRead,
-	"projects.manage": ScopeProfilesManage,
-}
-
-// Canonical returns the current name of scope s, which may be an old name.
-func Canonical(s string) string {
-	if to, ok := renamed[s]; ok {
-		return to
-	}
-	return s
-}
-
-// Rename replaces old scope names in scopes with their current ones,
-// keeping the order and anything unknown, for checking a request.
-func Rename(scopes []string) []string {
-	if scopes == nil {
-		return nil
-	}
-	out := make([]string, len(scopes))
-	for i, s := range scopes {
-		out[i] = Canonical(s)
-	}
-	return out
-}
-
-// CleanScopes keeps the known scopes in display order, without repeats,
-// with old names replaced by their current ones.
+// CleanScopes keeps the known scopes in display order, without repeats.
 func CleanScopes(scopes []string) []string {
 	out := []string{}
 	for _, s := range AllScopes {
-		if slices.ContainsFunc(scopes, func(sc string) bool { return Canonical(sc) == s }) {
+		if slices.Contains(scopes, s) {
 			out = append(out, s)
 		}
 	}
@@ -291,7 +259,7 @@ var narrower = map[string]string{
 // A scope over everyone's records includes the one over the caller's own
 // (narrower).
 func Grants(scopes []string, want string) bool {
-	scopes, want = CleanScopes(scopes), Canonical(want)
+	scopes = CleanScopes(scopes)
 	if slices.Contains(scopes, want) {
 		return true
 	}
@@ -308,7 +276,7 @@ func Grants(scopes []string, want string) bool {
 }
 
 // ValidScope reports whether s is a known scope, by its current or old name.
-func ValidScope(s string) bool { return slices.Contains(AllScopes, Canonical(s)) }
+func ValidScope(s string) bool { return slices.Contains(AllScopes, s) }
 
 // RoleRank orders roles so that managers cannot act on someone above them.
 func RoleRank(role string) int {

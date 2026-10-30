@@ -2,7 +2,10 @@
 // base, so every deploy can be rolled back and can run while the previous
 // version is still serving (docs/migrations.md):
 //
-//   - shipped migrations are never edited, renamed or deleted;
+//   - shipped migrations are never edited, renamed or deleted, except their
+//     comments: a change that leaves every statement as it was runs nothing
+//     new (migrations are recorded by name), and a release's review can ask
+//     for a comment to be reworded;
 //
 //   - every new file is NNNN_name.sql, with a number no other file has
 //     (a few early ones share numbers; they stay as shipped);
@@ -44,7 +47,24 @@ func main() {
 		os.Exit(2)
 	}
 	added := map[string][]byte{}
+	commentOnly := map[string]bool{}
+	mergeBase := ""
 	for _, c := range changes {
+		if c.status == "M" {
+			if mergeBase == "" {
+				mb, err := exec.Command("git", "merge-base", *base, "HEAD").Output()
+				if err != nil {
+					fmt.Fprintln(os.Stderr, "checkmigrations: merge-base:", err)
+					os.Exit(2)
+				}
+				mergeBase = strings.TrimSpace(string(mb))
+			}
+			was, err := exec.Command("git", "show", mergeBase+":"+c.path).Output()
+			now, err2 := os.ReadFile(c.path)
+			if err == nil && err2 == nil && sameStatements(was, now) {
+				commentOnly[c.path] = true
+			}
+		}
 		if c.status == "A" {
 			b, err := os.ReadFile(c.path)
 			if err != nil {
@@ -54,7 +74,7 @@ func main() {
 			added[c.path] = b
 		}
 	}
-	problems := check(changes, files, added)
+	problems := check(changes, files, added, commentOnly)
 	for _, p := range problems {
 		fmt.Println("::error::" + p)
 	}
@@ -91,10 +111,10 @@ var fileName = regexp.MustCompile(`^(\d{4})_[a-z0-9_]+\.sql$`)
 
 // check returns every problem, given the changed files, every migration
 // file now in the directory and the contents of the added ones.
-func check(changes []change, files []string, added map[string][]byte) []string {
+func check(changes []change, files []string, added map[string][]byte, commentOnly map[string]bool) []string {
 	var problems []string
 	for _, c := range changes {
-		if c.status != "A" {
+		if c.status != "A" && !(c.status == "M" && commentOnly[c.path]) {
 			problems = append(problems, fmt.Sprintf("%s: shipped migrations are append-only; add a new migration instead of changing this one", c.path))
 		}
 	}
@@ -159,6 +179,61 @@ var (
 	stringLit    = regexp.MustCompile(`'(?:[^']|'')*'`)
 	hasDefault   = regexp.MustCompile(`(?i)\bdefault\b|\bgenerated\b`)
 )
+
+// sameStatements reports whether two versions of a migration differ only in
+// their comments and whitespace. Text inside quotes counts as code.
+func sameStatements(a, b []byte) bool {
+	return statements(a) == statements(b)
+}
+
+func statements(sql []byte) string {
+	var out strings.Builder
+	space := false
+	for i := 0; i < len(sql); i++ {
+		switch {
+		case sql[i] == '\'':
+			j := i + 1 // the closing quote; '' inside is an escaped quote
+			for j < len(sql) {
+				if sql[j] == '\'' {
+					if j+1 < len(sql) && sql[j+1] == '\'' {
+						j += 2
+						continue
+					}
+					break
+				}
+				j++
+			}
+			if space && out.Len() > 0 {
+				out.WriteByte(' ')
+			}
+			space = false
+			out.Write(sql[i:min(j+1, len(sql))])
+			i = j
+		case sql[i] == '-' && i+1 < len(sql) && sql[i+1] == '-':
+			for i < len(sql) && sql[i] != '\n' {
+				i++
+			}
+			space = true
+		case sql[i] == '/' && i+1 < len(sql) && sql[i+1] == '*':
+			end := bytes.Index(sql[i+2:], []byte("*/"))
+			if end < 0 {
+				i = len(sql)
+			} else {
+				i += end + 3
+			}
+			space = true
+		case sql[i] == ' ' || sql[i] == '\t' || sql[i] == '\n' || sql[i] == '\r':
+			space = true
+		default:
+			if space && out.Len() > 0 {
+				out.WriteByte(' ')
+			}
+			space = false
+			out.WriteByte(sql[i])
+		}
+	}
+	return out.String()
+}
 
 // unsafe lists the risky statements in one migration, unless it carries a
 // migration-safety note.

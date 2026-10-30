@@ -224,7 +224,6 @@ func checkRoleRequest(a *access, list []roleView, self string, req roleRequest) 
 		*req.Description = d
 	}
 	if req.Scopes != nil {
-		*req.Scopes = auth.Rename(*req.Scopes)
 		for _, sc := range *req.Scopes {
 			if !auth.ValidScope(sc) {
 				return errInvalid("unknown scope " + truncate(sc, 60))

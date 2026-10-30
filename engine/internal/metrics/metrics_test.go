@@ -2,6 +2,7 @@ package metrics_test
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -120,6 +121,19 @@ func TestPostgres(t *testing.T) {
 	}
 	if _, err := pool.Exec(ctx, `TRUNCATE jobs`); err != nil {
 		t.Fatal(err)
+	}
+	// More tables than the size series cover, each bigger than the
+	// emptied job queue: jobs is still reported, however many tables
+	// outgrow it.
+	if _, err := pool.Exec(ctx, `CREATE SCHEMA IF NOT EXISTS metrics_test_big`); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _, _ = pool.Exec(ctx, `DROP SCHEMA metrics_test_big CASCADE`) })
+	for i := range 26 {
+		if _, err := pool.Exec(ctx, fmt.Sprintf(`CREATE TABLE IF NOT EXISTS metrics_test_big.t%d AS
+			SELECT g, repeat('x', 200) AS pad FROM generate_series(1, 2000) g`, i)); err != nil {
+			t.Fatal(err)
+		}
 	}
 	if _, err := pool.Exec(ctx, `INSERT INTO jobs (kind, run_at) VALUES
 		('metrics.test', now() - interval '90 seconds'), ('metrics.test', now()), ('metrics.test', now() + interval '1 hour')`); err != nil {

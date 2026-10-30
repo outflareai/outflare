@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
-import type { KitPlan, PlaybookConnectionNeed, WorkspacePlaybook } from "@outflare/sdk";
+import type { KitPlan, PlaybookAutomation, PlaybookConnectionNeed, WorkspacePlaybook } from "@outflare/sdk";
 import { track } from "@/lib/analytics";
+import { PlaybookAutomations } from "@/components/playbook-automations";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { KitFileSheet, KitPlanList } from "@/components/kit-export";
 import { api, errorMessage } from "../api";
@@ -31,6 +32,7 @@ export function Playbooks({ ws, canManage, go }: Props) {
   const [view, setView] = useState<View>("all");
   const [open, setOpen] = useState("");
   const [names, setNames] = useState<Record<string, string>>({});
+  const [autos, setAutos] = useState<PlaybookAutomation[]>([]);
   const [kitFile, setKitFile] = useState(false);
 
   const load = useCallback(async () => {
@@ -38,6 +40,8 @@ export function Playbooks({ ws, canManage, go }: Props) {
     if (error || !data) return setError(errorMessage(error));
     setError("");
     setList(data.data);
+    const a = await api.GET("/v1/workspaces/{ws}/playbook-automations", { params: { path: { ws } } });
+    setAutos(a.data?.data ?? []);
   }, [ws]);
   useEffect(() => {
     load();
@@ -93,12 +97,14 @@ export function Playbooks({ ws, canManage, go }: Props) {
               <span className="text-[14px] font-medium leading-snug">{p.title}</span>
               <span className="text-[13px] text-muted-foreground">{p.summary}</span>
               {p.runs > 0 && <span className="text-[12px] text-muted-foreground">Started {plural(p.runs, "time")}</span>}
+              {autos.some((a) => a.playbook_id === p.id && a.status === "held") ? <span><Badge tone="red">Held: needs you</Badge></span>
+                : autos.some((a) => a.playbook_id === p.id && a.status === "active") ? <span><Badge tone="green">Runs by itself</Badge></span> : null}
             </button>
           ))}
         </div>
       )}
       {kitFile && <KitFileSheet ws={ws} onClose={() => setKitFile(false)} onApplied={() => { setKitFile(false); go("journeys"); }} />}
-      {current && <PlaybookSheet ws={ws} playbook={current} names={names} canManage={canManage} go={go} onClose={() => setOpen("")} />}
+      {current && <PlaybookSheet ws={ws} playbook={current} names={names} canManage={canManage} go={go} onClose={() => { setOpen(""); load(); }} />}
     </div>
   );
 }
@@ -236,6 +242,8 @@ function PlaybookSheet({ ws, playbook: p, names, canManage, go, onClose }: { ws:
               </Button>
             )}
           </form>
+
+          <PlaybookAutomations ws={ws} playbook={p} inputs={values} canManage={canManage} go={go} />
 
           {p.example && (
             <section className="space-y-2">

@@ -969,7 +969,6 @@ class Operations(_Mixin):
         lead_list_ids: list[str] | None = None,
         mailbox_ids: list[str] | None = None,
         mission_ids: list[str] | None = None,
-        project_ids: list[str] | None = None,
         sequence_ids: list[str] | None = None,
         with_mailboxes: bool | None = None,
         extra_body: dict[str, Any] | None = None,
@@ -996,7 +995,6 @@ class Operations(_Mixin):
                 "lead_list_ids": lead_list_ids,
                 "mailbox_ids": mailbox_ids,
                 "mission_ids": mission_ids,
-                "project_ids": project_ids,
                 "sequence_ids": sequence_ids,
                 "with_mailboxes": with_mailboxes,
             },
@@ -1365,6 +1363,33 @@ class Operations(_Mixin):
             idempotency_key=idempotency_key,
         )
 
+    def approve_playbook_automation(
+        self,
+        id: str,
+        *,
+        ws: str | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Approve a playbook automation, so it runs by itself.
+
+        Scope missions.approve, and a person only: every run starts a
+        mission carrying their approval, and acts with their rights at the
+        time it runs. Also turns a paused or held automation back on. Needs
+        the playbook's connections, and the workspace's AI model when
+        Outflare's agent runs it (409 connector_needed, or the AI errors).
+        Events from before approval never start a run, except for a held
+        automation, whose events waited.
+
+        Needs: the missions.approve scope.
+        POST /v1/workspaces/{ws}/playbook-automations/{id}/approve
+        """
+        return self._call(
+            "POST",
+            "/v1/workspaces/{ws}/playbook-automations/{id}/approve",
+            path={"id": id, "ws": ws},
+            idempotency_key=idempotency_key,
+        )
+
     def approve_reddit_action(
         self,
         id: str,
@@ -1647,6 +1672,33 @@ class Operations(_Mixin):
             "/v1/workspaces/{ws}/knowledge/ask",
             path={"ws": ws},
             body={"audience": audience, "brand": brand, "question": question},
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
+    def assign_ai_receipt(
+        self,
+        id: str,
+        *,
+        ws: str | None = None,
+        account_id: str,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Assign a receipt to an AI account.
+
+        Scope: ai_accounts.manage. For a receipt that needs review: the account's renewal, plan, seats and price follow it,
+        and its receipt number and card are remembered so the next one matches by itself. Add a new account with POST
+        .../ai-accounts first when it has none.
+
+        Needs: the ai_accounts.manage scope.
+        POST /v1/workspaces/{ws}/ai-accounts/receipts/{id}/assign
+        """
+        return self._call(
+            "POST",
+            "/v1/workspaces/{ws}/ai-accounts/receipts/{id}/assign",
+            path={"id": id, "ws": ws},
+            body={"account_id": account_id},
             extra_body=extra_body,
             idempotency_key=idempotency_key,
         )
@@ -2804,8 +2856,7 @@ class Operations(_Mixin):
         max_priority: Literal["low", "normal", "high"] | None = None,
         may_take_mailboxes: bool | None = None,
         name: str,
-        project_id: str | None = None,
-        scopes: list[Any],
+        scopes: list[str],
         extra_body: dict[str, Any] | None = None,
         idempotency_key: str | None = None,
     ) -> Any:
@@ -2828,7 +2879,6 @@ class Operations(_Mixin):
                 "max_priority": max_priority,
                 "may_take_mailboxes": may_take_mailboxes,
                 "name": name,
-                "project_id": project_id,
                 "scopes": scopes,
             },
             extra_body=extra_body,
@@ -3037,7 +3087,6 @@ class Operations(_Mixin):
         mission_id: str | None = None,
         name: str,
         opened_at: str | None = None,
-        project_id: str | None = None,
         sequence_id: str | None = None,
         stage: str | None = None,
         state: Literal["open", "won", "lost"] | None = None,
@@ -3066,7 +3115,6 @@ class Operations(_Mixin):
                 "mission_id": mission_id,
                 "name": name,
                 "opened_at": opened_at,
-                "project_id": project_id,
                 "sequence_id": sequence_id,
                 "stage": stage,
                 "state": state,
@@ -3644,7 +3692,6 @@ class Operations(_Mixin):
         name: str | None = None,
         notes: str | None = None,
         personas: list[dict[str, Any]] | None = None,
-        project_id: str | None = None,
         provider: Literal["google", "microsoft"] | None = None,
         ready_by: str | None = None,
         rest_below: int | None = None,
@@ -3683,7 +3730,6 @@ class Operations(_Mixin):
                 "name": name,
                 "notes": notes,
                 "personas": personas,
-                "project_id": project_id,
                 "provider": provider,
                 "ready_by": ready_by,
                 "rest_below": rest_below,
@@ -3931,7 +3977,6 @@ class Operations(_Mixin):
         min_score: int | None = None,
         name: str | None = None,
         profile_id: str | None = None,
-        project_id: str | None = None,
         refresh_every_days: int | None = None,
         search_integration_id: str | None = None,
         skip_contacted_days: int | None = None,
@@ -3962,7 +4007,6 @@ class Operations(_Mixin):
                 "min_score": min_score,
                 "name": name,
                 "profile_id": profile_id,
-                "project_id": project_id,
                 "refresh_every_days": refresh_every_days,
                 "search_integration_id": search_integration_id,
                 "skip_contacted_days": skip_contacted_days,
@@ -4041,7 +4085,6 @@ class Operations(_Mixin):
         lead_id: str | None = None,
         mission_id: str | None = None,
         notes: str | None = None,
-        project_id: str | None = None,
         qualified: bool | None = None,
         sequence_id: str | None = None,
         starts_at: str,
@@ -4074,7 +4117,6 @@ class Operations(_Mixin):
                 "lead_id": lead_id,
                 "mission_id": mission_id,
                 "notes": notes,
-                "project_id": project_id,
                 "qualified": qualified,
                 "sequence_id": sequence_id,
                 "starts_at": starts_at,
@@ -4092,7 +4134,6 @@ class Operations(_Mixin):
         brand_id: str | None = None,
         kind: Literal["preference", "decision", "fact", "feedback"] | None = None,
         pinned: bool | None = None,
-        project_id: str | None = None,
         text: str | None = None,
         extra_body: dict[str, Any] | None = None,
         idempotency_key: str | None = None,
@@ -4112,7 +4153,7 @@ class Operations(_Mixin):
             "POST",
             "/v1/workspaces/{ws}/memories",
             path={"ws": ws},
-            body={"brand_id": brand_id, "kind": kind, "pinned": pinned, "project_id": project_id, "text": text},
+            body={"brand_id": brand_id, "kind": kind, "pinned": pinned, "text": text},
             extra_body=extra_body,
             idempotency_key=idempotency_key,
         )
@@ -4131,7 +4172,6 @@ class Operations(_Mixin):
         mode: Literal["dry_run", "approve_writes", "autonomous"] | None = None,
         name: str | None = None,
         plan: str | None = None,
-        project_id: str | None = None,
         token_id: str | None = None,
         extra_body: dict[str, Any] | None = None,
         idempotency_key: str | None = None,
@@ -4160,7 +4200,6 @@ class Operations(_Mixin):
                 "mode": mode,
                 "name": name,
                 "plan": plan,
-                "project_id": project_id,
                 "token_id": token_id,
             },
             extra_body=extra_body,
@@ -4371,7 +4410,9 @@ class Operations(_Mixin):
         email: str | None = None,
         event_name: str | None = None,
         external_id: str | None = None,
+        interval: Literal["day", "week", "month", "year", "one_time", "monthly", "yearly", "annual"] | None = None,
         occurred_at: str | None = None,
+        payment_source: str | None = None,
         product_id: str | None = None,
         program: str | None = None,
         promo_code: str | None = None,
@@ -4415,7 +4456,9 @@ class Operations(_Mixin):
                 "email": email,
                 "event_name": event_name,
                 "external_id": external_id,
+                "interval": interval,
                 "occurred_at": occurred_at,
+                "payment_source": payment_source,
                 "product_id": product_id,
                 "program": program,
                 "promo_code": promo_code,
@@ -4582,6 +4625,69 @@ class Operations(_Mixin):
             idempotency_key=idempotency_key,
         )
 
+    def create_playbook_automation(
+        self,
+        *,
+        ws: str | None = None,
+        brand_id: str | None = None,
+        cadence: Literal["daily", "weekly", "monthly"] | None = None,
+        daily_cap: int | None = None,
+        event_type: str | None = None,
+        gather: Literal["each", "hourly", "daily"] | None = None,
+        inputs: dict[str, Any] | None = None,
+        kind: Literal["schedule", "event"] | None = None,
+        max_spend_cents_per_month: int | None = None,
+        max_spend_cents_per_run: int | None = None,
+        mode: Literal["dry_run", "approve_writes", "autonomous"] | None = None,
+        name: str | None = None,
+        playbook_id: str | None = None,
+        run_hour: int | None = None,
+        run_monthday: int | None = None,
+        run_weekday: int | None = None,
+        runner: Literal["builtin", "external"] | None = None,
+        token_id: str | None = None,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Set a playbook to run on a schedule or an event.
+
+        Scope missions.run. Creates a draft: nothing runs until a person
+        approves it (POST .../approve). What is left out comes from the
+        playbook's suggestion (Playbook.automation), then from the defaults
+        (approve_writes, Outflare's agent, 09:00 UTC). An agent's
+        automation runs its missions itself unless it asks for the
+        built-in runner.
+
+        Needs: the missions.run scope.
+        POST /v1/workspaces/{ws}/playbook-automations
+        """
+        return self._call(
+            "POST",
+            "/v1/workspaces/{ws}/playbook-automations",
+            path={"ws": ws},
+            body={
+                "brand_id": brand_id,
+                "cadence": cadence,
+                "daily_cap": daily_cap,
+                "event_type": event_type,
+                "gather": gather,
+                "inputs": inputs,
+                "kind": kind,
+                "max_spend_cents_per_month": max_spend_cents_per_month,
+                "max_spend_cents_per_run": max_spend_cents_per_run,
+                "mode": mode,
+                "name": name,
+                "playbook_id": playbook_id,
+                "run_hour": run_hour,
+                "run_monthday": run_monthday,
+                "run_weekday": run_weekday,
+                "runner": runner,
+                "token_id": token_id,
+            },
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
     def create_pr_expert(
         self,
         *,
@@ -4711,7 +4817,6 @@ class Operations(_Mixin):
         every: Literal["month", "year"] | None = None,
         name: str,
         note: str | None = None,
-        project_id: str | None = None,
         provider: str | None = None,
         sequence_id: str | None = None,
         starts_on: str | None = None,
@@ -4737,7 +4842,6 @@ class Operations(_Mixin):
                 "every": every,
                 "name": name,
                 "note": note,
-                "project_id": project_id,
                 "provider": provider,
                 "sequence_id": sequence_id,
                 "starts_on": starts_on,
@@ -4859,7 +4963,7 @@ class Operations(_Mixin):
         ws: str | None = None,
         description: str | None = None,
         name: str,
-        scopes: list[Any] | None = None,
+        scopes: list[str] | None = None,
         extra_body: dict[str, Any] | None = None,
         idempotency_key: str | None = None,
     ) -> Any:
@@ -5029,7 +5133,6 @@ class Operations(_Mixin):
         pool_id: str | None = None,
         preferred_sender_ids: list[str] | None = None,
         priority: Literal["low", "normal", "high"] | None = None,
-        project_id: str | None = None,
         send_days: list[int] | None = None,
         send_end: str | None = None,
         send_start: str | None = None,
@@ -5067,7 +5170,6 @@ class Operations(_Mixin):
                 "pool_id": pool_id,
                 "preferred_sender_ids": preferred_sender_ids,
                 "priority": priority,
-                "project_id": project_id,
                 "send_days": send_days,
                 "send_end": send_end,
                 "send_start": send_start,
@@ -6219,6 +6321,27 @@ class Operations(_Mixin):
             "DELETE",
             "/v1/workspaces/{ws}/partner-programs/{id}/groups/{group}",
             path={"id": id, "group": group, "ws": ws},
+            idempotency_key=idempotency_key,
+        )
+
+    def delete_playbook_automation(
+        self,
+        id: str,
+        *,
+        ws: str | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Delete a playbook automation.
+
+        Scope missions.run. Its past runs stay as missions.
+
+        Needs: the missions.run scope.
+        DELETE /v1/workspaces/{ws}/playbook-automations/{id}
+        """
+        return self._call(
+            "DELETE",
+            "/v1/workspaces/{ws}/playbook-automations/{id}",
+            path={"id": id, "ws": ws},
             idempotency_key=idempotency_key,
         )
 
@@ -8197,6 +8320,7 @@ class Operations(_Mixin):
         *,
         ws: str | None = None,
         brand: str | None = None,
+        record: str | None = None,
     ) -> Any:
         """The automation map.
 
@@ -8215,7 +8339,10 @@ class Operations(_Mixin):
         - `never_fires`: a live journey whose trigger event hasn't happened in 30 days
 
         `brand` limits it to one brand's automations and the shared ones.
-        Changes nothing.
+        With `record`, a person, each node says what they have to do with
+        it in `reached`: an event they did, a list they are in, a rule that
+        fired for them, a journey they are in or went through. Changes
+        nothing.
 
         Needs: the emails.read scope.
         GET /v1/workspaces/{ws}/automation-map
@@ -8224,7 +8351,7 @@ class Operations(_Mixin):
             "GET",
             "/v1/workspaces/{ws}/automation-map",
             path={"ws": ws},
-            query={"brand": brand},
+            query={"brand": brand, "record": record},
         )
 
     def get_backlinks_summary(
@@ -8725,6 +8852,29 @@ class Operations(_Mixin):
             path={"id": id, "ws": ws},
         )
 
+    def get_data_network(
+        self,
+        *,
+        ws: str | None = None,
+    ) -> Any:
+        """Read the workspace's place in the data network.
+
+        Scope: leads.read. Internal: the data network is turned on only for workspaces the server's operator chose;
+        for every other workspace available is false and nothing else applies. When it is on, the email finder can
+        check and find addresses using what member workspaces learned, answering only about an address, or a name
+        and domain, the asker brought. A workspace that hasn't joined gets a few lookups a month (allowance);
+        members get unlimited lookups and share whether the addresses their sequences email deliver or bounce, and
+        their address shapes. Names, lists, replies and message text are never shared.
+
+        Needs: the leads.read scope.
+        GET /v1/workspaces/{ws}/data-network
+        """
+        return self._call(
+            "GET",
+            "/v1/workspaces/{ws}/data-network",
+            path={"ws": ws},
+        )
+
     def get_deal(
         self,
         id: str,
@@ -9221,6 +9371,31 @@ class Operations(_Mixin):
             "GET",
             "/v1/workspaces/{ws}/flags/{flag}",
             path={"flag": flag, "ws": ws},
+        )
+
+    def get_flag_group_holdout(
+        self,
+        group: str,
+        *,
+        ws: str | None = None,
+        event: str | None = None,
+        page: str | None = None,
+        days: int | None = None,
+    ) -> Any:
+        """Compare an exclusion group's holdout with everyone else.
+
+        Scope: analytics.read. Every visitor who viewed a page of the site in the last days, split by whether they fall in
+        the group's holdout (the same hash the flags use), and the goal after their first view: what the group's changes
+        did together. 409 when the group has no holdout.
+
+        Needs: the analytics.read scope.
+        GET /v1/workspaces/{ws}/flag-groups/{group}/holdout
+        """
+        return self._call(
+            "GET",
+            "/v1/workspaces/{ws}/flag-groups/{group}/holdout",
+            path={"group": group, "ws": ws},
+            query={"event": event, "page": page, "days": days},
         )
 
     def get_health(
@@ -10126,6 +10301,23 @@ class Operations(_Mixin):
         return self._call(
             "GET",
             "/v1/workspaces/{ws}/playbooks/{id}",
+            path={"id": id, "ws": ws},
+        )
+
+    def get_playbook_automation(
+        self,
+        id: str,
+        *,
+        ws: str | None = None,
+    ) -> Any:
+        """Get a playbook automation.
+
+        Needs: the missions.read scope.
+        GET /v1/workspaces/{ws}/playbook-automations/{id}
+        """
+        return self._call(
+            "GET",
+            "/v1/workspaces/{ws}/playbook-automations/{id}",
             path={"id": id, "ws": ws},
         )
 
@@ -11701,6 +11893,27 @@ class Operations(_Mixin):
             "/v1/auth/google/callback",
         )
 
+    def ignore_ai_receipt(
+        self,
+        id: str,
+        *,
+        ws: str | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Ignore a receipt.
+
+        Scope: ai_accounts.manage. A receipt that needs review but isn't for an account to track.
+
+        Needs: the ai_accounts.manage scope.
+        POST /v1/workspaces/{ws}/ai-accounts/receipts/{id}/ignore
+        """
+        return self._call(
+            "POST",
+            "/v1/workspaces/{ws}/ai-accounts/receipts/{id}/ignore",
+            path={"id": id, "ws": ws},
+            idempotency_key=idempotency_key,
+        )
+
     def impersonate_partner(
         self,
         id: str,
@@ -11915,6 +12128,56 @@ class Operations(_Mixin):
             path={"file": file},
         )
 
+    def join_data_network(
+        self,
+        *,
+        ws: str | None = None,
+        confirm: bool,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Join the data network.
+
+        Scope: integrations.manage, and only the workspace's owner, signed in: an API token or another role gets
+        403. Send confirm: true after showing the preview. From then on the workspace shares whether the addresses
+        its sequences email deliver or bounce, and their address shapes, starting with its past sends, and gets
+        unlimited lookups. Every owner and admin is emailed. Returns 409 data_network_unavailable when the data
+        network isn't on for this workspace. Joining again does nothing.
+
+        Needs: the integrations.manage scope.
+        POST /v1/workspaces/{ws}/data-network/join
+        """
+        return self._call(
+            "POST",
+            "/v1/workspaces/{ws}/data-network/join",
+            path={"ws": ws},
+            body={"confirm": confirm},
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
+    def leave_data_network(
+        self,
+        *,
+        ws: str | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Leave the data network.
+
+        Scope: integrations.manage. Sharing stops at once and lookups fall back to the monthly allowance.
+        Everything the workspace shared is withdrawn from the network by withdraw_by, 30 days at most. Every owner
+        and admin is emailed. Leaving when not a member does nothing.
+
+        Needs: the integrations.manage scope.
+        POST /v1/workspaces/{ws}/data-network/leave
+        """
+        return self._call(
+            "POST",
+            "/v1/workspaces/{ws}/data-network/leave",
+            path={"ws": ws},
+            idempotency_key=idempotency_key,
+        )
+
     def leave_workspace(
         self,
         *,
@@ -11932,6 +12195,30 @@ class Operations(_Mixin):
             "POST",
             "/v1/workspaces/{ws}/leave",
             path={"ws": ws},
+            idempotency_key=idempotency_key,
+        )
+
+    def link_inbound_forwarder(
+        self,
+        *,
+        ws: str | None = None,
+        email: str,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Link a personal address to forward from.
+
+        Scope: my_ai_accounts.manage, as a person. Lets mail you forward from this address (your own Gmail, say) reach the workspace; do it before adding the forwarding address in Gmail.
+
+        Needs: the my_ai_accounts.manage scope.
+        POST /v1/workspaces/{ws}/inbound-forwarders
+        """
+        return self._call(
+            "POST",
+            "/v1/workspaces/{ws}/inbound-forwarders",
+            path={"ws": ws},
+            body={"email": email},
+            extra_body=extra_body,
             idempotency_key=idempotency_key,
         )
 
@@ -12338,6 +12625,28 @@ class Operations(_Mixin):
             "GET",
             "/v1/workspaces/{ws}/ai-cohorts/{cohort}/prompts",
             path={"cohort": cohort, "ws": ws},
+        )
+
+    def list_ai_receipts(
+        self,
+        *,
+        ws: str | None = None,
+        status: Literal["matched", "needs_review", "ignored"] | None = None,
+    ) -> Any:
+        """List AI receipts.
+
+        Scope: ai_spend.read. Receipts people forwarded to the workspace's inbound address (Outflare Cloud), newest first:
+        what each says and the AI account it was matched to, and how (account_email, known_id, forwarder,
+        expected_renewal, or person). status=needs_review lists those waiting for someone to assign or ignore.
+
+        Needs: the ai_spend.read scope.
+        GET /v1/workspaces/{ws}/ai-accounts/receipts
+        """
+        return self._call(
+            "GET",
+            "/v1/workspaces/{ws}/ai-accounts/receipts",
+            path={"ws": ws},
+            query={"status": status},
         )
 
     def list_ai_runs(
@@ -13941,6 +14250,24 @@ class Operations(_Mixin):
             query={"source": source, "subject_id": subject_id, "status": status, "severity": severity, "brand": brand},
         )
 
+    def list_flag_groups(
+        self,
+        *,
+        ws: str | None = None,
+    ) -> Any:
+        """List exclusion groups.
+
+        Scope: analytics.read. Every exclusion group, with its holdout, its flags and their slices, and the share still free.
+
+        Needs: the analytics.read scope.
+        GET /v1/workspaces/{ws}/flag-groups
+        """
+        return self._call(
+            "GET",
+            "/v1/workspaces/{ws}/flag-groups",
+            path={"ws": ws},
+        )
+
     def list_flags(
         self,
         *,
@@ -14076,6 +14403,28 @@ class Operations(_Mixin):
             query={"brand": brand},
         )
 
+    def list_inbound_forwarders(
+        self,
+        *,
+        ws: str | None = None,
+        everyone: bool | None = None,
+    ) -> Any:
+        """List linked forwarding addresses.
+
+        Scope: my_ai_accounts.read. Personal addresses you linked to forward from, with Gmail's forwarding confirmation
+        once it arrives (open `confirmation_url` to confirm). Everyone's with everyone=true and ai_accounts.read. Members' own
+        work addresses can always forward and aren't listed.
+
+        Needs: the my_ai_accounts.read scope.
+        GET /v1/workspaces/{ws}/inbound-forwarders
+        """
+        return self._call(
+            "GET",
+            "/v1/workspaces/{ws}/inbound-forwarders",
+            path={"ws": ws},
+            query={"everyone": everyone},
+        )
+
     def list_inbox(
         self,
         *,
@@ -14093,7 +14442,6 @@ class Operations(_Mixin):
         min_confidence: float | None = None,
         assigned_to: str | None = None,
         tag: str | None = None,
-        label: str | None = None,
         q: str | None = None,
         brand: str | None = None,
         limit: int | None = None,
@@ -14128,7 +14476,6 @@ class Operations(_Mixin):
                 "min_confidence": min_confidence,
                 "assigned_to": assigned_to,
                 "tag": tag,
-                "label": label,
                 "q": q,
                 "brand": brand,
                 "limit": limit,
@@ -15700,6 +16047,46 @@ class Operations(_Mixin):
             "/v1/workspaces/{ws}/platforms",
             path={"ws": ws},
             query={"brand": brand},
+        )
+
+    def list_playbook_automation_runs(
+        self,
+        id: str,
+        *,
+        ws: str | None = None,
+    ) -> Any:
+        """The missions an automation started.
+
+        Scope missions.read. The latest 50, newest first.
+
+        Needs: the missions.read scope.
+        GET /v1/workspaces/{ws}/playbook-automations/{id}/runs
+        """
+        return self._call(
+            "GET",
+            "/v1/workspaces/{ws}/playbook-automations/{id}/runs",
+            path={"id": id, "ws": ws},
+        )
+
+    def list_playbook_automations(
+        self,
+        *,
+        ws: str | None = None,
+        playbook_id: str | None = None,
+        brand: str | None = None,
+    ) -> Any:
+        """List playbook automations.
+
+        Scope missions.read. Playbooks set to start by themselves, on a schedule or an event, newest first (up to 200).
+
+        Needs: the missions.read scope.
+        GET /v1/workspaces/{ws}/playbook-automations
+        """
+        return self._call(
+            "GET",
+            "/v1/workspaces/{ws}/playbook-automations",
+            path={"ws": ws},
+            query={"playbook_id": playbook_id, "brand": brand},
         )
 
     def list_playbook_catalog(
@@ -17823,6 +18210,27 @@ class Operations(_Mixin):
             idempotency_key=idempotency_key,
         )
 
+    def pause_playbook_automation(
+        self,
+        id: str,
+        *,
+        ws: str | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Pause a playbook automation.
+
+        Scope missions.run. Runs already started carry on; a person approves it again to turn it back on.
+
+        Needs: the missions.run scope.
+        POST /v1/workspaces/{ws}/playbook-automations/{id}/pause
+        """
+        return self._call(
+            "POST",
+            "/v1/workspaces/{ws}/playbook-automations/{id}/pause",
+            path={"id": id, "ws": ws},
+            idempotency_key=idempotency_key,
+        )
+
     def pause_rule(
         self,
         id: str,
@@ -17879,7 +18287,6 @@ class Operations(_Mixin):
         *,
         ws: str | None = None,
         goal: str,
-        project_id: str | None = None,
         extra_body: dict[str, Any] | None = None,
         idempotency_key: str | None = None,
     ) -> Any:
@@ -17908,7 +18315,7 @@ class Operations(_Mixin):
             "POST",
             "/v1/workspaces/{ws}/missions/plan",
             path={"ws": ws},
-            body={"goal": goal, "project_id": project_id},
+            body={"goal": goal},
             extra_body=extra_body,
             idempotency_key=idempotency_key,
         )
@@ -18025,6 +18432,27 @@ class Operations(_Mixin):
             path={"ws": ws},
         )
 
+    def preview_data_network(
+        self,
+        *,
+        ws: str | None = None,
+    ) -> Any:
+        """Count what joining the data network would share.
+
+        Scope: leads.read. What the workspace would share if it joined now: the addresses its sequences emailed
+        at least settle_days ago, by outcome, and how many domains they are at. Addresses or domains anyone opted
+        out or blocked, and personal mail providers such as gmail.com, are left out. Counts only. 409
+        data_network_unavailable when the data network isn't on for this workspace.
+
+        Needs: the leads.read scope.
+        GET /v1/workspaces/{ws}/data-network/preview
+        """
+        return self._call(
+            "GET",
+            "/v1/workspaces/{ws}/data-network/preview",
+            path={"ws": ws},
+        )
+
     def preview_digest(
         self,
         *,
@@ -18119,7 +18547,6 @@ class Operations(_Mixin):
         name: str | None = None,
         notes: str | None = None,
         personas: list[dict[str, Any]] | None = None,
-        project_id: str | None = None,
         provider: Literal["google", "microsoft"] | None = None,
         ready_by: str | None = None,
         rest_below: int | None = None,
@@ -18153,7 +18580,6 @@ class Operations(_Mixin):
                 "name": name,
                 "notes": notes,
                 "personas": personas,
-                "project_id": project_id,
                 "provider": provider,
                 "ready_by": ready_by,
                 "rest_below": rest_below,
@@ -18225,7 +18651,6 @@ class Operations(_Mixin):
         ws: str | None = None,
         filters: dict[str, Any],
         profile_id: str | None = None,
-        project_id: str | None = None,
         search_integration_id: str,
         extra_body: dict[str, Any] | None = None,
         idempotency_key: str | None = None,
@@ -18241,12 +18666,7 @@ class Operations(_Mixin):
             "POST",
             "/v1/workspaces/{ws}/lead-lists/preview",
             path={"ws": ws},
-            body={
-                "filters": filters,
-                "profile_id": profile_id,
-                "project_id": project_id,
-                "search_integration_id": search_integration_id,
-            },
+            body={"filters": filters, "profile_id": profile_id, "search_integration_id": search_integration_id},
             extra_body=extra_body,
             idempotency_key=idempotency_key,
         )
@@ -18805,7 +19225,6 @@ class Operations(_Mixin):
         mission_id: str | None = None,
         note: str | None = None,
         occurred_at: str | None = None,
-        project_id: str | None = None,
         provider: str | None = None,
         ref: str | None = None,
         sequence_id: str | None = None,
@@ -18839,7 +19258,6 @@ class Operations(_Mixin):
                 "mission_id": mission_id,
                 "note": note,
                 "occurred_at": occurred_at,
-                "project_id": project_id,
                 "provider": provider,
                 "ref": ref,
                 "sequence_id": sequence_id,
@@ -19070,7 +19488,6 @@ class Operations(_Mixin):
         lead_list_ids: list[str] | None = None,
         mailbox_ids: list[str] | None = None,
         mission_ids: list[str] | None = None,
-        project_ids: list[str] | None = None,
         sequence_ids: list[str] | None = None,
         with_mailboxes: bool | None = None,
         extra_body: dict[str, Any] | None = None,
@@ -19092,7 +19509,6 @@ class Operations(_Mixin):
                 "lead_list_ids": lead_list_ids,
                 "mailbox_ids": mailbox_ids,
                 "mission_ids": mission_ids,
-                "project_ids": project_ids,
                 "sequence_ids": sequence_ids,
                 "with_mailboxes": with_mailboxes,
             },
@@ -20101,6 +20517,30 @@ class Operations(_Mixin):
             idempotency_key=idempotency_key,
         )
 
+    def run_playbook_automation(
+        self,
+        id: str,
+        *,
+        ws: str | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Start a run of an active automation now.
+
+        Scope missions.run. Starts a run inside the approved limits, as if
+        its time had come, without moving its schedule. 409
+        automation_state when it isn't active, or when a limit or a missing
+        connection holds it.
+
+        Needs: the missions.run scope.
+        POST /v1/workspaces/{ws}/playbook-automations/{id}/run
+        """
+        return self._call(
+            "POST",
+            "/v1/workspaces/{ws}/playbook-automations/{id}/run",
+            path={"id": id, "ws": ws},
+            idempotency_key=idempotency_key,
+        )
+
     def run_query(
         self,
         *,
@@ -20737,6 +21177,34 @@ class Operations(_Mixin):
             idempotency_key=idempotency_key,
         )
 
+    def set_flag_group(
+        self,
+        group: str,
+        *,
+        ws: str | None = None,
+        holdout: int,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Set an exclusion group's holdout.
+
+        Scope: analytics.manage. The holdout is the percent of the group's visitors (the top slice) kept out of every flag
+        in it, so they see the default experience wherever its tests run; compare them with everyone else on a goal
+        (getFlagGroupHoldout) to see what the group's changes did together. 409 when a flag's slice reaches into it.
+        Needs access to every brand, since a group spans them.
+
+        Needs: the analytics.manage scope.
+        PUT /v1/workspaces/{ws}/flag-groups/{group}
+        """
+        return self._call(
+            "PUT",
+            "/v1/workspaces/{ws}/flag-groups/{group}",
+            path={"group": group, "ws": ws},
+            body={"holdout": holdout},
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
     def set_journey_step_secret(
         self,
         id: str,
@@ -20884,7 +21352,6 @@ class Operations(_Mixin):
         self,
         *,
         ws: str | None = None,
-        project_id: str | None = None,
         rules: dict[str, Any],
         sequence_id: str | None = None,
         extra_body: dict[str, Any] | None = None,
@@ -20893,8 +21360,7 @@ class Operations(_Mixin):
         """Save the reply rules for the workspace or a sequence.
 
         Scope inbox.manage. Replaces the set for the workspace (no id) or a
-        sequence (sequence_id). A project_id is refused with 400: projects
-        were removed. Labels left out
+        sequence (sequence_id). Labels left out
         follow the next set up; an empty rules object removes the set and
         answers {"cleared": true}. Every action can be undone: a snoozed
         reply can be woken, a restarted or enrolled lead stopped.
@@ -20906,7 +21372,7 @@ class Operations(_Mixin):
             "PUT",
             "/v1/workspaces/{ws}/reply-rules",
             path={"ws": ws},
-            body={"project_id": project_id, "rules": rules, "sequence_id": sequence_id},
+            body={"rules": rules, "sequence_id": sequence_id},
             extra_body=extra_body,
             idempotency_key=idempotency_key,
         )
@@ -21581,7 +22047,6 @@ class Operations(_Mixin):
         inputs: dict[str, Any] | None = None,
         max_spend_cents: int | None = None,
         mode: Literal["dry_run", "approve_writes", "autonomous"] | None = None,
-        project_id: str | None = None,
         token_id: str | None = None,
         extra_body: dict[str, Any] | None = None,
         idempotency_key: str | None = None,
@@ -21612,7 +22077,6 @@ class Operations(_Mixin):
                 "inputs": inputs,
                 "max_spend_cents": max_spend_cents,
                 "mode": mode,
-                "project_id": project_id,
                 "token_id": token_id,
             },
             extra_body=extra_body,
@@ -21881,6 +22345,30 @@ class Operations(_Mixin):
             "POST",
             "/v1/integrations/{id}/webhook",
             path={"id": id},
+            idempotency_key=idempotency_key,
+        )
+
+    def switch_over_partner_program(
+        self,
+        id: str,
+        *,
+        ws: str | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Switch a program over from the platform it was imported from.
+
+        Scope: partners.manage. Say that the platform the program was imported from (Tolt) no longer pays it. Until then,
+        commissions the import brought in keep that platform's status, re-runs bring its changes, and Outflare never approves
+        them after its hold or puts them in a payout, so nobody is paid twice. From now on they are approved and paid here like
+        any other. 409 when it has already switched over.
+
+        Needs: the partners.manage scope.
+        POST /v1/workspaces/{ws}/partner-programs/{id}/switch-over
+        """
+        return self._call(
+            "POST",
+            "/v1/workspaces/{ws}/partner-programs/{id}/switch-over",
+            path={"id": id, "ws": ws},
             idempotency_key=idempotency_key,
         )
 
@@ -22310,6 +22798,27 @@ class Operations(_Mixin):
             idempotency_key=idempotency_key,
         )
 
+    def unlink_inbound_forwarder(
+        self,
+        email: str,
+        *,
+        ws: str | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Unlink a forwarding address.
+
+        Scope: my_ai_accounts.manage for your own, ai_accounts.manage for anyone's. Mail forwarded from it is refused after.
+
+        Needs: the my_ai_accounts.manage scope.
+        DELETE /v1/workspaces/{ws}/inbound-forwarders/{email}
+        """
+        return self._call(
+            "DELETE",
+            "/v1/workspaces/{ws}/inbound-forwarders/{email}",
+            path={"email": email, "ws": ws},
+            idempotency_key=idempotency_key,
+        )
+
     def unsubscribe(
         self,
         token: str,
@@ -22460,7 +22969,7 @@ class Operations(_Mixin):
         *,
         ws: str | None = None,
         require_mission: bool | None = None,
-        scopes: list[Any] | None = None,
+        scopes: list[str] | None = None,
         extra_body: dict[str, Any] | None = None,
         idempotency_key: str | None = None,
     ) -> Any:
@@ -22841,7 +23350,7 @@ class Operations(_Mixin):
         max_priority: Literal["low", "normal", "high"] | None = None,
         may_take_mailboxes: bool | None = None,
         name: str | None = None,
-        scopes: list[Any] | None = None,
+        scopes: list[str] | None = None,
         extra_body: dict[str, Any] | None = None,
         idempotency_key: str | None = None,
     ) -> Any:
@@ -23353,7 +23862,6 @@ class Operations(_Mixin):
         currency: str | None = None,
         mission_id: str | None = None,
         name: str | None = None,
-        project_id: str | None = None,
         sequence_id: str | None = None,
         stage: str | None = None,
         state: Literal["open", "won", "lost"] | None = None,
@@ -23378,7 +23886,6 @@ class Operations(_Mixin):
                 "currency": currency,
                 "mission_id": mission_id,
                 "name": name,
-                "project_id": project_id,
                 "sequence_id": sequence_id,
                 "stage": stage,
                 "state": state,
@@ -23984,7 +24491,6 @@ class Operations(_Mixin):
         name: str | None = None,
         notes: str | None = None,
         personas: list[dict[str, Any]] | None = None,
-        project_id: str | None = None,
         provider: Literal["google", "microsoft"] | None = None,
         ready_by: str | None = None,
         rest_below: int | None = None,
@@ -24018,7 +24524,6 @@ class Operations(_Mixin):
                 "name": name,
                 "notes": notes,
                 "personas": personas,
-                "project_id": project_id,
                 "provider": provider,
                 "ready_by": ready_by,
                 "rest_below": rest_below,
@@ -24297,7 +24802,6 @@ class Operations(_Mixin):
         min_score: int | None = None,
         name: str | None = None,
         profile_id: str | None = None,
-        project_id: str | None = None,
         refresh_every_days: int | None = None,
         search_integration_id: str | None = None,
         skip_contacted_days: int | None = None,
@@ -24327,7 +24831,6 @@ class Operations(_Mixin):
                 "min_score": min_score,
                 "name": name,
                 "profile_id": profile_id,
-                "project_id": project_id,
                 "refresh_every_days": refresh_every_days,
                 "search_integration_id": search_integration_id,
                 "skip_contacted_days": skip_contacted_days,
@@ -24481,7 +24984,6 @@ class Operations(_Mixin):
         ws: str | None = None,
         mission_id: str | None = None,
         notes: str | None = None,
-        project_id: str | None = None,
         qualified: bool | None = None,
         sequence_id: str | None = None,
         starts_at: str | None = None,
@@ -24508,7 +25010,6 @@ class Operations(_Mixin):
             body={
                 "mission_id": mission_id,
                 "notes": notes,
-                "project_id": project_id,
                 "qualified": qualified,
                 "sequence_id": sequence_id,
                 "starts_at": starts_at,
@@ -24561,7 +25062,6 @@ class Operations(_Mixin):
         brand_id: str | None = None,
         kind: Literal["preference", "decision", "fact", "feedback"] | None = None,
         pinned: bool | None = None,
-        project_id: str | None = None,
         text: str | None = None,
         extra_body: dict[str, Any] | None = None,
         idempotency_key: str | None = None,
@@ -24577,7 +25077,7 @@ class Operations(_Mixin):
             "PATCH",
             "/v1/workspaces/{ws}/memories/{id}",
             path={"id": id, "ws": ws},
-            body={"brand_id": brand_id, "kind": kind, "pinned": pinned, "project_id": project_id, "text": text},
+            body={"brand_id": brand_id, "kind": kind, "pinned": pinned, "text": text},
             extra_body=extra_body,
             idempotency_key=idempotency_key,
         )
@@ -24597,7 +25097,6 @@ class Operations(_Mixin):
         mode: Literal["dry_run", "approve_writes", "autonomous"] | None = None,
         name: str | None = None,
         plan: str | None = None,
-        project_id: str | None = None,
         token_id: str | None = None,
         extra_body: dict[str, Any] | None = None,
         idempotency_key: str | None = None,
@@ -24626,7 +25125,6 @@ class Operations(_Mixin):
                 "mode": mode,
                 "name": name,
                 "plan": plan,
-                "project_id": project_id,
                 "token_id": token_id,
             },
             extra_body=extra_body,
@@ -24940,6 +25438,67 @@ class Operations(_Mixin):
             idempotency_key=idempotency_key,
         )
 
+    def update_playbook_automation(
+        self,
+        id: str,
+        *,
+        ws: str | None = None,
+        brand_id: str | None = None,
+        cadence: Literal["daily", "weekly", "monthly"] | None = None,
+        daily_cap: int | None = None,
+        event_type: str | None = None,
+        gather: Literal["each", "hourly", "daily"] | None = None,
+        inputs: dict[str, Any] | None = None,
+        kind: Literal["schedule", "event"] | None = None,
+        max_spend_cents_per_month: int | None = None,
+        max_spend_cents_per_run: int | None = None,
+        mode: Literal["dry_run", "approve_writes", "autonomous"] | None = None,
+        name: str | None = None,
+        playbook_id: str | None = None,
+        run_hour: int | None = None,
+        run_monthday: int | None = None,
+        run_weekday: int | None = None,
+        runner: Literal["builtin", "external"] | None = None,
+        token_id: str | None = None,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Change a playbook automation.
+
+        Scope missions.run. Changing anything but the name changes what a
+        person approved, so the automation goes back to draft and waits for
+        approval again.
+
+        Needs: the missions.run scope.
+        PATCH /v1/workspaces/{ws}/playbook-automations/{id}
+        """
+        return self._call(
+            "PATCH",
+            "/v1/workspaces/{ws}/playbook-automations/{id}",
+            path={"id": id, "ws": ws},
+            body={
+                "brand_id": brand_id,
+                "cadence": cadence,
+                "daily_cap": daily_cap,
+                "event_type": event_type,
+                "gather": gather,
+                "inputs": inputs,
+                "kind": kind,
+                "max_spend_cents_per_month": max_spend_cents_per_month,
+                "max_spend_cents_per_run": max_spend_cents_per_run,
+                "mode": mode,
+                "name": name,
+                "playbook_id": playbook_id,
+                "run_hour": run_hour,
+                "run_monthday": run_monthday,
+                "run_weekday": run_weekday,
+                "runner": runner,
+                "token_id": token_id,
+            },
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
     def update_pr_expert(
         self,
         expert: str,
@@ -25057,7 +25616,6 @@ class Operations(_Mixin):
         every: Literal["month", "year"] | None = None,
         name: str,
         note: str | None = None,
-        project_id: str | None = None,
         provider: str | None = None,
         sequence_id: str | None = None,
         starts_on: str | None = None,
@@ -25083,7 +25641,6 @@ class Operations(_Mixin):
                 "every": every,
                 "name": name,
                 "note": note,
-                "project_id": project_id,
                 "provider": provider,
                 "sequence_id": sequence_id,
                 "starts_on": starts_on,
@@ -25160,7 +25717,7 @@ class Operations(_Mixin):
         ws: str | None = None,
         description: str | None = None,
         name: str | None = None,
-        scopes: list[Any] | None = None,
+        scopes: list[str] | None = None,
         extra_body: dict[str, Any] | None = None,
         idempotency_key: str | None = None,
     ) -> Any:
@@ -25469,7 +26026,6 @@ class Operations(_Mixin):
         pool_id: str | None = None,
         preferred_sender_ids: list[str] | None = None,
         priority: Literal["low", "normal", "high"] | None = None,
-        project_id: str | None = None,
         send_days: list[int] | None = None,
         send_end: str | None = None,
         send_start: str | None = None,
@@ -25509,7 +26065,6 @@ class Operations(_Mixin):
                 "pool_id": pool_id,
                 "preferred_sender_ids": preferred_sender_ids,
                 "priority": priority,
-                "project_id": project_id,
                 "send_days": send_days,
                 "send_end": send_end,
                 "send_start": send_start,

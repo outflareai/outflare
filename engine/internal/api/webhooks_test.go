@@ -251,7 +251,7 @@ func TestWhoamiTellsATokenItsWorkspace(t *testing.T) {
 	secret := owner.must(201, "POST", "/v1/workspaces/"+ws+"/api-tokens", map[string]any{"name": "cli", "scopes": []string{"leads.read"}})["token"].(string)
 	bot := &client{t: t, h: h, bearer: secret}
 	tok := bot.must(200, "GET", "/v1/whoami", nil)["token"].(map[string]any)
-	if tok["workspace_id"] != ws || tok["name"] != "cli" || tok["kind"] != "workspace" {
+	if tok["workspace_id"] != ws || tok["name"] != "cli" {
 		t.Fatalf("token whoami %v", tok)
 	}
 	if w := tok["workspace"].(map[string]any); w["slug"] != "acme-outbound" || w["name"] != "Acme Outbound" {

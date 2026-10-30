@@ -163,12 +163,10 @@ func (s *Server) getPlaybook(w http.ResponseWriter, r *http.Request) {
 }
 
 type playbookRunInput struct {
-	Inputs map[string]string `json:"inputs"`
-	Mode   *string           `json:"mode"`
-	// Ignored: projects were removed. Accepted so older clients still work.
-	ProjectID     optional[string] `json:"project_id"`
-	TokenID       optional[string] `json:"token_id"`
-	MaxSpendCents optional[int64]  `json:"max_spend_cents"`
+	Inputs        map[string]string `json:"inputs"`
+	Mode          *string           `json:"mode"`
+	TokenID       optional[string]  `json:"token_id"`
+	MaxSpendCents optional[int64]   `json:"max_spend_cents"`
 	// ApplyKit sets up the playbook's kit in the same step (catalog.manage,
 	// and emails.manage when it adds email drafts).
 	ApplyKit bool `json:"apply_kit"`
@@ -238,7 +236,7 @@ func (s *Server) startPlaybook(w http.ResponseWriter, r *http.Request) {
 	name, goal := p.Title, p.Summary
 	instructions, plan := playbookBrief(p, in.Inputs)
 	mi := missionInput{Name: &name, Goal: &goal, Instructions: &instructions, Plan: &plan, Mode: in.Mode,
-		ProjectID: in.ProjectID, TokenID: in.TokenID, MaxSpendCents: in.MaxSpendCents,
+		TokenID: in.TokenID, MaxSpendCents: in.MaxSpendCents,
 		playbookID: &p.ID, playbookVersion: &p.Version}
 	if err := mi.validate(); s.missionError(w, r, err) {
 		return

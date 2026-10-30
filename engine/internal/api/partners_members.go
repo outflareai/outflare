@@ -109,7 +109,7 @@ const partnerSelect = `
 	                 FROM partner_rewards w WHERE w.membership_id = m.id AND w.side = 'partner' AND w.kind <> 'action'), 0)::bigint,
 	       COALESCE((SELECT sum(w.amount_cents) FILTER (WHERE w.status = 'paid')
 	                 FROM partner_rewards w WHERE w.membership_id = m.id AND w.side = 'partner' AND w.kind <> 'action'), 0)::bigint,
-	       COALESCE((SELECT sum(w.amount_cents) FILTER (WHERE w.status = 'approved' AND w.payout_id IS NULL)
+	       COALESCE((SELECT sum(w.amount_cents) FILTER (WHERE w.status = 'approved' AND w.payout_id IS NULL AND NOT ` + heldAtSource + `)
 	                 FROM partner_rewards w WHERE w.membership_id = m.id AND w.side = 'partner' AND w.kind <> 'action'), 0)::bigint,
 	       (SELECT count(*) FROM partner_rewards w WHERE w.membership_id = m.id AND w.kind = 'action' AND w.status = 'approved')::int,
 	       m.created_at, m.updated_at
@@ -885,7 +885,7 @@ func (s *Server) getPartnerProgramStats(w http.ResponseWriter, r *http.Request) 
 		       COALESCE((SELECT sum(amount_cents) FILTER (WHERE status = 'pending') FROM w WHERE side = 'partner' AND kind <> 'action'), 0)::bigint,
 		       COALESCE((SELECT sum(amount_cents) FILTER (WHERE status = 'approved') FROM w WHERE side = 'partner' AND kind <> 'action'), 0)::bigint,
 		       COALESCE((SELECT sum(amount_cents) FILTER (WHERE status = 'paid') FROM w WHERE side = 'partner' AND kind <> 'action'), 0)::bigint,
-		       COALESCE((SELECT sum(amount_cents) FILTER (WHERE status = 'approved' AND payout_id IS NULL) FROM w WHERE side = 'partner' AND kind <> 'action'), 0)::bigint,
+		       COALESCE((SELECT sum(amount_cents) FILTER (WHERE status = 'approved' AND payout_id IS NULL AND NOT `+heldAtSource+`) FROM w WHERE side = 'partner' AND kind <> 'action'), 0)::bigint,
 		       (SELECT count(*) FROM w WHERE kind = 'action' AND status = 'approved')::int`, a.WorkspaceID, prog.ID).
 		Scan(&active, &pending, &suspended, &rejected, &missing, &st.Clicks, &st.Referrals, &st.Customers, &st.SalesCents, &st.PendingCents,
 			&st.ApprovedCents, &st.PaidCents, &st.BalanceCents, &st.PendingActions)

@@ -31,9 +31,11 @@ import (
 	"github.com/outflareai/outflare/engine/internal/connectors"
 	"github.com/outflareai/outflare/engine/internal/cookies"
 	"github.com/outflareai/outflare/engine/internal/crawl"
+	"github.com/outflareai/outflare/engine/internal/datanetwork"
 	"github.com/outflareai/outflare/engine/internal/domainconnect"
 	"github.com/outflareai/outflare/engine/internal/emailfind"
 	"github.com/outflareai/outflare/engine/internal/emails"
+	"github.com/outflareai/outflare/engine/internal/features"
 	"github.com/outflareai/outflare/engine/internal/imports"
 	"github.com/outflareai/outflare/engine/internal/inbound"
 	"github.com/outflareai/outflare/engine/internal/inboundemail"
@@ -81,6 +83,7 @@ type Server struct {
 	lists         *lists.Service
 	verifier      *verify.Service
 	emailFinder   *emailfind.Service
+	dataNetwork   *datanetwork.Service
 	inboundEmail  *inboundemail.Service
 	classifier    *classify.Classifier
 	research      *research.Service
@@ -164,6 +167,9 @@ type Options struct {
 	// EmailFinder proposes and verifies addresses from a workspace's learned
 	// patterns; nil turns the /email-finder endpoints off.
 	EmailFinder *emailfind.Service
+	// DataNetwork is the data network's membership and lookups
+	// (internal/datanetwork); it works without a network registered.
+	DataNetwork *datanetwork.Service
 	// InboundEmail receives workspaces' forwarded mail when an extension
 	// turned it on (package inboundemail); nil leaves it off.
 	InboundEmail *inboundemail.Service
@@ -370,6 +376,7 @@ func NewServer(pool *pgxpool.Pool, log *slog.Logger, opts Options) *Server {
 		integrations:     opts.Integrations,
 		verifier:         opts.Verify,
 		emailFinder:      opts.EmailFinder,
+		dataNetwork:      opts.DataNetwork,
 		inboundEmail:     cmp.Or(opts.InboundEmail, &inboundemail.Service{}),
 		classifier:       classifier,
 		research:         opts.Research,
@@ -403,6 +410,14 @@ func NewServer(pool *pgxpool.Pool, log *slog.Logger, opts Options) *Server {
 	if s.seoSyncer != nil && s.seoSyncer.Store != nil {
 		s.seoSyncer.Watch()
 	}
+	// AI receipts: only members forward them, to one address per
+	// workspace, and only where AI Accounts is on.
+	s.inboundEmail.Register(inboundemail.PurposeAIReceipts, inboundemail.Purpose{
+		Handler: s.handleAIReceipt,
+		On: func(ctx context.Context, q inboundemail.Querier, workspaceID string) (bool, error) {
+			return features.Enabled(ctx, q, workspaceID, features.AIAccounts)
+		},
+	})
 	s.registerSupportForwarding()
 	return s
 }
@@ -533,6 +548,7 @@ func (s *Server) buildHandler() http.Handler {
 	s.routesAttribution(mux)
 	s.routesAttributionModels(mux)
 	s.routesConversionDefinitions(mux)
+	s.routesAIReceipts(mux)
 	s.routesAIAccounts(mux)
 	s.routesCustomerProfiles(mux)
 	s.routesKnowledge(mux)
@@ -547,12 +563,14 @@ func (s *Server) buildHandler() http.Handler {
 	s.routesWorkspaceDomains(mux)
 	s.routesMissions(mux)
 	s.routesPlaybooks(mux)
+	s.routesPlaybookAutomations(mux)
 	s.routesKits(mux)
 	s.routesTelemetry(mux)
 	s.routesAgentOAuth(mux)
 	s.routesMCP(mux)
 	if s.emailFinder != nil {
 		s.routesEmailFind(mux)
+		s.routesDataNetwork(mux)
 	}
 	if s.emails != nil {
 		s.routesEmails(mux)

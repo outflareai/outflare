@@ -342,7 +342,6 @@ func (s *Server) tokenPrincipal(ctx context.Context, tokenID string) (*principal
 		WHERE id = $1 AND revoked_at IS NULL AND (expires_at IS NULL OR expires_at > now())
 		  AND NOT EXISTS (SELECT 1 FROM users u WHERE u.id = api_tokens.created_by AND u.disabled_at IS NOT NULL)`, tokenID).
 		Scan(&p.TokenID, &p.ActorID, &p.TokenWorkspaceID, &p.TokenScopes)
-	p.TokenScopes = auth.Rename(p.TokenScopes)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, errors.New("its token was revoked or expired")
 	}

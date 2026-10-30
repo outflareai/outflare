@@ -763,6 +763,8 @@ func (s *Server) portalSignup(w http.ResponseWriter, r *http.Request) {
 		Name        string         `json:"name"`
 		Answers     map[string]any `json:"answers"`
 		AcceptTerms bool           `json:"accept_terms"`
+		// Group is the group whose sign-up link they came from.
+		Group string `json:"group"`
 	}
 	if !decode(w, r, &in) {
 		return
@@ -832,6 +834,20 @@ func (s *Server) portalSignup(w http.ResponseWriter, r *http.Request) {
 			return err
 		}
 		if !exists {
+			// A group's sign-up link joins them to it; a link to a group
+			// since deleted joins the default group instead.
+			var group *string
+			if validUUID(in.Group) {
+				var g string
+				err := tx.QueryRow(ctx, `SELECT id::text FROM partner_groups WHERE workspace_id = $1 AND program_id = $2 AND id = $3`,
+					p.ws, p.id, in.Group).Scan(&g)
+				if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+					return err
+				}
+				if g != "" {
+					group = &g
+				}
+			}
 			prog := &partnerProgramView{ID: p.id, Kind: p.kind, BrandID: p.brandID}
 			now := time.Now()
 			var terms *time.Time
@@ -839,7 +855,7 @@ func (s *Server) portalSignup(w http.ResponseWriter, r *http.Request) {
 				terms = &now
 			}
 			if _, err := s.joinPartner(ctx, tx, p.ws, nil, prog, partnerJoin{rec: rec, status: status, source: "signup",
-				application: answers, termsAt: terms}); err != nil {
+				group: group, application: answers, termsAt: terms}); err != nil {
 				return err
 			}
 		}

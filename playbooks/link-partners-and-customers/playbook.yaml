@@ -1,5 +1,5 @@
 id: link-partners-and-customers
-version: 2
+version: 3
 title: Get links from your partners and customers
 summary: Find the partners and customers whose websites don't link to you yet, and ask for a spot on their partners or integrations page.
 description: |
@@ -37,6 +37,10 @@ steps:
     tools: [startLinkPitch, listLinkPitches]
   - say: Report what was pitched and, later, what replied, agreed and went live.
     tools: [getLinkResults, listLinkProspects]
+automation:
+  schedule: monthly
+  events: [partner.created]
+  gather: daily
 guardrails:
   - Never offers or agrees to pay for a link; a reply asking for money waits for a person.
   - Every pitch waits for a person's approval, unless they turned approval off for that sequence.

@@ -43,6 +43,10 @@ type mapNode struct {
 	Volume *int `json:"volume"`
 	// A line about it, such as a list's size.
 	Detail string `json:"detail,omitempty"`
+	// With ?record=, what the person has to do with it: did (an event),
+	// member (a list), fired (a rule fired for them), in (a journey they
+	// are in now) or entered (one they went through).
+	Reached string `json:"reached,omitempty"`
 }
 
 type mapEdge struct {
@@ -63,6 +67,8 @@ type automationMap struct {
 	Edges      []mapEdge  `json:"edges"`
 	Flags      []mapFlag  `json:"flags"`
 	WindowDays int        `json:"window_days"`
+	// The person ?record= named, if any.
+	RecordID *string `json:"record_id"`
 }
 
 // driving edges are the ones that set the next thing off, which is what
@@ -108,10 +114,29 @@ func (s *Server) getAutomationMap(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	rec := r.URL.Query().Get("record")
+	if rec != "" {
+		var person bool
+		if validUUID(rec) {
+			if err := s.pool.QueryRow(r.Context(), `SELECT EXISTS (SELECT 1 FROM records WHERE workspace_id = $1 AND id = $2 AND record_type = 'person' AND archived_at IS NULL AND merged_into IS NULL)`,
+				a.WorkspaceID, rec).Scan(&person); err != nil {
+				s.internal(w, r, err)
+				return
+			}
+		}
+		if !person {
+			writeError(w, r, http.StatusNotFound, "not_found", "record is not a person in this workspace")
+			return
+		}
+	}
 	var out *automationMap
 	err := pgx.BeginTxFunc(r.Context(), s.pool, pgx.TxOptions{AccessMode: pgx.ReadOnly}, func(tx pgx.Tx) error {
 		var err error
 		out, err = buildAutomationMap(r.Context(), tx, a, sel)
+		if err == nil && rec != "" {
+			out.RecordID = &rec
+			err = mapPerson(r.Context(), tx, a.WorkspaceID, rec, out)
+		}
 		return err
 	})
 	if err != nil {
@@ -534,4 +559,51 @@ func emailOverlaps(ctx context.Context, tx pgx.Tx, ws string, ids []string) ([]o
 	}
 	_, err = tx.Exec(ctx, `RELEASE SAVEPOINT map_overlaps`)
 	return out, err
+}
+
+// mapPerson marks what one person has to do with the map: the events they
+// did, the lists they are in, the rules that fired for them and the
+// journeys they are in or went through. What those set off is theirs to
+// reach next; the web app lights that up.
+func mapPerson(ctx context.Context, tx pgx.Tx, ws, rec string, m *automationMap) error {
+	byID := map[string]*mapNode{}
+	var events []string
+	for _, n := range m.Nodes {
+		byID[n.ID] = n
+		if n.Kind == "event" {
+			events = append(events, n.Label)
+		}
+	}
+	queries := []struct{ sql, prefix string }{
+		{`SELECT DISTINCT name, 'did' FROM customer_events WHERE workspace_id = $1 AND record_id = $2 AND name = ANY($3)`, "event:"},
+		{`SELECT list_id::text, 'member' FROM smart_list_members WHERE workspace_id = $1 AND record_id = $2`, "list:"},
+		{`SELECT DISTINCT rule_id::text, 'fired' FROM rule_firings WHERE workspace_id = $1 AND record_id = $2`, "rule:"},
+		{`SELECT journey_id::text, CASE WHEN bool_or(status = 'active') THEN 'in' ELSE 'entered' END FROM journey_runs
+			WHERE workspace_id = $1 AND record_id = $2 GROUP BY journey_id`, "journey:"},
+	}
+	for _, q := range queries {
+		args := []any{ws, rec}
+		if strings.Contains(q.sql, "$3") {
+			args = append(args, events)
+		}
+		rows, err := tx.Query(ctx, q.sql, args...)
+		if err != nil {
+			return err
+		}
+		for rows.Next() {
+			var key, how string
+			if err := rows.Scan(&key, &how); err != nil {
+				rows.Close()
+				return err
+			}
+			if n, ok := byID[q.prefix+key]; ok {
+				n.Reached = how
+			}
+		}
+		rows.Close()
+		if err := rows.Err(); err != nil {
+			return err
+		}
+	}
+	return nil
 }

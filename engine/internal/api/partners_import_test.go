@@ -155,8 +155,20 @@ func TestPartnerToltImport(t *testing.T) {
 
 	tolt := &fakeTolt{data: map[string][]map[string]any{}}
 	tolt.set("/programs", map[string]any{"id": "prg_1", "name": "Northpeak partners", "currency": "usd"})
+	tolt.set("/groups",
+		map[string]any{"id": "grp_1", "name": "Standard", "is_default": true},
+		map[string]any{"id": "grp_2", "name": "Gold"})
+	tolt.set("/flows",
+		map[string]any{"id": "flw_1", "name": "Base", "group_id": "grp_1", "trigger": "new_payment",
+			"action": map[string]any{"type": "commission", "commission_type": "percentage", "value": 20}, "approval": map[string]any{"type": "auto_after", "days": 30}},
+		map[string]any{"id": "flw_2", "name": "Gold rate", "group_id": "grp_2", "trigger": "new_payment",
+			"action":       map[string]any{"type": "commission", "commission_type": "percentage", "value": "25"},
+			"conditions":   map[string]any{"operator": "and", "groups": []any{map[string]any{"operator": "or", "conditions": []any{map[string]any{"attribute": "partner_transactions_count", "operator": "greater_than", "value": "5"}}}}},
+			"custom_rates": []any{map[string]any{"partner_id": "p1", "value": 30}}},
+		map[string]any{"id": "flw_3", "name": "Odd", "trigger": "new_payment", "action": map[string]any{"type": "commission", "commission_type": "percentage", "value": 10},
+			"conditions": []any{map[string]any{"attribute": "partner_mood", "operator": "equals", "value": "happy"}}})
 	tolt.set("/partners",
-		map[string]any{"id": "p1", "first_name": "Ana", "last_name": "Lopez", "email": "ana@acme.example", "status": "active", "created_at": day(1)},
+		map[string]any{"id": "p1", "first_name": "Ana", "last_name": "Lopez", "email": "ana@acme.example", "status": "active", "group_id": "grp_2", "created_at": day(1)},
 		map[string]any{"id": "p2", "first_name": "Ben", "email": "ben@acme.example", "status": "pending"},
 		map[string]any{"id": "p3", "first_name": "Nobody", "status": "active"},
 		map[string]any{"id": "p4", "first_name": "Cid", "email": "cid@acme.example", "status": "active"},
@@ -234,7 +246,7 @@ func TestPartnerToltImport(t *testing.T) {
 	if p := k["partners"]; p["seen"] != 5.0 || p["created"] != 4.0 || p["skipped"] != 1.0 {
 		t.Fatalf("partners = %v", p)
 	}
-	if want := map[string]int{"no_email": 1, "code_changed": 1, "extra_link": 1, "link_param": 1, "partner_missing": 1, "partner_unavailable": 1}; jsonString(reasons(first)) != jsonString(want) {
+	if want := map[string]int{"no_email": 1, "code_changed": 1, "extra_link": 1, "link_param": 1, "partner_missing": 1, "partner_unavailable": 1, "flow_condition_unsupported": 1}; jsonString(reasons(first)) != jsonString(want) {
 		t.Fatalf("issues = %v", reasons(first))
 	}
 	codes := map[string]string{}
@@ -311,6 +323,29 @@ func TestPartnerToltImport(t *testing.T) {
 	st := owner.must(200, "GET", base+"/partners/"+anaID, nil)["stats"].(map[string]any)
 	if st["paid_cents"] != 980.0 || st["approved_cents"] != 1000.0 {
 		t.Fatalf("Ana's stats = %v", st)
+	}
+
+	// Tolt's groups and flows came over: Ana is in Gold, Standard is the
+	// default, and the Gold flow kept its condition and her own rate.
+	prog := owner.must(200, "GET", base+"/partner-programs/affiliates", nil)
+	groupIDs := map[string]string{}
+	for _, g := range prog["groups"].([]any) {
+		groupIDs[g.(map[string]any)["name"].(string)] = g.(map[string]any)["id"].(string)
+	}
+	if prog["default_group_id"] != groupIDs["Standard"] || groupIDs["Gold"] == "" {
+		t.Fatalf("groups = %v, default %v", groupIDs, prog["default_group_id"])
+	}
+	if a := owner.must(200, "GET", base+"/partners/"+anaID, nil); a["group_id"] != groupIDs["Gold"] {
+		t.Fatalf("Ana's group = %v", a["group_id"])
+	}
+	flowsByName := map[string]map[string]any{}
+	for _, f := range prog["rules"].([]any) {
+		flowsByName[f.(map[string]any)["name"].(string)] = f.(map[string]any)
+	}
+	gr := flowsByName["Gold rate"]
+	if base := flowsByName["Base"]; base == nil || base["approval"] != "after_days" || base["approval_days"] != 30.0 || base["group_id"] != groupIDs["Standard"] ||
+		gr == nil || gr["percent_bp"] != 2500.0 || len(gr["overrides"].([]any)) != 1 || len(gr["conditions"].(map[string]any)["groups"].([]any)) != 1 || flowsByName["Odd"] != nil {
+		t.Fatalf("flows = %v", flowsByName)
 	}
 
 	// The program's totals are the sum over every partner, whatever a page holds.
@@ -478,11 +513,13 @@ func TestPartnerImportUnreadableKind(t *testing.T) {
 			t.Fatalf("%v created %v, want %v", m["kind"], m["created"], want)
 		}
 	}
+	// This fake lists no groups or flows (404), as some Tolt accounts
+	// don't: each is noted and the run goes on.
 	issues := sum["issues"].([]any)
-	if len(issues) != 1 {
+	if len(issues) != 3 || issues[0].(map[string]any)["reason"] != "groups_unavailable" || issues[1].(map[string]any)["reason"] != "flows_unavailable" {
 		t.Fatalf("issues = %v", issues)
 	}
-	is := issues[0].(map[string]any)
+	is := issues[2].(map[string]any)
 	msg, _ := is["message"].(string)
 	if is["kind"] != "promo_codes" || is["reason"] != "unreadable" ||
 		!strings.Contains(msg, "promo codes") || !strings.Contains(msg, "HTTP 200") || !strings.Contains(msg, "text/html") || strings.Contains(msg, "@") {
@@ -603,5 +640,94 @@ func TestPartnerImportManyPartners(t *testing.T) {
 	}
 	if reasons["partner_unavailable"] != 1 || reasons["partner_missing"] != 1 {
 		t.Fatalf("issues = %v", reasons)
+	}
+}
+
+// TestPartnerImportHeldUntilSwitchOver: while Tolt still pays a program,
+// commissions imported from it are neither approved after the hold nor put
+// in a payout here; once it switches over they are.
+func TestPartnerImportHeldUntilSwitchOver(t *testing.T) {
+	e := freshEnv(t)
+	owner, ws := setupOwner(t, e.h)
+	base := "/v1/workspaces/" + ws
+	ctx := context.Background()
+	tolt := &fakeTolt{data: map[string][]map[string]any{}}
+	tolt.set("/programs", map[string]any{"id": "prg_1", "name": "Northpeak partners", "currency": "usd", "status": "active"})
+	tolt.set("/links", map[string]any{"id": "l1", "partner_id": "p1", "param": "ref", "value": "ANA"})
+	tolt.set("/partners", map[string]any{"id": "p1", "first_name": "Ana", "email": "ana@acme.example", "status": "active"})
+	tolt.set("/promotion-codes")
+	tolt.set("/customers", map[string]any{"id": "cus_1", "partner_id": "p1", "customer_id": "u-1"})
+	tolt.set("/transactions", map[string]any{"id": "t1", "customer_id": "cus_1", "amount": "10000"})
+	tolt.set("/commissions",
+		map[string]any{"id": "m1", "partner_id": "p1", "customer_id": "cus_1", "transaction_id": "t1", "amount": "5000", "status": "approved"},
+		map[string]any{"id": "m2", "partner_id": "p1", "customer_id": "cus_1", "amount": "3000", "status": "pending"})
+	srv := httptest.NewServer(tolt)
+	defer srv.Close()
+	e.integrations.Client.BaseURLs["tolt"] = srv.URL
+	owner.must(201, "POST", base+"/partner-programs", map[string]any{"name": "Affiliates", "kind": "affiliate"})
+	owner.must(200, "PATCH", base+"/partner-programs/affiliates", map[string]any{"auto_approve": true, "min_payout_cents": 0})
+	owner.must(201, "POST", base+"/integrations", map[string]any{"connector": "tolt", "credentials": map[string]string{"api_key": "tlt_test_not_a_real_key"}})
+	imports := base + "/partner-programs/affiliates/imports"
+	imp := owner.must(201, "POST", imports, map[string]any{})
+	e.runCRMImports(t)
+	for range 500 {
+		v := owner.must(200, "GET", imports+"/"+imp["id"].(string), nil)
+		if v["status"] == "done" {
+			var k map[string]any
+			for _, x := range v["summary"].(map[string]any)["kinds"].([]any) {
+				if m := x.(map[string]any); m["kind"] == "partners" {
+					k = m
+				}
+			}
+			if k == nil || k["by_status"].(map[string]any)["active"] != 1.0 {
+				t.Fatalf("partners = %v", k)
+			}
+			break
+		}
+		if v["status"] == "failed" {
+			t.Fatalf("import = %v", v)
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	prog := owner.must(200, "GET", base+"/partner-programs/affiliates", nil)
+	if prog["imported_from"] != "tolt" || prog["switched_over_at"] != nil {
+		t.Fatalf("program = %v %v", prog["imported_from"], prog["switched_over_at"])
+	}
+	if _, err := e.pool.Exec(ctx, `UPDATE partner_rewards SET hold_until = now() - interval '1 day' WHERE workspace_id = $1`, ws); err != nil {
+		t.Fatal(err)
+	}
+	statuses := func() string {
+		var s string
+		e.pool.QueryRow(ctx, `SELECT string_agg(status || ':' || (payout_id IS NOT NULL)::text, ',' ORDER BY amount_cents) FROM partner_rewards WHERE workspace_id = $1`, ws).Scan(&s) //nolint:errcheck
+		return s
+	}
+	if err := e.srv.ApproveDuePartnerRewards(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if n := len(owner.must(200, "POST", base+"/partner-payouts", map[string]any{"program": "affiliates"})["data"].([]any)); n != 0 {
+		t.Fatalf("payouts before switch-over = %d", n)
+	}
+	if got := statuses(); got != "pending:false,approved:false" {
+		t.Fatalf("before switch-over: %s", got)
+	}
+	sw := owner.must(200, "POST", base+"/partner-programs/affiliates/switch-over", nil)
+	if sw["switched_over_at"] == nil {
+		t.Fatalf("switch-over = %v", sw)
+	}
+	owner.must(409, "POST", base+"/partner-programs/affiliates/switch-over", nil)
+	if err := e.srv.ApproveDuePartnerRewards(ctx); err != nil {
+		t.Fatal(err)
+	}
+	// Tolt gave no payout details, so Ana's payout waits until she adds them.
+	if res := owner.must(200, "POST", base+"/partner-payouts", map[string]any{"program": "affiliates"}); len(res["data"].([]any)) != 0 || res["waiting_for_details"] != 1.0 {
+		t.Fatalf("payouts without details = %v", res)
+	}
+	ana := owner.must(200, "GET", base+"/partners?program=affiliates", nil)["data"].([]any)[0].(map[string]any)["id"].(string)
+	owner.must(200, "PATCH", base+"/partners/"+ana, map[string]any{"payout_method": "PayPal ana@acme.example"})
+	if n := len(owner.must(200, "POST", base+"/partner-payouts", map[string]any{"program": "affiliates"})["data"].([]any)); n != 1 {
+		t.Fatalf("payouts after switch-over = %d", n)
+	}
+	if got := statuses(); got != "approved:true,approved:true" {
+		t.Fatalf("after switch-over: %s", got)
 	}
 }

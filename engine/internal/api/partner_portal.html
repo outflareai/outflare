@@ -151,7 +151,9 @@ code, .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-
     var form = el("form", { onsubmit: function (e) {
       e.preventDefault();
       var answers = {}; Object.keys(inputs).forEach(function (k) { answers[k] = inputs[k].value; });
-      api("POST", "signup", { email: email.value, name: name.value, answers: answers, accept_terms: terms.checked }).then(function () {
+      // A group's sign-up link (?group=<id>) joins the partner to that group.
+      var group = new URLSearchParams(location.search).get("group") || "";
+      api("POST", "signup", { email: email.value, name: name.value, answers: answers, accept_terms: terms.checked, group: group }).then(function () {
         note.className = "banner ok"; note.textContent = "Thanks! Check your email for a link to sign in.";
       }, function (err) { note.className = "err"; note.textContent = err.message; });
     } }, [el("label", { text: "Name" }), name, el("label", { text: "Email" }), email].concat(fields).concat([

@@ -1,5 +1,5 @@
 id: link-broken-links
-version: 2
+version: 3
 title: Replace broken links on pages about your topic
 summary: Search for pages on your topic, find the links on them that are dead, and offer your page as the replacement.
 description: |
@@ -49,6 +49,9 @@ steps:
     tools: [startLinkPitch, listLinkPitches]
   - say: Report what was pitched and, later, what replied, agreed and went live.
     tools: [getLinkResults, listLinkProspects]
+automation:
+  schedule: monthly
+  events: []
 guardrails:
   - Never offers or agrees to pay for a link; a reply asking for money waits for a person.
   - Every pitch waits for a person's approval, unless they turned approval off for that sequence.

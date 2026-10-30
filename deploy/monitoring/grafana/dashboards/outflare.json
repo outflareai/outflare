@@ -3765,6 +3765,258 @@
     },
     {
       "type": "row",
+      "title": "Data network (email finding across workspaces)",
+      "id": 429,
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 624
+      },
+      "panels": []
+    },
+    {
+      "type": "timeseries",
+      "title": "Network lookups by outcome",
+      "description": "Data network lookups per minute from the email finder. answered and unknown are normal; refused_allowance means workspaces that haven't joined used their monthly lookups; refused_limit is one domain's daily limit (a spike can mean someone guessing names at one company); error means the network failed and the finder carried on without it.",
+      "id": 430,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 625
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (outcome) (rate(outflare_data_network_lookups_total{job=\"$job\"}[5m])) * 60",
+          "legendFormat": "{{outcome}}",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "fillOpacity": 10,
+            "stacking": {
+              "mode": "normal"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "mean",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Addresses shared",
+      "description": "Addresses joined workspaces shared per minute, by outcome. Sends are shared once they are 7 days old, from the hourly sharing jobs, so this comes in bursts.",
+      "id": 431,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 625
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (outcome) (rate(outflare_data_network_shared_total{job=\"$job\"}[15m])) * 60",
+          "legendFormat": "{{outcome}}",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          }
+        },
+        {
+          "refId": "B",
+          "expr": "sum(rate(outflare_data_network_share_runs_total{job=\"$job\",outcome=\"failed\"}[15m])) * 60",
+          "legendFormat": "failed jobs",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "fillOpacity": 10,
+            "stacking": {
+              "mode": "normal"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "mean",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Members and withdrawals",
+      "description": "members is how many workspaces have joined; withdrawals_pending is how many left and still have shared data to remove. Withdrawals normally finish within an hour of leaving.",
+      "id": 432,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 633
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "max(outflare_data_network_members{job=\"$job\"})",
+          "legendFormat": "members",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          }
+        },
+        {
+          "refId": "B",
+          "expr": "max(outflare_data_network_withdrawals_pending{job=\"$job\"})",
+          "legendFormat": "withdrawals pending",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "fillOpacity": 10,
+            "stacking": {
+              "mode": "none"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "mean",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Overdue withdrawals and sharing lag",
+      "description": "overdue is how far past its 30-day promise the latest withdrawal is, and should always be 0. lag is how far behind the furthest-behind member's sharing is, beyond the 7 days a send waits; under an hour or two is normal.",
+      "id": 433,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 633
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "max(outflare_data_network_withdrawal_overdue_seconds{job=\"$job\"})",
+          "legendFormat": "overdue",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          }
+        },
+        {
+          "refId": "B",
+          "expr": "max(outflare_data_network_share_lag_seconds{job=\"$job\"})",
+          "legendFormat": "lag",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "custom": {
+            "fillOpacity": 10,
+            "stacking": {
+              "mode": "none"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "mean",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "type": "row",
       "title": "Smart lists",
       "id": 77,
       "collapsed": false,
@@ -7551,6 +7803,69 @@
       }
     },
     {
+      "type": "timeseries",
+      "title": "Exchange rate age and receipts converted",
+      "description": "How old the newest exchange rate is (the European Central Bank publishes one each working day, so up to 3 days at a weekend is normal), and receipts in other currencies given their dollar amount per hour once a rate arrived. Only servers with inbound email fetch rates.",
+      "id": 434,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 564,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "max(outflare_exchange_rates_newest_age_seconds{job=\"$job\"}) / 86400",
+          "legendFormat": "newest rate age (days)",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          }
+        },
+        {
+          "refId": "B",
+          "expr": "sum(increase(outflare_exchange_rates_receipts_converted_total{job=\"$job\"}[1h]))",
+          "legendFormat": "receipts converted",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          }
+        },
+        {
+          "refId": "C",
+          "expr": "sum(increase(outflare_exchange_rates_fetched_total{job=\"$job\",outcome=\"error\"}[6h]))",
+          "legendFormat": "failed fetches (6h)",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "fillOpacity": 10
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
       "type": "row",
       "title": "Support inbox",
       "id": 281,
@@ -7559,7 +7874,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 564
+        "y": 572
       },
       "panels": []
     },
@@ -7576,7 +7891,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 565
+        "y": 573
       },
       "targets": [
         {
@@ -7629,7 +7944,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 565
+        "y": 573
       },
       "targets": [
         {
@@ -7682,7 +7997,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 573
+        "y": 581
       },
       "targets": [
         {
@@ -7744,7 +8059,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 573
+        "y": 581
       },
       "targets": [
         {
@@ -7801,7 +8116,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 581
+        "y": 589
       },
       "id": 191,
       "panels": []
@@ -7819,7 +8134,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 582
+        "y": 590
       },
       "targets": [
         {
@@ -7868,7 +8183,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 582
+        "y": 590
       },
       "targets": [
         {
@@ -7917,7 +8232,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 590
+        "y": 598
       },
       "targets": [
         {
@@ -7962,7 +8277,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 598
+        "y": 606
       },
       "panels": []
     },
@@ -7979,7 +8294,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 599
+        "y": 607
       },
       "targets": [
         {
@@ -8032,7 +8347,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 599
+        "y": 607
       },
       "targets": [
         {
@@ -8061,6 +8376,117 @@
             "fillOpacity": 10,
             "stacking": {
               "mode": "none"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "mean",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "type": "row",
+      "title": "Playbook automations (playbooks that run by themselves)",
+      "id": 426,
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 615
+      },
+      "panels": []
+    },
+    {
+      "type": "timeseries",
+      "title": "Playbook automation runs, by kind and outcome",
+      "description": "Runs per hour that playbook automations started (started), held for a person (held: a spend limit, a connection or the AI model missing, the approver gone), failed and will retry in 15 minutes (failed), or left for tomorrow by the daily cap (capped). Mostly started, with the odd held, is normal; steady failed means runs can't be created, usually the database: check playbook_automation.run_failed in the engine log.",
+      "id": 427,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 616
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (kind, outcome) (rate(outflare_playbooks_automation_runs_total{job=\"$job\"}[$__rate_interval])) * 3600",
+          "legendFormat": "{{kind}} {{outcome}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "fillOpacity": 10,
+            "stacking": {
+              "mode": "normal"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "mean",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Most overdue playbook automation",
+      "description": "How long the most overdue active automation has waited past its run time, at the last pass (every minute). Under two minutes is normal. A climbing line means the automation loop is stuck or slow: check playbook_automation.runner_failed in the engine log.",
+      "id": 428,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 616
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "max(outflare_playbooks_automation_lag_seconds{job=\"$job\"})",
+          "legendFormat": "lag"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "custom": {
+            "fillOpacity": 10,
+            "stacking": {
+              "mode": "normal"
             }
           }
         },

@@ -26,7 +26,7 @@ type Postgres struct {
 const (
 	cacheFor     = 10 * time.Second
 	queryTimeout = 5 * time.Second
-	topTables    = 25 // largest tables get their own size series
+	topTables    = 25 // largest tables get their own size series, plus jobs
 )
 
 func desc(sub, name, help string, labels ...string) *prometheus.Desc {
@@ -58,7 +58,7 @@ var (
 	dbBlocksRead    = desc("pg", "blocks_read_total", "Blocks read from disk.")
 	dbDeadlocks     = desc("pg", "deadlocks_total", "Deadlocks detected.")
 	dbTempBytes     = desc("pg", "temp_bytes_total", "Bytes written to temporary files by queries too big for work_mem.")
-	tableBytes      = desc("pg", "table_bytes", "Size of a table with its indexes and TOAST, for the largest tables.", "table")
+	tableBytes      = desc("pg", "table_bytes", "Size of a table with its indexes and TOAST, for the largest tables and the job queue.", "table")
 	tableDeadRows   = desc("pg", "table_dead_rows", "Dead rows waiting for vacuum, for the largest tables.", "table")
 	tableSeqScans   = desc("pg", "table_seq_scans_total", "Sequential scans, for the largest tables.", "table")
 	pipeItems       = desc("pipeline", "items", "Pipeline items now, by pipeline, stage and state (due, scheduled, working, held).", "pipeline", "stage", "state")
@@ -466,7 +466,9 @@ func (p *Postgres) query() []prometheus.Metric {
 	})
 	run("pg_tables", `
 		SELECT relname, pg_total_relation_size(relid)::float8, n_dead_tup::float8, seq_scan::float8
-		FROM pg_stat_user_tables ORDER BY pg_total_relation_size(relid) DESC LIMIT `+strconv.Itoa(topTables), func(r rowser) error {
+		FROM pg_stat_user_tables
+		WHERE relid IN (SELECT relid FROM pg_stat_user_tables ORDER BY pg_total_relation_size(relid) DESC LIMIT `+strconv.Itoa(topTables)+`)
+			OR relname = 'jobs'`, func(r rowser) error {
 		for r.Next() {
 			var table string
 			var size, dead, scans float64

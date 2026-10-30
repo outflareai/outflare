@@ -500,7 +500,7 @@ func (s *Server) createPartnerPayouts(w http.ResponseWriter, r *http.Request) {
 			m.source = 'import' AND m.payout_method IS NULL
 			FROM partner_rewards w JOIN partner_memberships m ON m.id = w.membership_id JOIN partner_programs p ON p.id = m.program_id
 			WHERE w.workspace_id = $1 AND w.status = 'approved' AND w.payout_id IS NULL AND w.side = 'partner' AND w.kind <> 'action'
-			  AND ($2 = '' OR m.id::text = $2) AND ($3 = '' OR p.id::text = lower($3) OR p.slug = lower($3))
+			  AND NOT `+heldAtSource+` AND ($2 = '' OR m.id::text = $2) AND ($3 = '' OR p.id::text = lower($3) OR p.slug = lower($3))
 			  AND ($4::uuid[] IS NULL OR p.brand_id = ANY($4))
 			GROUP BY m.id, p.id ORDER BY m.id`, a.WorkspaceID, in.PartnerID, in.Program, a.Brands)
 		if err != nil {
@@ -534,8 +534,8 @@ func (s *Server) createPartnerPayouts(w http.ResponseWriter, r *http.Request) {
 				VALUES ($1, $2, $3, $4, $5) RETURNING id::text`, a.WorkspaceID, d.membership, d.total, d.currency, nullIfEmpty(a.ActorID)).Scan(&id); err != nil {
 				return err
 			}
-			tag, err := tx.Exec(ctx, `UPDATE partner_rewards SET payout_id = $2, updated_at = now() WHERE membership_id = $1 AND status = 'approved'
-				AND payout_id IS NULL AND side = 'partner' AND kind <> 'action'`, d.membership, id)
+			tag, err := tx.Exec(ctx, `UPDATE partner_rewards w SET payout_id = $2, updated_at = now() WHERE w.membership_id = $1 AND w.status = 'approved'
+				AND w.payout_id IS NULL AND w.side = 'partner' AND w.kind <> 'action' AND NOT `+heldAtSource, d.membership, id)
 			if err != nil {
 				return err
 			}
@@ -717,7 +717,7 @@ func (s *Server) RunPartnerRewards(ctx context.Context) {
 func (s *Server) approveDuePartnerRewards(ctx context.Context) error {
 	rows, err := s.pool.Query(ctx, `SELECT w.workspace_id::text, w.id::text, w.hold_until FROM partner_rewards w
 		JOIN partner_programs p ON p.id = w.program_id JOIN partner_memberships m ON m.id = w.membership_id
-		WHERE w.status = 'pending' AND w.hold_until <= now() AND COALESCE(w.auto_approve, p.auto_approve) AND m.status = 'active'
+		WHERE w.status = 'pending' AND w.hold_until <= now() AND COALESCE(w.auto_approve, p.auto_approve) AND m.status = 'active' AND NOT `+heldAtSource+`
 		ORDER BY w.hold_until LIMIT $1`, partnerApproveBatch)
 	if err != nil {
 		return err

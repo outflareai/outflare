@@ -318,6 +318,37 @@ var (
 		Help: "Workspaces with meaning-based search turned on.",
 	})
 
+	// The data network: lookups the email finder makes, and what joined
+	// workspaces share.
+	dataNetworkLookups = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Namespace: namespace, Subsystem: "data_network", Name: "lookups_total",
+		Help: "Data network lookups by outcome (answered, unknown, refused_allowance, refused_limit, error).",
+	}, []string{"outcome"})
+	dataNetworkShared = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Namespace: namespace, Subsystem: "data_network", Name: "shared_total",
+		Help: "Addresses shared with the data network, by outcome (delivered, bounced).",
+	}, []string{"outcome"})
+	dataNetworkShareRuns = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Namespace: namespace, Subsystem: "data_network", Name: "share_runs_total",
+		Help: "Sharing jobs run, by outcome (success, failed).",
+	}, []string{"outcome"})
+	dataNetworkMembers = prometheus.NewGauge(prometheus.GaugeOpts{
+		Namespace: namespace, Subsystem: "data_network", Name: "members",
+		Help: "Workspaces that have joined the data network.",
+	})
+	dataNetworkWithdrawals = prometheus.NewGauge(prometheus.GaugeOpts{
+		Namespace: namespace, Subsystem: "data_network", Name: "withdrawals_pending",
+		Help: "Workspaces that left whose shared data is still to be withdrawn.",
+	})
+	dataNetworkOverdue = prometheus.NewGauge(prometheus.GaugeOpts{
+		Namespace: namespace, Subsystem: "data_network", Name: "withdrawal_overdue_seconds",
+		Help: "How far past its 30-day deadline the most overdue withdrawal is; 0 when none is late.",
+	})
+	dataNetworkLag = prometheus.NewGauge(prometheus.GaugeOpts{
+		Namespace: namespace, Subsystem: "data_network", Name: "share_lag_seconds",
+		Help: "How far behind sharing is for the furthest-behind joined workspace, beyond the 7 days a send waits to settle.",
+	})
+
 	// Conversions sent back to ad platforms. connector is a catalog id.
 	adConversions = prometheus.NewCounterVec(prometheus.CounterOpts{
 		Namespace: namespace, Subsystem: "ad_conversions", Name: "total",
@@ -408,7 +439,7 @@ var (
 	}, []string{"connector", "outcome"})
 	partnerImportObjects = prometheus.NewCounterVec(prometheus.CounterOpts{
 		Namespace: namespace, Subsystem: "partners", Name: "import_objects_total",
-		Help: "Objects partner imports read, by kind (links, partners, promo_codes, customers, transactions, commissions) and result (created, updated, unchanged, skipped).",
+		Help: "Objects partner imports read, by kind (groups, links, partners, flows, promo_codes, customers, transactions, commissions) and result (created, updated, unchanged, skipped).",
 	}, []string{"kind", "result"})
 	partnerRewardsOverdue = prometheus.NewGauge(prometheus.GaugeOpts{
 		Namespace: namespace, Subsystem: "partners", Name: "rewards_overdue_seconds",
@@ -448,6 +479,14 @@ var (
 	webSearches = linkCounter("web_searches_total",
 		"Searches on workspaces' own SERP connections (search-results), by outcome (done, budget_reached, connector_invalid, connector_auth, connector_quota, connector_unavailable).", "outcome")
 
+	automationRuns = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Namespace: namespace, Subsystem: "playbooks", Name: "automation_runs_total",
+		Help: "Playbook automations firing, by kind (schedule, event) and outcome (started, held, failed, capped).",
+	}, []string{"kind", "outcome"})
+	automationLag = prometheus.NewGauge(prometheus.GaugeOpts{
+		Namespace: namespace, Subsystem: "playbooks", Name: "automation_lag_seconds",
+		Help: "How long the most overdue active playbook automation has waited past its run time, at the last pass.",
+	})
 	inboundReceived = prometheus.NewCounterVec(prometheus.CounterOpts{
 		Namespace: namespace, Subsystem: "inbound_email", Name: "received_total",
 		Help: "Messages delivered to POST /v1/inbound/email, by purpose (ai_receipts, support, or none when the address is unknown) and outcome (accepted, duplicate, unknown_address, bad_signature, too_large, error).",
@@ -463,6 +502,19 @@ var (
 	inboundPurged = prometheus.NewCounter(prometheus.CounterOpts{
 		Namespace: namespace, Subsystem: "inbound_email", Name: "raw_purged_total",
 		Help: "Raw inbound messages deleted after 30 days (their details stay).",
+	})
+
+	ratesFetched = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Namespace: namespace, Subsystem: "exchange_rates", Name: "fetched_total",
+		Help: "Fetches of the European Central Bank's daily exchange rates, by outcome (success, error). Only servers with inbound email fetch them.",
+	}, []string{"outcome"})
+	ratesAge = prometheus.NewGauge(prometheus.GaugeOpts{
+		Namespace: namespace, Subsystem: "exchange_rates", Name: "newest_age_seconds",
+		Help: "Age of the newest exchange rate stored, from the start of its day. Set after each fetch.",
+	})
+	receiptsConverted = prometheus.NewCounter(prometheus.CounterOpts{
+		Namespace: namespace, Subsystem: "exchange_rates", Name: "receipts_converted_total",
+		Help: "AI receipts charged in another currency given their amount in US dollars once a rate arrived.",
 	})
 
 	buildInfo = prometheus.NewGaugeVec(prometheus.GaugeOpts{
@@ -488,6 +540,7 @@ var own = []prometheus.Collector{
 	queryRuns, queryDuration, queryRows,
 	ruleEvaluations, journeyCalls, journeyCallDuration, journeyEntriesRefused, excluded, sequencerPushes, crmContactPushes, adAudienceSyncs,
 	semanticRuns, semanticItems, semanticDuration, semanticAvailable, semanticWorkspaces, knowledgeAsks, knowledgeAskDuration,
+	dataNetworkLookups, dataNetworkShared, dataNetworkShareRuns, dataNetworkMembers, dataNetworkWithdrawals, dataNetworkOverdue, dataNetworkLag,
 	helpPages, helpRender,
 	supportMessages, supportReplies, supportReplyDuration,
 	adConversions, adConversionsOldest,
@@ -498,7 +551,9 @@ var own = []prometheus.Collector{
 	redditChecks,
 	partnerClicks, partnerConversions, partnerRewards, partnerRewardsOverdue, partnerImports, partnerImportObjects, partnerPostbacks,
 	newsRuns, newsFound, newsReads,
+	automationRuns, automationLag,
 	inboundReceived, inboundProcessed, inboundBytes, inboundPurged,
+	ratesFetched, ratesAge, receiptsConverted,
 	buildInfo,
 }
 
@@ -756,6 +811,27 @@ func SetSemanticAvailable(ok bool) {
 // SetSemanticWorkspaces is how many workspaces have meaning-based search on.
 func SetSemanticWorkspaces(n int) { semanticWorkspaces.Set(float64(n)) }
 
+// DataNetworkLookup counts one data network lookup by outcome.
+func DataNetworkLookup(outcome string) { dataNetworkLookups.WithLabelValues(outcome).Inc() }
+
+// DataNetworkShared counts addresses shared with the data network.
+func DataNetworkShared(delivered, bounced int) {
+	dataNetworkShared.WithLabelValues("delivered").Add(float64(delivered))
+	dataNetworkShared.WithLabelValues("bounced").Add(float64(bounced))
+}
+
+// DataNetworkShareRun counts one sharing job by outcome.
+func DataNetworkShareRun(outcome string) { dataNetworkShareRuns.WithLabelValues(outcome).Inc() }
+
+// SetDataNetwork sets the data network's gauges: members, withdrawals
+// still to do, the most overdue one and the sharing lag, in seconds.
+func SetDataNetwork(members, withdrawals int, overdue, lag float64) {
+	dataNetworkMembers.Set(float64(members))
+	dataNetworkWithdrawals.Set(float64(withdrawals))
+	dataNetworkOverdue.Set(overdue)
+	dataNetworkLag.Set(lag)
+}
+
 // AICall records one AI model call made with a workspace's own key: its
 // provider (connector id), tool, tokens and cost in cents.
 func AICall(provider, task string, input, output, cacheRead, cacheWrite, cents int64) {
@@ -944,6 +1020,13 @@ func PartnerImportObjects(kind, result string, n int) {
 // on its own has waited past its hold.
 func PartnerRewardsOverdue(d time.Duration) { partnerRewardsOverdue.Set(d.Seconds()) }
 
+// AutomationRun counts a playbook automation firing: kind is schedule or
+// event; outcome is started, held, failed or capped.
+func AutomationRun(kind, outcome string) { automationRuns.WithLabelValues(kind, outcome).Inc() }
+
+// AutomationLag records how late the most overdue automation is.
+func AutomationLag(d time.Duration) { automationLag.Set(d.Seconds()) }
+
 // InboundReceived counts one message delivered to the inbound endpoint:
 // its purpose ("none" when the address is unknown), outcome and size.
 func InboundReceived(purpose, outcome string, bytes int) {
@@ -964,3 +1047,15 @@ func InboundProcessed(purpose, status string) {
 
 // InboundPurged counts raw inbound messages deleted after 30 days.
 func InboundPurged(n int64) { inboundPurged.Add(float64(n)) }
+
+// RatesFetched counts one fetch of exchange rates, success or error, and
+// on success sets the newest rate's age.
+func RatesFetched(outcome string, newest time.Time) {
+	ratesFetched.WithLabelValues(outcome).Inc()
+	if !newest.IsZero() {
+		ratesAge.Set(time.Since(newest).Seconds())
+	}
+}
+
+// ReceiptsConverted counts receipts given their US dollar amount late.
+func ReceiptsConverted(n int64) { receiptsConverted.Add(float64(n)) }

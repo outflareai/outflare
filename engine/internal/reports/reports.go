@@ -73,8 +73,6 @@ type Metrics struct {
 type Row struct {
 	Key  string `json:"key"`  // the day, week start, step number, or id
 	Name string `json:"name"` // what to show: the sequence name, mailbox address, "Step 2"
-	// Label is Name under its first name, kept until clients move to name.
-	Label string `json:"label"`
 	Metrics
 }
 
@@ -261,7 +259,6 @@ func Run(ctx context.Context, q Querier, ws string, qr Query) (Report, error) {
 		if err := rows.Scan(append([]any{&r.Key, &r.Name}, r.fields()...)...); err != nil {
 			return rep, err
 		}
-		r.Label = r.Name
 		r.derive()
 		rep.Rows = append(rep.Rows, r)
 	}

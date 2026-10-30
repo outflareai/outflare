@@ -6,6 +6,64 @@ Each pull request that changes what Outflare does adds a change note in [changes
 
 ## [Unreleased]
 
+## [0.54.1] - 2026-10-30
+
+### Fixed
+
+- The changes from v0.54.0, which didn't pass the release checks, are now published.
+
+## [0.54.0] - 2026-10-30
+
+### Added
+
+- Playbooks can now run by themselves, on a schedule or when something happens, such as a lost backlink. You approve each automation once, with spend limits per run and per month; if a limit is reached or a connection goes missing, it stops and tells you why.
+
+### Changed
+
+- The automation map can now show what reaches one person: pick someone, and it marks the events they did, the lists they're in and the journeys they went through, and lights up what those set off next. You can also narrow it to everything that leads to one sequence, list or tag.
+- Partners: conversions keep the payment provider (`payment_source`, Tolt's `source`) and billing `interval` your backend sends, and flows can pay on them. The Tolt import brings both over.
+- Each partner group has its own sign-up link: partners who apply through it join that group.
+
+### Upgrading
+
+- runs migration 0306.
+
+## [0.53.0] - 2026-10-30
+
+### Changed
+
+- Partners: the Tolt import also brings Tolt's groups (with each partner in theirs, and the default group) and flows (rates, duration, conditions, approval and custom rates). A flow with something Outflare can't map yet isn't imported and is listed for you to add on the Flows tab.
+
+### Upgrading
+
+- runs migration 0305.
+
+## [0.52.0] - 2026-10-30
+
+### Added
+
+- Holdouts for exclusion groups: keep a share of a group's visitors out of every flag in it, then compare them with everyone else on a goal to see what all the group's changes did together.
+
+## [0.51.0] - 2026-10-30
+
+### Added
+
+- Reddit campaigns page: brand mentions and links placed and still live, cost and median lifespan, results by subreddit or tactic, every action with its status and timeline, experiments, and each brand's Reddit limits.
+
+### Changed
+
+- Partners: while Tolt still pays a program you imported, its imported commissions keep Tolt's status and never go into a payout here, so nobody is paid twice. Switch over on the Payouts tab when Tolt stops paying. The import summary now shows how many it read, and partners by status.
+
+## [0.50.0] - 2026-10-30
+
+### Changed
+
+- The API drops everything left from projects and agency accounts: `project_id` fields, the `project.*` webhook events, the old scope names `projects.read` and `projects.manage` (use `profiles.read` and `profiles.manage`) and the whoami token `kind`. Inbox filters use `tag` (not `label`), and report rows use `name`.
+
+### Upgrading
+
+- migration 0316 renames stored `projects.*` grants on tokens and roles to `profiles.*`, removes project events from webhook subscriptions, and drops `project_id` from the query views.
+
 ## [0.49.0] - 2026-10-30
 
 ### Added

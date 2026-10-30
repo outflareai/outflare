@@ -28,6 +28,12 @@ Two A/B tests running at once on the same pages can share visitors, and one chan
 
 A group holds 100%: a flag asking for more than is free gets a 409, and you can give it a smaller share or take a flag out. A flag's group and share are fixed while its A/B test runs, since changing them would change who the test measures. The flag's `exclusion_group`, `group_share` and `group_start` show where it sits, and server evaluation says `group` when a visitor fell in another flag's slice.
 
+### Holdouts
+
+A group can keep a share of its visitors out of every flag in it (`PUT .../flag-groups/{group}` with `holdout`, up to 50%, MCP `set_flag_group_holdout`; or **Exclusion groups** on the Feature flags page). Those visitors, the top slice of the group by the same hash, see the default experience wherever the group's tests run, and no flag can take a slice there. Over weeks, comparing them with everyone else shows what all the group's changes did together, which single tests can't: effects that add up, fade or cancel out.
+
+The holdout report (`GET .../flag-groups/{group}/holdout?event=signup_started`, or `page=`, with `days` up to 180, MCP `get_flag_group_holdout`) takes every visitor who viewed a page of the site in that time, splits them by whether they are in the holdout, and compares the goal after their first view. The lift is everyone else against the holdout. `GET .../flag-groups` (MCP `list_flag_groups`) lists each group's flags, slices, holdout and free share.
+
 ## On your website
 
 Add `data-flags` to the tracking script's tag:

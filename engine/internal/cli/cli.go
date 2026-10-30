@@ -198,7 +198,6 @@ func (c *runner) login(ctx context.Context, args []string) int {
 	var who struct {
 		Token *struct {
 			Name        string  `json:"name"`
-			Kind        string  `json:"kind"`
 			WorkspaceID *string `json:"workspace_id"`
 			Workspace   *struct {
 				Slug string `json:"slug"`

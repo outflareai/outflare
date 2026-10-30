@@ -78,6 +78,7 @@ import { SiteAudits } from "./pages/SiteAudits";
 import { Fixes } from "./pages/Fixes";
 import { Keywords } from "./pages/Keywords";
 import { Reddit } from "./pages/Reddit";
+import { RedditCampaigns } from "./pages/RedditCampaigns";
 import { Social } from "./pages/Social";
 import { Reviews } from "./pages/Reviews";
 import { Ads } from "./pages/Ads";
@@ -559,6 +560,7 @@ function Shell({ me, onSignOut, onReload }: { me: Me; onSignOut: () => void; onR
         {ready && ws && tab === "partners" && <Partners key={ws.id} ws={ws.id} canManage={writer} />}
         {ready && ws && tab === "visitors" && <Visitors key={ws.id} ws={ws.id} canManage={writer} go={setTab} />}
         {ready && ws && tab === "reddit" && <Reddit key={ws.id} ws={ws.id} canManage={writer} go={setTab} />}
+        {ready && ws && tab === "reddit-campaigns" && <RedditCampaigns key={ws.id} ws={ws.id} canManage={writer} go={setTab} />}
         {ready && ws && tab === "seo" && <SEO key={ws.id} ws={ws.id} canManage={isAdmin} go={setTab} />}
         {ready && ws && tab === "warmup" && <Warmup key={ws.id} ws={ws.id} canManage={writer} go={setTab} />}
         {ready && ws && tab === "reports" && <Reports key={ws.id} ws={ws.id} />}
@@ -609,7 +611,7 @@ function Shell({ me, onSignOut, onReload }: { me: Me; onSignOut: () => void; onR
             {ready && ws && tab === "digests" && <Digests key={ws.id} ws={ws.id} canManage={isAdmin} go={setTab} />}
             {ready && ws && tab === "ai-usage" && <AIUsage key={ws.id} ws={ws.id} canManage={isAdmin} go={setTab} />}
             {ready && ws && tab === "ai-accounts" && canOpen(ws, "ai-accounts") && (
-              <AIAccounts key={ws.id} ws={ws.id} me={me.user.id ?? ""} canAdd={can("my_ai_accounts.manage") || can("ai_accounts.manage")} seeAll={can("ai_accounts.read") || can("ai_accounts.manage")} manageAll={can("ai_accounts.manage")} seeSpend={can("ai_spend.read")} go={setTab} />
+              <AIAccounts key={ws.id} ws={ws.id} me={me.user.id ?? ""} canAdd={can("my_ai_accounts.manage") || can("ai_accounts.manage")} seeAll={can("ai_accounts.read") || can("ai_accounts.manage")} manageAll={can("ai_accounts.manage")} seeSpend={can("ai_spend.read")} canSetUp={can("workspace.manage")} go={setTab} />
             )}
             {ready && ws && tab === "webhooks" && <Webhooks key={ws.id} ws={ws.id} canManage={isAdmin} open={item ?? ""} onOpen={(id) => setItem(id || undefined)} />}
             {ready && ws && tab === "tokens" && can("tokens.manage") && <Tokens key={ws.id} ws={ws.id} open={item} setOpen={setItem} go={setTab} />}

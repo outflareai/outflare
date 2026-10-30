@@ -295,10 +295,9 @@ func TestBrandAccess(t *testing.T) {
 	owner.must(200, "POST", base+"/brands/geonode/add", map[string]any{"sequence_ids": []string{geoSeq}, "lead_list_ids": []string{geoList}})
 	owner.must(200, "POST", base+"/brands/repocket/add", map[string]any{"sequence_ids": []string{rpSeq}})
 
-	// A brand token: one brand. Projects were removed, so project_id is refused.
-	scopes := []string{"workspace.read", "projects.manage", "leads.manage", "context.manage", "sequences.manage", "inbox.read", "analytics.read", "integrations.read"}
+	// A brand token: one brand.
+	scopes := []string{"workspace.read", "leads.manage", "context.manage", "sequences.manage", "inbox.read", "analytics.read", "integrations.read"}
 	owner.must(400, "POST", base+"/api-tokens", map[string]any{"name": "x", "scopes": scopes, "brand": "nope"})
-	owner.must(400, "POST", base+"/api-tokens", map[string]any{"name": "x", "scopes": scopes, "brand": "repocket", "project_id": rpSeq})
 	tok := owner.must(201, "POST", base+"/api-tokens", map[string]any{"name": "Repocket agent", "scopes": scopes, "brand": "repocket"})
 	if tok["api_token"].(map[string]any)["brand_id"] != rp {
 		t.Fatalf("token view: %v", tok["api_token"])

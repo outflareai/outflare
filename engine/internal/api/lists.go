@@ -207,10 +207,8 @@ func (s *Server) getLeadList(w http.ResponseWriter, r *http.Request) {
 // listInput is a list's settings, for create and update. Absent fields
 // keep their value on update.
 type listInput struct {
-	Name        *string `json:"name"`
-	Description *string `json:"description"`
-	// Ignored: projects were removed. Accepted so older clients still work.
-	ProjectID            optional[string]         `json:"project_id"`
+	Name                 *string                  `json:"name"`
+	Description          *string                  `json:"description"`
 	ProfileID            optional[string]         `json:"profile_id"`
 	SearchIntegrationID  optional[string]         `json:"search_integration_id"`
 	Filters              *connectors.PeopleFilter `json:"filters"`
@@ -424,7 +422,7 @@ func (s *Server) createLeadList(w http.ResponseWriter, r *http.Request) {
 			return err
 		}
 		if err := record(ctx, tx, &a.principal, a.WorkspaceID, "lead_list.created", "lead_list", v.ID,
-			map[string]any{"name": v.Name, "kind": v.Kind, "project_id": nil}); err != nil {
+			map[string]any{"name": v.Name, "kind": v.Kind}); err != nil {
 			return err
 		}
 		if !in.Build {
@@ -893,9 +891,7 @@ func (s *Server) previewLeadList(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		SearchIntegrationID string                  `json:"search_integration_id"`
 		Filters             connectors.PeopleFilter `json:"filters"`
-		// Ignored: projects were removed.
-		ProjectID *string `json:"project_id"`
-		ProfileID *string `json:"profile_id"`
+		ProfileID           *string                 `json:"profile_id"`
 	}
 	if !decode(w, r, &req) {
 		return

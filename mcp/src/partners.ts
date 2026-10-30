@@ -275,6 +275,19 @@ export function registerPartnerTools(server: McpServer, gtm: MissionClient, work
   );
 
   server.registerTool(
+    "switch_over_partner_program",
+    {
+      title: "Switch a program over from Tolt",
+      description:
+        "Only once the platform the program was imported from (Tolt) no longer pays it. Until then its imported commissions keep Tolt's " +
+        "status and are never approved or paid here, so nobody is paid twice; afterwards they are approved and paid here like any other.",
+      inputSchema: { program },
+      annotations: write,
+    },
+    ({ program }) => call(() => gtm.POST("/v1/workspaces/{ws}/partner-programs/{id}/switch-over", { params: { path: { ws: workspace(), id: program } } })),
+  );
+
+  server.registerTool(
     "start_partner_import",
     {
       title: "Import a partner program from Tolt",

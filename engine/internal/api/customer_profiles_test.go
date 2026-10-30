@@ -1,8 +1,6 @@
 package api_test
 
 import (
-	"context"
-	"slices"
 	"testing"
 
 	"github.com/outflareai/outflare/engine/internal/track"
@@ -33,7 +31,7 @@ func TestIdealCustomerProfiles(t *testing.T) {
 	// A second profile; editing its filters bumps its version.
 	own := owner.must(201, "POST", base+"/ideal-customer-profiles", map[string]any{"name": "AU CFOs", "filters": map[string]any{"titles": []string{"CFO"}}})["id"].(string)
 	owner.must(200, "PATCH", base+"/ideal-customer-profiles/"+own, map[string]any{"filters": map[string]any{"titles": []string{"CFO", "VP Finance"}}})
-	if v := owner.must(200, "GET", base+"/ideal-customer-profiles/"+own, nil); len(v["filters"].(map[string]any)["titles"].([]any)) != 2 || v["version"] != 2.0 || v["project_ids"] != nil {
+	if v := owner.must(200, "GET", base+"/ideal-customer-profiles/"+own, nil); len(v["filters"].(map[string]any)["titles"].([]any)) != 2 || v["version"] != 2.0 {
 		t.Fatalf("after edit = %v", v)
 	}
 	// Saving the same filters changes nothing.
@@ -71,30 +69,14 @@ func TestIdealCustomerProfiles(t *testing.T) {
 	}
 }
 
-// Tokens saved before profiles.* replaced projects.* keep their access and
-// show the new names.
-func TestProfileScopesRenamed(t *testing.T) {
-	e := freshEnv(t)
-	owner, ws := setupOwner(t, e.h)
+// The project scopes are gone: profiles.read and profiles.manage replace
+// them, and migration 0316 moved stored grants over.
+func TestProjectScopesRefused(t *testing.T) {
+	h := freshServer(t)
+	owner, ws := setupOwner(t, h)
 	base := "/v1/workspaces/" + ws
-	tok := owner.must(201, "POST", base+"/api-tokens", map[string]any{"name": "ICP bot", "scopes": []string{"workspace.read", "projects.manage"}})
-	view := tok["api_token"].(map[string]any)
-	if got := view["scopes"].([]any); !slices.Contains(got, any("profiles.manage")) || slices.Contains(got, any("projects.manage")) {
-		t.Fatalf("new token scopes = %v", got)
-	}
-	// As an older version stored it.
-	if _, err := e.pool.Exec(context.Background(), `UPDATE api_tokens SET scopes = '{workspace.read,projects.manage}' WHERE id = $1`, view["id"]); err != nil {
-		t.Fatal(err)
-	}
-	bot := &client{t: t, h: e.h, bearer: tok["token"].(string)}
+	owner.must(400, "POST", base+"/api-tokens", map[string]any{"name": "ICP bot", "scopes": []string{"workspace.read", "projects.manage"}})
+	tok := owner.must(201, "POST", base+"/api-tokens", map[string]any{"name": "ICP bot", "scopes": []string{"workspace.read", "profiles.manage"}})
+	bot := &client{t: t, h: h, bearer: tok["token"].(string)}
 	bot.must(201, "POST", base+"/ideal-customer-profiles", map[string]any{"name": "AU CFOs"})
-	bot.must(200, "GET", base+"/ideal-customer-profiles", nil)
-	for _, x := range owner.must(200, "GET", base+"/api-tokens", nil)["data"].([]any) {
-		if got := x.(map[string]any)["scopes"].([]any); slices.Contains(got, any("projects.manage")) {
-			t.Fatalf("listed scopes = %v", got)
-		}
-	}
-	if got := bot.must(200, "GET", "/v1/whoami", nil)["token"].(map[string]any)["scopes"].([]any); !slices.Contains(got, any("profiles.manage")) {
-		t.Fatalf("whoami scopes = %v", got)
-	}
 }

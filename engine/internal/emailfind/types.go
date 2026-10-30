@@ -1,6 +1,9 @@
 package emailfind
 
-import "time"
+import (
+	"context"
+	"time"
+)
 
 // Code is the outcome of finding or verifying one address. It maps to what a
 // caller's pipeline does next: skip (we have an answer), wait (a slow check is
@@ -24,7 +27,31 @@ const (
 	EvidenceHistory = "history" // a first-party outcome for this exact address
 	EvidencePattern = "pattern" // the domain's learned shape
 	EvidenceDefault = "default" // shape priors only, no domain evidence yet
+	EvidenceNetwork = "network" // the data network: other workspaces' outcomes or the domain's shape
 )
+
+// NetworkLookup asks the data network about addresses at one domain
+// (internal/datanetwork). ok is false when there is no network, the domain
+// is a personal mail provider, or the lookup was refused or failed; the
+// finder then carries on as if there were none.
+type NetworkLookup interface {
+	LookupNetwork(ctx context.Context, ws, domain string, emails []string) (a NetworkAnswer, ok bool)
+}
+
+// NetworkAnswer is what the network knows. Emails only holds addresses
+// that were asked about.
+type NetworkAnswer struct {
+	Shape           string
+	ShapeConfidence int
+	CatchAll        bool
+	Emails          map[string]NetworkSignal
+}
+
+// NetworkSignal is the network's view of one address.
+type NetworkSignal struct {
+	Deliverable bool // false: it bounced
+	Confidence  int
+}
 
 // Cost is what one find or verify spent. Native, first-party work is free, so
 // Cents and Units are zero and Provider is "outflare"; a workspace's own paid

@@ -60,7 +60,7 @@ A meeting tied to a person is also an event on their timeline, so a booked or he
 | `meeting.no_show` | The same, for a no-show |
 | `meeting.canceled` | When it was canceled |
 
-Each has `meeting_id`, `source`, `attribution`, `starts_at` and, when the meeting has them, `sequence_id`, `project_id` (always null since projects were removed) and `mission_id`, with source `meetings`. They are recorded within a minute of the change, or of the meeting being tied to the person, and each only once. Meetings from before this were recorded too, with the times they happened.
+Each has `meeting_id`, `source`, `attribution`, `starts_at` and, when the meeting has them, `sequence_id` and `mission_id`, with source `meetings`. They are recorded within a minute of the change, or of the meeting being tied to the person, and each only once. Meetings from before this were recorded too, with the times they happened.
 
 ## Identities
 

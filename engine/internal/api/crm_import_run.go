@@ -14,6 +14,7 @@ import (
 
 	"github.com/outflareai/outflare/engine/internal/alerts"
 	"github.com/outflareai/outflare/engine/internal/connectors"
+	"github.com/outflareai/outflare/engine/internal/inboundemail"
 	"github.com/outflareai/outflare/engine/internal/inbox"
 	"github.com/outflareai/outflare/engine/internal/indexability"
 	"github.com/outflareai/outflare/engine/internal/jobs"
@@ -247,6 +248,9 @@ func startCRMImport(ctx context.Context, tx pgx.Tx, a *access, integrationID, co
 // RegisterJobs adds the server's own background work to the queue.
 func (s *Server) RegisterJobs(q *jobs.Queue) {
 	q.Handle(jobCRMImport, s.crmImportJob)
+	if s.inboundEmail != nil {
+		q.Handle(inboundemail.JobProcess, s.inboundEmail.Process)
+	}
 	q.Handle(jobPaymentsSync, s.paymentsSyncJob)
 	q.Handle(jobPartnerNotify, s.partnerNotifyJob)
 	q.Handle(jobPartnerBillingConversion, s.partnerBillingConversionJob)
@@ -260,6 +264,7 @@ func (s *Server) RegisterJobs(q *jobs.Queue) {
 	q.Handle(jobTrackingHTTPSRemove, s.trackingHTTPSRemoveJob)
 	q.Handle(jobVisitorReveal, s.visitorRevealJob)
 	q.Handle(jobAIBudgetAlert, s.aiBudgetAlertJob)
+	q.Handle(jobDataNetworkEmail, s.dataNetworkEmailJob)
 	q.Handle(usagelimits.JobAlert, s.connectionLimitAlertJob)
 	q.Handle(inbox.JobDeal, s.replyDealJob)
 	(&alerts.Service{Pool: s.pool, Log: s.log, Send: s.sendAccountEmail, PublicURL: s.publicURL, Store: s.integrations}).Register(q)

@@ -20,6 +20,49 @@ Opening one shows what it needs, its steps and the API operations each step uses
 
 Missions started from a playbook carry `playbook_id` and `playbook_version`, so results can be compared per playbook and version.
 
+## Running one by itself
+
+A playbook can run by itself, on a schedule or when something happens. This is a **playbook automation**:
+
+- **On a schedule:** every day, week or month, at the hour you choose (UTC). Each run looks only at what is new since the last one.
+- **When an event happens:** any event from the webhook catalog (`GET /v1/webhook-events`), such as `backlink.lost` or `competitor.page_removed`. Choose how it takes events:
+  - **each**: a run per event, at most a daily cap (10 by default); the rest wait for the next day.
+  - **hourly** or **daily**: the events are gathered into one run, so a burst is one mission, not dozens.
+
+  Events from before you turn it on never start a run. With a brand chosen, only that brand's events count.
+
+A playbook can suggest what suits it (its `automation:` section), and setting one up starts from that suggestion. The link building playbooks suggest, for example, a monthly run for resource pages and a daily run on lost links for reclaiming them.
+
+**A person approves it once.** An automation starts as a draft, and nothing runs until a person approves it, with:
+
+- the **mode** each run's mission runs in (dry run, approve each write, or within limits; approve each write by default);
+- **who runs it**: Outflare's agent, with the workspace's own AI model, or your own agent's token;
+- a **spend limit per run** and **per month**, on the workspace's own connected accounts.
+
+Then each run starts by itself: a mission from the playbook, approved by the automation with that mode and those limits. It acts with the approving person's rights as they are when it runs, never more. Changing anything but the name sends the automation back to draft for approval. An agent can set one up, but only a person can approve it.
+
+**It stops for a person, never around them.** An automation is **held**, with the reason shown, when:
+
+- the month's runs reach the monthly limit;
+- a connection the playbook needs, or the AI model, is missing;
+- the person who approved it can no longer run and approve missions.
+
+Approving it again turns it back on, and a held automation keeps the events that waited. Link pitches still wait for approval as always.
+
+Deciding which playbooks to run toward a target, and changing course from the results, is an autopilot. It is not part of this.
+
+| Call | What it does |
+| --- | --- |
+| `GET /v1/workspaces/{ws}/playbook-automations` | Automations, with status, next run and this month's spend (`missions.read`) |
+| `POST /v1/workspaces/{ws}/playbook-automations` | Set one up as a draft (`missions.run`) |
+| `PATCH`, `DELETE /v1/workspaces/{ws}/playbook-automations/{id}` | Change (back to draft) or delete it (`missions.run`) |
+| `POST .../playbook-automations/{id}/approve` | Turn it on, or back on (`missions.approve`, a person only) |
+| `POST .../playbook-automations/{id}/pause` | Pause it (`missions.run`) |
+| `POST .../playbook-automations/{id}/run` | Start a run now, inside its limits (`missions.run`) |
+| `GET .../playbook-automations/{id}/runs` | The missions it started |
+
+The runs' missions carry `automation_id`. MCP has the same tools, except approving.
+
 ## Setup kits
 
 Some playbooks need things set up before their first run, such as a pipeline in the CRM, fields on people and email drafts. Such a playbook names a setup kit (`playbooks/kits/<id>.yaml`). When you open it, **What it sets up** lists each part: **Adds**, **Extends** (an option list of your own gains missing options), **Have** (already there) or **Conflict** (there under the same key but set up differently). Tick **Set up what it needs when I start** and the kit is applied in the same step as the mission draft.
@@ -43,4 +86,4 @@ The first kit, **Creator partnerships**, adds a Partnerships record type with a 
 
 ## Events
 
-Starting a playbook records `playbook.started` (with `playbook_id`, `playbook_version`, `mode`, `publisher` and `kit_applied`) beside `mission.created`. Applying a kit records `kit.applied` (with `kit_id`, `kit_version` and how many parts were added, extended and reused), and each part records its own action with `kit_id`. The web app records `ui.playbook_opened` and `ui.playbook_prompt_copied`.
+Starting a playbook records `playbook.started` (with `playbook_id`, `playbook_version`, `mode`, `publisher` and `kit_applied`) beside `mission.created`. An automation's run records it too, with `automation_id`, `trigger` (schedule, event or manual) and `events`, and `playbook_automation.ran`. Automations record `playbook_automation.created`, `updated`, `approved`, `paused`, `held` (with the reason) and `deleted`. All of these are webhook events. Applying a kit records `kit.applied` (with `kit_id`, `kit_version` and how many parts were added, extended and reused), and each part records its own action with `kit_id`. The web app records `ui.playbook_opened` and `ui.playbook_prompt_copied`.

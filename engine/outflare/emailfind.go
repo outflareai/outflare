@@ -23,9 +23,10 @@ func (h *Host) EmailFind() *EmailFind {
 }
 
 // FindEmails proposes an address for each person in the batch from the learned
-// pattern and first-party history. Free; spends nothing.
+// pattern and first-party history, and the data network when there is one.
+// Free; spends nothing.
 func (e *EmailFind) FindEmails(ctx context.Context, workspaceID string, req emailfind.FindRequest) (emailfind.FindResult, error) {
-	return emailfind.FindEmails(ctx, e.h.emailFinder.Pool, e.h.emailFinder.Resolver, workspaceID, req)
+	return e.h.emailFinder.Find(ctx, workspaceID, req)
 }
 
 // FindCompanyPattern returns a domain's learned address shape for the

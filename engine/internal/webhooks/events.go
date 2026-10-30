@@ -108,10 +108,6 @@ var Catalog = []Event{
 	// Experiments
 	{"experiment.started", "experiments", "An SEO experiment started measuring: its site deployed, or a person said when the change went live. data has site_id, by (deploy or person), deploy_id and changed_at."},
 	{"experiment.concluded", "experiments", "An SEO experiment ended with a result. data has site_id, design, metric, verdict (better, worse, no_clear_change or too_early), lift, p_value, days_measured and treatment_pages."},
-	// Projects
-	{"project.created", "projects", "A project was created."},
-	{"project.updated", "projects", "A project's brief or settings changed."},
-	{"project.deleted", "projects", "A project was deleted."},
 	// Missions
 	{"mission.created", "missions", "An agent mission was created."},
 	{"mission.updated", "missions", "A mission's goal, limits or settings changed."},
@@ -124,6 +120,14 @@ var Catalog = []Event{
 	{"mission.action_held", "missions", "A write in a mission is waiting for a person to approve it."},
 	{"mission.action_approved", "missions", "A held mission write was approved and run."},
 	{"mission.action_rejected", "missions", "A held mission write was rejected."},
+	{"playbook.started", "missions", "A playbook was started as a mission, by hand or by an automation. data has playbook_id, playbook_version, mission_id and mode, and for an automation's run automation_id, trigger (schedule, event or manual) and events."},
+	{"playbook_automation.created", "missions", "A playbook automation (a schedule or an event trigger) was set up. It waits for a person's approval."},
+	{"playbook_automation.updated", "missions", "A playbook automation's settings changed. data.needs_approval is true when the change sent it back for approval."},
+	{"playbook_automation.approved", "missions", "A person approved a playbook automation, so it runs by itself."},
+	{"playbook_automation.paused", "missions", "A playbook automation was paused."},
+	{"playbook_automation.held", "missions", "A playbook automation stopped by itself until a person looks. data.reason says why (a limit reached, a connection or the AI model missing, its approver gone)."},
+	{"playbook_automation.ran", "missions", "A playbook automation started a run. data has automation_id, mission_id, trigger and events."},
+	{"playbook_automation.deleted", "missions", "A playbook automation was deleted."},
 	// Infrastructure
 	{"infra.plan_created", "infrastructure", "An infrastructure plan was drafted."},
 	{"infra.plan_approved", "infrastructure", "An infrastructure plan was approved, which may buy domains and mailboxes."},

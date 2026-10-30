@@ -65,7 +65,58 @@ export function registerAIAccountTools(server: McpServer, gtm: MissionClient, wo
     () => call(() => gtm.GET("/v1/workspaces/{ws}/ai-accounts/outflare", { params: { path: path() } })),
   );
 
+  server.registerTool(
+    "list_ai_receipts",
+    {
+      title: "List AI receipts",
+      description:
+        "Receipts people forwarded (Outflare Cloud): vendor, amount, plan, seats, period, the account each matched and how. needs_review lists those waiting for someone to assign or ignore.",
+      inputSchema: { status: z.enum(["matched", "needs_review", "ignored"]).optional() },
+      annotations: read,
+    },
+    (q) => call(() => gtm.GET("/v1/workspaces/{ws}/ai-accounts/receipts", { params: { path: path(), query: q } })),
+  );
+
+  server.registerTool(
+    "get_receipt_forwarding",
+    {
+      title: "Where to forward AI receipts",
+      description: "The workspace's inbound addresses (available on Outflare Cloud), such as the one AI receipts are forwarded to, and your linked personal addresses with any Gmail confirmation to open.",
+      inputSchema: {},
+      annotations: read,
+    },
+    async () => {
+      const [addresses, forwarders] = await Promise.all([
+        gtm.GET("/v1/workspaces/{ws}/inbound-addresses", { params: { path: path() } }),
+        gtm.GET("/v1/workspaces/{ws}/inbound-forwarders", { params: { path: path() } }),
+      ]);
+      return call(async () => (addresses.error ? addresses : { ...addresses, data: { ...addresses.data, forwarders: forwarders.data?.data ?? [] } }));
+    },
+  );
+
   if (readOnly) return;
+
+  server.registerTool(
+    "assign_ai_receipt",
+    {
+      title: "Assign a receipt to an AI account",
+      description: "For a receipt that needs review: the account's renewal, plan, seats and price follow it, and the next one from the same account matches by itself.",
+      inputSchema: { id: z.string().uuid().describe("The receipt's id, from list_ai_receipts."), account_id: z.string().uuid().describe("The AI account, from list_ai_accounts.") },
+      annotations: write,
+    },
+    ({ id, account_id }) => call(() => gtm.POST("/v1/workspaces/{ws}/ai-accounts/receipts/{id}/assign", { params: { path: { ...path(), id } }, body: { account_id } })),
+  );
+
+  server.registerTool(
+    "ignore_ai_receipt",
+    {
+      title: "Ignore a receipt",
+      description: "A receipt that needs review but isn't for an account to track.",
+      inputSchema: { id: z.string().uuid() },
+      annotations: write,
+    },
+    ({ id }) => call(() => gtm.POST("/v1/workspaces/{ws}/ai-accounts/receipts/{id}/ignore", { params: { path: { ...path(), id } } })),
+  );
 
   server.registerTool(
     "create_ai_account",

@@ -155,7 +155,7 @@ func TestInboxSyncMatchesAndActs(t *testing.T) {
 	if tri["category"] != "meeting_booked" || tri["category_source"] != "human" || tri["assignee_name"] == nil || len(tri["labels"].([]any)) != 2 {
 		t.Fatalf("triage: %v", tri)
 	}
-	if mine := owner.must(200, "GET", base+"/inbox?assigned_to=me&label=vip&category=meeting_booked", nil)["data"].([]any); len(mine) != 1 {
+	if mine := owner.must(200, "GET", base+"/inbox?assigned_to=me&tag=vip&category=meeting_booked", nil)["data"].([]any); len(mine) != 1 {
 		t.Fatalf("assigned to me: %v", mine)
 	}
 	owner.must(200, "PATCH", path, map[string]any{"snoozed_until": time.Now().Add(time.Hour).Format(time.RFC3339)})

@@ -21,6 +21,7 @@ import (
 	"go.yaml.in/yaml/v4"
 
 	"github.com/outflareai/outflare/engine/internal/connectors"
+	"github.com/outflareai/outflare/engine/internal/webhooks"
 	folder "github.com/outflareai/outflare/playbooks"
 )
 
@@ -76,7 +77,29 @@ type Playbook struct {
 	// Kit names the setup kit (kits/<id>.yaml) the playbook offers to
 	// apply before its first run, if any.
 	Kit string `yaml:"kit" json:"kit,omitempty"`
+	// Automation suggests how the playbook runs by itself, on a schedule
+	// or when an event happens (playbook automations). People choose; this
+	// is only the default offered.
+	Automation *Automation `yaml:"automation" json:"automation,omitempty"`
 }
+
+// Automation is a playbook's suggested schedule and trigger events.
+type Automation struct {
+	// Schedule is daily, weekly or monthly, or empty for none.
+	Schedule string `yaml:"schedule" json:"schedule,omitempty"`
+	// Events from the webhook catalog (GET /v1/webhook-events) that can
+	// start the playbook.
+	Events []string `yaml:"events" json:"events"`
+	// Gather is how a trigger takes events: each (a run per event), hourly
+	// or daily (the events gathered into one run).
+	Gather string `yaml:"gather" json:"gather,omitempty"`
+}
+
+// Cadences and gather modes an automation can use.
+var (
+	Cadences    = []string{"daily", "weekly", "monthly"}
+	GatherModes = []string{"each", "hourly", "daily"}
+)
 
 // Author is who wrote the playbook, by GitHub handle.
 type Author struct {
@@ -177,6 +200,9 @@ func (p *Playbook) normal() {
 	if p.Measure == nil {
 		p.Measure = []Measure{}
 	}
+	if p.Automation != nil && p.Automation.Events == nil {
+		p.Automation.Events = []string{}
+	}
 	for i := range p.Steps {
 		if p.Steps[i].Tools == nil {
 			p.Steps[i].Tools = []string{}
@@ -206,6 +232,9 @@ type Catalog struct {
 	Categories   map[string]bool
 	// Connectors maps a connector id to its category and capabilities.
 	Connectors map[string]ConnectorInfo
+	// Events are the webhook catalog's event types, which can start a
+	// playbook.
+	Events map[string]bool
 }
 
 // ConnectorInfo is what Validate needs to know about one connector.
@@ -309,6 +338,22 @@ func (p Playbook) Validate(c *Catalog) error {
 		for _, t := range s.Tools {
 			if c != nil && !c.Operations[t] {
 				bad("step %d uses %q, which is not an operationId in api/openapi.yaml", i+1, t)
+			}
+		}
+	}
+	if a := p.Automation; a != nil {
+		if a.Schedule != "" && !slices.Contains(Cadences, a.Schedule) {
+			bad("automation.schedule must be one of %s", strings.Join(Cadences, ", "))
+		}
+		if a.Gather != "" && !slices.Contains(GatherModes, a.Gather) {
+			bad("automation.gather must be one of %s", strings.Join(GatherModes, ", "))
+		}
+		if a.Schedule == "" && len(a.Events) == 0 {
+			bad("automation needs a schedule, events or both")
+		}
+		for _, e := range a.Events {
+			if c != nil && !c.Events[e] {
+				bad("automation event %q is not in the webhook catalog (GET /v1/webhook-events)", e)
 			}
 		}
 	}
@@ -448,7 +493,10 @@ func Get(id string) (Playbook, bool) {
 // NewCatalog builds a Catalog from the OpenAPI document and the connector
 // definitions (connectors.Registry.All). Only available connectors count.
 func NewCatalog(spec []byte, defs []connectors.Definition) *Catalog {
-	c := &Catalog{Operations: map[string]bool{}, Capabilities: map[string]bool{}, Categories: map[string]bool{}, Connectors: map[string]ConnectorInfo{}}
+	c := &Catalog{Operations: map[string]bool{}, Capabilities: map[string]bool{}, Categories: map[string]bool{}, Connectors: map[string]ConnectorInfo{}, Events: map[string]bool{}}
+	for _, e := range webhooks.Catalog {
+		c.Events[e.Type] = true
+	}
 	for _, line := range strings.Split(string(spec), "\n") {
 		if op, ok := strings.CutPrefix(strings.TrimSpace(line), "operationId:"); ok {
 			c.Operations[strings.TrimSpace(op)] = true

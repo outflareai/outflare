@@ -211,12 +211,9 @@ func (s *Server) listInbox(w http.ResponseWriter, r *http.Request) {
 		writeError(w, r, http.StatusBadRequest, "invalid_request", "assigned_to must be me, none or a user id")
 		return
 	}
-	// tag (or label, its older name) takes one tag, or several separated by
-	// commas for replies with any of them.
+	// tag takes one tag, or several separated by commas for replies with
+	// any of them.
 	tag := q.Get("tag")
-	if tag == "" {
-		tag = q.Get("label")
-	}
 	if v := strings.TrimSpace(strings.ToLower(tag)); v != "" {
 		var tags []string
 		for _, t := range strings.Split(v, ",") {

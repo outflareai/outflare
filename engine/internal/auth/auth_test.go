@@ -79,22 +79,3 @@ func TestManageIncludesRead(t *testing.T) {
 		}
 	}
 }
-
-func TestRenamedScopes(t *testing.T) {
-	old := []string{"projects.read", "projects.manage"}
-	if !ValidScope("projects.manage") || !Grants([]string{"projects.manage"}, ScopeProfilesManage) || !Grants([]string{"projects.manage"}, ScopeProfilesRead) {
-		t.Fatal("projects.manage should still grant profiles")
-	}
-	if !Grants([]string{ScopeProfilesRead}, "projects.read") || Grants([]string{"projects.read"}, ScopeProfilesManage) {
-		t.Fatal("old and new names should mean the same scope")
-	}
-	if got := CleanScopes(append(old, ScopeProfilesRead, ScopeLeadsRead)); strings.Join(got, ",") != "leads.read,profiles.read,profiles.manage" {
-		t.Fatalf("CleanScopes = %v", got)
-	}
-	if !Within(old, []string{ScopeProfilesRead, ScopeProfilesManage}) || !Within([]string{ScopeProfilesManage}, old) || Within(old, []string{ScopeProfilesRead}) {
-		t.Fatal("Within should treat old names as the new ones")
-	}
-	if got := Rename([]string{"projects.read", "nope"}); strings.Join(got, ",") != "profiles.read,nope" {
-		t.Fatalf("Rename = %v", got)
-	}
-}

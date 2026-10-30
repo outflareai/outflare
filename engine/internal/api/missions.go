@@ -86,7 +86,6 @@ type missionView struct {
 	PendingActions int        `json:"pending_actions"`
 	Calls          int        `json:"calls"`
 	LastCallAt     *time.Time `json:"last_call_at"`
-	BriefVersion   *int       `json:"brief_version"`
 	ApprovedBy     *string    `json:"approved_by"`
 	ApprovedByName *string    `json:"approved_by_name"`
 	ApprovedAt     *time.Time `json:"approved_at"`
@@ -101,13 +100,15 @@ type missionView struct {
 	Runner string       `json:"runner"`
 	Turns  missionTurns `json:"turns"`
 	// The playbook the mission was started from, if any.
-	PlaybookID      *string   `json:"playbook_id"`
-	PlaybookVersion *int      `json:"playbook_version"`
-	CreatedAt       time.Time `json:"created_at"`
-	UpdatedAt       time.Time `json:"updated_at"`
-	creatorIsToken  bool
-	tokenActorID    *string
-	workspaceID     string
+	PlaybookID      *string `json:"playbook_id"`
+	PlaybookVersion *int    `json:"playbook_version"`
+	// The playbook automation that started it, if any.
+	AutomationID   *string   `json:"automation_id"`
+	CreatedAt      time.Time `json:"created_at"`
+	UpdatedAt      time.Time `json:"updated_at"`
+	creatorIsToken bool
+	tokenActorID   *string
+	workspaceID    string
 }
 
 // missionTurns is the built-in agent's schedule.
@@ -122,13 +123,13 @@ type missionTurns struct {
 
 const missionColumns = `m.id, m.name, m.brand_id::text, m.goal, m.goal_metric, m.goal_target, m.instructions,
 	m.plan, m.plan_updated_at, m.mode, m.status, m.status_reason, m.token_id::text, t.name, t.actor_id::text,
-	m.max_sends, m.max_spend_cents, m.ends_at, m.brief_version, m.approved_by::text, ap.display_name, m.approved_at,
+	m.max_sends, m.max_spend_cents, m.ends_at, m.approved_by::text, ap.display_name, m.approved_at,
 	m.started_at, m.ended_at, m.report, m.created_by::text, cr.display_name, COALESCE(cr.type = 'api_token', false),
 	m.created_at, m.updated_at, m.workspace_id::text,
 	(SELECT count(*) FROM mission_actions x WHERE x.mission_id = m.id AND x.status = 'pending'),
 	(SELECT count(*) FROM mission_calls c WHERE c.mission_id = m.id),
 	(SELECT max(created_at) FROM mission_calls c WHERE c.mission_id = m.id),
-	m.runner, m.turns, m.last_turn_at, m.next_turn_at, m.turn_summary, m.turn_error, m.playbook_id, m.playbook_version`
+	m.runner, m.turns, m.last_turn_at, m.next_turn_at, m.turn_summary, m.turn_error, m.playbook_id, m.playbook_version, m.automation_id::text`
 
 const missionFrom = `FROM missions m
 	LEFT JOIN api_tokens t ON t.id = m.token_id
@@ -139,10 +140,10 @@ func scanMission(row pgx.Row) (missionView, error) {
 	var v missionView
 	err := row.Scan(&v.ID, &v.Name, &v.BrandID, &v.Goal.Text, &v.Goal.Metric, &v.Goal.Target, &v.Instructions,
 		&v.Plan, &v.PlanUpdated, &v.Mode, &v.Status, &v.StatusReason, &v.TokenID, &v.TokenName, &v.tokenActorID,
-		&v.Limits.MaxSends, &v.Limits.MaxSpendCents, &v.Limits.EndsAt, &v.BriefVersion, &v.ApprovedBy, &v.ApprovedByName, &v.ApprovedAt,
+		&v.Limits.MaxSends, &v.Limits.MaxSpendCents, &v.Limits.EndsAt, &v.ApprovedBy, &v.ApprovedByName, &v.ApprovedAt,
 		&v.StartedAt, &v.EndedAt, &v.Report, &v.CreatedBy, &v.CreatedByName, &v.creatorIsToken,
 		&v.CreatedAt, &v.UpdatedAt, &v.workspaceID, &v.PendingActions, &v.Calls, &v.LastCallAt,
-		&v.Runner, &v.Turns.Count, &v.Turns.LastAt, &v.Turns.NextAt, &v.Turns.Summary, &v.Turns.Error, &v.PlaybookID, &v.PlaybookVersion)
+		&v.Runner, &v.Turns.Count, &v.Turns.LastAt, &v.Turns.NextAt, &v.Turns.Summary, &v.Turns.Error, &v.PlaybookID, &v.PlaybookVersion, &v.AutomationID)
 	v.StartedByAgent = v.creatorIsToken
 	v.Writes = writePolicy(v.Status, v.Mode)
 	return v, err
@@ -373,9 +374,7 @@ func writesHelp(policy string) string {
 // ---- Creating and changing ----
 
 type missionInput struct {
-	Name *string `json:"name"`
-	// Ignored: projects were removed. Accepted so older clients still work.
-	ProjectID     optional[string] `json:"project_id"`
+	Name          *string          `json:"name"`
 	Goal          *string          `json:"goal"`
 	GoalMetric    optional[string] `json:"goal_metric"`
 	GoalTarget    optional[int]    `json:"goal_target"`
@@ -1414,7 +1413,6 @@ func (s *Server) replay(ctx context.Context, ws, missionID string, act missionAc
 			WHERE id = $1 AND revoked_at IS NULL AND (expires_at IS NULL OR expires_at > now())
 			  AND NOT EXISTS (SELECT 1 FROM users u WHERE u.id = api_tokens.created_by AND u.disabled_at IS NOT NULL)`, *act.tokenID).
 			Scan(&p.TokenID, &p.ActorID, &p.TokenWorkspaceID, &p.TokenScopes)
-		p.TokenScopes = auth.Rename(p.TokenScopes)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return 0, nil, errors.New("the agent's token was revoked or expired, so the request was not run")
 		}

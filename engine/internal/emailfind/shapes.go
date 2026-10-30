@@ -116,6 +116,13 @@ func candidatesFor(first, last string) []candidate {
 	return out
 }
 
+// ShapesOf returns the shapes an address fits for a person's name, such as
+// ["first.last"] for jane.roe@ and Jane Roe; none when it fits no known
+// shape. The data network shares these, never the name.
+func ShapesOf(first, last, email string) []string {
+	return inferShapes(first, last, localPart(email))
+}
+
 // inferShapes returns the names of every shape whose build of (first, last)
 // equals localpart. A plain name like "doe" can match more than one shape
 // (e.g. "last"); an ambiguous match counts for each, and the dominant-shape

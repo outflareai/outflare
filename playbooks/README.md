@@ -87,6 +87,11 @@ example: |                       # optional: a worked run, with fictional data o
   Northpeak's events showed that...
 
 kit: creators-partnerships       # optional: the setup kit it offers to apply first (below)
+
+automation:                      # optional: how it suggests running by itself
+  schedule: monthly              # daily, weekly or monthly
+  events: [backlink.lost]        # events from GET /v1/webhook-events that can start it
+  gather: daily                  # each (a run per event), hourly or daily (gathered into one run)
 ```
 
 ### What each part can refer to
@@ -94,6 +99,7 @@ kit: creators-partnerships       # optional: the setup kit it offers to apply fi
 - **`tools`** are `operationId`s from [`api/openapi.yaml`](../api/openapi.yaml). Each is also an MCP tool, so the agent knows exactly what to call. `GET /v1/connectors` and the API reference at outflare.ai/docs/api list them.
 - **`needs.connections`** name a `capability` (such as `email.send`, `plan`, `llm.sample`, `analytics.read`, `crawl.fetch`, `payments.read`) or a `category` (such as `analytics`, `crm`, `sequencer`). Any connector that offers it counts, so people can use the tool they already have.
 - **`recommended`** lists connector ids from `GET /v1/connectors`, best first. This is where you can suggest your own tool: if it isn't a connector yet, add it first ([docs/connectors.md](../docs/connectors.md)).
+- **`automation.events`** are event types from the webhook catalog (`GET /v1/webhook-events`). Suggest one only when the playbook's prompt can work from the events it is given; a schedule suits playbooks that look for what is new. People choose in the end ([docs/playbooks.md](../docs/playbooks.md), Running one by itself).
 - **`needs.data`** checks are one of `records`, `customer_events`, `inbox`, `site_tracking`, `seo_site`, `mailboxes`, `leads`. Ask in an issue if you need another.
 
 ### Rules the checks enforce

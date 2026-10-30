@@ -149,23 +149,20 @@ paths:
                     oneOf:
                       - type: "null"
                       - type: object
-                        required: [id, name, kind, workspace_id, workspace, scopes, expires_at]
+                        required: [id, name, workspace_id, workspace, scopes, expires_at]
                         properties:
                           id: { type: string, format: uuid }
                           name: { type: string }
-                          kind: { type: string, enum: [workspace] }
-                          workspace_id: { type: [string, "null"], format: uuid }
+                          workspace_id: { type: string, format: uuid }
                           workspace:
                             description: The token's workspace, with its slug and name.
-                            oneOf:
-                              - type: "null"
-                              - type: object
-                                required: [id, slug, name, test]
-                                properties:
-                                  id: { type: string, format: uuid }
-                                  slug: { type: string, example: acme }
-                                  name: { type: string, example: Acme Outbound }
-                                  test: { type: boolean, description: "A test workspace, where nothing reaches the outside world." }
+                            type: object
+                            required: [id, slug, name, test]
+                            properties:
+                              id: { type: string, format: uuid }
+                              slug: { type: string, example: acme }
+                              name: { type: string, example: Acme Outbound }
+                              test: { type: boolean, description: "A test workspace, where nothing reaches the outside world." }
                           brand_id: { type: [string, "null"], format: uuid, description: "Set for a brand token: it sees that brand's records and the shared ones, and changes only that brand's." }
                           brand:
                             description: A brand token's brand; null otherwise.
@@ -1147,7 +1144,7 @@ paths:
               properties:
                 name: { type: string, minLength: 1, maxLength: 60 }
                 description: { type: string, maxLength: 300 }
-                scopes: { type: array, items: { $ref: "#/components/schemas/ScopeInput" } }
+                scopes: { type: array, items: { $ref: "#/components/schemas/Scope" } }
       responses:
         "201":
           description: Created.
@@ -1177,7 +1174,7 @@ paths:
               properties:
                 name: { type: string, minLength: 1, maxLength: 60 }
                 description: { type: string, maxLength: 300 }
-                scopes: { type: array, items: { $ref: "#/components/schemas/ScopeInput" } }
+                scopes: { type: array, items: { $ref: "#/components/schemas/Scope" } }
       responses:
         "200":
           description: Changed.
@@ -1307,13 +1304,12 @@ paths:
                 name: { type: string }
                 scopes:
                   type: array
-                  items: { $ref: "#/components/schemas/ScopeInput" }
+                  items: { $ref: "#/components/schemas/Scope" }
                 expires_in_days: { type: integer, minimum: 1, maximum: 3650 }
                 daily_send_budget: { type: [integer, "null"], minimum: 1, maximum: 1000000 }
                 max_priority: { type: [string, "null"], enum: [low, normal, high, null] }
                 may_take_mailboxes: { type: boolean }
                 default_team_id: { type: [string, "null"], format: uuid }
-                project_id: { type: [string, "null"], format: uuid, deprecated: true, description: "Projects were removed: a token with a project_id is refused with 400. Limit it to a brand with `brand` instead." }
                 brand: { type: [string, "null"], description: "Binds the token to one brand, by id or handle: it sees that brand's records and the shared ones, changes only that brand's, and endpoints that need every brand refuse it. Fixed for the token's life.", example: repocket }
       responses:
         "201":
@@ -1402,7 +1398,7 @@ paths:
             schema:
               type: object
               properties:
-                scopes: { type: array, items: { $ref: "#/components/schemas/ScopeInput" }, description: "The write scopes to allow. Empty is read only. Left out keeps them as they are." }
+                scopes: { type: array, items: { $ref: "#/components/schemas/Scope" }, description: "The write scopes to allow. Empty is read only. Left out keeps them as they are." }
                 require_mission: { type: boolean, description: "Whether the app's changes need a mission a person approved. Left out keeps it as it is." }
       responses:
         "200":
@@ -3094,7 +3090,6 @@ paths:
               properties:
                 search_integration_id: { type: string, format: uuid }
                 filters: { $ref: "#/components/schemas/PeopleFilter" }
-                project_id: { type: [string, "null"], format: uuid, deprecated: true, description: "Ignored: projects were removed. Use profile_id." }
                 profile_id: { type: [string, "null"], format: uuid, description: Score the sample against this ideal customer profile. }
       responses:
         "202":
@@ -3985,6 +3980,100 @@ paths:
                 properties:
                   data: { $ref: "#/components/schemas/EmailFindResult" }
         default: { $ref: "#/components/responses/Error" }
+  /v1/workspaces/{ws}/data-network:
+    parameters: [{ $ref: "#/components/parameters/Workspace" }]
+    get:
+      operationId: getDataNetwork
+      x-outflare-access: { scope: leads.read }
+      summary: Read the workspace's place in the data network
+      description: |
+        Scope: leads.read. Internal: the data network is turned on only for workspaces the server's operator chose;
+        for every other workspace available is false and nothing else applies. When it is on, the email finder can
+        check and find addresses using what member workspaces learned, answering only about an address, or a name
+        and domain, the asker brought. A workspace that hasn't joined gets a few lookups a month (allowance);
+        members get unlimited lookups and share whether the addresses their sequences email deliver or bounce, and
+        their address shapes. Names, lists, replies and message text are never shared.
+      tags: [leads]
+      responses:
+        "200":
+          description: The workspace's membership and lookups.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/DataNetwork" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/workspaces/{ws}/data-network/preview:
+    parameters: [{ $ref: "#/components/parameters/Workspace" }]
+    get:
+      operationId: previewDataNetwork
+      x-outflare-access: { scope: leads.read }
+      summary: Count what joining the data network would share
+      description: |
+        Scope: leads.read. What the workspace would share if it joined now: the addresses its sequences emailed
+        at least settle_days ago, by outcome, and how many domains they are at. Addresses or domains anyone opted
+        out or blocked, and personal mail providers such as gmail.com, are left out. Counts only. 409
+        data_network_unavailable when the data network isn't on for this workspace.
+      tags: [leads]
+      responses:
+        "200":
+          description: The counts.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/DataNetworkPreview" }
+        "409": { $ref: "#/components/responses/Error" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/workspaces/{ws}/data-network/join:
+    parameters: [{ $ref: "#/components/parameters/Workspace" }]
+    post:
+      operationId: joinDataNetwork
+      x-outflare-access: { scope: integrations.manage }
+      summary: Join the data network
+      description: |
+        Scope: integrations.manage, and only the workspace's owner, signed in: an API token or another role gets
+        403. Send confirm: true after showing the preview. From then on the workspace shares whether the addresses
+        its sequences email deliver or bounce, and their address shapes, starting with its past sends, and gets
+        unlimited lookups. Every owner and admin is emailed. Returns 409 data_network_unavailable when the data
+        network isn't on for this workspace. Joining again does nothing.
+      tags: [leads]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [confirm]
+              additionalProperties: false
+              properties:
+                confirm: { type: boolean, description: "Must be true: the owner has seen what will be shared." }
+      responses:
+        "200":
+          description: The workspace's membership and lookups.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/DataNetwork" }
+        "202": { $ref: "#/components/responses/MissionHeld" }
+        "400": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/workspaces/{ws}/data-network/leave:
+    parameters: [{ $ref: "#/components/parameters/Workspace" }]
+    post:
+      operationId: leaveDataNetwork
+      x-outflare-access: { scope: integrations.manage }
+      summary: Leave the data network
+      description: |
+        Scope: integrations.manage. Sharing stops at once and lookups fall back to the monthly allowance.
+        Everything the workspace shared is withdrawn from the network by withdraw_by, 30 days at most. Every owner
+        and admin is emailed. Leaving when not a member does nothing.
+      tags: [leads]
+      responses:
+        "200":
+          description: The workspace's membership and lookups.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/DataNetwork" }
+        "202": { $ref: "#/components/responses/MissionHeld" }
+        default: { $ref: "#/components/responses/Error" }
   /v1/workspaces/{ws}/mailboxes/{id}/test-send:
     parameters:
       - { $ref: "#/components/parameters/Workspace" }
@@ -4511,7 +4600,6 @@ paths:
         - { name: min_confidence, in: query, description: Only replies labelled at least this surely (0 to 1)., schema: { type: number, minimum: 0, maximum: 1 } }
         - { name: assigned_to, in: query, description: "me (signed-in person only), none, or a user id.", schema: { type: string } }
         - { name: tag, in: query, description: "A tag, or several separated by commas for replies with any of them.", schema: { type: string } }
-        - { name: label, in: query, deprecated: true, description: The older name for tag., schema: { type: string } }
         - { name: q, in: query, description: "Search sender, subject and text.", schema: { type: string } }
         - { $ref: "#/components/parameters/Brand" }
         - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 200, default: 50 } }
@@ -4989,8 +5077,7 @@ paths:
       summary: Save the reply rules for the workspace or a sequence
       description: |
         Scope inbox.manage. Replaces the set for the workspace (no id) or a
-        sequence (sequence_id). A project_id is refused with 400: projects
-        were removed. Labels left out
+        sequence (sequence_id). Labels left out
         follow the next set up; an empty rules object removes the set and
         answers {"cleared": true}. Every action can be undone: a snoozed
         reply can be woken, a restarted or enrolled lead stopped.
@@ -5004,7 +5091,6 @@ paths:
               additionalProperties: false
               required: [rules]
               properties:
-                project_id: { type: string, format: uuid, deprecated: true, description: "Refused with 400: projects were removed." }
                 sequence_id: { type: string, format: uuid }
                 rules: { $ref: "#/components/schemas/ReplyRules" }
       responses:
@@ -16014,6 +16100,169 @@ paths:
         "404": { $ref: "#/components/responses/Error" }
         "409": { $ref: "#/components/responses/Error" }
         default: { $ref: "#/components/responses/Error" }
+  /v1/workspaces/{ws}/playbook-automations:
+    parameters:
+      - { $ref: "#/components/parameters/Workspace" }
+    get:
+      operationId: listPlaybookAutomations
+      x-outflare-access: { scope: missions.read }
+      summary: List playbook automations
+      description: Scope missions.read. Playbooks set to start by themselves, on a schedule or an event, newest first (up to 200).
+      tags: [playbooks]
+      parameters:
+        - { name: playbook_id, in: query, schema: { type: string }, description: Only this playbook's automations. }
+        - { name: brand, in: query, schema: { type: string }, description: "Only this brand's automations: its id or handle, none for those shared by every brand, or all." }
+      responses:
+        "200":
+          description: The automations.
+          content: { application/json: { schema: { type: object, required: [data], properties: { data: { type: array, items: { $ref: "#/components/schemas/PlaybookAutomation" } } } } } }
+        "403": { $ref: "#/components/responses/Error" }
+        default: { $ref: "#/components/responses/Error" }
+    post:
+      operationId: createPlaybookAutomation
+      x-outflare-access: { scope: missions.run }
+      summary: Set a playbook to run on a schedule or an event
+      description: |
+        Scope missions.run. Creates a draft: nothing runs until a person
+        approves it (POST .../approve). What is left out comes from the
+        playbook's suggestion (Playbook.automation), then from the defaults
+        (approve_writes, Outflare's agent, 09:00 UTC). An agent's
+        automation runs its missions itself unless it asks for the
+        built-in runner.
+      tags: [playbooks]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: "#/components/schemas/PlaybookAutomationInput" } } }
+      responses:
+        "201": { description: The automation, waiting for approval., content: { application/json: { schema: { $ref: "#/components/schemas/PlaybookAutomation" } } } }
+        "202": { $ref: "#/components/responses/MissionHeld" }
+        "400": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/workspaces/{ws}/playbook-automations/{id}:
+    parameters:
+      - { $ref: "#/components/parameters/Workspace" }
+      - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+    get:
+      operationId: getPlaybookAutomation
+      x-outflare-access: { scope: missions.read }
+      summary: Get a playbook automation
+      tags: [playbooks]
+      responses:
+        "200": { description: The automation., content: { application/json: { schema: { $ref: "#/components/schemas/PlaybookAutomation" } } } }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        default: { $ref: "#/components/responses/Error" }
+    patch:
+      operationId: updatePlaybookAutomation
+      x-outflare-access: { scope: missions.run }
+      summary: Change a playbook automation
+      description: |
+        Scope missions.run. Changing anything but the name changes what a
+        person approved, so the automation goes back to draft and waits for
+        approval again.
+      tags: [playbooks]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: "#/components/schemas/PlaybookAutomationInput" } } }
+      responses:
+        "200": { description: The automation., content: { application/json: { schema: { $ref: "#/components/schemas/PlaybookAutomation" } } } }
+        "202": { $ref: "#/components/responses/MissionHeld" }
+        "400": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        default: { $ref: "#/components/responses/Error" }
+    delete:
+      operationId: deletePlaybookAutomation
+      x-outflare-access: { scope: missions.run }
+      summary: Delete a playbook automation
+      description: Scope missions.run. Its past runs stay as missions.
+      tags: [playbooks]
+      responses:
+        "204": { description: Deleted. }
+        "202": { $ref: "#/components/responses/MissionHeld" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/workspaces/{ws}/playbook-automations/{id}/approve:
+    parameters:
+      - { $ref: "#/components/parameters/Workspace" }
+      - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+    post:
+      operationId: approvePlaybookAutomation
+      x-outflare-access: { scope: missions.approve }
+      summary: Approve a playbook automation, so it runs by itself
+      description: |
+        Scope missions.approve, and a person only: every run starts a
+        mission carrying their approval, and acts with their rights at the
+        time it runs. Also turns a paused or held automation back on. Needs
+        the playbook's connections, and the workspace's AI model when
+        Outflare's agent runs it (409 connector_needed, or the AI errors).
+        Events from before approval never start a run, except for a held
+        automation, whose events waited.
+      tags: [playbooks]
+      responses:
+        "200": { description: The automation, now active., content: { application/json: { schema: { $ref: "#/components/schemas/PlaybookAutomation" } } } }
+        "202": { $ref: "#/components/responses/MissionHeld" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/workspaces/{ws}/playbook-automations/{id}/pause:
+    parameters:
+      - { $ref: "#/components/parameters/Workspace" }
+      - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+    post:
+      operationId: pausePlaybookAutomation
+      x-outflare-access: { scope: missions.run }
+      summary: Pause a playbook automation
+      description: Scope missions.run. Runs already started carry on; a person approves it again to turn it back on.
+      tags: [playbooks]
+      responses:
+        "200": { description: The automation., content: { application/json: { schema: { $ref: "#/components/schemas/PlaybookAutomation" } } } }
+        "202": { $ref: "#/components/responses/MissionHeld" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/workspaces/{ws}/playbook-automations/{id}/run:
+    parameters:
+      - { $ref: "#/components/parameters/Workspace" }
+      - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+    post:
+      operationId: runPlaybookAutomation
+      x-outflare-access: { scope: missions.run }
+      summary: Start a run of an active automation now
+      description: |
+        Scope missions.run. Starts a run inside the approved limits, as if
+        its time had come, without moving its schedule. 409
+        automation_state when it isn't active, or when a limit or a missing
+        connection holds it.
+      tags: [playbooks]
+      responses:
+        "201": { description: The run's mission, running., content: { application/json: { schema: { $ref: "#/components/schemas/Mission" } } } }
+        "202": { $ref: "#/components/responses/MissionHeld" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/workspaces/{ws}/playbook-automations/{id}/runs:
+    parameters:
+      - { $ref: "#/components/parameters/Workspace" }
+      - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+    get:
+      operationId: listPlaybookAutomationRuns
+      x-outflare-access: { scope: missions.read }
+      summary: The missions an automation started
+      description: Scope missions.read. The latest 50, newest first.
+      tags: [playbooks]
+      responses:
+        "200":
+          description: The missions.
+          content: { application/json: { schema: { type: object, required: [data], properties: { data: { type: array, items: { $ref: "#/components/schemas/Mission" } } } } } }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        default: { $ref: "#/components/responses/Error" }
   /v1/kits:
     get:
       operationId: listKitCatalog
@@ -17816,6 +18065,139 @@ paths:
                 required: [data]
                 properties:
                   data: { type: array, items: { $ref: "#/components/schemas/InboundEmail" } }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/workspaces/{ws}/inbound-forwarders:
+    parameters:
+      - { $ref: "#/components/parameters/Workspace" }
+    get:
+      operationId: listInboundForwarders
+      x-outflare-access: { scope: my_ai_accounts.read, brand_limited: true }
+      summary: List linked forwarding addresses
+      description: |
+        Scope: my_ai_accounts.read. Personal addresses you linked to forward from, with Gmail's forwarding confirmation
+        once it arrives (open `confirmation_url` to confirm). Everyone's with everyone=true and ai_accounts.read. Members' own
+        work addresses can always forward and aren't listed.
+      tags: [inbound_email]
+      parameters:
+        - { name: everyone, in: query, required: false, schema: { type: boolean } }
+      responses:
+        "200":
+          description: The addresses.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data: { type: array, items: { $ref: "#/components/schemas/InboundForwarder" } }
+        default: { $ref: "#/components/responses/Error" }
+    post:
+      operationId: linkInboundForwarder
+      x-outflare-access: { scope: my_ai_accounts.manage, brand_limited: true }
+      summary: Link a personal address to forward from
+      description: "Scope: my_ai_accounts.manage, as a person. Lets mail you forward from this address (your own Gmail, say) reach the workspace; do it before adding the forwarding address in Gmail."
+      tags: [inbound_email]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object, required: [email], properties: { email: { type: string } } }
+      responses:
+        "201":
+          description: Your linked addresses.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data: { type: array, items: { $ref: "#/components/schemas/InboundForwarder" } }
+        "202": { $ref: "#/components/responses/MissionHeld" }
+        "400": { $ref: "#/components/responses/Error" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/workspaces/{ws}/inbound-forwarders/{email}:
+    parameters:
+      - { $ref: "#/components/parameters/Workspace" }
+      - { name: email, in: path, required: true, schema: { type: string } }
+    delete:
+      operationId: unlinkInboundForwarder
+      x-outflare-access: { scope: my_ai_accounts.manage, brand_limited: true }
+      summary: Unlink a forwarding address
+      description: "Scope: my_ai_accounts.manage for your own, ai_accounts.manage for anyone's. Mail forwarded from it is refused after."
+      tags: [inbound_email]
+      responses:
+        "204": { description: Unlinked. }
+        "202": { $ref: "#/components/responses/MissionHeld" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/workspaces/{ws}/ai-accounts/receipts:
+    parameters:
+      - { $ref: "#/components/parameters/Workspace" }
+    get:
+      operationId: listAIReceipts
+      x-outflare-access: { scope: ai_spend.read, brand_limited: true }
+      summary: List AI receipts
+      description: |
+        Scope: ai_spend.read. Receipts people forwarded to the workspace's inbound address (Outflare Cloud), newest first:
+        what each says and the AI account it was matched to, and how (account_email, known_id, forwarder,
+        expected_renewal, or person). status=needs_review lists those waiting for someone to assign or ignore.
+      tags: [ai_accounts]
+      parameters:
+        - { name: status, in: query, required: false, schema: { type: string, enum: [matched, needs_review, ignored] } }
+      responses:
+        "200":
+          description: The receipts.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data: { type: array, items: { $ref: "#/components/schemas/AIReceipt" } }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/workspaces/{ws}/ai-accounts/receipts/{id}/assign:
+    parameters:
+      - { $ref: "#/components/parameters/Workspace" }
+      - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+    post:
+      operationId: assignAIReceipt
+      x-outflare-access: { scope: ai_accounts.manage, brand_limited: true }
+      summary: Assign a receipt to an AI account
+      description: |
+        Scope: ai_accounts.manage. For a receipt that needs review: the account's renewal, plan, seats and price follow it,
+        and its receipt number and card are remembered so the next one matches by itself. Add a new account with POST
+        .../ai-accounts first when it has none.
+      tags: [ai_accounts]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object, required: [account_id], properties: { account_id: { type: string, format: uuid } } }
+      responses:
+        "200":
+          description: Assigned.
+          content:
+            application/json:
+              schema: { type: object, required: [id, status], properties: { id: { type: string }, status: { type: string, enum: [matched, ignored] } } }
+        "202": { $ref: "#/components/responses/MissionHeld" }
+        "400": { $ref: "#/components/responses/Error" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/workspaces/{ws}/ai-accounts/receipts/{id}/ignore:
+    parameters:
+      - { $ref: "#/components/parameters/Workspace" }
+      - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+    post:
+      operationId: ignoreAIReceipt
+      x-outflare-access: { scope: ai_accounts.manage, brand_limited: true }
+      summary: Ignore a receipt
+      description: "Scope: ai_accounts.manage. A receipt that needs review but isn't for an account to track."
+      tags: [ai_accounts]
+      responses:
+        "200":
+          description: Ignored.
+          content:
+            application/json:
+              schema: { type: object, required: [id, status], properties: { id: { type: string }, status: { type: string, enum: [matched, ignored] } } }
+        "202": { $ref: "#/components/responses/MissionHeld" }
         default: { $ref: "#/components/responses/Error" }
   /v1/workspaces/{ws}/knowledge/items:
     parameters: [{ $ref: "#/components/parameters/Workspace" }]
@@ -20667,6 +21049,96 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/Flag" }
         "202": { $ref: "#/components/responses/MissionHeld" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/workspaces/{ws}/flag-groups:
+    parameters: [{ $ref: "#/components/parameters/Workspace" }]
+    get:
+      operationId: listFlagGroups
+      x-outflare-access: { scope: analytics.read }
+      summary: List exclusion groups
+      description: "Scope: analytics.read. Every exclusion group, with its holdout, its flags and their slices, and the share still free."
+      tags: [flags]
+      responses:
+        "200":
+          description: The groups.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data: { type: array, items: { $ref: "#/components/schemas/FlagGroup" } }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/workspaces/{ws}/flag-groups/{group}:
+    parameters:
+      - { $ref: "#/components/parameters/Workspace" }
+      - { name: group, in: path, required: true, schema: { type: string, pattern: "^[a-z0-9][a-z0-9_-]{0,63}$" } }
+    put:
+      operationId: setFlagGroup
+      x-outflare-access: { scope: analytics.manage }
+      summary: Set an exclusion group's holdout
+      description: |
+        Scope: analytics.manage. The holdout is the percent of the group's visitors (the top slice) kept out of every flag
+        in it, so they see the default experience wherever its tests run; compare them with everyone else on a goal
+        (getFlagGroupHoldout) to see what the group's changes did together. 409 when a flag's slice reaches into it.
+        Needs access to every brand, since a group spans them.
+      tags: [flags]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [holdout]
+              properties:
+                holdout: { type: integer, minimum: 0, maximum: 50 }
+      responses:
+        "200":
+          description: The group.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/FlagGroup" }
+        "202": { $ref: "#/components/responses/MissionHeld" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/workspaces/{ws}/flag-groups/{group}/holdout:
+    parameters:
+      - { $ref: "#/components/parameters/Workspace" }
+      - { name: group, in: path, required: true, schema: { type: string } }
+    get:
+      operationId: getFlagGroupHoldout
+      x-outflare-access: { scope: analytics.read }
+      summary: Compare an exclusion group's holdout with everyone else
+      description: |
+        Scope: analytics.read. Every visitor who viewed a page of the site in the last days, split by whether they fall in
+        the group's holdout (the same hash the flags use), and the goal after their first view: what the group's changes
+        did together. 409 when the group has no holdout.
+      tags: [flags]
+      parameters:
+        - { name: event, in: query, required: false, schema: { type: string }, description: "The goal: an event name." }
+        - { name: page, in: query, required: false, schema: { type: string }, description: "The goal: a page path (a trailing * for a section). One of event or page." }
+        - { name: days, in: query, required: false, schema: { type: integer, minimum: 1, maximum: 180, default: 28 } }
+      responses:
+        "200":
+          description: The comparison.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [group, holdout, goal, metric, arms, comparison, from, to]
+                properties:
+                  group: { type: string }
+                  holdout: { type: integer }
+                  goal: { $ref: "#/components/schemas/ABTestGoal" }
+                  metric: { type: string, enum: [conversion, count, value] }
+                  arms: { type: array, items: { $ref: "#/components/schemas/ABTestArm" }, description: "The holdout first, then everyone_else." }
+                  comparison:
+                    description: "Everyone else against the holdout: the lift is what the group's changes did together."
+                    oneOf:
+                      - { $ref: "#/components/schemas/ABTestComparison" }
+                      - type: "null"
+                  from: { type: string, format: date-time }
+                  to: { type: string, format: date-time }
         default: { $ref: "#/components/responses/Error" }
   /v1/workspaces/{ws}/flags/evaluate:
     parameters: [{ $ref: "#/components/parameters/Workspace" }]
@@ -24443,10 +24915,14 @@ paths:
         - `never_fires`: a live journey whose trigger event hasn't happened in 30 days
 
         `brand` limits it to one brand's automations and the shared ones.
-        Changes nothing.
+        With `record`, a person, each node says what they have to do with
+        it in `reached`: an event they did, a list they are in, a rule that
+        fired for them, a journey they are in or went through. Changes
+        nothing.
       tags: [emails]
       parameters:
         - { $ref: "#/components/parameters/Brand" }
+        - { name: record, in: query, description: "A person's record id: mark what they have reached (404 if it isn't a person here).", schema: { type: string, format: uuid } }
       responses:
         "200": { description: The map., content: { application/json: { schema: { $ref: "#/components/schemas/AutomationMap" } } } }
         "403": { $ref: "#/components/responses/Error" }
@@ -25448,6 +25924,30 @@ paths:
                   moved: { type: integer }
         "400": { $ref: "#/components/responses/Error" }
         "404": { $ref: "#/components/responses/Error" }
+        "202": { $ref: "#/components/responses/MissionHeld" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/workspaces/{ws}/partner-programs/{id}/switch-over:
+    parameters:
+      - { $ref: "#/components/parameters/Workspace" }
+      - { name: id, in: path, required: true, description: "A program's id or slug.", schema: { type: string } }
+    post:
+      operationId: switchOverPartnerProgram
+      x-outflare-access: { scope: partners.manage, brand_limited: true }
+      summary: Switch a program over from the platform it was imported from
+      description: |
+        Scope: partners.manage. Say that the platform the program was imported from (Tolt) no longer pays it. Until then,
+        commissions the import brought in keep that platform's status, re-runs bring its changes, and Outflare never approves
+        them after its hold or puts them in a payout, so nobody is paid twice. From now on they are approved and paid here like
+        any other. 409 when it has already switched over.
+      tags: [partners]
+      responses:
+        "200":
+          description: The program.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PartnerProgram" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
         "202": { $ref: "#/components/responses/MissionHeld" }
         default: { $ref: "#/components/responses/Error" }
   /v1/workspaces/{ws}/partner-programs/{id}/postback:
@@ -27433,48 +27933,6 @@ webhooks:
             schema: { $ref: "#/components/schemas/WebhookEvent" }
       responses:
         "200": { description: Any 2xx answer means received; anything else is retried. }
-  project.created:
-    post:
-      operationId: webhook_project_created
-      summary: "A project was created."
-      description: No longer sent, since projects were removed. Listed so existing subscriptions stay valid.
-      deprecated: true
-      tags: [webhooks]
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema: { $ref: "#/components/schemas/WebhookEvent" }
-      responses:
-        "200": { description: Any 2xx answer means received; anything else is retried. }
-  project.updated:
-    post:
-      operationId: webhook_project_updated
-      summary: "A project's brief or settings changed."
-      description: No longer sent, since projects were removed. Listed so existing subscriptions stay valid.
-      deprecated: true
-      tags: [webhooks]
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema: { $ref: "#/components/schemas/WebhookEvent" }
-      responses:
-        "200": { description: Any 2xx answer means received; anything else is retried. }
-  project.deleted:
-    post:
-      operationId: webhook_project_deleted
-      summary: "A project was deleted."
-      description: No longer sent, since projects were removed. Listed so existing subscriptions stay valid.
-      deprecated: true
-      tags: [webhooks]
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema: { $ref: "#/components/schemas/WebhookEvent" }
-      responses:
-        "200": { description: Any 2xx answer means received; anything else is retried. }
   mission.created:
     post:
       operationId: webhook_mission_created
@@ -27599,6 +28057,102 @@ webhooks:
     post:
       operationId: webhook_mission_action_rejected
       summary: "A held mission write was rejected."
+      tags: [webhooks]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/WebhookEvent" }
+      responses:
+        "200": { description: Any 2xx answer means received; anything else is retried. }
+  playbook.started:
+    post:
+      operationId: webhook_playbook_started
+      summary: "A playbook was started as a mission, by hand or by an automation."
+      tags: [webhooks]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/WebhookEvent" }
+      responses:
+        "200": { description: Any 2xx answer means received; anything else is retried. }
+  playbook_automation.created:
+    post:
+      operationId: webhook_playbook_automation_created
+      summary: "A playbook automation was set up; it waits for a person's approval."
+      tags: [webhooks]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/WebhookEvent" }
+      responses:
+        "200": { description: Any 2xx answer means received; anything else is retried. }
+  playbook_automation.updated:
+    post:
+      operationId: webhook_playbook_automation_updated
+      summary: "A playbook automation's settings changed."
+      tags: [webhooks]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/WebhookEvent" }
+      responses:
+        "200": { description: Any 2xx answer means received; anything else is retried. }
+  playbook_automation.approved:
+    post:
+      operationId: webhook_playbook_automation_approved
+      summary: "A person approved a playbook automation, so it runs by itself."
+      tags: [webhooks]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/WebhookEvent" }
+      responses:
+        "200": { description: Any 2xx answer means received; anything else is retried. }
+  playbook_automation.paused:
+    post:
+      operationId: webhook_playbook_automation_paused
+      summary: "A playbook automation was paused."
+      tags: [webhooks]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/WebhookEvent" }
+      responses:
+        "200": { description: Any 2xx answer means received; anything else is retried. }
+  playbook_automation.held:
+    post:
+      operationId: webhook_playbook_automation_held
+      summary: "A playbook automation stopped by itself until a person looks."
+      tags: [webhooks]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/WebhookEvent" }
+      responses:
+        "200": { description: Any 2xx answer means received; anything else is retried. }
+  playbook_automation.ran:
+    post:
+      operationId: webhook_playbook_automation_ran
+      summary: "A playbook automation started a run."
+      tags: [webhooks]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/WebhookEvent" }
+      responses:
+        "200": { description: Any 2xx answer means received; anything else is retried. }
+  playbook_automation.deleted:
+    post:
+      operationId: webhook_playbook_automation_deleted
+      summary: "A playbook automation was deleted."
       tags: [webhooks]
       requestBody:
         required: true
@@ -28754,7 +29308,7 @@ webhooks:
   partner_conversion.created:
     post:
       operationId: webhook_partner_conversion_created
-      summary: "A sign-up, sale, refund or custom conversion was recorded for a referred customer. data has program_id, partner_id, referral_id, record_id, type, event_name (custom only), recurring, amount_cents, currency, product_id, source and, for a refund, refund_of."
+      summary: "A sign-up, sale, refund or custom conversion was recorded for a referred customer. data has program_id, partner_id, referral_id, record_id, type, event_name (custom only), recurring, amount_cents, currency, product_id, source, payment_source, interval and, for a refund, refund_of."
       tags: [webhooks]
       requestBody:
         required: true
@@ -29263,7 +29817,7 @@ components:
       required: [id, type, created_at, workspace_id, actor, target, request_id, data]
       properties:
         id: { type: string, description: "Unique per event, and the webhook-id header. Use it to ignore repeats.", example: evt_48213 }
-        type: { type: string, enum: [lead.replied, lead.unsubscribed, inbox.replied, inbox.updated, inbox.classified, lead.bounced, mailbox.auto_paused, lead.created, lead.updated, lead.deleted, leads.imported, suppressions.added, suppression.removed, lead_list.created, lead_list.leads_added, lead_list.run_started, lead_list.build_done, lead_list.build_failed, lead_list.refresh_done, lead_list.refresh_failed, lead_list.enrich_done, lead_list.enrich_failed, import.done, import.failed, sequence.created, sequence.updated, sequence.activated, sequence.paused, sequence.archived, sequence.deleted, sequence.steps_updated, sequence.leads_enrolled, enrollment.stopped, mailbox.imported, mailbox.updated, mailbox.paused, mailbox.resumed, mailbox.stage_changed, mailbox.deleted, domain.added, domain.paused, domain.resumed, domain.removed, email.queued, email.sent, email.delivered, email.bounced, email.complained, email.failed, email.suppressed, email.cancelled, email.unsubscribed, email.opened, email.clicked, email.preferences_changed, email_domain.verified, email_domain.verification_failed, email_provider.events_failed, email_template.published, meeting.created, meeting.updated, meeting.deleted, deal.created, deal.updated, deal.deleted, spend.recorded, integration.connected, integration.updated, integration.disconnected, connect_request.created, deploy.detected, deploy.failed, digest.ready, ai_budget.warned, ai_budget.reached, connection_limit.warned, connection_limit.reached, experiment.started, experiment.concluded, project.created, project.updated, project.deleted, mission.created, mission.updated, mission.submitted, mission.approved, mission.paused, mission.resumed, mission.stopped, mission.completed, mission.action_held, mission.action_approved, mission.action_rejected, infra.plan_created, infra.plan_approved, infra.ordered, infra.order_failed, infra.domains_bought, infra.mailbox_joined, infra.plan_warming, infra.plan_ready, infra.plan_cancelled, fix.found, fix.updated, fix.started, fix.verify_requested, fix.confirmed, fix.reopened, record.created, record.bulk_created, record.bulk_updated, record.updated, record.merged, identity.verified, identity.closed, relationship.added, relationship.ended, consent.granted, consent.withdrawn, consent.bulk_withdrawn, brand.created, brand.updated, knowledge.created, knowledge.updated, knowledge.deleted, knowledge.restored, email_broadcast.created, email_broadcast.started, email_broadcast.sent, email_broadcast.failed, email_broadcast.cancelled, journey.created, journey.updated, journey_run.entered, journey_run.exited, rule.created, rule.updated, rule.activated, rule.paused, rule.archived, rule.fired, brand_setup.installed, brand_setup.install_failed, install.issue_opened, install.issue_resolved, seo_site.created, seo_site.verified, seo_site.unverified, seo_site.deleted, crawl.started, crawl.stopped, crawl.done, link_pitch.drafted, link_pitch.approved, link_pitch.rejected, link_prospect.overdue, backlink.new, backlink.lost, backlink.regained, competitor.page_removed, link_prospect.found, link_prospect.checked, link_prospect.excluded, link_prospect.pitched, link_prospect.replied, link_prospect.agreed, link_prospect.live, link_prospect.declined, link_prospect.removed, link_prospect.reopened, link_prospect.updated, link_prospect.deleted, social_action.drafted, social_action.approved, social_action.rejected, social_action.done, social_action.failed, review.posted, review.replied, review.reply_drafted, review_momentum.changed, alert.raised, visitor.became_hot, partner_program.created, partner_program.updated, partner_program.rules_updated, partner.created, partner.updated, partner_referral.created, partner_conversion.created, partner_reward.created, partner_reward.approved, partner_reward.rejected, partner_reward.reversed, partner_reward.fulfilled, partner_payout.created, partner_payout.paid, partner_payout.canceled, workspace.updated, webhook.test] }
+        type: { type: string, enum: [lead.replied, lead.unsubscribed, inbox.replied, inbox.updated, inbox.classified, lead.bounced, mailbox.auto_paused, lead.created, lead.updated, lead.deleted, leads.imported, suppressions.added, suppression.removed, lead_list.created, lead_list.leads_added, lead_list.run_started, lead_list.build_done, lead_list.build_failed, lead_list.refresh_done, lead_list.refresh_failed, lead_list.enrich_done, lead_list.enrich_failed, import.done, import.failed, sequence.created, sequence.updated, sequence.activated, sequence.paused, sequence.archived, sequence.deleted, sequence.steps_updated, sequence.leads_enrolled, enrollment.stopped, mailbox.imported, mailbox.updated, mailbox.paused, mailbox.resumed, mailbox.stage_changed, mailbox.deleted, domain.added, domain.paused, domain.resumed, domain.removed, email.queued, email.sent, email.delivered, email.bounced, email.complained, email.failed, email.suppressed, email.cancelled, email.unsubscribed, email.opened, email.clicked, email.preferences_changed, email_domain.verified, email_domain.verification_failed, email_provider.events_failed, email_template.published, meeting.created, meeting.updated, meeting.deleted, deal.created, deal.updated, deal.deleted, spend.recorded, integration.connected, integration.updated, integration.disconnected, connect_request.created, deploy.detected, deploy.failed, digest.ready, ai_budget.warned, ai_budget.reached, connection_limit.warned, connection_limit.reached, experiment.started, experiment.concluded, mission.created, mission.updated, mission.submitted, mission.approved, mission.paused, mission.resumed, mission.stopped, mission.completed, mission.action_held, mission.action_approved, mission.action_rejected, playbook.started, playbook_automation.created, playbook_automation.updated, playbook_automation.approved, playbook_automation.paused, playbook_automation.held, playbook_automation.ran, playbook_automation.deleted, infra.plan_created, infra.plan_approved, infra.ordered, infra.order_failed, infra.domains_bought, infra.mailbox_joined, infra.plan_warming, infra.plan_ready, infra.plan_cancelled, fix.found, fix.updated, fix.started, fix.verify_requested, fix.confirmed, fix.reopened, record.created, record.bulk_created, record.bulk_updated, record.updated, record.merged, identity.verified, identity.closed, relationship.added, relationship.ended, consent.granted, consent.withdrawn, consent.bulk_withdrawn, brand.created, brand.updated, knowledge.created, knowledge.updated, knowledge.deleted, knowledge.restored, email_broadcast.created, email_broadcast.started, email_broadcast.sent, email_broadcast.failed, email_broadcast.cancelled, journey.created, journey.updated, journey_run.entered, journey_run.exited, rule.created, rule.updated, rule.activated, rule.paused, rule.archived, rule.fired, brand_setup.installed, brand_setup.install_failed, install.issue_opened, install.issue_resolved, seo_site.created, seo_site.verified, seo_site.unverified, seo_site.deleted, crawl.started, crawl.stopped, crawl.done, link_pitch.drafted, link_pitch.approved, link_pitch.rejected, link_prospect.overdue, backlink.new, backlink.lost, backlink.regained, competitor.page_removed, link_prospect.found, link_prospect.checked, link_prospect.excluded, link_prospect.pitched, link_prospect.replied, link_prospect.agreed, link_prospect.live, link_prospect.declined, link_prospect.removed, link_prospect.reopened, link_prospect.updated, link_prospect.deleted, social_action.drafted, social_action.approved, social_action.rejected, social_action.done, social_action.failed, review.posted, review.replied, review.reply_drafted, review_momentum.changed, alert.raised, visitor.became_hot, partner_program.created, partner_program.updated, partner_program.rules_updated, partner.created, partner.updated, partner_referral.created, partner_conversion.created, partner_reward.created, partner_reward.approved, partner_reward.rejected, partner_reward.reversed, partner_reward.fulfilled, partner_payout.created, partner_payout.paid, partner_payout.canceled, workspace.updated, webhook.test] }
         created_at: { type: string, format: date-time }
         workspace_id: { type: string, format: uuid }
         actor: { $ref: "#/components/schemas/WebhookRef" }
@@ -29366,7 +29920,6 @@ components:
       required: [goal]
       properties:
         goal: { type: string, maxLength: 2000, example: "Book 10 meetings with CFOs at Australian fintechs with 50 to 500 staff by 30 November" }
-        project_id: { type: string, format: uuid, deprecated: true, description: "Ignored: projects were removed." }
     MissionDraft:
       type: object
       description: What the planner proposed. The mission holds the same values; this keeps the parts a mission has no field for.
@@ -29398,7 +29951,6 @@ components:
       type: object
       properties:
         name: { type: string }
-        project_id: { type: [string, "null"], format: uuid, deprecated: true, description: "Ignored: projects were removed." }
         goal: { type: string, description: The goal in words. }
         goal_metric: { type: [string, "null"], enum: [meetings, replies, sends, leads, revenue_attributed, revenue_deals, revenue_referred, null], description: "Revenue goals are in whole US dollars: revenue_attributed counts payments credited to the campaigns of the mission's sequences under the default attribution model, net of refunds; revenue_deals counts won deals tagged with the mission; revenue_referred counts sales partners referred, less refunds, in the mission's brand's partner programs since it started." }
         goal_target: { type: [integer, "null"], minimum: 1 }
@@ -29411,7 +29963,7 @@ components:
         ends_at: { type: [string, "null"], format: date-time, description: The mission ends itself at this time. }
     Mission:
       type: object
-      required: [id, name, brand_id, goal, instructions, plan, plan_updated_at, mode, status, status_reason, token_id, token_name, limits, progress, writes, pending_actions, calls, last_call_at, brief_version, approved_by, approved_by_name, approved_at, started_at, ended_at, report, created_by, created_by_name, started_by_agent, runner, turns, playbook_id, playbook_version, created_at, updated_at]
+      required: [id, name, brand_id, goal, instructions, plan, plan_updated_at, mode, status, status_reason, token_id, token_name, limits, progress, writes, pending_actions, calls, last_call_at, approved_by, approved_by_name, approved_at, started_at, ended_at, report, created_by, created_by_name, started_by_agent, runner, turns, playbook_id, playbook_version, created_at, updated_at]
       properties:
         id: { type: string, format: uuid }
         name: { type: string }
@@ -29459,7 +30011,6 @@ components:
         pending_actions: { type: integer }
         calls: { type: integer }
         last_call_at: { type: [string, "null"], format: date-time }
-        brief_version: { type: [integer, "null"], deprecated: true, description: "Always null for missions approved after projects were removed." }
         approved_by: { type: [string, "null"], format: uuid }
         approved_by_name: { type: [string, "null"] }
         approved_at: { type: [string, "null"], format: date-time }
@@ -29474,6 +30025,7 @@ components:
           enum: [builtin, external]
           description: "external: your own agent sends the Outflare-Mission header. builtin: Outflare's agent runs it in turns."
         turns: { $ref: "#/components/schemas/MissionTurns" }
+        automation_id: { type: [string, "null"], format: uuid, description: "The playbook automation that started it (GET .../playbook-automations/{id}), if any." }
         playbook_id: { type: [string, "null"], description: "The playbook it was started from (GET /v1/playbooks/{id})." }
         playbook_version: { type: [integer, "null"] }
         created_at: { type: string, format: date-time }
@@ -29540,6 +30092,14 @@ components:
         prompt: { type: string, description: "The prompt to copy, with {{inputs}} to fill in." }
         example: { type: string, description: A worked example with fictional data. }
         kit: { type: string, description: "The setup kit it offers to apply before its first run (GET /v1/kits/{id}), if any.", example: creators-partnerships }
+        automation:
+          type: object
+          description: How the playbook suggests running by itself (POST /v1/workspaces/{ws}/playbook-automations). Only a default; people choose.
+          required: [events]
+          properties:
+            schedule: { type: string, enum: [daily, weekly, monthly] }
+            events: { type: array, items: { type: string }, description: "Events from the webhook catalog (GET /v1/webhook-events) that can start it.", example: [backlink.lost] }
+            gather: { type: string, enum: [each, hourly, daily], description: "each starts a run per event; hourly and daily gather the events into one run." }
         source_url: { type: string, format: uri, description: The playbook's file on GitHub. }
     PlaybookDataNeed:
       type: object
@@ -29580,10 +30140,68 @@ components:
           additionalProperties: { type: string, maxLength: 500 }
           description: Values for the playbook's inputs, by name.
         mode: { type: string, enum: [dry_run, approve_writes, autonomous], description: "Defaults to dry_run." }
-        project_id: { type: [string, "null"], format: uuid, deprecated: true, description: "Ignored: projects were removed." }
         token_id: { type: [string, "null"], format: uuid, description: The API token that runs the mission. }
         max_spend_cents: { type: [integer, "null"], format: int64 }
         apply_kit: { type: boolean, description: "Apply the playbook's setup kit in the same step. Needs catalog.manage, and emails.manage when the kit adds email drafts." }
+    PlaybookAutomation:
+      type: object
+      description: |
+        A playbook that starts by itself, on a schedule or when an event
+        happens. A person approves it once; each run is then a mission
+        started from the playbook and approved with this mode, runner and
+        spend limits, acting with that person's current rights.
+      required: [id, playbook_id, name, brand_id, inputs, kind, cadence, run_hour, run_weekday, run_monthday, event_type, gather, daily_cap, mode, runner, token_id, max_spend_cents_per_run, max_spend_cents_per_month, spent_this_month_cents, status, held_reason, next_run_at, last_run_at, last_mission_id, runs, approved_by, approved_at, created_at, updated_at]
+      properties:
+        id: { type: string, format: uuid }
+        playbook_id: { type: string, example: link-reclaim-lost-links }
+        name: { type: string }
+        brand_id: { type: [string, "null"], format: uuid, description: Runs for this brand only; null for every brand. Event automations then take only that brand's events. }
+        inputs: { type: object, additionalProperties: { type: string } }
+        kind: { type: string, enum: [schedule, event] }
+        cadence: { type: [string, "null"], enum: [daily, weekly, monthly, null] }
+        run_hour: { type: integer, minimum: 0, maximum: 23, description: The UTC hour schedules (and daily gathered events) run at. }
+        run_weekday: { type: integer, minimum: 0, maximum: 6, description: "Weekly schedules: the weekday, 0 is Sunday." }
+        run_monthday: { type: integer, minimum: 1, maximum: 28, description: Monthly schedules. }
+        event_type: { type: [string, "null"], description: An event from the webhook catalog (GET /v1/webhook-events). }
+        gather: { type: string, enum: [each, hourly, daily], description: "each: a run per event, at most daily_cap a day (the rest wait for the next day). hourly, daily: the events gathered into one run." }
+        daily_cap: { type: integer, minimum: 1, maximum: 100 }
+        mode: { type: string, enum: [dry_run, approve_writes, autonomous], description: The mode every run's mission runs in. }
+        runner: { type: string, enum: [builtin, external], description: "builtin: Outflare's agent runs each mission with the workspace's AI model. external: the agent with token_id does." }
+        token_id: { type: [string, "null"], format: uuid }
+        max_spend_cents_per_run: { type: [integer, "null"], format: int64 }
+        max_spend_cents_per_month: { type: [integer, "null"], format: int64, description: Reaching it holds the automation until a person looks. }
+        spent_this_month_cents: { type: integer, format: int64, description: "What this month's runs spent, from the outcomes ledger." }
+        status: { type: string, enum: [draft, active, paused, held], description: "draft waits for a person to approve it; held stopped by itself (held_reason says why)." }
+        held_reason: { type: string }
+        next_run_at: { type: [string, "null"], format: date-time }
+        last_run_at: { type: [string, "null"], format: date-time }
+        last_mission_id: { type: [string, "null"], format: uuid }
+        runs: { type: integer }
+        approved_by: { type: [string, "null"], format: uuid, description: The user whose approval the runs carry. }
+        approved_at: { type: [string, "null"], format: date-time }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    PlaybookAutomationInput:
+      type: object
+      description: What the playbook suggests (Playbook.automation) fills what is left out on create.
+      properties:
+        playbook_id: { type: string, description: Required on create; can't change. }
+        name: { type: string, maxLength: 200 }
+        brand_id: { type: [string, "null"], format: uuid }
+        inputs: { type: object, additionalProperties: { type: string, maxLength: 500 } }
+        kind: { type: string, enum: [schedule, event] }
+        cadence: { type: [string, "null"], enum: [daily, weekly, monthly, null] }
+        run_hour: { type: integer, minimum: 0, maximum: 23 }
+        run_weekday: { type: integer, minimum: 0, maximum: 6 }
+        run_monthday: { type: integer, minimum: 1, maximum: 28 }
+        event_type: { type: [string, "null"] }
+        gather: { type: string, enum: [each, hourly, daily] }
+        daily_cap: { type: integer, minimum: 1, maximum: 100 }
+        mode: { type: string, enum: [dry_run, approve_writes, autonomous], description: Defaults to approve_writes. }
+        runner: { type: string, enum: [builtin, external], description: "Defaults to builtin, or external with the caller's own token for an agent." }
+        token_id: { type: [string, "null"], format: uuid }
+        max_spend_cents_per_run: { type: [integer, "null"], format: int64, minimum: 0 }
+        max_spend_cents_per_month: { type: [integer, "null"], format: int64, minimum: 0 }
     Kit:
       description: A setup kit from the repository's playbooks/kits folder (playbooks/README.md has the format).
       allOf:
@@ -30313,8 +30931,8 @@ components:
         Groups of conditions; match says whether all or any must hold, for the groups and inside each. Empty always holds.
         Fields: partner.id, partner.country (text); partner.transactions, partner.customers, partner.leads, partner.revenue_cents,
         partner.earnings_cents (numbers); customer.transactions and customer.total_paid_cents (numbers, before this conversion);
-        customer.first_sale_at and customer.signed_up_at (dates); transaction.amount_cents (number), transaction.product_id (text),
-        transaction.recurring (true or false). Ops: numbers eq, neq, gt, gte, lt, lte; text eq, neq, in, not_in (case-insensitive);
+        customer.first_sale_at and customer.signed_up_at (dates); transaction.amount_cents (number), transaction.product_id,
+        transaction.payment_source and transaction.interval (text), transaction.recurring (true or false). Ops: numbers eq, neq, gt, gte, lt, lte; text eq, neq, in, not_in (case-insensitive);
         true or false eq; dates within or not_within, with {"amount": N, "unit": "days" | "months" | "years"} back from the conversion.
         A fact that isn't known (no country, no first sale yet) fails every test but neq, not_in and not_within.
       properties:
@@ -30371,17 +30989,18 @@ components:
         target_group_id: { type: string, format: uuid, description: "kind group: a group of this program." }
     PartnerGroup:
       type: object
-      required: [id, name, partners, default]
+      required: [id, name, partners, default, signup_url]
       properties:
         id: { type: string, format: uuid }
         name: { type: string }
         partners: { type: integer, description: How many partners are in it. }
         default: { type: boolean, description: New partners join this group. }
+        signup_url: { type: string, description: "The portal's sign-up page for this group (portal_url with ?group=<id>): partners who apply through it join the group. Share it only with those you'd put in the group." }
     PartnerProgram:
       type: object
       required: [id, name, slug, kind, status, brand_id, landing_url, currency, credit_window_days, credit_model, codes_win, hold_days,
         auto_approve, auto_accept, pay_browser_signups, min_payout_cents, terms_url, sales_source, postback_hint, portal_enabled, portal_subdomain, portal, portal_url, rules, groups,
-        partners, created_at, updated_at]
+        partners, imported_from, switched_over_at, created_at, updated_at]
       properties:
         id: { type: string, format: uuid }
         name: { type: string }
@@ -30410,6 +31029,11 @@ components:
         groups: { type: array, items: { $ref: "#/components/schemas/PartnerGroup" }, description: "Empty in lists; GET the program for them." }
         default_group_id: { type: [string, "null"], format: uuid, description: "The group new partners join (when none is given); null is none." }
         partners: { type: integer }
+        imported_from: { type: string, description: "The platform the program was last imported from (tolt), or empty." }
+        switched_over_at:
+          type: [string, "null"]
+          format: date-time
+          description: "When the platform it was imported from stopped paying it (switchOverPartnerProgram). Until then, imported commissions keep that platform's status: they are never approved after the hold here or put in a payout."
         created_at: { type: string, format: date-time }
         updated_at: { type: string, format: date-time }
     PartnerPortalField:
@@ -30455,7 +31079,7 @@ components:
                 type: object
                 required: [kind, seen, created, updated, unchanged, skipped]
                 properties:
-                  kind: { type: string, enum: [links, partners, promo_codes, customers, transactions, commissions] }
+                  kind: { type: string, enum: [groups, links, partners, flows, promo_codes, customers, transactions, commissions] }
                   seen: { type: integer }
                   created: { type: integer }
                   updated: { type: integer, description: A status brought over, or a refund added. }
@@ -30466,6 +31090,10 @@ components:
                     type: object
                     additionalProperties: { type: integer }
                     description: "reported per part, when the platform lists the kind in parts (Tolt's partners, by status)."
+                  by_status:
+                    type: object
+                    additionalProperties: { type: integer }
+                    description: "Partners only: how many were read with each status there (active, pending, rejected, suspended)."
             issues:
               type: array
               description: The first 100 things to look at, by the platform's id and a reason, never names or addresses.
@@ -30539,7 +31167,7 @@ components:
         pending_cents: { type: integer, format: int64, description: "Cash, fees and adjustments still on hold." }
         approved_cents: { type: integer, format: int64, description: Approved and not yet paid (some may be in a due payout). }
         paid_cents: { type: integer, format: int64 }
-        balance_cents: { type: integer, format: int64, description: "Approved, not yet in a payout: what the next payout gathers." }
+        balance_cents: { type: integer, format: int64, description: "Approved, not yet in a payout: what the next payout gathers. Commissions imported from a platform that still pays the program are left out until it switches over." }
         pending_actions: { type: integer, description: Approved action rewards your system hasn't fulfilled. }
     PartnerPostbackSend:
       type: object
@@ -30632,7 +31260,8 @@ components:
         created_at: { type: string, format: date-time }
     PartnerConversion:
       type: object
-      required: [id, program_id, partner_id, referral_id, record_id, type, event_name, recurring, external_id, refund_of, amount_cents, currency, product_id, source, occurred_at, created_at]
+      required: [id, program_id, partner_id, referral_id, record_id, type, event_name, recurring, external_id, refund_of, amount_cents, currency, product_id, source,
+        payment_source, interval, occurred_at, created_at]
       properties:
         id: { type: string, format: uuid }
         program_id: { type: string, format: uuid }
@@ -30648,6 +31277,8 @@ components:
         currency: { type: string }
         product_id: { type: string }
         source: { type: string, enum: [api, postback, billing, manual, import, browser], description: "billing: a payment synced from the program's sales_source. browser: a sign-up the website reported with outflare.signup()." }
+        payment_source: { type: string, description: "The payment provider your backend named, such as stripe; '' when it didn't." }
+        interval: { type: string, enum: ["", day, week, month, year, one_time], description: "How the sale bills, as your backend said; '' when it didn't." }
         occurred_at: { type: string, format: date-time }
         created_at: { type: string, format: date-time }
     PartnerConversionInput:
@@ -30672,6 +31303,8 @@ components:
         sub_id: { type: string, maxLength: 100 }
         anonymous_id: { type: string, description: "The website visitor's id (outflare.anonymousId() in the browser). Their visits with a partner's ref credit the partner, under the program's window and credit rule, before the product identifies them." }
         occurred_at: { type: string, description: "RFC 3339 or Unix seconds; now when left out." }
+        payment_source: { type: string, maxLength: 40, description: "The payment provider, such as stripe or paddle (Tolt's source). Flows can test it (transaction.payment_source)." }
+        interval: { type: string, enum: [day, week, month, year, one_time, monthly, yearly, annual], description: "How it bills; monthly, yearly and annual are stored as month and year. Flows can test it (transaction.interval)." }
     PartnerConversionResult:
       type: object
       required: [credited, duplicate, partner_id, referral_id, conversion, rewards]
@@ -31227,7 +31860,7 @@ components:
     AutomationMap:
       type: object
       description: The workspace's automations as a graph (GET .../automation-map).
-      required: [nodes, edges, flags, window_days]
+      required: [nodes, edges, flags, window_days, record_id]
       properties:
         nodes:
           type: array
@@ -31243,6 +31876,10 @@ components:
               brand_id: { type: [string, "null"], format: uuid }
               volume: { type: [integer, "null"], description: "Events, rule firings or people entering a journey in the last window_days days; null where it doesn't apply." }
               detail: { type: string, description: "A line about it, such as a list's size." }
+              reached:
+                type: string
+                enum: [did, member, fired, in, entered]
+                description: "With record: an event they did, a list they are in, a rule that fired for them, a journey they are in now or went through."
         edges:
           type: array
           items:
@@ -31266,6 +31903,7 @@ components:
               message: { type: string }
               nodes: { type: array, items: { type: string }, description: The nodes it is about. }
         window_days: { type: integer, example: 7 }
+        record_id: { type: [string, "null"], format: uuid, description: The person record named, if any. }
     JourneyTest:
       type: object
       required: [version, event_at, steps, end]
@@ -31744,11 +32382,10 @@ components:
             allOf:
               - { $ref: "#/components/schemas/ReportMetrics" }
               - type: object
-                required: [key, name, label]
+                required: [key, name]
                 properties:
                   key: { type: string, description: "The day, week start, step number, or the sequence or mailbox id." }
                   name: { type: string, description: "What to show: the sequence name, mailbox address, \"Step 2\"." }
-                  label: { type: string, deprecated: true, description: The same as name; use name. }
     HealthSignal:
       type: object
       required: [key, level, title, detail]
@@ -32273,6 +32910,24 @@ components:
         model: { type: string, description: The model that answered. }
         created_at: { type: string, format: date-time }
         finished_at: { type: [string, "null"], format: date-time }
+    FlagGroup:
+      type: object
+      required: [name, holdout, flags, free]
+      properties:
+        name: { type: string }
+        holdout: { type: integer, description: "Percent of the group's visitors kept out of every flag in it (the top slice)." }
+        free: { type: integer, description: Percent no flag or holdout holds. }
+        flags:
+          type: array
+          items:
+            type: object
+            required: [key, name, status, share, start]
+            properties:
+              key: { type: string }
+              name: { type: string }
+              status: { type: string, enum: [on, off] }
+              share: { type: integer }
+              start: { type: integer }
     ABTestCell:
       type: object
       required: [versions, arm, comparison]
@@ -36351,7 +37006,6 @@ components:
         attendee_email: { type: string }
         attendee_name: { type: string }
         sequence_id: { type: string, format: uuid }
-        project_id: { type: [string, "null"], format: uuid, deprecated: true, description: "Ignored: projects were removed." }
         mission_id: { type: string, format: uuid }
         title: { type: string }
         starts_at: { type: string, format: date-time }
@@ -36370,7 +37024,6 @@ components:
         title: { type: string }
         starts_at: { type: string, format: date-time }
         sequence_id: { type: string, format: uuid }
-        project_id: { type: [string, "null"], format: uuid, deprecated: true, description: "Ignored: projects were removed." }
         mission_id: { type: string, description: "An id, or empty to clear." }
         unattributed: { type: boolean, description: Not from outreach; pins that. }
     Deal:
@@ -36408,7 +37061,6 @@ components:
         contact_email: { type: string }
         meeting_id: { type: string, format: uuid }
         sequence_id: { type: string, format: uuid }
-        project_id: { type: [string, "null"], format: uuid, deprecated: true, description: "Ignored: projects were removed." }
         mission_id: { type: string, format: uuid }
         stage: { type: string }
         state: { type: string, enum: [open, won, lost], description: Default open. }
@@ -36427,7 +37079,6 @@ components:
         currency: { type: string }
         closed_at: { type: string, format: date-time }
         sequence_id: { type: string, format: uuid }
-        project_id: { type: [string, "null"], format: uuid, deprecated: true, description: "Ignored: projects were removed." }
         mission_id: { type: string }
         unattributed: { type: boolean }
     SpendCategory:
@@ -36466,7 +37117,6 @@ components:
         unit_name: { type: string, example: credit }
         currency: { type: string, description: Default USD. }
         occurred_at: { type: string, format: date-time }
-        project_id: { type: [string, "null"], format: uuid, deprecated: true, description: "Ignored: projects were removed." }
         sequence_id: { type: string, format: uuid }
         mission_id: { type: string, format: uuid }
         mailbox_id: { type: string, format: uuid }
@@ -36486,7 +37136,6 @@ components:
         every: { type: string, enum: [month, year], description: Default month. }
         starts_on: { type: string, format: date }
         ends_on: { type: [string, "null"], format: date }
-        project_id: { type: [string, "null"], format: uuid, deprecated: true, description: "Ignored: projects were removed." }
         sequence_id: { type: [string, "null"], format: uuid }
         note: { type: string }
     RecurringSpend:
@@ -36604,13 +37253,7 @@ components:
         invites: { type: integer, description: Pending invites for this role. }
     Scope:
       type: string
-      description: "profiles.read and profiles.manage were called projects.read and projects.manage until projects were removed. Requests may still send the old names (ScopeInput); responses always use the new names."
       enum: [workspace.read, workspace.manage, context.manage, members.read, members.manage, members.remove, roles.manage, tokens.manage, audit.read, mailboxes.read, mailboxes.manage, leads.read, leads.manage, suppressions.manage, sequences.read, sequences.manage, inbox.read, inbox.manage, integrations.read, integrations.manage, outcomes.read, outcomes.manage, profiles.read, profiles.manage, infrastructure.read, infrastructure.manage, infrastructure.approve, analytics.read, analytics.manage, missions.read, missions.run, missions.approve, seo.read, seo.manage, social.read, social.manage, social.post, partners.read, partners.manage, partners.conversions, my_ai_accounts.read, my_ai_accounts.manage, ai_accounts.read, ai_accounts.manage, ai_spend.read, webhooks.read, webhooks.manage, emails.read, emails.send, emails.manage, customers.read, customers.manage, catalog.manage]
-    ScopeInput:
-      description: A scope in a request. projects.read and projects.manage, the old names of profiles.read and profiles.manage, are still accepted and mean the new ones.
-      anyOf:
-        - { $ref: "#/components/schemas/Scope" }
-        - { type: string, enum: [projects.read, projects.manage], deprecated: true }
     Workspace:
       type: object
       required: [id, name, slug, test]
@@ -36689,7 +37332,7 @@ components:
       type: object
       properties:
         name: { type: string, description: "A new name. It shows in the audit log next to everything the token does." }
-        scopes: { type: array, minItems: 1, items: { $ref: "#/components/schemas/ScopeInput" }, description: "Replaces the token's scopes. Takes effect on its next request." }
+        scopes: { type: array, minItems: 1, items: { $ref: "#/components/schemas/Scope" }, description: "Replaces the token's scopes. Takes effect on its next request." }
         daily_send_budget: { type: [integer, "null"], minimum: 1, maximum: 1000000 }
         max_priority: { type: [string, "null"], enum: [low, normal, high, null] }
         may_take_mailboxes: { type: boolean }
@@ -37142,7 +37785,6 @@ components:
       properties:
         name: { type: string, minLength: 1, maxLength: 100 }
         description: { type: string, maxLength: 2000 }
-        project_id: { type: [string, "null"], format: uuid, deprecated: true, description: "Ignored: projects were removed." }
         profile_id: { type: [string, "null"], format: uuid, description: "The ideal customer profile people are scored against, under the list's own filters. Null scores against the filters alone." }
         search_integration_id: { type: [string, "null"], format: uuid, description: The connected provider that searches. Null makes a manual list. }
         filters: { $ref: "#/components/schemas/PeopleFilter" }
@@ -37488,10 +38130,40 @@ components:
         email: { type: string }
         confidence: { type: integer, minimum: 0, maximum: 100 }
         code: { $ref: "#/components/schemas/EmailFindCode" }
-        evidence: { type: string, description: "Where the confidence came from: history, pattern or default." }
+        evidence: { type: string, description: "Where the confidence came from: history, pattern, default, network (the data network) or provider:<connector>." }
         cost: { $ref: "#/components/schemas/EmailFindCost" }
         stop_code: { type: string, description: "An error-catalog code when code is stop." }
         retry_after: { type: integer, description: "Nanoseconds to wait before re-calling, set when code is pending or retry." }
+    DataNetwork:
+      type: object
+      required: [available, status, joined_at, left_at, withdraw_by, allowance]
+      properties:
+        available: { type: boolean, description: "Whether the data network is on for this workspace. When false, nothing is shared or looked up." }
+        status: { type: string, enum: [not_joined, joined, left] }
+        joined_at: { type: [string, "null"], format: date-time }
+        left_at: { type: [string, "null"], format: date-time }
+        withdraw_by: { type: [string, "null"], format: date-time, description: "After leaving: when what the workspace shared will be gone at the latest. Null once withdrawn." }
+        allowance:
+          description: Lookups this month; null when the data network isn't on for this workspace.
+          oneOf:
+            - type: "null"
+            - type: object
+              required: [unlimited, limit, used, resets_at]
+              properties:
+                unlimited: { type: boolean }
+                limit: { type: [integer, "null"], description: "Lookups a month; null when unlimited." }
+                used: { type: integer }
+                resets_at: { type: [string, "null"], format: date-time }
+    DataNetworkPreview:
+      type: object
+      required: [addresses, delivered, bounced, domains, settle_days, withdraw_days]
+      properties:
+        addresses: { type: integer, description: "Addresses that would be shared." }
+        delivered: { type: integer }
+        bounced: { type: integer }
+        domains: { type: integer }
+        settle_days: { type: integer, description: "A send is shared once it is this many days old, so a bounce has had time to come back." }
+        withdraw_days: { type: integer, description: "After leaving, what was shared is gone within this many days." }
     EmailFindResult:
       type: object
       required: [items]
@@ -37938,7 +38610,6 @@ components:
       properties:
         text: { type: string, minLength: 1, maxLength: 500, description: "One lasting fact, preference or decision." }
         kind: { type: string, enum: [preference, decision, fact, feedback], description: Defaults to fact. }
-        project_id: { type: [string, "null"], format: uuid, deprecated: true, description: "Ignored: projects were removed." }
         brand_id: { type: [string, "null"], description: "The brand it is true for: a brand's id or handle. Null: true for the whole company." }
         pinned: { type: boolean, description: Pin what every conversation should know. Defaults to false. }
     KnowledgeCollection:
@@ -37999,6 +38670,39 @@ components:
         status: { type: string, enum: [received, processed, ignored, rejected, failed] }
         reason: { type: [string, "null"] }
         size_bytes: { type: integer }
+    InboundForwarder:
+      type: object
+      required: [email, user_id, confirmation_code, confirmation_url, confirmation_at, last_email_at, created_at]
+      properties:
+        email: { type: string }
+        user_id: { type: string, format: uuid }
+        confirmation_code: { type: [string, "null"], description: "Gmail's forwarding confirmation code, once its email arrived." }
+        confirmation_url: { type: [string, "null"], description: Open it to confirm forwarding in Gmail. Outflare never opens it itself. }
+        confirmation_at: { type: [string, "null"], format: date-time }
+        last_email_at: { type: [string, "null"], format: date-time }
+        created_at: { type: string, format: date-time }
+    AIReceipt:
+      type: object
+      required: [id, vendor, provider, forwarded_by, charged_on, amount_minor, currency, usd_cents, plan, seats, period_start, period_end, account_email, account_id, account_name, matched_by, status, created_at]
+      properties:
+        id: { type: string, format: uuid }
+        vendor: { type: string, enum: [anthropic, openai, cursor, github] }
+        provider: { type: [string, "null"], description: The AI tool it is for, when the receipt says. }
+        forwarded_by: { type: [string, "null"], description: The member who forwarded it. }
+        charged_on: { type: [string, "null"], format: date }
+        amount_minor: { type: [integer, "null"], format: int64, description: What was charged, in the currency's minor unit (cents). }
+        currency: { type: [string, "null"], example: USD }
+        usd_cents: { type: [integer, "null"], format: int64, description: The charge in US cents; null until another currency is converted. }
+        plan: { type: [string, "null"], example: Max 20x }
+        seats: { type: [integer, "null"] }
+        period_start: { type: [string, "null"], format: date }
+        period_end: { type: [string, "null"], format: date }
+        account_email: { type: [string, "null"] }
+        account_id: { type: [string, "null"], format: uuid }
+        account_name: { type: [string, "null"] }
+        matched_by: { type: [string, "null"], enum: [account_email, known_id, forwarder, expected_renewal, person, null] }
+        status: { type: string, enum: [matched, needs_review, ignored] }
+        created_at: { type: string, format: date-time }
     KnowledgeItem:
       type: object
       required: [id, kind, title, excerpt, visibility, status, brand_id, collection_id, version, owner_id, owner_name, review_by, created_by, updated_by, created_at, updated_at, deleted_at, uses_30d]
@@ -39185,7 +39889,6 @@ components:
     BrandMembers:
       type: object
       properties:
-        project_ids: { type: array, items: { type: string, format: uuid }, deprecated: true, description: "Ignored: projects were removed." }
         domains: { type: array, items: { type: string }, example: [repocket-mail.com] }
         mailbox_ids: { type: array, items: { type: string, format: uuid } }
         lead_list_ids: { type: array, items: { type: string, format: uuid } }
@@ -39348,7 +40051,6 @@ components:
       type: object
       properties:
         name: { type: string, maxLength: 200 }
-        project_id: { type: [string, "null"], format: uuid, deprecated: true, description: "Ignored: projects were removed." }
         pool_id: { type: [string, "null"], format: uuid, description: "Restrict allocation to mailboxes in this pool. Null allows any mailbox." }
         timezone: { type: string, example: Australia/Sydney, description: IANA time zone for the sending window. }
         send_days:
@@ -39934,7 +40636,6 @@ components:
       properties:
         name: { type: string, maxLength: 200 }
         brand_id: { type: [string, "null"], format: uuid, description: "The brand the plan is for: its new domains and mailboxes join it. Null: shared by every brand." }
-        project_id: { type: [string, "null"], format: uuid, deprecated: true, description: "Ignored: projects were removed." }
         supplier:
           type: string
           description: "manual (you buy; the plan waits for you), or a supplier connector such as cheapinboxes. See `suppliers` on GET /infrastructure."

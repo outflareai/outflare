@@ -17,6 +17,7 @@ import { track } from "@/lib/analytics";
 import { companyPaid, cycleWord, daysUntil, monthlyCents, owners, shortDay, usd } from "@/lib/aiAccounts";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { PeopleView, SpendView, TimelineView, UsageView } from "./AIAccountsViews";
+import { ReceiptsView } from "./AIAccountsReceipts";
 
 type Props = {
   ws: string;
@@ -25,6 +26,7 @@ type Props = {
   seeAll: boolean;
   manageAll: boolean;
   seeSpend: boolean;
+  canSetUp: boolean;
   go: (t: Tab) => void;
 };
 
@@ -61,9 +63,9 @@ const monthly = (list: AIAccount[]) => list.filter(companyPaid).reduce((n, a) =>
 
 // The page's views. Spend and people are for those who see everyone's
 // accounts (spend also needs ai_spend.read).
-type View = "accounts" | "spend" | "people" | "timeline" | "usage";
+type View = "accounts" | "spend" | "people" | "timeline" | "usage" | "receipts";
 
-export function AIAccounts({ ws, me, canAdd, seeAll, manageAll, seeSpend, go }: Props) {
+export function AIAccounts({ ws, me, canAdd, seeAll, manageAll, seeSpend, canSetUp, go }: Props) {
   const [accounts, setAccounts] = useState<AIAccount[] | null>(null);
   const [error, setError] = useState("");
   const [provider, setProvider] = useState<AIProvider | "">("");
@@ -76,6 +78,7 @@ export function AIAccounts({ ws, me, canAdd, seeAll, manageAll, seeSpend, go }: 
     ...(seeAll ? [{ id: "people" as View, label: "People" }] : []),
     { id: "timeline", label: "Timeline" },
     { id: "usage", label: "Usage" },
+    { id: "receipts", label: "Receipts" },
   ];
 
   const load = useCallback(async () => {
@@ -117,7 +120,7 @@ export function AIAccounts({ ws, me, canAdd, seeAll, manageAll, seeSpend, go }: 
           <button className="underline underline-offset-2" onClick={() => setEditing(left[0])}>Review {left[0].name}</button>
         </div>
       )}
-      {accounts !== null && accounts.length > 0 && (
+      {accounts !== null && (
         <Tabs value={view} onValueChange={(v) => { setView(v as View); track("ui.ai_accounts_view_opened", { view: v }); }}>
           <TabsList>
             {views.map((v) => <TabsTrigger key={v.id} value={v.id}>{v.label}</TabsTrigger>)}
@@ -126,14 +129,16 @@ export function AIAccounts({ ws, me, canAdd, seeAll, manageAll, seeSpend, go }: 
       )}
       {accounts === null ? (
         <Loading />
-      ) : accounts.length > 0 && view === "spend" ? (
+      ) : view === "spend" ? (
         <SpendView accounts={accounts} open={setEditing} />
-      ) : accounts.length > 0 && view === "people" ? (
+      ) : view === "people" ? (
         <PeopleView accounts={accounts} open={setEditing} />
-      ) : accounts.length > 0 && view === "timeline" ? (
+      ) : view === "timeline" ? (
         <TimelineView accounts={accounts} open={setEditing} />
-      ) : accounts.length > 0 && view === "usage" ? (
+      ) : view === "usage" ? (
         <UsageView accounts={accounts} />
+      ) : view === "receipts" ? (
+        <ReceiptsView ws={ws} accounts={accounts} canSetUp={canSetUp} seeSpend={seeSpend} manageAll={manageAll} open={setEditing} reload={load} />
       ) : accounts.length === 0 ? (
         <Empty title={everyone ? "No AI accounts yet" : "You have no AI accounts yet"} action={canAdd && <Button onClick={() => setEditing("new")}>Add account</Button>}>
           Add the Claude, ChatGPT, Cursor or Copilot plans and API accounts you pay for, with what they cost and when they renew.

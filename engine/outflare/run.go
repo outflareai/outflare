@@ -31,6 +31,7 @@ import (
 
 	"github.com/outflareai/outflare/engine/internal/adconv"
 	"github.com/outflareai/outflare/engine/internal/adsync"
+	"github.com/outflareai/outflare/engine/internal/aiaccounts"
 	"github.com/outflareai/outflare/engine/internal/aivis"
 	"github.com/outflareai/outflare/engine/internal/allocation"
 	"github.com/outflareai/outflare/engine/internal/analyticsync"
@@ -45,6 +46,7 @@ import (
 	"github.com/outflareai/outflare/engine/internal/cookies"
 	"github.com/outflareai/outflare/engine/internal/crawl"
 	"github.com/outflareai/outflare/engine/internal/customers"
+	"github.com/outflareai/outflare/engine/internal/datanetwork"
 	"github.com/outflareai/outflare/engine/internal/db"
 	"github.com/outflareai/outflare/engine/internal/deploys"
 	"github.com/outflareai/outflare/engine/internal/digests"
@@ -53,6 +55,7 @@ import (
 	"github.com/outflareai/outflare/engine/internal/eventstore"
 	"github.com/outflareai/outflare/engine/internal/experiments"
 	"github.com/outflareai/outflare/engine/internal/fixauto"
+	"github.com/outflareai/outflare/engine/internal/fxrates"
 	"github.com/outflareai/outflare/engine/internal/health"
 	"github.com/outflareai/outflare/engine/internal/imports"
 	"github.com/outflareai/outflare/engine/internal/inbound"
@@ -252,6 +255,10 @@ func Run(ctx context.Context, log *slog.Logger, cmd string, exts ...Extension) e
 	// own leads and their outcomes, and runs the find/verify waterfall.
 	emailFinder := &emailfind.Service{Pool: pool, Verify: verifier, Resolver: net.DefaultResolver, Log: log}
 	emailFinder.Register(queue)
+	// The data network, when an extension registers one (Host.SetDataNetwork).
+	dataNet := &datanetwork.Service{Pool: pool, Log: log}
+	dataNet.Register(queue)
+	emailFinder.Network = dataNet
 	vendors := &vendorsync.Service{Pool: pool, Box: box, Store: integrations, Mail: mail, PublicURL: cfg.PublicURL, Log: log}
 	// Infrastructure plans buy domains and mailboxes on the customer's own
 	// Cheap Inboxes account.
@@ -359,7 +366,7 @@ func Run(ctx context.Context, log *slog.Logger, cmd string, exts ...Extension) e
 	stages := pipeline.NewRunner(pool, log)
 	inboundMail := &inboundemail.Service{Pool: pool, Log: log}
 	queue.Handle(inboundemail.JobProcess, inboundMail.Process)
-	host := &Host{inboundEmail: inboundMail, Pool: pool, Log: log, PublicURL: cfg.PublicURL, signedInDomain: cfg.SignedInCookieDomain, queue: queue, box: box, telemetry: tel, mailer: mailer, store: integrations, emailFinder: emailFinder, stages: stages}
+	host := &Host{inboundEmail: inboundMail, Pool: pool, Log: log, PublicURL: cfg.PublicURL, signedInDomain: cfg.SignedInCookieDomain, queue: queue, box: box, telemetry: tel, mailer: mailer, store: integrations, emailFinder: emailFinder, dataNetwork: dataNet, stages: stages}
 	for _, ext := range exts {
 		if err := ext.Setup(ctx, host); err != nil {
 			return fmt.Errorf("extension %s: %w", ext.Name(), err)
@@ -381,7 +388,7 @@ func Run(ctx context.Context, log *slog.Logger, cmd string, exts ...Extension) e
 	}
 	apiServer := api.NewServer(pool, log, api.Options{
 		WebDir: cfg.WebDir, PublicURL: cfg.PublicURL, Mailboxes: mail, Sending: send, Inbox: syncer, OAuth: tokens, Allocation: alloc,
-		Box: box, Integrations: integrations, Verify: verifier, EmailFinder: emailFinder, InboundEmail: inboundMail, Imports: importer, Platforms: plat, Lists: lister, Outcomes: results, AnalyticsSync: analyticsSync, SEOSync: seoSync, AdSync: adSync, Crawl: crawler, Vendors: vendors, Inbound: liveUpdates, Telemetry: tel, Mailer: mailer, Webhooks: hooks, Emails: lifecycle, Research: researcher, RateLimit: cfg.RateLimit, Passkeys: cfg.PasskeysOn(), ClientIPHeader: cfg.ClientIPHeader,
+		Box: box, Integrations: integrations, Verify: verifier, EmailFinder: emailFinder, DataNetwork: dataNet, InboundEmail: inboundMail, Imports: importer, Platforms: plat, Lists: lister, Outcomes: results, AnalyticsSync: analyticsSync, SEOSync: seoSync, AdSync: adSync, Crawl: crawler, Vendors: vendors, Inbound: liveUpdates, Telemetry: tel, Mailer: mailer, Webhooks: hooks, Emails: lifecycle, Research: researcher, RateLimit: cfg.RateLimit, Passkeys: cfg.PasskeysOn(), ClientIPHeader: cfg.ClientIPHeader,
 		TrackingTarget: cfg.TrackingTarget, PartnersDomain: cfg.PartnersDomain, TrackingCerts: host.trackingCerts, EdgeSecret: cfg.EdgeSecret,
 		PostHogKey: cfg.PostHogKey, PostHogHost: cfg.PostHogHost, MCP: mcpUpstream, PrivacyURL: cfg.PrivacyURL, TermsURL: cfg.TermsURL, CommunityLinks: cfg.CommunityLinks, CommunityXURL: cfg.CommunityXURL, CommunityBuilderURL: cfg.CommunityBuilderURL, SignedInCookieDomain: cfg.SignedInCookieDomain,
 		SiteInbox: true, QueryConnections: queryConnections(cfg.QueryConnections),
@@ -532,6 +539,12 @@ func Run(ctx context.Context, log *slog.Logger, cmd string, exts ...Extension) e
 			defer wg.Done()
 			apiServer.RunMissions(ctx, 30*time.Second)
 		}()
+		// Playbooks that start by themselves, on a schedule or on events.
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			apiServer.RunAutomations(ctx, time.Minute)
+		}()
 		// Browser events the collector queued, here or on an ingest server.
 		wg.Add(1)
 		go func() {
@@ -573,11 +586,29 @@ func Run(ctx context.Context, log *slog.Logger, cmd string, exts ...Extension) e
 			defer wg.Done()
 			apiServer.RunSemanticSearch(ctx, 5*time.Minute)
 		}()
+		// The data network: sharing joined workspaces' settled sends, and
+		// withdrawing what workspaces that left shared.
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			dataNet.Run(ctx, time.Hour)
+		}()
 		// Raw inbound messages are deleted after 30 days.
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
 			inboundMail.RunPurge(ctx, time.Hour)
+		}()
+		// Exchange rates for receipts charged in other currencies, fetched
+		// only where inbound email is on.
+		rates := &fxrates.Service{Pool: pool, Log: log}
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			rates.Run(ctx, 6*time.Hour, inboundMail.Enabled, func(ctx context.Context) error {
+				_, err := aiaccounts.ConvertPending(ctx, pool)
+				return err
+			})
 		}()
 		// The AI usage log keeps 13 months of calls.
 		wg.Add(1)

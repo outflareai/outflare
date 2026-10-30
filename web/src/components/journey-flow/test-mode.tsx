@@ -4,15 +4,14 @@
 // or written. A branch can be sent the other way to see that path too.
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { FlaskConical, Search, X } from "lucide-react";
-import type { EmailTemplate, JourneyTest, Schemas } from "@outflare/sdk";
+import { FlaskConical, X } from "lucide-react";
+import type { EmailTemplate, JourneyTest } from "@outflare/sdk";
 import { api, errorMessage } from "../../api";
 import { track } from "@/lib/analytics";
 import { cn } from "@/lib/utils";
 import { Button, ErrorText } from "../../ui";
 import { ago } from "../../format";
-import { Command, CommandEmpty, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { PersonPicker, type Person } from "@/components/person-picker";
 import { errorLink, stepLabel, waitText, type Step, type StepKind } from "./model";
 
 export type TestMark = { n: number; text: string; tone?: "red" | "amber" };
@@ -20,7 +19,6 @@ export type TestMark = { n: number; text: string; tone?: "red" | "amber" };
 // links taken (from step id, then the output field, or "error").
 export type TestMarks = { steps: Map<string, TestMark>; links: Set<string> };
 
-type Person = { id: string; name: string; email?: string };
 type Result = JourneyTest;
 type TestStep = Result["steps"][number];
 
@@ -69,51 +67,6 @@ const endText = (res: Result) =>
   res.end_reason === "too many steps" ? "Stops: it goes round too many steps." :
   res.end_reason === "unknown_step" ? "Stops at a step that doesn't exist." :
   "Fails here, and the run would stop.";
-
-function usePeople(ws: string, q: string) {
-  const [list, setList] = useState<Person[] | null>(null);
-  useEffect(() => {
-    let live = true;
-    const t = setTimeout(async () => {
-      const { data } = await api.GET("/v1/workspaces/{ws}/records", { params: { path: { ws }, query: { type: "person", limit: 8, ...(q.trim() ? { q: q.trim() } : {}) } } });
-      if (live) setList((data?.data ?? []).map((r: Schemas["Record"]) => ({ id: r.id, name: r.name, email: r.identities.find((i) => i.namespace === "email")?.value })));
-    }, q ? 250 : 0);
-    return () => { live = false; clearTimeout(t); };
-  }, [ws, q]);
-  return list;
-}
-
-function PersonPicker({ ws, person, onPick }: { ws: string; person: Person | null; onPick: (p: Person) => void }) {
-  const [open, setOpen] = useState(!person);
-  const [q, setQ] = useState("");
-  const people = usePeople(ws, open ? q : "");
-  return (
-    <Popover open={open} onOpenChange={setOpen}>
-      <PopoverTrigger asChild>
-        <button type="button" className="flex h-8 min-w-0 max-w-full items-center gap-1.5 rounded-md border bg-background px-2.5 text-[13px] shadow-xs hover:border-ring/60">
-          <Search className="size-3.5 shrink-0 text-muted-foreground" />
-          <span className={cn("truncate", !person && "text-muted-foreground")}>{person ? person.name || person.email : "Pick a person"}</span>
-        </button>
-      </PopoverTrigger>
-      <PopoverContent align="start" className="w-80 p-0">
-        <Command shouldFilter={false}>
-          <CommandInput placeholder="Search people by name or email" value={q} onValueChange={setQ} />
-          <CommandList>
-            <CommandEmpty>{people ? "No one matches." : "Searching…"}</CommandEmpty>
-            {(people ?? []).map((p) => (
-              <CommandItem key={p.id} value={p.id} onSelect={() => { onPick(p); setOpen(false); }}>
-                <span className="min-w-0">
-                  <span className="block truncate text-[13px]">{p.name || p.email || "Unnamed"}</span>
-                  {p.email && p.name && <span className="block truncate text-[12px] text-muted-foreground">{p.email}</span>}
-                </span>
-              </CommandItem>
-            ))}
-          </CommandList>
-        </Command>
-      </PopoverContent>
-    </Popover>
-  );
-}
 
 // TestPanel sits above the flow while testing. version says which version
 // the engine tests, and note says so to people; saved changes when the

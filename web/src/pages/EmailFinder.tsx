@@ -43,6 +43,7 @@ const evidenceLabel: Record<string, string> = {
   history: "from a known address at this domain",
   pattern: "from this domain's learned email shape",
   default: "a best guess (little is known about this domain yet)",
+  network: "confirmed by the data network",
 };
 
 export function EmailFinder({ ws, canManage }: { ws: string; canManage: boolean }) {

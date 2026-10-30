@@ -33,20 +33,10 @@ for d, _ in domains:
         status = "paused" if (d == "northpeak.example" and s == "casey") else "active"
         mailboxes.append((mid, f"{s}@{d}", d, status))
         name = {"alex": "Alex Moreno", "casey": "Casey Okoro", "jordan": "Jordan Pike", "riley": "Riley Haas", "sam": "Sam Ferreira", "taylor": "Taylor Brandt"}[s]
-        ramp = 10 if (d == "trynorthpeak.example" and i < 2) else 20
         out.append(f"""INSERT INTO mailboxes (id, workspace_id, email, display_name, provider, auth_method, smtp_host, smtp_port, smtp_username, imap_host, imap_port, imap_username, credentials,
- status, daily_limit, smtp_ok, imap_ok, last_verified_at, last_synced_at, warmup_enabled, warmup_started_at, warmup_daily_target, warmup_checked_at, created_at)
+ status, daily_limit, smtp_ok, imap_ok, last_verified_at, last_synced_at, warmup_enabled, warmup_started_at, created_at)
 VALUES ('{mid}', '{ws}', {q(s + '@' + d)}, {q(name)}, 'google', 'password', 'smtp.gmail.com', 587, {q(s + '@' + d)}, 'imap.gmail.com', 993, {q(s + '@' + d)}, '\\x00',
- '{status}', {limits[d]}, true, true, now() - interval '1 hour', now() - interval '2 minutes', true, now() - interval '{30 + i} days', {ramp}, now(), now() - interval '40 days');""")
-
-# Warm-up: about 95% inbox placement over the last week.
-active = [m for m in mailboxes if m[3] == "active"]
-for day in range(7):
-    for m in active:
-        for _ in range(3):
-            to = rnd.choice([x for x in active if x[0] != m[0]])
-            landed = "inbox" if rnd.random() < 0.95 else "spam"
-            out.append(f"INSERT INTO warmup_messages (workspace_id, from_mailbox_id, to_mailbox_id, message_id, subject, status, landed, landed_at, created_at) VALUES ('{ws}', '{m[0]}', '{to[0]}', '<w{uuid.uuid4().hex}@demo>', 'Notes from today', 'sent', '{landed}', now() - interval '{day} days 2 hours', now() - interval '{day} days 3 hours');")
+ '{status}', {limits[d]}, true, true, now() - interval '1 hour', now() - interval '2 minutes', true, now() - interval '{30 + i} days', now() - interval '40 days');""")
 
 firsts = ["Zoe", "Theo", "Ivy", "Ava", "Owen", "Liam", "Mia", "Noah", "Ella", "Leo", "Nina", "Omar", "Priya", "Ravi", "Sara", "Tom", "Uma", "Vik", "Wren", "Yara"]
 lasts = ["Okafor", "Haddad", "Muller", "Patel", "Brooks", "Larsen", "Tanaka", "Novak", "Reyes", "Silva", "Kowalski", "Mensah", "Duarte", "Ahmed", "Lindgren"]

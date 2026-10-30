@@ -146,21 +146,19 @@ func validMeetingStatus(s string) bool {
 
 // NewMeeting is a meeting logged by a person or an agent.
 type NewMeeting struct {
-	LeadID        *string `json:"lead_id"`
-	AttendeeEmail string  `json:"attendee_email"`
-	AttendeeName  string  `json:"attendee_name"`
-	SequenceID    *string `json:"sequence_id"`
-	// Ignored: projects were removed. Accepted so older clients still work.
-	ProjectID  *string    `json:"project_id"`
-	MissionID  *string    `json:"mission_id"`
-	Title      string     `json:"title"`
-	StartsAt   time.Time  `json:"starts_at"`
-	EndsAt     *time.Time `json:"ends_at"`
-	BookedAt   *time.Time `json:"booked_at"`
-	Status     string     `json:"status"`
-	Qualified  *bool      `json:"qualified"`
-	Notes      string     `json:"notes"`
-	ExternalID *string    `json:"external_id"`
+	LeadID        *string    `json:"lead_id"`
+	AttendeeEmail string     `json:"attendee_email"`
+	AttendeeName  string     `json:"attendee_name"`
+	SequenceID    *string    `json:"sequence_id"`
+	MissionID     *string    `json:"mission_id"`
+	Title         string     `json:"title"`
+	StartsAt      time.Time  `json:"starts_at"`
+	EndsAt        *time.Time `json:"ends_at"`
+	BookedAt      *time.Time `json:"booked_at"`
+	Status        string     `json:"status"`
+	Qualified     *bool      `json:"qualified"`
+	Notes         string     `json:"notes"`
+	ExternalID    *string    `json:"external_id"`
 }
 
 // CreateMeeting logs a meeting. Give a lead, or an attendee email that is
@@ -254,9 +252,7 @@ type MeetingPatch struct {
 	Title      *string    `json:"title"`
 	StartsAt   *time.Time `json:"starts_at"`
 	SequenceID *string    `json:"sequence_id"`
-	// Ignored: projects were removed. Accepted so older clients still work.
-	ProjectID *string `json:"project_id"`
-	MissionID *string `json:"mission_id"`
+	MissionID  *string    `json:"mission_id"`
 	// Unattributed true clears the sequence and pins that.
 	Unattributed bool `json:"unattributed"`
 }

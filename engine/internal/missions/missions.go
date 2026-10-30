@@ -158,6 +158,13 @@ func missionReport(ctx context.Context, q outcomes.Querier, ws, missionID string
 	})
 }
 
+// Spent is what the mission has spent, in US cents, from the outcomes
+// ledger.
+func Spent(ctx context.Context, q outcomes.Querier, ws, missionID string) (int64, error) {
+	rep, err := missionReport(ctx, q, ws, missionID)
+	return rep.Totals.Spend.TotalCents, err
+}
+
 // ErrSpendLimit is returned by CheckSpend when a charge would take the
 // mission past its spend limit.
 var ErrSpendLimit = errors.New("this would take the mission past its spend limit")

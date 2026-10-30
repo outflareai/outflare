@@ -10,6 +10,7 @@ import (
 	"github.com/outflareai/outflare/engine/internal/api"
 	"github.com/outflareai/outflare/engine/internal/classify"
 	"github.com/outflareai/outflare/engine/internal/connectors"
+	"github.com/outflareai/outflare/engine/internal/datanetwork"
 	"github.com/outflareai/outflare/engine/internal/emailfind"
 	"github.com/outflareai/outflare/engine/internal/inboundemail"
 	"github.com/outflareai/outflare/engine/internal/jobs"
@@ -59,6 +60,7 @@ type Host struct {
 	store           *connectors.Store
 	server          *api.Server
 	emailFinder     *emailfind.Service
+	dataNetwork     *datanetwork.Service
 	stages          *pipeline.Runner
 	inboundEmail    *inboundemail.Service
 }

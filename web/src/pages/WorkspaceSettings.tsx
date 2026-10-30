@@ -6,6 +6,7 @@ import { cn } from "@/lib/utils";
 import { CopyButton } from "./Tokens";
 import { AIModelCard } from "./AIModel";
 import { SemanticSearchCard } from "./SemanticSearch";
+import { DataNetworkCard } from "./DataNetwork";
 import { SiteKeysCard } from "./SiteKeys";
 
 // What someone types becomes a slug as they type: "Acme Co" → "acme-co".
@@ -107,6 +108,8 @@ export function WorkspaceSettings({ ws, canManage, onSaved }: { ws: Workspace; c
       <AIModelCard ws={ws.id} canManage={canManage} />
 
       <SemanticSearchCard ws={ws.id} canManage={canManage} />
+
+      <DataNetworkCard ws={ws.id} isOwner={ws.role === "owner"} canManage={canManage} />
 
       <SiteKeysCard ws={ws.id} canManage={canManage} />
 

@@ -49,10 +49,93 @@ const splitText = (vs: FlagVariant[]) => {
   return vs.map((v) => `${v.key} ${Math.round((v.weight / total) * 100)}%`).join(" · ");
 };
 
+type Group = { name: string; holdout: number; free: number; flags: { key: string; name: string; status: string; share: number; start: number }[] };
+
+// GroupsSheet lists the exclusion groups: which flags share each one's
+// visitors, its holdout, and the holdout against everyone else on a goal.
+function GroupsSheet({ ws, canManage, onClose }: { ws: string; canManage: boolean; onClose: () => void }) {
+  const [groups, setGroups] = useState<Group[] | null>(null);
+  const [error, setError] = useState("");
+  const load = useCallback(() => {
+    api.GET("/v1/workspaces/{ws}/flag-groups", { params: { path: { ws } } }).then(({ data, error }) => {
+      setError(error ? errorMessage(error) : "");
+      setGroups((data?.data as Group[] | undefined) ?? []);
+    });
+  }, [ws]);
+  useEffect(() => load(), [load]);
+  return (
+    <Sheet open onOpenChange={(o) => !o && onClose()}>
+      <SheetContent className="w-full overflow-y-auto sm:max-w-xl">
+        <SheetHeader>
+          <SheetTitle>Exclusion groups</SheetTitle>
+          <SheetDescription>Flags in one group split its visitors, so no visitor is in two of their A/B tests. A holdout keeps some visitors out of every flag in the group, to measure what its changes did together.</SheetDescription>
+        </SheetHeader>
+        <div className="space-y-4 px-4 pb-6 text-[13px]">
+          <ErrorText>{error}</ErrorText>
+          {groups === null ? <Loading /> : groups.map((g) => <GroupCard key={g.name} ws={ws} group={g} canManage={canManage} onChanged={load} />)}
+        </div>
+      </SheetContent>
+    </Sheet>
+  );
+}
+
+function GroupCard({ ws, group, canManage, onChanged }: { ws: string; group: Group; canManage: boolean; onChanged: () => void }) {
+  const [holdout, setHoldout] = useState(group.holdout);
+  const [event, setEvent] = useState("");
+  const [report, setReport] = useState<{ lift: number; chance: number; holdout: number; rest: number } | null>(null);
+  const [error, setError] = useState("");
+  const save = async () => {
+    const { error } = await api.PUT("/v1/workspaces/{ws}/flag-groups/{group}", { params: { path: { ws, group: group.name } }, body: { holdout } });
+    if (error) return setError(errorMessage(error));
+    setError("");
+    toast(holdout ? `${holdout}% of ${group.name}'s visitors are now held out.` : `${group.name} has no holdout.`);
+    onChanged();
+  };
+  const compare = async (e: FormEvent) => {
+    e.preventDefault();
+    const { data, error } = await api.GET("/v1/workspaces/{ws}/flag-groups/{group}/holdout", { params: { path: { ws, group: group.name }, query: { event: event.trim() } } });
+    if (error || !data) return setError(error ? errorMessage(error) : "");
+    setError("");
+    setReport({ lift: data.comparison?.lift ?? 0, chance: data.comparison?.chance_to_beat ?? 0.5, holdout: data.arms[0]?.visitors ?? 0, rest: data.arms[1]?.visitors ?? 0 });
+  };
+  return (
+    <Card title={group.name}>
+      <div className="space-y-2 text-[12px]">
+        <p>
+          {group.flags.map((f) => `${f.name} ${f.share}%`).join(", ") || "No flags"}
+          {group.holdout > 0 && `, holdout ${group.holdout}%`}, free {group.free}%.
+        </p>
+        {canManage && (
+          <div className="flex items-center gap-2">
+            <span>Holdout</span>
+            <input aria-label="Holdout" type="number" min={0} max={50} className={`${field} w-20`} value={holdout} onChange={(e) => setHoldout(Number(e.target.value))} />
+            <span>%</span>
+            <Button variant="ghost" disabled={holdout === group.holdout} onClick={save}>Save</Button>
+          </div>
+        )}
+        {group.holdout > 0 && (
+          <form className="flex items-center gap-2" onSubmit={compare}>
+            <input aria-label="Goal event" className={`${field} w-48 font-mono`} required placeholder="signup_started" value={event} onChange={(e) => setEvent(e.target.value)} />
+            <Button variant="ghost">Compare with the holdout</Button>
+          </form>
+        )}
+        <ErrorText>{error}</ErrorText>
+        {report && (
+          <p>
+            Over the last 28 days, everyone else did {report.lift >= 0 ? "+" : ""}
+            {Math.round(report.lift * 100)}% against the holdout ({Math.round(report.chance * 100)}% likely better), from {report.rest.toLocaleString()} and {report.holdout.toLocaleString()} visitors.
+          </p>
+        )}
+      </div>
+    </Card>
+  );
+}
+
 export function Flags({ ws, canManage, go }: Props) {
   const { query } = useBrand(ws);
   const [flags, setFlags] = useState<Flag[] | null>(null);
   const [editing, setEditing] = useState<Flag | "new" | null>(null);
+  const [groupsOpen, setGroupsOpen] = useState(false);
   const [error, setError] = useState("");
 
   const load = useCallback(async () => {
@@ -87,8 +170,14 @@ export function Flags({ ws, canManage, go }: Props) {
       <PageHeader
         title="Feature flags"
         description="Turn something on for some visitors, or split them between versions to see which works better. Your website and your servers read them, and each visitor keeps the version they first got."
-        action={canManage && <Button onClick={() => setEditing("new")}>New flag</Button>}
+        action={
+          <div className="flex gap-2">
+            {flags?.some((f) => f.exclusion_group) && <Button variant="ghost" onClick={() => setGroupsOpen(true)}>Exclusion groups</Button>}
+            {canManage && <Button onClick={() => setEditing("new")}>New flag</Button>}
+          </div>
+        }
       />
+      {groupsOpen && <GroupsSheet ws={ws} canManage={canManage} onClose={() => setGroupsOpen(false)} />}
       <ErrorText>{error}</ErrorText>
       {flags === null ? (
         <Loading />

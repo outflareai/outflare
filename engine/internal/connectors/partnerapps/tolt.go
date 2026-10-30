@@ -20,6 +20,7 @@ import (
 	"unicode/utf8"
 
 	c "github.com/outflareai/outflare/engine/internal/connectors"
+	"github.com/outflareai/outflare/engine/internal/partners"
 )
 
 // toltAPI is Tolt's v2 API. v1 (api.tolt.com/v1) has no customers list
@@ -357,6 +358,7 @@ var toltPartnerStatuses = []string{"active", "pending", "rejected", "suspended",
 const toltOptionalStatus = 4
 
 var toltPaths = map[string]string{
+	c.PartnerKindGroups: "/groups", c.PartnerKindFlows: "/flows",
 	c.PartnerKindPartners: "/partners", c.PartnerKindLinks: "/links", c.PartnerKindPromoCodes: "/promotion-codes",
 	c.PartnerKindCustomers: "/customers", c.PartnerKindTransactions: "/transactions", c.PartnerKindCommissions: "/commissions",
 }
@@ -386,7 +388,16 @@ func (t Tolt) PartnerPage(ctx context.Context, cl *c.Client, creds c.Creds, prog
 	if after != "" {
 		q.Set("starting_after", after)
 	}
-	l, err := t.get(ctx, cl, creds, strings.ReplaceAll(kind, "_", " "), path, q)
+	what := strings.ReplaceAll(kind, "_", " ")
+	status, ctype, body, err := t.fetch(ctx, cl, creds, what, path, q)
+	if status == http.StatusNotFound && !probed && (kind == c.PartnerKindGroups || kind == c.PartnerKindFlows) {
+		// Not every Tolt account or plan lists these.
+		return page, "", c.ErrPartnerKindUnavailable
+	}
+	var l toltList
+	if err == nil {
+		l, err = decodeToltList(what, status, ctype, body)
+	}
 	refused := err != nil && (c.KindOf(err) == c.ErrInvalid || errors.As(err, new(*c.UnreadableError)))
 	if refused && kind == c.PartnerKindPartners && st >= toltOptionalStatus && after == "" {
 		// Tolt doesn't filter by this status here: there are none to read.
@@ -414,6 +425,10 @@ func (t Tolt) PartnerPage(ctx context.Context, cl *c.Client, creds c.Creds, prog
 	}
 	for _, o := range l.Data {
 		switch kind {
+		case c.PartnerKindGroups:
+			page.Groups = append(page.Groups, c.ImportGroup{ID: str(o, "id"), Name: str(o, "name"), Default: truthy(o["is_default"]) || truthy(o["default"])})
+		case c.PartnerKindFlows:
+			page.Flows = append(page.Flows, toltFlow(o))
 		case c.PartnerKindPartners:
 			page.Partners = append(page.Partners, toltPartner(o))
 		case c.PartnerKindLinks:
@@ -507,7 +522,7 @@ func toltPartner(o map[string]any) c.ImportPartner {
 	// Tolt's v2 API has no payout details: partners give theirs on the
 	// portal.
 	return c.ImportPartner{ID: str(o, "id"), Email: str(o, "email"), Name: name, Status: status,
-		Created: when(o, "created_at", "created")}
+		GroupID: ref(o, "group_id", "group"), Created: when(o, "created_at", "created")}
 }
 
 func toltTransaction(o map[string]any) c.ImportTransaction {
@@ -515,6 +530,19 @@ func toltTransaction(o map[string]any) c.ImportTransaction {
 		Currency: strings.ToUpper(str(o, "currency", "currency_code")), Created: when(o, "created_at", "created")}
 	bt := strings.ToLower(str(o, "billing_type", "type"))
 	t.Recurring = bt == "subscription" || bt == "recurring" || bt == "renewal"
+	// source is the payment provider in capitals (STRIPE); interval how a
+	// subscription bills (month).
+	if src := strings.ToLower(str(o, "source")); paymentSourceRE.MatchString(src) {
+		t.PaymentSource = src
+	}
+	switch iv := strings.ToLower(str(o, "interval")); iv {
+	case "day", "week", "month", "year":
+		t.Interval = iv
+	default:
+		if bt == "one_time" {
+			t.Interval = "one_time"
+		}
+	}
 	t.RefundedCents = cents(o, "refunded_amount", "amount_refunded")
 	if t.RefundedCents == 0 && (strings.EqualFold(str(o, "status"), "refunded") || truthy(o["refunded"])) {
 		t.RefundedCents = t.AmountCents
@@ -545,6 +573,8 @@ func toltCommission(o map[string]any) c.ImportCommission {
 }
 
 // str returns the first of keys that holds a non-empty string or number.
+var paymentSourceRE = regexp.MustCompile(`^[a-z0-9][a-z0-9_.-]{0,39}$`)
+
 func nonEmpty(vals ...string) []string {
 	out := []string{}
 	for _, v := range vals {
@@ -629,4 +659,206 @@ func when(o map[string]any, keys ...string) time.Time {
 func truthy(v any) bool {
 	b, ok := v.(bool)
 	return ok && b
+}
+
+// Tolt's flows: a trigger (new payment or new signup), an action (generate
+// a commission or switch group), AND/OR conditions on partner, customer
+// and transaction attributes, approval, and custom rates per partner or
+// plan. Tolt's docs couldn't be read from where this was built, so every
+// name here is read under the names Tolt is known or likely to use
+// (_check_ in docs/partners-tolt-migration.md), and anything else makes
+// the flow Unsupported rather than guessed.
+
+// toltFields maps Tolt condition attributes to Outflare's facts.
+var toltFields = map[string]string{
+	"partner_id": "partner.id", "partner.id": "partner.id",
+	"partner_country": "partner.country", "country": "partner.country", "partner.country": "partner.country",
+	"partner_transactions": "partner.transactions", "partner_transactions_count": "partner.transactions", "transactions_count": "partner.transactions",
+	"partner_customers": "partner.customers", "partner_customers_count": "partner.customers", "customers_count": "partner.customers",
+	"partner_leads": "partner.leads", "partner_leads_count": "partner.leads", "leads_count": "partner.leads",
+	"partner_revenue": "partner.revenue_cents", "revenue": "partner.revenue_cents",
+	"partner_earnings": "partner.earnings_cents", "earnings": "partner.earnings_cents",
+	"customer_transactions": "customer.transactions", "customer_transactions_count": "customer.transactions",
+	"customer_total_paid": "customer.total_paid_cents", "customer_revenue": "customer.total_paid_cents",
+	"customer_conversion_date": "customer.signed_up_at", "conversion_date": "customer.signed_up_at",
+	"customer_first_transaction_date": "customer.first_sale_at", "first_transaction_date": "customer.first_sale_at",
+	"transaction_amount": "transaction.amount_cents", "amount": "transaction.amount_cents",
+	"product_id": "transaction.product_id", "plan_id": "transaction.product_id", "price_id": "transaction.product_id", "plan": "transaction.product_id",
+	"recurring": "transaction.recurring", "is_recurring": "transaction.recurring",
+}
+
+var toltOps = map[string]string{
+	"equals": "eq", "eq": "eq", "is": "eq", "=": "eq",
+	"not_equals": "neq", "neq": "neq", "is_not": "neq", "!=": "neq",
+	"greater_than": "gt", "gt": "gt", ">": "gt",
+	"greater_than_or_equal": "gte", "greater_than_or_equal_to": "gte", "gte": "gte", ">=": "gte",
+	"less_than": "lt", "lt": "lt", "<": "lt",
+	"less_than_or_equal": "lte", "less_than_or_equal_to": "lte", "lte": "lte", "<=": "lte",
+	"in": "in", "is_one_of": "in", "not_in": "not_in", "is_not_one_of": "not_in",
+	"within": "within", "within_last": "within", "in_the_last": "within", "not_within": "not_within",
+}
+
+func toltFlow(o map[string]any) c.ImportFlow {
+	f := c.ImportFlow{ID: str(o, "id"), GroupID: ref(o, "group_id", "group"), Name: str(o, "name", "title"), Recurrence: "every", Approval: "program"}
+	switch strings.ToLower(str(o, "trigger", "trigger_type", "event")) {
+	case "new_payment", "payment", "transaction", "new_transaction", "sale", "":
+		f.Trigger = "sale"
+	case "new_signup", "signup", "customer", "new_customer", "lead":
+		f.Trigger = "signup"
+	default:
+		f.Unsupported = append(f.Unsupported, "trigger")
+	}
+	action, _ := o["action"].(map[string]any)
+	if action == nil {
+		action = o
+	}
+	switch strings.ToLower(str(action, "type", "action_type", "action")) {
+	case "switch_group", "change_group", "move_to_group", "group":
+		f.Kind, f.TargetGroupID = "group", ref(action, "group_id", "target_group_id", "group")
+		if f.TargetGroupID == "" {
+			f.Unsupported = append(f.Unsupported, "action")
+		}
+	default:
+		ct := strings.ToLower(str(action, "commission_type", "reward_type", "value_type", "type_of_commission"))
+		v := cents(action, "value", "amount", "commission", "rate")
+		switch {
+		case ct == "percentage" || ct == "percent" || ct == "%":
+			bp := int(math.Round(num(action, "value", "amount", "commission", "rate") * 100))
+			f.Kind, f.PercentBP = "percent", &bp
+		case ct == "fixed" || ct == "flat" || ct == "amount":
+			f.Kind, f.AmountCents = "fixed", &v
+		default:
+			f.Unsupported = append(f.Unsupported, "action")
+		}
+	}
+	switch strings.ToLower(str(o, "duration", "recurrence", "commission_duration")) {
+	case "", "lifetime", "every", "forever", "recurring":
+	case "first", "one_time", "first_payment", "once":
+		f.Recurrence = "first"
+	case "months", "limited", "first_months":
+		n := int(cents(o, "duration_months", "months", "duration_value"))
+		if n > 0 {
+			f.Recurrence, f.Months = "months", &n
+		} else {
+			f.Unsupported = append(f.Unsupported, "duration")
+		}
+	default:
+		f.Unsupported = append(f.Unsupported, "duration")
+	}
+	approval, _ := o["approval"].(map[string]any)
+	if approval == nil {
+		approval = map[string]any{"type": o["approval_type"], "days": o["approval_days"]}
+	}
+	switch strings.ToLower(str(approval, "type")) {
+	case "", "default":
+	case "auto", "automatic", "instant":
+		f.Approval = "auto"
+	case "auto_after", "automatic_after", "after_days", "delayed":
+		d := int(cents(approval, "days", "delay_days"))
+		f.Approval, f.ApprovalDays = "after_days", &d
+	case "manual":
+		f.Approval = "manual"
+	default:
+		f.Unsupported = append(f.Unsupported, "approval")
+	}
+	f.Conditions = toltConditions(o["conditions"], &f.Unsupported)
+	for _, x := range list(o["custom_rates"], o["overrides"]) {
+		r, _ := x.(map[string]any)
+		ov := partners.Override{}
+		if id := ref(r, "partner_id", "partner"); id != "" {
+			ov.PartnerID = &id
+		} else if id := ref(r, "plan_id", "product_id", "price_id", "plan"); id != "" {
+			ov.ProductID = &id
+		} else {
+			f.Unsupported = append(f.Unsupported, "custom_rate")
+			continue
+		}
+		v := cents(r, "value", "amount", "rate", "commission")
+		if f.Kind == "percent" {
+			bp := int(math.Round(num(r, "value", "amount", "rate", "commission") * 100))
+			ov.PercentBP = &bp
+		} else {
+			ov.AmountCents = &v
+		}
+		f.Overrides = append(f.Overrides, ov)
+	}
+	return f
+}
+
+// num reads a number, given as a number or as text.
+func num(o map[string]any, keys ...string) float64 {
+	for _, k := range keys {
+		switch v := o[k].(type) {
+		case float64:
+			return v
+		case string:
+			if f, err := strconv.ParseFloat(strings.TrimSpace(v), 64); err == nil {
+				return f
+			}
+		}
+	}
+	return 0
+}
+
+func list(vs ...any) []any {
+	for _, v := range vs {
+		if l, ok := v.([]any); ok {
+			return l
+		}
+	}
+	return nil
+}
+
+func toltMatch(v string) string {
+	if strings.EqualFold(v, "or") || strings.EqualFold(v, "any") {
+		return "any"
+	}
+	return "all"
+}
+
+// toltConditions reads {operator, groups: [{operator, conditions: [...]}]},
+// or a flat list of conditions.
+func toltConditions(v any, unsupported *[]string) partners.Conditions {
+	var out partners.Conditions
+	root, _ := v.(map[string]any)
+	groups := list(v)
+	if root != nil {
+		out.Match = toltMatch(str(root, "operator", "match", "logic"))
+		if g := list(root["groups"]); g != nil {
+			groups = g
+		} else if cs := list(root["conditions"], root["rules"]); cs != nil {
+			groups = []any{map[string]any{"operator": str(root, "operator", "match", "logic"), "conditions": cs}}
+			out.Match = "all"
+		}
+	} else if groups != nil {
+		groups = []any{map[string]any{"operator": "and", "conditions": groups}}
+	}
+	for _, g := range groups {
+		gm, _ := g.(map[string]any)
+		group := partners.ConditionGroup{Match: toltMatch(str(gm, "operator", "match", "logic"))}
+		for _, x := range list(gm["conditions"], gm["rules"]) {
+			cm, _ := x.(map[string]any)
+			field, ok := toltFields[strings.ToLower(str(cm, "attribute", "field", "property"))]
+			op, okOp := toltOps[strings.ToLower(str(cm, "operator", "op", "comparison"))]
+			if !ok || !okOp {
+				*unsupported = append(*unsupported, "condition")
+				continue
+			}
+			cond := partners.Condition{Field: field, Op: op, Value: cm["value"]}
+			if op == "within" || op == "not_within" {
+				cond.Value = map[string]any{"amount": float64(cents(cm, "value", "amount")), "unit": strings.ToLower(str(cm, "unit", "period"))}
+			}
+			if s, isText := cond.Value.(string); isText && partners.Fields[field] == partners.FieldNumber {
+				if f, err := strconv.ParseFloat(s, 64); err == nil {
+					cond.Value = f
+				}
+			}
+			group.Conditions = append(group.Conditions, cond)
+		}
+		out.Groups = append(out.Groups, group)
+	}
+	if err := out.Check(); err != nil {
+		*unsupported = append(*unsupported, "condition")
+	}
+	return out
 }

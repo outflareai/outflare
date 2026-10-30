@@ -45,6 +45,7 @@ func (s *Server) routesFlags(mux *http.ServeMux) {
 	// Public: the site key in the body is the authority.
 	mux.HandleFunc("POST /v1/site/flags", s.siteFlags)
 	mux.HandleFunc("OPTIONS /v1/site/flags", s.siteEventsPreflight)
+	s.flagGroupRoutes(mux)
 	// The visual editor: the signed edit token is the authority.
 	mux.HandleFunc("POST /v1/workspaces/{ws}/flags/{flag}/edit-link", s.inWorkspace(manage, s.createFlagEditLink))
 	mux.HandleFunc("GET /v1/site/flags/edits", s.siteFlagEdits)
@@ -317,7 +318,11 @@ func placeInGroup(ctx context.Context, tx pgx.Tx, ws string, f *flagView) error 
 	if err != nil {
 		return err
 	}
-	from, _, ok := flags.Allocate(taken, f.GroupShare)
+	var holdout int
+	if err := tx.QueryRow(ctx, `SELECT coalesce((SELECT holdout FROM flag_groups WHERE workspace_id = $1 AND name = $2), 0)`, ws, f.ExclusionGroup).Scan(&holdout); err != nil {
+		return err
+	}
+	from, _, ok := flags.Allocate(taken, f.GroupShare, flags.Buckets-holdout*100)
 	if !ok {
 		return errABConflict(fmt.Sprintf("exclusion group %s has no free %d%% left: give this flag a smaller group_share, or take a flag out of the group", f.ExclusionGroup, f.GroupShare))
 	}

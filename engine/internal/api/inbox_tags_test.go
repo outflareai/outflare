@@ -62,7 +62,7 @@ func TestInboxLabelsTagsAndViews(t *testing.T) {
 		"min_confidence=0.9":            "[hot@a.test ask@b.test away@e.test]",
 		"tag=q4":                        "[later@c.test]",
 		"tag=vip,q4":                    "[hot@a.test later@c.test]",
-		"label=vip&group=hot":           "[hot@a.test]",
+		"tag=vip&group=hot":             "[hot@a.test]",
 		"q=competitor":                  "[later@c.test]",
 		"group=automatic&kind=all":      "[away@e.test]",
 		"brand=none&needs_review=false": "[hot@a.test ask@b.test later@c.test away@e.test]",

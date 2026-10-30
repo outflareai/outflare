@@ -409,6 +409,45 @@ groups:
         annotations:
           summary: "Most embedding jobs fail; check search.embed_failed events and the engine log for the provider's error (a bad key, AI limits reached or the provider down)."
 
+      - alert: OutflareDataNetworkWithdrawalOverdue
+        # A workspace left the data network more than 30 days ago and what
+        # it shared is still there: a broken promise to that customer.
+        expr: max(outflare_data_network_withdrawal_overdue_seconds) > 0
+        for: 15m
+        labels: { severity: critical }
+        annotations:
+          summary: "A workspace's data network withdrawal is past its 30-day deadline; check data_network.withdrawn failures in the engine log and that the server still registers its data network."
+
+      - alert: OutflareDataNetworkSharingBehind
+        expr: max(outflare_data_network_share_lag_seconds) > 2 * 86400
+        for: 1h
+        labels: { severity: warning }
+        annotations:
+          summary: "A data network member's sends haven't been shared for over 2 days past settling; check datanetwork.share jobs and data_network.shared failures in the engine log."
+
+      - alert: OutflareDataNetworkShareFailing
+        expr: sum(increase(outflare_data_network_share_runs_total{outcome="failed"}[1h])) > 3 and sum(increase(outflare_data_network_share_runs_total{outcome="failed"}[1h])) / sum(increase(outflare_data_network_share_runs_total[1h])) > 0.5
+        for: 30m
+        labels: { severity: warning }
+        annotations:
+          summary: "Most data network sharing jobs fail; the engine log has the network's error on data_network.shared."
+
+      - alert: OutflareDataNetworkLookupErrors
+        expr: sum(increase(outflare_data_network_lookups_total{outcome="error"}[30m])) > 20 and sum(increase(outflare_data_network_lookups_total{outcome="error"}[30m])) / sum(increase(outflare_data_network_lookups_total[30m])) > 0.25
+        for: 15m
+        labels: { severity: warning }
+        annotations:
+          summary: "Over a quarter of data network lookups fail; the email finder carries on without the network. Check data_network.lookup_failed in the engine log."
+
+      - alert: OutflareDataNetworkProbing
+        # Many lookups refused at one domain's daily limit: someone may be
+        # guessing names at a company.
+        expr: sum(increase(outflare_data_network_lookups_total{outcome="refused_limit"}[1h])) > 500
+        for: 15m
+        labels: { severity: info }
+        annotations:
+          summary: "Over 500 data network lookups an hour hit a domain's daily limit; look at data_network.lookup_refused events by workspace for someone guessing names."
+
       - alert: OutflareKnowledgeAnswersFailing
         # Questions asked of the knowledge base end in an error rather
         # than an answer: the AI providers are failing or rejecting keys.
@@ -742,6 +781,21 @@ groups:
         annotations:
           summary: "Over half of web searches (search-results) fail for reasons other than a budget: DataForSEO's or Geonode's search API may be failing or have changed; check api.called for readSearchResults by error code."
 
+      - alert: OutflarePlaybookAutomationsFailing
+        # held and capped are limits working as meant; failed retries in 15 minutes.
+        expr: sum(increase(outflare_playbooks_automation_runs_total{outcome="failed"}[1h])) > 3 and sum(increase(outflare_playbooks_automation_runs_total{outcome="started"}[1h])) == 0
+        for: 30m
+        labels: { severity: warning }
+        annotations:
+          summary: "Playbook automations keep failing to start runs and none started in the last hour: check playbook_automation.run_failed in the engine log (usually the database or the missions table)."
+
+      - alert: OutflarePlaybookAutomationsBehind
+        expr: max(outflare_playbooks_automation_lag_seconds) > 900
+        for: 15m
+        labels: { severity: warning }
+        annotations:
+          summary: "An active playbook automation is over 15 minutes past its run time: the automation loop (RunAutomations) is stuck or slow; check playbook_automation.runner_failed in the engine log."
+
       - alert: OutflareInboundEmailBadSignatures
         # The operator's edge (Outflare Cloud's mail receiver) signs every
         # delivery; refusals mean the two disagree on the secret, so
@@ -765,3 +819,10 @@ groups:
         labels: { severity: warning }
         annotations:
           summary: "Inbound email deliveries fail on Outflare's side before they are stored (usually the database): the mail receiver retries, but check POST /v1/inbound/email errors in the log."
+
+      - alert: OutflareExchangeRatesStale
+        expr: max(outflare_exchange_rates_newest_age_seconds) > 6 * 86400
+        for: 1h
+        labels: { severity: warning }
+        annotations:
+          summary: "The newest exchange rate is over 6 days old, so receipts in other currencies wait for their dollar amount: check exchange_rates.fetch_failed in the engine log (the European Central Bank's feed down or blocked)."

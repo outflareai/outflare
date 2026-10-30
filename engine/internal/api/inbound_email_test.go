@@ -10,7 +10,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5"
+
 	"github.com/outflareai/outflare/engine/internal/api"
+	"github.com/outflareai/outflare/engine/internal/features"
 	"github.com/outflareai/outflare/engine/internal/inboundemail"
 	"github.com/outflareai/outflare/engine/internal/jobs"
 	"github.com/outflareai/outflare/engine/internal/track"
@@ -56,6 +59,14 @@ func TestInboundEmail(t *testing.T) {
 	inbound.Pool = e.pool
 	owner, ws := setupOwner(t, e.h)
 	base := "/v1/workspaces/" + ws
+	// AI receipts are part of AI Accounts, which is off until switched on.
+	owner.must(404, "POST", base+"/inbound-addresses", map[string]any{"purpose": "ai_receipts"})
+	if err := pgx.BeginFunc(t.Context(), e.pool, func(tx pgx.Tx) error {
+		_, err := features.Set(t.Context(), tx, ws, features.AIAccounts, true, "")
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
 
 	owner.must(400, "POST", base+"/inbound-addresses", map[string]any{"purpose": "leads"})
 	owner.must(400, "POST", base+"/inbound-addresses", map[string]any{"purpose": "ai_receipts", "name": "receipts"})

@@ -21,7 +21,7 @@ Admins make them under the purpose's settings, or with `POST /v1/workspaces/{ws}
 Each purpose decides:
 
 - **Support** takes mail whoever forwarded it: it is the business's own support mailbox, and customers write to it in the open anyway.
-- **AI receipts** only takes mail someone in the workspace forwarded: a member's own work address (a Google Workspace admin can add one routing rule that copies receipts from every inbox), or a personal address a member linked first. Mail forwarded by anyone else is refused (`unknown_forwarder`).
+- **AI receipts** only takes mail someone in the workspace forwarded: a member's own work address (a Google Workspace admin can add one routing rule that copies receipts from every inbox), or a personal address a member linked first. Mail forwarded by anyone else is refused (`unknown_forwarder`). A member links one with `POST /v1/workspaces/{ws}/inbound-forwarders` (`email`), lists theirs with `GET` (everyone's with `everyone=true` and `ai_accounts.read`), and unlinks it with `DELETE .../inbound-forwarders/{email}`.
 
 **Gmail asks to confirm forwarding.** When a Gmail or Google Workspace mailbox is set to forward, Gmail first sends a confirmation to the address. Outflare keeps it: for a support address it is shown on that address for an admin to confirm with one click; for receipts, to the member who linked their personal address. Outflare never opens the link itself. Each message's DKIM signatures are checked and kept.
 

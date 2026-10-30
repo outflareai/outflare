@@ -25,8 +25,6 @@ func (s *Server) planMission(w http.ResponseWriter, r *http.Request) {
 	a := accessFrom(r.Context())
 	var req struct {
 		Goal string `json:"goal"`
-		// Ignored: projects were removed. Accepted so older clients still work.
-		ProjectID *string `json:"project_id"`
 	}
 	if !decode(w, r, &req) {
 		return

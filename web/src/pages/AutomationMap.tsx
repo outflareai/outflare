@@ -19,6 +19,7 @@ import { cn } from "@/lib/utils";
 import { Badge, Button, Empty, ErrorText, field, Loading, PageHeader, type tones } from "../ui";
 import { plural } from "../format";
 import type { Tab } from "../App";
+import { PersonPicker, type Person } from "@/components/person-picker";
 
 type Map = Schemas["AutomationMap"];
 type MapNode = Map["nodes"][number];
@@ -47,6 +48,11 @@ const W = 220;
 const H = 72;
 
 type NodeData = { n: MapNode; selected: boolean; dim: boolean; flagged: boolean; pick: () => void };
+
+// What a person has to do with a card, with ?record=.
+const reachedText: Record<NonNullable<MapNode["reached"]>, string> = {
+  did: "They did this", member: "In this list", fired: "Fired for them", in: "In it now", entered: "Went through it",
+};
 type EdgeData = { label?: string; lit: boolean; dim: boolean };
 
 // Layout: left to right, so causes read before effects.
@@ -77,10 +83,11 @@ function layout(m: Map, shown: Set<string>, lit: Set<string> | null, flagged: Se
   return { nodes, edges };
 }
 
-// reach is everything a node sets off, and everything that sets it off.
-function reach(m: Map, from: string): Set<string> {
+// reach is everything a node sets off (down), everything that sets it off
+// (up), or both.
+function reach(m: Map, from: string, dirs: ("down" | "up")[] = ["down", "up"]): Set<string> {
   const out = new Set([from]);
-  for (const dir of ["down", "up"] as const) {
+  for (const dir of dirs) {
     const todo = [from];
     const seen = new Set([from]);
     while (todo.length) {
@@ -118,6 +125,7 @@ function MapCard({ data }: NodeProps<Node<NodeData>>) {
           <span className="truncate">{info.label}</span>
           {n.status && (n.kind === "rule" || n.kind === "journey" || n.kind === "sequence") && n.status !== "active" && <Badge tone={statusTone[n.status] ?? "grey"}>{n.status}</Badge>}
           {data.flagged && <CircleAlert className="ml-auto size-3.5 shrink-0 text-amber-600 dark:text-amber-400" aria-label="Flagged" />}
+          {n.reached && <span className={cn("shrink-0 rounded-full bg-violet-500/15 px-1.5 text-[10px] font-medium text-violet-700 dark:text-violet-300", !data.flagged && "ml-auto")}>{reachedText[n.reached]}</span>}
         </span>
         <span className={cn("truncate text-[13px] font-medium", (n.kind === "event" || n.kind === "field") && "font-mono text-[12px]")}>{n.label}</span>
         <span className="truncate text-[11px] text-muted-foreground tabular-nums">
@@ -180,13 +188,17 @@ export function AutomationMap({ ws, go }: { ws: string; go: (tab: Tab, item?: st
   const [focus, setFocus] = useState<Set<string> | null>(null);
   const [show, setShow] = useState<Show>("all");
   const [q, setQ] = useState("");
+  // A sequence, list or tag: only what leads to it.
+  const [touches, setTouches] = useState("");
+  // A person: what they reached, and what that sets off next.
+  const [person, setPerson] = useState<Person | null>(null);
 
   const load = useCallback(async () => {
-    const { data, error } = await api.GET("/v1/workspaces/{ws}/automation-map", { params: { path: { ws } } });
+    const { data, error } = await api.GET("/v1/workspaces/{ws}/automation-map", { params: { path: { ws }, query: person ? { record: person.id } : {} } });
     if (error || !data) return setError(errorMessage(error));
     setError("");
     setMap(data);
-  }, [ws]);
+  }, [ws, person]);
   useEffect(() => {
     load();
   }, [load]);
@@ -207,11 +219,16 @@ export function AutomationMap({ ws, go }: { ws: string; go: (tab: Tab, item?: st
     if (!m) return null;
     if (focus) return focus;
     if (selected) return reach(m, selected);
+    if (touches) return reach(m, touches, ["up"]);
+    if (person) {
+      const reached = m.nodes.filter((n) => n.reached);
+      return new Set(reached.flatMap((n) => [...reach(m, n.id, ["down"])]));
+    }
     const term = q.trim().toLowerCase();
     if (!term) return null;
     const hits = m.nodes.filter((n) => n.label.toLowerCase().includes(term));
     return hits.length ? new Set(hits.flatMap((n) => [...reach(m, n.id)])) : new Set<string>();
-  }, [m, focus, selected, q]);
+  }, [m, focus, selected, touches, person, q]);
   const pick = useCallback((id: string) => {
     setFocus(null);
     setSelected((cur) => {
@@ -226,6 +243,7 @@ export function AutomationMap({ ws, go }: { ws: string; go: (tab: Tab, item?: st
   if (!m) return error ? <ErrorText>{error}</ErrorText> : <Loading />;
   const node = m.nodes.find((n) => n.id === selected);
   const automations = m.nodes.filter((n) => n.kind === "rule" || n.kind === "journey").length;
+  const targets = m.nodes.filter((n) => n.kind === "sequence" || n.kind === "smart_list" || n.kind === "tag").sort((a, b) => a.kind.localeCompare(b.kind) || a.label.localeCompare(b.label));
   return (
     <div className="space-y-4">
       <PageHeader
@@ -259,9 +277,34 @@ export function AutomationMap({ ws, go }: { ws: string; go: (tab: Tab, item?: st
               {Object.entries(shows).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
             </select>
             <input aria-label="Find" className={cn(field, "w-56")} placeholder="Find an event, rule or journey" value={q} onChange={(e) => { setQ(e.target.value); setSelected(""); setFocus(null); }} />
-            {(selected || focus) && <Button variant="ghost" onClick={() => { setSelected(""); setFocus(null); }}><X className="size-4" />Show everything</Button>}
+            {targets.length > 0 && (
+              <select aria-label="Touches" className={field} value={touches} onChange={(e) => {
+                setTouches(e.target.value);
+                setSelected("");
+                setFocus(null);
+                if (e.target.value) track("ui.automation_map_filtered", { touches: m.nodes.find((n) => n.id === e.target.value)?.kind });
+              }}>
+                <option value="">Touches anything</option>
+                {targets.map((n) => <option key={n.id} value={n.id}>{kindInfo[n.kind].label}: {n.label}</option>)}
+              </select>
+            )}
+            <PersonPicker ws={ws} person={person} startOpen={false} onPick={(p) => {
+              setPerson(p);
+              setSelected("");
+              setFocus(null);
+              setTouches("");
+              track("ui.automation_map_person_picked");
+            }} />
+            {(selected || focus || touches || person) && <Button variant="ghost" onClick={() => { setSelected(""); setFocus(null); setTouches(""); setPerson(null); }}><X className="size-4" />Show everything</Button>}
             <span className="ml-auto text-[12px] text-muted-foreground">{plural(m.nodes.filter((n) => n.kind === "rule").length, "rule")} · {plural(m.nodes.filter((n) => n.kind === "journey").length, "journey")}</span>
           </div>
+          {person && !selected && !focus && (
+            <p className="text-[13px] text-muted-foreground">
+              {m.nodes.some((n) => n.reached)
+                ? <>Lit up: what {person.name || person.email || "they"} did, the lists they're in, the rules that fired for them and the journeys they went through, then everything those set off next.</>
+                : <>{person.name || person.email || "This person"} hasn't done anything these automations listen to yet.</>}
+            </p>
+          )}
           {node && (
             <div className="flex flex-wrap items-center gap-2 rounded-lg border bg-card px-3 py-2 text-[13px]">
               <span className="text-muted-foreground">{kindInfo[node.kind].label}</span>

@@ -36,8 +36,6 @@ func (s *Server) routesInfra(mux *http.ServeMux) {
 // their value (or default, on create).
 type planInput struct {
 	Name *string `json:"name"`
-	// Ignored: projects were removed. Accepted so older clients still work.
-	ProjectID optional[string] `json:"project_id"`
 	// The brand the domains and mailboxes are for; null for every brand.
 	BrandID               optional[string] `json:"brand_id"`
 	Supplier              *string          `json:"supplier"`

@@ -67,20 +67,22 @@ const (
 
 // Fields are the facts conditions can test, by name.
 var Fields = map[string]FieldKind{
-	"partner.id":                FieldText,
-	"partner.country":           FieldText,
-	"partner.transactions":      FieldNumber, // sales credited to them, ever
-	"partner.customers":         FieldNumber, // referred customers who bought
-	"partner.leads":             FieldNumber, // referred customers, bought or not
-	"partner.revenue_cents":     FieldNumber, // their sales less refunds
-	"partner.earnings_cents":    FieldNumber, // cash earned, not rejected or reversed
-	"customer.transactions":     FieldNumber, // the customer's sales before this one
-	"customer.total_paid_cents": FieldNumber, // what they paid before this one
-	"customer.first_sale_at":    FieldDate,
-	"customer.signed_up_at":     FieldDate, // when they were referred
-	"transaction.amount_cents":  FieldNumber,
-	"transaction.product_id":    FieldText,
-	"transaction.recurring":     FieldBool,
+	"partner.id":                 FieldText,
+	"partner.country":            FieldText,
+	"partner.transactions":       FieldNumber, // sales credited to them, ever
+	"partner.customers":          FieldNumber, // referred customers who bought
+	"partner.leads":              FieldNumber, // referred customers, bought or not
+	"partner.revenue_cents":      FieldNumber, // their sales less refunds
+	"partner.earnings_cents":     FieldNumber, // cash earned, not rejected or reversed
+	"customer.transactions":      FieldNumber, // the customer's sales before this one
+	"customer.total_paid_cents":  FieldNumber, // what they paid before this one
+	"customer.first_sale_at":     FieldDate,
+	"customer.signed_up_at":      FieldDate, // when they were referred
+	"transaction.amount_cents":   FieldNumber,
+	"transaction.product_id":     FieldText,
+	"transaction.recurring":      FieldBool,
+	"transaction.interval":       FieldText, // day, week, month, year or one_time, as the backend said
+	"transaction.payment_source": FieldText, // stripe, paddle, ..., as the backend said
 }
 
 // Ops each field kind takes.

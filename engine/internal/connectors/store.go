@@ -45,7 +45,7 @@ type Integration struct {
 	UpdatedAt     time.Time  `json:"updated_at"`
 }
 
-// outflareSecret matches Outflare's own secrets (oft_, ofa_, ofs_, ofi_, ofc_).
+// outflareSecret matches Outflare's own secrets (oft_, ofs_, ofi_, ofc_).
 var outflareSecret = regexp.MustCompile(`^of[a-z]_[A-Za-z0-9_\-]{8,}`)
 
 // ErrNotFound means no such integration in the workspace.

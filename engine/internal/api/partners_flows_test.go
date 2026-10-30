@@ -78,3 +78,40 @@ func TestPartnerFlows(t *testing.T) {
 		t.Fatalf("pending %d, switched %d", pending, switched)
 	}
 }
+
+// TestPartnerConversionBilling: a conversion keeps the payment provider and
+// billing interval the backend sent (Tolt's source and interval), and a
+// flow can pay on them.
+func TestPartnerConversionBilling(t *testing.T) {
+	e := freshEnv(t)
+	owner, ws := setupOwner(t, e.h)
+	base := "/v1/workspaces/" + ws
+	owner.must(201, "POST", base+"/partner-programs", map[string]any{"name": "Affiliates", "slug": "aff", "kind": "affiliate"})
+	owner.must(201, "POST", base+"/partners", map[string]any{"program": "aff", "email": "ana@example.com", "code": "ana"})
+	owner.must(200, "PUT", base+"/partner-programs/aff/rules", map[string]any{"rules": []any{
+		map[string]any{"trigger": "sale", "kind": "percent", "percent_bp": 2000},
+		map[string]any{"name": "Yearly bonus", "trigger": "sale", "kind": "fixed", "amount_cents": 1000, "stacking": "adds",
+			"conditions": map[string]any{"groups": []any{map[string]any{"conditions": []any{map[string]any{"field": "transaction.interval", "op": "eq", "value": "year"}}}}}},
+	}})
+	sale := func(order, interval string) map[string]any {
+		t.Helper()
+		return owner.must(201, "POST", base+"/partner-conversions", map[string]any{"type": "sale", "ref": "ana", "customer_id": order,
+			"amount_cents": 10000, "external_id": order, "payment_source": "STRIPE", "interval": interval})
+	}
+	owner.must(400, "POST", base+"/partner-conversions", map[string]any{"type": "sale", "ref": "ana", "customer_id": "x", "amount_cents": 1, "interval": "fortnight"})
+	if r := sale("o-1", "monthly"); len(r["rewards"].([]any)) != 1 {
+		t.Fatalf("monthly = %v", r["rewards"])
+	}
+	if r := sale("o-2", "year"); len(r["rewards"].([]any)) != 2 {
+		t.Fatalf("yearly = %v", r["rewards"])
+	}
+	c := owner.must(200, "GET", base+"/partner-conversions?type=sale", nil)["data"].([]any)
+	got := map[string]bool{}
+	for _, x := range c {
+		m := x.(map[string]any)
+		got[m["payment_source"].(string)+"/"+m["interval"].(string)] = true
+	}
+	if !got["stripe/month"] || !got["stripe/year"] {
+		t.Fatalf("conversions = %v", got)
+	}
+}

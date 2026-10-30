@@ -1,6 +1,7 @@
 # Change notes (changes/README.md): every pull request that changes what Outflare
 # does adds a note, or carries the no-note label. Separate from CI so adding the
-# label re-runs only this check.
+# label re-runs only this check. In the private engine repository it runs in
+# pr-checks.yml, one job with the other quick checks, and is skipped here.
 name: Change notes
 
 on:
@@ -17,6 +18,7 @@ permissions:
 
 jobs:
   notes:
+    if: github.repository != 'outflareai/engine'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0

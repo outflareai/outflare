@@ -43,7 +43,7 @@ func TestReports(t *testing.T) {
 
 	steps := owner.must(200, "GET", base+"/reports?group_by=step", nil)["rows"].([]any)
 	s0 := steps[0].(map[string]any)
-	if s0["name"] != "Step 1" || s0["label"] != "Step 1" || s0["sent"] != 10.0 || s0["replies"] != 2.0 || steps[1].(map[string]any)["sent"] != 5.0 {
+	if s0["name"] != "Step 1" || s0["sent"] != 10.0 || s0["replies"] != 2.0 || steps[1].(map[string]any)["sent"] != 5.0 {
 		t.Fatalf("by step: %v", steps)
 	}
 	mbs := owner.must(200, "GET", base+"/reports?group_by=mailbox", nil)["rows"].([]any)

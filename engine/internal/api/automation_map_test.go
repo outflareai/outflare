@@ -99,6 +99,30 @@ func TestAutomationMap(t *testing.T) {
 		t.Errorf("overlap: %v", flags)
 	}
 
+	// For one person, the map marks what they reached: an event they did,
+	// the list they are in, and the journeys they went through.
+	if _, err := e.pool.Exec(ctx, `INSERT INTO customer_events (workspace_id, record_id, kind, name, occurred_at) VALUES ($1, $2, 'track', 'order_completed', now())`, ws, rec); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.pool.Exec(ctx, `INSERT INTO smart_list_members (workspace_id, list_id, record_id) VALUES ($1, $2, $3)`, ws, list, rec); err != nil {
+		t.Fatal(err)
+	}
+	m = owner.must(200, "GET", base+"/automation-map?record="+rec, nil)
+	reached := map[string]any{}
+	for _, n := range m["nodes"].([]any) {
+		n := n.(map[string]any)
+		reached[n["id"].(string)] = n["reached"]
+	}
+	if m["record_id"] != rec || reached["event:order_completed"] != "did" || reached["list:"+list] != "member" || reached["journey:"+main] != "entered" ||
+		reached["event:signed_up"] != nil || reached["rule:"+orphan] != nil {
+		t.Fatalf("reached: %v", reached)
+	}
+	if owner.must(200, "GET", base+"/automation-map", nil)["record_id"] != nil {
+		t.Fatal("record_id without ?record=")
+	}
+	owner.must(404, "GET", base+"/automation-map?record=00000000-0000-4000-8000-000000000001", nil)
+	owner.must(404, "GET", base+"/automation-map?record=nope", nil)
+
 	// The map needs customers.read too.
 	tok := owner.must(201, "POST", base+"/api-tokens", map[string]any{"name": "Emails only", "scopes": []string{"emails.read"}})["token"].(string)
 	(&client{t: t, h: e.h, bearer: tok}).must(403, "GET", base+"/automation-map", nil)

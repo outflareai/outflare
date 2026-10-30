@@ -114,21 +114,19 @@ func GetDeal(ctx context.Context, q Querier, ws, id string) (Deal, error) {
 
 // NewDeal is a deal logged by hand, for workspaces without a CRM.
 type NewDeal struct {
-	Name         string  `json:"name"`
-	LeadID       *string `json:"lead_id"`
-	ContactEmail string  `json:"contact_email"`
-	SequenceID   *string `json:"sequence_id"`
-	// Ignored: projects were removed. Accepted so older clients still work.
-	ProjectID   *string    `json:"project_id"`
-	MissionID   *string    `json:"mission_id"`
-	MeetingID   *string    `json:"meeting_id"`
-	Stage       string     `json:"stage"`
-	State       string     `json:"state"`
-	AmountCents *int64     `json:"amount_cents"`
-	Currency    string     `json:"currency"`
-	OpenedAt    *time.Time `json:"opened_at"`
-	ClosedAt    *time.Time `json:"closed_at"`
-	ExternalID  *string    `json:"external_id"`
+	Name         string     `json:"name"`
+	LeadID       *string    `json:"lead_id"`
+	ContactEmail string     `json:"contact_email"`
+	SequenceID   *string    `json:"sequence_id"`
+	MissionID    *string    `json:"mission_id"`
+	MeetingID    *string    `json:"meeting_id"`
+	Stage        string     `json:"stage"`
+	State        string     `json:"state"`
+	AmountCents  *int64     `json:"amount_cents"`
+	Currency     string     `json:"currency"`
+	OpenedAt     *time.Time `json:"opened_at"`
+	ClosedAt     *time.Time `json:"closed_at"`
+	ExternalID   *string    `json:"external_id"`
 }
 
 func checkDeal(state string, amount *int64, currency *string) error {
@@ -228,17 +226,15 @@ func CreateDeal(ctx context.Context, tx pgx.Tx, ws, source, actorID string, n Ne
 
 // DealPatch changes a deal logged by hand, or re-attributes a synced one.
 type DealPatch struct {
-	Name        *string    `json:"name"`
-	Stage       *string    `json:"stage"`
-	State       *string    `json:"state"`
-	AmountCents *int64     `json:"amount_cents"`
-	Currency    *string    `json:"currency"`
-	ClosedAt    *time.Time `json:"closed_at"`
-	SequenceID  *string    `json:"sequence_id"`
-	// Ignored: projects were removed. Accepted so older clients still work.
-	ProjectID    *string `json:"project_id"`
-	MissionID    *string `json:"mission_id"`
-	Unattributed bool    `json:"unattributed"`
+	Name         *string    `json:"name"`
+	Stage        *string    `json:"stage"`
+	State        *string    `json:"state"`
+	AmountCents  *int64     `json:"amount_cents"`
+	Currency     *string    `json:"currency"`
+	ClosedAt     *time.Time `json:"closed_at"`
+	SequenceID   *string    `json:"sequence_id"`
+	MissionID    *string    `json:"mission_id"`
+	Unattributed bool       `json:"unattributed"`
 }
 
 // UpdateDeal applies a patch. Fields owned by a CRM (name, stage, state,

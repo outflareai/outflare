@@ -30,8 +30,10 @@ Each run reads the whole Tolt program and brings in what isn't in Outflare yet. 
 
 | From Tolt | Becomes |
 | --- | --- |
-| Partners | Partners, each a customer record found by email. Their code is their first link's value, so `?ref=<code>` and `?via=<code>` links keep working. Every status is read (active, pending, suspended, rejected and invited) and kept; invited partners come over as pending. Tolt's API has no payout details, so partners give theirs on the portal; until they do, their payouts wait (their balance is kept). |
+| Groups | Groups of the same name (made when missing). Tolt's default group becomes the program's default when it has none. Read from `/groups` _check_; if Tolt doesn't list them, the run notes `groups_unavailable` and goes on. |
+| Partners | Partners, each a customer record found by email. Each joins their Tolt group (`group_id` _check_); on a later run a partner the import made follows a group change in Tolt. Their code is their first link's value, so `?ref=<code>` and `?via=<code>` links keep working. Every status is read (active, pending, suspended, rejected and invited) and kept; invited partners come over as pending. Tolt's API has no payout details, so partners give theirs on the portal; until they do, their payouts wait (their balance is kept). |
 | Links | The partner's code. A partner's second link, or a link whose parameter isn't `ref` or `via` (the only two the website script reads), is listed under issues. |
+| Flows | Flows on the Flows tab, for the same group: the trigger (new payment or new signup), the action (a percentage or fixed commission, or switch group), the duration (lifetime, first payment, first N months), approval (automatic, after N days, manual), AND/OR conditions and custom rates per partner or plan. Read from `/flows` _check_, with every field name _check_. A flow with anything Outflare can't map (a condition on an attribute it doesn't know, say) isn't imported, so nothing pays that shouldn't: it is listed under issues, for you to add on the Flows tab. |
 | Promo codes | The partner's promo codes, kept as they are: they already exist in your billing account. |
 | Customers | Referred customers, matched by your own `customer_id` and email the same way the conversion API matches them. Tolt's own customer id (`cus_...`, what `tolt.signup()` returned) is kept as one of their user ids, so if your backend stored it and reports renewals with `customer_id: "cus_..."`, those still credit the partner. Running the import again adds it to customers an earlier run brought over. |
 | Transactions | The partner's sales (and refunds), with source `import`. They are not new events on the customer's timeline: your billing or backend already told attribution about them. |
@@ -55,6 +57,9 @@ Each run lists what it couldn't bring over, by Tolt id and reason (never names o
 | `promo_code_invalid`, `promo_code_taken` | Add the code by hand, with a new name if it's taken. |
 | `already_referred` | Another partner already has that customer in Outflare: the first partner keeps them. |
 | `status_conflict` | Rejected in Tolt after Outflare approved it: add a negative adjustment. |
+| `flow_condition_unsupported`, `flow_action_unsupported`, `flow_trigger_unsupported`, `flow_duration_unsupported`, `flow_approval_unsupported`, `flow_custom_rate_unsupported`, `flow_invalid` | That flow didn't come over. Add it on the Flows tab (a template may be close). |
+| `groups_unavailable`, `flows_unavailable` | Tolt didn't list them for this account. Add the groups and flows by hand. |
+| `group_missing`, `too_many_groups`, `custom_rate_partner_missing` | What the flow or partner belongs to didn't come over, or the program already has 50 groups. A flow whose custom rate names a missing partner comes over without that rate. |
 | `customer_id_taken` | Another customer record already has that Tolt `cus_...` id, so conversions sent with it credit that record's partner, if any. Merge the two records if they are the same person. |
 
 | `unreadable` | Tolt's answer for a whole kind couldn't be read (not JSON, no list in it) or Tolt refused the request. The import read the other kinds; the issue's message names the kind, the HTTP status, the content type and the answer's top-level keys. Send us that message. If no kind could be read, the run fails with it. |
@@ -127,8 +132,9 @@ Postbacks a partner's own tracker made to Tolt go to the program's postback URL 
    2. Check that the sign-up shows under the partner's Conversions, credited.
    3. Report a small test sale, then refund it.
    4. Check the reward and its reversal in the ledger.
-6. **Turn auto-approve back on** if the program uses it.
-7. **Cancel Tolt** once the test passes. Partners' existing links keep working because the codes are the same: `?ref=<code>` on your site, and `/r/<code>` on your tracking domain.
+6. **Switch over** (Payouts → Switch over, or `POST .../partner-programs/{id}/switch-over`) once Tolt has made its last payout. Until then, commissions imported from Tolt keep Tolt's status: re-runs bring Tolt's approvals and payments, but Outflare never approves them after its hold or puts them in a payout, so nobody is paid twice. Afterwards, the ones still unpaid are approved and paid here like any other.
+7. **Turn auto-approve back on** if the program uses it.
+8. **Cancel Tolt** once the test passes. Partners' existing links keep working because the codes are the same: `?ref=<code>` on your site, and `/r/<code>` on your tracking domain.
 
 ## After the move
 
