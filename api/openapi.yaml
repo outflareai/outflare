@@ -32024,7 +32024,7 @@ components:
       type: object
       required: [id, name, slug, kind, status, brand_id, landing_url, currency, credit_window_days, credit_model, codes_win, block_self_referrals, hold_days,
         auto_approve, auto_accept, pay_browser_signups, min_payout_cents, payout_term_days, payout_methods, payout_tokens, terms_url, sales_source, postback_hint, portal_enabled, portal_subdomain, portal, portal_url, rules, groups,
-        partners, imported_from, switched_over_at, lead_expiry_days, created_at, updated_at]
+        partners, imported_from, switched_over_at, lead_expiry_days, url_params, created_at, updated_at]
       properties:
         id: { type: string, format: uuid }
         name: { type: string }
@@ -32047,6 +32047,7 @@ components:
         payout_methods: { type: array, items: { type: string, enum: [paypal, wise, bank_transfer, crypto, other] }, description: "What partners choose from on the portal; empty allows any." }
         payout_tokens: { type: array, items: { type: string }, description: "The crypto tokens partners choose from, such as USDC on Base; empty allows any." }
         lead_expiry_days: { type: [integer, "null"], description: "A referred customer who hasn't bought within this many days of being referred no longer credits the partner (reason lead_expired). null: leads never expire." }
+        url_params: { type: array, items: { type: string }, description: "Query parameters besides ref and via that carry a partner's code on the website, such as aff for links made on another platform." }
         terms_url: { type: string }
         sales_source: { type: string, description: "A billing connector (stripe) whose synced payments and refunds are also partner sales; '' for the API and postbacks only." }
         postback_hint: { type: string, description: "The start of the postback URL's secret; '' when there is none." }
@@ -32190,6 +32191,7 @@ components:
         payout_methods: { type: array, items: { type: string, enum: [paypal, wise, bank_transfer, crypto, other] }, description: "Empty allows any." }
         payout_tokens: { type: array, maxItems: 20, items: { type: string, maxLength: 40 }, description: "Crypto tokens, such as USDC on Base; empty allows any." }
         lead_expiry_days: { type: [integer, "null"], minimum: 1, maximum: 3650, description: "Days a referred lead has to buy before it stops crediting the partner; null never expires." }
+        url_params: { type: array, maxItems: 5, items: { type: string, pattern: "^[a-z][a-z0-9_]{0,31}$" }, description: "Extra query parameters carrying a partner's code, such as aff or fpr; not ref, via, utm_…, of… or an ad click id. [] for none." }
         terms_url: { type: string, maxLength: 2000 }
         sales_source: { type: string, description: "A billing connector's id (stripe): its synced payments and refunds become partner sales too. \"\" for none." }
         rules: { type: array, maxItems: 50, items: { $ref: "#/components/schemas/PartnerRuleInput" }, description: "Create only: the preset's rules when left out." }

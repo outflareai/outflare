@@ -26614,6 +26614,8 @@ export interface components {
             payout_tokens: string[];
             /** @description A referred customer who hasn't bought within this many days of being referred no longer credits the partner (reason lead_expired). null: leads never expire. */
             lead_expiry_days: number | null;
+            /** @description Query parameters besides ref and via that carry a partner's code on the website, such as aff for links made on another platform. */
+            url_params: string[];
             terms_url: string;
             /** @description A billing connector (stripe) whose synced payments and refunds are also partner sales; '' for the API and postbacks only. */
             sales_source: string;
@@ -26802,6 +26804,8 @@ export interface components {
             payout_tokens?: string[];
             /** @description Days a referred lead has to buy before it stops crediting the partner; null never expires. */
             lead_expiry_days?: number | null;
+            /** @description Extra query parameters carrying a partner's code, such as aff or fpr; not ref, via, utm_…, of… or an ad click id. [] for none. */
+            url_params?: string[];
             terms_url?: string;
             /** @description A billing connector's id (stripe): its synced payments and refunds become partner sales too. "" for none. */
             sales_source?: string;

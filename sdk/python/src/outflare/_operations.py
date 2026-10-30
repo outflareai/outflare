@@ -4663,6 +4663,7 @@ class Operations(_Mixin):
         slug: str | None = None,
         status: Literal["active", "paused", "archived"] | None = None,
         terms_url: str | None = None,
+        url_params: list[str] | None = None,
         extra_body: dict[str, Any] | None = None,
         idempotency_key: str | None = None,
     ) -> Any:
@@ -4705,6 +4706,7 @@ class Operations(_Mixin):
                 "slug": slug,
                 "status": status,
                 "terms_url": terms_url,
+                "url_params": url_params,
             },
             extra_body=extra_body,
             idempotency_key=idempotency_key,
@@ -26176,6 +26178,7 @@ class Operations(_Mixin):
         slug: str | None = None,
         status: Literal["active", "paused", "archived"] | None = None,
         terms_url: str | None = None,
+        url_params: list[str] | None = None,
         extra_body: dict[str, Any] | None = None,
         idempotency_key: str | None = None,
     ) -> Any:
@@ -26214,6 +26217,7 @@ class Operations(_Mixin):
                 "slug": slug,
                 "status": status,
                 "terms_url": terms_url,
+                "url_params": url_params,
             },
             extra_body=extra_body,
             idempotency_key=idempotency_key,

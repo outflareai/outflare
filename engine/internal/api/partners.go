@@ -168,9 +168,12 @@ type partnerProgramView struct {
 	SwitchedOverAt *time.Time `json:"switched_over_at"`
 	// LeadExpiryDays: a referred customer who hasn't bought within this
 	// many days no longer credits the partner; nil never expires.
-	LeadExpiryDays *int      `json:"lead_expiry_days"`
-	CreatedAt      time.Time `json:"created_at"`
-	UpdatedAt      time.Time `json:"updated_at"`
+	LeadExpiryDays *int `json:"lead_expiry_days"`
+	// URLParams are query parameters besides ref and via that carry a
+	// partner's code on the website, such as aff for links made elsewhere.
+	URLParams []string  `json:"url_params"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
 }
 
 const partnerProgramSelect = `
@@ -179,7 +182,7 @@ const partnerProgramSelect = `
 	       p.payout_term_days, p.payout_methods, p.payout_tokens, p.terms_url, p.sales_source, p.postback_hint, p.portal_enabled, p.portal_subdomain, p.portal, p.default_group_id::text,
 	       (SELECT count(*) FROM partner_memberships m WHERE m.program_id = p.id)::int,
 	       COALESCE((SELECT i.connector FROM partner_imports i WHERE i.program_id = p.id AND i.workspace_id = p.workspace_id AND i.status = 'done'
-	                 ORDER BY i.created_at DESC LIMIT 1), ''), p.switched_over_at, p.lead_expiry_days, p.created_at, p.updated_at
+	                 ORDER BY i.created_at DESC LIMIT 1), ''), p.switched_over_at, p.lead_expiry_days, p.url_params, p.created_at, p.updated_at
 	FROM partner_programs p WHERE p.workspace_id = $1`
 
 func scanPartnerProgram(row pgx.Row) (partnerProgramView, error) {
@@ -188,12 +191,19 @@ func scanPartnerProgram(row pgx.Row) (partnerProgramView, error) {
 	err := row.Scan(&v.ID, &v.Name, &v.Slug, &v.Kind, &v.Status, &v.BrandID, &v.LandingURL, &v.Currency, &v.CreditWindowDays, &v.CreditModel,
 		&v.CodesWin, &v.BlockSelfReferrals, &v.HoldDays, &v.AutoApprove, &v.AutoAccept, &v.PayBrowserSignups, &v.MinPayoutCents,
 		&v.PayoutTermDays, &v.PayoutMethods, &v.PayoutTokens, &v.TermsURL, &v.SalesSource, &v.PostbackHint,
-		&v.PortalEnabled, &v.PortalSubdomain, &portal, &v.DefaultGroupID, &v.Partners, &v.ImportedFrom, &v.SwitchedOverAt, &v.LeadExpiryDays, &v.CreatedAt, &v.UpdatedAt)
+		&v.PortalEnabled, &v.PortalSubdomain, &portal, &v.DefaultGroupID, &v.Partners, &v.ImportedFrom, &v.SwitchedOverAt, &v.LeadExpiryDays, &v.URLParams, &v.CreatedAt, &v.UpdatedAt)
 	if err == nil {
 		v.Portal = portalFor(v.Kind, portal)
 	}
 	return v, err
 }
+
+var urlParamRE = regexp.MustCompile(`^[a-z][a-z0-9_]{0,31}$`)
+
+// reservedURLParams are query parameters the website script reads already:
+// ref, via and the ad networks' click ids.
+var reservedURLParams = []string{"ref", "via", "gclid", "gbraid", "wbraid", "dclid", "fbclid", "msclkid", "li_fat_id", "rdt_cid", "twclid",
+	"ttclid", "sccid", "epik", "tblci", "ob_click_id", "qclid", "irclickid"}
 
 // partnerQuerier is a pool or a transaction.
 type partnerQuerier interface {
@@ -334,6 +344,7 @@ type partnerProgramInput struct {
 	SalesSource        *string          `json:"sales_source"`
 	Rules              *[]partnerRuleIn `json:"rules"`
 	LeadExpiryDays     optional[int]    `json:"lead_expiry_days"`
+	URLParams          *[]string        `json:"url_params"`
 }
 
 var (
@@ -394,6 +405,16 @@ func (in partnerProgramInput) check() error {
 	}
 	if d := in.LeadExpiryDays.Value; d != nil && (*d < 1 || *d > 3650) {
 		return errInvalid("lead_expiry_days is 1 to 3650, or null for leads that never expire")
+	}
+	if in.URLParams != nil {
+		if len(*in.URLParams) > 5 {
+			return errInvalid("url_params has at most 5 names")
+		}
+		for _, n := range *in.URLParams {
+			if !urlParamRE.MatchString(n) || slices.Contains(reservedURLParams, n) || strings.HasPrefix(n, "utm_") || strings.HasPrefix(n, "of") {
+				return errInvalid("url_params are lowercase names such as aff or fpr: letters, digits and _, not ref, via, utm_…, of… or an ad click id, which Outflare reads already")
+			}
+		}
 	}
 	return nil
 }
@@ -547,6 +568,11 @@ func (s *Server) createPartnerProgram(w http.ResponseWriter, r *http.Request) {
 				return err
 			}
 		}
+		if in.URLParams != nil {
+			if _, err := tx.Exec(ctx, `UPDATE partner_programs SET url_params = $2 WHERE id = $1`, id, cleanURLParams(*in.URLParams)); err != nil {
+				return err
+			}
+		}
 		rules := p.Rules
 		if in.Rules != nil {
 			if rules, err = checkPartnerRules(*in.Rules, nil, nil); err != nil {
@@ -664,6 +690,13 @@ func (s *Server) updatePartnerProgram(w http.ResponseWriter, r *http.Request) {
 			}
 			changed = append(changed, "lead_expiry_days")
 		}
+		if in.URLParams != nil {
+			if _, err := tx.Exec(ctx, `UPDATE partner_programs SET url_params = $3 WHERE workspace_id = $1 AND id = $2`,
+				a.WorkspaceID, cur.ID, cleanURLParams(*in.URLParams)); err != nil {
+				return err
+			}
+			changed = append(changed, "url_params")
+		}
 		slices.Sort(changed)
 		return partnerRecord(ctx, tx, &a.principal, a.WorkspaceID, "partner_program.updated", "partner_program", cur.ID,
 			map[string]any{"kind": cur.Kind, "status": coalesce(in.Status, cur.Status), "changed": changed})
@@ -674,6 +707,17 @@ func (s *Server) updatePartnerProgram(w http.ResponseWriter, r *http.Request) {
 	if v, ok := s.findPartnerProgram(w, r, a.WorkspaceID, cur.ID); ok {
 		writeJSON(w, http.StatusOK, v)
 	}
+}
+
+// cleanURLParams drops repeated names, keeping the order.
+func cleanURLParams(in []string) []string {
+	out := []string{}
+	for _, n := range in {
+		if !slices.Contains(out, n) {
+			out = append(out, n)
+		}
+	}
+	return out
 }
 
 func coalesce(p *string, def string) string {

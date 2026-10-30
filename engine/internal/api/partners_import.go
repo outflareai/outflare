@@ -829,7 +829,9 @@ func (r *partnerImportRun) page(ctx context.Context, kind string, page connector
 		}
 	case connectors.PartnerKindLinks:
 		for _, l := range page.Links {
-			r.link(l)
+			if err := r.link(ctx, l); err != nil {
+				return err
+			}
 		}
 	case connectors.PartnerKindPartners:
 		for _, p := range page.Partners {
@@ -888,25 +890,37 @@ func (e importSkip) Error() string { return string(e) }
 var linkParams = []string{"ref", "via"}
 
 // link keeps each partner's first link value as their code. A link with
-// a parameter the website script doesn't read, or a second link, is noted.
-func (r *partnerImportRun) link(l connectors.ImportLink) {
+// another parameter (?aff=) adds it to the program's url_params, so the
+// website reads it too; one that can't be added (a name Outflare uses, or
+// the program has 5), and a second link, are noted.
+func (r *partnerImportRun) link(ctx context.Context, l connectors.ImportLink) error {
 	if l.PartnerID == "" || l.Value == "" {
 		r.issue("links", l.ID, "incomplete")
-		return
+		return nil
 	}
-	if l.Param != "" && !slices.Contains(linkParams, strings.ToLower(l.Param)) {
-		r.issue("links", l.ID, "link_param")
-		return
+	if p := strings.ToLower(l.Param); p != "" && !slices.Contains(linkParams, p) && !slices.Contains(r.prog.URLParams, p) {
+		if !urlParamRE.MatchString(p) || slices.Contains(reservedURLParams, p) || strings.HasPrefix(p, "utm_") || strings.HasPrefix(p, "of") ||
+			len(r.prog.URLParams) >= 5 {
+			r.issue("links", l.ID, "link_param")
+			return nil
+		}
+		if _, err := r.s.pool.Exec(ctx, `UPDATE partner_programs SET url_params = array_append(url_params, $3), updated_at = now()
+			WHERE workspace_id = $1 AND id = $2 AND NOT $3 = ANY(url_params)`, r.ws, r.prog.ID, p); err != nil {
+			return err
+		}
+		r.prog.URLParams = append(r.prog.URLParams, p)
+		r.warnWhy("links", l.ID, "link_param_added", "the program now also reads ?"+p+"= links on your website (url_params)")
 	}
 	if r.progress.Codes == nil {
 		r.progress.Codes = map[string]string{}
 	}
 	if _, ok := r.progress.Codes[l.PartnerID]; ok {
 		r.issue("links", l.ID, "extra_link")
-		return
+		return nil
 	}
 	r.progress.Codes[l.PartnerID] = l.Value
 	r.note("links", "created")
+	return nil
 }
 
 // ref finds what an object on the platform became here.

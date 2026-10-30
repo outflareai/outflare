@@ -141,6 +141,7 @@ Each program keeps its own credit rule. It never follows the workspace's [attrib
 - **`credit_model`:** `first` or `last` visit with a ref inside the window.
 - **`codes_win`:** a promo code beats a link when a conversion carries both.
 - **`block_self_referrals`:** a partner's own sign-ups and purchases earn them nothing (the conversion answers `reason: self_referral`). On by default; turn it off for programs where partners may buy through their own link.
+- **`url_params`** (Settings → Other link parameters): query parameters besides `ref` and `via` that carry a partner's code on your website, such as `aff` or `fpr` for links made on another platform. A page view with no `ref` or `via` is credited by the first of these it carries. Up to 5 lowercase names; not `ref`, `via`, `utm_…`, `of…` or an ad network's click id, which the website script reads already.
 - **`lead_expiry_days`** (Settings → Lead expiration): a referred customer who hasn't bought within this many days of being referred no longer credits the partner (`lead_expired`). Once they have bought, their later sales credit the partner as the flows say, whatever the lead expiration. Empty (`null`, the default) means leads never expire.
 
 Channel reporting credits a visit by `ofc` first, while commissions credit by `ref` first ([campaign links](campaign-links.md#partner-links-and-ref)).

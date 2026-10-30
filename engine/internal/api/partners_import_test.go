@@ -250,8 +250,13 @@ func TestPartnerToltImport(t *testing.T) {
 	if p := k["partners"]; p["seen"] != 5.0 || p["created"] != 4.0 || p["skipped"] != 1.0 {
 		t.Fatalf("partners = %v", p)
 	}
-	if want := map[string]int{"no_email": 1, "code_changed": 1, "extra_link": 1, "link_param": 1, "partner_missing": 2, "partner_unavailable": 1, "flow_condition_unsupported": 1}; jsonString(reasons(first)) != jsonString(want) {
+	// l5's ?aff= becomes one of the program's url_params, then counts as
+	// Ben's second link.
+	if want := map[string]int{"no_email": 1, "code_changed": 1, "extra_link": 2, "link_param_added": 1, "partner_missing": 2, "partner_unavailable": 1, "flow_condition_unsupported": 1}; jsonString(reasons(first)) != jsonString(want) {
 		t.Fatalf("issues = %v", reasons(first))
+	}
+	if p := owner.must(200, "GET", base+"/partner-programs/affiliates", nil); jsonString(p["url_params"]) != `["aff"]` {
+		t.Fatalf("url_params = %v", p["url_params"])
 	}
 	codes := map[string]string{}
 	rows, _ := e.pool.Query(ctx, `SELECT i.value, m.code, m.status FROM partner_memberships m JOIN record_identities i ON i.record_id = m.record_id AND i.namespace = 'email'

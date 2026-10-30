@@ -79,6 +79,7 @@ const programSettings = {
   payout_methods: z.array(z.enum(["paypal", "wise", "bank_transfer", "crypto", "other"])).optional().describe("What partners choose from on the portal; empty allows any."),
   payout_tokens: z.array(z.string().max(40)).max(20).optional().describe("Crypto tokens partners choose from, such as USDC on Base."),
   lead_expiry_days: z.number().int().min(1).max(3650).nullable().optional().describe("Days a referred lead has to buy before it stops crediting the partner; null never expires."),
+  url_params: z.array(z.string().max(32)).max(5).optional().describe("Query parameters besides ref and via that carry a partner's code on the website, such as aff for links made elsewhere."),
   terms_url: z.string().max(2000).optional(),
   sales_source: z.string().optional().describe('A billing connector (stripe) whose synced payments and refunds are also partner sales; "" for none.'),
 };

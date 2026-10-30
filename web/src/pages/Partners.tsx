@@ -858,6 +858,7 @@ function ProgramSettings({ ws, program: p, canManage, onClose }: { ws: string; p
   const [methods, setMethods] = useState<PayoutMethod[]>(p.payout_methods);
   const [tokens, setTokens] = useState(p.payout_tokens.join(", "));
   const [leadDays, setLeadDays] = useState(p.lead_expiry_days === null ? "" : String(p.lead_expiry_days));
+  const [urlParams, setURLParams] = useState(p.url_params.join(", "));
   const [salesSource, setSalesSource] = useState(p.sales_source);
   const [postback, setPostback] = useState("");
   const [busy, setBusy] = useState(false);
@@ -871,7 +872,8 @@ function ProgramSettings({ ws, program: p, canManage, onClose }: { ws: string; p
       params: { path: { ws, id: p.id } },
       body: { landing_url: landing.trim(), credit_window_days: Number(windowDays), credit_model: model, hold_days: Number(hold), auto_approve: auto, pay_browser_signups: payBrowser, block_self_referrals: blockSelf, min_payout_cents: Math.round(Number(minPayout) * 100), sales_source: salesSource,
         payout_term_days: term === "" ? null : Number(term), payout_methods: methods, payout_tokens: methods.includes("crypto") ? tokens.split(",").map((t) => t.trim()).filter(Boolean) : p.payout_tokens,
-        lead_expiry_days: leadDays.trim() === "" ? null : Number(leadDays) },
+        lead_expiry_days: leadDays.trim() === "" ? null : Number(leadDays),
+        url_params: urlParams.split(",").map((s) => s.trim().toLowerCase()).filter(Boolean) },
     });
     setBusy(false);
     if (error) return setError(errorMessage(error));
@@ -935,6 +937,8 @@ function ProgramSettings({ ws, program: p, canManage, onClose }: { ws: string; p
             {methods.includes("crypto") && (
               <Input label="Crypto tokens" value={tokens} onChange={(e) => setTokens(e.target.value)} placeholder="USDC on Base, USDT on Tron" hint="Comma separated. Empty: any token." maxLength={1000} />
             )}
+            <Input label="Other link parameters" value={urlParams} onChange={(e) => setURLParams(e.target.value)} placeholder="aff, fpr" maxLength={200}
+              hint="Besides ref and via: parameters that carry a partner's code on your website, such as those of links made on another platform. Comma separated." />
             <label className="flex items-center gap-2 text-[13px]">
               <input type="checkbox" checked={auto} onChange={(e) => setAuto(e.target.checked)} /> Approve rewards on their own when the hold ends
             </label>
@@ -982,7 +986,8 @@ function ProgramSettings({ ws, program: p, canManage, onClose }: { ws: string; p
 const importReasons: Record<string, string> = {
   incomplete: "missing its id or partner",
   no_email: "no email address",
-  link_param: "a link parameter other than ref or via, which the website script doesn't read",
+  link_param: "a link parameter Outflare can't read (a name it uses already, or the program has 5 others)",
+  link_param_added: "a link parameter the program now reads too (Settings → Other link parameters)",
   extra_link: "a partner's second link (their code is the first)",
   code_changed: "the code was taken or not allowed, so the partner got a new one",
   partner_missing: "its partner didn't come over",

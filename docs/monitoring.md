@@ -187,7 +187,98 @@ The database numbers are read when Prometheus scrapes, at most once every 10 sec
 
 ## Alerts
 
-`deploy/monitoring/alerts.yml` has rules for: the server not answering; over 2% of requests failing with a 5xx; p95 latency over 2 seconds; a due job waiting over 10 minutes; website events waiting over 5 minutes to be stored, or batches set aside; jobs of one kind dying; jobs put back after their lease ran out; the pool over 90% in use or callers waiting on it; Postgres over 80% of `max_connections`; a transaction open over 5 minutes; deadlocks; over 20,000 goroutines; a pipeline stage with an item waiting over 30 minutes, over 10% of a stage's items retrying or failing, items failing for good, or an outside account's breaker open for 10 minutes; the database growing over 25% in a day (once it is over 1 GB); database metrics that can't be read; one tool making over 5 AI calls a second for 15 minutes (a loop spending workspaces' money); over 20 AI spend limits reached in an hour; a paid connection reaching its daily or monthly usage limit (info: its workspace's admins are emailed); over 500 calls an hour through one connector refused at a usage limit for 30 minutes (a feature retrying into the limit); over 20 webhook deliveries with a bad signature for one connector in 15 minutes; over 5 webhook events failing in 30 minutes; webhook events waiting over 5 minutes to be handled; over half of Domain Connect lookups failing (a DNS provider's API down, or the signing key's TXT record at outflare.ai missing); Query unable to set up its database role; over a quarter of queries timing out; meaning-based search on in workspaces while the database has no pgvector; most embedding jobs failing; most questions asked of the knowledge base failing, or answers from it taking over 20 seconds at the 95th percentile (info); a smart list not refreshed for over an hour; smart lists whose last refresh failed (info); an absence rule's timer due for over 15 minutes, over 10,000 rule timers waiting, or rule jobs failing and retrying; over 5,000 marketing emails stopped by frequency caps in an hour (info); a journey run due for over 15 minutes; over half of journey webhook, Slack, sequencer or CRM calls failing (info), or taking over 10 seconds at the 95th percentile (info); over half of the people journeys add to one sequencer's campaigns failing in 30 minutes; over half of the people journeys create or update in one CRM failing in 30 minutes; over half of the people journeys add to or remove from one ad platform's audiences failing in 30 minutes; over a quarter of conversions sent to one ad platform failing; a conversion waiting over 30 minutes to be sent; over 500 meetings waiting 30 minutes for their meeting event on people's timelines; a partner reward waiting over 30 minutes past its hold to be approved; partner conversions failing with server errors; partner link clicks not being stored; over half of partner postbacks failing for an hour (info: usually partners' trackers, or outbound traffic blocked); several partner imports from Tolt failing in an hour (info); the same kind unreadable from Tolt in several partner imports within 6 hours; over 2% of feature flag requests failing; flags taking over 250 ms to decide at the 95th percentile; over 2% of consent banner requests failing; a network's tracking template macros arriving unfilled for an hour (info); over 80% of a network's paid landings in 6 hours with no click id or ad ids (info); over 5% of clicks on campaign redirect links failing to be stored; consent banner requests taking over 500 ms at the 95th percentile; over half of cookie scans reading no page; over 5% of browsers' cookie reports failing; A/B test results taking over 10 seconds to count at the 95th percentile (info); over 5 A/B test results failing to count in 30 minutes; a review page not read for two days; over half of review page reads failing; a news search over an hour past its time; over half of news search runs failing with a provider or internal error; over half of news article reads failing to reach the page; over half of story ideas and release drafts failing at the AI call; over half of the AI's story work (ideas, release drafts, pitch openers, reading replies) failing at the AI call; an approved social post over 10 minutes past its time; over 5 social posts failing on one channel in an hour; over half of link reads failing for reasons other than a budget; over half of link prospect page checks failing; over half of Internet Archive lookups failing (info); review pages that keep failing after retries with an error Outflare has to fix (`slow_page`, `not_a_review_page`, `save_failed`; a site blocking the page reader, `blocked`, is the reader's to get past and doesn't alert); review page reads that couldn't be saved; social accounts that keep failing after retries with an error Outflare has to fix (`slow_page`, `no_follower_count`, `save_failed`; a site blocking the page reader, `blocked`, is the reader's to get past and doesn't alert); over half of social account reads failing; over half of link pitch openers or of replies to pitches failing to be read by the AI; over half of checks of agreed and live links unable to reach the page (info); over half of social account reads failing; over half of social account reads failing; a connection's analytics, Search Console, conversions, ads or SEO sync failing 3 runs in a row with Outflare's own error or the provider down; any sync run failing on Outflare's side; and over half of web searches failing for reasons other than a budget. The thresholds suit one server; over half of web searches failing for reasons other than a budget; playbook automations failing to start runs for an hour with none started; and an active playbook automation over 15 minutes past its run time. The thresholds suit one server; inbound email deliveries refused for a bad signature (the mail receiver and the engine disagree on the inbound secret), inbound messages failing to be processed, or deliveries failing before they are stored; the newest exchange rate over 6 days old; reports from Outflare for desktop failing on Outflare's side, the apps unable to read one AI tool on most computers (it likely changed its endpoint), or most linked computers silent for 12 hours (info); over a quarter of support replies failing to send, a support reply waiting over 5 minutes for a worker, or replies taking over 20 seconds to send at the 95th percentile (info); over 5% of public help centre pages failing; help centre views not being counted (info); help centre pages taking over a second to build at the 95th percentile (info); a privacy export failing for Outflare's own reasons (`OutflarePrivacyExportsFailing`); adjust them in your copy.
+`deploy/monitoring/alerts.yml` has rules for:
+
+- the server not answering
+- over 2% of requests failing with a 5xx
+- p95 latency over 2 seconds
+- a due job waiting over 10 minutes
+- website events waiting over 5 minutes to be stored, or batches set aside
+- jobs of one kind dying
+- jobs put back after their lease ran out
+- the pool over 90% in use or callers waiting on it
+- Postgres over 80% of `max_connections`
+- a transaction open over 5 minutes
+- deadlocks
+- over 20,000 goroutines
+- a pipeline stage with an item waiting over 30 minutes, over 10% of a stage's items retrying or failing, items failing for good, or an outside account's breaker open for 10 minutes
+- the database growing over 25% in a day (once it is over 1 GB)
+- database metrics that can't be read
+- one tool making over 5 AI calls a second for 15 minutes (a loop spending workspaces' money)
+- over 20 AI spend limits reached in an hour
+- a paid connection reaching its daily or monthly usage limit (info: its workspace's admins are emailed)
+- over 500 calls an hour through one connector refused at a usage limit for 30 minutes (a feature retrying into the limit)
+- over 20 webhook deliveries with a bad signature for one connector in 15 minutes
+- over 5 webhook events failing in 30 minutes
+- webhook events waiting over 5 minutes to be handled
+- over half of Domain Connect lookups failing (a DNS provider's API down, or the signing key's TXT record at outflare.ai missing)
+- Query unable to set up its database role
+- over a quarter of queries timing out
+- meaning-based search on in workspaces while the database has no pgvector
+- most embedding jobs failing
+- most questions asked of the knowledge base failing, or answers from it taking over 20 seconds at the 95th percentile (info)
+- a smart list not refreshed for over an hour
+- smart lists whose last refresh failed (info)
+- an absence rule's timer due for over 15 minutes, over 10,000 rule timers waiting, or rule jobs failing and retrying
+- over 5,000 marketing emails stopped by frequency caps in an hour (info)
+- a journey run due for over 15 minutes
+- over half of journey webhook, Slack, sequencer or CRM calls failing (info), or taking over 10 seconds at the 95th percentile (info)
+- over half of the people journeys add to one sequencer's campaigns failing in 30 minutes
+- over half of the people journeys create or update in one CRM failing in 30 minutes
+- over half of the people journeys add to or remove from one ad platform's audiences failing in 30 minutes
+- over a quarter of conversions sent to one ad platform failing
+- a conversion waiting over 30 minutes to be sent
+- over 500 meetings waiting 30 minutes for their meeting event on people's timelines
+- a partner reward waiting over 30 minutes past its hold to be approved
+- partner conversions failing with server errors
+- partner link clicks not being stored
+- over half of partner postbacks failing for an hour (info: usually partners' trackers, or outbound traffic blocked)
+- several partner imports from Tolt failing in an hour (info)
+- the same kind unreadable from Tolt in several partner imports within 6 hours
+- over 2% of feature flag requests failing
+- flags taking over 250 ms to decide at the 95th percentile
+- over 2% of consent banner requests failing
+- a network's tracking template macros arriving unfilled for an hour (info)
+- over 80% of a network's paid landings in 6 hours with no click id or ad ids (info)
+- over 5% of clicks on campaign redirect links failing to be stored
+- consent banner requests taking over 500 ms at the 95th percentile
+- over half of cookie scans reading no page
+- over 5% of browsers' cookie reports failing
+- A/B test results taking over 10 seconds to count at the 95th percentile (info)
+- over 5 A/B test results failing to count in 30 minutes
+- a review page not read for two days
+- over half of review page reads failing
+- a news search over an hour past its time
+- over half of news search runs failing with a provider or internal error
+- over half of news article reads failing to reach the page
+- over half of story ideas and release drafts failing at the AI call
+- over half of the AI's story work (ideas, release drafts, pitch openers, reading replies) failing at the AI call
+- an approved social post over 10 minutes past its time
+- over 5 social posts failing on one channel in an hour
+- over half of link reads failing for reasons other than a budget
+- over half of link prospect page checks failing
+- over half of Internet Archive lookups failing (info)
+- review pages that keep failing after retries with an error Outflare has to fix (`slow_page`, `not_a_review_page`, `save_failed`; a site blocking the page reader, `blocked`, is the reader's to get past and doesn't alert)
+- review page reads that couldn't be saved
+- social accounts that keep failing after retries with an error Outflare has to fix (`slow_page`, `no_follower_count`, `save_failed`; a site blocking the page reader, `blocked`, is the reader's to get past and doesn't alert)
+- over half of social account reads failing
+- over half of link pitch openers or of replies to pitches failing to be read by the AI
+- over half of checks of agreed and live links unable to reach the page (info)
+- a connection's analytics, Search Console, conversions, ads or SEO sync failing 3 runs in a row with Outflare's own error or the provider down
+- any sync run failing on Outflare's side
+- and over half of web searches failing for reasons other than a budget. The thresholds suit one server
+- over half of web searches failing for reasons other than a budget
+- playbook automations failing to start runs for an hour with none started
+- and an active playbook automation over 15 minutes past its run time. The thresholds suit one server
+- inbound email deliveries refused for a bad signature (the mail receiver and the engine disagree on the inbound secret), inbound messages failing to be processed, or deliveries failing before they are stored
+- the newest exchange rate over 6 days old
+- reports from Outflare for desktop failing on Outflare's side, the apps unable to read one AI tool on most computers (it likely changed its endpoint), or most linked computers silent for 12 hours (info)
+- over a quarter of support replies failing to send, a support reply waiting over 5 minutes for a worker, or replies taking over 20 seconds to send at the 95th percentile (info)
+- over 5% of public help centre pages failing
+- help centre views not being counted (info)
+- help centre pages taking over a second to build at the 95th percentile (info)
+- a privacy export failing for Outflare's own reasons (`OutflarePrivacyExportsFailing`)
+- adjust them in your copy
 
 For product events sent to brands (the event inbox), alerts fire when an event has waited over 5 minutes to be processed (warning), when over half of the events processed in an hour were rejected (info: a sender broke; the rejected-by-code panel and each brand's Events page say what to fix), and when rows stay over 6 hours past their retention (info: the sweep is failing).
 

@@ -182,6 +182,36 @@ func touchOf(props, ctxObj map[string]any) siteTouch {
 	return t
 }
 
+// partnerParamRef reads a partner's code from the page's query string under
+// one of the extra parameter names the workspace's programs set
+// (url_params), for a page view that carried no ref or via.
+func partnerParamRef(ctx context.Context, tx pgx.Tx, ws string, ctxObj map[string]any) (string, error) {
+	pageObj, _ := ctxObj["page"].(map[string]any)
+	search, _ := pageObj["search"].(string)
+	if !strings.Contains(search, "=") {
+		return "", nil
+	}
+	q, err := url.ParseQuery(strings.TrimPrefix(search, "?"))
+	if err != nil || len(q) == 0 {
+		return "", nil
+	}
+	rows, err := tx.Query(ctx, `SELECT DISTINCT unnest(url_params) FROM partner_programs WHERE workspace_id = $1 AND status = 'active'`, ws)
+	if err != nil {
+		return "", err
+	}
+	names, err := pgx.CollectRows(rows, pgx.RowTo[string])
+	if err != nil {
+		return "", err
+	}
+	slices.Sort(names)
+	for _, n := range names {
+		if v := strings.TrimSpace(q.Get(n)); v != "" {
+			return cutUTF8(v, 200), nil
+		}
+	}
+	return "", nil
+}
+
 // siteSession finds the visit an event belongs to, or starts one, and
 // puts its id in the event's context. It reports whether the visit is new.
 func siteSession(ctx context.Context, tx pgx.Tx, a *access, v siteVisitor, m eventMessage, now time.Time) (bool, error) {
@@ -196,6 +226,11 @@ func siteSession(ctx context.Context, tx pgx.Tx, a *access, v siteVisitor, m eve
 	}
 	touch := touchOf(props, ctxObj)
 	page := m.text("type") == "page"
+	if page && touch.ref == "" {
+		if touch.ref, err = partnerParamRef(ctx, tx, a.WorkspaceID, ctxObj); err != nil {
+			return false, err
+		}
+	}
 	if !page {
 		touch.ad = nil
 	}
