@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"time"
 
 	"github.com/jackc/pgx/v5"
 
@@ -16,9 +15,7 @@ import (
 )
 
 func (s *Server) routesWarmup(mux *http.ServeMux) {
-	read, manage := auth.ScopeMailboxesRead, auth.ScopeMailboxesManage
-	mux.HandleFunc("POST /v1/workspaces/{ws}/mailboxes/warmup", s.inWorkspace(manage, s.bulkWarmup))
-	mux.HandleFunc("GET /v1/workspaces/{ws}/mailboxes/{id}/warmup", s.inWorkspace(read, s.warmupHistory))
+	mux.HandleFunc("POST /v1/workspaces/{ws}/mailboxes/warmup", s.inWorkspace(auth.ScopeMailboxesManage, s.bulkWarmup))
 }
 
 // warmupSettings changes warm-up on one or more mailboxes. Unset fields
@@ -27,10 +24,6 @@ func (s *Server) routesWarmup(mux *http.ServeMux) {
 // Smartlead) runs it.
 type warmupSettings struct {
 	Enabled *bool `json:"enabled,omitempty"`
-	// DailyTarget and ReplyRate were for Outflare's own warm-up, which is
-	// gone. They are still accepted and stored, and do nothing.
-	DailyTarget *int `json:"daily_target,omitempty"`
-	ReplyRate   *int `json:"reply_rate,omitempty"`
 	// Provider is the id of the connected sequencer that runs the
 	// warm-up. "outflare" only goes with enabled false, and detaches the
 	// mailbox from its sequencer's warm-up. Turning warm-up on without a
@@ -46,12 +39,8 @@ const noWarmupProvider = "Outflare doesn't send warm-up mail itself. Connect Ema
 
 func (w *warmupSettings) validate() string {
 	switch {
-	case w.Enabled == nil && w.DailyTarget == nil && w.ReplyRate == nil && w.Provider == nil:
+	case w.Enabled == nil && w.Provider == nil:
 		return "set enabled or provider"
-	case w.DailyTarget != nil && (*w.DailyTarget < 1 || *w.DailyTarget > 100):
-		return "daily_target must be 1 to 100"
-	case w.ReplyRate != nil && (*w.ReplyRate < 0 || *w.ReplyRate > 100):
-		return "reply_rate must be 0 to 100"
 	case w.Provider != nil && *w.Provider == "outflare" && (w.Enabled == nil || *w.Enabled):
 		return noWarmupProvider
 	case w.Provider != nil && *w.Provider != "outflare" && !validUUID(*w.Provider):
@@ -191,19 +180,17 @@ func (w *warmupSettings) apply(ctx context.Context, tx pgx.Tx, ws string, ids []
 		UPDATE mailboxes m SET
 			warmup_started_at = CASE WHEN $3 AND NOT m.warmup_enabled THEN now() ELSE m.warmup_started_at END,
 			warmup_enabled = COALESCE($3, m.warmup_enabled),
-			warmup_daily_target = COALESCE($4, m.warmup_daily_target),
-			warmup_reply_rate = COALESCE($5, m.warmup_reply_rate),
 			warmup_integration_id = CASE
-				WHEN $6::text IS NOT NULL THEN NULLIF($6, '')::uuid
+				WHEN $4::text IS NOT NULL THEN NULLIF($4, '')::uuid
 				WHEN $3 AND m.warmup_integration_id IS NULL THEN (
 					SELECT p.integration_id FROM mailbox_platforms p
-					WHERE p.mailbox_id = m.id AND p.integration_id = ANY($7)
+					WHERE p.mailbox_id = m.id AND p.integration_id = ANY($5)
 					ORDER BY p.warmup_enabled DESC, p.observed_at DESC NULLS LAST LIMIT 1)
 				ELSE m.warmup_integration_id END,
 			updated_at = now()
 		FROM old WHERE m.id = old.id
 		RETURNING m.id::text, old.warmup_integration_id::text, m.warmup_integration_id::text`,
-		ws, ids, w.Enabled, w.DailyTarget, w.ReplyRate, provider, w.capable)
+		ws, ids, w.Enabled, provider, w.capable)
 	if err != nil {
 		return 0, err
 	}
@@ -215,7 +202,7 @@ func (w *warmupSettings) apply(ctx context.Context, tx pgx.Tx, ws string, ids []
 		var c changed
 		return c, r.Scan(&c.id, &c.was, &c.now)
 	})
-	if err != nil || w.Enabled == nil && w.Provider == nil {
+	if err != nil {
 		return int64(len(list)), err
 	}
 	for _, c := range list {
@@ -321,48 +308,4 @@ func (s *Server) bulkWarmup(w http.ResponseWriter, r *http.Request) {
 	default:
 		writeJSON(w, http.StatusOK, map[string]any{"updated": updated})
 	}
-}
-
-type warmupDay struct {
-	Date    string `json:"date"`
-	Sent    int    `json:"sent"`
-	Inbox   int    `json:"inbox"`
-	Spam    int    `json:"spam"`
-	Missing int    `json:"missing"`
-	// Replies is how many warm-up replies this mailbox received.
-	Replies int `json:"replies"`
-}
-
-// warmupHistory is a mailbox's results from Outflare's own warm-up for
-// each of the last 14 days (UTC), oldest first. That warm-up is gone, so
-// the days run down to zero; the route stays for clients that call it.
-func (s *Server) warmupHistory(w http.ResponseWriter, r *http.Request) {
-	a := accessFrom(r.Context())
-	w.Header().Set("Deprecation", "@1792972800") // 2026-10-26
-	id := r.PathValue("id")
-	if _, ok := s.findMailbox(w, r, a.WorkspaceID, id); !ok {
-		return
-	}
-	today := time.Now().UTC().Truncate(24 * time.Hour)
-	rows, err := s.pool.Query(r.Context(), `
-		SELECT to_char(d AT TIME ZONE 'UTC', 'YYYY-MM-DD'),
-			count(g.id) FILTER (WHERE g.from_mailbox_id = $1 AND g.status = 'sent'),
-			count(g.id) FILTER (WHERE g.from_mailbox_id = $1 AND g.landed = 'inbox'),
-			count(g.id) FILTER (WHERE g.from_mailbox_id = $1 AND g.landed = 'spam'),
-			count(g.id) FILTER (WHERE g.from_mailbox_id = $1 AND g.landed = 'missing'),
-			count(g.id) FILTER (WHERE g.to_mailbox_id = $1 AND g.depth > 0 AND g.status = 'sent')
-		FROM generate_series($2::timestamptz - interval '13 days', $2::timestamptz, interval '1 day') d
-		LEFT JOIN warmup_messages g ON (g.from_mailbox_id = $1 OR g.to_mailbox_id = $1)
-			AND g.created_at >= d AND g.created_at < d + interval '1 day'
-		GROUP BY d ORDER BY d`, id, today)
-	if err != nil {
-		s.internal(w, r, err)
-		return
-	}
-	days, err := pgx.CollectRows(rows, pgx.RowToStructByPos[warmupDay])
-	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
-		s.internal(w, r, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"data": days})
 }

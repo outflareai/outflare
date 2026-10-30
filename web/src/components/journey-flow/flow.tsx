@@ -87,7 +87,7 @@ function layout(props: FlowProps): { nodes: Node[]; edges: Edge<SlotData>[]; wid
   for (const s of steps) {
     for (const field of outputs(kinds, s)) {
       const to = linkOf(s, field);
-      link(s.id, to && ids.has(to) ? to : end(`${s.id}:${field}`), { from: s.id, field }, outputLabel(field));
+      link(s.id, to && ids.has(to) ? to : end(`${s.id}:${field}`), { from: s.id, field }, outputLabel(field, s));
     }
     // A step's error path, when its error mode names a step.
     const err = errorLink(kinds, s);

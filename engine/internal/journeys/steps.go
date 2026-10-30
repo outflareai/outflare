@@ -8,6 +8,7 @@ package journeys
 import (
 	"fmt"
 	"regexp"
+	"slices"
 	"strings"
 )
 
@@ -17,6 +18,12 @@ const (
 	KindWait   = "wait"
 	KindBranch = "branch"
 	KindExit   = "exit"
+	// KindWaitUntil waits for one of its paths (an event, or conditions
+	// coming true), or its timeout, whichever comes first.
+	KindWaitUntil = "wait_until"
+	// KindSplit sends people down one of its paths: the first whose
+	// conditions hold (by value), or one picked at random by weight.
+	KindSplit = "split"
 )
 
 // Step is one step of a journey. Next (or Then and Else for a branch) names
@@ -64,6 +71,16 @@ type Step struct {
 	Body    any               `json:"body,omitempty"`
 	Auth    *Auth             `json:"auth,omitempty"`
 	SaveAs  string            `json:"save_as,omitempty"`
+	// wait_until and split: the ways on, in order. wait_until also has
+	// timeout_seconds and where to go then (timeout_next; empty ends the
+	// run). split picks by value (the first path whose conditions hold,
+	// else else) or at random (by weight, the same for a person, or for
+	// everyone at their company with split_key company).
+	Paths          []Path `json:"paths,omitempty"`
+	TimeoutSeconds int64  `json:"timeout_seconds,omitempty"`
+	TimeoutNext    string `json:"timeout_next,omitempty"`
+	SplitBy        string `json:"split_by,omitempty"`
+	SplitKey       string `json:"split_key,omitempty"`
 	// slack: the channel, and which Slack connection (the workspace's
 	// first when empty). The message is text, with title in bold above it.
 	Channel      string `json:"channel,omitempty"`
@@ -97,6 +114,25 @@ type Step struct {
 	// move_deal: the deal to move or open.
 	Deal    *DealMove `json:"deal,omitempty"`
 	OnError string    `json:"on_error,omitempty"`
+}
+
+// Path is one way on from a wait_until or split step. Its id names it in
+// the step's results.
+//
+//   - wait_until: event (they do this event; conditions then test its
+//     properties and their fields), or conditions alone (they come true).
+//   - split by value: conditions, all or any of them (match).
+//   - split at random: weight, a share of people; holdout marks the
+//     people kept out on purpose, whose runs end there as exited.
+type Path struct {
+	ID         string      `json:"id"`
+	Name       string      `json:"name,omitempty"`
+	Event      string      `json:"event,omitempty"`
+	Conditions []Condition `json:"conditions,omitempty"`
+	Match      string      `json:"match,omitempty"`
+	Weight     int         `json:"weight,omitempty"`
+	Holdout    bool        `json:"holdout,omitempty"`
+	Next       string      `json:"next,omitempty"`
 }
 
 // Auth is how a webhook step's call proves it may call: type none (the
@@ -195,6 +231,10 @@ func Check(steps []Step) string {
 			if st.Next != "" {
 				return "step " + st.ID + ": an exit step ends the run, so it has no next"
 			}
+		case KindWaitUntil, KindSplit:
+			if msg := checkPaths(*st); msg != "" {
+				return "step " + st.ID + ": " + msg
+			}
 		default:
 			a := action(st.Kind)
 			if a == nil {
@@ -209,12 +249,16 @@ func Check(steps []Step) string {
 		}
 	}
 	for _, st := range steps {
-		for _, to := range []string{st.Next, st.Then, st.Else, errorStep(st.OnError)} {
-			if to != "" && byID[to] == nil {
+		for _, to := range st.Links() {
+			if byID[to] == nil {
 				return "step " + st.ID + " goes to " + to + ", which is not a step"
 			}
 		}
-		for _, c := range st.Conditions {
+		conds := slices.Clone(st.Conditions)
+		for _, p := range st.Paths {
+			conds = append(conds, p.Conditions...)
+		}
+		for _, c := range conds {
 			if c.Step != "" && (byID[c.Step] == nil || byID[c.Step].Kind != KindEmail) {
 				return "step " + st.ID + ": " + c.Step + " is not an email step"
 			}
@@ -235,7 +279,10 @@ func Check(steps []Step) string {
 		}
 		state[id] = 1
 		st := byID[id]
-		ok := visit(st.Next) && visit(st.Then) && visit(st.Else) && visit(errorStep(st.OnError))
+		ok := true
+		for _, to := range st.Links() {
+			ok = ok && visit(to)
+		}
 		state[id] = 2
 		return ok
 	}
@@ -319,11 +366,15 @@ func errorStep(onError string) string {
 	return onError
 }
 
-// Links is the steps a step goes on to: next, then and else, and where a
-// failed action goes (on_error).
+// Links is the steps a step goes on to: next, then and else, its paths
+// and timeout, and where a failed action goes (on_error).
 func (st Step) Links() []string {
 	out := []string{}
-	for _, to := range []string{st.Next, st.Then, st.Else, errorStep(st.OnError)} {
+	to := []string{st.Next, st.Then, st.Else, st.TimeoutNext, errorStep(st.OnError)}
+	for _, p := range st.Paths {
+		to = append(to, p.Next)
+	}
+	for _, to := range to {
 		if to != "" {
 			out = append(out, to)
 		}
@@ -360,4 +411,89 @@ func Unreachable(steps []Step) []string {
 		}
 	}
 	return out
+}
+
+// MaxPaths is the most paths a wait_until or split step can have.
+const MaxPaths = 10
+
+func checkPaths(st Step) string {
+	if len(st.Paths) == 0 || len(st.Paths) > MaxPaths {
+		return fmt.Sprintf("a %s step needs 1 to %d paths", st.Kind, MaxPaths)
+	}
+	if st.Next != "" || st.Then != "" {
+		return "it goes on through its paths, not next or then"
+	}
+	ids := map[string]bool{}
+	weights := 0
+	for i, p := range st.Paths {
+		at := fmt.Sprintf("path %d: ", i+1)
+		if !stepIDRE.MatchString(p.ID) || ids[p.ID] {
+			return at + "id must be unique: 1 to 40 lowercase letters, digits, - or _"
+		}
+		ids[p.ID] = true
+		if len(p.Name) > 100 {
+			return at + "name must be at most 100 characters"
+		}
+		if p.Match != "" && p.Match != "all" && p.Match != "any" {
+			return at + "match is all or any"
+		}
+		if len(p.Conditions) > 20 {
+			return at + "at most 20 conditions"
+		}
+		for _, c := range p.Conditions {
+			if msg := checkCondition(c); msg != "" {
+				return at + msg
+			}
+		}
+		random := st.Kind == KindSplit && st.SplitBy == "random"
+		switch {
+		case p.Event != "" && (st.Kind != KindWaitUntil || !ValidEventName(p.Event)):
+			return at + "event is for wait_until, and is an event name such as order_completed"
+		case st.Kind == KindWaitUntil && p.Event == "" && len(p.Conditions) == 0:
+			return at + "wait for an event or for conditions"
+		case st.Kind == KindSplit && !random && len(p.Conditions) == 0:
+			return at + "a split by value tests conditions"
+		case random && len(p.Conditions) > 0:
+			return at + "a random split doesn't test conditions"
+		case random && (p.Weight < 0 || p.Weight > 100):
+			return at + "weight is 0 to 100"
+		case !random && (p.Weight != 0 || p.Holdout):
+			return at + "weight and holdout are for a random split"
+		case p.Holdout && p.Next != "":
+			return at + "a holdout path ends there, so it has no next"
+		}
+		weights += p.Weight
+	}
+	switch st.Kind {
+	case KindWaitUntil:
+		if st.TimeoutSeconds < 60 || st.TimeoutSeconds > 90*24*3600 {
+			return "timeout_seconds must be from 60 (a minute) to 7776000 (90 days)"
+		}
+		if st.SplitBy != "" || st.SplitKey != "" || st.Else != "" {
+			return "split_by, split_key and else are for split steps"
+		}
+	case KindSplit:
+		switch st.SplitBy {
+		case "", "value":
+			if st.SplitKey != "" {
+				return "split_key is for a random split"
+			}
+		case "random":
+			if weights == 0 {
+				return "a random split needs a weight above 0"
+			}
+			if st.Else != "" {
+				return "a random split always picks a path, so it has no else"
+			}
+		default:
+			return "split_by is value or random"
+		}
+		if st.SplitKey != "" && st.SplitKey != "person" && st.SplitKey != "company" {
+			return "split_key is person or company"
+		}
+		if st.TimeoutSeconds != 0 || st.TimeoutNext != "" {
+			return "timeout_seconds and timeout_next are for wait_until"
+		}
+	}
+	return ""
 }

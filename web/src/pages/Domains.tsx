@@ -4,7 +4,7 @@ import { useBrand } from "@/lib/brand";
 import { BrandBadge } from "@/components/brand-badge";
 import { api, errorMessage } from "../api";
 import { Badge, Button, Card, confirmAction, Empty, ErrorText, field, Loading, PageHeader, Stat, Stats, toast, type tones } from "../ui";
-import { ago, placementTone, plural, replyRate } from "../format";
+import { ago, plural, replyRate } from "../format";
 import type { Tab } from "../App";
 import { DataTable } from "@/components/data-table";
 import { health as sharedHealth, mailboxStatus } from "@/lib/status";
@@ -165,7 +165,7 @@ function List({ ws, canManage, onOpen, go }: Props) {
               </div>
               <div className="text-xs text-muted-foreground">
                 {d.mailbox_counts.active} of {d.mailboxes} mailboxes active · {d.sent_24h}/{d.daily_capacity} sent today · bounces {rate(d.bounces_7d, d.sent_7d)} · replies {rate(d.replies_7d, d.sent_7d)}
-                {d.warmup.inbox_rate !== null && <> · inbox {Math.round(d.warmup.inbox_rate * 100)}%</>}
+                {d.warmup.warming > 0 && <> · {d.warmup.warming} warming up</>}
               </div>
             </div>
           )}
@@ -218,7 +218,7 @@ function List({ ws, canManage, onOpen, go }: Props) {
             { id: "sent", header: "Sent 24h", accessorFn: (d) => d.sent_24h, meta: { align: "right", mono: true }, cell: ({ row: { original: d } }) => <>{d.sent_24h}<span className="text-muted-foreground">/{d.daily_capacity}</span></> },
             { id: "bounces", header: "Bounces 7d", accessorFn: (d) => (d.sent_7d ? d.bounces_7d / d.sent_7d : 0), meta: { align: "right", mono: true }, cell: ({ row: { original: d } }) => <span className={d.issues.some((i) => i.code === "bounce_rate") ? "text-red-600 dark:text-red-400" : ""}>{rate(d.bounces_7d, d.sent_7d)}</span> },
             { id: "replies", header: "Replies 7d", accessorFn: (d) => d.replies_7d, meta: { align: "right", mono: true }, cell: ({ row: { original: d } }) => rate(d.replies_7d, d.sent_7d) },
-            { id: "inbox", header: "Inbox 7d", accessorFn: (d) => d.warmup.inbox_rate ?? -1, meta: { align: "right", mono: true }, cell: ({ row: { original: d } }) => <Placement w={d.warmup} /> },
+            { id: "warming", header: "Warming", accessorFn: (d) => d.warmup.warming, meta: { align: "right", mono: true }, cell: ({ row: { original: d } }) => d.warmup.warming || <span className="text-muted-foreground">–</span> },
           ]}
         />
       )}
@@ -525,12 +525,7 @@ function Detail({ ws, canManage, open, onOpen, go }: Props) {
         <Stat label="Sent · 7d" value={d.sent_7d} />
         <Stat label="Replies · 7d" value={d.replies_7d} sub={replyRate(d.replied_leads_7d, d.contacted_leads_7d) && `${replyRate(d.replied_leads_7d, d.contacted_leads_7d)} reply rate`} />
         <Stat label="Bounces · 7d" value={d.bounces_7d} sub={d.sent_7d ? `${pct(bounceRate)} bounce rate${bounceRate > 0.02 ? ", keep under 2%" : ""}` : undefined} tone={bounceRate > 0.02 ? "red" : undefined} />
-        <Stat
-          label="Inbox · 7d"
-          value={d.warmup.inbox_rate === null ? "–" : `${Math.round(d.warmup.inbox_rate * 100)}%`}
-          tone={placementTone(d.warmup.inbox_rate)}
-          sub={d.warmup.inbox_rate !== null ? `${d.warmup.inbox_7d} of ${d.warmup.placed_7d} warm-up emails` : d.warmup.warming > 0 ? `${d.warmup.warming} warming, results soon` : "turn on warm-up in Mailboxes"}
-        />
+        <Stat label="Warming up" value={d.warmup.warming} sub={d.warmup.warming > 0 ? "in a connected sequencer" : "turn on warm-up in Mailboxes"} />
       </Stats>
 
       <Card title="Last 14 days">
@@ -961,13 +956,6 @@ function MailboxTable({ ws, mailboxes, canManage, onChange }: { ws: string; mail
   );
 }
 
-
-// Inbox placement of the domain's warm-up mail, colored like the advice thresholds.
-function Placement({ w }: { w: SendingDomain["warmup"] }) {
-  if (w.inbox_rate === null) return <span className="text-muted-foreground">{w.warming > 0 ? "warming" : "–"}</span>;
-  const color = { red: "text-red-600 dark:text-red-400", amber: "text-amber-600 dark:text-amber-400", green: "text-green-600 dark:text-green-400" }[placementTone(w.inbox_rate)!];
-  return <span className={color} title={`${w.inbox_7d} of ${w.placed_7d} warm-up emails reached the inbox`}>{Math.round(w.inbox_rate * 100)}%</span>;
-}
 
 function pct(r: number) {
   return `${Math.round(r * 1000) / 10}%`;

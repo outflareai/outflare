@@ -114,8 +114,6 @@ export function Overview({ ws, name, isAdmin, go, limited = false }: { ws: strin
   }
   if (s.domains.need_attention > 0 && !status?.blockers.some((b) => b.code === "domain_critical"))
     todos.push({ key: "domains", title: `${plural(s.domains.need_attention, "sending domain needs", "sending domains need")} attention`, tone: "amber", tab: "domains", cta: "See what to fix" });
-  if (s.warmup_inbox_rate !== null && s.warmup_inbox_rate < 0.75)
-    todos.push({ key: "warmup", title: `Only ${pct(s.warmup_inbox_rate)} of warm-up mail reached the inbox this week`, tone: "amber", tab: "domains", cta: "See which domains" });
   if (bounceRate > 0.02) todos.push({ key: "bounces", title: `Bounce rate is ${pct(bounceRate)} this week, keep it under 2%`, tone: "red", tab: "leads", cta: "Check your list" });
 
   if (checklist) {

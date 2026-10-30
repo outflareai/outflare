@@ -256,6 +256,8 @@ with the rule's dry run. On a phone the flow is read-only.
     started (`{"event": "upgraded", "op": "exists"}`) or whether an earlier
     email step's email was delivered, opened or clicked (`{"email":
     "opened", "step": "welcome", "op": "exists"}`).
+  - `wait_until` waits for whichever of its `paths` comes first, or its timeout (`timeout_seconds`, a minute to 90 days; then `timeout_next`). A path waits for an `event` (its `conditions` then test that event's properties and the person's fields, so `order_completed` with amount over 50 can go one way), or for `conditions` to come true, checked whenever one of the person's fields changes and at least hourly. See [Flow control](#flow-control).
+  - `split` sends people down one of its `paths`: by value (`split_by` `value`, the default), the first path whose `conditions` hold, else `else`; or at random (`random`) by `weight`, the same way every time for a person, or for everyone at their company (`split_key` `company`). A random path marked `holdout` keeps people out on purpose: their run ends there, exited with reason `holdout`.
   - `exit` ends the run. An empty `next` ends it as completed.
 - **Actions.** Steps that do something besides email, each going on to
   `next`:
@@ -285,6 +287,7 @@ with the rule's dry run. On a phone the flow is read-only.
   - **AI.** `ai` asks the workspace's own AI model to sort the person into choices or write a short text, kept for later steps. See [AI steps](#ai-steps).
 
   Each action is done, `skipped` with why, or `failed`. A failed step does what its `on_error` says: `stop` (the default) fails the run, `continue` goes on to `next`, and a step id goes there. `GET .../journeys/step-kinds` (MCP `list_journey_step_kinds`) lists every kind with its settings as JSON Schema and the fields that name the next step. The flow builder's step picker reads it.
+- **Entry limits.** `entry_limit` (`{"count": 500, "per": "day"}`, or `hour`) caps how many people a journey's trigger starts; the rest are turned away, counted in `outflare_journeys_entries_refused_total`. With entry `again`, `reentry_after_seconds` is how long after someone's last run ends they can start again. Both leave adding someone by hand alone.
 - **Run variables.** A step can save something for later steps: a webhook's answer is kept as `vars.<save_as>`. Templates, webhook and Slack text and `set_field` values read it as `{{vars.x}}`, and a branch tests it with a `var` condition (`{"var": "billing.status", "op": "eq", "value": 200}`). One run shows its `vars`.
 - **Goal.** When the person does `goal_event`, their run ends with reason
   `goal`.
@@ -337,7 +340,11 @@ with the rule's dry run. On a phone the flow is read-only.
   starts the run is their latest trigger event (or one you give). A check
   on something they may still do, such as an event or opening an email,
   goes the way their data says now ("for now"); **Try Yes** or **Try No**
-  sends it the other way. It also says when they wouldn't start a run now,
+  sends it the other way. A `wait_until` can't wait in a test: it takes a
+  path that holds now, or times out. `paths` in the request sends a
+  branch `yes` or `no`, a split down one of its path ids or `else`, and
+  a `wait_until` down one of its path ids or `timed_out`. It also says
+  when they wouldn't start a run now,
   such as being in the journey already, and shows the path anyway.
 - **Results.** A journey shows how many people entered, are in it,
   completed, exited and failed, and per step how many were sent, skipped,
@@ -356,6 +363,26 @@ A `webhook` step makes one HTTP call per person:
 - **Where it can call.** Only public `https` addresses, unless the server sets `WEBHOOKS_ALLOW_PRIVATE` (self-hosted receivers on the same network).
 
 The run's history shows each call as `calling`, then `done` with the status and time (`200 in 184 ms`), or `failed` with why.
+
+### Flow control
+
+`wait_until` and `split` steps have `paths`, each with an `id` that names it in the journey's step results (`step_stats`), so you see how many people went each way; `wait_until` also counts `timed_out`, and a value split `else`.
+
+```json
+{"id": "wait", "kind": "wait_until", "timeout_seconds": 604800, "timeout_next": "nudge",
+ "paths": [
+   {"id": "bought", "event": "order_completed", "conditions": [{"property": "amount", "op": "gt", "value": 50}], "next": "thanks"},
+   {"id": "upgraded", "conditions": [{"attribute": "plan", "op": "eq", "value": "pro"}], "next": "welcome_pro"}]}
+```
+
+```json
+{"id": "test", "kind": "split", "split_by": "random", "split_key": "company",
+ "paths": [
+   {"id": "a", "weight": 45, "next": "email_a"}, {"id": "b", "weight": 45, "next": "email_b"},
+   {"id": "control", "weight": 10, "holdout": true}]}
+```
+
+A run on a `wait_until` step shows `wait_deadline`. Paths go in order: the first that comes true wins. A paused journey's runs keep waiting but don't move on an event until it is active again; their timeout still counts.
 
 ### AI steps
 

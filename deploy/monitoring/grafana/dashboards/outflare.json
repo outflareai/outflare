@@ -7679,6 +7679,166 @@
           "sort": "desc"
         }
       }
+    },
+    {
+      "type": "row",
+      "title": "Journeys",
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 572
+      },
+      "id": 191,
+      "panels": []
+    },
+    {
+      "type": "timeseries",
+      "title": "Journey runs waiting",
+      "description": "Runs on a wait_until step, waiting for an event, for conditions to come true, or for their timeout. It grows with journeys that wait days; a sudden jump usually means a new journey with a long wait went live.",
+      "id": 192,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 573
+      },
+      "targets": [
+        {
+          "expr": "max(outflare_journeys_waiting_runs{job=\"$job\"})",
+          "legendFormat": "waiting",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "fillOpacity": 10,
+            "stacking": {
+              "mode": "none"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "mean",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Most overdue journey run",
+      "description": "How long past its time the most overdue run of an active journey is. Normal: under a minute. Higher means journey jobs aren't running or are far behind: check the job queue panels.",
+      "id": 193,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 573
+      },
+      "targets": [
+        {
+          "expr": "max(outflare_journeys_oldest_due_seconds{job=\"$job\"})",
+          "legendFormat": "overdue",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "custom": {
+            "fillOpacity": 10,
+            "stacking": {
+              "mode": "none"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "mean",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Journey entries turned away",
+      "description": "People a journey's trigger would have started but its entry limit (limit) or re-entry wait (reentry) turned away, per minute. Expected when a busy trigger meets a low limit; a steady high rate may mean the limit is too low.",
+      "id": 194,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 581
+      },
+      "targets": [
+        {
+          "expr": "sum by (reason) (rate(outflare_journeys_entries_refused_total{job=\"$job\"}[5m])) * 60",
+          "legendFormat": "{{reason}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "fillOpacity": 10,
+            "stacking": {
+              "mode": "none"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "mean",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
     }
   ]
 }

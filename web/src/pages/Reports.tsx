@@ -71,13 +71,12 @@ export function Reports({ ws }: { ws: string }) {
       {!report && !error && <Loading />}
       {t && report && (
         <>
-          <Stats cols={6}>
+          <Stats cols={5}>
             <Stat label="Sent" value={t.sent.toLocaleString()} sub={`${t.new_leads.toLocaleString()} new · ${t.follow_ups.toLocaleString()} follow-ups`} />
             <Stat label="Leads contacted" value={t.contacted.toLocaleString()} sub={t.clicks > 0 ? `${t.clicked_leads.toLocaleString()} clicked a link (${pct(t.click_rate)})` : undefined} />
             <Stat label="Reply rate" value={pct(t.reply_rate)} sub={`${t.replied_leads.toLocaleString()} leads replied`} tone={t.reply_rate !== null && t.reply_rate >= 3 ? "green" : undefined} />
             <Stat label="Bounce rate" value={pct(t.bounce_rate)} sub={`${t.bounced.toLocaleString()} bounced`} tone={t.bounce_rate === null ? undefined : t.bounce_rate >= 5 ? "red" : t.bounce_rate >= 3 ? "amber" : "green"} />
             <Stat label="Opt-outs" value={pct(t.opt_out_rate)} sub={`${t.opt_outs + t.unsubscribes} opted out`} />
-            <Stat label="Inbox placement" value={pct(t.inbox_placement)} sub="warm-up mail" />
           </Stats>
           {(group === "day" || group === "week") && report.rows.length > 1 && <SendsChart rows={report.rows} />}
           {report.rows.length === 0 ? (
@@ -123,7 +122,7 @@ function SendsChart({ rows }: { rows: Row[] }) {
 
 function Breakdown({ rows, group, clicks }: { rows: Row[]; group: Group; clicks: boolean }) {
   const header = useMemo(() => groups.find((g) => g.id === group)!.label, [group]);
-  const num = (k: keyof ReportMetrics, h: string) => ({ id: k, header: h, accessorFn: (r: Row) => (r[k] as number | null) ?? -1, meta: { align: "right" as const, mono: true }, cell: ({ row: { original: r } }: { row: { original: Row } }) => (k.endsWith("rate") || k === "inbox_placement" ? pct(r[k] as number | null) : (r[k] as number).toLocaleString()) });
+  const num = (k: keyof ReportMetrics, h: string) => ({ id: k, header: h, accessorFn: (r: Row) => (r[k] as number | null) ?? -1, meta: { align: "right" as const, mono: true }, cell: ({ row: { original: r } }: { row: { original: Row } }) => (k.endsWith("rate") ? pct(r[k] as number | null) : (r[k] as number).toLocaleString()) });
   return (
     <DataTable
       data={rows}
@@ -140,7 +139,6 @@ function Breakdown({ rows, group, clicks }: { rows: Row[]; group: Group; clicks:
         num("opt_outs", "Opt-outs"),
         num("unsubscribes", "Unsubscribes"),
         ...(clicks ? [num("clicked_leads", "Clicked"), num("click_rate", "Click rate")] : []),
-        ...(group === "mailbox" || group === "domain" || group === "day" || group === "week" ? [num("inbox_placement", "Placement")] : []),
       ]}
     />
   );

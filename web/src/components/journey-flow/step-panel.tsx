@@ -11,7 +11,7 @@ import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "
 import type { Go } from "@/pages/Lifecycle";
 import { track } from "@/lib/analytics";
 import { ExclusionPicker, type Exclusion } from "@/components/exclusion-picker";
-import { kindOf, leadsTo, opText, outputLabel, outputs, stepLabel, type Problem, type SettingsSchema, type Step, type StepKind } from "./model";
+import { kindOf, leadsTo, linkOf, opText, outputLabel, outputs, setLink, stepLabel, type Problem, type SettingsSchema, type Step, type StepKind } from "./model";
 
 type EventDefinition = Schemas["EventDefinition"];
 
@@ -391,11 +391,11 @@ export function StepPanel({ ws, step: s, steps, kinds, templates, catalog, event
           {s.kind === "exit" && <p className="text-[13px] text-muted-foreground">Ends their run here.</p>}
           {k && !["email", "wait", "branch", "exit"].includes(s.kind) && <SchemaFields ws={ws} schema={k.settings_schema} step={s} onChange={onChange} disabled={disabled} />}
           {outputs(kinds, s).map((f) => (
-            <Row key={f} label={outputLabel(f) ? `${outputLabel(f)}: go to` : "Then"}>
-              <select aria-label={outputLabel(f) || "Then"} className={`${field} w-full`} value={(s[f] as string | undefined) ?? ""} disabled={disabled}
+            <Row key={f} label={outputLabel(f, s) ? `${outputLabel(f, s)}: go to` : "Then"}>
+              <select aria-label={outputLabel(f, s) || "Then"} className={`${field} w-full`} value={linkOf(s, f) ?? ""} disabled={disabled}
                 onChange={(e) => {
-                  track("ui.journey_step_linked", { kind: s.kind, output: f, to: e.target.value ? "step" : "end" });
-                  onChange({ ...s, [f]: e.target.value || undefined });
+                  track("ui.journey_step_linked", { kind: s.kind, output: f.startsWith("paths.") ? "path" : f, to: e.target.value ? "step" : "end" });
+                  onChange(setLink(s, f, e.target.value || undefined));
                 }}>
                 <option value="">End (completed)</option>
                 {targets.map((x) => <option key={x.id} value={x.id}>{steps.indexOf(x) + 1}. {stepLabel(x, kinds, templates)}</option>)}

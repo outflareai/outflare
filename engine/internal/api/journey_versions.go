@@ -30,18 +30,22 @@ type journeyVersionView struct {
 	// Exit criteria, as on the journey.
 	ExitEvents     []string             `json:"exit_events"`
 	ExitConditions []journeys.Condition `json:"exit_conditions"`
-	Exclude        customers.Exclusion  `json:"exclude"`
-	Steps          []journeys.Step      `json:"steps"`
-	RunsActive     int                  `json:"runs_active"`
-	CreatedAt      time.Time            `json:"created_at"`
-	UpdatedAt      time.Time            `json:"updated_at"`
-	PublishedAt    *time.Time           `json:"published_at"`
+	// Entry limits, as on the journey.
+	EntryLimit          *journeyEntryLimit  `json:"entry_limit"`
+	ReentryAfterSeconds *int                `json:"reentry_after_seconds"`
+	Exclude             customers.Exclusion `json:"exclude"`
+	Steps               []journeys.Step     `json:"steps"`
+	RunsActive          int                 `json:"runs_active"`
+	CreatedAt           time.Time           `json:"created_at"`
+	UpdatedAt           time.Time           `json:"updated_at"`
+	PublishedAt         *time.Time          `json:"published_at"`
 }
 
 // The active runs on each version: a run with no version of its own goes
 // through the journey's current one.
 const journeyVersionSelect = `
-	SELECT v.id, v.status, v.version, v.trigger_kind, v.trigger_event, v.trigger_filter, v.entry, v.goal_event, v.exit_events, v.exit_conditions, v.exclude, v.steps,
+	SELECT v.id, v.status, v.version, v.trigger_kind, v.trigger_event, v.trigger_filter, v.entry, v.goal_event, v.exit_events, v.exit_conditions,
+	       v.entry_limit, v.entry_limit_per, v.reentry_after_seconds, v.exclude, v.steps,
 	       CASE WHEN v.status = 'draft' THEN 0 ELSE (SELECT count(*)::int FROM journey_runs r
 	         WHERE r.journey_id = v.journey_id AND r.status = 'active' AND COALESCE(r.journey_version, j.version) = v.version) END,
 	       v.created_at, v.updated_at, v.published_at
@@ -51,13 +55,17 @@ const journeyVersionSelect = `
 func scanJourneyVersion(row pgx.Row) (journeyVersionView, error) {
 	var v journeyVersionView
 	var filter, exitConds, exclude, steps []byte
-	err := row.Scan(&v.ID, &v.Status, &v.Version, &v.Trigger.Kind, &v.Trigger.Event, &filter, &v.Entry, &v.GoalEvent, &v.ExitEvents, &exitConds, &exclude, &steps, &v.RunsActive,
+	var limit *int
+	var per *string
+	err := row.Scan(&v.ID, &v.Status, &v.Version, &v.Trigger.Kind, &v.Trigger.Event, &filter, &v.Entry, &v.GoalEvent, &v.ExitEvents, &exitConds,
+		&limit, &per, &v.ReentryAfterSeconds, &exclude, &steps, &v.RunsActive,
 		&v.CreatedAt, &v.UpdatedAt, &v.PublishedAt)
 	if err != nil {
 		return v, err
 	}
 	v.Trigger.Filter, v.Steps, v.ExitConditions = []journeys.Condition{}, []journeys.Step{}, []journeys.Condition{}
 	_ = json.Unmarshal(exitConds, &v.ExitConditions)
+	v.EntryLimit = entryLimitOf(limit, per)
 	_ = json.Unmarshal(exclude, &v.Exclude)
 	v.Exclude = v.Exclude.Clean()
 	_ = json.Unmarshal(filter, &v.Trigger.Filter)
@@ -73,8 +81,9 @@ func keepJourneyVersion(ctx context.Context, tx pgx.Tx, a *access, journeyID str
 		by = &a.ActorID
 	}
 	_, err := tx.Exec(ctx, `INSERT INTO journey_versions (workspace_id, journey_id, status, version, trigger_kind, trigger_event, trigger_filter,
-		entry, goal_event, exit_events, exit_conditions, exclude, steps, created_by, published_by, published_at)
-		SELECT workspace_id, id, 'published', version, trigger_kind, trigger_event, trigger_filter, entry, goal_event, exit_events, exit_conditions, exclude, steps, $3, $3, now()
+		entry, goal_event, exit_events, exit_conditions, entry_limit, entry_limit_per, reentry_after_seconds, exclude, steps, created_by, published_by, published_at)
+		SELECT workspace_id, id, 'published', version, trigger_kind, trigger_event, trigger_filter, entry, goal_event, exit_events, exit_conditions,
+			entry_limit, entry_limit_per, reentry_after_seconds, exclude, steps, $3, $3, now()
 		FROM journeys WHERE workspace_id = $1 AND id = $2
 		ON CONFLICT (journey_id, version) WHERE status = 'published' DO NOTHING`, a.WorkspaceID, journeyID, by)
 	return err
@@ -155,8 +164,9 @@ func (s *Server) createJourneyDraft(w http.ResponseWriter, r *http.Request) {
 			by = &a.ActorID
 		}
 		tag, err := tx.Exec(ctx, `INSERT INTO journey_versions (workspace_id, journey_id, status, trigger_kind, trigger_event, trigger_filter,
-			entry, goal_event, exit_events, exit_conditions, exclude, steps, created_by)
-			SELECT workspace_id, id, 'draft', trigger_kind, trigger_event, trigger_filter, entry, goal_event, exit_events, exit_conditions, exclude, steps, $3
+			entry, goal_event, exit_events, exit_conditions, entry_limit, entry_limit_per, reentry_after_seconds, exclude, steps, created_by)
+			SELECT workspace_id, id, 'draft', trigger_kind, trigger_event, trigger_filter, entry, goal_event, exit_events, exit_conditions,
+				entry_limit, entry_limit_per, reentry_after_seconds, exclude, steps, $3
 			FROM journeys WHERE workspace_id = $1 AND id = $2
 			ON CONFLICT (journey_id) WHERE status = 'draft' DO NOTHING`, a.WorkspaceID, cur.ID, by)
 		if err != nil || tag.RowsAffected() == 0 {
@@ -202,13 +212,15 @@ func (s *Server) updateJourneyDraft(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var in struct {
-		Trigger        *journeyTrigger       `json:"trigger"`
-		Entry          *string               `json:"entry"`
-		GoalEvent      optional[string]      `json:"goal_event"`
-		ExitEvents     *[]string             `json:"exit_events"`
-		ExitConditions *[]journeys.Condition `json:"exit_conditions"`
-		Exclude        *customers.Exclusion  `json:"exclude"`
-		Steps          *[]journeys.Step      `json:"steps"`
+		Trigger        *journeyTrigger             `json:"trigger"`
+		Entry          *string                     `json:"entry"`
+		GoalEvent      optional[string]            `json:"goal_event"`
+		ExitEvents     *[]string                   `json:"exit_events"`
+		ExitConditions *[]journeys.Condition       `json:"exit_conditions"`
+		EntryLimit     optional[journeyEntryLimit] `json:"entry_limit"`
+		ReentryAfter   optional[int]               `json:"reentry_after_seconds"`
+		Exclude        *customers.Exclusion        `json:"exclude"`
+		Steps          *[]journeys.Step            `json:"steps"`
 	}
 	if !decode(w, r, &in) {
 		return
@@ -223,8 +235,10 @@ func (s *Server) updateJourneyDraft(w http.ResponseWriter, r *http.Request) {
 		writeError(w, r, http.StatusNotFound, "not_found", "the journey has no draft version; start one with POST .../draft")
 		return
 	}
-	v := journeyView{Trigger: d.Trigger, Entry: d.Entry, GoalEvent: d.GoalEvent, ExitEvents: d.ExitEvents, ExitConditions: d.ExitConditions, Exclude: d.Exclude, Steps: d.Steps}
-	f := journeyFields{Trigger: in.Trigger, Entry: in.Entry, GoalEvent: in.GoalEvent, ExitEvents: in.ExitEvents, ExitConditions: in.ExitConditions, Exclude: in.Exclude, Steps: in.Steps}
+	v := journeyView{Trigger: d.Trigger, Entry: d.Entry, GoalEvent: d.GoalEvent, ExitEvents: d.ExitEvents, ExitConditions: d.ExitConditions,
+		EntryLimit: d.EntryLimit, ReentryAfterSeconds: d.ReentryAfterSeconds, Exclude: d.Exclude, Steps: d.Steps}
+	f := journeyFields{Trigger: in.Trigger, Entry: in.Entry, GoalEvent: in.GoalEvent, ExitEvents: in.ExitEvents, ExitConditions: in.ExitConditions,
+		EntryLimit: in.EntryLimit, ReentryAfter: in.ReentryAfter, Exclude: in.Exclude, Steps: in.Steps}
 	if !s.journeyApplied(w, r, s.applyJourney(r, a.WorkspaceID, f, &v)) {
 		return
 	}
@@ -232,9 +246,12 @@ func (s *Server) updateJourneyDraft(w http.ResponseWriter, r *http.Request) {
 		filter, _ := json.Marshal(v.Trigger.Filter)
 		steps, _ := json.Marshal(v.Steps)
 		exitConds, _ := json.Marshal(v.ExitConditions)
+		limit, per := v.EntryLimit.columns()
 		tag, err := tx.Exec(ctx, `UPDATE journey_versions SET trigger_kind = $3, trigger_event = $4, trigger_filter = $5, entry = $6, goal_event = $7,
-			steps = $8, exit_events = $9, exit_conditions = $10, exclude = $11, updated_at = now() WHERE workspace_id = $1 AND id = $2 AND status = 'draft'`,
-			a.WorkspaceID, d.ID, v.Trigger.Kind, v.Trigger.Event, filter, v.Entry, v.GoalEvent, steps, v.ExitEvents, exitConds, v.Exclude)
+			steps = $8, exit_events = $9, exit_conditions = $10, entry_limit = $11, entry_limit_per = $12, reentry_after_seconds = $13,
+			exclude = $14, updated_at = now() WHERE workspace_id = $1 AND id = $2 AND status = 'draft'`,
+			a.WorkspaceID, d.ID, v.Trigger.Kind, v.Trigger.Event, filter, v.Entry, v.GoalEvent, steps, v.ExitEvents, exitConds, limit, per, v.ReentryAfterSeconds,
+			v.Exclude)
 		if err != nil {
 			return err
 		}
@@ -344,10 +361,13 @@ func (s *Server) publishJourney(w http.ResponseWriter, r *http.Request) {
 		filter, _ := json.Marshal(d.Trigger.Filter)
 		steps, _ := json.Marshal(d.Steps)
 		exitConds, _ := json.Marshal(d.ExitConditions)
+		limit, per := d.EntryLimit.columns()
 		tag, err := tx.Exec(ctx, `UPDATE journeys SET trigger_kind = $4, trigger_event = $5, trigger_filter = $6, entry = $7, goal_event = $8,
-			steps = $9, exit_events = $10, exit_conditions = $11, exclude = $12, version = version + 1, updated_at = now()
+			steps = $9, exit_events = $10, exit_conditions = $11, entry_limit = $12, entry_limit_per = $13, reentry_after_seconds = $14,
+			exclude = $15, version = version + 1, updated_at = now()
 			WHERE workspace_id = $1 AND id = $2 AND version = $3 AND status IN ('active', 'paused')`,
-			a.WorkspaceID, cur.ID, cur.Version, d.Trigger.Kind, d.Trigger.Event, filter, d.Entry, d.GoalEvent, steps, d.ExitEvents, exitConds, d.Exclude)
+			a.WorkspaceID, cur.ID, cur.Version, d.Trigger.Kind, d.Trigger.Event, filter, d.Entry, d.GoalEvent, steps, d.ExitEvents, exitConds,
+			limit, per, d.ReentryAfterSeconds, d.Exclude)
 		if err != nil {
 			return err
 		}

@@ -1569,31 +1569,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/v1/workspaces/{ws}/mailboxes/{id}/warmup": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
-                ws: components["parameters"]["Workspace"];
-                id: string;
-            };
-            cookie?: never;
-        };
-        /**
-         * A mailbox's results from Outflare's own warm-up for each of the last 14 days
-         * @deprecated
-         * @description Scope: mailboxes.read. Days are UTC, oldest first. Outflare no longer sends warm-up mail itself, so the days run down to zero; a connected sequencer's warm-up score is in the mailbox's `warmup.platform`.
-         */
-        get: operations["getMailboxWarmup"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/v1/workspaces/{ws}/mailboxes/warmup": {
         parameters: {
             query?: never;
@@ -12486,7 +12461,7 @@ export interface paths {
          * How every sending mailbox is doing
          * @description Scope: mailboxes.read. Graded from every signal: sign-in and inbox sync
          *     errors (explained, e.g. suspended account or revoked consent), send
-         *     failures, bounce rate, warm-up inbox placement, the domain's SPF, DKIM,
+         *     failures, bounce rate, the domain's SPF, DKIM,
          *     DMARC and blocklists, and new mailboxes not warming up. Each signal
          *     says what to do. Worst first. Computed on read.
          */
@@ -12540,10 +12515,10 @@ export interface paths {
          * Outreach and deliverability report
          * @description Scope: sequences.read. Sends, leads contacted, new leads and follow-ups,
          *     failures, policy blocks, bounces, replies (and replied leads), auto-replies,
-         *     opt-outs, unsubscribes and warm-up placement, with reply, bounce, opt-out
-         *     and placement rates. Totals for the period, and rows by day, week,
-         *     sequence, step, mailbox, domain or brand. Default period is the last 30 days.
-         *     A record's brand is its sequence's, or its mailbox's for warm-up.
+         *     opt-outs and unsubscribes, with reply, bounce and opt-out rates. Totals
+         *     for the period, and rows by day, week, sequence, step, mailbox, domain or
+         *     brand. Default period is the last 30 days. A record's brand is its
+         *     sequence's, or its mailbox's when it has no sequence.
          */
         get: operations["report"];
         put?: never;
@@ -25494,7 +25469,7 @@ export interface components {
         JourneyStep: {
             id: string;
             /** @enum {string} */
-            kind: "email" | "wait" | "branch" | "exit" | "set_field" | "add_tag" | "remove_tag" | "add_to_list" | "remove_from_list" | "enter_journey" | "exit_journey" | "enroll_in_sequence" | "stop_sequences" | "suppress" | "unsubscribe_topic" | "alert" | "transactional_email" | "set_consent" | "assign_owner" | "move_deal" | "slack" | "webhook" | "push_to_sequencer" | "push_to_crm" | "sync_audience" | "ai";
+            kind: "email" | "wait" | "branch" | "exit" | "set_field" | "add_tag" | "remove_tag" | "add_to_list" | "remove_from_list" | "enter_journey" | "exit_journey" | "enroll_in_sequence" | "stop_sequences" | "suppress" | "unsubscribe_topic" | "alert" | "transactional_email" | "set_consent" | "assign_owner" | "move_deal" | "slack" | "webhook" | "push_to_sequencer" | "push_to_crm" | "sync_audience" | "ai" | "wait_until" | "split";
             name?: string;
             /** @description email: a lifecycle template's handle or id. transactional_email: a transactional one's. */
             template?: string;
@@ -25626,6 +25601,22 @@ export interface components {
             choices?: string[];
             /** @description ai: for a written answer, at most this many words (100 when left out). */
             max_words?: number;
+            /** @description wait_until and split: the ways on, in order. */
+            paths?: components["schemas"]["JourneyPath"][];
+            /** @description wait_until: how long to wait for a path at most. */
+            timeout_seconds?: number;
+            /** @description wait_until: the step after the timeout; empty ends the run. */
+            timeout_next?: string;
+            /**
+             * @description split: value (the default: the first path whose conditions hold, else else) or random (by weight).
+             * @enum {string}
+             */
+            split_by?: "value" | "random";
+            /**
+             * @description split at random: person (the default), or company, so everyone at a company goes the same way.
+             * @enum {string}
+             */
+            split_key?: "person" | "company";
             /** @description slack: the channel's id. */
             channel?: string;
             /**
@@ -25635,6 +25626,29 @@ export interface components {
             connection_id?: string;
             /** @description Action steps: stop (the default: the run fails), continue, or a step id to go to. */
             on_error?: string;
+        };
+        /**
+         * @description One way on from a wait_until or split step; its id is the step's outcome in results. wait_until: event (they do
+         *     this event; conditions then test its properties and their fields) or conditions alone (they come true). split by
+         *     value: conditions. split at random: weight, and holdout for people kept out on purpose (their run ends there).
+         */
+        JourneyPath: {
+            id: string;
+            name?: string;
+            event?: string;
+            conditions?: components["schemas"]["JourneyCondition"][];
+            /** @enum {string} */
+            match?: "all" | "any";
+            weight?: number;
+            holdout?: boolean;
+            /** @description The step after; empty ends the run. */
+            next?: string;
+        };
+        /** @description At most count people start the journey per hour or day; its trigger skips the rest. */
+        JourneyEntryLimit: {
+            count: number;
+            /** @enum {string} */
+            per: "hour" | "day";
         };
         /**
          * @description webhook: how the call proves it may call the receiver, besides the signature every call carries. The key itself
@@ -25702,6 +25716,10 @@ export interface components {
             exit_events?: string[];
             /** @description Attribute conditions: when any holds, the run ends before its next step, and nobody who already meets one starts. */
             exit_conditions?: components["schemas"]["JourneyCondition"][];
+            /** @description At most this many people start it per hour or day; null for no limit. */
+            entry_limit?: components["schemas"]["JourneyEntryLimit"] | null;
+            /** @description With entry again: how long after their last run ends someone can start again. */
+            reentry_after_seconds?: number | null;
             exclude?: components["schemas"]["Exclusion"];
             /** @description The first step starts. */
             steps?: components["schemas"]["JourneyStep"][];
@@ -25725,6 +25743,8 @@ export interface components {
             goal_event: string | null;
             exit_events: string[];
             exit_conditions: components["schemas"]["JourneyCondition"][];
+            entry_limit: components["schemas"]["JourneyEntryLimit"] | null;
+            reentry_after_seconds: number | null;
             exclude: components["schemas"]["Exclusion"];
             steps: components["schemas"]["JourneyStep"][];
             /** @description Goes up each time what it does (trigger */
@@ -25743,7 +25763,7 @@ export interface components {
                 exited: number;
                 failed: number;
             };
-            /** @description Only on a single journey: by step id, how many runs had each outcome (sent, skipped, waited, yes, no, done, failed). */
+            /** @description Only on a single journey: by step id, how many runs had each outcome (sent, skipped, waited, yes, no, done, failed; for wait_until and split, each path's id, else and timed_out). */
             step_stats?: {
                 [key: string]: {
                     [key: string]: number;
@@ -25776,6 +25796,10 @@ export interface components {
             exit_events?: string[];
             /** @description Attribute conditions: when any holds, the run ends before its next step. */
             exit_conditions?: components["schemas"]["JourneyCondition"][];
+            /** @description At most this many people start it per hour or day; null for no limit. */
+            entry_limit?: components["schemas"]["JourneyEntryLimit"] | null;
+            /** @description With entry again: how long after their last run ends someone can start again. */
+            reentry_after_seconds?: number | null;
             exclude?: components["schemas"]["Exclusion"];
             /** @description The first step starts. */
             steps?: components["schemas"]["JourneyStep"][];
@@ -25885,6 +25909,8 @@ export interface components {
             goal_event: string | null;
             exit_events: string[];
             exit_conditions: components["schemas"]["JourneyCondition"][];
+            entry_limit: components["schemas"]["JourneyEntryLimit"] | null;
+            reentry_after_seconds: number | null;
             exclude: components["schemas"]["Exclusion"];
             steps: components["schemas"]["JourneyStep"][];
             /** @description People going through this version now. */
@@ -25912,7 +25938,7 @@ export interface components {
              * @description When a wait ends.
              */
             next_at: string | null;
-            /** @description goal, exit_step, manual, archived, step_removed, email_failed. */
+            /** @description goal, exit_event, exit_condition, exit_step, holdout, manual, archived, step_removed, email_failed, action_failed. */
             exit_reason: string | null;
             /** @description The journey version this run goes through; null for a run from before versions, which follows the current one. */
             version: number | null;
@@ -25921,6 +25947,11 @@ export interface components {
             context: {
                 [key: string]: unknown;
             };
+            /**
+             * Format: date-time
+             * @description On a wait_until step: when it times out.
+             */
+            wait_deadline: string | null;
             /** @description What its steps saved for later steps, such as a webhook's answer under its save_as; templates see it as vars.*. */
             vars: {
                 [key: string]: unknown;
@@ -26413,14 +26444,10 @@ export interface components {
             /** @description Replies asking not to be contacted. */
             opt_outs: number;
             unsubscribes: number;
-            warmup_inbox: number;
-            warmup_spam: number;
-            warmup_missing: number;
             /** @description Percent of contacted leads who replied. */
             reply_rate: number | null;
             bounce_rate: number | null;
             opt_out_rate: number | null;
-            inbox_placement: number | null;
             /** @description Tracked link clicks, leaving out likely link scanners. Zero unless click tracking is on. */
             clicks: number;
             clicked_leads: number;
@@ -26448,7 +26475,7 @@ export interface components {
         };
         HealthSignal: {
             /**
-             * @description sign_in, inbox_sync, send_failures, bounce_rate, placement, warmup, domain_spf, domain_dkim, domain_dmarc, blocklist, domain_paused, paused
+             * @description sign_in, inbox_sync, send_failures, bounce_rate, warmup, domain_spf, domain_dkim, domain_dmarc, blocklist, domain_paused, paused
              * @example bounce_rate
              */
             key: string;
@@ -26480,11 +26507,6 @@ export interface components {
                 bounce_rate_7d: number | null;
                 failed_24h: number;
                 replies_7d: number;
-                warmup_landed_7d: number;
-                warmup_spam_7d: number;
-                warmup_missing_7d: number;
-                /** @description Percent of warm-up email in the inbox; null under 10. */
-                inbox_placement_7d: number | null;
             };
         };
         MailboxHealthSummary: {
@@ -32490,56 +32512,14 @@ export interface components {
             /** Format: date-time */
             updated_at: string;
         };
-        /** @description Warm-up settings. A connected sequencer runs the warm-up; its view, including its warm-up score, is in `platform`. The 7-day counts, `daily_target`, `reply_rate`, `today_target`, `last_error` and `inbox_rate` were for Outflare's own warm-up, which is gone, and run down to zero or null. */
+        /** @description Warm-up settings. A connected sequencer runs the warm-up; its view, including its warm-up score, is in `platform`. */
         MailboxWarmup: {
             enabled: boolean;
-            /**
-             * @deprecated
-             * @description Outflare's own warm-up only.
-             */
-            daily_target: number;
-            /**
-             * @deprecated
-             * @description Outflare's own warm-up only.
-             */
-            reply_rate: number;
             /**
              * Format: date-time
              * @description When warm-up was last turned on.
              */
             started_at: string | null;
-            /**
-             * @deprecated
-             * @description Outflare's own warm-up only; always 0.
-             */
-            today_target: number;
-            /** @deprecated */
-            sent_7d: number;
-            /**
-             * @deprecated
-             * @description Sent warm-up mail found in the recipient's inbox.
-             */
-            inbox_7d: number;
-            /**
-             * @deprecated
-             * @description Found in spam, and moved to the inbox.
-             */
-            spam_7d: number;
-            /**
-             * @deprecated
-             * @description Not found within two days.
-             */
-            missing_7d: number;
-            /**
-             * @deprecated
-             * @description Warm-up sends the mailbox's SMTP server refused.
-             */
-            failed_7d: number;
-            /**
-             * @deprecated
-             * @description Why the latest warm-up send failed.
-             */
-            last_error: string | null;
             /** @description The id of the connected sequencer (integration) that runs the warm-up, or outflare when none does. A mailbox a sequencer already warms up when it is first synced takes that sequencer as its provider. */
             provider: string;
             /** @description The sequencer's own view of its warm-up, as of its last sync; null when no sequencer runs it. */
@@ -32555,41 +32535,16 @@ export interface components {
                 observed_at: string | null;
             } | null;
             /**
-             * @description platform while warm-up is on here but the sequencer running it doesn't show it on yet; null otherwise. another_mailbox, connection and paused were for Outflare's own warm-up and no longer occur.
+             * @description platform while warm-up is on here but the sequencer running it doesn't show it on yet; null otherwise.
              * @enum {string|null}
              */
-            waiting_on: "another_mailbox" | "connection" | "paused" | "platform" | null;
-            /**
-             * @deprecated
-             * @description inbox_7d over all placed messages; null until any are placed.
-             */
-            inbox_rate: number | null;
+            waiting_on: "platform" | null;
         };
         /** @description Unset fields are left as they are. */
         WarmupSettings: {
             enabled?: boolean;
-            /**
-             * @deprecated
-             * @description Outflare's own warm-up only, which is gone: accepted and ignored.
-             */
-            daily_target?: number;
-            /**
-             * @deprecated
-             * @description Outflare's own warm-up only, which is gone: accepted and ignored.
-             */
-            reply_rate?: number;
             /** @description The id of a connected sequencer with the control.warmup capability (EmailBison, Instantly, Smartlead), which runs the warm-up with its own. The mailboxes must be in that sequencer's account. On the bulk endpoint without mailbox_ids or pool_id, it applies to every mailbox that sequencer has. outflare is accepted only with enabled false, and detaches the mailboxes from their sequencer's warm-up; Outflare doesn't send warm-up mail itself. */
             provider?: string;
-        };
-        WarmupDay: {
-            /** Format: date */
-            date: string;
-            sent: number;
-            inbox: number;
-            spam: number;
-            missing: number;
-            /** @description Warm-up replies this mailbox received. */
-            replies: number;
         };
         MailboxInput: {
             email: string;
@@ -32715,14 +32670,10 @@ export interface components {
             /** @description Of those, leads who replied. The reply rate is replied_leads_7d / contacted_leads_7d. */
             replied_leads_7d: number;
             bounces_7d: number;
-            /** @description Warm-up across the domain's mailboxes, last 7 days. */
+            /** @description Warm-up across the domain's mailboxes. */
             warmup: {
                 /** @description Mailboxes in the warm-up stage (lifecycle_stage warming), the same count Mailboxes and Infrastructure show. */
                 warming: number;
-                /** @description Warm-up emails whose landing place is known. */
-                placed_7d: number;
-                inbox_7d: number;
-                inbox_rate: number | null;
             };
             /** Format: date-time */
             created_at: string;
@@ -36229,8 +36180,6 @@ export interface components {
                 /** @description Mailboxes in the warm-up stage (lifecycle_stage warming), the same count Mailboxes and Infrastructure show. */
                 warming: number;
             };
-            /** @description Share of the last 7 days' placed warm-up mail that reached the inbox. */
-            warmup_inbox_rate: number | null;
             domains: {
                 total: number;
                 paused: number;
@@ -36669,8 +36618,6 @@ export interface components {
                 auto_rest: boolean;
                 /** Format: uuid */
                 plan_id: string | null;
-                placed_7d: number;
-                inbox_rate: number | null;
             }[];
             plans: components["schemas"]["InfraPlan"][];
             suppliers: string[];
@@ -39899,34 +39846,6 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Queued"] | components["schemas"]["MissionHeld"];
-                };
-            };
-            404: components["responses"]["Error"];
-            default: components["responses"]["Error"];
-        };
-    };
-    getMailboxWarmup: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
-                ws: components["parameters"]["Workspace"];
-                id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Daily results. */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        data: components["schemas"]["WarmupDay"][];
-                    };
                 };
             };
             404: components["responses"]["Error"];
@@ -69942,9 +69861,9 @@ export interface operations {
                     event?: {
                         [key: string]: unknown;
                     };
-                    /** @description Branch step ids to send down yes or no whatever the data says. */
+                    /** @description Step ids to send down a way whatever the data says: a branch yes or no, a split one of its path ids or else, a wait_until one of its path ids or timed_out (a test can't wait, so a wait_until otherwise takes a path that holds now, or times out). */
                     paths?: {
-                        [key: string]: "yes" | "no";
+                        [key: string]: string;
                     };
                 };
             };

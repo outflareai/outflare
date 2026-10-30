@@ -997,8 +997,6 @@ type stageMailbox struct {
 	ChangedAt time.Time  `json:"changed_at"`
 	AutoRest  bool       `json:"auto_rest"`
 	PlanID    *string    `json:"plan_id"`
-	Placed7d  int        `json:"placed_7d"`
-	InboxRate *float64   `json:"inbox_rate"`
 }
 
 // infraOverview is every mailbox by lifecycle stage, the ones not ready
@@ -1035,13 +1033,8 @@ func (s *Server) infraOverview(w http.ResponseWriter, r *http.Request) {
 		}
 		rows, err = tx.Query(ctx, `
 			SELECT m.id::text, m.email, m.domain, m.lifecycle_stage, m.stage_reason, m.stage_until, m.stage_changed_at,
-			       m.auto_rest, m.infra_plan_id::text, COALESCE(w.placed, 0)::int,
-			       CASE WHEN w.placed > 0 THEN w.inbox::float / w.placed END
+			       m.auto_rest, m.infra_plan_id::text
 			FROM mailboxes m
-			LEFT JOIN LATERAL (
-				SELECT count(*) FILTER (WHERE g.landed IS NOT NULL) AS placed, count(*) FILTER (WHERE g.landed = 'inbox') AS inbox
-				FROM warmup_messages g WHERE g.from_mailbox_id = m.id AND g.created_at > now() - interval '7 days'
-			) w ON true
 			WHERE m.workspace_id = $1 AND m.lifecycle_stage <> 'ready'`+listWhere+`
 			ORDER BY CASE m.lifecycle_stage WHEN 'resting' THEN 0 WHEN 'warming' THEN 1 ELSE 2 END, m.stage_until NULLS LAST, lower(m.email)
 			LIMIT 1000`, listArgs...)

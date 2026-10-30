@@ -39,7 +39,7 @@ export function listTime(iso: string): string {
 
 export const plural = (n: number, one: string, many = `${one}s`) => `${n.toLocaleString()} ${n === 1 ? one : many}`;
 
-/** Tone for an inbox placement rate, matching the domain advice: amber under 90%, red under 75%. */
+/** Tone for a warm-up score as a 0 to 1 rate: amber under 90%, red under 75%. */
 export function placementTone(rate: number | null | undefined): "red" | "amber" | "green" | undefined {
   if (rate === null || rate === undefined) return undefined;
   return rate < 0.75 ? "red" : rate < 0.9 ? "amber" : "green";

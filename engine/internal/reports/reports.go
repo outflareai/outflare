@@ -57,20 +57,16 @@ type Metrics struct {
 	Replies      int `json:"replies"`
 	RepliedLeads int `json:"replied_leads"`
 	AutoReplies  int `json:"auto_replies"`
-	OptOuts      int `json:"opt_outs"`     // replies asking not to be contacted
-	Unsubscribes int `json:"unsubscribes"` // unsubscribe link or header
-	WarmupInbox  int `json:"warmup_inbox"` // warm-up mail that landed in the inbox
-	WarmupSpam   int `json:"warmup_spam"`  // ...in spam
-	WarmupLost   int `json:"warmup_missing"`
+	OptOuts      int `json:"opt_outs"`      // replies asking not to be contacted
+	Unsubscribes int `json:"unsubscribes"`  // unsubscribe link or header
 	Clicks       int `json:"clicks"`        // clicks on tracked links, scanners left out
 	ClickedLeads int `json:"clicked_leads"` // distinct leads who clicked
 
 	// Percentages, null when there is nothing to divide by.
-	ReplyRate     *float64 `json:"reply_rate"`      // replied leads / contacted
-	BounceRate    *float64 `json:"bounce_rate"`     // bounced / sent
-	OptOutRate    *float64 `json:"opt_out_rate"`    // (opt-outs + unsubscribes) / contacted
-	PlacementRate *float64 `json:"inbox_placement"` // warm-up inbox / warm-up landed
-	ClickRate     *float64 `json:"click_rate"`      // clicked leads / contacted (only meaningful with click tracking on)
+	ReplyRate  *float64 `json:"reply_rate"`   // replied leads / contacted
+	BounceRate *float64 `json:"bounce_rate"`  // bounced / sent
+	OptOutRate *float64 `json:"opt_out_rate"` // (opt-outs + unsubscribes) / contacted
+	ClickRate  *float64 `json:"click_rate"`   // clicked leads / contacted (only meaningful with click tracking on)
 }
 
 // Row is one bucket of a report.
@@ -122,10 +118,6 @@ const events = `
 		FROM inbound_messages i JOIN mailboxes mb ON mb.id = i.mailbox_id LEFT JOIN messages rm ON rm.id = i.reply_to_message_id
 		WHERE i.workspace_id = $1 AND i.opt_out AND i.received_at >= $2 AND i.received_at < $3
 		UNION ALL
-		SELECT w.landed_at, NULL::uuid, NULL::int, w.from_mailbox_id, lower(split_part(mb.email, '@', 2)), NULL::uuid, 'warmup_' || w.landed
-		FROM warmup_messages w JOIN mailboxes mb ON mb.id = w.from_mailbox_id
-		WHERE w.workspace_id = $1 AND w.landed IS NOT NULL AND w.landed_at >= $2 AND w.landed_at < $3
-		UNION ALL
 		SELECT c.clicked_at, t.sequence_id, t.step_position, en.mailbox_id, lower(split_part(mb.email, '@', 2)), en.lead_id, 'click'
 		FROM link_clicks c JOIN tracked_links t ON t.id = c.link_id JOIN enrollments en ON en.id = t.enrollment_id
 		LEFT JOIN mailboxes mb ON mb.id = en.mailbox_id
@@ -154,15 +146,12 @@ const metrics = `
 	count(*) FILTER (WHERE kind = 'auto_reply')::int,
 	count(*) FILTER (WHERE kind = 'opt_out')::int,
 	count(*) FILTER (WHERE kind = 'unsubscribed')::int,
-	count(*) FILTER (WHERE kind = 'warmup_inbox')::int,
-	count(*) FILTER (WHERE kind = 'warmup_spam')::int,
-	count(*) FILTER (WHERE kind = 'warmup_missing')::int,
 	count(*) FILTER (WHERE kind = 'click')::int,
 	count(DISTINCT lead_id) FILTER (WHERE kind = 'click')::int`
 
 func (m *Metrics) fields() []any {
 	return []any{&m.Sent, &m.Contacted, &m.NewLeads, &m.FollowUps, &m.Failed, &m.Blocked, &m.Bounced, &m.Replies, &m.RepliedLeads,
-		&m.AutoReplies, &m.OptOuts, &m.Unsubscribes, &m.WarmupInbox, &m.WarmupSpam, &m.WarmupLost, &m.Clicks, &m.ClickedLeads}
+		&m.AutoReplies, &m.OptOuts, &m.Unsubscribes, &m.Clicks, &m.ClickedLeads}
 }
 
 func rate(a, b int) *float64 {
@@ -177,7 +166,6 @@ func (m *Metrics) derive() {
 	m.ReplyRate = rate(m.RepliedLeads, m.Contacted)
 	m.BounceRate = rate(m.Bounced, m.Sent)
 	m.OptOutRate = rate(m.OptOuts+m.Unsubscribes, m.Contacted)
-	m.PlacementRate = rate(m.WarmupInbox, m.WarmupInbox+m.WarmupSpam+m.WarmupLost)
 	m.ClickRate = rate(m.ClickedLeads, m.Contacted)
 }
 

@@ -74,6 +74,8 @@ var (
 	rulesActive     = desc("rules", "active", "Active rules in every workspace, by trigger kind.", "trigger")
 	rulesTimersDue  = desc("rules", "timers_due", "Absence timers of active rules that ran out and wait to be handled. Normally 0 or close to it: they are handled every minute.")
 	rulesOldestDue  = desc("rules", "oldest_due_seconds", "How long the longest-waiting absence timer of an active rule has been due. Normally under two minutes.")
+	journeysWaiting = desc("journeys", "waiting_runs", "Journey runs on a wait_until step, waiting for an event, conditions or their timeout.")
+	journeysOverdue = desc("journeys", "oldest_due_seconds", "How long past its time the most overdue run of an active journey is (a wait, a wait_until check or timeout, or a call that never came back). Runs move on within seconds of their time, so this stays near 0.")
 	reviewPages     = desc("reviews", "pages", "Review pages being read, by platform and state (ok, failing: the last read failed).", "platform", "state")
 	reviewStuck     = desc("reviews", "stuck_pages", "Active review pages whose last 3 or more reads failed, retries included, by platform and the last error code.", "platform", "code")
 	socialStuck     = desc("social", "stuck_accounts", "Active social accounts whose last 3 or more reads failed, retries included, by channel and the last error code.", "channel", "code")
@@ -85,7 +87,7 @@ var (
 	scrapeDuration  = desc("metrics", "scrape_duration_seconds", "Time the last database scrape took.")
 	newsSearches    = desc("news", "searches", "Active news searches, by state (ok, failing: the last run failed).", "state")
 	newsOverdue     = desc("news", "search_overdue_seconds", "How long past its time the most overdue active news search is. Searches are queued every few minutes, so this stays near 0.")
-	allDescs        = []*prometheus.Desc{poolAcquired, poolIdle, poolTotal, poolMax, poolAcquires, poolWaits, poolWaitSeconds, poolAcquireSecs, poolCanceled, queued, scheduled, oldestDue, running, dbBackends, dbMaxConns, dbLongestXact, dbLockWaits, dbSize, dbCommits, dbRollbacks, dbBlocksHit, dbBlocksRead, dbDeadlocks, dbTempBytes, tableBytes, tableDeadRows, tableSeqScans, pipeItems, pipeOldest, pipeRuns, pipeBreakers, inboxPending, inboxOldest, inboxFailed, smartLists, smartOldest, smartFailing, rulesActive, rulesTimersDue, rulesOldestDue, reviewPages, reviewStuck, socialStuck, syncStuck, reviewOldest, newsSearches, newsOverdue, socialScheduled, socialOverdue, scrapeErrors, scrapeDuration}
+	allDescs        = []*prometheus.Desc{poolAcquired, poolIdle, poolTotal, poolMax, poolAcquires, poolWaits, poolWaitSeconds, poolAcquireSecs, poolCanceled, queued, scheduled, oldestDue, running, dbBackends, dbMaxConns, dbLongestXact, dbLockWaits, dbSize, dbCommits, dbRollbacks, dbBlocksHit, dbBlocksRead, dbDeadlocks, dbTempBytes, tableBytes, tableDeadRows, tableSeqScans, pipeItems, pipeOldest, pipeRuns, pipeBreakers, inboxPending, inboxOldest, inboxFailed, smartLists, smartOldest, smartFailing, rulesActive, rulesTimersDue, rulesOldestDue, journeysWaiting, journeysOverdue, reviewPages, reviewStuck, socialStuck, syncStuck, reviewOldest, newsSearches, newsOverdue, socialScheduled, socialOverdue, scrapeErrors, scrapeDuration}
 	gauge, counter  = prometheus.GaugeValue, prometheus.CounterValue
 )
 
@@ -228,6 +230,29 @@ func (p *Postgres) query() []prometheus.Metric {
 			}
 			add(rulesTimersDue, gauge, float64(n))
 			add(rulesOldestDue, gauge, oldest)
+		}
+		return nil
+	})
+	run("journey_waiting", `SELECT count(*) FROM journey_runs WHERE status = 'active' AND wait_deadline IS NOT NULL`, func(r rowser) error {
+		for r.Next() {
+			var n int64
+			if err := r.Scan(&n); err != nil {
+				return err
+			}
+			add(journeysWaiting, gauge, float64(n))
+		}
+		return nil
+	})
+	// The earliest due run of an active journey, through the next_at index.
+	run("journey_due", `
+		SELECT coalesce((SELECT extract(epoch FROM now() - r.next_at) FROM journey_runs r JOIN journeys j ON j.id = r.journey_id
+			WHERE r.status = 'active' AND r.next_at IS NOT NULL AND j.status = 'active' ORDER BY r.next_at LIMIT 1), 0)::float8`, func(r rowser) error {
+		for r.Next() {
+			var oldest float64
+			if err := r.Scan(&oldest); err != nil {
+				return err
+			}
+			add(journeysOverdue, gauge, max(oldest, 0))
 		}
 		return nil
 	})

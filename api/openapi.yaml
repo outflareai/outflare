@@ -2202,31 +2202,6 @@ paths:
               schema: { oneOf: [{ $ref: "#/components/schemas/Queued" }, { $ref: "#/components/schemas/MissionHeld" }] }
         "404": { $ref: "#/components/responses/Error" }
         default: { $ref: "#/components/responses/Error" }
-  /v1/workspaces/{ws}/mailboxes/{id}/warmup:
-    parameters:
-      - { $ref: "#/components/parameters/Workspace" }
-      - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
-    get:
-      operationId: getMailboxWarmup
-      x-outflare-access: { scope: mailboxes.read }
-      deprecated: true
-      summary: A mailbox's results from Outflare's own warm-up for each of the last 14 days
-      description: "Scope: mailboxes.read. Days are UTC, oldest first. Outflare no longer sends warm-up mail itself, so the days run down to zero; a connected sequencer's warm-up score is in the mailbox's `warmup.platform`."
-      tags: [mailboxes]
-      responses:
-        "200":
-          description: Daily results.
-          content:
-            application/json:
-              schema:
-                type: object
-                required: [data]
-                properties:
-                  data:
-                    type: array
-                    items: { $ref: "#/components/schemas/WarmupDay" }
-        "404": { $ref: "#/components/responses/Error" }
-        default: { $ref: "#/components/responses/Error" }
   /v1/workspaces/{ws}/mailboxes/warmup:
     parameters: [{ $ref: "#/components/parameters/Workspace" }]
     post:
@@ -16799,7 +16774,7 @@ paths:
       description: |
         Scope: mailboxes.read. Graded from every signal: sign-in and inbox sync
         errors (explained, e.g. suspended account or revoked consent), send
-        failures, bounce rate, warm-up inbox placement, the domain's SPF, DKIM,
+        failures, bounce rate, the domain's SPF, DKIM,
         DMARC and blocklists, and new mailboxes not warming up. Each signal
         says what to do. Worst first. Computed on read.
       tags: [mailboxes]
@@ -16872,10 +16847,10 @@ paths:
       description: |
         Scope: sequences.read. Sends, leads contacted, new leads and follow-ups,
         failures, policy blocks, bounces, replies (and replied leads), auto-replies,
-        opt-outs, unsubscribes and warm-up placement, with reply, bounce, opt-out
-        and placement rates. Totals for the period, and rows by day, week,
-        sequence, step, mailbox, domain or brand. Default period is the last 30 days.
-        A record's brand is its sequence's, or its mailbox's for warm-up.
+        opt-outs and unsubscribes, with reply, bounce and opt-out rates. Totals
+        for the period, and rows by day, week, sequence, step, mailbox, domain or
+        brand. Default period is the last 30 days. A record's brand is its
+        sequence's, or its mailbox's when it has no sequence.
       tags: [reports]
       parameters:
         - { name: from, in: query, schema: { type: string }, description: "A date (2026-10-01) or RFC 3339 time." }
@@ -24161,8 +24136,8 @@ paths:
                 event: { type: object, additionalProperties: true, description: "The properties of the event that starts the run. Left out: the person's latest trigger event." }
                 paths:
                   type: object
-                  additionalProperties: { type: string, enum: ["yes", "no"] }
-                  description: Branch step ids to send down yes or no whatever the data says.
+                  additionalProperties: { type: string, maxLength: 40 }
+                  description: "Step ids to send down a way whatever the data says: a branch yes or no, a split one of its path ids or else, a wait_until one of its path ids or timed_out (a test can't wait, so a wait_until otherwise takes a path that holds now, or times out)."
       responses:
         "200":
           description: The path the person would take.
@@ -30391,7 +30366,7 @@ components:
         kind:
           type: string
           enum: [email, wait, branch, exit, set_field, add_tag, remove_tag, add_to_list, remove_from_list, enter_journey, exit_journey,
-            enroll_in_sequence, stop_sequences, suppress, unsubscribe_topic, alert, transactional_email, set_consent, assign_owner, move_deal, slack, webhook, push_to_sequencer, push_to_crm, sync_audience, ai]
+            enroll_in_sequence, stop_sequences, suppress, unsubscribe_topic, alert, transactional_email, set_consent, assign_owner, move_deal, slack, webhook, push_to_sequencer, push_to_crm, sync_audience, ai, wait_until, split]
         name: { type: string, maxLength: 100 }
         template: { type: string, description: "email: a lifecycle template's handle or id. transactional_email: a transactional one's." }
         wait_seconds: { type: integer, minimum: 60, maximum: 7776000, description: "wait: how long." }
@@ -30441,9 +30416,37 @@ components:
         prompt: { type: string, maxLength: 4000, description: "ai: what to ask the workspace's own AI model about the person; {{person.x}}, {{event.x}} and {{vars.x}} fill in. Needs a connected AI model; it uses the workspace's own key and AI spend limits (the Journey AI steps tool)." }
         choices: { type: array, minItems: 2, maxItems: 20, items: { type: string, maxLength: 100 }, description: "ai: the only answers allowed, to sort people (hot, warm, cold). Leave out for a written answer." }
         max_words: { type: integer, minimum: 1, maximum: 300, description: "ai: for a written answer, at most this many words (100 when left out)." }
+        paths: { type: array, maxItems: 10, items: { $ref: "#/components/schemas/JourneyPath" }, description: "wait_until and split: the ways on, in order." }
+        timeout_seconds: { type: integer, minimum: 60, maximum: 7776000, description: "wait_until: how long to wait for a path at most." }
+        timeout_next: { type: string, description: "wait_until: the step after the timeout; empty ends the run." }
+        split_by: { type: string, enum: [value, random], description: "split: value (the default: the first path whose conditions hold, else else) or random (by weight)." }
+        split_key: { type: string, enum: [person, company], description: "split at random: person (the default), or company, so everyone at a company goes the same way." }
         channel: { type: string, description: "slack: the channel's id." }
         connection_id: { type: string, format: uuid, description: "slack: which Slack connection; the workspace's first when left out. push_to_crm: which CRM connection; the workspace's first that can create contacts when left out." }
         on_error: { type: string, description: "Action steps: stop (the default: the run fails), continue, or a step id to go to." }
+    JourneyPath:
+      type: object
+      required: [id]
+      description: |
+        One way on from a wait_until or split step; its id is the step's outcome in results. wait_until: event (they do
+        this event; conditions then test its properties and their fields) or conditions alone (they come true). split by
+        value: conditions. split at random: weight, and holdout for people kept out on purpose (their run ends there).
+      properties:
+        id: { type: string, pattern: "^[a-z0-9][a-z0-9_-]{0,39}$" }
+        name: { type: string, maxLength: 100 }
+        event: { type: string }
+        conditions: { type: array, maxItems: 20, items: { $ref: "#/components/schemas/JourneyCondition" } }
+        match: { type: string, enum: [all, any] }
+        weight: { type: integer, minimum: 0, maximum: 100 }
+        holdout: { type: boolean }
+        next: { type: string, description: The step after; empty ends the run. }
+    JourneyEntryLimit:
+      type: object
+      required: [count, per]
+      description: At most count people start the journey per hour or day; its trigger skips the rest.
+      properties:
+        count: { type: integer, minimum: 1, maximum: 1000000 }
+        per: { type: string, enum: [hour, day] }
     JourneyWebhookAuth:
       type: object
       required: [type]
@@ -30490,11 +30493,13 @@ components:
         goal_event: { type: [string, "null"], description: "Doing this event ends their run: they reached the goal." }
         exit_events: { type: array, maxItems: 10, items: { type: string }, description: "Doing any of these events ends their run at once, even mid-wait." }
         exit_conditions: { type: array, maxItems: 20, items: { $ref: "#/components/schemas/JourneyCondition" }, description: "Attribute conditions: when any holds, the run ends before its next step, and nobody who already meets one starts." }
+        entry_limit: { oneOf: [{ $ref: "#/components/schemas/JourneyEntryLimit" }, { type: "null" }], description: "At most this many people start it per hour or day; null for no limit." }
+        reentry_after_seconds: { type: [integer, "null"], minimum: 60, maximum: 31536000, description: "With entry again: how long after their last run ends someone can start again." }
         exclude: { $ref: "#/components/schemas/Exclusion" }
         steps: { type: array, maxItems: 100, items: { $ref: "#/components/schemas/JourneyStep" }, description: The first step starts. }
     Journey:
       type: object
-      required: [id, name, description, status, brand_id, trigger, entry, goal_event, exit_events, exit_conditions, exclude, steps, version, activated_at, draft_updated_at, kit, stats, created_at, updated_at]
+      required: [id, name, description, status, brand_id, trigger, entry, goal_event, exit_events, exit_conditions, entry_limit, reentry_after_seconds, exclude, steps, version, activated_at, draft_updated_at, kit, stats, created_at, updated_at]
       properties:
         id: { type: string, format: uuid }
         name: { type: string }
@@ -30512,6 +30517,8 @@ components:
         goal_event: { type: [string, "null"] }
         exit_events: { type: array, items: { type: string } }
         exit_conditions: { type: array, items: { $ref: "#/components/schemas/JourneyCondition" } }
+        entry_limit: { oneOf: [{ $ref: "#/components/schemas/JourneyEntryLimit" }, { type: "null" }] }
+        reentry_after_seconds: { type: [integer, "null"] }
         exclude: { $ref: "#/components/schemas/Exclusion" }
         steps: { type: array, items: { $ref: "#/components/schemas/JourneyStep" } }
         version: { type: integer, description: Goes up each time what it does (trigger, entry, goal or steps) changes. }
@@ -30528,7 +30535,7 @@ components:
             failed: { type: integer }
         step_stats:
           type: object
-          description: "Only on a single journey: by step id, how many runs had each outcome (sent, skipped, waited, yes, no, done, failed)."
+          description: "Only on a single journey: by step id, how many runs had each outcome (sent, skipped, waited, yes, no, done, failed; for wait_until and split, each path's id, else and timed_out)."
           additionalProperties: { type: object, additionalProperties: { type: integer } }
         at_step:
           type: object
@@ -30555,6 +30562,8 @@ components:
         goal_event: { type: [string, "null"] }
         exit_events: { type: array, maxItems: 10, items: { type: string }, description: "Doing any of these events ends their run at once, even mid-wait." }
         exit_conditions: { type: array, maxItems: 20, items: { $ref: "#/components/schemas/JourneyCondition" }, description: "Attribute conditions: when any holds, the run ends before its next step." }
+        entry_limit: { oneOf: [{ $ref: "#/components/schemas/JourneyEntryLimit" }, { type: "null" }], description: "At most this many people start it per hour or day; null for no limit." }
+        reentry_after_seconds: { type: [integer, "null"], minimum: 60, maximum: 31536000, description: "With entry again: how long after their last run ends someone can start again." }
         exclude: { $ref: "#/components/schemas/Exclusion" }
         steps: { type: array, maxItems: 100, items: { $ref: "#/components/schemas/JourneyStep" }, description: The first step starts. }
     AutomationMap:
@@ -30625,7 +30634,7 @@ components:
         end_reason: { type: string, description: "Why it would exit or fail: exit_step, exit_condition, email_failed, action_failed." }
     JourneyVersion:
       type: object
-      required: [id, status, version, trigger, entry, goal_event, exit_events, exit_conditions, exclude, steps, runs_active, created_at, updated_at, published_at]
+      required: [id, status, version, trigger, entry, goal_event, exit_events, exit_conditions, entry_limit, reentry_after_seconds, exclude, steps, runs_active, created_at, updated_at, published_at]
       properties:
         id: { type: string, format: uuid }
         status: { type: string, enum: [draft, published], description: "draft: being edited. published: went live once." }
@@ -30641,6 +30650,8 @@ components:
         goal_event: { type: [string, "null"] }
         exit_events: { type: array, items: { type: string } }
         exit_conditions: { type: array, items: { $ref: "#/components/schemas/JourneyCondition" } }
+        entry_limit: { oneOf: [{ $ref: "#/components/schemas/JourneyEntryLimit" }, { type: "null" }] }
+        reentry_after_seconds: { type: [integer, "null"] }
         exclude: { $ref: "#/components/schemas/Exclusion" }
         steps: { type: array, items: { $ref: "#/components/schemas/JourneyStep" } }
         runs_active: { type: integer, description: People going through this version now. }
@@ -30649,7 +30660,7 @@ components:
         published_at: { type: [string, "null"], format: date-time }
     JourneyRun:
       type: object
-      required: [id, journey_id, record_id, name, status, step, next_at, exit_reason, version, steps_taken, context, vars, entered_at, finished_at]
+      required: [id, journey_id, record_id, name, status, step, next_at, exit_reason, version, steps_taken, context, vars, wait_deadline, entered_at, finished_at]
       properties:
         id: { type: string, format: uuid }
         journey_id: { type: string, format: uuid }
@@ -30658,10 +30669,11 @@ components:
         status: { $ref: "#/components/schemas/JourneyRunStatus" }
         step: { type: [string, "null"], description: The step it is on. }
         next_at: { type: [string, "null"], format: date-time, description: When a wait ends. }
-        exit_reason: { type: [string, "null"], description: "goal, exit_step, manual, archived, step_removed, email_failed." }
+        exit_reason: { type: [string, "null"], description: "goal, exit_event, exit_condition, exit_step, holdout, manual, archived, step_removed, email_failed, action_failed." }
         version: { type: [integer, "null"], description: "The journey version this run goes through; null for a run from before versions, which follows the current one." }
         steps_taken: { type: integer }
         context: { type: object, additionalProperties: true, description: "The event's properties, or the data it was added with; emails see it as event.*." }
+        wait_deadline: { type: [string, "null"], format: date-time, description: "On a wait_until step: when it times out." }
         vars: { type: object, additionalProperties: true, description: "What its steps saved for later steps, such as a webhook's answer under its save_as; templates see it as vars.*." }
         entered_at: { type: string, format: date-time }
         finished_at: { type: [string, "null"], format: date-time }
@@ -31040,7 +31052,7 @@ components:
         details: { type: object, additionalProperties: { type: string } }
     ReportMetrics:
       type: object
-      required: [sent, contacted, new_leads, follow_ups, failed, blocked, bounced, replies, replied_leads, auto_replies, opt_outs, unsubscribes, warmup_inbox, warmup_spam, warmup_missing, reply_rate, bounce_rate, opt_out_rate, inbox_placement, clicks, clicked_leads, click_rate]
+      required: [sent, contacted, new_leads, follow_ups, failed, blocked, bounced, replies, replied_leads, auto_replies, opt_outs, unsubscribes, reply_rate, bounce_rate, opt_out_rate, clicks, clicked_leads, click_rate]
       properties:
         sent: { type: integer }
         contacted: { type: integer, description: Distinct leads emailed. }
@@ -31054,13 +31066,9 @@ components:
         auto_replies: { type: integer }
         opt_outs: { type: integer, description: Replies asking not to be contacted. }
         unsubscribes: { type: integer }
-        warmup_inbox: { type: integer }
-        warmup_spam: { type: integer }
-        warmup_missing: { type: integer }
         reply_rate: { type: [number, "null"], description: Percent of contacted leads who replied. }
         bounce_rate: { type: [number, "null"] }
         opt_out_rate: { type: [number, "null"] }
-        inbox_placement: { type: [number, "null"] }
         clicks: { type: integer, description: "Tracked link clicks, leaving out likely link scanners. Zero unless click tracking is on." }
         clicked_leads: { type: integer }
         click_rate: { type: [number, "null"], description: Percent of contacted leads who clicked. }
@@ -31087,7 +31095,7 @@ components:
       type: object
       required: [key, level, title, detail]
       properties:
-        key: { type: string, example: bounce_rate, description: "sign_in, inbox_sync, send_failures, bounce_rate, placement, warmup, domain_spf, domain_dkim, domain_dmarc, blocklist, domain_paused, paused" }
+        key: { type: string, example: bounce_rate, description: "sign_in, inbox_sync, send_failures, bounce_rate, warmup, domain_spf, domain_dkim, domain_dmarc, blocklist, domain_paused, paused" }
         level: { type: string, enum: [ok, warning, critical, paused] }
         title: { type: string }
         detail: { type: string }
@@ -31107,7 +31115,7 @@ components:
         signals: { type: array, items: { $ref: "#/components/schemas/HealthSignal" } }
         stats:
           type: object
-          required: [sent_24h, bounced_24h, sent_7d, bounced_7d, bounce_rate_7d, failed_24h, replies_7d, warmup_landed_7d, warmup_spam_7d, warmup_missing_7d, inbox_placement_7d]
+          required: [sent_24h, bounced_24h, sent_7d, bounced_7d, bounce_rate_7d, failed_24h, replies_7d]
           properties:
             sent_24h: { type: integer }
             bounced_24h: { type: integer }
@@ -31116,10 +31124,6 @@ components:
             bounce_rate_7d: { type: [number, "null"], description: Percent; null under 20 sends. }
             failed_24h: { type: integer }
             replies_7d: { type: integer }
-            warmup_landed_7d: { type: integer }
-            warmup_spam_7d: { type: integer }
-            warmup_missing_7d: { type: integer }
-            inbox_placement_7d: { type: [number, "null"], description: Percent of warm-up email in the inbox; null under 10. }
     MailboxHealthSummary:
       type: object
       required: [total, ok, warning, critical, paused]
@@ -35972,20 +35976,11 @@ components:
         updated_at: { type: string, format: date-time }
     MailboxWarmup:
       type: object
-      description: "Warm-up settings. A connected sequencer runs the warm-up; its view, including its warm-up score, is in `platform`. The 7-day counts, `daily_target`, `reply_rate`, `today_target`, `last_error` and `inbox_rate` were for Outflare's own warm-up, which is gone, and run down to zero or null."
-      required: [enabled, daily_target, reply_rate, started_at, today_target, sent_7d, inbox_7d, spam_7d, missing_7d, failed_7d, last_error, provider, platform, waiting_on, inbox_rate]
+      description: "Warm-up settings. A connected sequencer runs the warm-up; its view, including its warm-up score, is in `platform`."
+      required: [enabled, started_at, provider, platform, waiting_on]
       properties:
         enabled: { type: boolean }
-        daily_target: { type: integer, minimum: 1, maximum: 100, deprecated: true, description: Outflare's own warm-up only. }
-        reply_rate: { type: integer, minimum: 0, maximum: 100, deprecated: true, description: Outflare's own warm-up only. }
         started_at: { type: [string, "null"], format: date-time, description: When warm-up was last turned on. }
-        today_target: { type: integer, deprecated: true, description: Outflare's own warm-up only; always 0. }
-        sent_7d: { type: integer, deprecated: true }
-        inbox_7d: { type: integer, deprecated: true, description: Sent warm-up mail found in the recipient's inbox. }
-        spam_7d: { type: integer, deprecated: true, description: "Found in spam, and moved to the inbox." }
-        missing_7d: { type: integer, deprecated: true, description: Not found within two days. }
-        failed_7d: { type: integer, deprecated: true, description: Warm-up sends the mailbox's SMTP server refused. }
-        last_error: { type: [string, "null"], deprecated: true, description: Why the latest warm-up send failed. }
         provider: { type: string, description: "The id of the connected sequencer (integration) that runs the warm-up, or outflare when none does. A mailbox a sequencer already warms up when it is first synced takes that sequencer as its provider." }
         platform:
           type: [object, "null"]
@@ -35999,29 +35994,16 @@ components:
             observed_at: { type: [string, "null"], format: date-time }
         waiting_on:
           type: [string, "null"]
-          enum: [another_mailbox, connection, paused, platform, null]
-          description: "platform while warm-up is on here but the sequencer running it doesn't show it on yet; null otherwise. another_mailbox, connection and paused were for Outflare's own warm-up and no longer occur."
-        inbox_rate: { type: [number, "null"], minimum: 0, maximum: 1, deprecated: true, description: "inbox_7d over all placed messages; null until any are placed." }
+          enum: [platform, null]
+          description: "platform while warm-up is on here but the sequencer running it doesn't show it on yet; null otherwise."
     WarmupSettings:
       type: object
       description: Unset fields are left as they are.
       properties:
         enabled: { type: boolean }
-        daily_target: { type: integer, minimum: 1, maximum: 100, deprecated: true, description: "Outflare's own warm-up only, which is gone: accepted and ignored." }
-        reply_rate: { type: integer, minimum: 0, maximum: 100, deprecated: true, description: "Outflare's own warm-up only, which is gone: accepted and ignored." }
         provider:
           type: string
           description: "The id of a connected sequencer with the control.warmup capability (EmailBison, Instantly, Smartlead), which runs the warm-up with its own. The mailboxes must be in that sequencer's account. On the bulk endpoint without mailbox_ids or pool_id, it applies to every mailbox that sequencer has. outflare is accepted only with enabled false, and detaches the mailboxes from their sequencer's warm-up; Outflare doesn't send warm-up mail itself."
-    WarmupDay:
-      type: object
-      required: [date, sent, inbox, spam, missing, replies]
-      properties:
-        date: { type: string, format: date }
-        sent: { type: integer }
-        inbox: { type: integer }
-        spam: { type: integer }
-        missing: { type: integer }
-        replies: { type: integer, description: Warm-up replies this mailbox received. }
     MailboxInput:
       type: object
       required: [email]
@@ -36123,13 +36105,10 @@ components:
         bounces_7d: { type: integer }
         warmup:
           type: object
-          description: Warm-up across the domain's mailboxes, last 7 days.
-          required: [warming, placed_7d, inbox_7d, inbox_rate]
+          description: Warm-up across the domain's mailboxes.
+          required: [warming]
           properties:
             warming: { type: integer, description: "Mailboxes in the warm-up stage (lifecycle_stage warming), the same count Mailboxes and Infrastructure show." }
-            placed_7d: { type: integer, description: Warm-up emails whose landing place is known. }
-            inbox_7d: { type: integer }
-            inbox_rate: { type: [number, "null"], minimum: 0, maximum: 1 }
         created_at: { type: string, format: date-time }
         updated_at: { type: string, format: date-time }
     SendingDomainDetail:
@@ -38745,7 +38724,7 @@ components:
         at: { type: string, format: date-time }
     WorkspaceStats:
       type: object
-      required: [mailboxes, domains, warmup_inbox_rate, sent_24h, sent_7d, replies_7d, contacted_leads_7d, replied_leads_7d, bounces_7d, unread_replies, active_sequences, active_enrollments, leads, link_pitches_waiting]
+      required: [mailboxes, domains, sent_24h, sent_7d, replies_7d, contacted_leads_7d, replied_leads_7d, bounces_7d, unread_replies, active_sequences, active_enrollments, leads, link_pitches_waiting]
       properties:
         mailboxes:
           type: object
@@ -38758,7 +38737,6 @@ components:
             verifying: { type: integer }
             daily_capacity: { type: integer, description: "Most emails that can go out in 24 hours: active mailboxes' daily limits, held to each domain's cap, with paused domains at 0." }
             warming: { type: integer, description: "Mailboxes in the warm-up stage (lifecycle_stage warming), the same count Mailboxes and Infrastructure show." }
-        warmup_inbox_rate: { type: [number, "null"], description: "Share of the last 7 days' placed warm-up mail that reached the inbox." }
         domains:
           type: object
           required: [total, paused, need_attention]
@@ -39138,7 +39116,7 @@ components:
           type: array
           items:
             type: object
-            required: [id, email, domain, stage, reason, until, changed_at, auto_rest, plan_id, placed_7d, inbox_rate]
+            required: [id, email, domain, stage, reason, until, changed_at, auto_rest, plan_id]
             properties:
               id: { type: string, format: uuid }
               email: { type: string }
@@ -39149,7 +39127,5 @@ components:
               changed_at: { type: string, format: date-time }
               auto_rest: { type: boolean }
               plan_id: { type: [string, "null"], format: uuid }
-              placed_7d: { type: integer }
-              inbox_rate: { type: [number, "null"] }
         plans: { type: array, items: { $ref: "#/components/schemas/InfraPlan" } }
         suppliers: { type: array, items: { type: string } }

@@ -24,7 +24,7 @@ import (
 )
 
 // JobRun moves one run along until it waits or ends.
-const JobRun = "journey.run"
+const JobRun = customers.JobJourneyRun
 
 // Service moves runs along: it starts them from events and goes through
 // their steps in jobs.
@@ -73,6 +73,12 @@ type journey struct {
 	// (any of them) end it before its next step.
 	exitEvents     []string
 	exitConditions []Condition
+	// Entry limits: at most entryLimit entries per entryLimitPer, and
+	// reentryAfter seconds after someone's last run before they start
+	// again.
+	entryLimit    *int
+	entryLimitPer *string
+	reentryAfter  *int
 	// Who never enters.
 	exclude customers.Exclusion
 }
@@ -80,12 +86,13 @@ type journey struct {
 func loadJourney(ctx context.Context, q jobs.Querier, ws, id string, lock bool) (*journey, error) {
 	var j journey
 	var filter, steps, exitConds, exclude []byte
-	sql := `SELECT id, workspace_id, status, trigger_kind, entry, version, brand_id, trigger_filter, steps, exit_events, exit_conditions, exclude FROM journeys
-		WHERE workspace_id = $1 AND id = $2`
+	sql := `SELECT id, workspace_id, status, trigger_kind, entry, version, brand_id, trigger_filter, steps, exit_events, exit_conditions, exclude,
+		entry_limit, entry_limit_per, reentry_after_seconds FROM journeys WHERE workspace_id = $1 AND id = $2`
 	if lock {
 		sql += ` FOR SHARE`
 	}
-	err := q.QueryRow(ctx, sql, ws, id).Scan(&j.id, &j.ws, &j.status, &j.triggerKind, &j.entry, &j.version, &j.brandID, &filter, &steps, &j.exitEvents, &exitConds, &exclude)
+	err := q.QueryRow(ctx, sql, ws, id).Scan(&j.id, &j.ws, &j.status, &j.triggerKind, &j.entry, &j.version, &j.brandID, &filter, &steps, &j.exitEvents, &exitConds, &exclude,
+		&j.entryLimit, &j.entryLimitPer, &j.reentryAfter)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil
 	}
@@ -194,6 +201,21 @@ func (s *Service) eventJob(ctx context.Context, job jobs.Job) error {
 		}
 		var event map[string]any
 		_ = json.Unmarshal(props, &event)
+		// Runs waiting for this event on a wait_until step go on.
+		rows, err = tx.Query(ctx, `SELECT id::text FROM journey_runs WHERE workspace_id = $1 AND record_id = $2 AND status = 'active'
+			AND wait_events @> ARRAY[$3]::text[]`, ws, *rec, name)
+		if err != nil {
+			return err
+		}
+		waiting, err := pgx.CollectRows(rows, pgx.RowTo[string])
+		if err != nil {
+			return err
+		}
+		for _, runID := range waiting {
+			if err := s.waitEvent(ctx, tx, ws, runID, in.EventID, name, event); err != nil {
+				return err
+			}
+		}
 		rows, err = tx.Query(ctx, `SELECT id::text FROM journeys WHERE workspace_id = $1 AND status = 'active' AND trigger_kind = 'event' AND trigger_event = $2`, ws, name)
 		if err != nil {
 			return err
@@ -232,6 +254,11 @@ func Enroll(ctx context.Context, tx pgx.Tx, ws, journeyID, recordID string, even
 			metrics.Excluded("journey")
 		}
 		return "", why, err
+	}
+	if !manual {
+		if why, err := entryRefused(ctx, tx, j, recordID); err != nil || why != "" {
+			return "", why, err
+		}
 	}
 	first := ""
 	if len(j.steps) > 0 {
@@ -376,8 +403,10 @@ type run struct {
 	nextAt                  *time.Time
 	context                 map[string]any
 	vars                    map[string]any
-	entered                 time.Time
-	taken                   int
+	// When a wait_until step it is on times out.
+	waitDeadline *time.Time
+	entered      time.Time
+	taken        int
 }
 
 // advance takes one step of a run, and reports whether to go on.
@@ -433,7 +462,7 @@ func (s *Service) advance(ctx context.Context, ws, runID string) (bool, error) {
 			return err
 		}
 		t, err := s.take(ctx, tx, ws, j, r, st, nil)
-		if err != nil {
+		if err != nil || t.wait {
 			return err
 		}
 		if t.call != nil {
@@ -456,6 +485,9 @@ type taken struct {
 	end, reason string
 	// call is set when the step is a call to start: the run waits for it.
 	call *actionDef
+	// wait is set when the run stays on the step (a wait_until that hasn't
+	// happened yet): it has already been saved, and nothing moves on.
+	wait bool
 }
 
 // take does one step of a run. A test run (t set) goes through the same
@@ -501,6 +533,37 @@ func (s *Service) take(ctx context.Context, tx pgx.Tx, ws string, j *journey, r 
 		return taken{next: st.Next, outcome: "sent", emailID: id}, nil
 	case KindExit:
 		return taken{outcome: "exited", end: "exited", reason: "exit_step"}, nil
+	case KindWaitUntil:
+		if t != nil {
+			return s.tryWaitUntil(ctx, tx, ws, r, st, t)
+		}
+		next, outcome, done, err := s.waitUntil(ctx, tx, ws, r, st)
+		if err != nil || !done {
+			return taken{wait: true}, err
+		}
+		return taken{next: next, outcome: outcome}, nil
+	case KindSplit:
+		p, ok, err := s.split(ctx, tx, ws, j, r, st)
+		if err != nil {
+			return taken{}, err
+		}
+		if t != nil {
+			if id, set := t.paths[st.ID]; set {
+				p, ok = Path{}, false
+				for _, q := range st.Paths {
+					if q.ID == id {
+						p, ok = q, true
+					}
+				}
+			}
+		}
+		switch {
+		case !ok:
+			return taken{next: st.Else, outcome: "else"}, nil
+		case p.Holdout:
+			return taken{outcome: p.ID, detail: "holdout", end: "exited", reason: "holdout"}, nil
+		}
+		return taken{next: p.Next, outcome: p.ID}, nil
 	}
 	a := action(st.Kind)
 	if a == nil {
@@ -544,9 +607,9 @@ func onError(st *Step, t taken) taken {
 func loadRun(ctx context.Context, tx pgx.Tx, ws, runID string) (run, bool, error) {
 	var r run
 	var ctxJSON, varsJSON []byte
-	err := tx.QueryRow(ctx, `SELECT id, journey_id, record_id, step, journey_version, next_at, context, vars, entered_at, steps_taken FROM journey_runs
+	err := tx.QueryRow(ctx, `SELECT id, journey_id, record_id, step, journey_version, next_at, context, vars, wait_deadline, entered_at, steps_taken FROM journey_runs
 		WHERE workspace_id = $1 AND id = $2 AND status = 'active' FOR UPDATE`, ws, runID).
-		Scan(&r.id, &r.journeyID, &r.recordID, &r.step, &r.version, &r.nextAt, &ctxJSON, &varsJSON, &r.entered, &r.taken)
+		Scan(&r.id, &r.journeyID, &r.recordID, &r.step, &r.version, &r.nextAt, &ctxJSON, &varsJSON, &r.waitDeadline, &r.entered, &r.taken)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return r, false, nil
 	}
@@ -575,7 +638,8 @@ func (s *Service) moveOn(ctx context.Context, tx pgx.Tx, ws string, r run, st *S
 	if err := logStep(ctx, tx, ws, r, st, t.outcome, t.emailID, t.detail); err != nil {
 		return false, err
 	}
-	if _, err := tx.Exec(ctx, `UPDATE journey_runs SET step = NULLIF($2, ''), next_at = NULL, steps_taken = steps_taken + 1, updated_at = now() WHERE id = $1`,
+	if _, err := tx.Exec(ctx, `UPDATE journey_runs SET step = NULLIF($2, ''), next_at = NULL, steps_taken = steps_taken + 1,
+		wait_events = NULL, wait_fields = false, wait_deadline = NULL, updated_at = now() WHERE id = $1`,
 		r.id, t.next); err != nil {
 		return false, err
 	}

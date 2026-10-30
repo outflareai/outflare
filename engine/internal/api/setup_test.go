@@ -16,6 +16,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
+	"github.com/outflareai/outflare/engine/internal/api"
 	"github.com/outflareai/outflare/engine/internal/connectors"
 	"github.com/outflareai/outflare/engine/internal/jobs"
 	"github.com/outflareai/outflare/engine/internal/track"
@@ -373,10 +374,11 @@ func TestInstallHealthFindsProblems(t *testing.T) {
 		}
 	}
 	// An old MCP server and a deprecated route in the request logs.
+	t.Cleanup(api.DeprecateOperation("getOldThing", "GET /v1/workspaces/{ws}/new-thing"))
 	if _, err := e.pool.Exec(ctx, `
 		INSERT INTO request_logs (workspace_id, request_id, method, route, operation, path, status, duration_ms, surface, client)
 		VALUES ($1, 'r1', 'GET', 'x', 'listLeads', '/x', 200, 1, 'mcp', 'mcp/0.0.9'),
-		       ($1, 'r2', 'GET', 'x', 'getMailboxWarmup', '/x', 200, 1, 'api', '')`, ws); err != nil {
+		       ($1, 'r2', 'GET', 'x', 'getOldThing', '/x', 200, 1, 'api', '')`, ws); err != nil {
 		t.Fatal(err)
 	}
 

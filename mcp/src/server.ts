@@ -1038,7 +1038,7 @@ export function createServer({ client: gtm, workspace, readOnly = false, mission
       title: "Mailbox health",
       description:
         "Every sending mailbox graded ok, warning, critical or paused, worst first, with each problem explained and what to do: sign-in failures " +
-        "(suspended account, wrong app password, revoked consent), replies not syncing, send failures, bounce rate, warm-up inbox placement, " +
+        "(suspended account, wrong app password, revoked consent), replies not syncing, send failures, bounce rate, " +
         "domain SPF/DKIM/DMARC and blocklists, and new mailboxes not warming up.",
       inputSchema: { level: z.enum(["ok", "warning", "critical", "paused"]).optional(), mailbox_id: z.array(id).max(500).optional(), brand: brandParam },
       annotations: read,
@@ -8251,6 +8251,12 @@ export function createServer({ client: gtm, workspace, readOnly = false, mission
       .max(20)
       .optional()
       .describe("Attribute conditions: when any holds, the run ends before its next step, and nobody who already meets one starts."),
+    entry_limit: z
+      .object({ count: z.number().int().min(1).max(1000000), per: z.enum(["hour", "day"]) })
+      .nullable()
+      .optional()
+      .describe("At most count people start it per hour or day; its trigger skips the rest. null removes the limit."),
+    reentry_after_seconds: z.number().int().min(60).max(31536000).nullable().optional().describe("With entry again: how long after their last run someone can start again."),
     exclude: exclusion,
     steps: z
       .array(
@@ -8283,6 +8289,8 @@ export function createServer({ client: gtm, workspace, readOnly = false, mission
             "push_to_crm",
             "sync_audience",
             "ai",
+            "wait_until",
+            "split",
           ]),
           name: z.string().optional(),
           template: z.string().optional().describe("email: a lifecycle template's handle."),
@@ -8333,6 +8341,26 @@ export function createServer({ client: gtm, workspace, readOnly = false, mission
           prompt: z.string().max(4000).optional().describe("ai: what to ask the workspace's own AI model, with {{person.x}}, {{event.x}}, {{vars.x}}."),
           choices: z.array(z.string().max(100)).min(2).max(20).optional().describe("ai: the only answers allowed, to sort people. Leave out for a written answer."),
           max_words: z.number().int().min(1).max(300).optional().describe("ai: for a written answer, at most this many words."),
+          paths: z
+            .array(
+              z.object({
+                id: z.string().describe("Names the path in results."),
+                name: z.string().optional(),
+                event: z.string().optional().describe("wait_until: they do this event; conditions then test its properties."),
+                conditions: z.array(condition).max(20).optional(),
+                match: z.enum(["all", "any"]).optional(),
+                weight: z.number().int().min(0).max(100).optional().describe("Random split: this path's share."),
+                holdout: z.boolean().optional().describe("Random split: people kept out on purpose; their run ends here."),
+                next: z.string().optional(),
+              }),
+            )
+            .max(10)
+            .optional()
+            .describe("wait_until and split: the ways on, in order; the first that comes true (or holds) wins."),
+          timeout_seconds: z.number().int().min(60).max(7776000).optional().describe("wait_until: how long to wait at most."),
+          timeout_next: z.string().optional().describe("wait_until: the step after the timeout; empty ends the run."),
+          split_by: z.enum(["value", "random"]).optional().describe("split: value (the default) or random by weight."),
+          split_key: z.enum(["person", "company"]).optional().describe("Random split: company sends everyone at a company the same way."),
           channel: z.string().optional().describe("slack: the channel's id."),
           connection_id: z.string().optional().describe("slack: which Slack connection. push_to_crm: which CRM connection. The first when left out."),
           on_error: z.string().optional().describe("Action steps: stop (default), continue, or a step id."),
@@ -8348,7 +8376,7 @@ export function createServer({ client: gtm, workspace, readOnly = false, mission
     {
       title: "List the kinds of journey step",
       description:
-        "Every step a journey can have: email, wait, branch, exit, and actions that change the person's fields and tags, move them between lists, journeys and sequences, suppress them, unsubscribe them, raise an alert, post to Slack or call a webhook. Each with its settings as JSON Schema.",
+        "Every step a journey can have: email, wait, branch, exit, and actions that change the person's fields and tags, move them between lists, journeys and sequences, suppress them, unsubscribe them, raise an alert, post to Slack or call a webhook, and flow control: wait until an event or conditions, and split by value or at random. Each with its settings as JSON Schema.",
       inputSchema: {},
       annotations: read,
     },
@@ -8438,6 +8466,8 @@ export function createServer({ client: gtm, workspace, readOnly = false, mission
         goal_event: journeyFields.goal_event,
         exit_events: journeyFields.exit_events,
         exit_conditions: journeyFields.exit_conditions,
+        entry_limit: journeyFields.entry_limit,
+        reentry_after_seconds: journeyFields.reentry_after_seconds,
         exclude: journeyFields.exclude,
         steps: journeyFields.steps,
       },
@@ -8479,13 +8509,16 @@ export function createServer({ client: gtm, workspace, readOnly = false, mission
     {
       title: "Test a journey with one person",
       description:
-        "Take one person through a journey (its live version, or its draft) and see, step by step, what would happen: which way each branch goes, the subject of each email or why they'd be skipped, and what each action would do. Nothing is sent, written or recorded, and waits pass at once. refusal says why they wouldn't start a run now. A branch on something they may still do follows the data as it is now (can_change); paths sends a branch the other way.",
+        "Take one person through a journey (its live version, or its draft) and see, step by step, what would happen: which way each branch goes, the subject of each email or why they'd be skipped, and what each action would do. Nothing is sent, written or recorded, and waits pass at once. refusal says why they wouldn't start a run now. A branch on something they may still do follows the data as it is now (can_change); paths sends a branch, split or wait_until another way; a wait_until otherwise takes a path that holds now, or times out.",
       inputSchema: {
         journey: z.string().describe("The journey's id."),
         record_id: z.string().describe("The person to test with (a customer record id)."),
         version: z.enum(["live", "draft"]).optional().describe("Which version to test (default live)."),
         event: z.record(z.string(), z.unknown()).optional().describe("The properties of the event that starts the run; left out, the person's latest trigger event."),
-        paths: z.record(z.string(), z.enum(["yes", "no"])).optional().describe("Branch step ids to send down yes or no whatever the data says."),
+        paths: z
+          .record(z.string(), z.string().max(40))
+          .optional()
+          .describe("Step ids to send down a way whatever the data says: a branch yes or no, a split one of its path ids or else, a wait_until one of its path ids or timed_out."),
       },
       annotations: read,
     },

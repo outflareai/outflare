@@ -134,7 +134,41 @@ var builtinKinds = []StepKind{
 	{Kind: KindBranch, Group: "flow", Label: "Branch", Description: "Go one way when the conditions hold and another when they don't.", Requires: []Requirement{},
 		Settings: schema(map[string]any{"conditions": map[string]any{"type": "array", "maxItems": 20, "items": conditionSchema},
 			"match": enum("all (the default) or any", "all", "any")}, "conditions"), Outputs: []string{"then", "else"}},
-	{Kind: KindExit, Group: "flow", Label: "Exit", Description: "End the run here.", Requires: []Requirement{}, Settings: schema(map[string]any{}), Outputs: []string{}},
+	{Kind: KindWaitUntil, Group: "flow", Label: "Wait until", Requires: []Requirement{},
+		Description: "Wait until they do an event, or until conditions come true, whichever path comes first; or until the timeout. Each path goes its own way.",
+		Settings: schema(map[string]any{
+			"paths": map[string]any{"type": "array", "minItems": 1, "maxItems": MaxPaths, "items": pathSchema(true, false),
+				"description": "In order: the first that comes true wins."},
+			"timeout_seconds": map[string]any{"type": "integer", "minimum": 60, "maximum": 7776000},
+			"timeout_next":    str("The step after the timeout; empty ends the run."),
+		}, "paths", "timeout_seconds"), Outputs: []string{"paths[].next", "timeout_next"}},
+	{Kind: KindSplit, Group: "flow", Label: "Split", Requires: []Requirement{},
+		Description: "Send people down one of several paths: the first whose conditions hold (by value, else goes to else), or at random by weight, with an optional holdout kept out on purpose.",
+		Settings: schema(map[string]any{
+			"split_by":  enum("value (the default) or random", "value", "random"),
+			"split_key": enum("random: person (the default), or company so everyone at a company goes the same way", "person", "company"),
+			"paths":     map[string]any{"type": "array", "minItems": 1, "maxItems": MaxPaths, "items": pathSchema(false, true)},
+			"else":      str("By value: the step when no path's conditions hold; empty ends the run."),
+		}, "paths"), Outputs: []string{"paths[].next", "else"}},
+}
+
+// pathSchema is one path of a wait_until or split step, as JSON Schema.
+func pathSchema(event, random bool) map[string]any {
+	props := map[string]any{
+		"id":         str("Names the path in results: lowercase letters, digits, - or _."),
+		"name":       str("A label people see."),
+		"conditions": map[string]any{"type": "array", "maxItems": 20, "items": conditionSchema},
+		"match":      enum("all (the default) or any", "all", "any"),
+		"next":       str("The step after; empty ends the run."),
+	}
+	if event {
+		props["event"] = str("They do this event; conditions then test its properties.")
+	}
+	if random {
+		props["weight"] = map[string]any{"type": "integer", "minimum": 0, "maximum": 100, "description": "Random split: this path's share."}
+		props["holdout"] = map[string]any{"type": "boolean", "description": "Random split: people kept out on purpose; their run ends here."}
+	}
+	return schema(props, "id")
 }
 
 // Actions are the action steps, in the order the step picker lists them.

@@ -247,6 +247,10 @@ var (
 		Namespace: namespace, Subsystem: "journeys", Name: "call_duration_seconds",
 		Help: "Time one try of a journey step's call took, by step kind.", Buckets: requestBuckets,
 	}, []string{"kind"})
+	journeyEntriesRefused = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Namespace: namespace, Subsystem: "journeys", Name: "entries_refused_total",
+		Help: "People a journey's trigger would have started but its limits turned away, by reason (limit: its entry limit per hour or day; reentry: too soon after their last run).",
+	}, []string{"reason"})
 	// Exclusions: people a journey, broadcast or sequence left out.
 	excluded = prometheus.NewCounterVec(prometheus.CounterOpts{
 		Namespace: namespace, Subsystem: "automations", Name: "excluded_total",
@@ -464,7 +468,7 @@ var own = []prometheus.Collector{
 	hooksReceived, hookEvents, hookLag,
 	domainConnectLookups, domainConnectDuration,
 	queryRuns, queryDuration, queryRows,
-	ruleEvaluations, journeyCalls, journeyCallDuration, excluded, sequencerPushes, crmContactPushes, adAudienceSyncs,
+	ruleEvaluations, journeyCalls, journeyCallDuration, journeyEntriesRefused, excluded, sequencerPushes, crmContactPushes, adAudienceSyncs,
 	semanticRuns, semanticItems, semanticDuration, semanticAvailable, semanticWorkspaces, knowledgeAsks, knowledgeAskDuration,
 	supportMessages, supportReplies, supportReplyDuration,
 	adConversions, adConversionsOldest,
@@ -627,6 +631,10 @@ func FlagCache(hit bool) {
 // RuleEvaluated counts one rule evaluated for one record, by trigger kind
 // and outcome.
 func RuleEvaluated(trigger, outcome string) { ruleEvaluations.WithLabelValues(trigger, outcome).Inc() }
+
+// JourneyEntryRefused records an automatic entry a journey's limits
+// turned away: limit or reentry.
+func JourneyEntryRefused(reason string) { journeyEntriesRefused.WithLabelValues(reason).Inc() }
 
 // JourneyCalled records one try of a journey step's call: its kind
 // (webhook, slack), outcome (done, retried, failed) and time.

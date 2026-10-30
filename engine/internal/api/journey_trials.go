@@ -34,14 +34,8 @@ func (s *Server) testJourney(w http.ResponseWriter, r *http.Request) {
 		writeError(w, r, http.StatusBadRequest, "invalid_request", "version is live or draft")
 		return
 	case len(req.Paths) > 100:
-		writeError(w, r, http.StatusBadRequest, "invalid_request", "paths names at most 100 branch steps")
+		writeError(w, r, http.StatusBadRequest, "invalid_request", "paths names at most 100 steps")
 		return
-	}
-	for _, way := range req.Paths {
-		if way != "yes" && way != "no" {
-			writeError(w, r, http.StatusBadRequest, "invalid_request", "each of paths is yes or no")
-			return
-		}
 	}
 	if raw, _ := json.Marshal(req.Event); len(raw) > 32<<10 {
 		writeError(w, r, http.StatusBadRequest, "invalid_request", "event must be at most 32 KB of JSON")
@@ -52,7 +46,10 @@ func (s *Server) testJourney(w http.ResponseWriter, r *http.Request) {
 	draft := req.Version == "draft" && cur.Status != "draft"
 	svc := &journeys.Service{Pool: s.pool, Emails: s.emails, Log: s.log, Fields: s, Deals: s, AI: s.JourneyAI()}
 	res, err := svc.Test(r.Context(), a.WorkspaceID, cur.ID, journeys.TestInput{RecordID: req.RecordID, Draft: draft, Event: req.Event, Paths: req.Paths})
+	var pathErr *journeys.PathError
 	switch {
+	case errors.As(err, &pathErr):
+		writeError(w, r, http.StatusBadRequest, "invalid_request", pathErr.Message)
 	case errors.Is(err, journeys.ErrNoDraft):
 		writeError(w, r, http.StatusNotFound, "not_found", "the journey has no draft version; start one with POST .../draft")
 	case errors.Is(err, journeys.ErrNotPerson):

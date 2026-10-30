@@ -45,3 +45,10 @@ func SetReviewJobTimes(poll, wait time.Duration) func() {
 	reviewJobPoll, reviewJobWait = poll, wait
 	return func() { reviewJobPoll, reviewJobWait = p, w }
 }
+
+// DeprecateOperation marks an operation as on its way out, so a test can
+// see install health warn about calls to it. It returns the undo.
+func DeprecateOperation(op, instead string) func() {
+	deprecatedOperations[op] = deprecatedOperation{instead: instead}
+	return func() { delete(deprecatedOperations, op) }
+}

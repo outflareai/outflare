@@ -263,6 +263,10 @@ func RecordEvent(ctx context.Context, q Querier, workspaceID string, ev Event) (
 // JobJourneyEvent is the job that hands a new event to journeys.
 const JobJourneyEvent = "journey.event"
 
+// JobJourneyRun is the job that moves a journey run along
+// (journeys.JobRun).
+const JobJourneyRun = "journey.run"
+
 // The jobs that hand changes to the rules engine (engine/internal/rules).
 const (
 	JobRuleEvent    = "rule.event"
@@ -276,7 +280,8 @@ const (
 func EventAdded(ctx context.Context, q Querier, workspaceID, eventID, name string) error {
 	var journey, rule bool
 	if err := q.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM journeys WHERE workspace_id = $1
-		AND ((status = 'active' AND trigger_event = $2) OR (status IN ('active', 'paused') AND (goal_event = $2 OR $2 = ANY (exit_events))))),
+		AND ((status = 'active' AND trigger_event = $2) OR (status IN ('active', 'paused') AND (goal_event = $2 OR $2 = ANY (exit_events)))))
+		OR EXISTS (SELECT 1 FROM journey_runs WHERE workspace_id = $1 AND status = 'active' AND wait_events @> ARRAY[$2]::text[]),
 		EXISTS (SELECT 1 FROM rules WHERE workspace_id = $1 AND status = 'active' AND $2 = ANY (watch_events))`,
 		workspaceID, name).Scan(&journey, &rule); err != nil {
 		return err
@@ -308,14 +313,31 @@ type FieldChange struct {
 }
 
 // FieldChanged tells rules that a record's field changed when an active
-// rule tests that field. Call it in the transaction that changed it.
+// rule tests that field, and has journey runs waiting for the record's
+// conditions to come true look again. Call it in the transaction that
+// changed it.
 func FieldChanged(ctx context.Context, q Querier, workspaceID string, c FieldChange) error {
+	// One statement: the waiting runs look again now, each in a job.
+	tag, err := q.Exec(ctx, `WITH w AS (
+			UPDATE journey_runs SET next_at = now(), updated_at = now()
+			WHERE workspace_id = $1 AND record_id = $2 AND status = 'active' AND wait_fields RETURNING id, workspace_id)
+		INSERT INTO jobs (kind, payload, workspace_id, run_at, idempotency_key)
+		SELECT $3, jsonb_build_object('run_id', w.id::text), w.workspace_id, now(), 'journey-run:' || w.id::text || ':field:' || $4::text FROM w`,
+		workspaceID, c.RecordID, JobJourneyRun, fmt.Sprint(time.Now().UnixNano()))
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() > 0 {
+		if _, err := q.Exec(ctx, `SELECT pg_notify('outflare_jobs', '')`); err != nil {
+			return err
+		}
+	}
 	var hit bool
 	if err := q.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM rules WHERE workspace_id = $1 AND status = 'active' AND trigger_kind = 'change'
 		AND $2 = ANY (watch_fields))`, workspaceID, c.Field).Scan(&hit); err != nil || !hit {
 		return err
 	}
-	_, err := jobs.Enqueue(ctx, q, jobs.NewJob{Kind: JobRuleChange, WorkspaceID: &workspaceID, Payload: c})
+	_, err = jobs.Enqueue(ctx, q, jobs.NewJob{Kind: JobRuleChange, WorkspaceID: &workspaceID, Payload: c})
 	return err
 }
 

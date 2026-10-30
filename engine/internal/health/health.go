@@ -59,11 +59,6 @@ type Stats struct {
 	BounceRate7d *float64 `json:"bounce_rate_7d"` // percent; null under 20 sends
 	Failed24h    int      `json:"failed_24h"`
 	Replies7d    int      `json:"replies_7d"`
-	// Warm-up emails from this mailbox that landed, last 7 days.
-	WarmupLanded int      `json:"warmup_landed_7d"`
-	WarmupSpam   int      `json:"warmup_spam_7d"`
-	WarmupLost   int      `json:"warmup_missing_7d"`
-	Placement    *float64 `json:"inbox_placement_7d"` // percent in the inbox; null under 10 landed
 }
 
 // Summary counts mailboxes by level.
@@ -97,7 +92,6 @@ func Check(ctx context.Context, q Querier, ws string, ids []string) ([]Mailbox, 
 		       m.warmup_enabled OR EXISTS (SELECT 1 FROM mailbox_platforms mp WHERE mp.mailbox_id = m.id AND mp.warmup_enabled), m.warmup_started_at,
 		       s.sent24, s.sent7, s.failed24, s.last_failure,
 		       b.b24, b.b7, r.replies7,
-		       w.landed, w.spam, w.lost,
 		       d.spf, d.dkim, d.dmarc, d.status, d.blocklists
 		FROM mailboxes m
 		LEFT JOIN LATERAL (
@@ -112,10 +106,6 @@ func Check(ctx context.Context, q Querier, ws string, ids []string) ([]Mailbox, 
 		LEFT JOIN LATERAL (
 			SELECT count(*)::int AS replies7 FROM inbound_messages
 			WHERE mailbox_id = m.id AND kind = 'reply' AND received_at > now() - interval '7 days') r ON true
-		LEFT JOIN LATERAL (
-			SELECT count(*) FILTER (WHERE landed = 'inbox')::int AS landed, count(*) FILTER (WHERE landed = 'spam')::int AS spam,
-			       count(*) FILTER (WHERE landed = 'missing')::int AS lost
-			FROM warmup_messages WHERE from_mailbox_id = m.id AND created_at > now() - interval '7 days') w ON true
 		LEFT JOIN sending_domains d ON d.workspace_id = m.workspace_id AND d.domain = m.domain
 		WHERE m.workspace_id = $1 AND (cardinality($2::uuid[]) = 0 OR m.id = ANY($2))
 		ORDER BY m.email`, ws, ids)
@@ -126,9 +116,9 @@ func Check(ctx context.Context, q Querier, ws string, ids []string) ([]Mailbox, 
 	out := []Mailbox{}
 	for rows.Next() {
 		var r row
-		var sent24, sent7, failed24, b24, b7, replies, landed, spam, lost *int
+		var sent24, sent7, failed24, b24, b7, replies *int
 		if err := rows.Scan(&r.MailboxID, &r.Email, &r.Domain, &r.Provider, &r.Status, &r.statusReason, &r.syncError, &r.lastSynced, &r.created,
-			&r.warmup, &r.warmupStarted, &sent24, &sent7, &failed24, &r.lastFailure, &b24, &b7, &replies, &landed, &spam, &lost,
+			&r.warmup, &r.warmupStarted, &sent24, &sent7, &failed24, &r.lastFailure, &b24, &b7, &replies,
 			&r.spf, &r.dkim, &r.dmarc, &r.domainStatus, &r.blocklists); err != nil {
 			return nil, err
 		}
@@ -138,8 +128,7 @@ func Check(ctx context.Context, q Querier, ws string, ids []string) ([]Mailbox, 
 			}
 			return *p
 		}
-		r.Stats = Stats{Sent24h: n(sent24), Sent7d: n(sent7), Failed24h: n(failed24), Bounced24h: n(b24), Bounced7d: n(b7), Replies7d: n(replies),
-			WarmupLanded: n(landed), WarmupSpam: n(spam), WarmupLost: n(lost)}
+		r.Stats = Stats{Sent24h: n(sent24), Sent7d: n(sent7), Failed24h: n(failed24), Bounced24h: n(b24), Bounced7d: n(b7), Replies7d: n(replies)}
 		out = append(out, grade(r, time.Now()))
 	}
 	return out, rows.Err()
@@ -204,19 +193,6 @@ func grade(r row, now time.Time) Mailbox {
 		case rate >= 3:
 			add(Signal{Key: "bounce_rate", Level: Warning, Value: &rate, Title: fmt.Sprintf("%.1f%% of emails bounced this week", rate),
 				Detail: fmt.Sprintf("%d of %d.", st.Bounced7d, st.Sent7d), Fix: "Verify the leads before sending and check the list's source."})
-		}
-	}
-	// Warm-up placement.
-	total := st.WarmupLanded + st.WarmupSpam + st.WarmupLost
-	if total >= 10 {
-		p := pct(st.WarmupLanded, total)
-		st.Placement = &p
-		detail := fmt.Sprintf("Of %d warm-up emails: %d inbox, %d spam, %d never arrived.", total, st.WarmupLanded, st.WarmupSpam, st.WarmupLost)
-		switch {
-		case p < 60:
-			add(Signal{Key: "placement", Level: Critical, Value: &p, Title: fmt.Sprintf("Only %.0f%% reach the inbox", p), Detail: detail, Fix: "Pause cold sending from this mailbox, keep warm-up on, and check the domain's DNS and blocklists."})
-		case p < 80:
-			add(Signal{Key: "placement", Level: Warning, Value: &p, Title: fmt.Sprintf("%.0f%% reach the inbox", p), Detail: detail, Fix: "Lower the daily limit and keep warm-up on until placement is above 80%."})
 		}
 	}
 	// New and cold.

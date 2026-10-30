@@ -6,6 +6,18 @@ Each pull request that changes what Outflare does adds a change note in [changes
 
 ## [Unreleased]
 
+## [0.46.0] - 2026-10-30
+
+### Added
+
+- Multivariate A/B tests: add up to two more flags to a test, and see every combination of their versions against the original, the best combination, each change's own effect, and whether the changes affect each other.
+- Engain connector: connect your Engain account with your own API key to run Reddit campaigns through Engain's accounts. Connecting shows your projects and credits left.
+- Journeys can add people to your ad audiences, or take them out. An "Add to an ad audience" step puts the person in a Meta custom audience or a Google Ads Customer Match list on one of your ad accounts, through your own connection. Only their hashed email and phone number reach the platform, and adding follows your ad consent setting.
+
+### Fixed
+
+- The Tolt import also brings over partners Tolt lists as invited (as pending), with the customers they referred.
+
 ## [0.45.0] - 2026-10-30
 
 ### Changed

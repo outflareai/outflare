@@ -3668,11 +3668,13 @@ class Operations(_Mixin):
         brand_id: str | None = None,
         description: str | None = None,
         entry: Literal["once", "again"] | None = None,
+        entry_limit: Any | None = None,
         exclude: dict[str, Any] | None = None,
         exit_conditions: list[dict[str, Any]] | None = None,
         exit_events: list[str] | None = None,
         goal_event: str | None = None,
         name: str | None = None,
+        reentry_after_seconds: int | None = None,
         steps: list[dict[str, Any]] | None = None,
         trigger: dict[str, Any] | None = None,
         extra_body: dict[str, Any] | None = None,
@@ -3695,11 +3697,13 @@ class Operations(_Mixin):
                 "brand_id": brand_id,
                 "description": description,
                 "entry": entry,
+                "entry_limit": entry_limit,
                 "exclude": exclude,
                 "exit_conditions": exit_conditions,
                 "exit_events": exit_events,
                 "goal_event": goal_event,
                 "name": name,
+                "reentry_after_seconds": reentry_after_seconds,
                 "steps": steps,
                 "trigger": trigger,
             },
@@ -9566,25 +9570,6 @@ class Operations(_Mixin):
         return self._call(
             "GET",
             "/v1/workspaces/{ws}/mailboxes/{id}",
-            path={"id": id, "ws": ws},
-        )
-
-    def get_mailbox_warmup(
-        self,
-        id: str,
-        *,
-        ws: str | None = None,
-    ) -> Any:
-        """A mailbox's results from Outflare's own warm-up for each of the last 14 days.
-
-        Scope: mailboxes.read. Days are UTC, oldest first. Outflare no longer sends warm-up mail itself, so the days run down to zero; a connected sequencer's warm-up score is in the mailbox's `warmup.platform`.
-
-        Needs: the mailboxes.read scope.
-        GET /v1/workspaces/{ws}/mailboxes/{id}/warmup
-        """
-        return self._call(
-            "GET",
-            "/v1/workspaces/{ws}/mailboxes/{id}/warmup",
             path={"id": id, "ws": ws},
         )
 
@@ -16961,7 +16946,7 @@ class Operations(_Mixin):
 
         Scope: mailboxes.read. Graded from every signal: sign-in and inbox sync
         errors (explained, e.g. suspended account or revoked consent), send
-        failures, bounce rate, warm-up inbox placement, the domain's SPF, DKIM,
+        failures, bounce rate, the domain's SPF, DKIM,
         DMARC and blocklists, and new mailboxes not warming up. Each signal
         says what to do. Worst first. Computed on read.
 
@@ -18809,10 +18794,10 @@ class Operations(_Mixin):
 
         Scope: sequences.read. Sends, leads contacted, new leads and follow-ups,
         failures, policy blocks, bounces, replies (and replied leads), auto-replies,
-        opt-outs, unsubscribes and warm-up placement, with reply, bounce, opt-out
-        and placement rates. Totals for the period, and rows by day, week,
-        sequence, step, mailbox, domain or brand. Default period is the last 30 days.
-        A record's brand is its sequence's, or its mailbox's for warm-up.
+        opt-outs and unsubscribes, with reply, bounce and opt-out rates. Totals
+        for the period, and rows by day, week, sequence, step, mailbox, domain or
+        brand. Default period is the last 30 days. A record's brand is its
+        sequence's, or its mailbox's when it has no sequence.
 
         Needs: the sequences.read scope.
         GET /v1/workspaces/{ws}/reports
@@ -23422,11 +23407,13 @@ class Operations(_Mixin):
         brand_id: str | None = None,
         description: str | None = None,
         entry: Literal["once", "again"] | None = None,
+        entry_limit: Any | None = None,
         exclude: dict[str, Any] | None = None,
         exit_conditions: list[dict[str, Any]] | None = None,
         exit_events: list[str] | None = None,
         goal_event: str | None = None,
         name: str | None = None,
+        reentry_after_seconds: int | None = None,
         steps: list[dict[str, Any]] | None = None,
         trigger: dict[str, Any] | None = None,
         extra_body: dict[str, Any] | None = None,
@@ -23449,11 +23436,13 @@ class Operations(_Mixin):
                 "brand_id": brand_id,
                 "description": description,
                 "entry": entry,
+                "entry_limit": entry_limit,
                 "exclude": exclude,
                 "exit_conditions": exit_conditions,
                 "exit_events": exit_events,
                 "goal_event": goal_event,
                 "name": name,
+                "reentry_after_seconds": reentry_after_seconds,
                 "steps": steps,
                 "trigger": trigger,
             },
@@ -23467,10 +23456,12 @@ class Operations(_Mixin):
         *,
         ws: str | None = None,
         entry: Literal["once", "again"] | None = None,
+        entry_limit: Any | None = None,
         exclude: dict[str, Any] | None = None,
         exit_conditions: list[dict[str, Any]] | None = None,
         exit_events: list[str] | None = None,
         goal_event: str | None = None,
+        reentry_after_seconds: int | None = None,
         steps: list[dict[str, Any]] | None = None,
         trigger: dict[str, Any] | None = None,
         extra_body: dict[str, Any] | None = None,
@@ -23490,10 +23481,12 @@ class Operations(_Mixin):
             path={"id": id, "ws": ws},
             body={
                 "entry": entry,
+                "entry_limit": entry_limit,
                 "exclude": exclude,
                 "exit_conditions": exit_conditions,
                 "exit_events": exit_events,
                 "goal_event": goal_event,
+                "reentry_after_seconds": reentry_after_seconds,
                 "steps": steps,
                 "trigger": trigger,
             },
@@ -25497,10 +25490,8 @@ class Operations(_Mixin):
         self,
         *,
         ws: str | None = None,
-        daily_target: int | None = None,
         enabled: bool | None = None,
         provider: str | None = None,
-        reply_rate: int | None = None,
         mailbox_ids: list[str] | None = None,
         pool_id: str | None = None,
         extra_body: dict[str, Any] | None = None,
@@ -25525,14 +25516,7 @@ class Operations(_Mixin):
             "POST",
             "/v1/workspaces/{ws}/mailboxes/warmup",
             path={"ws": ws},
-            body={
-                "daily_target": daily_target,
-                "enabled": enabled,
-                "provider": provider,
-                "reply_rate": reply_rate,
-                "mailbox_ids": mailbox_ids,
-                "pool_id": pool_id,
-            },
+            body={"enabled": enabled, "provider": provider, "mailbox_ids": mailbox_ids, "pool_id": pool_id},
             extra_body=extra_body,
             idempotency_key=idempotency_key,
         )

@@ -27,12 +27,9 @@ type statsView struct {
 		Paused        int `json:"paused"`
 		NeedAttention int `json:"need_attention"`
 	} `json:"domains"`
-	// WarmupInboxRate is the share of the last 7 days' placed warm-up
-	// mail that reached the inbox, null when there is none.
-	WarmupInboxRate *float64 `json:"warmup_inbox_rate"`
-	Sent24h         int      `json:"sent_24h"`
-	Sent7d          int      `json:"sent_7d"`
-	Replies7d       int      `json:"replies_7d"`
+	Sent24h   int `json:"sent_24h"`
+	Sent7d    int `json:"sent_7d"`
+	Replies7d int `json:"replies_7d"`
 	// ContactedLeads7d and RepliedLeads7d give the reply rate the same
 	// way everywhere: leads who replied over leads emailed.
 	ContactedLeads7d  int `json:"contacted_leads_7d"`
@@ -92,12 +89,10 @@ func (s *Server) stats(w http.ResponseWriter, r *http.Request) {
 			(SELECT count(*) FROM mailboxes x WHERE workspace_id = $1 AND lifecycle_stage = 'warming' AND status IN ('active', 'verifying')`+mb("x")+`),
 			(SELECT count(DISTINCT lead_id) FROM messages g WHERE workspace_id = $1 AND status = 'sent' AND lead_id IS NOT NULL AND created_at > now() - interval '7 days'`+viaMailbox("g")+`),
 			(SELECT count(DISTINCT lead_id) FROM inbound_messages i WHERE workspace_id = $1 AND kind = 'reply' AND lead_id IS NOT NULL AND received_at > now() - interval '7 days'`+viaMailbox("i")+`),
-			(SELECT count(*) FILTER (WHERE landed = 'inbox')::float / NULLIF(count(*), 0) FROM warmup_messages wm
-				WHERE workspace_id = $1 AND landed IS NOT NULL AND created_at > now() - interval '7 days'`+viaWarmup(brand, mb)+`),
 			(SELECT count(*) FROM link_pitches k WHERE workspace_id = $1 AND status = 'draft'`+viaSequence("k")+`)`, args...,
 	).Scan(&m.Total, &m.Active, &m.Error, &m.Paused, &m.Verifying, &m.DailyCapacity,
 		&v.Sent24h, &v.Sent7d, &v.Replies7d, &v.Bounces7d, &v.UnreadReplies, &v.ActiveSequences, &v.ActiveEnrollments, &v.Leads,
-		&m.Warming, &v.ContactedLeads7d, &v.RepliedLeads7d, &v.WarmupInboxRate, &v.LinkPitchesWaiting)
+		&m.Warming, &v.ContactedLeads7d, &v.RepliedLeads7d, &v.LinkPitchesWaiting)
 	if err != nil {
 		s.internal(w, r, err)
 		return
@@ -124,12 +119,4 @@ func (s *Server) stats(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	writeJSON(w, http.StatusOK, v)
-}
-
-// viaWarmup keeps warm-up mail to the brand's mailboxes, by sender.
-func viaWarmup(brand brandSel, mb func(string) string) string {
-	if brand.all() {
-		return ""
-	}
-	return ` AND wm.from_mailbox_id IN (SELECT b.id FROM mailboxes b WHERE b.workspace_id = $1` + mb("b") + `)`
 }

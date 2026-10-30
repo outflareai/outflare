@@ -204,28 +204,6 @@ func TestConnectionChecksAndSend(t *testing.T) {
 	}
 }
 
-func TestInboxPlacementIssue(t *testing.T) {
-	base := mailbox.DomainFacts{Domain: "acme-com.example", Checked: true, SPF: "pass", DKIM: "pass", DMARC: "pass", Mailboxes: 2}
-	code := func(placed, inbox int) string {
-		f := base
-		f.WarmupPlaced, f.WarmupInbox = placed, inbox
-		for _, i := range mailbox.DomainIssues(f) {
-			if i.Code == "inbox_placement" {
-				return i.Severity
-			}
-		}
-		return ""
-	}
-	for _, c := range []struct {
-		placed, inbox int
-		want          string
-	}{{10, 0, ""}, {100, 95, ""}, {100, 85, "warning"}, {100, 60, "critical"}} {
-		if got := code(c.placed, c.inbox); got != c.want {
-			t.Errorf("%d of %d in the inbox: %q, want %q", c.inbox, c.placed, got, c.want)
-		}
-	}
-}
-
 func TestServerIPsAndBlocklists(t *testing.T) {
 	dns := fakeDNS{host: map[string][]string{
 		"smtp.reef.io":                  {"198.51.100.7", "2001:db8::7", "198.51.100.6"},

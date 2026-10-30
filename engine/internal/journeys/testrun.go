@@ -29,8 +29,9 @@ type TestInput struct {
 	// Event is the properties of the event that starts the run. Nil uses
 	// the person's latest trigger event, if they have one.
 	Event map[string]any
-	// Paths sends branch steps (by id) down yes or no whatever the data
-	// says, to see the other way.
+	// Paths sends steps (by id) down a way whatever the data says, to see
+	// the other ways: a branch yes or no, a split one of its paths or
+	// else, a wait_until one of its paths or timed_out.
 	Paths map[string]string
 }
 
@@ -70,6 +71,36 @@ type trial struct {
 	paths   map[string]string
 	data    bool
 	subject string
+}
+
+// PathError is a test's paths naming a way its step doesn't have.
+type PathError struct{ Message string }
+
+func (e *PathError) Error() string { return e.Message }
+
+// checkTestPaths checks a test's paths against the steps they name. Ids of
+// steps the journey doesn't have are left alone.
+func checkTestPaths(j *journey, paths map[string]string) error {
+	for id, way := range paths {
+		st := j.step(id)
+		if st == nil {
+			continue
+		}
+		ok := false
+		switch st.Kind {
+		case KindBranch:
+			ok = way == "yes" || way == "no"
+		case KindSplit, KindWaitUntil:
+			ok = way == "else" && st.Kind == KindSplit || way == "timed_out" && st.Kind == KindWaitUntil
+			for _, p := range st.Paths {
+				ok = ok || p.ID == way
+			}
+		}
+		if !ok {
+			return &PathError{Message: "paths." + id + ": a branch goes yes or no, a split one of its paths or else, a wait_until one of its paths or timed_out"}
+		}
+	}
+	return nil
 }
 
 // ErrNoDraft is returned when a test asks for a draft the journey doesn't
@@ -115,6 +146,9 @@ func (s *Service) Test(ctx context.Context, ws, journeyID string, in TestInput) 
 			}
 		}
 		out.Version = "draft"
+	}
+	if err := checkTestPaths(j, in.Paths); err != nil {
+		return nil, err
 	}
 	event := in.Event
 	if event == nil && triggerEvent != nil {

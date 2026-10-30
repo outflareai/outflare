@@ -24,8 +24,6 @@ type DomainFacts struct {
 	Failing    int // mailboxes whose connection check failed
 	Sent7d     int
 	Bounces7d  int
-	// Warm-up mail placed in the last 7 days, and how much reached the inbox.
-	WarmupPlaced, WarmupInbox int
 }
 
 // Issue is one thing to fix or know about a domain, with the fix.
@@ -58,10 +56,6 @@ const (
 	bounceWarn     = 0.02
 	bounceCritical = 0.05
 	bounceMinSent  = 20 // fewer sends than this say too little
-
-	warmupWarn      = 0.9
-	warmupCritical  = 0.75
-	warmupMinPlaced = 20
 )
 
 // DomainIssues lists what is wrong with a domain, most severe first, and
@@ -102,19 +96,6 @@ func DomainIssues(f DomainFacts) []Issue {
 		case rate > bounceWarn:
 			add(Issue{Code: "bounce_rate", Severity: "warning", Title: "Bounce rate is " + pct + " over 7 days",
 				Detail: "Keep it under 2%: verify emails before importing leads, and remove role and catch-all addresses."})
-		}
-	}
-
-	if f.WarmupPlaced >= warmupMinPlaced {
-		rate := float64(f.WarmupInbox) / float64(f.WarmupPlaced)
-		pct := fmt.Sprintf("%.0f%%", rate*100)
-		switch {
-		case rate < warmupCritical:
-			add(Issue{Code: "inbox_placement", Severity: "critical", Title: "Only " + pct + " of warm-up mail reached the inbox",
-				Detail: "Most mail from this domain is going to spam. Pause cold sending from it, fix any DNS issues above, and let warm-up run until placement is back above 90%."})
-		case rate < warmupWarn:
-			add(Issue{Code: "inbox_placement", Severity: "warning", Title: pct + " of warm-up mail reached the inbox",
-				Detail: "Some mail from this domain lands in spam. Lower its mailboxes' daily limits and keep warm-up on until placement is above 90%."})
 		}
 	}
 

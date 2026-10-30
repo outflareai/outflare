@@ -72,9 +72,7 @@ type deprecatedOperation struct {
 	sunset time.Time
 }
 
-var deprecatedOperations = map[string]deprecatedOperation{
-	"getMailboxWarmup": {instead: "GET /v1/workspaces/{ws}/mailboxes/{id}: its warmup.platform has the connected sequencer's warm-up score"},
-}
+var deprecatedOperations = map[string]deprecatedOperation{}
 
 // semverLess compares dotted version numbers; anything unreadable is not
 // less.

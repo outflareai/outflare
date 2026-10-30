@@ -77,12 +77,9 @@ type domainView struct {
 	UpdatedAt        time.Time    `json:"updated_at"`
 }
 
-// domainWarmup sums warm-up across the domain's mailboxes, last 7 days.
+// domainWarmup counts the domain's mailboxes that are warming up.
 type domainWarmup struct {
-	Warming   int      `json:"warming"`
-	Placed7d  int      `json:"placed_7d"`
-	Inbox7d   int      `json:"inbox_7d"`
-	InboxRate *float64 `json:"inbox_rate"`
+	Warming int `json:"warming"`
 }
 
 type domainDay struct {
@@ -131,10 +128,8 @@ const domainSelect = `
 		GROUP BY m.domain
 	), warm AS (
 		SELECT m.domain,
-		       count(DISTINCT m.id) FILTER (WHERE m.lifecycle_stage = 'warming' AND m.status IN ('active', 'verifying'))::int AS warming,
-		       count(g.id) FILTER (WHERE g.landed IS NOT NULL)::int AS placed,
-		       count(g.id) FILTER (WHERE g.landed = 'inbox')::int AS inbox
-		FROM mailboxes m LEFT JOIN warmup_messages g ON g.from_mailbox_id = m.id AND g.created_at > now() - interval '7 days'
+		       count(*) FILTER (WHERE m.lifecycle_stage = 'warming' AND m.status IN ('active', 'verifying'))::int AS warming
+		FROM mailboxes m
 		WHERE m.workspace_id = $1 AND ($2::text IS NULL OR m.domain = $2)
 		GROUP BY m.domain
 	)
@@ -144,7 +139,7 @@ const domainSelect = `
 	       COALESCE(mb.total, 0), COALESCE(mb.active, 0), COALESCE(mb.error, 0), COALESCE(mb.paused, 0),
 	       COALESCE(mb.verifying, 0), COALESCE(mb.capacity, 0),
 	       COALESCE(sent.d1, 0), COALESCE(sent.d7, 0), COALESCE(inb.replies, 0), COALESCE(sent.leads, 0), COALESCE(inb.replied, 0), COALESCE(inb.bounces, 0),
-	       COALESCE(warm.warming, 0), COALESCE(warm.placed, 0), COALESCE(warm.inbox, 0)
+	       COALESCE(warm.warming, 0)
 	FROM sending_domains d
 	LEFT JOIN mb ON mb.domain = d.domain
 	LEFT JOIN sent ON sent.domain = d.domain
@@ -167,7 +162,7 @@ func (s *Server) queryDomains(ctx context.Context, ws string, domain *string) ([
 			&v.CheckedAt, &v.CreatedAt, &v.UpdatedAt,
 			&v.Mailboxes, &c.Active, &c.Error, &c.Paused, &c.Verifying, &v.DailyCapacity,
 			&v.Sent24h, &v.Sent7d, &v.Replies7d, &v.ContactedLeads7d, &v.RepliedLeads7d, &v.Bounces7d,
-			&v.Warmup.Warming, &v.Warmup.Placed7d, &v.Warmup.Inbox7d)
+			&v.Warmup.Warming)
 		if err != nil {
 			return v, err
 		}
@@ -184,11 +179,6 @@ func (s *Server) queryDomains(ctx context.Context, ws string, domain *string) ([
 			Domain: v.Domain, Checked: v.CheckedAt != nil, Paused: v.Status == "paused",
 			SPF: v.SPF, DKIM: v.DKIM, DMARC: v.DMARC, Blocklists: v.Blocklists,
 			Mailboxes: v.Mailboxes, Failing: c.Error, Sent7d: v.Sent7d, Bounces7d: v.Bounces7d,
-			WarmupPlaced: v.Warmup.Placed7d, WarmupInbox: v.Warmup.Inbox7d,
-		}
-		if v.Warmup.Placed7d > 0 {
-			rate := float64(v.Warmup.Inbox7d) / float64(v.Warmup.Placed7d)
-			v.Warmup.InboxRate = &rate
 		}
 		if v.MXProvider != nil {
 			facts.MXProvider = *v.MXProvider

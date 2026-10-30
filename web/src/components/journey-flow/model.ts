@@ -81,8 +81,16 @@ export const builtinKinds: StepKind[] = [
   },
 ];
 
-const outputText: Record<string, string> = { then: "Yes", else: "No" };
-export const outputLabel = (field: string) => outputText[field] ?? (field === "next" ? "" : field);
+const outputText: Record<string, string> = { then: "Yes", else: "No", timeout_next: "Timed out" };
+// outputLabel names a link: a path by its name or id (paths.0.next).
+export const outputLabel = (field: string, s?: Step) => {
+  const m = /^paths\.(\d+)\.next$/.exec(field);
+  if (m) {
+    const p = (s?.paths as { id?: string; name?: string }[] | undefined)?.[Number(m[1])];
+    return p?.name || p?.id || `Path ${Number(m[1]) + 1}`;
+  }
+  return outputText[field] ?? (field === "next" ? "" : field);
+};
 
 // Step is a journey step with whatever fields a newer kind adds.
 export type Step = JourneyStep & Record<string, unknown>;
@@ -93,13 +101,38 @@ export function kindOf(kinds: StepKind[], kind: string): StepKind | undefined {
 
 // outputs is the link fields of a step; a kind the catalog doesn't know
 // links through next.
+// A list of paths (paths[].next) is one link per path: paths.0.next,
+// paths.1.next and so on.
 export function outputs(kinds: StepKind[], s: Step): string[] {
-  return kindOf(kinds, s.kind)?.outputs ?? ["next"];
+  const out: string[] = [];
+  for (const f of kindOf(kinds, s.kind)?.outputs ?? ["next"]) {
+    const m = /^(\w+)\[\]\.(\w+)$/.exec(f);
+    if (!m) {
+      out.push(f);
+      continue;
+    }
+    const list = s[m[1]];
+    if (Array.isArray(list)) list.forEach((_, i) => out.push(`${m[1]}.${i}.${m[2]}`));
+  }
+  return out;
 }
 
 export function linkOf(s: Step, field: string): string | undefined {
-  const v = s[field];
+  let v: unknown = s;
+  for (const part of field.split(".")) v = v && typeof v === "object" ? (v as Record<string, unknown>)[part] : undefined;
   return typeof v === "string" && v ? v : undefined;
+}
+
+// setLink is s with one of its links (next, else, paths.0.next) set.
+export function setLink(s: Step, field: string, to: string | undefined): Step {
+  const parts = field.split(".");
+  if (parts.length === 1) return { ...s, [field]: to };
+  const set = (o: unknown, i: number): unknown => {
+    const copy: Record<string, unknown> | unknown[] = Array.isArray(o) ? [...o] : { ...(o as Record<string, unknown>) };
+    (copy as Record<string, unknown>)[parts[i]] = i === parts.length - 1 ? to : set((o as Record<string, unknown>)[parts[i]], i + 1);
+    return copy;
+  };
+  return set(s, 0) as Step;
 }
 
 // errorLink is the step a failing step goes to, if its error mode names
@@ -210,10 +243,10 @@ export function insert(kinds: StepKind[], steps: Step[], slot: Slot, s: Step): S
   const parent = slot.from === null ? undefined : steps.find((x) => x.id === slot.from);
   const after = slot.from === null ? steps[0]?.id : parent && linkOf(parent, slot.field);
   const first = outputs(kinds, s)[0];
-  const added: Step = first && after ? { ...s, [first]: after } : s;
+  const added: Step = first && after ? setLink(s, first, after) : s;
   if (slot.from === null) return [added, ...steps];
   const i = steps.findIndex((x) => x.id === slot.from);
-  const out = steps.map((x) => (x.id === slot.from ? { ...x, [slot.field]: added.id } : x));
+  const out = steps.map((x) => (x.id === slot.from ? setLink(x, slot.field, added.id) : x));
   return [...out.slice(0, i + 1), added, ...out.slice(i + 1)];
 }
 
@@ -227,8 +260,8 @@ export function remove(kinds: StepKind[], steps: Step[], id: string): { steps: S
   const after = first ? linkOf(gone, first) : undefined;
   const before = reachable(kinds, steps);
   let out = steps.filter((s) => s.id !== id).map((s) => {
-    const c: Step = { ...s };
-    for (const f of outputs(kinds, s)) if (c[f] === id) c[f] = after;
+    let c: Step = { ...s };
+    for (const f of outputs(kinds, s)) if (linkOf(c, f) === id) c = setLink(c, f, after);
     const ef = kindOf(kinds, s.kind)?.error_output;
     if (ef && c[ef] === id) c[ef] = "stop";
     if (c.conditions) c.conditions = c.conditions.filter((x) => x.step !== id);

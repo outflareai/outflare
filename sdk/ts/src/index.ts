@@ -30,7 +30,6 @@ export type MailboxInput = Schemas["MailboxInput"];
 export type MailboxPool = Schemas["MailboxPool"];
 export type MailboxWarmup = Schemas["MailboxWarmup"];
 export type WarmupSettings = Schemas["WarmupSettings"];
-export type WarmupDay = Schemas["WarmupDay"];
 export type SendingDomain = Schemas["SendingDomain"];
 export type SendingDomainDetail = Schemas["SendingDomainDetail"];
 export type DomainIssue = Schemas["DomainIssue"];

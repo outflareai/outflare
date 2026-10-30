@@ -131,21 +131,10 @@ type mailboxLock struct {
 }
 
 // warmupView is a mailbox's warm-up settings. A connected sequencer runs
-// the warm-up; the 7-day counts are from Outflare's own warm-up, which is
-// gone, so they run down to zero.
+// the warm-up; Outflare doesn't send warm-up mail itself.
 type warmupView struct {
-	Enabled     bool       `json:"enabled"`
-	DailyTarget int        `json:"daily_target"`
-	ReplyRate   int        `json:"reply_rate"`
-	StartedAt   *time.Time `json:"started_at"`
-	Sent7d      int        `json:"sent_7d"`
-	Inbox7d     int        `json:"inbox_7d"`
-	Spam7d      int        `json:"spam_7d"`
-	Missing7d   int        `json:"missing_7d"`
-	Failed7d    int        `json:"failed_7d"`
-	// LastError is why the latest warm-up send failed, null once one
-	// succeeds again.
-	LastError *string `json:"last_error"`
+	Enabled   bool       `json:"enabled"`
+	StartedAt *time.Time `json:"started_at"`
 	// Provider is the id of the connected sequencer that runs the
 	// warm-up, or "outflare" when none does.
 	Provider string `json:"provider"`
@@ -155,11 +144,6 @@ type warmupView struct {
 	// WaitingOn is platform while a mailbox has warm-up on here but its
 	// sequencer doesn't show it on yet, and null otherwise.
 	WaitingOn *string `json:"waiting_on"`
-	// Today was the day's volume on Outflare's own ramp; always 0.
-	Today int `json:"today_target"`
-	// InboxRate is the share of placed messages that reached the inbox,
-	// null until there are any.
-	InboxRate *float64 `json:"inbox_rate"`
 }
 
 type warmupPlatform struct {
@@ -193,7 +177,7 @@ func scanMailbox(r pgx.CollectableRow) (mailboxView, error) {
 		&m.SMTPHost, &m.SMTPPort, &m.SMTPUsername, &m.IMAPHost, &m.IMAPPort, &m.IMAPUsername,
 		&m.Status, &m.StatusReason, &m.DailyLimit, &m.MinGapSeconds, &m.SMTPOK, &m.IMAPOK, &m.LastVerifiedAt, &m.LastSyncedAt, &m.SyncError,
 		&m.Source, &m.BrandID, &m.PoolID, &m.PoolName, &m.ServerID, &m.ServerHost,
-		&w.Enabled, &w.DailyTarget, &w.ReplyRate, &w.StartedAt, &w.Sent7d, &w.Inbox7d, &w.Spam7d, &w.Missing7d, &w.Failed7d, &w.LastError,
+		&w.Enabled, &w.StartedAt,
 		&wp.id, &wp.name, &wp.enabled, &wp.score, &wp.observed,
 		&m.CreatedAt, &m.UpdatedAt,
 		&senderID, &senderName, &senderConfirmed, &m.SuggestedSenderID,
@@ -221,10 +205,6 @@ func scanMailbox(r pgx.CollectableRow) (mailboxView, error) {
 		waiting := "platform"
 		w.WaitingOn = &waiting
 	}
-	if placed := w.Inbox7d + w.Spam7d + w.Missing7d; placed > 0 {
-		rate := float64(w.Inbox7d) / float64(placed)
-		w.InboxRate = &rate
-	}
 	return m, err
 }
 
@@ -234,9 +214,7 @@ const mailboxSelect = `
 	       m.smtp_host, m.smtp_port, m.smtp_username, m.imap_host, m.imap_port, m.imap_username,
 	       m.status, m.status_reason, m.daily_limit, m.min_gap_seconds, m.smtp_ok, m.imap_ok, m.last_verified_at, m.last_synced_at, m.sync_error,
 	       m.source, m.brand_id::text, m.pool_id, p.name, m.server_id, sv.host,
-	       m.warmup_enabled, m.warmup_daily_target, m.warmup_reply_rate, m.warmup_started_at,
-	       COALESCE(w.sent, 0), COALESCE(w.inbox, 0), COALESCE(w.spam, 0), COALESCE(w.missing, 0),
-	       COALESCE(w.failed, 0), w.last_error,
+	       m.warmup_enabled, m.warmup_started_at,
 	       m.warmup_integration_id::text, wi.name, wpl.warmup_enabled, wpl.warmup_score, wpl.observed_at,
 	       m.created_at, m.updated_at,
 	       m.sender_id::text, sn.name, m.sender_confirmed_at IS NOT NULL, m.suggested_sender_id::text,
@@ -256,16 +234,7 @@ const mailboxSelect = `
 	LEFT JOIN campaign_links al ON al.id = ma.link_id LEFT JOIN integrations ai ON ai.id = al.integration_id
 	LEFT JOIN mailbox_locks lk ON lk.mailbox_id = m.id AND (lk.until IS NULL OR lk.until > now())
 	LEFT JOIN integrations wi ON wi.id = m.warmup_integration_id
-	LEFT JOIN mailbox_platforms wpl ON wpl.mailbox_id = m.id AND wpl.integration_id = m.warmup_integration_id
-	LEFT JOIN LATERAL (
-		SELECT count(*) FILTER (WHERE status = 'sent') AS sent,
-		       count(*) FILTER (WHERE landed = 'inbox') AS inbox,
-		       count(*) FILTER (WHERE landed = 'spam') AS spam,
-		       count(*) FILTER (WHERE landed = 'missing') AS missing,
-		       count(*) FILTER (WHERE status = 'failed') AS failed,
-		       (array_agg(error ORDER BY created_at DESC) FILTER (WHERE status IN ('sent', 'failed')))[1] AS last_error
-		FROM warmup_messages WHERE from_mailbox_id = m.id AND created_at > now() - interval '7 days'
-	) w ON true`
+	LEFT JOIN mailbox_platforms wpl ON wpl.mailbox_id = m.id AND wpl.integration_id = m.warmup_integration_id`
 
 func (s *Server) listMailboxes(w http.ResponseWriter, r *http.Request) {
 	a := accessFrom(r.Context())

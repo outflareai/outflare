@@ -579,7 +579,6 @@ function HealthDialog({ h, onClose }: { h: MailboxHealth; onClose: () => void })
           <DialogTitle className="flex items-center gap-2 text-[15px]">{h.email}<Badge tone={levelTone[h.level]}>{levelLabel[h.level]} · {h.score}</Badge></DialogTitle>
           <DialogDescription className="text-[13px]">
             {st.sent_7d.toLocaleString()} sent this week · {st.bounce_rate_7d === null ? `${st.bounced_7d} bounced` : `${st.bounce_rate_7d}% bounced`} · {st.replies_7d} replies
-            {st.inbox_placement_7d !== null && ` · ${Math.round(st.inbox_placement_7d)}% inbox placement`}
           </DialogDescription>
         </DialogHeader>
         {h.signals.length === 0 ? (

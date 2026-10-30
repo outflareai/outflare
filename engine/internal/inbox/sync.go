@@ -328,19 +328,6 @@ func (s *Syncer) store(ctx context.Context, tx pgx.Tx, acct *mailbox.Account, uv
 		return false, err
 	}
 
-	if fromOwnMailbox && p.MessageID != "" {
-		// Warm-up mail is handled by the warm-up checks and kept out of
-		// the inbox.
-		var warmup bool
-		if err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM warmup_messages WHERE workspace_id = $1 AND message_id = $2)`,
-			ws, p.MessageID).Scan(&warmup); err != nil {
-			return false, err
-		}
-		if warmup {
-			return false, nil
-		}
-	}
-
 	if p.Bounce == nil && m.messageID == nil && !fromOwnMailbox {
 		// A sequencer that warms up this mailbox marks its warm-up mail
 		// with a tag, which the workspace keeps on that integration

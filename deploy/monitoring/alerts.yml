@@ -169,6 +169,13 @@ groups:
         annotations:
           summary: "Over half of journey {{ $labels.kind }} calls failed in 30 minutes. Usually one workspace's receiver changed or its key expired (each run's history says why); if it is every workspace, the engine can't reach the internet. journey_step.called failures in the logs name the journey."
 
+      - alert: OutflareJourneyRunsBehind
+        expr: max(outflare_journeys_oldest_due_seconds) > 900
+        for: 10m
+        labels: { severity: warning }
+        annotations:
+          summary: "A journey run has been due for over 15 minutes (normal is seconds): waits, wait_until checks and timeouts aren't moving on. Check journey.run jobs in the queue panels and job.failed in the logs."
+
       - alert: OutflareJourneyCallsSlow
         expr: histogram_quantile(0.95, sum by (kind, le) (rate(outflare_journeys_call_duration_seconds_bucket[15m]))) > 10
         for: 15m

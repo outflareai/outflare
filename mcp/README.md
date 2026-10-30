@@ -112,7 +112,7 @@ Read (always available):
 | --- | --- |
 | `list_ideal_customer_profiles`, `get_ideal_customer_profile` | Who the workspace sells to: each profile's description, filters and brand |
 | `get_overview` | Mailbox health and capacity, sends, replies and bounces, unread replies; `brand` narrows it to one brand |
-| `list_mailboxes` | Sending mailboxes with status, daily limit, pool and warm-up (settings and 7-day inbox placement) |
+| `list_mailboxes` | Sending mailboxes with status, daily limit, pool and warm-up (who runs it and its warm-up score) |
 | `get_mailbox` | One mailbox: status and last error, limits, pool, brand, stage, warm-up and sender |
 | `get_report` | Sends, bounces, replies, opt-outs, clicks and placement with rates, by day, week, sequence, step, mailbox, domain or brand; `brand` narrows it |
 | `get_mailbox_health` | Every mailbox graded ok, warning, critical or paused, with each problem explained and its fix |
