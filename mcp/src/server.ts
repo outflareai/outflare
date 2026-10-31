@@ -14,6 +14,7 @@ import { registerRecordTools } from "./records.js";
 import { registerContextTools } from "./context.js";
 import { registerKnowledgeTools } from "./knowledge.js";
 import { registerSupportTools } from "./support.js";
+import { registerReviewRequestTools } from "./review-requests.js";
 import { registerFlagTools } from "./flags.js";
 import { registerAIAccountTools } from "./aiaccounts.js";
 import { registerABTestTools } from "./abtests.js";
@@ -306,6 +307,7 @@ export function createServer({ client: gtm, workspace, readOnly = false, mission
   registerContextTools(server, gtm, () => ws, readOnly, call, withBrand);
   registerKnowledgeTools(server, gtm, () => ws, readOnly, call, withBrand);
   registerSupportTools(server, gtm, () => ws, readOnly, call);
+  registerReviewRequestTools(server, gtm, readOnly, call);
   registerFlagTools(server, gtm, () => ws, readOnly, call, withBrand);
   registerAIAccountTools(server, gtm, () => ws, readOnly, call);
   registerABTestTools(server, gtm, () => ws, readOnly, call, withBrand);
@@ -8530,6 +8532,7 @@ export function createServer({ client: gtm, workspace, readOnly = false, mission
         z.object({
           id: z.string().describe("Lowercase letters, digits, - or _."),
           kind: z.enum([
+            "request_review",
             "email",
             "wait",
             "branch",
@@ -8560,6 +8563,7 @@ export function createServer({ client: gtm, workspace, readOnly = false, mission
             "split",
           ]),
           name: z.string().optional(),
+          review_campaign_id: z.string().uuid().optional().describe("request_review: an active workflow review campaign in the journey brand."),
           template: z.string().optional().describe("email: a lifecycle template's handle."),
           ignore_cap: z.boolean().optional().describe("email: send even over the frequency cap (get_email_guardrails), for email a person must get."),
           quiet_hours: z.enum(["hold", "skip"]).optional().describe("email: in quiet hours, hold (default) sends when they end; skip doesn't send and goes on."),

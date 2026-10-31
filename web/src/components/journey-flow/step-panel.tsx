@@ -6,6 +6,7 @@
 import { useEffect, useState, type ReactNode } from "react";
 import type { EmailTemplate, JourneyCondition, Schemas } from "@outflare/sdk";
 import { api } from "@/api";
+import { useBrand } from "@/lib/brand";
 import { Button, CopyButton, field, Input } from "@/ui";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import type { Go } from "@/pages/Lifecycle";
@@ -258,6 +259,14 @@ function AdPicker({ ws, pick, label, hint, step, disabled, onChange }: {
   );
 }
 
+function ReviewCampaignPicker({ ws, value, disabled, onChange }: { ws: string; value: string; disabled: boolean; onChange: (id: string) => void }) {
+ const { brand } = useBrand(ws);
+ const [campaigns, setCampaigns] = useState<{ id: string; name: string }[]>([]);
+ const [error, setError] = useState("");
+ useEffect(() => { let live = true; setCampaigns([]); setError(""); if (brand) api.GET("/v1/brands/{brand}/review-requests/campaigns", { params: { path: { brand: brand.id } } }).then(({ data, error }) => { if (!live) return; if (error) setError(error.error.message); setCampaigns((data?.data ?? []).filter(c => c.config.mode === "workflow" && c.status === "active").map(c => ({ id: c.id, name: c.config.name }))); }); return () => { live = false; }; }, [brand?.id]);
+ return <Row label="Review campaign" hint={error || (!brand ? "Select this journey's brand first." : "Choose an active workflow campaign from Reviews. Frequency and email policies apply.")}><select aria-label="Review campaign" className={`${field} w-full`} value={value} disabled={disabled || !brand} onChange={e => onChange(e.target.value)}><option value="">Choose a campaign…</option>{value && !campaigns.some(c => c.id === value) && <option value={value}>Unavailable campaign ({value})</option>}{campaigns.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}</select></Row>;
+}
+
 // SchemaFields draws a simple form for a kind the builder has no form of
 // its own for, from its settings schema.
 function SchemaFields({ ws, schema, step, onChange, disabled }: { ws: string; schema: SettingsSchema; step: Step; onChange: (s: Step) => void; disabled: boolean }) {
@@ -268,6 +277,7 @@ function SchemaFields({ ws, schema, step, onChange, disabled }: { ws: string; sc
         const v = step[key];
         const type = Array.isArray(p.type) ? p.type.find((t) => t !== "null") : p.type;
         const picker = p["x-outflare-picker"];
+        if (picker === "review_campaign") return <ReviewCampaignPicker key={key} ws={ws} value={String(v ?? "")} disabled={disabled} onChange={id => onChange({ ...step, [key]: id })} />;
         if (picker === "ad_account" || picker === "ad_audience") {
           return <AdPicker key={key} ws={ws} pick={picker} label={title} hint={p.description} step={step} disabled={disabled}
             onChange={(id) => onChange(picker === "ad_account" ? { ...step, [key]: id, audience_id: undefined } : { ...step, [key]: id })} />;
@@ -417,7 +427,7 @@ export function StepPanel({ ws, step: s, steps, kinds, templates, catalog, event
                   <option value="any">any of these holds</option>
                 </select>
               </label>
-              <Conditions list={s.conditions ?? []} onChange={(c) => onChange({ ...s, conditions: c })} emailSteps={steps.filter((x) => x.kind === "email")}
+              <Conditions list={s.conditions ?? []} onChange={(c) => onChange({ ...s, conditions: c })} emailSteps={steps.filter((x) => x.kind === "email" || x.kind === "request_review")}
                 catalog={catalog} event={event} disabled={disabled} />
             </div>
           )}

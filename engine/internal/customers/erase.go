@@ -11,6 +11,7 @@ import (
 // what they did, what was sent to them and what they wrote. Owned rows
 // (identities, links, history) go with the record itself.
 var Erased = []Ref{
+	{"review_requests", "record_id"},
 	{"customer_events", "record_id"}, {"consents", "record_id"},
 	// The events as sent, kept in the event inbox.
 	{"event_inbox", "record_id"},

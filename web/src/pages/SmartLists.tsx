@@ -17,7 +17,7 @@ type Field = { key: string; label: string };
 // useRuleChoices loads what rules can pick from: the person fields and
 // approved events in the catalog, the workspace's lead lists, and its news
 // searches (for media lists; empty without seo.read).
-function useRuleChoices(ws: string) {
+export function useRuleChoices(ws: string) {
   const [fields, setFields] = useState<Field[]>([]);
   const [events, setEvents] = useState<string[]>([]);
   const [leadLists, setLeadLists] = useState<LeadList[]>([]);
@@ -70,7 +70,7 @@ export function rulesText(l: Pick<SmartList, "rules" | "match">, fieldLabel: (k:
   return l.rules.map((r) => ruleText(r, fieldLabel, listName)).join(l.match === "any" ? ", or " : ", and ");
 }
 
-function Rules({ rules, onChange, fields, events, leadLists, newsSearches }: {
+export function Rules({ rules, onChange, fields, events, leadLists, newsSearches }: {
   rules: SmartListRule[]; onChange: (r: SmartListRule[]) => void; fields: Field[]; events: string[]; leadLists: LeadList[]; newsSearches: NewsSearch[];
 }) {
   const set = (i: number, r: SmartListRule) => onChange(rules.map((x, k) => (k === i ? r : x)));

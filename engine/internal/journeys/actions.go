@@ -17,6 +17,7 @@ import (
 	"github.com/outflareai/outflare/engine/internal/jobs"
 	"github.com/outflareai/outflare/engine/internal/leads"
 	"github.com/outflareai/outflare/engine/internal/metrics"
+	"github.com/outflareai/outflare/engine/internal/reviewrequests"
 	"github.com/outflareai/outflare/engine/internal/smartlists"
 )
 
@@ -175,6 +176,20 @@ func pathSchema(event, random bool) map[string]any {
 
 // Actions are the action steps, in the order the step picker lists them.
 var Actions = []actionDef{
+	{StepKind: StepKind{Kind: "request_review", Group: "messaging", Label: "Request a review", Description: "Send one honest review invitation using an active brand review campaign. Brand frequency limits, consent and email guardrails apply.", Requires: []Requirement{{Connection: "email_provider", Label: "A lifecycle email provider"}}, Settings: schema(map[string]any{"review_campaign_id": ref("review_campaign", "An active workflow review campaign for this brand.")}, "review_campaign_id")},
+		check: func(st Step) string {
+			if !uuidRE.MatchString(st.ReviewCampaignID) {
+				return "choose a review campaign"
+			}
+			return ""
+		},
+		run: func(ctx context.Context, x *act) (string, string, error) {
+			if x.j.brandID == nil {
+				return "failed", "choose a brand for this journey", nil
+			}
+			svc := reviewrequests.Service{Pool: x.s.Pool, Mail: x.s.Emails}
+			return svc.FromWorkflow(ctx, x.tx, x.ws, *x.j.brandID, x.st.ReviewCampaignID, x.r.recordID, x.r.id+":"+x.st.ID)
+		}},
 	{StepKind: StepKind{Kind: "set_field", Group: "data", Label: "Update a field",
 		Description: "Set, clear or add to a field on the person. It never overwrites a value a person set by hand unless overwrite_manual is on.",
 		Settings: schema(map[string]any{"field": str("The field's key, such as lifecycle_stage."), "change": enum("set (the default), clear or increment", "set", "clear", "increment"),

@@ -247,3 +247,5 @@ Event properties carry ids, codes, counts and durations only: never names, email
 - Signing out resets the PostHog identity, so the next person on that browser starts fresh.
 
 Cookies: PostHog stores an anonymous id in a first-party cookie on your domain. If your visitors are in the EU or UK and you treat that as needing consent, put the app behind your own consent banner or leave this off.
+
+Review requests: `review_request_settings.updated`, `review_campaign.created`, `review_campaign.updated`, `review_campaign.launched`, `review_campaign.paused`, `review_campaign.resumed`, `review_campaign.archived`, `review_campaign.duplicated`, `review_request.queued`, `review_request.skipped`, `review_request.failed`. Browser navigation: `ui.review_view_opened`, `ui.review_campaign_step_opened`. Customer timeline events retain request outcomes with campaign/request IDs; delivery and click events use the existing lifecycle email events.

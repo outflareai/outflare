@@ -91,3 +91,10 @@ func TestPaths(t *testing.T) {
 		}
 	}
 }
+
+func TestReviewRequestEmailConditions(t *testing.T) {
+	steps := []Step{{ID: "ask", Kind: "request_review", ReviewCampaignID: "00000000-0000-4000-8000-000000000001", Next: "check"}, {ID: "check", Kind: KindBranch, Conditions: []Condition{{Email: "clicked", Step: "ask", Op: "exists"}}}}
+	if msg := Check(steps); msg != "" {
+		t.Fatalf("review email cannot be used by a later condition: %s", msg)
+	}
+}

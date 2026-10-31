@@ -581,7 +581,12 @@ func (s *Service) take(ctx context.Context, tx pgx.Tx, ws string, j *journey, r 
 	if err != nil {
 		return taken{}, err
 	}
-	return onError(st, taken{next: st.Next, outcome: outcome, detail: detail}), nil
+	result := taken{next: st.Next, outcome: outcome, detail: detail}
+	if st.Kind == "request_review" && outcome == "done" {
+		result.emailID = &detail
+		result.detail = "review invitation queued"
+	}
+	return onError(st, result), nil
 }
 
 // onError applies a failed action's on_error: stop (the run fails),

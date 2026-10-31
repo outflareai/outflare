@@ -6,6 +6,12 @@ Each pull request that changes what Outflare does adds a change note in [changes
 
 ## [Unreleased]
 
+## [0.65.0] - 2026-10-31
+
+### Added
+
+- Request honest customer reviews by email from Reviews or existing workflows. Configure brand destinations, customize starter emails, preview audiences, schedule campaigns, and track sends and review-link clicks with shared frequency limits.
+
 ## [0.64.0] - 2026-10-30
 
 ### Added

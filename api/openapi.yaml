@@ -28115,6 +28115,301 @@ paths:
         "404": { $ref: "#/components/responses/Error" }
         "202": { $ref: "#/components/responses/MissionHeld" }
         default: { $ref: "#/components/responses/Error" }
+  /v1/brands/{brand}/review-requests/settings:
+    parameters:
+    - $ref: '#/components/parameters/BrandID'
+    get:
+      operationId: getReviewRequestSettings
+      x-outflare-access:
+        scope: emails.read
+        brand: true
+      summary: getReviewRequestSettings
+      tags:
+      - reviews
+      responses:
+        '200':
+          description: Result.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReviewRequestCatalog'
+        default:
+          $ref: '#/components/responses/Error'
+    put:
+      operationId: updateReviewRequestSettings
+      x-outflare-access:
+        scope: emails.manage
+        brand: true
+      summary: updateReviewRequestSettings
+      tags:
+      - reviews
+      responses:
+        '200':
+          description: Result.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReviewRequestCatalog'
+        default:
+          $ref: '#/components/responses/Error'
+        '202':
+          $ref: '#/components/responses/MissionHeld'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ReviewRequestSettings'
+  /v1/brands/{brand}/review-requests/campaigns:
+    parameters:
+    - $ref: '#/components/parameters/BrandID'
+    get:
+      operationId: listReviewRequestCampaigns
+      x-outflare-access:
+        scope: emails.read
+        brand: true
+      summary: listReviewRequestCampaigns
+      tags:
+      - reviews
+      responses:
+        '200':
+          description: Result.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/ReviewRequestCampaign'
+                required:
+                - data
+        default:
+          $ref: '#/components/responses/Error'
+    post:
+      operationId: createReviewRequestCampaign
+      x-outflare-access:
+        scope: emails.manage
+        brand: true
+      summary: createReviewRequestCampaign
+      tags:
+      - reviews
+      responses:
+        '201':
+          description: Result.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReviewRequestCampaign'
+        default:
+          $ref: '#/components/responses/Error'
+        '202':
+          $ref: '#/components/responses/MissionHeld'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ReviewCampaignConfig'
+  /v1/brands/{brand}/review-requests/campaigns/{campaign}:
+    parameters:
+    - $ref: '#/components/parameters/BrandID'
+    - name: campaign
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    put:
+      operationId: updateReviewRequestCampaign
+      x-outflare-access:
+        scope: emails.manage
+        brand: true
+      summary: updateReviewRequestCampaign
+      tags:
+      - reviews
+      responses:
+        '200':
+          description: Result.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReviewRequestCampaign'
+        default:
+          $ref: '#/components/responses/Error'
+        '202':
+          $ref: '#/components/responses/MissionHeld'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ReviewCampaignConfig'
+  /v1/brands/{brand}/review-requests/campaigns/{campaign}/preview:
+    parameters:
+    - $ref: '#/components/parameters/BrandID'
+    - name: campaign
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    post:
+      operationId: previewReviewRequestCampaign
+      x-outflare-access:
+        scope: emails.manage
+        brand: true
+      summary: previewReviewRequestCampaign
+      tags:
+      - reviews
+      responses:
+        '200':
+          description: Result.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReviewRequestPreview'
+        default:
+          $ref: '#/components/responses/Error'
+        '202':
+          $ref: '#/components/responses/MissionHeld'
+  /v1/brands/{brand}/review-requests/campaigns/{campaign}/action:
+    parameters:
+    - $ref: '#/components/parameters/BrandID'
+    - name: campaign
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    post:
+      operationId: actOnReviewRequestCampaign
+      x-outflare-access:
+        scope: emails.send
+        brand: true
+      summary: actOnReviewRequestCampaign
+      tags:
+      - reviews
+      responses:
+        '200':
+          description: Result.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReviewRequestCampaign'
+        default:
+          $ref: '#/components/responses/Error'
+        '202':
+          $ref: '#/components/responses/MissionHeld'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                action:
+                  type: string
+                  enum:
+                  - launch
+                  - pause
+                  - resume
+                  - archive
+                  - duplicate
+                send_at:
+                  type:
+                  - string
+                  - 'null'
+                  format: date-time
+              required:
+              - action
+  /v1/brands/{brand}/review-requests/campaigns/{campaign}/test:
+    parameters:
+    - $ref: '#/components/parameters/BrandID'
+    - name: campaign
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    post:
+      operationId: testReviewRequestCampaign
+      x-outflare-access:
+        scope: emails.send
+        brand: true
+      summary: testReviewRequestCampaign
+      tags:
+      - reviews
+      responses:
+        '200':
+          description: Result.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  email_id:
+                    type: string
+                required:
+                - email_id
+        default:
+          $ref: '#/components/responses/Error'
+        '202':
+          $ref: '#/components/responses/MissionHeld'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                to:
+                  type: string
+              required:
+              - to
+  /v1/brands/{brand}/review-requests:
+    parameters:
+    - $ref: '#/components/parameters/BrandID'
+    get:
+      operationId: listReviewRequests
+      x-outflare-access:
+        scope: emails.read
+        brand: true
+      summary: listReviewRequests
+      tags:
+      - reviews
+      responses:
+        '200':
+          description: Result.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReviewRequestList'
+        default:
+          $ref: '#/components/responses/Error'
+      parameters:
+      - name: campaign
+        in: query
+        schema:
+          type: string
+      - name: status
+        in: query
+        schema:
+          type: string
+      - name: after
+        in: query
+        schema:
+          type: string
+      - name: from
+        in: query
+        schema:
+          type: string
+      - name: to
+        in: query
+        schema:
+          type: string
+
 webhooks:
   lead.replied:
     post:
@@ -30858,6 +31153,281 @@ components:
         application/json:
           schema: { $ref: "#/components/schemas/MissionHeld" }
   schemas:
+    ReviewDestination:
+      type: object
+      properties:
+        platform:
+          type: string
+        url:
+          type: string
+      required:
+      - platform
+      - url
+    ReviewRequestSettings:
+      type: object
+      properties:
+        from:
+          type: string
+        reply_to:
+          type: string
+        frequency:
+          type: string
+          enum:
+          - interval
+          - once
+          - unlimited
+        interval_days:
+          type: integer
+        frequency_scope:
+          type: string
+          enum:
+          - brand
+          - platform
+        destinations:
+          type: array
+          items:
+            $ref: '#/components/schemas/ReviewDestination'
+      required:
+      - from
+      - reply_to
+      - frequency
+      - interval_days
+      - frequency_scope
+      - destinations
+    ReviewCampaignConfig:
+      type: object
+      properties:
+        name:
+          type: string
+        mode:
+          type: string
+          enum:
+          - manual
+          - workflow
+        from:
+          type: string
+        reply_to:
+          type: string
+        subject:
+          type: string
+        body:
+          type: string
+        platforms:
+          type: array
+          items:
+            type: string
+        audience:
+          type: object
+          properties:
+            kind:
+              type: string
+              enum:
+              - list
+              - rules
+              - records
+            list_id:
+              type: string
+            record_ids:
+              type: array
+              items:
+                type: string
+            rules:
+              type: array
+              items:
+                $ref: '#/components/schemas/SmartListRule'
+            match:
+              type: string
+              enum:
+              - all
+              - any
+      required:
+      - name
+      - mode
+      - from
+      - reply_to
+      - subject
+      - body
+      - platforms
+      - audience
+    ReviewRequestCampaign:
+      type: object
+      properties:
+        stats:
+          type: object
+          additionalProperties: { type: integer }
+        id:
+          type: string
+        brand_id:
+          type: string
+        status:
+          type: string
+        config:
+          $ref: '#/components/schemas/ReviewCampaignConfig'
+        created_at:
+          type: string
+          format: date-time
+        send_at:
+          type:
+          - string
+          - 'null'
+          format: date-time
+      required:
+      - id
+      - brand_id
+      - status
+      - config
+      - created_at
+      - send_at
+    ReviewRequestPlatform:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        invitation:
+          type: boolean
+        monitoring:
+          type: boolean
+        note:
+          type: string
+      required:
+      - id
+      - name
+      - invitation
+      - monitoring
+      - note
+    ReviewRequestCatalog:
+      type: object
+      properties:
+        settings:
+          $ref: '#/components/schemas/ReviewRequestSettings'
+        platforms:
+          type: array
+          items:
+            $ref: '#/components/schemas/ReviewRequestPlatform'
+      required:
+      - settings
+      - platforms
+    ReviewRequestPreview:
+      type: object
+      properties:
+        total:
+          type: integer
+        eligible:
+          type: integer
+        excluded:
+          type: object
+          additionalProperties:
+            type: integer
+      required:
+      - total
+      - eligible
+      - excluded
+    ReviewRequest:
+      type: object
+      properties:
+        id:
+          type: string
+        record_id:
+          type: string
+        customer:
+          type: string
+        campaign_id:
+          type: string
+        campaign:
+          type: string
+        platforms:
+          type: array
+          items:
+            type: string
+        status:
+          type: string
+        reason:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+        sent_at:
+          type:
+          - string
+          - 'null'
+          format: date-time
+        clicked_at:
+          type:
+          - string
+          - 'null'
+          format: date-time
+        email_id:
+          type:
+          - string
+          - 'null'
+      required:
+      - id
+      - record_id
+      - customer
+      - campaign_id
+      - campaign
+      - platforms
+      - status
+      - reason
+      - created_at
+      - sent_at
+      - clicked_at
+      - email_id
+    ReviewRequestReport:
+      type: object
+      properties:
+        total:
+          type: integer
+        sent:
+          type: integer
+        delivered:
+          type: integer
+        clicked:
+          type: integer
+        skipped:
+          type: integer
+        failed:
+          type: integer
+        pending:
+          type: integer
+        platforms:
+          type: array
+          items:
+            type: object
+            properties:
+              platform:
+                type: string
+              clickers:
+                type: integer
+            required:
+            - platform
+            - clickers
+      required:
+      - total
+      - sent
+      - delivered
+      - clicked
+      - skipped
+      - failed
+      - pending
+      - platforms
+    ReviewRequestList:
+      type: object
+      properties:
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/ReviewRequest'
+        next:
+          type: string
+        report:
+          $ref: '#/components/schemas/ReviewRequestReport'
+      required:
+      - data
+      - next
+      - report
     ErrorCode:
       type: object
       required: [code, statuses, description, retry]
@@ -32962,10 +33532,11 @@ components:
         GET .../journeys/step-kinds. Action steps (everything but email, wait, branch and exit) report done, skipped (with
         why) or failed, and a failed one does what on_error says.
       properties:
+        review_campaign_id: { type: string, format: uuid, description: "Active workflow review campaign in the journey brand, for request_review steps." }
         id: { type: string, pattern: "^[a-z0-9][a-z0-9_-]{0,39}$" }
         kind:
           type: string
-          enum: [email, wait, branch, exit, set_field, add_tag, remove_tag, add_to_list, remove_from_list, enter_journey, exit_journey,
+          enum: [request_review, email, wait, branch, exit, set_field, add_tag, remove_tag, add_to_list, remove_from_list, enter_journey, exit_journey,
             enroll_in_sequence, stop_sequences, suppress, unsubscribe_topic, alert, transactional_email, set_consent, assign_owner, move_deal, slack, webhook, push_to_sequencer, push_to_crm, sync_audience, ai, wait_until, split]
         name: { type: string, maxLength: 100 }
         template: { type: string, description: "email: a lifecycle template's handle or id. transactional_email: a transactional one's." }

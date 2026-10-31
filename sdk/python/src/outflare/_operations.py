@@ -63,6 +63,30 @@ class Operations(_Mixin):
             idempotency_key=idempotency_key,
         )
 
+    def act_on_review_request_campaign(
+        self,
+        brand: str,
+        campaign: str,
+        *,
+        action: Literal["launch", "pause", "resume", "archive", "duplicate"],
+        send_at: str | None = None,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """actOnReviewRequestCampaign.
+
+        Needs: the emails.send scope.
+        POST /v1/brands/{brand}/review-requests/campaigns/{campaign}/action
+        """
+        return self._call(
+            "POST",
+            "/v1/brands/{brand}/review-requests/campaigns/{campaign}/action",
+            path={"brand": brand, "campaign": campaign},
+            body={"action": action, "send_at": send_at},
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
     def activate_journey(
         self,
         id: str,
@@ -5073,6 +5097,44 @@ class Operations(_Mixin):
             "/v1/workspaces/{ws}/reddit/experiments",
             path={"ws": ws},
             body={"brand": brand, "hypothesis": hypothesis, "name": name, "strategy": strategy},
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
+    def create_review_request_campaign(
+        self,
+        brand: str,
+        *,
+        audience: dict[str, Any],
+        body: str,
+        from_: str,
+        mode: Literal["manual", "workflow"],
+        name: str,
+        platforms: list[str],
+        reply_to: str,
+        subject: str,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """createReviewRequestCampaign.
+
+        Needs: the emails.manage scope.
+        POST /v1/brands/{brand}/review-requests/campaigns
+        """
+        return self._call(
+            "POST",
+            "/v1/brands/{brand}/review-requests/campaigns",
+            path={"brand": brand},
+            body={
+                "audience": audience,
+                "body": body,
+                "from": from_,
+                "mode": mode,
+                "name": name,
+                "platforms": platforms,
+                "reply_to": reply_to,
+                "subject": subject,
+            },
             extra_body=extra_body,
             idempotency_key=idempotency_key,
         )
@@ -11071,6 +11133,21 @@ class Operations(_Mixin):
             "GET",
             "/v1/workspaces/{ws}/brands/{brand}/review-guide",
             path={"brand": brand, "ws": ws},
+        )
+
+    def get_review_request_settings(
+        self,
+        brand: str,
+    ) -> Any:
+        """getReviewRequestSettings.
+
+        Needs: the emails.read scope.
+        GET /v1/brands/{brand}/review-requests/settings
+        """
+        return self._call(
+            "GET",
+            "/v1/brands/{brand}/review-requests/settings",
+            path={"brand": brand},
         )
 
     def get_reviews_summary(
@@ -17170,6 +17247,43 @@ class Operations(_Mixin):
             query={"brand": brand, "platform": platform, "status": status},
         )
 
+    def list_review_request_campaigns(
+        self,
+        brand: str,
+    ) -> Any:
+        """listReviewRequestCampaigns.
+
+        Needs: the emails.read scope.
+        GET /v1/brands/{brand}/review-requests/campaigns
+        """
+        return self._call(
+            "GET",
+            "/v1/brands/{brand}/review-requests/campaigns",
+            path={"brand": brand},
+        )
+
+    def list_review_requests(
+        self,
+        brand: str,
+        *,
+        campaign: str | None = None,
+        status: str | None = None,
+        after: str | None = None,
+        from_: str | None = None,
+        to: str | None = None,
+    ) -> Any:
+        """listReviewRequests.
+
+        Needs: the emails.read scope.
+        GET /v1/brands/{brand}/review-requests
+        """
+        return self._call(
+            "GET",
+            "/v1/brands/{brand}/review-requests",
+            path={"brand": brand},
+            query={"campaign": campaign, "status": status, "after": after, "from": from_, "to": to},
+        )
+
     def list_reviews(
         self,
         *,
@@ -19344,6 +19458,25 @@ class Operations(_Mixin):
             path={"ws": ws},
             body={"filters": filters, "profile_id": profile_id, "search_integration_id": search_integration_id},
             extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
+    def preview_review_request_campaign(
+        self,
+        brand: str,
+        campaign: str,
+        *,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """previewReviewRequestCampaign.
+
+        Needs: the emails.manage scope.
+        POST /v1/brands/{brand}/review-requests/campaigns/{campaign}/preview
+        """
+        return self._call(
+            "POST",
+            "/v1/brands/{brand}/review-requests/campaigns/{campaign}/preview",
+            path={"brand": brand, "campaign": campaign},
             idempotency_key=idempotency_key,
         )
 
@@ -23597,6 +23730,29 @@ class Operations(_Mixin):
             idempotency_key=idempotency_key,
         )
 
+    def test_review_request_campaign(
+        self,
+        brand: str,
+        campaign: str,
+        *,
+        to: str,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """testReviewRequestCampaign.
+
+        Needs: the emails.send scope.
+        POST /v1/brands/{brand}/review-requests/campaigns/{campaign}/test
+        """
+        return self._call(
+            "POST",
+            "/v1/brands/{brand}/review-requests/campaigns/{campaign}/test",
+            path={"brand": brand, "campaign": campaign},
+            body={"to": to},
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
     def test_send_mailbox(
         self,
         id: str,
@@ -26743,6 +26899,79 @@ class Operations(_Mixin):
             "/v1/workspaces/{ws}/reviews/pages/{id}",
             path={"id": id, "ws": ws},
             body={"status": status},
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
+    def update_review_request_campaign(
+        self,
+        brand: str,
+        campaign: str,
+        *,
+        audience: dict[str, Any],
+        body: str,
+        from_: str,
+        mode: Literal["manual", "workflow"],
+        name: str,
+        platforms: list[str],
+        reply_to: str,
+        subject: str,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """updateReviewRequestCampaign.
+
+        Needs: the emails.manage scope.
+        PUT /v1/brands/{brand}/review-requests/campaigns/{campaign}
+        """
+        return self._call(
+            "PUT",
+            "/v1/brands/{brand}/review-requests/campaigns/{campaign}",
+            path={"brand": brand, "campaign": campaign},
+            body={
+                "audience": audience,
+                "body": body,
+                "from": from_,
+                "mode": mode,
+                "name": name,
+                "platforms": platforms,
+                "reply_to": reply_to,
+                "subject": subject,
+            },
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
+    def update_review_request_settings(
+        self,
+        brand: str,
+        *,
+        destinations: list[dict[str, Any]],
+        frequency: Literal["interval", "once", "unlimited"],
+        frequency_scope: Literal["brand", "platform"],
+        from_: str,
+        interval_days: int,
+        reply_to: str,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """updateReviewRequestSettings.
+
+        Needs: the emails.manage scope.
+        PUT /v1/brands/{brand}/review-requests/settings
+        """
+        return self._call(
+            "PUT",
+            "/v1/brands/{brand}/review-requests/settings",
+            path={"brand": brand},
+            body={
+                "destinations": destinations,
+                "frequency": frequency,
+                "frequency_scope": frequency_scope,
+                "from": from_,
+                "interval_days": interval_days,
+                "reply_to": reply_to,
+            },
             extra_body=extra_body,
             idempotency_key=idempotency_key,
         )

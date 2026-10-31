@@ -75,8 +75,8 @@ func TestPlaybookAutomations(t *testing.T) {
 		t.Fatalf("instructions: %s", ins)
 	}
 	sched = owner.must(200, "GET", auto+"/"+sid, nil)
-	next, _ := time.Parse(time.RFC3339, sched["next_run_at"].(string))
-	if sched["runs"] != float64(1) || sched["last_mission_id"] != m["id"] || !next.After(time.Now().Add(24*time.Hour)) {
+	next, err := time.Parse(time.RFC3339, sched["next_run_at"].(string))
+	if sched["runs"] != float64(1) || sched["last_mission_id"] != m["id"] || err != nil || !next.After(time.Now()) || next.Day() != 1 || next.Hour() != 9 || next.Minute() != 0 {
 		t.Fatalf("after the run: %v", sched)
 	}
 	// Nothing is due now.

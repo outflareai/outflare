@@ -519,6 +519,14 @@ func (s *Service) Send(ctx context.Context, id string, last bool) error {
 			skip = true // sent, cancelled or finished already
 			return nil
 		}
+		var stopped bool
+		if err := tx.QueryRow(ctx, `SELECT e.metadata ? 'review_request_id' AND NOT EXISTS (SELECT 1 FROM review_requests r JOIN review_request_campaigns c ON c.id=r.campaign_id AND c.workspace_id=r.workspace_id AND c.brand_id=r.brand_id JOIN brands b ON b.id=r.brand_id AND b.workspace_id=r.workspace_id AND b.status='active' JOIN records p ON p.id=r.record_id AND p.workspace_id=r.workspace_id AND p.brand_id=r.brand_id WHERE r.workspace_id=e.workspace_id AND r.email_id=e.id AND r.brand_id=e.brand_id AND c.status='active' AND p.deleted_at IS NULL AND p.archived_at IS NULL AND p.merged_into IS NULL) FROM emails e WHERE e.workspace_id=$1 AND e.id=$2`, q.WorkspaceID, id).Scan(&stopped); err != nil {
+			return err
+		}
+		if stopped {
+			skip = true
+			return s.finish(ctx, tx, q.WorkspaceID, id, "cancelled", "Review campaign paused or customer unavailable.", "review_request_stopped")
+		}
 		if q.ProviderID == nil {
 			skip = true
 			return s.finish(ctx, tx, q.WorkspaceID, id, "failed", "The email provider it was queued for was removed.", "provider_missing")

@@ -13,14 +13,16 @@ import (
 var storyPrompts struct {
 	sync.Mutex
 	ideas, draft string
+	// hold, when set, keeps a draft unanswered until it is closed.
+	hold chan struct{}
 }
 
 // answerStories answers fakeClaude's story ideas and release drafts.
 func answerStories(w http.ResponseWriter, body string) {
-	storyPrompts.Lock()
-	defer storyPrompts.Unlock()
 	if strings.Contains(body, "You suggest digital PR story ideas") {
+		storyPrompts.Lock()
 		storyPrompts.ideas = body
+		storyPrompts.Unlock()
 		answerJSON(w, map[string]any{"ideas": []map[string]any{
 			{"title": "Which sites block the bots their customers use", "kind": "data", "summary": "Count blocks by site from the October crawl.", "article_id": ""},
 			{"title": "Our CEO on the new bot rules", "kind": "reactive", "summary": "Comment on the rules.", "article_id": "00000000-0000-0000-0000-000000000000"},
@@ -28,7 +30,15 @@ func answerStories(w http.ResponseWriter, body string) {
 		}})
 		return
 	}
+	storyPrompts.Lock()
+	hold := storyPrompts.hold
+	storyPrompts.Unlock()
+	if hold != nil {
+		<-hold
+	}
+	storyPrompts.Lock()
 	storyPrompts.draft = body
+	storyPrompts.Unlock()
 	answerJSON(w, map[string]any{"release": "# A third of sites block their customers' bots\n\nNorthpeak measured 1,200 sites in October; 37% blocked the bots their own customers use.\n\n" +
 		`"Blocking every bot also blocks the people your customers send," said Ana Ruiz, CEO.`})
 }
@@ -79,8 +89,22 @@ func TestStoriesAI(t *testing.T) {
 	owner.must(200, "PATCH", path+"/quotes/"+q["id"].(string), map[string]any{"status": "approved"})
 	owner.must(201, "POST", path+"/quotes", map[string]any{"body": "A line Ana never approved."})
 	owner.must(400, "POST", path+"/draft", map[string]any{"guidance": strings.Repeat("x", 1001)})
+	// The AI holds its answer until a second draft has been refused: the
+	// job would otherwise finish, and clear "drafting", before it is asked.
+	hold := make(chan struct{})
+	release := sync.OnceFunc(func() { close(hold) })
+	storyPrompts.Lock()
+	storyPrompts.hold = hold
+	storyPrompts.Unlock()
+	t.Cleanup(func() {
+		release()
+		storyPrompts.Lock()
+		storyPrompts.hold = nil
+		storyPrompts.Unlock()
+	})
 	owner.must(202, "POST", path+"/draft", map[string]any{"guidance": "Lead with the 37%"})
 	owner.must(409, "POST", path+"/draft", nil)
+	release()
 	d := waitFor(t, owner, path, func(m map[string]any) bool { return m["ai_status"] != "drafting" })
 	if d["ai_status"] != "" || d["status"] != "draft" || !strings.Contains(d["release"].(string), "1,200 sites") || d["last_check"].(map[string]any)["ok"] != true {
 		t.Fatalf("drafted: %v", d)

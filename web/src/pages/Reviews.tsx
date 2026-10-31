@@ -1,3 +1,4 @@
+import { ReviewRequests } from "./ReviewRequests";
 import { useCallback, useEffect, useState } from "react";
 import type { Brand, BrandLinkSuggestion, Review, ReviewGuide, ReviewMomentum, ReviewPage, ReviewPlatform, ReviewsSummary } from "@outflare/sdk";
 import { useBrand } from "@/lib/brand";
@@ -32,7 +33,7 @@ const momentumText: Record<ReviewMomentum["state"], { label: string; tone: "gree
   growing: { label: "Growing", tone: "green", say: (m) => `New reviews are coming ${pct(m.pace_change)} faster than the 28 days before, and the score held.` },
   improving: { label: "Improving", tone: "green", say: (m) => `The score is up ${m.score_change} points in 28 days.` },
   steady: { label: "Steady", tone: "grey", say: (m) => `About ${m.per_week.toLocaleString(undefined, { maximumFractionDigits: 1 })} new reviews a week, and the score is holding.` },
-  stagnating: { label: "Stagnating", tone: "amber", say: (m) => m.new_reviews_before > 0 && m.pace_change !== null && m.pace_change <= -0.3 ? `New reviews slowed by ${pct(m.pace_change)}: ${m.new_reviews} in the last 28 days against ${m.new_reviews_before} before.` : `Only ${m.new_reviews + m.new_reviews_before} new reviews in 8 weeks. Asking happy customers would help.` },
+  stagnating: { label: "Stagnating", tone: "amber", say: (m) => m.new_reviews_before > 0 && m.pace_change !== null && m.pace_change <= -0.3 ? `New reviews slowed by ${pct(m.pace_change)}: ${m.new_reviews} in the last 28 days against ${m.new_reviews_before} before.` : `Only ${m.new_reviews + m.new_reviews_before} new reviews in 8 weeks. Inviting customers to share honest feedback would help.` },
   slipping: { label: "Slipping", tone: "red", say: (m) => `The score fell ${Math.abs(m.score_change)} points in 28 days: recent reviews are less happy.` },
   too_few: { label: "Too few to tell", tone: "grey", say: () => "Fewer than 5 reviews so far, so there's no trend yet." },
 };
@@ -42,6 +43,7 @@ const stars = (r: number) => "★★★★★".slice(0, Math.round(r)) + "☆☆
 
 export function Reviews({ ws, canManage, go }: Props) {
   const brand = useBrand(ws);
+  const [screen, setScreen] = useState<"requests" | "reviews">("requests");
   const brandKey = brand.query.brand ?? "";
   const [summary, setSummary] = useState<ReviewsSummary | null>(null);
   const [pages, setPages] = useState<ReviewPage[]>([]);
@@ -76,10 +78,11 @@ export function Reviews({ ws, canManage, go }: Props) {
   const header = (
     <PageHeader
       title="Reviews"
-      description="What customers say about your brands on Trustpilot, G2, Capterra and Google, where it's heading, and answers drafted for you to post."
+      description="Ask customers for honest reviews, track invitations, and manage your brand’s public reviews."
       action={canManage && pages.length > 0 && summary?.can_read && <Button variant="ghost" disabled={busy} onClick={readNow}>Read now</Button>}
     />
   );
+  if (screen === "requests") return <div className="space-y-6">{header}<ReviewRequests ws={ws} canManage={canManage} go={go} onReviews={() => setScreen("reviews")} /></div>;
   if (error && !summary) return <div className="space-y-6">{header}<ErrorText>{error}</ErrorText></div>;
   if (!summary) return <div className="space-y-6">{header}<Loading /></div>;
 
@@ -90,6 +93,7 @@ export function Reviews({ ws, canManage, go }: Props) {
   return (
     <div className="space-y-6">
       {header}
+      <Button variant="ghost" onClick={() => setScreen("requests")}>Review requests</Button>
       {error && <ErrorText>{error}</ErrorText>}
 
       <YourPages ws={ws} brands={brands} pages={pages} canRead={summary.can_read} canManage={canManage} go={go} onChange={load} />

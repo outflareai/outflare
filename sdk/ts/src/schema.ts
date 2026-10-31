@@ -21408,6 +21408,152 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/brands/{brand}/review-requests/settings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+            };
+            cookie?: never;
+        };
+        /** getReviewRequestSettings */
+        get: operations["getReviewRequestSettings"];
+        /** updateReviewRequestSettings */
+        put: operations["updateReviewRequestSettings"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/brands/{brand}/review-requests/campaigns": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+            };
+            cookie?: never;
+        };
+        /** listReviewRequestCampaigns */
+        get: operations["listReviewRequestCampaigns"];
+        put?: never;
+        /** createReviewRequestCampaign */
+        post: operations["createReviewRequestCampaign"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/brands/{brand}/review-requests/campaigns/{campaign}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                campaign: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        /** updateReviewRequestCampaign */
+        put: operations["updateReviewRequestCampaign"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/brands/{brand}/review-requests/campaigns/{campaign}/preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                campaign: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** previewReviewRequestCampaign */
+        post: operations["previewReviewRequestCampaign"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/brands/{brand}/review-requests/campaigns/{campaign}/action": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                campaign: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** actOnReviewRequestCampaign */
+        post: operations["actOnReviewRequestCampaign"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/brands/{brand}/review-requests/campaigns/{campaign}/test": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                campaign: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** testReviewRequestCampaign */
+        post: operations["testReviewRequestCampaign"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/brands/{brand}/review-requests": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+            };
+            cookie?: never;
+        };
+        /** listReviewRequests */
+        get: operations["listReviewRequests"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export interface webhooks {
     "lead.replied": {
@@ -25017,6 +25163,105 @@ export interface webhooks {
 }
 export interface components {
     schemas: {
+        ReviewDestination: {
+            platform: string;
+            url: string;
+        };
+        ReviewRequestSettings: {
+            from: string;
+            reply_to: string;
+            /** @enum {string} */
+            frequency: "interval" | "once" | "unlimited";
+            interval_days: number;
+            /** @enum {string} */
+            frequency_scope: "brand" | "platform";
+            destinations: components["schemas"]["ReviewDestination"][];
+        };
+        ReviewCampaignConfig: {
+            name: string;
+            /** @enum {string} */
+            mode: "manual" | "workflow";
+            from: string;
+            reply_to: string;
+            subject: string;
+            body: string;
+            platforms: string[];
+            audience: {
+                /** @enum {string} */
+                kind?: "list" | "rules" | "records";
+                list_id?: string;
+                record_ids?: string[];
+                rules?: components["schemas"]["SmartListRule"][];
+                /** @enum {string} */
+                match?: "all" | "any";
+            };
+        };
+        ReviewRequestCampaign: {
+            stats?: {
+                [key: string]: number;
+            };
+            id: string;
+            brand_id: string;
+            status: string;
+            config: components["schemas"]["ReviewCampaignConfig"];
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            send_at: string | null;
+        };
+        ReviewRequestPlatform: {
+            id: string;
+            name: string;
+            invitation: boolean;
+            monitoring: boolean;
+            note: string;
+        };
+        ReviewRequestCatalog: {
+            settings: components["schemas"]["ReviewRequestSettings"];
+            platforms: components["schemas"]["ReviewRequestPlatform"][];
+        };
+        ReviewRequestPreview: {
+            total: number;
+            eligible: number;
+            excluded: {
+                [key: string]: number;
+            };
+        };
+        ReviewRequest: {
+            id: string;
+            record_id: string;
+            customer: string;
+            campaign_id: string;
+            campaign: string;
+            platforms: string[];
+            status: string;
+            reason: string;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            sent_at: string | null;
+            /** Format: date-time */
+            clicked_at: string | null;
+            email_id: string | null;
+        };
+        ReviewRequestReport: {
+            total: number;
+            sent: number;
+            delivered: number;
+            clicked: number;
+            skipped: number;
+            failed: number;
+            pending: number;
+            platforms: {
+                platform: string;
+                clickers: number;
+            }[];
+        };
+        ReviewRequestList: {
+            data: components["schemas"]["ReviewRequest"][];
+            next: string;
+            report: components["schemas"]["ReviewRequestReport"];
+        };
         ErrorCode: {
             /** @example idempotency_in_progress */
             code: string;
@@ -27855,9 +28100,14 @@ export interface components {
          *     why) or failed, and a failed one does what on_error says.
          */
         JourneyStep: {
+            /**
+             * Format: uuid
+             * @description Active workflow review campaign in the journey brand, for request_review steps.
+             */
+            review_campaign_id?: string;
             id: string;
             /** @enum {string} */
-            kind: "email" | "wait" | "branch" | "exit" | "set_field" | "add_tag" | "remove_tag" | "add_to_list" | "remove_from_list" | "enter_journey" | "exit_journey" | "enroll_in_sequence" | "stop_sequences" | "suppress" | "unsubscribe_topic" | "alert" | "transactional_email" | "set_consent" | "assign_owner" | "move_deal" | "slack" | "webhook" | "push_to_sequencer" | "push_to_crm" | "sync_audience" | "ai" | "wait_until" | "split";
+            kind: "request_review" | "email" | "wait" | "branch" | "exit" | "set_field" | "add_tag" | "remove_tag" | "add_to_list" | "remove_from_list" | "enter_journey" | "exit_journey" | "enroll_in_sequence" | "stop_sequences" | "suppress" | "unsubscribe_topic" | "alert" | "transactional_email" | "set_consent" | "assign_owner" | "move_deal" | "slack" | "webhook" | "push_to_sequencer" | "push_to_crm" | "sync_audience" | "ai" | "wait_until" | "split";
             name?: string;
             /** @description email: a lifecycle template's handle or id. transactional_email: a transactional one's. */
             template?: string;
@@ -78451,6 +78701,269 @@ export interface operations {
             202: components["responses"]["MissionHeld"];
             400: components["responses"]["Error"];
             404: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    getReviewRequestSettings: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Result. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReviewRequestCatalog"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    updateReviewRequestSettings: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ReviewRequestSettings"];
+            };
+        };
+        responses: {
+            /** @description Result. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReviewRequestCatalog"];
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            default: components["responses"]["Error"];
+        };
+    };
+    listReviewRequestCampaigns: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Result. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["ReviewRequestCampaign"][];
+                    };
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    createReviewRequestCampaign: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ReviewCampaignConfig"];
+            };
+        };
+        responses: {
+            /** @description Result. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReviewRequestCampaign"];
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            default: components["responses"]["Error"];
+        };
+    };
+    updateReviewRequestCampaign: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                campaign: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ReviewCampaignConfig"];
+            };
+        };
+        responses: {
+            /** @description Result. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReviewRequestCampaign"];
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            default: components["responses"]["Error"];
+        };
+    };
+    previewReviewRequestCampaign: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                campaign: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Result. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReviewRequestPreview"];
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            default: components["responses"]["Error"];
+        };
+    };
+    actOnReviewRequestCampaign: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                campaign: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @enum {string} */
+                    action: "launch" | "pause" | "resume" | "archive" | "duplicate";
+                    /** Format: date-time */
+                    send_at?: string | null;
+                };
+            };
+        };
+        responses: {
+            /** @description Result. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReviewRequestCampaign"];
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            default: components["responses"]["Error"];
+        };
+    };
+    testReviewRequestCampaign: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                campaign: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    to: string;
+                };
+            };
+        };
+        responses: {
+            /** @description Result. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        email_id: string;
+                    };
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            default: components["responses"]["Error"];
+        };
+    };
+    listReviewRequests: {
+        parameters: {
+            query?: {
+                campaign?: string;
+                status?: string;
+                after?: string;
+                from?: string;
+                to?: string;
+            };
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Result. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReviewRequestList"];
+                };
+            };
             default: components["responses"]["Error"];
         };
     };

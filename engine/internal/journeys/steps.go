@@ -38,7 +38,8 @@ type Step struct {
 	// A label people see; optional.
 	Name string `json:"name,omitempty"`
 	// email: a lifecycle template's handle or id.
-	Template string `json:"template,omitempty"`
+	Template         string `json:"template,omitempty"`
+	ReviewCampaignID string `json:"review_campaign_id,omitempty"`
 	// email: send even over the workspace's frequency cap, for email a
 	// person must get (a sign-in link, a trial ending).
 	IgnoreCap bool `json:"ignore_cap,omitempty"`
@@ -272,7 +273,7 @@ func Check(steps []Step) string {
 			conds = append(conds, p.Conditions...)
 		}
 		for _, c := range conds {
-			if c.Step != "" && (byID[c.Step] == nil || byID[c.Step].Kind != KindEmail) {
+			if c.Step != "" && (byID[c.Step] == nil || (byID[c.Step].Kind != KindEmail && byID[c.Step].Kind != "request_review")) {
 				return "step " + st.ID + ": " + c.Step + " is not an email step"
 			}
 		}

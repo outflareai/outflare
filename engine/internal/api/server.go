@@ -527,6 +527,7 @@ func (s *Server) buildHandler() http.Handler {
 	s.routesRedditCampaigns(mux)
 	s.routesBrandLinks(mux)
 	s.routesReviews(mux)
+	s.routesReviewRequests(mux)
 	s.routesAIFacts(mux)
 	s.routesFixAutonomy(mux)
 	s.routesFixTickets(mux)

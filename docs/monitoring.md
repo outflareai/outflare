@@ -294,3 +294,8 @@ Data network alerts: a withdrawal past its 30-day deadline (critical); a member'
 ## Metrics from extensions
 
 An extension registers its own Prometheus collectors with `Host.Metrics()`, so they are served on the same metrics address and reach the same Prometheus. Name them `outflare_<extension>_*`. The dashboards and alerts for them ship with the extension, not here.
+
+- **OutflareReviewRequestsBehind**: review invitation dispatch is over five minutes behind.
+- **OutflareReviewRequestsFailing**: review invitation batches repeatedly retry or die.
+
+The Review invitations dashboard row shows dispatch results, due-job delay and batch duration, using the common job metrics.

@@ -46,6 +46,7 @@ const (
 )
 
 func (s *Server) registerReviewJobs(q *jobs.Queue) {
+	s.reviewRequests().Register(q)
 	q.Handle(jobReviewsRead, s.reviewsReadJob)
 	q.Handle(jobReviewsDiscover, s.reviewsDiscoverJob)
 	q.Handle(jobReviewDraft, s.reviewDraftJob)

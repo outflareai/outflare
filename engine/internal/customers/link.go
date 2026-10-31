@@ -292,6 +292,7 @@ type Ref struct{ Table, Column string }
 // when a column points at records and is neither here nor in Owned, so a
 // new link is never left behind on a merged record.
 var Follows = []Ref{
+	{"review_requests", "record_id"},
 	{"customer_events", "record_id"}, {"customer_events", "account_id"}, {"consents", "record_id"}, {"event_inbox", "record_id"},
 	{"leads", "record_id"}, {"messages", "record_id"}, {"inbound_messages", "record_id"},
 	{"meetings", "record_id"}, {"deals", "record_id"}, {"emails", "record_id"},

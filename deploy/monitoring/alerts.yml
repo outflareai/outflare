@@ -909,3 +909,17 @@ groups:
         labels: { severity: warning }
         annotations:
           summary: "The newest exchange rate is over 6 days old, so receipts in other currencies wait for their dollar amount: check exchange_rates.fetch_failed in the engine log (the European Central Bank's feed down or blocked)."
+
+      - alert: OutflareReviewRequestsBehind
+        expr: max(outflare_jobs_oldest_due_seconds{kind="reviews.dispatch"}) > 300
+        for: 5m
+        labels: { severity: warning }
+        annotations:
+          summary: "Review invitation batches have waited over 5 minutes. Check workers and reviews.dispatch jobs."
+
+      - alert: OutflareReviewRequestsFailing
+        expr: sum(increase(outflare_jobs_processed_total{kind="reviews.dispatch",outcome=~"retried|dead"}[15m])) > 3
+        for: 5m
+        labels: { severity: warning }
+        annotations:
+          summary: "Review invitation batches are failing repeatedly. Inspect reviews.dispatch jobs and email configuration."

@@ -506,3 +506,17 @@ pnpm --filter @outflare/mcp test     # runs against a fake API, no instance need
 ```
 
 To try it by hand, run the [MCP Inspector](https://github.com/modelcontextprotocol/inspector) with the same environment variables: `npx @modelcontextprotocol/inspector node mcp/dist/index.js`.
+
+### Review request campaigns
+
+| Tool | Purpose |
+| --- | --- |
+| `get_review_request_settings` | Brand defaults and platform capabilities. |
+| `update_review_request_settings` | Save destination links and frequency controls. |
+| `list_review_request_campaigns` | List manual and workflow campaigns. |
+| `create_review_request_campaign` | Create a campaign draft. |
+| `update_review_request_campaign` | Edit a draft or paused workflow configuration. |
+| `preview_review_request_campaign` | Check current audience eligibility. |
+| `act_on_review_request_campaign` | Launch, schedule, pause, resume, archive or duplicate. |
+| `test_review_request_campaign` | Send a test without consuming frequency limits. |
+| `list_review_requests` | Request history and send/click reports. |
