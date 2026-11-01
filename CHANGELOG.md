@@ -6,6 +6,18 @@ Each pull request that changes what Outflare does adds a change note in [changes
 
 ## [Unreleased]
 
+## [0.73.4] - 2026-11-01
+
+### Fixed
+
+- The changes from v0.73.2, which didn't pass the release checks, are now published.
+
+## [0.73.3] - 2026-11-01
+
+### Fixed
+
+- The changes from v0.73.0, which didn't pass the release checks, are now published.
+
 ## [0.73.2] - 2026-11-01
 
 ### Fixed

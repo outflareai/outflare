@@ -14,6 +14,14 @@ import (
 func TestTrackingDomainAndClicks(t *testing.T) {
 	e := freshEnv(t)
 	clock := &fakeClock{t: time.Now()}
+	// The sequence below sends 00:00–23:59 in UTC, so it is closed from
+	// 23:59 to midnight, and a send held to the opening waits up to 10
+	// minutes more (policy.CheckWindow's jitter). The sends take 15 minutes
+	// of this clock, so keep them clear of midnight. Running ahead of real
+	// time is fine: the enrollment comes due at the database's now().
+	if u := clock.Now().UTC(); u.Hour() == 23 && u.Minute() >= 30 {
+		clock.Add(time.Hour)
+	}
 	owner, base, srv := sendingSetup(t, e, clock)
 
 	// A tracking domain is pending until its CNAME points here.
