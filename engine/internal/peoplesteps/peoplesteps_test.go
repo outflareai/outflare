@@ -177,6 +177,32 @@ func TestPeopleSteps(t *testing.T) {
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
+	// Linked runs inside add_person's transaction, before it commits, so a
+	// person can be seen above before their record is. The runner writes the
+	// stage counts only after a step returns (and so has committed): wait
+	// for every linked person to be counted before reading the records.
+	for {
+		v, err := pipeline.View(ctx, pool, ws, run)
+		if err != nil {
+			t.Fatal(err)
+		}
+		done := 0
+		for _, s := range v.Stages {
+			if s.Stage == AddPerson {
+				done = s.Done
+			}
+		}
+		mu.Lock()
+		want := len(linked)
+		mu.Unlock()
+		if done == want {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("stages: %+v", v.Stages)
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
 
 	if len(spent) != 1 || spent["ana"] != 1 {
 		t.Fatalf("spent: %v", spent)

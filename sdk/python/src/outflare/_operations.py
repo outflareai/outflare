@@ -595,7 +595,8 @@ class Operations(_Mixin):
         Scope: customers.manage. Adds an identity, or updates the record's own copy of it: sending verified: true for
         an email the record holds unverified verifies it (200). When a person changes their email, send the new one
         with replaces set to the old identity's id: the old one is closed as changed and kept in the history. A
-        verified value another record holds is refused with identity_taken, never moved or merged.
+        verified value another record of the same brand holds is refused with identity_taken, never moved or merged;
+        another brand's person with the same value is someone else and never blocks it.
 
         Needs: the customers.manage scope.
         POST /v1/workspaces/{ws}/records/{record}/identities
@@ -1247,6 +1248,31 @@ class Operations(_Mixin):
             path={"ws": ws},
             body={"user_code": user_code},
             extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
+    def approve_brand_event_name(
+        self,
+        brand: str,
+        event: str,
+        *,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Approve a held event name.
+
+        Scope: customers.manage. Approves a track name for the brand, defining it when the brand has only held it,
+        so its held events can be replayed (POST /v1/brands/{brand}/events/replay). It changes nothing else about the
+        event: labels, properties and deprecating need catalog.manage (PATCH .../catalog/events/{event}). Approving
+        is part of fixing the brand's data, so customers.manage is enough. 409 event_name_in_other_brand when another
+        brand of the workspace defines the name.
+
+        Needs: the customers.manage scope.
+        POST /v1/brands/{brand}/catalog/events/{event}/approve
+        """
+        return self._call(
+            "POST",
+            "/v1/brands/{brand}/catalog/events/{event}/approve",
+            path={"brand": brand, "event": event},
             idempotency_key=idempotency_key,
         )
 
@@ -3126,6 +3152,152 @@ class Operations(_Mixin):
                 "status": status,
                 "website": website,
             },
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
+    def create_brand_event_definition(
+        self,
+        brand: str,
+        *,
+        description: str | None = None,
+        label: str | None = None,
+        name: str | None = None,
+        properties: list[dict[str, Any]] | None = None,
+        sensitivity: Literal["public", "internal", "confidential", "restricted"] | None = None,
+        status: Literal["quarantined", "approved", "deprecated"] | None = None,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Define a product event for a brand.
+
+        Scope: catalog.manage. Names are lowercase words joined by dots, such as product.activated. For now an event
+        name is defined in one brand of a workspace at a time: a name another brand defines is refused with 409
+        event_name_in_other_brand.
+
+        Needs: the catalog.manage scope.
+        POST /v1/brands/{brand}/catalog/events
+        """
+        return self._call(
+            "POST",
+            "/v1/brands/{brand}/catalog/events",
+            path={"brand": brand},
+            body={
+                "description": description,
+                "label": label,
+                "name": name,
+                "properties": properties,
+                "sensitivity": sensitivity,
+                "status": status,
+            },
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
+    def create_brand_field(
+        self,
+        brand: str,
+        type: str,
+        *,
+        archived: bool | None = None,
+        description: str | None = None,
+        filterable: bool | None = None,
+        key: str | None = None,
+        label: str | None = None,
+        multiple: bool | None = None,
+        option_set: str | None = None,
+        precedence: list[Literal["manual", "first_party", "crm_sync", "enrichment", "import"]] | None = None,
+        sensitivity: Literal["public", "internal", "confidential", "restricted"] | None = None,
+        target_type: str | None = None,
+        value_type: str | None = None,
+        write_policy: Literal["source_owned", "platform_owned", "manual_override_allowed", "computed"] | None = None,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Add a field to a brand's record type.
+
+        Scope: catalog.manage. One definition of a fact the brand's features share. Check the type's fields first so
+        the same fact is never added twice. select and status take an option_set (built in, or the brand's own);
+        record_reference takes a target_type. A field's key, value type, option list, multiple and target never
+        change. The field is the brand's only: other brands don't see it.
+
+        Needs: the catalog.manage scope.
+        POST /v1/brands/{brand}/catalog/types/{type}/fields
+        """
+        return self._call(
+            "POST",
+            "/v1/brands/{brand}/catalog/types/{type}/fields",
+            path={"brand": brand, "type": type},
+            body={
+                "archived": archived,
+                "description": description,
+                "filterable": filterable,
+                "key": key,
+                "label": label,
+                "multiple": multiple,
+                "option_set": option_set,
+                "precedence": precedence,
+                "sensitivity": sensitivity,
+                "target_type": target_type,
+                "value_type": value_type,
+                "write_policy": write_policy,
+            },
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
+    def create_brand_option_set(
+        self,
+        brand: str,
+        *,
+        key: str | None = None,
+        name: str | None = None,
+        options: list[dict[str, Any]] | None = None,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Add an option list to a brand.
+
+        Scope: catalog.manage. Such as partner tiers, for any number of the brand's fields to share.
+
+        Needs: the catalog.manage scope.
+        POST /v1/brands/{brand}/catalog/option-sets
+        """
+        return self._call(
+            "POST",
+            "/v1/brands/{brand}/catalog/option-sets",
+            path={"brand": brand},
+            body={"key": key, "name": name, "options": options},
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
+    def create_brand_record_type(
+        self,
+        brand: str,
+        *,
+        archived: bool | None = None,
+        description: str | None = None,
+        key: str | None = None,
+        name: str | None = None,
+        plural: str | None = None,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Add a record type to a brand.
+
+        Scope: catalog.manage. A kind of record the brand tracks beyond people and companies, such as subscription
+        or partner. The key comes from the name unless given and never changes; another brand may use the same key
+        for its own type. Then add its fields.
+
+        Needs: the catalog.manage scope.
+        POST /v1/brands/{brand}/catalog/types
+        """
+        return self._call(
+            "POST",
+            "/v1/brands/{brand}/catalog/types",
+            path={"brand": brand},
+            body={"archived": archived, "description": description, "key": key, "name": name, "plural": plural},
             extra_body=extra_body,
             idempotency_key=idempotency_key,
         )
@@ -5243,6 +5415,7 @@ class Operations(_Mixin):
         amount_cents: int | None = None,
         anonymous_id: str | None = None,
         click_id: str | None = None,
+        country: str | None = None,
         currency: str | None = None,
         customer_id: str | None = None,
         email: str | None = None,
@@ -5275,7 +5448,8 @@ class Operations(_Mixin):
         only proposes a partner: this call binds it. Identify the customer with customer_id (your own user id),
         email or record_id, the same way each time. external_id (your charge or order id) makes a retry safe and is what
         a refund's refund_of names. Not credited is not an error: the answer is 200 with credited false and a reason
-        (no_partner, partner_inactive, program_inactive, self_referral, sale_not_found, currency or lead_expired). 201 means it was
+        (no_partner, partner_inactive, program_inactive, self_referral, sale_not_found, currency, lead_expired or
+        country_blocked). 201 means it was
         credited, with the rewards it earned.
 
         Needs: the partners.conversions scope.
@@ -5289,6 +5463,7 @@ class Operations(_Mixin):
                 "amount_cents": amount_cents,
                 "anonymous_id": anonymous_id,
                 "click_id": click_id,
+                "country": country,
                 "currency": currency,
                 "customer_id": customer_id,
                 "email": email,
@@ -5376,6 +5551,7 @@ class Operations(_Mixin):
         block_ad_clicks: bool | None = None,
         block_self_referrals: bool | None = None,
         block_social_clicks: bool | None = None,
+        blocked_countries: list[str] | None = None,
         brand: str | None = None,
         codes_win: bool | None = None,
         credit_model: Literal["first", "last"] | None = None,
@@ -5421,6 +5597,7 @@ class Operations(_Mixin):
                 "block_ad_clicks": block_ad_clicks,
                 "block_self_referrals": block_self_referrals,
                 "block_social_clicks": block_social_clicks,
+                "blocked_countries": blocked_countries,
                 "brand": brand,
                 "codes_win": codes_win,
                 "credit_model": credit_model,
@@ -5606,8 +5783,9 @@ class Operations(_Mixin):
         Scope: customers.manage. Attributes are checked against the type's fields in the catalog; an unknown key is
         refused, so add the field first. Identities say who the record is: email and phone count only when verified
         (default false), and the workspace's own ids, payment customers and domains are trusted as sent. A verified
-        identity another record already holds is refused with identity_taken; look it up with GET .../records/lookup.
-        A person with no name takes first_name and last_name.
+        identity another record of the same brand already holds is refused with identity_taken; look it up with GET
+        .../records/lookup. The record's catalog and its identities are its brand's: the same email in another brand
+        is another person there. A person with no name takes first_name and last_name.
 
         Needs: the customers.manage scope.
         POST /v1/workspaces/{ws}/records
@@ -5646,8 +5824,9 @@ class Operations(_Mixin):
     ) -> Any:
         """Add a record type.
 
-        Scope: catalog.manage. A kind of record the workspace tracks beyond people and companies, such as deal,
-        subscription or partner. The key comes from the name unless given and never changes. Then add its fields.
+        Scope: catalog.manage. A kind of record the workspace's first brand tracks beyond people and companies, such
+        as deal, subscription or partner. The key comes from the name unless given and never changes. Then add its
+        fields. For another brand use POST /v1/brands/{brand}/catalog/types.
 
         Needs: the catalog.manage scope.
         POST /v1/workspaces/{ws}/catalog/types
@@ -9611,6 +9790,29 @@ class Operations(_Mixin):
             path={"brand": brand},
         )
 
+    def get_brand_catalog(
+        self,
+        brand: str,
+        *,
+        archived: bool | None = None,
+    ) -> Any:
+        """Read a brand's catalog.
+
+        Scope: customers.read. Everything the brand's customer records can hold: record types (person and account
+        built in, plus the brand's own such as deal), their fields, the option lists and the product events it has
+        defined. Each brand has its own catalog: a new brand starts with the default set (the built-ins and the Deal
+        type with its stages and fields), never a copy of another brand's. Read it before writing the brand's records.
+
+        Needs: the customers.read scope.
+        GET /v1/brands/{brand}/catalog
+        """
+        return self._call(
+            "GET",
+            "/v1/brands/{brand}/catalog",
+            path={"brand": brand},
+            query={"archived": archived},
+        )
+
     def get_brand_context(
         self,
         brand: str,
@@ -9696,6 +9898,24 @@ class Operations(_Mixin):
             path={"brand": brand},
         )
 
+    def get_brand_record_type(
+        self,
+        brand: str,
+        type: str,
+    ) -> Any:
+        """Read a brand's record type.
+
+        Scope: customers.read. The type and all its fields, archived ones included.
+
+        Needs: the customers.read scope.
+        GET /v1/brands/{brand}/catalog/types/{type}
+        """
+        return self._call(
+            "GET",
+            "/v1/brands/{brand}/catalog/types/{type}",
+            path={"brand": brand, "type": type},
+        )
+
     def get_brand_rules(
         self,
         *,
@@ -9753,13 +9973,16 @@ class Operations(_Mixin):
         *,
         ws: str | None = None,
         archived: bool | None = None,
+        brand: str | None = None,
     ) -> Any:
-        """Read the catalog.
+        """Read a brand's catalog (workspace route).
 
-        Scope: customers.read. Everything a workspace's customer records can hold: record types (person and account
-        built in, plus the workspace's own such as deal), their fields, the shared option lists and the product events
-        it has defined. It is the one definition of each fact for every feature (the customer data platform, the CRM,
-        imports, list filters, enrichment, merge tags), so read it before writing records.
+        Scope: customers.read. Everything a brand's customer records can hold: record types (person and account
+        built in, plus the brand's own such as deal), their fields, the option lists and the product events it has
+        defined. It is the one definition of each fact for every feature (the customer data platform, the CRM,
+        imports, list filters, enrichment, merge tags), so read it before writing records. Each brand has its own
+        catalog; this workspace route reads the one ?brand= picks, or the workspace's first brand. It stays until
+        the brands contract step; use GET /v1/brands/{brand}/catalog.
 
         Needs: the customers.read scope.
         GET /v1/workspaces/{ws}/catalog
@@ -9768,7 +9991,7 @@ class Operations(_Mixin):
             "GET",
             "/v1/workspaces/{ws}/catalog",
             path={"ws": ws},
-            query={"archived": archived},
+            query={"archived": archived, "brand": brand},
         )
 
     def get_connect_request(
@@ -12154,10 +12377,11 @@ class Operations(_Mixin):
         type: str,
         *,
         ws: str | None = None,
+        brand: str | None = None,
     ) -> Any:
         """Read a record type.
 
-        Scope: customers.read. The type and all its fields, archived ones included.
+        Scope: customers.read. The type and all its fields, archived ones included. ?brand= picks the brand; the default is the workspace's first.
 
         Needs: the customers.read scope.
         GET /v1/workspaces/{ws}/catalog/types/{type}
@@ -12166,6 +12390,7 @@ class Operations(_Mixin):
             "GET",
             "/v1/workspaces/{ws}/catalog/types/{type}",
             path={"type": type, "ws": ws},
+            query={"brand": brand},
         )
 
     def get_reddit_action(
@@ -15081,6 +15306,27 @@ class Operations(_Mixin):
             query={"kind": kind, "limit": limit, "before": before, "cursor": cursor, "fields": fields},
         )
 
+    def list_brand_event_definitions(
+        self,
+        brand: str,
+        *,
+        status: Literal["quarantined", "approved", "deprecated"] | None = None,
+    ) -> Any:
+        """List a brand's product event definitions.
+
+        Scope: customers.read. The events the brand's product sends, such as product.activated. Names seen at ingest
+        that the brand never defined arrive quarantined; only approved events drive segments, rules and journeys.
+
+        Needs: the customers.read scope.
+        GET /v1/brands/{brand}/catalog/events
+        """
+        return self._call(
+            "GET",
+            "/v1/brands/{brand}/catalog/events",
+            path={"brand": brand},
+            query={"status": status},
+        )
+
     def list_brand_events(
         self,
         brand: str,
@@ -15149,6 +15395,43 @@ class Operations(_Mixin):
             "/v1/workspaces/{ws}/brands/{brand}/link-suggestions",
             path={"brand": brand, "ws": ws},
             query={"status": status},
+        )
+
+    def list_brand_option_sets(
+        self,
+        brand: str,
+    ) -> Any:
+        """List a brand's option lists.
+
+        Scope: customers.read. country, industry, company_size, seniority and lifecycle_stage built in, then the brand's own, such as deal_stage.
+
+        Needs: the customers.read scope.
+        GET /v1/brands/{brand}/catalog/option-sets
+        """
+        return self._call(
+            "GET",
+            "/v1/brands/{brand}/catalog/option-sets",
+            path={"brand": brand},
+        )
+
+    def list_brand_record_types(
+        self,
+        brand: str,
+        *,
+        archived: bool | None = None,
+    ) -> Any:
+        """List a brand's record types.
+
+        Scope: customers.read. Built-in types first, then the brand's own, with their fields.
+
+        Needs: the customers.read scope.
+        GET /v1/brands/{brand}/catalog/types
+        """
+        return self._call(
+            "GET",
+            "/v1/brands/{brand}/catalog/types",
+            path={"brand": brand},
+            query={"archived": archived},
         )
 
     def list_brands(
@@ -16742,11 +17025,13 @@ class Operations(_Mixin):
         *,
         ws: str | None = None,
         status: Literal["quarantined", "approved", "deprecated"] | None = None,
+        brand: str | None = None,
     ) -> Any:
         """List product event definitions.
 
-        Scope: customers.read. The events the workspace's product sends, such as product.activated. Names seen at ingest
-        that nobody defined arrive quarantined; only approved events drive segments, rules and journeys.
+        Scope: customers.read. The events a brand's product sends, such as product.activated. Names seen at ingest
+        that nobody defined arrive quarantined; only approved events drive segments, rules and journeys. ?brand=
+        picks the brand; the default is the workspace's first.
 
         Needs: the customers.read scope.
         GET /v1/workspaces/{ws}/catalog/events
@@ -16755,7 +17040,7 @@ class Operations(_Mixin):
             "GET",
             "/v1/workspaces/{ws}/catalog/events",
             path={"ws": ws},
-            query={"status": status},
+            query={"status": status, "brand": brand},
         )
 
     def list_events(
@@ -18361,10 +18646,11 @@ class Operations(_Mixin):
         self,
         *,
         ws: str | None = None,
+        brand: str | None = None,
     ) -> Any:
         """List option lists.
 
-        Scope: customers.read. The choices select and status fields share: country, industry, company_size, seniority and lifecycle_stage built in, then the workspace's own.
+        Scope: customers.read. The choices select and status fields share: country, industry, company_size, seniority and lifecycle_stage built in, then the brand's own. ?brand= picks the brand; the default is the workspace's first.
 
         Needs: the customers.read scope.
         GET /v1/workspaces/{ws}/catalog/option-sets
@@ -18373,6 +18659,7 @@ class Operations(_Mixin):
             "GET",
             "/v1/workspaces/{ws}/catalog/option-sets",
             path={"ws": ws},
+            query={"brand": brand},
         )
 
     def list_outcome_syncs(
@@ -19055,10 +19342,11 @@ class Operations(_Mixin):
         *,
         ws: str | None = None,
         archived: bool | None = None,
+        brand: str | None = None,
     ) -> Any:
         """List record types.
 
-        Scope: customers.read. Built-in types first, then the workspace's own, with their fields.
+        Scope: customers.read. Built-in types first, then the brand's own, with their fields. ?brand= picks the brand; the default is the workspace's first.
 
         Needs: the customers.read scope.
         GET /v1/workspaces/{ws}/catalog/types
@@ -19067,7 +19355,7 @@ class Operations(_Mixin):
             "GET",
             "/v1/workspaces/{ws}/catalog/types",
             path={"ws": ws},
-            query={"archived": archived},
+            query={"archived": archived, "brand": brand},
         )
 
     def list_records(
@@ -20672,6 +20960,29 @@ class Operations(_Mixin):
             idempotency_key=idempotency_key,
         )
 
+    def lookup_brand_records(
+        self,
+        brand: str,
+        *,
+        namespace: str,
+        value: str,
+    ) -> Any:
+        """Find a brand's records by identity.
+
+        Scope: customers.read. The brand's records an email, phone, user id or other identity points at. owner is
+        the brand's one record holding it verified. The same email in another brand is another person there, never
+        listed here.
+
+        Needs: the customers.read scope.
+        GET /v1/brands/{brand}/records/lookup
+        """
+        return self._call(
+            "GET",
+            "/v1/brands/{brand}/records/lookup",
+            path={"brand": brand},
+            query={"namespace": namespace, "value": value},
+        )
+
     def lookup_records(
         self,
         *,
@@ -20684,6 +20995,8 @@ class Operations(_Mixin):
 
         Scope: customers.read. The records an email, phone, user id or other identity points at. owner is the one
         record holding it verified; the others hold it unverified, such as a sign-up that never confirmed its email.
+        Each brand has its own people, so the same email can have an owner in each brand: pick one with ?brand=
+        (or use GET /v1/brands/{brand}/records/lookup); under all brands owner is the first brand's, else another's.
 
         Needs: the customers.read scope.
         GET /v1/workspaces/{ws}/records/lookup
@@ -20948,6 +21261,7 @@ class Operations(_Mixin):
         ref: str | None = None,
         click_id: str | None = None,
         promo_code: str | None = None,
+        country: str | None = None,
         customer_id: str | None = None,
         email: str | None = None,
         external_id: str | None = None,
@@ -20961,7 +21275,7 @@ class Operations(_Mixin):
         POST .../partner-conversions from the query string, with the names affiliate networks use as aliases: type
         (or event, goal), ref, click_id (or ref_click, clickid), promo_code (or coupon), customer_id (or user_id),
         email, external_id (or order_id, transaction_id, charge_id, txid), refund_of, amount (in the currency's main
-        unit, such as 49.90; or amount_cents), currency, product_id, sub_id and occurred_at.
+        unit, such as 49.90; or amount_cents), currency, product_id, sub_id, country (or country_code) and occurred_at.
 
         GET /v1/partner-postbacks/{token}
         """
@@ -20976,6 +21290,7 @@ class Operations(_Mixin):
                 "ref": ref,
                 "click_id": click_id,
                 "promo_code": promo_code,
+                "country": country,
                 "customer_id": customer_id,
                 "email": email,
                 "external_id": external_id,
@@ -27042,6 +27357,153 @@ class Operations(_Mixin):
             idempotency_key=idempotency_key,
         )
 
+    def update_brand_event_definition(
+        self,
+        brand: str,
+        event: str,
+        *,
+        description: str | None = None,
+        label: str | None = None,
+        name: str | None = None,
+        properties: list[dict[str, Any]] | None = None,
+        sensitivity: Literal["public", "internal", "confidential", "restricted"] | None = None,
+        status: Literal["quarantined", "approved", "deprecated"] | None = None,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Change, approve or deprecate a brand's event definition.
+
+        Scope: catalog.manage. The name never changes. Deprecating is how an event is retired.
+
+        Needs: the catalog.manage scope.
+        PATCH /v1/brands/{brand}/catalog/events/{event}
+        """
+        return self._call(
+            "PATCH",
+            "/v1/brands/{brand}/catalog/events/{event}",
+            path={"brand": brand, "event": event},
+            body={
+                "description": description,
+                "label": label,
+                "name": name,
+                "properties": properties,
+                "sensitivity": sensitivity,
+                "status": status,
+            },
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
+    def update_brand_field(
+        self,
+        brand: str,
+        type: str,
+        field: str,
+        *,
+        archived: bool | None = None,
+        description: str | None = None,
+        filterable: bool | None = None,
+        key: str | None = None,
+        label: str | None = None,
+        multiple: bool | None = None,
+        option_set: str | None = None,
+        precedence: list[Literal["manual", "first_party", "crm_sync", "enrichment", "import"]] | None = None,
+        sensitivity: Literal["public", "internal", "confidential", "restricted"] | None = None,
+        target_type: str | None = None,
+        value_type: str | None = None,
+        write_policy: Literal["source_owned", "platform_owned", "manual_override_allowed", "computed"] | None = None,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Change or archive a brand's field.
+
+        Scope: catalog.manage. Label, description, write policy, precedence, sensitivity, filterable and archived.
+        Archiving is how a field is deleted (records keep their values; it can be restored). Built-in fields never
+        change.
+
+        Needs: the catalog.manage scope.
+        PATCH /v1/brands/{brand}/catalog/types/{type}/fields/{field}
+        """
+        return self._call(
+            "PATCH",
+            "/v1/brands/{brand}/catalog/types/{type}/fields/{field}",
+            path={"brand": brand, "type": type, "field": field},
+            body={
+                "archived": archived,
+                "description": description,
+                "filterable": filterable,
+                "key": key,
+                "label": label,
+                "multiple": multiple,
+                "option_set": option_set,
+                "precedence": precedence,
+                "sensitivity": sensitivity,
+                "target_type": target_type,
+                "value_type": value_type,
+                "write_policy": write_policy,
+            },
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
+    def update_brand_option_set(
+        self,
+        brand: str,
+        set: str,
+        *,
+        key: str | None = None,
+        name: str | None = None,
+        options: list[dict[str, Any]] | None = None,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Change a brand's option list.
+
+        Scope: catalog.manage. options replaces the list's order and labels. Keys never go away: an option left out is
+        archived, so records that use it keep their meaning. Built-in lists never change.
+
+        Needs: the catalog.manage scope.
+        PATCH /v1/brands/{brand}/catalog/option-sets/{set}
+        """
+        return self._call(
+            "PATCH",
+            "/v1/brands/{brand}/catalog/option-sets/{set}",
+            path={"brand": brand, "set": set},
+            body={"key": key, "name": name, "options": options},
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
+    def update_brand_record_type(
+        self,
+        brand: str,
+        type: str,
+        *,
+        archived: bool | None = None,
+        description: str | None = None,
+        key: str | None = None,
+        name: str | None = None,
+        plural: str | None = None,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Rename or archive a brand's record type.
+
+        Scope: catalog.manage. Built-in types never change. Archiving is how a type is deleted: archived types keep
+        their records but take no new ones, and can be restored. Other brands' types are never touched.
+
+        Needs: the catalog.manage scope.
+        PATCH /v1/brands/{brand}/catalog/types/{type}
+        """
+        return self._call(
+            "PATCH",
+            "/v1/brands/{brand}/catalog/types/{type}",
+            path={"brand": brand, "type": type},
+            body={"archived": archived, "description": description, "key": key, "name": name, "plural": plural},
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
     def update_brand_rules(
         self,
         *,
@@ -29558,6 +30020,7 @@ class Operations(_Mixin):
         block_ad_clicks: bool | None = None,
         block_self_referrals: bool | None = None,
         block_social_clicks: bool | None = None,
+        blocked_countries: list[str] | None = None,
         brand: str | None = None,
         codes_win: bool | None = None,
         credit_model: Literal["first", "last"] | None = None,
@@ -29599,6 +30062,7 @@ class Operations(_Mixin):
                 "block_ad_clicks": block_ad_clicks,
                 "block_self_referrals": block_self_referrals,
                 "block_social_clicks": block_social_clicks,
+                "blocked_countries": blocked_countries,
                 "brand": brand,
                 "codes_win": codes_win,
                 "credit_model": credit_model,

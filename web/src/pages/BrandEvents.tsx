@@ -37,7 +37,7 @@ export function BrandEvents({ ws, canManage, tabs, onOpen }: { ws: string; canMa
       />
       {tabs}
       {brand ? (
-        <BrandEventsFor key={brand.id} ws={ws} brand={brand.id} canManage={canManage} onOpen={onOpen} />
+        <BrandEventsFor key={brand.id} brand={brand.id} canManage={canManage} onOpen={onOpen} />
       ) : (
         <Empty title="Pick a brand">
           Events belong to one brand. Pick {active.length > 1 ? `one of your ${active.length} brands` : "your brand"} in the brand switcher to see its events.
@@ -47,7 +47,7 @@ export function BrandEvents({ ws, canManage, tabs, onOpen }: { ws: string; canMa
   );
 }
 
-function BrandEventsFor({ ws, brand, canManage, onOpen }: { ws: string; brand: string; canManage: boolean; onOpen: (item: string) => void }) {
+function BrandEventsFor({ brand, canManage, onOpen }: { brand: string; canManage: boolean; onOpen: (item: string) => void }) {
   const [summary, setSummary] = useState<Summary | null>(null);
   const [list, setList] = useState<Event[] | null>(null);
   const [next, setNext] = useState<string | null>(null);
@@ -120,7 +120,7 @@ function BrandEventsFor({ ws, brand, canManage, onOpen }: { ws: string; brand: s
   async function approve(name: string) {
     if (!(await confirmAction(`Approve ${name} and replay its events?`, <p>Approved names drive journeys, rules and reports. The events held for it are processed now.</p>, "Approve and replay", false))) return;
     setBusy(true);
-    const { error } = await api.PATCH("/v1/workspaces/{ws}/catalog/events/{event}", { params: { path: { ws, event: name } }, body: { status: "approved" } });
+    const { error } = await api.POST("/v1/brands/{brand}/catalog/events/{event}/approve", { params: { path: { brand, event: name } } });
     setBusy(false);
     if (error) return toast(errorMessage(error), "error");
     await replay({ status: "held", name }, name, "held_name");

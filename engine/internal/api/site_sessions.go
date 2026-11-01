@@ -31,6 +31,9 @@ type siteVisitor struct {
 	brandID             *string
 	origins             []string
 	device, browser, os string
+	// The visitor's country from the proxy or the IP database
+	// (siteKeyRow.country); "" falls back to the browser's time zone.
+	country, countrySource string
 }
 
 // botUA matches the user agents of crawlers, previews, monitors and
@@ -264,7 +267,11 @@ func siteSession(ctx context.Context, tx pgx.Tx, a *access, v siteVisitor, m eve
 			}
 		}
 		tz, _ := ctxObj["timezone"].(string)
-		rec, _, err := ownerOf(ctx, tx, a, "anonymous_id", anon)
+		country, countrySource := v.country, v.countrySource
+		if country == "" && zoneCountry[tz] != "" {
+			country, countrySource = zoneCountry[tz], "timezone"
+		}
+		rec, _, err := ownerOf(ctx, tx, a, deref(v.brandID), "anonymous_id", anon)
 		if err != nil {
 			return false, err
 		}
@@ -286,11 +293,11 @@ func siteSession(ctx context.Context, tx pgx.Tx, a *access, v siteVisitor, m eve
 		}
 		if err := tx.QueryRow(ctx, `INSERT INTO site_sessions (workspace_id, key_id, brand_id, anonymous_id, record_id, started_at, last_seen_at, events, pageviews,
 				landing_url, landing_path, referrer, referrer_host, utm_source, utm_medium, utm_campaign, utm_term, utm_content, click_ids, ref, ofc,
-				country, timezone, device, browser, os, ad)
-			VALUES ($1, $2, $3, $4, $5, $6, $6, 1, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25) RETURNING id::text`,
+				country, timezone, device, browser, os, ad, country_source)
+			VALUES ($1, $2, $3, $4, $5, $6, $6, 1, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26) RETURNING id::text`,
 			a.WorkspaceID, v.keyID, v.brandID, anon, rec, now, boolInt(page), cutUTF8(str("url"), 2000), cutUTF8(str("path"), 2000),
 			cutUTF8(referrer, 2000), cutUTF8(refHost, 253), touch.source, touch.medium, touch.campaign, touch.term, touch.content, ids,
-			touch.ref, touch.ofc, zoneCountry[tz], cutUTF8(tz, 100), v.device, v.browser, v.os, ad).Scan(&id); err != nil {
+			touch.ref, touch.ofc, country, cutUTF8(tz, 100), v.device, v.browser, v.os, ad, countrySource).Scan(&id); err != nil {
 			return false, err
 		}
 

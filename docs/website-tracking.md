@@ -39,7 +39,7 @@ On every page, including in-app navigation, the snippet sends a `page` event on 
 
 ## Visits, touches and devices
 
-Each event joins a visit: a session that ends after 30 minutes without an event, or when the visitor comes back through a different campaign (new tags, a new ad click id or ad, a `ref` or an `ofc`; an ad pixel's cookie never starts one). The visit's id is in `context.sessionId`. A visit keeps its landing page, referrer, tags, click ids, ad ids, `ref` and `ofc`, plus a rough country (from the browser's time zone, not its address), device type (desktop, mobile, tablet), browser and system. A visit from another page of your own site, or from another of the key's origins, is not counted as a referral.
+Each event joins a visit: a session that ends after 30 minutes without an event, or when the visitor comes back through a different campaign (new tags, a new ad click id or ad, a `ref` or an `ofc`; an ad pixel's cookie never starts one). The visit's id is in `context.sessionId`. A visit keeps its landing page, referrer, tags, click ids, ad ids, `ref` and `ofc`, plus its country, device type (desktop, mobile, tablet), browser and system. A visit from another page of your own site, or from another of the key's origins, is not counted as a referral.
 
 When your product identifies a visitor, their visits join their record, and Outflare works out these fields on the person (computed, so nobody writes them):
 
@@ -118,6 +118,8 @@ location /ofx/ {
 A Cloudflare Worker sets the same two headers, taking the address from `CF-Connecting-IP`. A plain Next.js rewrite can't add headers, so use middleware there. If your site sits behind a CDN, take the address from the CDN's own header (such as `CF-Connecting-IP`), never from the first `X-Forwarded-For` entry, which the browser can set. Outflare takes the address only when the secret matches and it is a public address, and otherwise uses the connecting address. With a proxy secret, each visitor's address can send up to 600 requests a minute. A new secret replaces the old one at once, and `DELETE .../proxy-secret` removes it.
 
 With the secret, the proxy can also pass the visitor's country in `X-Outflare-Country` (two letters, such as `DE`), from its CDN's geolocation (`CF-IPCountry` on Cloudflare, `x-vercel-ip-country` on Vercel). The [consent banner](consent-banner.md) then picks the region's rule by country instead of the browser's time zone.
+
+A visit's country comes from, in order: your proxy's `X-Outflare-Country`; the visitor's address, looked up in the IP database the engine ships with ([IP geolocation by DB-IP](https://db-ip.com), CC BY 4.0, about 95% right by country, refreshed with engine releases); or, when neither knows, the browser's time zone. The address is only looked up, never stored. Partner programs that [block countries](partners.md) trust only the first two.
 
 ## Sites on more than one domain
 

@@ -861,6 +861,7 @@ function ProgramSettings({ ws, program: p, canManage, onClose }: { ws: string; p
   const [urlParams, setURLParams] = useState(p.url_params.join(", "));
   const [blockAds, setBlockAds] = useState(p.block_ad_clicks);
   const [blockSocial, setBlockSocial] = useState(p.block_social_clicks);
+  const [countries, setCountries] = useState(p.blocked_countries.join(", "));
   const [salesSource, setSalesSource] = useState(p.sales_source);
   const [postback, setPostback] = useState("");
   const [busy, setBusy] = useState(false);
@@ -875,7 +876,8 @@ function ProgramSettings({ ws, program: p, canManage, onClose }: { ws: string; p
       body: { landing_url: landing.trim(), credit_window_days: Number(windowDays), credit_model: model, hold_days: Number(hold), auto_approve: auto, pay_browser_signups: payBrowser, block_self_referrals: blockSelf, min_payout_cents: Math.round(Number(minPayout) * 100), sales_source: salesSource,
         payout_term_days: term === "" ? null : Number(term), payout_methods: methods, payout_tokens: methods.includes("crypto") ? tokens.split(",").map((t) => t.trim()).filter(Boolean) : p.payout_tokens,
         lead_expiry_days: leadDays.trim() === "" ? null : Number(leadDays),
-        url_params: urlParams.split(",").map((s) => s.trim().toLowerCase()).filter(Boolean), block_ad_clicks: blockAds, block_social_clicks: blockSocial },
+        url_params: urlParams.split(",").map((s) => s.trim().toLowerCase()).filter(Boolean), block_ad_clicks: blockAds, block_social_clicks: blockSocial,
+        blocked_countries: countries.split(",").map((c) => c.trim().toUpperCase()).filter(Boolean) },
     });
     setBusy(false);
     if (error) return setError(errorMessage(error));
@@ -950,6 +952,13 @@ function ProgramSettings({ ws, program: p, canManage, onClose }: { ws: string; p
             <label className="flex items-center gap-2 text-[13px]">
               <input type="checkbox" checked={blockSocial} onChange={(e) => setBlockSocial(e.target.checked)} /> Don't credit website visits from social media
             </label>
+            <div>
+              <Input label="Blocked countries" value={countries} onChange={(e) => setCountries(e.target.value)} placeholder="BR, IN" maxLength={1000}
+                hint="Two-letter codes, comma separated. Visits and new customers from these countries don't credit partners. Countries come from your site's proxy or the visitor's address, never the time zone." />
+              <p className="mt-1 text-[12px] text-muted-foreground">
+                <a href="https://db-ip.com" target="_blank" rel="noreferrer" className="underline">IP geolocation by DB-IP</a>
+              </p>
+            </div>
             <label className="flex items-center gap-2 text-[13px]">
               <input type="checkbox" checked={blockSelf} onChange={(e) => setBlockSelf(e.target.checked)} /> Block self-referrals: a partner's own sign-ups and purchases earn them nothing
             </label>
@@ -1165,6 +1174,12 @@ function PortalSection({ ws, program: p, canManage }: { ws: string; program: Par
   const [signup, setSignup] = useState(!!p.portal.signup_open);
   const [poweredBy, setPoweredBy] = useState(!p.portal.hide_powered_by);
   const [businessOnly, setBusinessOnly] = useState(!!p.portal.business_email_only);
+  const [siteKey, setSiteKey] = useState(p.portal.site_key_id ?? "");
+  const [ga, setGA] = useState(p.portal.ga_measurement_id ?? "");
+  const [siteKeys, setSiteKeys] = useState<{ id: string; name: string }[]>([]);
+  useEffect(() => {
+    api.GET("/v1/workspaces/{ws}/site-keys", { params: { path: { ws } } }).then(({ data }) => setSiteKeys((data?.data ?? []).map((k) => ({ id: k.id, name: k.name }))));
+  }, [ws]);
   const [url, setUrl] = useState(p.portal_url);
   const [assets, setAssets] = useState<PartnerAsset[]>([]);
   const [busy, setBusy] = useState(false);
@@ -1183,7 +1198,8 @@ function PortalSection({ ws, program: p, canManage }: { ws: string; program: Par
     setError("");
     const { data, error } = await api.PUT("/v1/workspaces/{ws}/partner-programs/{id}/portal", {
       params: { path: { ws, id: p.id } },
-      body: { enabled, subdomain: sub.trim(), settings: { ...p.portal, title: title.trim(), color, logo_url: logo.trim(), favicon_url: favicon.trim(), welcome: welcome.trim(), email_from: from.trim(), signup_open: signup, hide_powered_by: !poweredBy, business_email_only: businessOnly } },
+      body: { enabled, subdomain: sub.trim(), settings: { ...p.portal, title: title.trim(), color, logo_url: logo.trim(), favicon_url: favicon.trim(), welcome: welcome.trim(), email_from: from.trim(), signup_open: signup, hide_powered_by: !poweredBy, business_email_only: businessOnly,
+        site_key_id: siteKey, ga_measurement_id: siteKey ? ga.trim().toUpperCase() : "" } },
     });
     setBusy(false);
     if (error || !data) return setError(errorMessage(error));
@@ -1230,6 +1246,17 @@ function PortalSection({ ws, program: p, canManage }: { ws: string; program: Par
           <label className="flex items-center gap-2 text-[13px]"><input type="checkbox" checked={signup} onChange={(e) => setSignup(e.target.checked)} /> Anyone can apply</label>
           <label className="flex items-center gap-2 text-[13px]"><input type="checkbox" checked={businessOnly} onChange={(e) => setBusinessOnly(e.target.checked)} /> Work email addresses only: refuse applications from free, disposable and relay addresses</label>
           <label className="flex items-center gap-2 text-[13px]"><input type="checkbox" checked={poweredBy} onChange={(e) => setPoweredBy(e.target.checked)} /> Show "Powered by Outflare" at the foot of the portal</label>
+          <div className="grid gap-3 sm:grid-cols-2">
+            <label className="block text-[13px]">
+              <span className="mb-1 block font-medium">Website analytics</span>
+              <select className={field + " w-full"} value={siteKey} onChange={(e) => setSiteKey(e.target.value)}>
+                <option value="">Off</option>
+                {siteKeys.map((k) => <option key={k.id} value={k.id}>{k.name}</option>)}
+              </select>
+              <span className="mt-1 block text-xs text-muted-foreground">Partners' visits to the portal show in your website analytics, through this site key and its cookie banner.</span>
+            </label>
+            {siteKey && <Input label="Google Analytics" value={ga} onChange={(e) => setGA(e.target.value)} placeholder="G-ABC123XYZ" maxLength={20} hint="Optional. Loads only once the visitor allows analytics where consent is needed." />}
+          </div>
         </fieldset>
         <ErrorText>{error}</ErrorText>
         <div className="flex flex-wrap items-center gap-2">

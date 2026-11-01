@@ -711,7 +711,7 @@ func runBatchUndo(ctx context.Context, tx pgx.Tx, a *access, p *undoPlan, mode s
 
 	// Field values it set, back to what they were, while they still hold
 	// what it put there.
-	c, err := loadCatalog(ctx, tx, ws, false)
+	c, err := loadCatalog(ctx, tx, ws, brand, false)
 	if err != nil {
 		return err
 	}
@@ -915,7 +915,7 @@ func restoreBatchRows(ctx context.Context, tx pgx.Tx, a *access, id string) (map
 	if err != nil {
 		return nil, nil, err
 	}
-	c, err := loadCatalog(ctx, tx, a.WorkspaceID, false)
+	c, err := loadCatalog(ctx, tx, a.WorkspaceID, a.Brand, false)
 	if err != nil {
 		return nil, nil, err
 	}

@@ -2,21 +2,24 @@
 
 Customer records are Outflare's one model of the people and companies a workspace knows, plus any other kind of record it tracks, such as deals, subscriptions or partners. The customer data platform, the CRM and lifecycle email all read and write the same records, so a fact about someone is stored once, whichever feature or connector wrote it.
 
-This covers the customer data platform so far: records, their identities and links, the shared catalog, product events, duplicates and merges, each record's timeline, and consent. [Search](workspace-search.md) finds records and their history by their words, [Query](query.md) reads it with SQL; [smart lists](lists.md#smart-lists) group it, and [rules](rules.md) turn what happens to records into business events of their own, which journeys and webhooks act on.
+This covers the customer data platform so far: records, their identities and links, each brand's catalog, product events, duplicates and merges, each record's timeline, and consent. [Search](workspace-search.md) finds records and their history by their words, [Query](query.md) reads it with SQL; [smart lists](lists.md#smart-lists) group it, and [rules](rules.md) turn what happens to records into business events of their own, which journeys and webhooks act on.
 
 Everything here works the same from the REST API and the MCP server.
 
 ## The catalog
 
-The catalog says what records can hold. Read it first (`GET /v1/workspaces/{ws}/catalog`, MCP `get_catalog`) and reuse what is there before adding anything.
+The catalog says what records can hold. Each brand has its own: the record types, fields, option lists and event definitions belong to a brand, and a field one brand adds is never seen by another. Read it first (`GET /v1/brands/{brand}/catalog`, MCP `get_catalog`) and reuse what is there before adding anything.
 
-- **Record types.** Every workspace has `person` and `account` (shown as Companies), and a `deal` type (Deals) it can change like its own. Add your own with `POST .../catalog/types`, such as `subscription`. A type's key never changes; archiving one keeps its records.
-- **Fields.** Each type has fields, each the one definition of a fact for every feature: imports, list filters, enrichment, the CRM and merge tags all use it. Built in: first and last name, job title, seniority, companies, country, city, time zone, LinkedIn and lifecycle stage for people; website, industry, company size, country, LinkedIn and lifecycle stage for companies. Both have **tags** (labels such as `vip` or `churn-risk`, made lowercase, up to 50 characters each) and an **owner** (a member of the workspace; alerts about the record go to them). Add your own with `POST .../catalog/types/{type}/fields`.
+- **Smart defaults.** A new brand starts with the default catalog: the built-in types, fields and option lists below, and the `deal` type with its stages and fields. It is never a copy of another brand's, since two brands are rarely the same business. From there the brand has full create, change and archive.
+- **Record types.** Every brand has `person` and `account` (shown as Companies), and a `deal` type (Deals) it can change like its own. Add your own with `POST /v1/brands/{brand}/catalog/types`, such as `subscription`. A type's key never changes; archiving one (how a type is deleted) keeps its records, and it can be restored. Two brands may each have a type, field or option list with the same key; they are separate.
+- **Fields.** Each type has fields, each the one definition of a fact for every feature: imports, list filters, enrichment, the CRM and merge tags all use it. Built in: first and last name, job title, seniority, companies, country, city, time zone, LinkedIn and lifecycle stage for people; website, industry, company size, country, LinkedIn and lifecycle stage for companies. Both have **tags** (labels such as `vip` or `churn-risk`, made lowercase, up to 50 characters each) and an **owner** (a member of the workspace; alerts about the record go to them). Add your own with `POST .../catalog/types/{type}/fields`; archive one to delete it.
 - **Value types.** `text`, `number`, `currency` (`{"amount_minor": 1999, "currency": "USD"}`), `date`, `timestamp`, `checkbox`, `select` and `status` (an option key), `rating` (0 to 5), `email`, `phone` (international format), `url`, `location`, `record_reference` (another record, such as a deal's company) and `actor_reference` (a member of the workspace). `multiple` fields take a list. A field's key, value type, option list and target never change; anything else can, and a field can be archived.
 - **Option lists.** `select` and `status` fields share option lists, so the industry of a lead, a CRM company and an import are the same values. Built in: country (ISO 3166 codes), industry, company size, seniority and lifecycle stage. Add your own, such as deal stages, with `POST .../catalog/option-sets`. Options are archived, never deleted, so old values keep their meaning.
-- **Product events.** `POST .../catalog/events` defines an event your product sends, such as `product.activated`, with its properties. Only approved events will drive segments, rules and journeys.
+- **Product events.** `POST .../catalog/events` defines an event your product sends, such as `product.activated`, with its properties. Only approved events will drive segments, rules and journeys. For now an event name is defined in one brand of a workspace at a time: defining or approving a name another brand defines is refused with `event_name_in_other_brand` (409). A later release lifts this.
 
-Changing the catalog needs `catalog.manage`, which owners and admins have by default, because a field is shared by every feature that uses it.
+Changing the catalog needs `catalog.manage`, which owners and admins have by default, because a field is shared by every feature that uses it. Approving a held event name (`POST /v1/brands/{brand}/catalog/events/{event}/approve`, MCP `approve_event_name`) needs only `customers.manage`, since it is part of fixing the brand's data and changes nothing else about the event.
+
+The brand routes are under `/v1/brands/{brand}/catalog` (`types`, `types/{type}`, `types/{type}/fields`, `types/{type}/fields/{field}`, `option-sets`, `option-sets/{set}`, `events`, `events/{event}`, `events/{event}/approve`). The workspace routes (`/v1/workspaces/{ws}/catalog/...`) still work until a later release: reads take `?brand=` (the default is the workspace's first brand, or a brand-limited caller's own), and changes act on the workspace's first brand. A record is always checked against its own brand's catalog.
 
 ## Records
 
@@ -25,7 +28,7 @@ Changing the catalog needs `catalog.manage`, which owners and admins have by def
 Each record also has:
 
 - **origin**: where it came from (`first_party` for your own product, billing or forms, `prospect` for lead lists and data providers, `crm_sync`, `import` or `manual`). With consent it sets each person's contact basis, which decides what may go out to them ([docs/opt-outs.md](opt-outs.md)). `acquired_via` names the tool the record came from.
-- **brand_id**: a brand's record, or shared by every brand. People limited to some brands see their brands' records and the shared ones, and change only their brands'.
+- **brand_id**: the brand the record belongs to; one made without a brand goes to the workspace's first. Its identities are matched in that brand only (see Identities), and its fields are that brand's catalog's. People limited to some brands see and change only their brands' records.
 - **version**: goes up on every change. Send the version you read with a `PATCH` (or a merge) and an edit made against an old copy is refused with `record_changed`. Agents must send it: a change from the MCP server, a connected AI app or a mission without a version is refused with `version_required`, so two agents working on one record never overwrite each other. People in the app and scripts with a plain API token may leave it out.
 - **history**: `GET .../records/{record}/history` lists every change to the name and attributes, with who made it and from which source.
 
@@ -66,13 +69,14 @@ Each has `meeting_id`, `source`, `attribution`, `starts_at` and, when the meetin
 
 Identities say who a record is: `email`, `phone`, `device_token` (with `properties.platform`: ios, android or web), `user_id` (your product's own id), `anonymous_id`, `domain` for companies, or a source's own, such as `stripe.customer`.
 
-Only a **verified** identity claims its value, and only one record can hold a value verified:
+Identities belong to their record's brand, and are matched only within it: **the same email or user id in two brands is two people**, never merged and never linked. A product event, identify call, payment customer, CRM or CSV import, or record made with identities in one brand finds that brand's person, or makes a new one there, whatever another brand holds. Only a **verified** identity claims its value, and in each brand only one record can hold a value verified:
 
 - An email or phone is unverified unless you say the person proved they own it (`"verified": true`, only from your servers). Your own ids, payment customers and domains are trusted as sent.
 - Someone who signs up with another person's email and never confirms it gets their own record. They never take over the other person's record, and the address stays the other person's.
-- A verified value another record already holds is refused with `identity_taken`, naming that record when you can see it. Nothing is moved or merged.
+- A verified value another record of the same brand already holds is refused with `identity_taken`, naming that record when you can see it. Nothing is moved or merged. Another brand's person with the same value never blocks it.
 - When a person changes their email, add the new one with `replaces` set to the old identity's id: the old one is closed as `changed` and kept in the history, so the address can later be claimed by whoever proves they own it.
-- `GET .../records/lookup?namespace=email&value=...` finds the records an identity points at: `owner` is the one holding it verified, and the rest hold it unverified.
+- `GET /v1/brands/{brand}/records/lookup?namespace=email&value=...` finds the brand's records an identity points at: `owner` is the one holding it verified, and the rest hold it unverified. The workspace route `GET .../records/lookup` does the same for the brand `?brand=` picks; under all brands it lists every brand's, and `owner` is the first brand's (else another's).
+- A CSV import of leads links each lead to a person of its list's brand (the first brand for a list of no brand), and a payments or CRM import to the person of its connection's brand. Outreach, replies and email clicks that find a person by address look in every brand until their step of the brands project moves them, preferring the workspace's first brand.
 
 ## Links
 
@@ -109,15 +113,15 @@ Send what people do in your product to a brand: `POST /v1/brands/{brand}/events`
 - **Processed in the background.** A job processes the brand's events in the order they arrived, usually within seconds. Each ends as one of:
   - `accepted`: stored, with the person it matched (`record_id`) and the product event (`customer_event_id`)
   - `duplicate`: a `messageId` the brand already has, so it was stored once
-  - `rejected`: something to fix, with a `code` and a `reason` that says what (`missing_id`: every event needs `userId` or `anonymousId`; `invalid_timestamp`; `property_type`: a property isn't the type the catalog defines for that event; `other_brand`: the person belongs to another brand; `identity_taken` and the other record conflicts; `internal`: it failed five times for a reason of ours)
-  - `held`: a track name the catalog hasn't approved yet. It is kept, but changes nobody and drives nothing until you approve it.
+  - `rejected`: something to fix, with a `code` and a `reason` that says what (`missing_id`: every event needs `userId` or `anonymousId`; `invalid_timestamp`; `property_type`: a property isn't the type the brand's catalog defines for that event; `identity_taken` and the other record conflicts; `internal`: it failed five times for a reason of ours)
+  - `held`: a track name the brand's catalog hasn't approved yet. It is kept, but changes nobody and drives nothing until you approve it.
 - **Follow them.** `GET /v1/brands/{brand}/events` lists them newest first, filtered by `status`, `code`, `source`, `batch_id`, `name` or when they arrived; `GET .../events/{id}` shows one with the event as sent (`raw`); `GET .../events/summary` counts the last 24 hours and 7 days by status, and lists the rejection codes and held names waiting. The brand's **Events** page in the app shows the same, with what to do about each.
-- **Fix and replay.** Fix what the reason says (approve the name with `PATCH .../catalog/events/{name}`, change a property's type, free an identity), then `POST .../events/replay` with the events' `ids`, or a filter such as `{"status": "held"}` or `{"status": "rejected", "code": "property_type"}`. They go back to `pending` and are processed again. Accepted and duplicate events are never replayed.
+- **Fix and replay.** Fix what the reason says (approve the name with `POST /v1/brands/{brand}/catalog/events/{name}/approve` or the Events page's Approve and replay, change a property's type, free an identity), then `POST .../events/replay` with the events' `ids`, or a filter such as `{"status": "held"}` or `{"status": "rejected", "code": "property_type"}`. They go back to `pending` and are processed again. Accepted and duplicate events are never replayed.
 - **Kept for a while.** Accepted and duplicate events stay in this log for 30 days, rejected and held ones for 90, so there is time to fix them; each shows its `expires_at`. The product events themselves (`GET .../customer-events`, the timeline) are kept as before.
 - **Types.** `track` (something happened), `identify` (who someone is), `page` and `screen` (stored as `page.viewed` and `screen.viewed`), `group` (the company they belong to) and `alias` (an id they had before).
 - **Names.** A track's `event` becomes its catalog name: `Order Completed` is `order_completed`, `checkoutStarted` is `checkout_started`, and dotted names such as `product.activated` stay as they are. A name the catalog has not seen arrives **quarantined** and its events are `held` until someone approves it. identify, page, screen, group and alias names need no approval.
 - **Retries.** Send a `messageId`: a second event with the same one comes back as `duplicate`.
-- **The brand.** Events belong to the brand in the URL; a `brand_id` in the body is ignored. A `userId` or verified email that a person of another brand holds is `rejected` with `other_brand`: brands keep their data apart.
+- **The brand.** Events belong to the brand in the URL; a `brand_id` in the body is ignored. People are found by `userId`, verified email and `anonymousId` in that brand only: the same `userId` sent to two brands makes a person in each, and neither ever changes the other. The catalog that approves names and types properties is the brand's own.
 
 The workspace route `POST /v1/workspaces/{ws}/customer-events` (MCP `track_customer_events`) still works for now: it processes the events while you wait and answers each one's result in `results`, keeping rejected events only in that answer. It moves to the brand route in a later release.
 
@@ -135,7 +139,7 @@ identify's traits fill in the person; group's fill in the company. Each trait th
 
 ## Duplicates
 
-Records that share an email or phone may be the same human. Outflare lists each such pair once (`GET .../records/duplicates`, MCP `list_record_duplicates`), including pairs that existed before the upgrade, with both records side by side, for someone to answer "same human?":
+Records of one brand that share an email or phone may be the same human; records of two brands never are, and are never paired or merged. Outflare lists each such pair once (`GET .../records/duplicates`, MCP `list_record_duplicates`), including pairs that existed before the upgrade, with both records side by side, for someone to answer "same human?":
 
 - **Merge** (`POST .../records/{record}/merge` with `from`, MCP `merge_records`): the record in the path is kept. The other's identities, links, product events, consent and payment subscriptions move to it, and its billing fields are worked out again from both; its attributes fill in what the kept record lacks, or replace a value a lower-precedence source set (a CRM value never replaces one someone typed), and lists such as companies are joined. The merged record is kept, archived, with `merged_into` set, so its history and old links still lead to the one kept.
 - **Link** (`.../duplicates/{candidate}/link`): the same human, kept as two records, joined by a `same_human` link.
@@ -217,7 +221,7 @@ A wrong merge or a bad import can be undone in one step.
 
 ### Undoing a batch
 
-- **What a batch is.** Every CSV import of leads, every CRM import and every send of product events to a brand (`POST /v1/brands/{brand}/events`, whose answer has its `batch_id`) is a *batch*. Everything it writes carries it: the people and companies it creates, field values it sets (their history), emails and ids, links, product events, list places and leads. Data written before batches existed carries none, so it can't be undone this way. A batch belongs to the brand its records are made in (for CSV and CRM imports, the workspace's first brand, where they make people today), and undoing it never touches another brand's data.
+- **What a batch is.** Every CSV import of leads, every CRM import and every send of product events to a brand (`POST /v1/brands/{brand}/events`, whose answer has its `batch_id`) is a *batch*. Everything it writes carries it: the people and companies it creates, field values it sets (their history), emails and ids, links, product events, list places and leads. Data written before batches existed carries none, so it can't be undone this way. A batch belongs to the brand its records are made in (a CSV import's list's brand, a CRM import's connection's, else the workspace's first), and undoing it never touches another brand's data.
 - **Where.** People → Imports lists a brand's batches with what each made; `GET /v1/brands/{brand}/batches` (MCP `list_batches`). Undo… shows the preview first.
 - **The preview** (`GET .../batches/{batch}/undo-preview`, `preview_batch_undo`) counts what the batch made, and lists what changed since: records someone else edited, emailed, that have payments or other activity since, records merged since, fields it set that were changed since, and leads already in a sequence. It says what each way of undoing would do.
 - **You choose each time** (`POST .../batches/{batch}/undo` with `mode`, `undo_batch`):
@@ -234,5 +238,5 @@ A wrong merge or a bad import can be undone in one step.
 | Scope | Allows | Roles |
 | --- | --- | --- |
 | `customers.read` | Read records, their identities, links, history, timeline and consents, product events, and the catalog | Owner, admin, operator, viewer |
-| `customers.manage` | Add and change records, identities and links, merge duplicates, send product events, record consent, and ask for and download privacy exports | Owner, admin, operator |
-| `catalog.manage` | Add and change record types, fields, option lists and event definitions | Owner, admin |
+| `customers.manage` | Add and change records, identities and links, merge duplicates, send product events, approve a held event name, record consent, and ask for and download privacy exports | Owner, admin, operator |
+| `catalog.manage` | Add, change and archive record types, fields, option lists and event definitions | Owner, admin |

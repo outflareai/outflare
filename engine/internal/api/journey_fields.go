@@ -33,7 +33,7 @@ func (s *Server) WriteField(ctx context.Context, tx pgx.Tx, ws, recordID, field,
 	if rec.MergedInto != nil || rec.Archived {
 		return "skipped", "the record is merged or archived", nil
 	}
-	c, err := loadCatalog(ctx, tx, ws, false)
+	c, err := loadCatalog(ctx, tx, ws, deref(rec.BrandID), false)
 	if err != nil {
 		return "", "", err
 	}

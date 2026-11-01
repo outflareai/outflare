@@ -85,7 +85,7 @@ func checkDealRules(ctx context.Context, tx pgx.Tx, ws string, rs inbox.RuleSet)
 		}
 		if c == nil {
 			var err error
-			if c, err = loadCatalog(ctx, tx, ws, false); err != nil {
+			if c, err = loadCatalog(ctx, tx, ws, "", false); err != nil {
 				return err
 			}
 		}
@@ -134,7 +134,7 @@ func (s *Server) replyDealJob(ctx context.Context, job jobs.Job) error {
 		if d == nil {
 			return nil
 		}
-		c, err := loadCatalog(ctx, tx, ws, false)
+		c, err := loadCatalog(ctx, tx, ws, "", false)
 		if err != nil {
 			return err
 		}

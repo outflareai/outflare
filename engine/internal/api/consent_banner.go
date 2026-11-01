@@ -594,7 +594,7 @@ func (s *Server) siteConsentChoice(w http.ResponseWriter, r *http.Request) {
 		outcome = failed
 		return
 	}
-	if !originAllowed(k.origins, r.Header.Get("Origin")) {
+	if !s.siteOriginOK(r, k.siteKeyRow, r.Header.Get("Origin")) {
 		writeError(w, r, http.StatusForbidden, "forbidden", "this site key does not take requests from this origin; add it to the key's origins")
 		return
 	}
@@ -675,7 +675,7 @@ func (s *Server) siteConsentChoice(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	err = pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
 		a := &access{principal: principal{ActorType: "site_key", TokenID: k.id}, WorkspaceID: k.workspaceID}
-		rec, _, err := ownerOf(ctx, tx, a, "anonymous_id", anon)
+		rec, _, err := ownerOf(ctx, tx, a, deref(k.brandID), "anonymous_id", anon)
 		if err != nil {
 			return err
 		}

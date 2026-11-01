@@ -124,7 +124,7 @@ func (s *Server) knownFromClick(ctx context.Context, tx pgx.Tx, a *access, c *ca
 		return "", nil
 	}
 	// A browser someone else already signed in on stays theirs.
-	if owner, _, err := ownerOf(ctx, tx, a, "anonymous_id", anonID); err != nil {
+	if owner, _, err := ownerOf(ctx, tx, a, recordBrandOf(ctx, tx, *rec), "anonymous_id", anonID); err != nil {
 		return "", err
 	} else if owner != nil {
 		return "", nil

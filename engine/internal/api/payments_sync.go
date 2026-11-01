@@ -182,12 +182,17 @@ func (s *Server) syncPayments(ctx context.Context, ws, id string) error {
 		return err
 	}
 	var st paymentState
+	var brand string
+	// The payments connection's brand owns the people it brings in
+	// (plans/brands/README.md, decision 4): customers are matched and made
+	// there, and the same customer of two brands is two people.
 	if err := s.pool.QueryRow(ctx, `UPDATE payment_syncs SET last_run_at = now(), updated_at = now() WHERE integration_id = $1 AND workspace_id = $2
-		RETURNING phase, backfill_kind, backfill_cursor, changes_cursor, totals`, id, ws).
-		Scan(&st.Phase, &st.BackfillKind, &st.BackfillCursor, &st.ChangesCursor, &st.Totals); err != nil {
+		RETURNING phase, backfill_kind, backfill_cursor, changes_cursor, totals,
+			COALESCE((SELECT i.brand_id FROM integrations i WHERE i.id = payment_syncs.integration_id), brand_id, outflare_first_brand(workspace_id))::text`, id, ws).
+		Scan(&st.Phase, &st.BackfillKind, &st.BackfillCursor, &st.ChangesCursor, &st.Totals, &brand); err != nil {
 		return err
 	}
-	run := &paymentRun{s: s, ws: ws, o: o, reader: reader, provider: o.Connector.Definition().ID, st: st,
+	run := &paymentRun{s: s, ws: ws, brand: brand, o: o, reader: reader, provider: o.Connector.Definition().ID, st: st,
 		a: &access{principal: principal{ActorType: "system"}, WorkspaceID: ws}}
 	runErr := run.run(ctx)
 	if runErr != nil && !isProviderError(runErr) {
@@ -231,6 +236,7 @@ func isProviderError(err error) bool {
 type paymentRun struct {
 	s        *Server
 	ws       string
+	brand    string
 	o        *connectors.Opened
 	reader   connectors.PaymentReader
 	provider string
@@ -402,7 +408,7 @@ func (r *paymentRun) apply(ctx context.Context, page connectors.PaymentPage) err
 			}
 		}
 		if len(touched) > 0 {
-			c, err := loadCatalog(ctx, tx, r.ws, false)
+			c, err := loadCatalog(ctx, tx, r.ws, r.brand, false)
 			if err != nil {
 				return err
 			}
@@ -452,8 +458,8 @@ func (r *paymentRun) fetchMissing(ctx context.Context, page *connectors.PaymentP
 	if len(want) == 0 {
 		return nil
 	}
-	rows, err := r.s.pool.Query(ctx, `SELECT value FROM record_identities WHERE workspace_id = $1 AND namespace = $2 AND value = ANY($3)
-		AND valid_to IS NULL AND verified`, r.ws, r.namespace(), want)
+	rows, err := r.s.pool.Query(ctx, `SELECT value FROM record_identities WHERE workspace_id = $1 AND brand_id = $4 AND namespace = $2 AND value = ANY($3)
+		AND valid_to IS NULL AND verified`, r.ws, r.namespace(), want, r.brand)
 	if err != nil {
 		return err
 	}
@@ -481,7 +487,7 @@ func (r *paymentRun) recordFor(ctx context.Context, tx pgx.Tx, customerID string
 	if customerID == "" {
 		return "", nil
 	}
-	id, _, err := customers.OwnerOf(ctx, tx, r.ws, r.namespace(), customerID)
+	id, _, err := customers.OwnerOfIn(ctx, tx, r.ws, r.brand, r.namespace(), customerID)
 	return id, err
 }
 
@@ -489,14 +495,14 @@ func (r *paymentRun) recordFor(ctx context.Context, tx pgx.Tx, customerID string
 // record was created for it.
 func (r *paymentRun) customer(ctx context.Context, tx pgx.Tx, n *paymentTotals, c connectors.PaymentCustomer) (string, bool, error) {
 	ns := r.namespace()
-	rec, ok, err := customers.OwnerOf(ctx, tx, r.ws, ns, c.ID)
+	rec, ok, err := customers.OwnerOfIn(ctx, tx, r.ws, r.brand, ns, c.ID)
 	if err != nil {
 		return "", false, err
 	}
 	created := false
 	if !ok && c.UserID != "" {
 		// The workspace's own product already knows them by this id.
-		if rec, ok, err = customers.OwnerOf(ctx, tx, r.ws, "user_id", c.UserID); err != nil {
+		if rec, ok, err = customers.OwnerOfIn(ctx, tx, r.ws, r.brand, "user_id", c.UserID); err != nil {
 			return "", false, err
 		}
 		if ok {
@@ -506,7 +512,7 @@ func (r *paymentRun) customer(ctx context.Context, tx pgx.Tx, n *paymentTotals, 
 		}
 	}
 	if !ok {
-		if rec, err = customers.EnsurePerson(ctx, tx, r.ws, ns, c.ID, true, RequestID(ctx)); err != nil {
+		if rec, err = customers.EnsurePersonIn(ctx, tx, r.ws, r.brand, ns, c.ID, true, RequestID(ctx)); err != nil {
 			return "", false, err
 		}
 		created = true
@@ -541,7 +547,7 @@ func (r *paymentRun) identity(ctx context.Context, tx pgx.Tx, n *paymentTotals, 
 		var conflict recordConflict
 		if err := claimFree(ctx, tx, r.a, rec, namespace, value); errors.As(err, &conflict) {
 			verified = false
-			o, ok, err := customers.OwnerOf(ctx, tx, r.ws, namespace, value)
+			o, ok, err := customers.OwnerOfIn(ctx, tx, r.ws, r.brand, namespace, value)
 			if err != nil {
 				return err
 			}

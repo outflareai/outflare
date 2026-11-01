@@ -14,7 +14,7 @@ import (
 // moves the person's open deal the same way a reply rule does, and with
 // the same source, so it never overrides a stage a person set.
 func (s *Server) MoveDeal(ctx context.Context, tx pgx.Tx, ws, recordID string, d journeys.DealMove, ref string) (string, string, error) {
-	c, err := loadCatalog(ctx, tx, ws, false)
+	c, err := loadCatalog(ctx, tx, ws, recordBrandOf(ctx, tx, recordID), false)
 	if err != nil {
 		return "", "", err
 	}
@@ -82,7 +82,7 @@ func (s *Server) checkJourneyActionRefs(ctx context.Context, ws string, steps []
 			if c == nil {
 				err := pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
 					var err error
-					c, err = loadCatalog(ctx, tx, ws, false)
+					c, err = loadCatalog(ctx, tx, ws, "", false)
 					return err
 				})
 				if err != nil {

@@ -41,8 +41,16 @@ type Person struct {
 // EnsurePeople returns the person record for each email (lowercased), adding
 // records of the given origin for those nobody has. An unverified email is
 // added, so it never claims an address someone else proves they own. Run it
-// in the same transaction as what it is for.
+// in the same transaction as what it is for. It finds people in every
+// brand and adds them to the workspace's first; EnsurePeopleIn works in one.
 func EnsurePeople(ctx context.Context, tx pgx.Tx, workspaceID, origin, via string, people []Person) (map[string]string, error) {
+	return EnsurePeopleIn(ctx, tx, workspaceID, "", origin, via, people)
+}
+
+// EnsurePeopleIn is EnsurePeople within one brand: the same email in
+// another brand is another person (plans/brands/README.md, decision 1). An
+// empty brand finds people in every brand and adds them to the first.
+func EnsurePeopleIn(ctx context.Context, tx pgx.Tx, workspaceID, brand, origin, via string, people []Person) (map[string]string, error) {
 	out := map[string]string{}
 	if len(people) == 0 {
 		return out, nil
@@ -62,7 +70,8 @@ func EnsurePeople(ctx context.Context, tx pgx.Tx, workspaceID, origin, via strin
 	if len(emails) == 0 {
 		return out, nil
 	}
-	rows, err := tx.Query(ctx, `SELECT e, outflare_person_with_email($1, e)::text FROM unnest($2::text[]) AS e`, workspaceID, emails)
+	rows, err := tx.Query(ctx, `SELECT e, CASE WHEN $3 = '' THEN outflare_person_with_email($1, e)
+		ELSE outflare_brand_person_with_email(NULLIF($3, '')::uuid, e) END::text FROM unnest($2::text[]) AS e`, workspaceID, emails, brand)
 	if err != nil {
 		return nil, err
 	}
@@ -118,12 +127,14 @@ func EnsurePeople(ctx context.Context, tx pgx.Tx, workspaceID, origin, via strin
 			SELECT gen_random_uuid() AS id, e, n, a::jsonb AS a, s::jsonb AS s, v FROM unnest($2::text[], $3::text[], $4::text[], $5::text[], $8::text[]) AS t(e, n, a, s, v)
 		), made AS (
 			INSERT INTO records (id, workspace_id, record_type, brand_id, name, attributes, attribute_sources, origin, acquired_via)
-			SELECT id, $1, 'person', outflare_first_brand($1), n, a, s, $6, v FROM todo
+			SELECT id, $1, 'person', COALESCE(NULLIF($9, '')::uuid, outflare_first_brand($1)), n, a, s, $6, v FROM todo
 		), ids AS (
-			INSERT INTO record_identities (workspace_id, record_id, namespace, value, verified, source)
-			SELECT $1, id, 'email', e, false, $7 FROM todo
+			-- The record isn't visible to the identity's brand trigger in
+			-- the same statement, so the brand is set here.
+			INSERT INTO record_identities (workspace_id, record_id, brand_id, namespace, value, verified, source)
+			SELECT $1, id, COALESCE(NULLIF($9, '')::uuid, outflare_first_brand($1)), 'email', e, false, $7 FROM todo
 		)
-		SELECT e, id::text FROM todo`, workspaceID, missing, names, attrs, sources, origin, via, vias)
+		SELECT e, id::text FROM todo`, workspaceID, missing, names, attrs, sources, origin, via, vias, brand)
 	if err != nil {
 		return nil, err
 	}
@@ -145,19 +156,32 @@ func EnsurePeople(ctx context.Context, tx pgx.Tx, workspaceID, origin, via strin
 	// event for the lot.
 	if n == 1 {
 		return out, audit.Record(ctx, tx, audit.Event{WorkspaceID: workspaceID, Action: "record.created", TargetType: "record", TargetID: made,
-			ActorType: "system", Data: map[string]any{"type": "person", "origin": origin, "via": via, "identities": 1}})
+			ActorType: "system", Data: withBrand(map[string]any{"type": "person", "origin": origin, "via": via, "identities": 1}, brand)})
 	}
 	return out, audit.Record(ctx, tx, audit.Event{WorkspaceID: workspaceID, Action: "record.bulk_created", TargetType: "workspace", TargetID: workspaceID,
-		ActorType: "system", Data: map[string]any{"type": "person", "origin": origin, "via": via, "count": n}})
+		ActorType: "system", Data: withBrand(map[string]any{"type": "person", "origin": origin, "via": via, "count": n}, brand)})
+}
+
+// withBrand adds brand_id to an audit event's data when it is set.
+func withBrand(data map[string]any, brand string) map[string]any {
+	if brand != "" {
+		data["brand_id"] = brand
+	}
+	return data
 }
 
 // LinkLeads gives the workspace's unlinked leads (these ids, or any when
 // ids is nil, up to limit) their person record, and points their activity
-// at it. It returns how many leads it linked.
+// at it. It returns how many leads it linked. A lead links to a person of
+// its brand: the brand of the first list it joined that has one, or the
+// workspace's first brand. The same email in two brands is two people.
 func LinkLeads(ctx context.Context, tx pgx.Tx, workspaceID string, ids []string, limit int) (int, error) {
-	rows, err := tx.Query(ctx, `SELECT id::text, email, first_name, last_name, title, linkedin_url, source, COALESCE(batch_id::text, '') FROM leads
-		WHERE workspace_id = $1 AND record_id IS NULL AND ($2::uuid[] IS NULL OR id = ANY($2))
-		ORDER BY id LIMIT $3 FOR UPDATE SKIP LOCKED`, workspaceID, ids, limit)
+	rows, err := tx.Query(ctx, `SELECT l.id::text, l.email, l.first_name, l.last_name, l.title, l.linkedin_url, l.source, COALESCE(l.batch_id::text, ''),
+			COALESCE((SELECT ll.brand_id FROM lead_list_members m JOIN lead_lists ll ON ll.id = m.list_id
+				WHERE m.lead_id = l.id AND ll.brand_id IS NOT NULL ORDER BY m.added_at, ll.id LIMIT 1), outflare_first_brand(l.workspace_id))::text
+		FROM leads l
+		WHERE l.workspace_id = $1 AND l.record_id IS NULL AND ($2::uuid[] IS NULL OR l.id = ANY($2))
+		ORDER BY l.id LIMIT $3 FOR UPDATE OF l SKIP LOCKED`, workspaceID, ids, limit)
 	if err != nil {
 		return 0, err
 	}
@@ -165,19 +189,27 @@ func LinkLeads(ctx context.Context, tx pgx.Tx, workspaceID string, ids []string,
 	var leads []lead
 	var people []Person
 	// Leads an import batch made link under that batch, so the people they
-	// become carry it too (undo a batch).
+	// become carry it too (undo a batch), and leads of each brand link
+	// within it.
 	batches := map[string][]string{}
 	var order []string
+	brand := ""
 	for rows.Next() {
 		var id, email, first, last, title, linkedin, source, batch string
-		if err := rows.Scan(&id, &email, &first, &last, &title, &linkedin, &source, &batch); err != nil {
+		var b *string
+		if err := rows.Scan(&id, &email, &first, &last, &title, &linkedin, &source, &batch, &b); err != nil {
 			rows.Close()
 			return 0, err
 		}
-		if _, ok := batches[batch]; !ok {
-			order = append(order, batch)
+		group := batch
+		if b != nil {
+			brand = *b
+			group = batch + "|" + *b
 		}
-		batches[batch] = append(batches[batch], id)
+		if _, ok := batches[group]; !ok {
+			order = append(order, group)
+		}
+		batches[group] = append(batches[group], id)
 		leads = append(leads, lead{id, strings.ToLower(strings.TrimSpace(email))})
 		people = append(people, Person{Email: email, Name: strings.TrimSpace(first + " " + last), Attributes: map[string]any{
 			"first_name": first, "last_name": last, "job_title": title, "linkedin_url": linkedin}, Via: source})
@@ -200,7 +232,7 @@ func LinkLeads(ctx context.Context, tx pgx.Tx, workspaceID string, ids []string,
 		}
 		return total, nil
 	}
-	if b := order[0]; b != "" {
+	if b, _, _ := strings.Cut(order[0], "|"); b != "" {
 		var prev string
 		if err := tx.QueryRow(ctx, `SELECT COALESCE(current_setting('outflare.batch_id', true), '')`).Scan(&prev); err != nil {
 			return 0, err
@@ -212,7 +244,7 @@ func LinkLeads(ctx context.Context, tx pgx.Tx, workspaceID string, ids []string,
 			defer func() { _, _ = tx.Exec(ctx, `SELECT set_config('outflare.batch_id', $1, true)`, prev) }()
 		}
 	}
-	owners, err := EnsurePeople(ctx, tx, workspaceID, "prospect", "lead", people)
+	owners, err := EnsurePeopleIn(ctx, tx, workspaceID, brand, "prospect", "lead", people)
 	if err != nil {
 		return 0, err
 	}

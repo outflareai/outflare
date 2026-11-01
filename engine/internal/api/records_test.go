@@ -1,6 +1,7 @@
 package api_test
 
 import (
+	"fmt"
 	"slices"
 	"strings"
 	"testing"
@@ -316,10 +317,18 @@ func TestRecordsBrandLimited(t *testing.T) {
 	if n := len(agent.must(200, "GET", base+"/records", nil)["data"].([]any)); n != 1 {
 		t.Fatalf("brand-limited list: %d", n)
 	}
-	// A claim held by a record it cannot see is refused without naming it.
-	e := agent.must(409, "POST", base+"/records/"+mine["id"].(string)+"/identities", map[string]any{"namespace": "user_id", "value": "np_1"})
-	if strings.Contains(e["error"].(map[string]any)["message"].(string), theirs) {
-		t.Fatalf("leaked owner: %v", e)
+	// Another brand's person with the same user id is someone else, so it
+	// never blocks a claim (plans/brands/README.md, decision 1), and the
+	// answer never names them.
+	got := agent.must(201, "POST", base+"/records/"+mine["id"].(string)+"/identities", map[string]any{"namespace": "user_id", "value": "np_1"})
+	if strings.Contains(fmt.Sprint(got), theirs) {
+		t.Fatalf("leaked the other brand's person: %v", got)
+	}
+	// Within its brand a claim is refused, naming the record it can see.
+	other := agent.must(201, "POST", base+"/records", map[string]any{"type": "person", "name": "Other"})["id"].(string)
+	e := agent.must(409, "POST", base+"/records/"+other+"/identities", map[string]any{"namespace": "user_id", "value": "np_1"})
+	if !strings.Contains(e["error"].(map[string]any)["message"].(string), mine["id"].(string)) {
+		t.Fatalf("owner not named: %v", e)
 	}
 }
 

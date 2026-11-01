@@ -43,7 +43,7 @@ func (s *Server) sitePartnerSignup(w http.ResponseWriter, r *http.Request) {
 	if failed != "" {
 		return
 	}
-	if !originAllowed(k.origins, r.Header.Get("Origin")) {
+	if !s.siteOriginOK(r, k.siteKeyRow, r.Header.Get("Origin")) {
 		writeError(w, r, http.StatusForbidden, "forbidden", "this site key does not take requests from this origin; add it to the key's origins")
 		return
 	}

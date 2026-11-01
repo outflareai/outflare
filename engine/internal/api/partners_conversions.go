@@ -69,7 +69,11 @@ type conversionInput struct {
 	// or one_time.
 	PaymentSource string `json:"payment_source"`
 	Interval      string `json:"interval"`
-	at            time.Time
+	// Country is the customer's country as the caller knows it (from the
+	// billing address, say): a program that blocks it doesn't take them
+	// as a new referral.
+	Country string `json:"country"`
+	at      time.Time
 }
 
 func (in *conversionInput) check(now time.Time) error {
@@ -81,6 +85,7 @@ func (in *conversionInput) check(now time.Time) error {
 	in.Currency = strings.ToUpper(strings.TrimSpace(in.Currency))
 	in.Ref, in.PromoCode = strings.TrimSpace(in.Ref), strings.TrimSpace(in.PromoCode)
 	in.CustomerID, in.ExternalID, in.RefundOf = strings.TrimSpace(in.CustomerID), strings.TrimSpace(in.ExternalID), strings.TrimSpace(in.RefundOf)
+	in.Country = strings.ToUpper(strings.TrimSpace(in.Country))
 	in.PaymentSource, in.Interval = strings.ToLower(strings.TrimSpace(in.PaymentSource)), strings.ToLower(strings.TrimSpace(in.Interval))
 	if in.Interval == "monthly" || in.Interval == "yearly" || in.Interval == "annual" {
 		in.Interval = map[string]string{"monthly": "month", "yearly": "year", "annual": "year"}[in.Interval]
@@ -88,6 +93,8 @@ func (in *conversionInput) check(now time.Time) error {
 	switch {
 	case in.PaymentSource != "" && !paymentSourceRE.MatchString(in.PaymentSource):
 		return errInvalid("payment_source is the payment provider, such as stripe or paddle: lowercase letters, digits, dots, hyphens and underscores, at most 40")
+	case in.Country != "" && !countryRe.MatchString(in.Country):
+		return errInvalid("country is a two-letter country code, such as DE")
 	case in.Interval != "" && !slices.Contains([]string{"day", "week", "month", "year", "one_time"}, in.Interval):
 		return errInvalid("interval is day, week, month, year or one_time")
 	case !slices.Contains([]string{"signup", "sale", "refund", "custom"}, in.Type):
@@ -264,8 +271,8 @@ func scanPartnerConversion(row pgx.Row) (partnerConversionView, error) {
 type conversionResult struct {
 	Credited bool `json:"credited"`
 	// Reason says why it wasn't credited: no_partner, partner_inactive,
-	// program_inactive, self_referral, sale_not_found, currency or
-	// lead_expired.
+	// program_inactive, self_referral, sale_not_found, currency,
+	// lead_expired or country_blocked.
 	Reason     string                 `json:"reason,omitempty"`
 	Duplicate  bool                   `json:"duplicate"`
 	PartnerID  *string                `json:"partner_id"`
@@ -465,7 +472,8 @@ func (c *conversionRun) named(ctx context.Context) (m *membershipRow, via, click
 // several programs could take it, the latest credited visit wins.
 func (c *conversionRun) visited(ctx context.Context, rec string) (*membershipRow, error) {
 	rows, err := c.tx.Query(ctx, `SELECT s.started_at, m.id::text, m.program_id::text, p.credit_window_days, p.credit_model,
-		       p.block_ad_clicks, p.block_social_clicks, s.click_ids, s.referrer_host
+		       p.block_ad_clicks, p.block_social_clicks, s.click_ids, s.referrer_host,
+		       s.country_source IN ('proxy', 'ip') AND s.country = ANY (p.blocked_countries)
 		FROM site_sessions s
 		JOIN partner_memberships m ON m.workspace_id = s.workspace_id AND lower(m.code) = lower(s.ref)
 		JOIN partner_programs p ON p.id = m.program_id
@@ -485,14 +493,15 @@ func (c *conversionRun) visited(ctx context.Context, rec string) (*membershipRow
 		var at time.Time
 		var mid, pid, model, refHost string
 		var window int
-		var blockAds, blockSocial bool
+		var blockAds, blockSocial, blockedCountry bool
 		var clicks map[string]string
-		if err := rows.Scan(&at, &mid, &pid, &window, &model, &blockAds, &blockSocial, &clicks, &refHost); err != nil {
+		if err := rows.Scan(&at, &mid, &pid, &window, &model, &blockAds, &blockSocial, &clicks, &refHost, &blockedCountry); err != nil {
 			rows.Close()
 			return nil, err
 		}
-		// A program can refuse visits from paid ads or social media.
-		if ad, social := clickSources(clicks, refHost); blockAds && ad || blockSocial && social {
+		// A program can refuse visits from paid ads, social media or the
+		// countries it blocks.
+		if ad, social := clickSources(clicks, refHost); blockAds && ad || blockSocial && social || blockedCountry {
 			continue
 		}
 		if progs[pid] == nil {
@@ -600,6 +609,17 @@ func (c *conversionRun) leadOrSale(ctx context.Context) error {
 	case in.Currency != "" && in.Currency != m.currency && in.Type == "sale":
 		c.res.Reason = "currency"
 		return nil
+	}
+	if f == nil && in.Country != "" {
+		// A program can refuse new customers from countries it blocks.
+		var blocked bool
+		if err := tx.QueryRow(ctx, `SELECT $2 = ANY (blocked_countries) FROM partner_programs WHERE id = $1`, m.programID, in.Country).Scan(&blocked); err != nil {
+			return err
+		}
+		if blocked {
+			c.res.Reason = "country_blocked"
+			return nil
+		}
 	}
 	if f != nil && f.firstSaleAt == nil {
 		// A lead who hasn't bought within the program's lead expiration no
@@ -1057,6 +1077,7 @@ func postbackInput(v url.Values) (conversionInput, error) {
 		// Tolt's transactions call the payment provider source.
 		PaymentSource: get("payment_source", "source"),
 		Interval:      get("interval", "billing_interval"),
+		Country:       get("country", "country_code"),
 	}
 	if t := get("occurred_at", "timestamp"); t != "" {
 		in.OccurredAt = &t

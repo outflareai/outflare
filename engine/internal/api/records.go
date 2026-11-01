@@ -40,6 +40,8 @@ func (s *Server) routesRecords(mux *http.ServeMux) {
 	mux.HandleFunc("GET "+base, s.inBrand(read, s.listRecords))
 	mux.HandleFunc("POST "+base, s.inBrand(manage, s.createRecord))
 	mux.HandleFunc("GET "+base+"/lookup", s.inBrand(read, s.lookupRecords))
+	// Who an email or id belongs to in one brand.
+	mux.HandleFunc("GET /v1/brands/{brand}/records/lookup", s.onBrand(read, s.lookupRecords))
 	mux.HandleFunc("GET "+base+"/{record}", s.inBrand(read, s.getRecord))
 	mux.HandleFunc("PATCH "+base+"/{record}", s.inBrand(manage, s.updateRecord))
 	mux.HandleFunc("DELETE "+base+"/{record}", s.inBrand(manage, s.deleteRecord))
@@ -746,12 +748,17 @@ func putIdentity(ctx context.Context, tx pgx.Tx, a *access, rec *recordView, in 
 	return v, action, record(ctx, tx, &a.principal, a.WorkspaceID, action, "identity", v.ID, data)
 }
 
-// claimFree refuses a verified identity another record already holds.
+// claimFree refuses a verified identity another record of the same brand
+// already holds. Another brand's person with the same email is someone
+// else (plans/brands/README.md, decision 1), so it never blocks a claim.
 func claimFree(ctx context.Context, tx pgx.Tx, a *access, id, namespace, value string) error {
 	var owner string
 	var brand *string
 	err := tx.QueryRow(ctx, `SELECT r.id::text, r.brand_id::text FROM record_identities i JOIN records r ON r.id = i.record_id
-		WHERE i.workspace_id = $1 AND i.namespace = $2 AND i.value = $3 AND i.valid_to IS NULL AND i.verified`, a.WorkspaceID, namespace, value).Scan(&owner, &brand)
+		JOIN records me ON me.id = $4
+		WHERE i.workspace_id = $1 AND i.namespace = $2 AND i.value = $3 AND i.valid_to IS NULL AND i.verified
+		  AND i.brand_id IS NOT DISTINCT FROM me.brand_id
+		LIMIT 1`, a.WorkspaceID, namespace, value, id).Scan(&owner, &brand)
 	if errors.Is(err, pgx.ErrNoRows) || (err == nil && owner == id) {
 		return nil
 	}
@@ -921,7 +928,7 @@ func (s *Server) createRecord(w http.ResponseWriter, r *http.Request) {
 	}
 	var view recordView
 	err = pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
-		c, err := loadCatalog(ctx, tx, a.WorkspaceID, false)
+		c, err := loadCatalog(ctx, tx, a.WorkspaceID, deref(brand), false)
 		if err != nil {
 			return err
 		}
@@ -1026,7 +1033,7 @@ func (s *Server) updateRecord(w http.ResponseWriter, r *http.Request) {
 		if req.Version != nil && *req.Version != rec.Version {
 			return recordConflict{"record_changed", fmt.Sprintf("the record changed since version %d (it is at %d): read it again, check your change still makes sense, and send it with version %d", *req.Version, rec.Version, rec.Version)}
 		}
-		c, err := loadCatalog(ctx, tx, a.WorkspaceID, false)
+		c, err := loadCatalog(ctx, tx, a.WorkspaceID, deref(rec.BrandID), false)
 		if err != nil {
 			return err
 		}
@@ -1322,9 +1329,16 @@ func (s *Server) lookupRecords(w http.ResponseWriter, r *http.Request) {
 	if err := in.normalize(); s.allocError(w, r, err) {
 		return
 	}
-	sel, ok := s.brandFilter(w, r)
-	if !ok {
-		return
+	// On a brand route, or with a brand picked, only that brand's records:
+	// each brand has its own person for an email (decision 1), and owner
+	// is that brand's. Under all brands each brand may have an owner; the
+	// first brand's comes first.
+	sel := brandSel{id: a.Brand, in: a.Brands}
+	if a.Brand == "" {
+		var ok bool
+		if sel, ok = s.brandFilter(w, r); !ok {
+			return
+		}
 	}
 	args := []any{a.WorkspaceID, in.Namespace, in.Value}
 	where := sel.sql("r.brand_id", &args)
@@ -1333,7 +1347,7 @@ func (s *Server) lookupRecords(w http.ResponseWriter, r *http.Request) {
 	err := s.readTx(ctx, func(tx pgx.Tx) error {
 		rows, err := tx.Query(ctx, `SELECT `+recordColumns+`, bool_or(i.verified) FROM records r JOIN record_identities i ON i.record_id = r.id
 			WHERE i.workspace_id = $1 AND i.namespace = $2 AND i.value = $3 AND i.valid_to IS NULL`+where+`
-			GROUP BY r.id ORDER BY bool_or(i.verified) DESC, r.created_at LIMIT 50`, args...)
+			GROUP BY r.id ORDER BY bool_or(i.verified) DESC, r.brand_id IS NOT DISTINCT FROM outflare_first_brand($1) DESC, r.created_at LIMIT 50`, args...)
 		if err != nil {
 			return err
 		}
@@ -1342,7 +1356,7 @@ func (s *Server) lookupRecords(w http.ResponseWriter, r *http.Request) {
 			var verified bool
 			err := row.Scan(&v.ID, &v.Type, &v.Name, &v.BrandID, &v.Origin, &v.Attributes, &v.AttributeSources, &v.Version,
 				&v.MergedInto, &v.Archived, &v.CreatedAt, &v.UpdatedAt, &v.NeedsReview, &verified)
-			if verified {
+			if verified && owner == nil {
 				owner = &v.ID
 			}
 			return v, err
@@ -1607,7 +1621,7 @@ func (s *Server) addRelationship(w http.ResponseWriter, r *http.Request) {
 		if to.MergedInto != nil {
 			return errInvalid("to was merged into " + *to.MergedInto + "; link that one instead")
 		}
-		c, err := loadCatalog(ctx, tx, a.WorkspaceID, false)
+		c, err := loadCatalog(ctx, tx, a.WorkspaceID, deref(rec.BrandID), false)
 		if err != nil {
 			return err
 		}

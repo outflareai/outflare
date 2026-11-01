@@ -222,7 +222,7 @@ func (s *Server) importLeads(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	var res leads.ImportResult
 	var listID *string
-	var batchID string
+	var batchID, listBrand string
 	err = pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
 		if listName != "" {
 			// Someone kept to some brands imports into their brands' lists.
@@ -246,17 +246,17 @@ func (s *Server) importLeads(w http.ResponseWriter, r *http.Request) {
 			if err := tx.QueryRow(ctx, `
 				INSERT INTO lead_lists (workspace_id, name, brand_id) VALUES ($1, $2, $3)
 				ON CONFLICT (workspace_id, lower(name)) DO UPDATE SET name = lead_lists.name
-				RETURNING id`, a.WorkspaceID, listName, brand).Scan(&id); err != nil {
+				RETURNING id, COALESCE(brand_id::text, '')`, a.WorkspaceID, listName, brand).Scan(&id, &listBrand); err != nil {
 				return err
 			}
 			listID = &id
 		}
 		// The import is one batch: what it writes carries it, so it can be
 		// undone in one step (batches.go). It belongs to the brand its
-		// people are made in: the workspace's first, as for every lead.
+		// people are made in: the list's, or the workspace's first.
 		var err error
 		if len(unique) > 0 {
-			if batchID, err = startBatch(ctx, tx, &a.principal, a.WorkspaceID, "", batchCSVImport, "csv", listName, ""); err != nil {
+			if batchID, err = startBatch(ctx, tx, &a.principal, a.WorkspaceID, listBrand, batchCSVImport, "csv", listName, ""); err != nil {
 				return err
 			}
 		}

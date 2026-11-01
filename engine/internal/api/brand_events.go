@@ -244,11 +244,11 @@ func (s *Server) processInboxChunk(ctx context.Context, ws, brand string) (int, 
 		if err != nil || len(list) == 0 {
 			return err
 		}
-		c, err := loadCatalog(ctx, tx, ws, false)
+		c, err := loadCatalog(ctx, tx, ws, brand, false)
 		if err != nil {
 			return err
 		}
-		defs, err := inboxDefinitions(ctx, tx, ws, list)
+		defs, err := inboxDefinitions(ctx, tx, ws, c.Brand, list)
 		if err != nil {
 			return err
 		}
@@ -307,7 +307,7 @@ func (s *Server) processInboxChunk(ctx context.Context, ws, brand string) (int, 
 		}
 		for _, id := range order {
 			b := batches[id]
-			if err := saveEventNames(ctx, tx, ws, b.totals.names); err != nil {
+			if err := saveEventNames(ctx, tx, ws, c.Brand, b.totals.names); err != nil {
 				return err
 			}
 			if len(b.counts) == 0 {
@@ -366,8 +366,10 @@ type eventDef struct {
 	props  []eventProperty
 }
 
-// inboxDefinitions reads the catalog entries for the track names in rows.
-func inboxDefinitions(ctx context.Context, tx pgx.Tx, ws string, rows []inboxRow) (map[string]eventDef, error) {
+// inboxDefinitions reads the brand's catalog entries for the track names
+// in rows. Another brand's definition of a name counts for nothing here:
+// each brand approves its own.
+func inboxDefinitions(ctx context.Context, tx pgx.Tx, ws, brand string, rows []inboxRow) (map[string]eventDef, error) {
 	var names []string
 	for _, row := range rows {
 		var m eventMessage
@@ -382,7 +384,8 @@ func inboxDefinitions(ctx context.Context, tx pgx.Tx, ws string, rows []inboxRow
 	if len(names) == 0 {
 		return out, nil
 	}
-	q, err := tx.Query(ctx, `SELECT name, status, properties FROM event_definitions WHERE workspace_id = $1 AND name = ANY($2)`, ws, names)
+	q, err := tx.Query(ctx, `SELECT name, status, properties FROM event_definitions WHERE workspace_id = $1
+		AND brand_id IS NOT DISTINCT FROM NULLIF($3, '')::uuid AND name = ANY($2)`, ws, names, brand)
 	if err != nil {
 		return nil, err
 	}
@@ -464,9 +467,6 @@ func (s *Server) processInboxRow(ctx context.Context, tx pgx.Tx, ws, brand strin
 		totals.created, totals.identities, totals.duplicates, totals.merged = before.created, before.identities, before.duplicates, before.merged
 		if err := sp.Rollback(ctx); err != nil {
 			return inboxOutcome{}, err
-		}
-		if code == "other_brand" {
-			msg = "this person belongs to another brand, and brands keep their data apart; send the event to that brand's events, or use another userId"
 		}
 		out, _ := reject(code, msg)
 		out.name = res.Name

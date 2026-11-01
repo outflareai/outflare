@@ -153,6 +153,7 @@ var errorCodes = []errorCode{
 	{"identity_taken", []int{409}, "Another record already holds this verified identity, such as a verified email. The message names it when you can see it: change that record, or add the identity unverified.", false},
 	{"merge_refused", []int{409}, "Both records have their own user id, so they are two accounts in your product and are never merged. Link them as the same human instead (POST .../records/duplicates/{candidate}/link).", false},
 	{"record_changed", []int{409}, "The record changed since the version you sent. Read it again, check your change still makes sense, and send it with the new version.", false},
+	{"event_name_in_other_brand", []int{409}, "Another brand of this workspace defines this event name. Each brand has its own catalog, but until a later release an event name is defined in one brand at a time: rename the event in this brand's product, or deprecate it in the other brand.", false},
 	{"version_required", []int{400}, "Agents (MCP, connected AI apps and missions) send the record's version with every change to it, so one agent never overwrites another's. Read the record and send its version.", false},
 
 	// Query.

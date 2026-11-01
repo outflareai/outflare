@@ -655,7 +655,7 @@ func (s *Server) siteFlags(w http.ResponseWriter, r *http.Request) {
 		writeError(w, r, http.StatusUnauthorized, "unauthenticated", "the site key is not valid: copy the snippet again from the workspace's website tracking settings")
 		return
 	}
-	if !originAllowed(k.origins, r.Header.Get("Origin")) {
+	if !s.siteOriginOK(r, k, r.Header.Get("Origin")) {
 		writeError(w, r, http.StatusForbidden, "forbidden", "this site key does not take requests from this origin; add it to the key's origins")
 		return
 	}

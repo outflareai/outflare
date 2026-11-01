@@ -6,6 +6,27 @@ Each pull request that changes what Outflare does adds a change note in [changes
 
 ## [Unreleased]
 
+## [0.73.0] - 2026-11-01
+
+### Changed
+
+- Each brand now has its own people and its own catalog: the same email or user id in two brands is two separate people, never merged, and record types, fields, option lists and event definitions belong to one brand, with every new brand starting from the default set. Approving a held event name needs only the customers permission.
+- The partner portal can load your own website script, so partners' visits show in your website analytics, and Google Analytics 4 alongside it, held back until the visitor allows analytics. Pick a site key and, if you like, a measurement id in the portal settings.
+
+### Fixed
+
+- The changes from v0.72.0, which didn't pass the release checks, are now published.
+
+## [0.72.0] - 2026-11-01
+
+### Changed
+
+- Partner programs can block countries: website visits and new customers from them don't credit partners. A website visit's country now comes from the visitor's address, looked up in an IP database that ships with Outflare (IP geolocation by DB-IP), when your own proxy doesn't pass it. The address itself is never stored.
+
+### Fixed
+
+- The changes from v0.71.0, which didn't pass the release checks, are now published.
+
 ## [0.71.0] - 2026-11-01
 
 ### Added

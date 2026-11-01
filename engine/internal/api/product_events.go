@@ -55,7 +55,7 @@ func (p *productEventSink) Send(ctx context.Context, events []track.Event) {
 			return err
 		}
 		msgs = append(ids, msgs...)
-		c, err := loadCatalog(ctx, tx, p.ws, false)
+		c, err := loadCatalog(ctx, tx, p.ws, "", false)
 		if err != nil {
 			return err
 		}
@@ -84,7 +84,7 @@ func (p *productEventSink) Send(ctx context.Context, events []track.Event) {
 		if rejected > 0 {
 			p.s.log.Warn("product events not stored", "count", rejected)
 		}
-		if err := saveEventNames(ctx, tx, p.ws, totals.names); err != nil {
+		if err := saveEventNames(ctx, tx, p.ws, c.Brand, totals.names); err != nil {
 			return err
 		}
 		// Outflare's code names these events, so they need no approval.

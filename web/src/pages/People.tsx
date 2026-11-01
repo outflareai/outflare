@@ -275,8 +275,11 @@ function FieldValue({ f, v, cat, names, onOpen }: { f?: Field; v: unknown; cat: 
   return <span className="break-words">{typeof v === "object" ? JSON.stringify(v) : String(v)}</span>;
 }
 
-function RecordPage({ ws, id, cat, canManage, onOpen, go }: { ws: string; id: string; cat: CatalogInfo; canManage: boolean; onOpen: (item: string) => void; go: (t: Tab) => void }) {
+function RecordPage({ ws, id, cat: picked, canManage, onOpen, go }: { ws: string; id: string; cat: CatalogInfo; canManage: boolean; onOpen: (item: string) => void; go: (t: Tab) => void }) {
   const [rec, setRec] = useState<Rec | null>(null);
+  // A record's fields are its brand's catalog's, whichever brand is picked.
+  const own = useCatalog(ws, rec?.brand_id);
+  const cat = rec?.brand_id ? own : picked;
   const [links, setLinks] = useState<Link[]>([]);
   const [error, setError] = useState("");
   const [section, setSection] = useState<"timeline" | "history">("timeline");

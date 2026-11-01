@@ -19693,15 +19693,18 @@ paths:
     get:
       operationId: getCatalog
       x-outflare-access: { scope: customers.read, brand_limited: true }
-      summary: Read the catalog
+      summary: Read a brand's catalog (workspace route)
       description: |
-        Scope: customers.read. Everything a workspace's customer records can hold: record types (person and account
-        built in, plus the workspace's own such as deal), their fields, the shared option lists and the product events
-        it has defined. It is the one definition of each fact for every feature (the customer data platform, the CRM,
-        imports, list filters, enrichment, merge tags), so read it before writing records.
+        Scope: customers.read. Everything a brand's customer records can hold: record types (person and account
+        built in, plus the brand's own such as deal), their fields, the option lists and the product events it has
+        defined. It is the one definition of each fact for every feature (the customer data platform, the CRM,
+        imports, list filters, enrichment, merge tags), so read it before writing records. Each brand has its own
+        catalog; this workspace route reads the one ?brand= picks, or the workspace's first brand. It stays until
+        the brands contract step; use GET /v1/brands/{brand}/catalog.
       tags: [catalog]
       parameters:
         - { name: archived, in: query, description: "true includes archived types, fields and options.", schema: { type: boolean, default: false } }
+        - { name: brand, in: query, description: "Whose catalog: a brand's id or handle. Each brand has its own; the default is the workspace's first brand (a member or token kept to some brands gets its own). Prefer GET /v1/brands/{brand}/catalog.", schema: { type: string } }
       responses:
         "200":
           description: The catalog.
@@ -19715,10 +19718,11 @@ paths:
       operationId: listRecordTypes
       x-outflare-access: { scope: customers.read, brand_limited: true }
       summary: List record types
-      description: "Scope: customers.read. Built-in types first, then the workspace's own, with their fields."
+      description: "Scope: customers.read. Built-in types first, then the brand's own, with their fields. ?brand= picks the brand; the default is the workspace's first."
       tags: [catalog]
       parameters:
         - { name: archived, in: query, schema: { type: boolean, default: false } }
+        - { name: brand, in: query, description: "Whose catalog: a brand's id or handle. Each brand has its own; the default is the workspace's first brand (a member or token kept to some brands gets its own). Prefer GET /v1/brands/{brand}/catalog.", schema: { type: string } }
       responses:
         "200":
           description: Record types.
@@ -19736,8 +19740,9 @@ paths:
       parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
       summary: Add a record type
       description: |
-        Scope: catalog.manage. A kind of record the workspace tracks beyond people and companies, such as deal,
-        subscription or partner. The key comes from the name unless given and never changes. Then add its fields.
+        Scope: catalog.manage. A kind of record the workspace's first brand tracks beyond people and companies, such
+        as deal, subscription or partner. The key comes from the name unless given and never changes. Then add its
+        fields. For another brand use POST /v1/brands/{brand}/catalog/types.
       tags: [catalog]
       requestBody:
         required: true
@@ -19763,8 +19768,10 @@ paths:
       operationId: getRecordType
       x-outflare-access: { scope: customers.read, brand_limited: true }
       summary: Read a record type
-      description: "Scope: customers.read. The type and all its fields, archived ones included."
+      description: "Scope: customers.read. The type and all its fields, archived ones included. ?brand= picks the brand; the default is the workspace's first."
       tags: [catalog]
+      parameters:
+        - { name: brand, in: query, description: "Whose catalog: a brand's id or handle. Each brand has its own; the default is the workspace's first brand (a member or token kept to some brands gets its own). Prefer GET /v1/brands/{brand}/catalog.", schema: { type: string } }
       responses:
         "200":
           description: The record type.
@@ -19854,8 +19861,10 @@ paths:
       operationId: listOptionSets
       x-outflare-access: { scope: customers.read, brand_limited: true }
       summary: List option lists
-      description: "Scope: customers.read. The choices select and status fields share: country, industry, company_size, seniority and lifecycle_stage built in, then the workspace's own."
+      description: "Scope: customers.read. The choices select and status fields share: country, industry, company_size, seniority and lifecycle_stage built in, then the brand's own. ?brand= picks the brand; the default is the workspace's first."
       tags: [catalog]
+      parameters:
+        - { name: brand, in: query, description: "Whose catalog: a brand's id or handle. Each brand has its own; the default is the workspace's first brand (a member or token kept to some brands gets its own). Prefer GET /v1/brands/{brand}/catalog.", schema: { type: string } }
       responses:
         "200":
           description: Option lists.
@@ -19923,11 +19932,13 @@ paths:
       x-outflare-access: { scope: customers.read, brand_limited: true }
       summary: List product event definitions
       description: |
-        Scope: customers.read. The events the workspace's product sends, such as product.activated. Names seen at ingest
-        that nobody defined arrive quarantined; only approved events drive segments, rules and journeys.
+        Scope: customers.read. The events a brand's product sends, such as product.activated. Names seen at ingest
+        that nobody defined arrive quarantined; only approved events drive segments, rules and journeys. ?brand=
+        picks the brand; the default is the workspace's first.
       tags: [catalog]
       parameters:
         - { name: status, in: query, schema: { type: string, enum: [quarantined, approved, deprecated] } }
+        - { name: brand, in: query, description: "Whose catalog: a brand's id or handle. Each brand has its own; the default is the workspace's first brand (a member or token kept to some brands gets its own). Prefer GET /v1/brands/{brand}/catalog.", schema: { type: string } }
       responses:
         "200":
           description: Event definitions by name.
@@ -20041,8 +20052,9 @@ paths:
         Scope: customers.manage. Attributes are checked against the type's fields in the catalog; an unknown key is
         refused, so add the field first. Identities say who the record is: email and phone count only when verified
         (default false), and the workspace's own ids, payment customers and domains are trusted as sent. A verified
-        identity another record already holds is refused with identity_taken; look it up with GET .../records/lookup.
-        A person with no name takes first_name and last_name.
+        identity another record of the same brand already holds is refused with identity_taken; look it up with GET
+        .../records/lookup. The record's catalog and its identities are its brand's: the same email in another brand
+        is another person there. A person with no name takes first_name and last_name.
       tags: [records]
       requestBody:
         required: true
@@ -20143,6 +20155,8 @@ paths:
       description: |
         Scope: customers.read. The records an email, phone, user id or other identity points at. owner is the one
         record holding it verified; the others hold it unverified, such as a sign-up that never confirmed its email.
+        Each brand has its own people, so the same email can have an owner in each brand: pick one with ?brand=
+        (or use GET /v1/brands/{brand}/records/lookup); under all brands owner is the first brand's, else another's.
       tags: [records]
       parameters:
         - { name: namespace, in: query, required: true, schema: { type: string, example: email } }
@@ -20327,7 +20341,8 @@ paths:
         Scope: customers.manage. Adds an identity, or updates the record's own copy of it: sending verified: true for
         an email the record holds unverified verifies it (200). When a person changes their email, send the new one
         with replaces set to the old identity's id: the old one is closed as changed and kept in the history. A
-        verified value another record holds is refused with identity_taken, never moved or merged.
+        verified value another record of the same brand holds is refused with identity_taken, never moved or merged;
+        another brand's person with the same value is someone else and never blocks it.
       tags: [records]
       requestBody:
         required: true
@@ -23252,6 +23267,383 @@ paths:
         "202": { $ref: "#/components/responses/MissionHeld" }
         "404": { $ref: "#/components/responses/Error" }
         "409": { $ref: "#/components/responses/Error" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/brands/{brand}/catalog:
+    parameters: [{ $ref: "#/components/parameters/BrandID" }]
+    get:
+      operationId: getBrandCatalog
+      x-outflare-access: { scope: customers.read, brand: true }
+      summary: Read a brand's catalog
+      description: |
+        Scope: customers.read. Everything the brand's customer records can hold: record types (person and account
+        built in, plus the brand's own such as deal), their fields, the option lists and the product events it has
+        defined. Each brand has its own catalog: a new brand starts with the default set (the built-ins and the Deal
+        type with its stages and fields), never a copy of another brand's. Read it before writing the brand's records.
+      tags: [catalog]
+      parameters:
+        - { name: archived, in: query, description: "true includes archived types, fields and options.", schema: { type: boolean, default: false } }
+      responses:
+        "200":
+          description: The catalog.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Catalog" }
+        "404": { $ref: "#/components/responses/Error" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/brands/{brand}/catalog/types:
+    parameters: [{ $ref: "#/components/parameters/BrandID" }]
+    get:
+      operationId: listBrandRecordTypes
+      x-outflare-access: { scope: customers.read, brand: true }
+      summary: List a brand's record types
+      description: "Scope: customers.read. Built-in types first, then the brand's own, with their fields."
+      tags: [catalog]
+      parameters:
+        - { name: archived, in: query, schema: { type: boolean, default: false } }
+      responses:
+        "200":
+          description: Record types.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data: { type: array, items: { $ref: "#/components/schemas/RecordType" } }
+        "404": { $ref: "#/components/responses/Error" }
+        default: { $ref: "#/components/responses/Error" }
+    post:
+      operationId: createBrandRecordType
+      x-outflare-access: { scope: catalog.manage, brand: true }
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      summary: Add a record type to a brand
+      description: |
+        Scope: catalog.manage. A kind of record the brand tracks beyond people and companies, such as subscription
+        or partner. The key comes from the name unless given and never changes; another brand may use the same key
+        for its own type. Then add its fields.
+      tags: [catalog]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: "#/components/schemas/RecordTypeInput"
+                - required: [name]
+      responses:
+        "201":
+          description: The record type.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RecordType" }
+        "202": { $ref: "#/components/responses/MissionHeld" }
+        "404": { $ref: "#/components/responses/Error" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/brands/{brand}/catalog/types/{type}:
+    parameters:
+      - { $ref: "#/components/parameters/BrandID" }
+      - { $ref: "#/components/parameters/RecordTypeKey" }
+    get:
+      operationId: getBrandRecordType
+      x-outflare-access: { scope: customers.read, brand: true }
+      summary: Read a brand's record type
+      description: "Scope: customers.read. The type and all its fields, archived ones included."
+      tags: [catalog]
+      responses:
+        "200":
+          description: The record type.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RecordType" }
+        "404": { $ref: "#/components/responses/Error" }
+        default: { $ref: "#/components/responses/Error" }
+    patch:
+      operationId: updateBrandRecordType
+      x-outflare-access: { scope: catalog.manage, brand: true }
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      summary: Rename or archive a brand's record type
+      description: |
+        Scope: catalog.manage. Built-in types never change. Archiving is how a type is deleted: archived types keep
+        their records but take no new ones, and can be restored. Other brands' types are never touched.
+      tags: [catalog]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/RecordTypeInput" }
+      responses:
+        "200":
+          description: The record type.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RecordType" }
+        "202": { $ref: "#/components/responses/MissionHeld" }
+        "404": { $ref: "#/components/responses/Error" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/brands/{brand}/catalog/types/{type}/fields:
+    parameters:
+      - { $ref: "#/components/parameters/BrandID" }
+      - { $ref: "#/components/parameters/RecordTypeKey" }
+    post:
+      operationId: createBrandField
+      x-outflare-access: { scope: catalog.manage, brand: true }
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      summary: Add a field to a brand's record type
+      description: |
+        Scope: catalog.manage. One definition of a fact the brand's features share. Check the type's fields first so
+        the same fact is never added twice. select and status take an option_set (built in, or the brand's own);
+        record_reference takes a target_type. A field's key, value type, option list, multiple and target never
+        change. The field is the brand's only: other brands don't see it.
+      tags: [catalog]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: "#/components/schemas/FieldInput"
+                - required: [label, value_type]
+      responses:
+        "201":
+          description: The field.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Field" }
+        "202": { $ref: "#/components/responses/MissionHeld" }
+        "404": { $ref: "#/components/responses/Error" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/brands/{brand}/catalog/types/{type}/fields/{field}:
+    parameters:
+      - { $ref: "#/components/parameters/BrandID" }
+      - { $ref: "#/components/parameters/RecordTypeKey" }
+      - { name: field, in: path, required: true, description: The field's key., schema: { type: string } }
+    patch:
+      operationId: updateBrandField
+      x-outflare-access: { scope: catalog.manage, brand: true }
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      summary: Change or archive a brand's field
+      description: |
+        Scope: catalog.manage. Label, description, write policy, precedence, sensitivity, filterable and archived.
+        Archiving is how a field is deleted (records keep their values; it can be restored). Built-in fields never
+        change.
+      tags: [catalog]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/FieldInput" }
+      responses:
+        "200":
+          description: The field.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Field" }
+        "202": { $ref: "#/components/responses/MissionHeld" }
+        "404": { $ref: "#/components/responses/Error" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/brands/{brand}/catalog/option-sets:
+    parameters: [{ $ref: "#/components/parameters/BrandID" }]
+    get:
+      operationId: listBrandOptionSets
+      x-outflare-access: { scope: customers.read, brand: true }
+      summary: List a brand's option lists
+      description: "Scope: customers.read. country, industry, company_size, seniority and lifecycle_stage built in, then the brand's own, such as deal_stage."
+      tags: [catalog]
+      responses:
+        "200":
+          description: Option lists.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data: { type: array, items: { $ref: "#/components/schemas/OptionSet" } }
+        "404": { $ref: "#/components/responses/Error" }
+        default: { $ref: "#/components/responses/Error" }
+    post:
+      operationId: createBrandOptionSet
+      x-outflare-access: { scope: catalog.manage, brand: true }
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      summary: Add an option list to a brand
+      description: "Scope: catalog.manage. Such as partner tiers, for any number of the brand's fields to share."
+      tags: [catalog]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: "#/components/schemas/OptionSetInput"
+                - required: [name, options]
+      responses:
+        "201":
+          description: The option list.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/OptionSet" }
+        "202": { $ref: "#/components/responses/MissionHeld" }
+        "404": { $ref: "#/components/responses/Error" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/brands/{brand}/catalog/option-sets/{set}:
+    parameters:
+      - { $ref: "#/components/parameters/BrandID" }
+      - { name: set, in: path, required: true, description: The option list's key., schema: { type: string } }
+    patch:
+      operationId: updateBrandOptionSet
+      x-outflare-access: { scope: catalog.manage, brand: true }
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      summary: Change a brand's option list
+      description: |
+        Scope: catalog.manage. options replaces the list's order and labels. Keys never go away: an option left out is
+        archived, so records that use it keep their meaning. Built-in lists never change.
+      tags: [catalog]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/OptionSetInput" }
+      responses:
+        "200":
+          description: The option list.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/OptionSet" }
+        "202": { $ref: "#/components/responses/MissionHeld" }
+        "404": { $ref: "#/components/responses/Error" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/brands/{brand}/catalog/events:
+    parameters: [{ $ref: "#/components/parameters/BrandID" }]
+    get:
+      operationId: listBrandEventDefinitions
+      x-outflare-access: { scope: customers.read, brand: true }
+      summary: List a brand's product event definitions
+      description: |
+        Scope: customers.read. The events the brand's product sends, such as product.activated. Names seen at ingest
+        that the brand never defined arrive quarantined; only approved events drive segments, rules and journeys.
+      tags: [catalog]
+      parameters:
+        - { name: status, in: query, schema: { type: string, enum: [quarantined, approved, deprecated] } }
+      responses:
+        "200":
+          description: Event definitions by name.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data: { type: array, items: { $ref: "#/components/schemas/EventDefinition" } }
+        "404": { $ref: "#/components/responses/Error" }
+        default: { $ref: "#/components/responses/Error" }
+    post:
+      operationId: createBrandEventDefinition
+      x-outflare-access: { scope: catalog.manage, brand: true }
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      summary: Define a product event for a brand
+      description: |
+        Scope: catalog.manage. Names are lowercase words joined by dots, such as product.activated. For now an event
+        name is defined in one brand of a workspace at a time: a name another brand defines is refused with 409
+        event_name_in_other_brand.
+      tags: [catalog]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: "#/components/schemas/EventDefinitionInput"
+                - required: [name]
+      responses:
+        "201":
+          description: The event definition.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/EventDefinition" }
+        "202": { $ref: "#/components/responses/MissionHeld" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/brands/{brand}/catalog/events/{event}:
+    parameters:
+      - { $ref: "#/components/parameters/BrandID" }
+      - { name: event, in: path, required: true, description: The event's name., schema: { type: string } }
+    patch:
+      operationId: updateBrandEventDefinition
+      x-outflare-access: { scope: catalog.manage, brand: true }
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      summary: Change, approve or deprecate a brand's event definition
+      description: "Scope: catalog.manage. The name never changes. Deprecating is how an event is retired."
+      tags: [catalog]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/EventDefinitionInput" }
+      responses:
+        "200":
+          description: The event definition.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/EventDefinition" }
+        "202": { $ref: "#/components/responses/MissionHeld" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/brands/{brand}/catalog/events/{event}/approve:
+    parameters:
+      - { $ref: "#/components/parameters/BrandID" }
+      - { name: event, in: path, required: true, description: The event's name, such as order_completed., schema: { type: string } }
+    post:
+      operationId: approveBrandEventName
+      x-outflare-access: { scope: customers.manage, brand: true }
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      summary: Approve a held event name
+      description: |
+        Scope: customers.manage. Approves a track name for the brand, defining it when the brand has only held it,
+        so its held events can be replayed (POST /v1/brands/{brand}/events/replay). It changes nothing else about the
+        event: labels, properties and deprecating need catalog.manage (PATCH .../catalog/events/{event}). Approving
+        is part of fixing the brand's data, so customers.manage is enough. 409 event_name_in_other_brand when another
+        brand of the workspace defines the name.
+      tags: [catalog]
+      responses:
+        "200":
+          description: The event definition, approved.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/EventDefinition" }
+        "202": { $ref: "#/components/responses/MissionHeld" }
+        "400": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/brands/{brand}/records/lookup:
+    parameters: [{ $ref: "#/components/parameters/BrandID" }]
+    get:
+      operationId: lookupBrandRecords
+      x-outflare-access: { scope: customers.read, brand: true }
+      summary: Find a brand's records by identity
+      description: |
+        Scope: customers.read. The brand's records an email, phone, user id or other identity points at. owner is
+        the brand's one record holding it verified. The same email in another brand is another person there, never
+        listed here.
+      tags: [records]
+      parameters:
+        - { name: namespace, in: query, required: true, schema: { type: string, example: email } }
+        - { name: value, in: query, required: true, schema: { type: string, example: ada@example.com } }
+      responses:
+        "200":
+          description: Matching records, the owner first.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, owner]
+                properties:
+                  data: { type: array, items: { $ref: "#/components/schemas/Record" } }
+                  owner: { type: [string, "null"], format: uuid }
+        "400": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
         default: { $ref: "#/components/responses/Error" }
   /v1/brands/{brand}/batches:
     parameters:
@@ -27866,7 +28258,8 @@ paths:
         only proposes a partner: this call binds it. Identify the customer with customer_id (your own user id),
         email or record_id, the same way each time. external_id (your charge or order id) makes a retry safe and is what
         a refund's refund_of names. Not credited is not an error: the answer is 200 with credited false and a reason
-        (no_partner, partner_inactive, program_inactive, self_referral, sale_not_found, currency or lead_expired). 201 means it was
+        (no_partner, partner_inactive, program_inactive, self_referral, sale_not_found, currency, lead_expired or
+        country_blocked). 201 means it was
         credited, with the rewards it earned.
       tags: [partners]
       requestBody:
@@ -27900,7 +28293,7 @@ paths:
         POST .../partner-conversions from the query string, with the names affiliate networks use as aliases: type
         (or event, goal), ref, click_id (or ref_click, clickid), promo_code (or coupon), customer_id (or user_id),
         email, external_id (or order_id, transaction_id, charge_id, txid), refund_of, amount (in the currency's main
-        unit, such as 49.90; or amount_cents), currency, product_id, sub_id and occurred_at.
+        unit, such as 49.90; or amount_cents), currency, product_id, sub_id, country (or country_code) and occurred_at.
       tags: [partners]
       parameters:
         - { name: type, in: query, schema: { type: string, enum: [signup, lead, sale, refund, custom] } }
@@ -27909,6 +28302,7 @@ paths:
         - { name: ref, in: query, schema: { type: string } }
         - { name: click_id, in: query, schema: { type: string } }
         - { name: promo_code, in: query, schema: { type: string } }
+        - { name: country, in: query, schema: { type: string, description: "The customer's two-letter country code." } }
         - { name: customer_id, in: query, schema: { type: string } }
         - { name: email, in: query, schema: { type: string } }
         - { name: external_id, in: query, schema: { type: string } }
@@ -37654,7 +38048,7 @@ components:
       type: object
       required: [id, name, slug, kind, status, brand_id, landing_url, currency, credit_window_days, credit_model, codes_win, block_self_referrals, hold_days,
         auto_approve, auto_accept, pay_browser_signups, min_payout_cents, payout_term_days, payout_methods, payout_tokens, terms_url, sales_source, postback_hint, portal_enabled, portal_subdomain, portal, portal_url, rules, groups,
-        partners, imported_from, switched_over_at, lead_expiry_days, url_params, block_ad_clicks, block_social_clicks, created_at, updated_at]
+        partners, imported_from, switched_over_at, lead_expiry_days, url_params, block_ad_clicks, block_social_clicks, blocked_countries, created_at, updated_at]
       properties:
         id: { type: string, format: uuid }
         name: { type: string }
@@ -37680,6 +38074,7 @@ components:
         url_params: { type: array, items: { type: string }, description: "Query parameters besides ref and via that carry a partner's code on the website, such as aff for links made on another platform." }
         block_ad_clicks: { type: boolean, description: "A website visit with a partner's ref that came from a paid ad click (it carries an ad network's click id, such as gclid) doesn't credit the partner." }
         block_social_clicks: { type: boolean, description: "A website visit with a partner's ref that came from social media (fbclid, or a social network as referrer) doesn't credit the partner." }
+        blocked_countries: { type: array, items: { type: string, pattern: "^[A-Z]{2}$" }, description: "Countries the program doesn't credit: a website visit from one (by the site's proxy or the IP database, never the browser's time zone), or a new customer whose conversion call says one in country (reason country_blocked). Sorted; [] for none." }
         terms_url: { type: string }
         sales_source: { type: string, description: "A billing connector (stripe) whose synced payments and refunds are also partner sales; '' for the API and postbacks only." }
         postback_hint: { type: string, description: "The start of the postback URL's secret; '' when there is none." }
@@ -37723,6 +38118,8 @@ components:
         sign_in_template: { type: string, description: "An email template's id or handle for the sign-in email, with sign_in_url, program_name and partner_name; Outflare's own wording when empty." }
         hide_powered_by: { type: boolean, description: "Hide the \"Powered by Outflare\" line at the foot of the portal, shown by default." }
         business_email_only: { type: boolean, description: "Applications must use a work email address: free, disposable and relay addresses are refused (personal_email), as Outflare's email classifier sees them." }
+        site_key_id: { type: string, description: "A site key of the workspace (and of the program's brand, if any): the portal loads the workspace's own website script with it, so partners' visits show in its website analytics. The key takes events from the portal's address without adding it to its origins. \"\" for none." }
+        ga_measurement_id: { type: string, description: "A Google Analytics 4 measurement id (G-...) to add to the portal. It loads through the website script, which holds it back until the visitor allows analytics where consent is needed, so it needs site_key_id. \"\" for none." }
     PartnerImport:
       type: object
       required: [id, program_id, integration_id, connector, source_program, status, summary, error, created_at, started_at, finished_at]
@@ -37826,6 +38223,7 @@ components:
         url_params: { type: array, maxItems: 5, items: { type: string, pattern: "^[a-z][a-z0-9_]{0,31}$" }, description: "Extra query parameters carrying a partner's code, such as aff or fpr; not ref, via, utm_…, of… or an ad click id. [] for none." }
         block_ad_clicks: { type: boolean, description: "Visits from paid ad clicks don't credit partners. false when left out on create." }
         block_social_clicks: { type: boolean, description: "Visits from social media don't credit partners. false when left out on create." }
+        blocked_countries: { type: array, maxItems: 250, items: { type: string, pattern: "^[A-Za-z]{2}$" }, description: "Two-letter country codes the program doesn't credit, such as [\"BR\", \"IN\"]. [] for none." }
         terms_url: { type: string, maxLength: 2000 }
         sales_source: { type: string, description: "A billing connector's id (stripe): its synced payments and refunds become partner sales too. \"\" for none." }
         rules: { type: array, maxItems: 50, items: { $ref: "#/components/schemas/PartnerRuleInput" }, description: "Create only: the preset's rules when left out." }
@@ -37982,12 +38380,13 @@ components:
         occurred_at: { type: string, description: "RFC 3339 or Unix seconds; now when left out." }
         payment_source: { type: string, maxLength: 40, description: "The payment provider, such as stripe or paddle (Tolt's source). Flows can test it (transaction.payment_source)." }
         interval: { type: string, enum: [day, week, month, year, one_time, monthly, yearly, annual], description: "How it bills; monthly, yearly and annual are stored as month and year. Flows can test it (transaction.interval)." }
+        country: { type: string, pattern: "^[A-Za-z]{2}$", description: "The customer's country as you know it, such as from their billing address. A program that blocks it doesn't take them as a new referral (reason country_blocked)." }
     PartnerConversionResult:
       type: object
       required: [credited, duplicate, partner_id, referral_id, conversion, rewards]
       properties:
         credited: { type: boolean }
-        reason: { type: string, enum: [no_partner, partner_inactive, program_inactive, self_referral, sale_not_found, currency, lead_expired] }
+        reason: { type: string, enum: [no_partner, partner_inactive, program_inactive, self_referral, sale_not_found, currency, lead_expired, country_blocked] }
         duplicate: { type: boolean, description: "Already recorded with this external_id (or, for a lead, already a lead)." }
         partner_id: { type: [string, "null"], format: uuid }
         referral_id: { type: [string, "null"], format: uuid }
@@ -46189,7 +46588,7 @@ components:
           type: string
           enum: [pending, accepted, duplicate, rejected, held]
           description: "pending: waiting to be processed. held: a track name the catalog hasn't approved; approve it, then replay."
-        code: { type: [string, "null"], description: "Why it was rejected or held, such as missing_id, invalid_timestamp, property_type, other_brand, identity_taken, internal or name_not_approved." }
+        code: { type: [string, "null"], description: "Why it was rejected or held, such as missing_id, invalid_timestamp, property_type, identity_taken, internal or name_not_approved." }
         reason: { type: [string, "null"], description: What to fix. }
         type: { type: [string, "null"], description: "The event's type as sent: track, identify, page, screen, group or alias." }
         name: { type: [string, "null"], description: "Its catalog name once processed, or the name as sent." }

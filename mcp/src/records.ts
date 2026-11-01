@@ -58,15 +58,15 @@ export function registerRecordTools(server: McpServer, gtm: MissionClient, works
   server.registerTool(
     "get_catalog",
     {
-      title: "Read the catalog",
+      title: "Read a brand's catalog",
       description:
-        "Everything customer records can hold: record types (person and account built in, plus the workspace's own such as deal), each type's fields " +
-        "with their value types, the shared option lists (country, industry, company_size, seniority, lifecycle_stage and the workspace's own) and " +
-        "the product events. Call before writing records or adding fields, and reuse what exists.",
-      inputSchema: { archived: z.boolean().optional().describe("Include archived types, fields and options.") },
+        "Everything a brand's customer records can hold: record types (person and account built in, plus the brand's own such as deal), each type's fields " +
+        "with their value types, the option lists (country, industry, company_size, seniority, lifecycle_stage and the brand's own) and " +
+        "the product events. Each brand has its own catalog. Call before writing a brand's records or adding fields, and reuse what exists.",
+      inputSchema: { brand: brandRef, archived: z.boolean().optional().describe("Include archived types, fields and options.") },
       annotations: read,
     },
-    (q) => call(() => gtm.GET("/v1/workspaces/{ws}/catalog", { params: { path: path(), query: q } })),
+    ({ brand, ...q }) => call(() => onBrand(brand, (b) => gtm.GET("/v1/brands/{brand}/catalog", { params: { path: { brand: b }, query: q } }))),
   );
 
   server.registerTool(
@@ -114,7 +114,8 @@ export function registerRecordTools(server: McpServer, gtm: MissionClient, works
       title: "Find records by identity",
       description:
         "The records an email, phone, user id or other identity points at. owner is the one record holding it verified; the others hold it " +
-        "unverified, such as a sign-up that never confirmed its email. Use before create_record to avoid duplicates.",
+        "unverified, such as a sign-up that never confirmed its email. Each brand has its own people: pass brand to look in one (the same email " +
+        "in another brand is another person). Use before create_record to avoid duplicates.",
       inputSchema: { namespace: z.string().min(1), value: z.string().min(1), brand: z.string().optional() },
       annotations: read,
     },
@@ -279,7 +280,7 @@ export function registerRecordTools(server: McpServer, gtm: MissionClient, works
       title: "Summarise a brand's received events",
       description:
         "How many events a brand received in the last 24 hours and 7 days by status, how many wait, the rejection codes still kept with " +
-        "the latest reason, and the held names waiting for approval (approve with update_event_definition, then replay_brand_events).",
+        "the latest reason, and the held names waiting for approval (approve with approve_event_name, then replay_brand_events).",
       inputSchema: { brand: brandRef },
       annotations: read,
     },
@@ -532,22 +533,36 @@ export function registerRecordTools(server: McpServer, gtm: MissionClient, works
     "create_record_type",
     {
       title: "Add a record type",
-      description: "A kind of record beyond people and companies, such as deal, subscription or partner. Then add its fields with create_field.",
-      inputSchema: { name: z.string().min(1).max(60), plural: z.string().max(60).optional(), key: z.string().optional(), description: z.string().max(1000).optional() },
+      description: "A kind of record a brand tracks beyond people and companies, such as subscription or partner. Then add its fields with create_field.",
+      inputSchema: {
+        brand: brandRef,
+        name: z.string().min(1).max(60),
+        plural: z.string().max(60).optional(),
+        key: z.string().optional(),
+        description: z.string().max(1000).optional(),
+      },
       annotations: write,
     },
-    (body) => call(() => gtm.POST("/v1/workspaces/{ws}/catalog/types", { params: { path: path() }, body })),
+    ({ brand, ...body }) => call(() => onBrand(brand, (b) => gtm.POST("/v1/brands/{brand}/catalog/types", { params: { path: { brand: b } }, body }))),
   );
 
   server.registerTool(
     "update_record_type",
     {
       title: "Rename or archive a record type",
-      description: "Built-in types never change.",
-      inputSchema: { type: typeKey, name: z.string().max(60).optional(), plural: z.string().max(60).optional(), description: z.string().max(1000).optional(), archived: z.boolean().optional() },
+      description: "Built-in types never change. Archiving is how a type is deleted; it can be restored. Other brands' types are never touched.",
+      inputSchema: {
+        brand: brandRef,
+        type: typeKey,
+        name: z.string().max(60).optional(),
+        plural: z.string().max(60).optional(),
+        description: z.string().max(1000).optional(),
+        archived: z.boolean().optional(),
+      },
       annotations: write,
     },
-    ({ type, ...body }) => call(() => gtm.PATCH("/v1/workspaces/{ws}/catalog/types/{type}", { params: { path: { ws: workspace(), type } }, body })),
+    ({ brand, type, ...body }) =>
+      call(() => onBrand(brand, (b) => gtm.PATCH("/v1/brands/{brand}/catalog/types/{type}", { params: { path: { brand: b, type } }, body }))),
   );
 
   server.registerTool(
@@ -555,9 +570,10 @@ export function registerRecordTools(server: McpServer, gtm: MissionClient, works
     {
       title: "Add a field",
       description:
-        "One definition of a fact every feature shares. Check get_catalog first so the same fact is never added twice. select and status " +
-        "take an option_set; record_reference takes a target_type. A field's key, value type, option list and target never change.",
+        "One definition of a fact the brand's features share. Check get_catalog first so the same fact is never added twice. select and status " +
+        "take an option_set; record_reference takes a target_type. A field's key, value type, option list and target never change. Other brands don't see it.",
       inputSchema: {
+        brand: brandRef,
         type: typeKey,
         label: z.string().min(1).max(80),
         value_type: valueTypes,
@@ -573,15 +589,17 @@ export function registerRecordTools(server: McpServer, gtm: MissionClient, works
       },
       annotations: write,
     },
-    ({ type, ...body }) => call(() => gtm.POST("/v1/workspaces/{ws}/catalog/types/{type}/fields", { params: { path: { ws: workspace(), type } }, body })),
+    ({ brand, type, ...body }) =>
+      call(() => onBrand(brand, (b) => gtm.POST("/v1/brands/{brand}/catalog/types/{type}/fields", { params: { path: { brand: b, type } }, body }))),
   );
 
   server.registerTool(
     "update_field",
     {
       title: "Change or archive a field",
-      description: "Label, description, write policy, precedence, sensitivity, filterable or archived. Built-in fields never change.",
+      description: "Label, description, write policy, precedence, sensitivity, filterable or archived (how a field is deleted). Built-in fields never change.",
       inputSchema: {
+        brand: brandRef,
         type: typeKey,
         field: z.string().min(1),
         label: z.string().max(80).optional(),
@@ -594,19 +612,19 @@ export function registerRecordTools(server: McpServer, gtm: MissionClient, works
       },
       annotations: write,
     },
-    ({ type, field, ...body }) =>
-      call(() => gtm.PATCH("/v1/workspaces/{ws}/catalog/types/{type}/fields/{field}", { params: { path: { ws: workspace(), type, field } }, body })),
+    ({ brand, type, field, ...body }) =>
+      call(() => onBrand(brand, (b) => gtm.PATCH("/v1/brands/{brand}/catalog/types/{type}/fields/{field}", { params: { path: { brand: b, type, field } }, body }))),
   );
 
   server.registerTool(
     "create_option_set",
     {
       title: "Add an option list",
-      description: "Choices that select and status fields share, such as deal stages or partner tiers.",
-      inputSchema: { name: z.string().min(1), key: z.string().optional(), options },
+      description: "Choices a brand's select and status fields share, such as partner tiers.",
+      inputSchema: { brand: brandRef, name: z.string().min(1), key: z.string().optional(), options },
       annotations: write,
     },
-    (body) => call(() => gtm.POST("/v1/workspaces/{ws}/catalog/option-sets", { params: { path: path() }, body })),
+    ({ brand, ...body }) => call(() => onBrand(brand, (b) => gtm.POST("/v1/brands/{brand}/catalog/option-sets", { params: { path: { brand: b } }, body }))),
   );
 
   server.registerTool(
@@ -614,18 +632,22 @@ export function registerRecordTools(server: McpServer, gtm: MissionClient, works
     {
       title: "Change an option list",
       description: "options sets the order and labels. An option left out is archived, never deleted. Built-in lists never change.",
-      inputSchema: { set: z.string().min(1), name: z.string().optional(), options: options.optional() },
+      inputSchema: { brand: brandRef, set: z.string().min(1), name: z.string().optional(), options: options.optional() },
       annotations: write,
     },
-    ({ set, ...body }) => call(() => gtm.PATCH("/v1/workspaces/{ws}/catalog/option-sets/{set}", { params: { path: { ws: workspace(), set } }, body })),
+    ({ brand, set, ...body }) =>
+      call(() => onBrand(brand, (b) => gtm.PATCH("/v1/brands/{brand}/catalog/option-sets/{set}", { params: { path: { brand: b, set } }, body }))),
   );
 
   server.registerTool(
     "define_event",
     {
       title: "Define a product event",
-      description: "An event the product sends, such as product.activated, with its properties. Only approved events drive segments, rules and journeys.",
+      description:
+        "An event a brand's product sends, such as product.activated, with its properties. Only approved events drive segments, rules and journeys. " +
+        "For now a name is defined in one brand of a workspace at a time (409 event_name_in_other_brand).",
       inputSchema: {
+        brand: brandRef,
         name: z.string().min(1).max(100),
         label: z.string().max(80).optional(),
         description: z.string().max(1000).optional(),
@@ -635,15 +657,16 @@ export function registerRecordTools(server: McpServer, gtm: MissionClient, works
       },
       annotations: write,
     },
-    (body) => call(() => gtm.POST("/v1/workspaces/{ws}/catalog/events", { params: { path: path() }, body })),
+    ({ brand, ...body }) => call(() => onBrand(brand, (b) => gtm.POST("/v1/brands/{brand}/catalog/events", { params: { path: { brand: b } }, body }))),
   );
 
   server.registerTool(
     "update_event_definition",
     {
       title: "Change, approve or deprecate an event",
-      description: "The name never changes.",
+      description: "The name never changes. To only approve a held name, approve_event_name needs less access.",
       inputSchema: {
+        brand: brandRef,
         name: z.string().min(1),
         label: z.string().max(80).optional(),
         description: z.string().max(1000).optional(),
@@ -653,7 +676,22 @@ export function registerRecordTools(server: McpServer, gtm: MissionClient, works
       },
       annotations: write,
     },
-    ({ name, ...body }) => call(() => gtm.PATCH("/v1/workspaces/{ws}/catalog/events/{event}", { params: { path: { ws: workspace(), event: name } }, body })),
+    ({ brand, name, ...body }) =>
+      call(() => onBrand(brand, (b) => gtm.PATCH("/v1/brands/{brand}/catalog/events/{event}", { params: { path: { brand: b, event: name } }, body }))),
+  );
+
+  server.registerTool(
+    "approve_event_name",
+    {
+      title: "Approve a held event name",
+      description:
+        "Approves a track name a brand's events are held for (get_brand_events_summary lists them), so replay_brand_events can process them. " +
+        "Needs customers.manage only; it changes nothing else about the event.",
+      inputSchema: { brand: brandRef, name: z.string().min(1).max(100).describe("The catalog name, such as order_completed.") },
+      annotations: write,
+    },
+    ({ brand, name }) =>
+      call(() => onBrand(brand, (b) => gtm.POST("/v1/brands/{brand}/catalog/events/{event}/approve", { params: { path: { brand: b, event: name } } }))),
   );
 
   server.registerTool(
@@ -746,7 +784,7 @@ export function registerRecordTools(server: McpServer, gtm: MissionClient, works
     {
       title: "Replay rejected or held events",
       description:
-        "Process rejected or held events again once what they needed is fixed (the name approved with update_event_definition, a property's " +
+        "Process rejected or held events again once what they needed is fixed (the name approved with approve_event_name, a property's " +
         "type changed, an identity freed): either ids, or a filter (status, code, source, batch_id, name), up to 10,000 a call. Accepted and " +
         "duplicate events are skipped. Check the result with list_brand_events.",
       inputSchema: {

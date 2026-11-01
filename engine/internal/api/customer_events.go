@@ -337,7 +337,7 @@ func (s *Server) ingestCustomerEvents(w http.ResponseWriter, r *http.Request) {
 	totals := ingestTotals{names: map[string]*seenName{}}
 	now := time.Now().UTC()
 	err = pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
-		c, err := loadCatalog(ctx, tx, a.WorkspaceID, false)
+		c, err := loadCatalog(ctx, tx, a.WorkspaceID, deref(brand), false)
 		if err != nil {
 			return err
 		}
@@ -368,7 +368,7 @@ func (s *Server) ingestCustomerEvents(w http.ResponseWriter, r *http.Request) {
 			}
 			results[i] = res
 		}
-		if err := saveEventNames(ctx, tx, a.WorkspaceID, totals.names); err != nil {
+		if err := saveEventNames(ctx, tx, a.WorkspaceID, c.Brand, totals.names); err != nil {
 			return err
 		}
 		counts := map[string]any{"accepted": 0, "duplicate": 0, "rejected": 0, "events": len(msgs), "records_created": totals.created, "identities_added": totals.identities, "possible_duplicates": totals.duplicates, "records_merged": totals.merged, "names": len(totals.names)}
@@ -387,21 +387,27 @@ func (s *Server) ingestCustomerEvents(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, out)
 }
 
-// saveEventNames keeps one catalog row per name, however many events had
-// it. A name the workspace never defined arrives quarantined, so it drives
-// nothing until someone approves it.
-func saveEventNames(ctx context.Context, tx pgx.Tx, ws string, names map[string]*seenName) error {
+// saveEventNames keeps one catalog row per name in the brand (a resolved
+// id, catalog.Brand), however many events had it. A name the brand never
+// defined arrives quarantined, so it drives nothing until someone approves
+// it. Until the contract step of plans/brands/README.md an event name is
+// defined in one brand of a workspace at a time (event_definitions keeps
+// its per-workspace unique constraint for the version before this one), so
+// a name another brand defines is left uncounted here.
+func saveEventNames(ctx context.Context, tx pgx.Tx, ws, brand string, names map[string]*seenName) error {
 	for name, n := range names {
 		status := "quarantined"
 		if n.kind != "track" {
 			status = "approved"
 		}
-		if _, err := tx.Exec(ctx, `INSERT INTO event_definitions (workspace_id, name, status, first_seen_at, last_seen_at, seen_count)
-			VALUES ($1, $2, $3, $4, $5, $6)
+		if _, err := tx.Exec(ctx, `INSERT INTO event_definitions (workspace_id, brand_id, name, status, first_seen_at, last_seen_at, seen_count)
+			SELECT $1, NULLIF($7, '')::uuid, $2, $3, $4, $5, $6
+			WHERE NOT EXISTS (SELECT 1 FROM event_definitions WHERE workspace_id = $1 AND name = $2 AND brand_id IS DISTINCT FROM NULLIF($7, '')::uuid)
 			ON CONFLICT (workspace_id, name) DO UPDATE SET seen_count = event_definitions.seen_count + EXCLUDED.seen_count,
 				last_seen_at = GREATEST(event_definitions.last_seen_at, EXCLUDED.last_seen_at),
-				first_seen_at = LEAST(COALESCE(event_definitions.first_seen_at, EXCLUDED.first_seen_at), EXCLUDED.first_seen_at)`,
-			ws, name, status, n.first, n.last, n.count); err != nil {
+				first_seen_at = LEAST(COALESCE(event_definitions.first_seen_at, EXCLUDED.first_seen_at), EXCLUDED.first_seen_at)
+			WHERE event_definitions.brand_id IS NOT DISTINCT FROM EXCLUDED.brand_id`,
+			ws, name, status, n.first, n.last, n.count, brand); err != nil {
 			return err
 		}
 	}
@@ -584,24 +590,28 @@ func (s *Server) ingestOne(ctx context.Context, tx pgx.Tx, a *access, c *catalog
 	return nil
 }
 
-// ownerOf is the record holding an identity verified, if the caller can
-// see it.
-func ownerOf(ctx context.Context, tx pgx.Tx, a *access, namespace, value string) (*string, *string, error) {
+// ownerOf is the record holding an identity verified in brand (a brand's
+// id; "" looks in every brand, the workspace's first brand first), if the
+// caller can see it. The same email or user id in another brand is
+// another person there (plans/brands/README.md, decision 1).
+func ownerOf(ctx context.Context, tx pgx.Tx, a *access, brand, namespace, value string) (*string, *string, error) {
 	var id string
-	var brand *string
+	var owner *string
 	err := tx.QueryRow(ctx, `SELECT r.id::text, r.brand_id::text FROM record_identities i JOIN records r ON r.id = i.record_id
-		WHERE i.workspace_id = $1 AND i.namespace = $2 AND i.value = $3 AND i.valid_to IS NULL AND i.verified AND r.merged_into IS NULL`,
-		a.WorkspaceID, namespace, value).Scan(&id, &brand)
+		WHERE i.workspace_id = $1 AND i.namespace = $2 AND i.value = $3 AND i.valid_to IS NULL AND i.verified AND r.merged_into IS NULL
+		  AND ($4 = '' OR i.brand_id = NULLIF($4, '')::uuid)
+		ORDER BY i.brand_id IS NOT DISTINCT FROM outflare_first_brand($1) DESC, i.valid_from LIMIT 1`,
+		a.WorkspaceID, namespace, value, brand).Scan(&id, &owner)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil, nil
 	}
 	if err != nil {
 		return nil, nil, err
 	}
-	if !a.writes(brand) {
+	if !a.writes(owner) {
 		return nil, nil, errSharedRecord
 	}
-	return &id, brand, nil
+	return &id, owner, nil
 }
 
 // attach gives a record an identity the ingest trusts. It reports whether
@@ -609,9 +619,11 @@ func ownerOf(ctx context.Context, tx pgx.Tx, a *access, namespace, value string)
 // it is.
 func attach(ctx context.Context, tx pgx.Tx, a *access, rec, namespace, value string, verified bool, totals *ingestTotals) (bool, error) {
 	if verified {
+		// Another record of the same brand holding it verified keeps it.
 		var other string
-		err := tx.QueryRow(ctx, `SELECT record_id::text FROM record_identities WHERE workspace_id = $1 AND namespace = $2 AND value = $3
-			AND valid_to IS NULL AND verified`, a.WorkspaceID, namespace, value).Scan(&other)
+		err := tx.QueryRow(ctx, `SELECT i.record_id::text FROM record_identities i JOIN records me ON me.id = $4
+			WHERE i.workspace_id = $1 AND i.namespace = $2 AND i.value = $3 AND i.valid_to IS NULL AND i.verified
+			  AND i.brand_id IS NOT DISTINCT FROM me.brand_id`, a.WorkspaceID, namespace, value, rec).Scan(&other)
 		if err == nil && other != rec {
 			return false, nil
 		}
@@ -655,12 +667,12 @@ func (s *Server) resolvePerson(ctx context.Context, tx pgx.Tx, a *access, c *cat
 	var rec *string
 	var err error
 	if userID != "" {
-		if rec, _, err = ownerOf(ctx, tx, a, "user_id", userID); err != nil {
+		if rec, _, err = ownerOf(ctx, tx, a, c.Brand, "user_id", userID); err != nil {
 			return nil, err
 		}
 	}
 	if rec == nil && email != "" && emailVerified {
-		if rec, _, err = ownerOf(ctx, tx, a, "email", email); err != nil {
+		if rec, _, err = ownerOf(ctx, tx, a, c.Brand, "email", email); err != nil {
 			return nil, err
 		}
 		// An email someone proved belongs to the record that holds it, unless
@@ -674,7 +686,7 @@ func (s *Server) resolvePerson(ctx context.Context, tx pgx.Tx, a *access, c *cat
 		}
 	}
 	if rec == nil && anonID != "" {
-		if rec, _, err = ownerOf(ctx, tx, a, "anonymous_id", anonID); err != nil {
+		if rec, _, err = ownerOf(ctx, tx, a, c.Brand, "anonymous_id", anonID); err != nil {
 			return nil, err
 		}
 		// A visitor who was identified as one user and now signs in as
@@ -716,7 +728,7 @@ func (s *Server) resolvePerson(ctx context.Context, tx pgx.Tx, a *access, c *cat
 		}
 	}
 	if anonID != "" {
-		if other, _, err := ownerOf(ctx, tx, a, "anonymous_id", anonID); err != nil {
+		if other, _, err := ownerOf(ctx, tx, a, c.Brand, "anonymous_id", anonID); err != nil {
 			return nil, err
 		} else if other != nil && *other != *rec {
 			if _, err := releaseClickBrowser(ctx, tx, a, c, *other, anonID, userID, email); err != nil {
@@ -737,7 +749,7 @@ func (s *Server) resolvePerson(ctx context.Context, tx pgx.Tx, a *access, c *cat
 		if added, err := attach(ctx, tx, a, *rec, "email", email, emailVerified, totals); err != nil {
 			return nil, err
 		} else if !added && emailVerified {
-			owner, _, err := ownerOf(ctx, tx, a, "email", email)
+			owner, _, err := ownerOf(ctx, tx, a, c.Brand, "email", email)
 			if err != nil {
 				return nil, err
 			}
@@ -838,12 +850,16 @@ func releaseClickBrowser(ctx context.Context, tx pgx.Tx, a *access, c *catalog, 
 // their anonymousId had before anyone knew who they were, and works out
 // their first and last touch from those visits.
 func backfill(ctx context.Context, tx pgx.Tx, a *access, c *catalog, rec, anonID string) error {
-	if _, err := tx.Exec(ctx, `UPDATE customer_events SET record_id = $3 WHERE workspace_id = $1 AND anonymous_id = $2 AND record_id IS NULL`,
+	// Only the person's brand's events and choices: a browser seen by two
+	// brands is two people's there.
+	if _, err := tx.Exec(ctx, `UPDATE customer_events SET record_id = $3 WHERE workspace_id = $1 AND anonymous_id = $2 AND record_id IS NULL
+		AND brand_id IS NOT DISTINCT FROM (SELECT brand_id FROM records WHERE id = $3)`,
 		a.WorkspaceID, anonID, rec); err != nil {
 		return err
 	}
 	// Choices made on the site's consent banner.
-	if _, err := tx.Exec(ctx, `UPDATE consents SET record_id = $3 WHERE workspace_id = $1 AND anonymous_id = $2 AND record_id IS NULL`,
+	if _, err := tx.Exec(ctx, `UPDATE consents SET record_id = $3 WHERE workspace_id = $1 AND anonymous_id = $2 AND record_id IS NULL
+		AND brand_id IS NOT DISTINCT FROM (SELECT brand_id FROM records WHERE id = $3)`,
 		a.WorkspaceID, anonID, rec); err != nil {
 		return err
 	}
@@ -866,7 +882,7 @@ func backfill(ctx context.Context, tx pgx.Tx, a *access, c *catalog, rec, anonID
 // aliasPerson links a previous id to the person. An earlier userId stays
 // with whoever holds it: two users are never merged.
 func (s *Server) aliasPerson(ctx context.Context, tx pgx.Tx, a *access, c *catalog, rec, prev string, res *eventResult, totals *ingestTotals) error {
-	owner, _, err := ownerOf(ctx, tx, a, "user_id", prev)
+	owner, _, err := ownerOf(ctx, tx, a, c.Brand, "user_id", prev)
 	if err != nil {
 		return err
 	}
@@ -876,7 +892,7 @@ func (s *Server) aliasPerson(ctx context.Context, tx pgx.Tx, a *access, c *catal
 		}
 		return nil
 	}
-	if other, _, err := ownerOf(ctx, tx, a, "anonymous_id", prev); err != nil {
+	if other, _, err := ownerOf(ctx, tx, a, c.Brand, "anonymous_id", prev); err != nil {
 		return err
 	} else if other != nil && *other != rec {
 		res.Warnings = append(res.Warnings, "previousId already belongs to another person; it was left there")
@@ -893,7 +909,7 @@ func (s *Server) aliasPerson(ctx context.Context, tx pgx.Tx, a *access, c *catal
 // its traits and adds it to the person's companies.
 func (s *Server) resolveAccount(ctx context.Context, tx pgx.Tx, a *access, c *catalog, brand *string, groupID string, traits map[string]any,
 	person *string, res *eventResult, totals *ingestTotals) (string, error) {
-	acct, _, err := ownerOf(ctx, tx, a, "group_id", groupID)
+	acct, _, err := ownerOf(ctx, tx, a, c.Brand, "group_id", groupID)
 	if err != nil {
 		return "", err
 	}

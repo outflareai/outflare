@@ -520,7 +520,7 @@ func (s *Server) siteCookieReport(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	origin := r.Header.Get("Origin")
-	if !originAllowed(k.origins, origin) {
+	if !s.siteOriginOK(r, k.siteKeyRow, origin) {
 		writeError(w, r, http.StatusForbidden, "forbidden", "this site key does not take requests from this origin; add it to the key's origins")
 		return
 	}

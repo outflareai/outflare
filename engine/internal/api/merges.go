@@ -477,7 +477,7 @@ func (s *Server) mergeRecord(w http.ResponseWriter, r *http.Request) {
 		} else if err != nil {
 			return err
 		}
-		c, err := loadCatalog(ctx, tx, a.WorkspaceID, false)
+		c, err := loadCatalog(ctx, tx, a.WorkspaceID, recordBrandOf(ctx, tx, into), false)
 		if err != nil {
 			return err
 		}

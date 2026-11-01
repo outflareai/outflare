@@ -135,7 +135,7 @@ func (p *kitPlan) addsTemplates() bool {
 
 // planKit compares kit k with the workspace's catalog and email templates.
 func planKit(ctx context.Context, tx pgx.Tx, ws string, k playbooks.Kit) (*kitPlan, error) {
-	c, err := loadCatalog(ctx, tx, ws, false)
+	c, err := loadCatalog(ctx, tx, ws, "", false)
 	if err != nil {
 		return nil, err
 	}
@@ -313,7 +313,10 @@ func applyKit(ctx context.Context, tx pgx.Tx, a *access, k playbooks.Kit, inputs
 			}
 			continue
 		}
-		if _, err := tx.Exec(ctx, `UPDATE option_sets SET options = $3, updated_at = now() WHERE workspace_id = $1 AND key = $2`, ws, it.Key, it.options); err != nil {
+		// Kits set up the workspace's first brand's catalog (the one planKit
+		// read), never another brand's list of the same key.
+		if _, err := tx.Exec(ctx, `UPDATE option_sets SET options = $3, updated_at = now()
+			WHERE workspace_id = $1 AND brand_id IS NOT DISTINCT FROM outflare_first_brand($1) AND key = $2`, ws, it.Key, it.options); err != nil {
 			return nil, err
 		}
 		if err := record(ctx, tx, p, ws, "option_set.updated", "option_set", it.Key, map[string]any{"options": len(it.options), "kit_id": k.ID}); err != nil {

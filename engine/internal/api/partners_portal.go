@@ -88,6 +88,12 @@ type portalSettings struct {
 	// BusinessEmailOnly refuses applications from free, disposable and
 	// relay email addresses (Outflare's email classifier decides).
 	BusinessEmailOnly bool `json:"business_email_only"`
+	// SiteKeyID puts the workspace's own website script on the portal with
+	// this site key, so partners' visits show in its analytics; "" for none.
+	SiteKeyID string `json:"site_key_id"`
+	// GAMeasurementID adds Google Analytics 4 (G-...) through that script,
+	// held back until the visitor allows analytics where consent is needed.
+	GAMeasurementID string `json:"ga_measurement_id"`
 }
 
 // portalFor reads stored settings over the kind's defaults: affiliates get
@@ -136,6 +142,15 @@ func (p *portalSettings) check() error {
 		return errInvalid("portal.signup_fields has at most 20 questions")
 	case len(p.SignInTemplate) > 100:
 		return errInvalid("portal.sign_in_template is a template's id or handle")
+	case p.SiteKeyID != "" && !validUUID(p.SiteKeyID):
+		return errInvalid("portal.site_key_id is a site key's id (Settings → Website tracking)")
+	}
+	p.GAMeasurementID = strings.ToUpper(strings.TrimSpace(p.GAMeasurementID))
+	switch {
+	case p.GAMeasurementID != "" && !gaIDRE.MatchString(p.GAMeasurementID):
+		return errInvalid("portal.ga_measurement_id is a Google Analytics 4 measurement id, such as G-ABC123XYZ")
+	case p.GAMeasurementID != "" && p.SiteKeyID == "":
+		return errInvalid("portal.ga_measurement_id needs portal.site_key_id: Google Analytics loads through the website script, which holds it back until the visitor allows analytics")
 	}
 	if p.LogoURL != "" {
 		u, err := utm.Destination(p.LogoURL)
@@ -287,6 +302,18 @@ func (s *Server) setPartnerPortal(w http.ResponseWriter, r *http.Request) {
 	raw, _ := json.Marshal(settings)
 	ctx := r.Context()
 	err := pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
+		if settings.SiteKeyID != "" && settings.SiteKeyID != cur.Portal.SiteKeyID {
+			// The key must be one of the workspace's, and of the program's
+			// brand when it has one.
+			var ok bool
+			if err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM site_keys WHERE workspace_id = $1 AND id = $2 AND revoked_at IS NULL
+				AND ($3::uuid IS NULL OR brand_id IS NULL OR brand_id = $3))`, a.WorkspaceID, settings.SiteKeyID, cur.BrandID).Scan(&ok); err != nil {
+				return err
+			}
+			if !ok {
+				return errInvalid("portal.site_key_id: no such site key in this workspace (or it belongs to another brand)")
+			}
+		}
 		if sub != nil {
 			var taken bool
 			if err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM partner_programs WHERE portal_subdomain = $1 AND id <> $2)`, *sub, cur.ID).Scan(&taken); err != nil {
@@ -612,8 +639,11 @@ func (s *Server) portalPage(w http.ResponseWriter, r *http.Request) {
 	h.Set("Cache-Control", "no-store")
 	h.Set("Referrer-Policy", "no-referrer")
 	h.Set("X-Frame-Options", "DENY")
-	h.Set("Content-Security-Policy", "default-src 'self'; img-src https: data:; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'")
-	_, _ = w.Write([]byte(strings.ReplaceAll(partnerPortalHTML, "{{BASE}}", html.EscapeString(base))))
+	head, scriptSrc, connectSrc := s.portalAnalytics(r, id)
+	h.Set("Content-Security-Policy", "default-src 'self'; img-src https: data:; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'"+scriptSrc+
+		"; connect-src 'self'"+connectSrc+"; frame-ancestors 'none'; base-uri 'none'; form-action 'self'")
+	page := strings.ReplaceAll(partnerPortalHTML, "{{BASE}}", html.EscapeString(base))
+	_, _ = w.Write([]byte(strings.Replace(page, "</head>", head+"</head>", 1)))
 }
 
 // portalPublicInfo is what anyone sees of a portal before signing in.

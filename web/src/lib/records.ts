@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import type { Schemas } from "@outflare/sdk";
 import { api, errorMessage } from "../api";
 import { plural } from "../format";
+import { useBrand } from "./brand";
 
 // Shared by the People pages: the catalog of fields, and how a record and
 // its values read.
@@ -36,16 +37,29 @@ export const namespaces: Record<string, string> = {
   "outflare.lead": "Lead",
 };
 
-// The catalog's fields and option labels, read once per page.
-export function useCatalog(ws: string) {
+// The catalog's fields and option labels, read once per page. Each brand
+// has its own catalog: brandId's (a record's brand), else the brand picked
+// in the switcher, else, with all brands picked, the workspace's first
+// brand's.
+export function useCatalog(ws: string, brandId?: string | null) {
+  const { brand: picked } = useBrand(ws);
+  const brand = brandId || picked?.id || "";
   const [catalog, setCatalog] = useState<Schemas["Catalog"] | null>(null);
   const [error, setError] = useState("");
   useEffect(() => {
-    api.GET("/v1/workspaces/{ws}/catalog", { params: { path: { ws } } }).then(({ data, error }) => {
+    let live = true;
+    const req = brand
+      ? api.GET("/v1/brands/{brand}/catalog", { params: { path: { brand } } })
+      : api.GET("/v1/workspaces/{ws}/catalog", { params: { path: { ws }, query: { brand: "all" } } });
+    req.then(({ data, error }) => {
+      if (!live) return;
       if (data) setCatalog(data);
       else setError(errorMessage(error));
     });
-  }, [ws]);
+    return () => {
+      live = false;
+    };
+  }, [ws, brand]);
   return useMemo(() => {
     const labels = new Map<string, Map<string, string>>();
     for (const s of catalog?.option_sets ?? []) labels.set(s.key, new Map(s.options.map((o) => [o.key, o.label])));

@@ -44,10 +44,13 @@ func CompanyDomain(s string) string {
 }
 
 // EnsureCompanies returns the company record for each domain, adding
-// prospect companies (of brand, nil for shared) for those nobody has, with
+// prospect companies (of brand, nil for the workspace's first) for those
+// nobody has, with
 // via as the tool they came from (records.acquired_via). The
 // domain is added unverified, so it never claims a domain a company record
-// already proves. Run it in the same transaction as what it is for.
+// already proves. Run it in the same transaction as what it is for. With a
+// brand, only that brand's companies count: the same domain in another
+// brand is another company (plans/brands/README.md, decision 1).
 func EnsureCompanies(ctx context.Context, tx pgx.Tx, workspaceID string, brand *string, via string, companies []Company) (map[string]string, error) {
 	out := map[string]string{}
 	byDomain := map[string]Company{}
@@ -70,7 +73,8 @@ func EnsureCompanies(ctx context.Context, tx pgx.Tx, workspaceID string, brand *
 		SELECT DISTINCT ON (i.value) i.value, i.record_id::text
 		FROM record_identities i JOIN records r ON r.id = i.record_id AND r.record_type = 'account' AND r.merged_into IS NULL
 		WHERE i.workspace_id = $1 AND i.namespace = 'domain' AND i.value = ANY($2) AND i.valid_to IS NULL
-		ORDER BY i.value, i.verified DESC, i.created_at`, workspaceID, domains)
+		  AND ($3::uuid IS NULL OR i.brand_id = $3)
+		ORDER BY i.value, i.verified DESC, i.created_at`, workspaceID, domains, brand)
 	if err != nil {
 		return nil, err
 	}
@@ -123,8 +127,10 @@ func EnsureCompanies(ctx context.Context, tx pgx.Tx, workspaceID string, brand *
 			INSERT INTO records (id, workspace_id, record_type, brand_id, name, attributes, attribute_sources, origin, acquired_via)
 			SELECT id, $1, 'account', COALESCE($6, outflare_first_brand($1)), n, a, s, 'prospect', left($7, 64) FROM todo
 		), ids AS (
-			INSERT INTO record_identities (workspace_id, record_id, namespace, value, verified, source)
-			SELECT $1, id, 'domain', d, false, $7 FROM todo
+			-- The record isn't visible to the identity's brand trigger in
+			-- the same statement, so the brand is set here.
+			INSERT INTO record_identities (workspace_id, record_id, brand_id, namespace, value, verified, source)
+			SELECT $1, id, COALESCE($6, outflare_first_brand($1)), 'domain', d, false, $7 FROM todo
 		)
 		SELECT d, id::text FROM todo`, workspaceID, missing, names, attrs, sources, brand, via)
 	if err != nil {

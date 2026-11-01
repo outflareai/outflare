@@ -413,7 +413,7 @@ func (s *Server) deleteFieldValue(w http.ResponseWriter, r *http.Request) {
 			if !had {
 				return errNotFound
 			}
-			c, err := loadCatalog(ctx, tx, a.WorkspaceID, false)
+			c, err := loadCatalog(ctx, tx, a.WorkspaceID, deref(rec.BrandID), false)
 			if err != nil {
 				return err
 			}
@@ -657,7 +657,7 @@ func isQuiet(ctx context.Context) bool { q, _ := ctx.Value(quietKey{}).(bool); r
 // quietBilling works a record's billing fields out again after one of its
 // payments was deleted or restored, without firing rules on the change.
 func quietBilling(ctx context.Context, tx pgx.Tx, ws, recordID string) error {
-	c, err := loadCatalog(ctx, tx, ws, false)
+	c, err := loadCatalog(ctx, tx, ws, recordBrandOf(ctx, tx, recordID), false)
 	if err != nil {
 		return err
 	}

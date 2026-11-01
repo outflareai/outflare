@@ -234,7 +234,7 @@ func (s *Server) applyRule(r *http.Request, a *access, f ruleFields, v *ruleView
 	if msg := rules.Check(v.engine(a.WorkspaceID)); msg != "" {
 		return errInvalid(msg)
 	}
-	c, err := s.readCatalog(ctx, a.WorkspaceID, false)
+	c, err := s.readCatalog(ctx, a.WorkspaceID, "", false)
 	if err != nil {
 		return err
 	}

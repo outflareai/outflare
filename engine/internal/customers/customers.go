@@ -29,15 +29,24 @@ type Querier interface {
 // OwnerOf returns the record holding an identity verified, such as the
 // person who proved they own an email address. An unverified identity
 // never makes anyone its owner, so ok is false for an address someone only
-// typed in.
+// typed in. It looks in every brand, the workspace's first brand first,
+// for features that don't belong to a brand yet; OwnerOfIn looks in one.
 func OwnerOf(ctx context.Context, q Querier, workspaceID, namespace, value string) (recordID string, ok bool, err error) {
+	return OwnerOfIn(ctx, q, workspaceID, "", namespace, value)
+}
+
+// OwnerOfIn is OwnerOf within one brand (plans/brands/README.md, decision
+// 1: the same email in two brands is two people). An empty brand looks in
+// every brand, the workspace's first brand first.
+func OwnerOfIn(ctx context.Context, q Querier, workspaceID, brand, namespace, value string) (recordID string, ok bool, err error) {
 	value = strings.TrimSpace(value)
 	if namespace == "email" || namespace == "domain" {
 		value = strings.ToLower(value)
 	}
 	err = q.QueryRow(ctx, `SELECT i.record_id::text FROM record_identities i JOIN records r ON r.id = i.record_id
 		WHERE i.workspace_id = $1 AND i.namespace = $2 AND i.value = $3 AND i.valid_to IS NULL AND i.verified
-		AND r.merged_into IS NULL`, workspaceID, namespace, value).Scan(&recordID)
+		AND r.merged_into IS NULL AND ($4 = '' OR i.brand_id = NULLIF($4, '')::uuid)
+		ORDER BY i.brand_id IS NOT DISTINCT FROM outflare_first_brand($1) DESC, i.valid_from LIMIT 1`, workspaceID, namespace, value, brand).Scan(&recordID)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return "", false, nil
 	}
@@ -51,19 +60,29 @@ func OwnerOf(ctx context.Context, q Querier, workspaceID, namespace, value strin
 // exactly one person is verified there, and with several unverified copies
 // (someone typed another person's address) the inbox's owner gets a new
 // record of their own. Run it in the same transaction as what it is for.
+// It looks in every brand and makes new people in the workspace's first;
+// EnsurePersonIn works in one brand.
 func EnsurePerson(ctx context.Context, q Querier, workspaceID, namespace, value string, verified bool, requestID string) (string, error) {
+	return EnsurePersonIn(ctx, q, workspaceID, "", namespace, value, verified, requestID)
+}
+
+// EnsurePersonIn is EnsurePerson within one brand: the person is found
+// there, and made there when nobody there holds the identity. An empty
+// brand looks in every brand and makes new people in the first.
+func EnsurePersonIn(ctx context.Context, q Querier, workspaceID, brand, namespace, value string, verified bool, requestID string) (string, error) {
 	value = strings.TrimSpace(value)
 	if namespace == "email" || namespace == "domain" {
 		value = strings.ToLower(value)
 	}
-	if id, ok, err := OwnerOf(ctx, q, workspaceID, namespace, value); err != nil || ok {
+	if id, ok, err := OwnerOfIn(ctx, q, workspaceID, brand, namespace, value); err != nil || ok {
 		return id, err
 	}
 	var holders []string
 	var oldest string
 	err := q.QueryRow(ctx, `SELECT COALESCE(array_agg(i.record_id::text ORDER BY i.valid_from), '{}') FROM record_identities i JOIN records r ON r.id = i.record_id
-		WHERE i.workspace_id = $1 AND i.namespace = $2 AND i.value = $3 AND i.valid_to IS NULL AND r.merged_into IS NULL AND r.record_type = 'person'`,
-		workspaceID, namespace, value).Scan(&holders)
+		WHERE i.workspace_id = $1 AND i.namespace = $2 AND i.value = $3 AND i.valid_to IS NULL AND r.merged_into IS NULL AND r.record_type = 'person'
+		AND ($4 = '' OR i.brand_id = NULLIF($4, '')::uuid)`,
+		workspaceID, namespace, value, brand).Scan(&holders)
 	if err != nil {
 		return "", err
 	}
@@ -84,16 +103,22 @@ func EnsurePerson(ctx context.Context, q Querier, workspaceID, namespace, value 
 		return oldest, audit.Record(ctx, q, audit.Event{WorkspaceID: workspaceID, Action: "identity.verified", TargetType: "record", TargetID: oldest,
 			RequestID: requestID, ActorType: "system", Data: map[string]any{"record_id": oldest, "namespace": namespace, "verified": true}})
 	}
-	var id string
-	if err := q.QueryRow(ctx, `INSERT INTO records (workspace_id, record_type, brand_id, origin) VALUES ($1, 'person', outflare_first_brand($1), 'first_party') RETURNING id::text`, workspaceID).Scan(&id); err != nil {
+	var id, made string
+	if err := q.QueryRow(ctx, `INSERT INTO records (workspace_id, record_type, brand_id, origin)
+		VALUES ($1, 'person', COALESCE(NULLIF($2, '')::uuid, outflare_first_brand($1)), 'first_party') RETURNING id::text, COALESCE(brand_id::text, '')`,
+		workspaceID, brand).Scan(&id, &made); err != nil {
 		return "", err
 	}
 	if _, err := q.Exec(ctx, `INSERT INTO record_identities (workspace_id, record_id, namespace, value, verified, verified_at, source)
 		VALUES ($1, $2, $3, $4, $5, CASE WHEN $5 THEN now() END, 'system')`, workspaceID, id, namespace, value, verified); err != nil {
 		return "", err
 	}
+	data := map[string]any{"type": "person", "origin": "first_party", "identities": 1}
+	if made != "" {
+		data["brand_id"] = made
+	}
 	return id, audit.Record(ctx, q, audit.Event{WorkspaceID: workspaceID, Action: "record.created", TargetType: "record", TargetID: id,
-		RequestID: requestID, ActorType: "system", Data: map[string]any{"type": "person", "origin": "first_party", "identities": 1}})
+		RequestID: requestID, ActorType: "system", Data: data})
 }
 
 // ConsentChange is a grant or withdrawal another feature records, such as
@@ -246,12 +271,16 @@ func RecordEvent(ctx context.Context, q Querier, workspaceID string, ev Event) (
 	}
 	// The catalog entry goes in before journeys hear of the event: outside a
 	// transaction the job could otherwise run before the name is approved.
-	if _, err := q.Exec(ctx, `INSERT INTO event_definitions (workspace_id, name, status, first_seen_at, last_seen_at, seen_count)
-		VALUES ($1, $2, 'approved', $3, $3, 1)
+	// It is the person's brand's; until the contract step a name another
+	// brand defines stays with that brand (event_definitions keeps its
+	// per-workspace unique constraint for the version before this one).
+	if _, err := q.Exec(ctx, `INSERT INTO event_definitions (workspace_id, brand_id, name, status, first_seen_at, last_seen_at, seen_count)
+		SELECT $1, e.brand_id, $2, 'approved', $3, $3, 1 FROM customer_events e WHERE e.id = $4
+		  AND NOT EXISTS (SELECT 1 FROM event_definitions d WHERE d.workspace_id = $1 AND d.name = $2 AND d.brand_id IS DISTINCT FROM e.brand_id)
 		ON CONFLICT (workspace_id, name) DO UPDATE SET seen_count = event_definitions.seen_count + 1,
 			last_seen_at = GREATEST(event_definitions.last_seen_at, EXCLUDED.last_seen_at),
 			first_seen_at = LEAST(COALESCE(event_definitions.first_seen_at, EXCLUDED.first_seen_at), EXCLUDED.first_seen_at)`,
-		workspaceID, ev.Name, ev.OccurredAt); err != nil {
+		workspaceID, ev.Name, ev.OccurredAt, id); err != nil {
 		return "", err
 	}
 	if err := EventAdded(ctx, q, workspaceID, id, ev.Name); err != nil {

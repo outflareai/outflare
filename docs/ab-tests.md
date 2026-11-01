@@ -170,7 +170,7 @@ The checklist warns when another test is running on a flag outside this one's [e
 
 - `device`: desktop, mobile or tablet;
 - `source`: the visit's `utm_source`, else the site it came from, else direct;
-- `country`: from the browser's time zone;
+- `country`: the visit's country (from your proxy, the visitor's address or, failing both, the browser's time zone; see [website tracking](website-tracking.md));
 - `visitor`: new, or returning (they had visited before).
 
 Each visitor is grouped by the visit they first saw their version in, so their group never changes. Visitors whose visit isn't known, such as exposures sent by a server, are "unknown". The largest 8 groups are shown, the rest added up as "other".

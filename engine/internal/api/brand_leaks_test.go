@@ -47,13 +47,6 @@ var brandWide = map[string]string{
 	"/v1/workspaces/{ws}/verifications":     "an address checked once is known for every brand",
 	"/v1/workspaces/{ws}/digests/preview":   "digests report on the whole workspace",
 	"/v1/workspaces/{ws}/digests":           "digests report on the whole workspace",
-	// The catalog rows carry their brand since 0316, but reads and writes
-	// stay per workspace until the catalog-per-brand step of
-	// plans/brands/README.md switches them; take these off then.
-	"/v1/workspaces/{ws}/catalog":             "the catalog is read per workspace until the catalog-per-brand step",
-	"/v1/workspaces/{ws}/catalog/types":       "the catalog is read per workspace until the catalog-per-brand step",
-	"/v1/workspaces/{ws}/catalog/option-sets": "the catalog is read per workspace until the catalog-per-brand step",
-	"/v1/workspaces/{ws}/catalog/events":      "the catalog is read per workspace until the catalog-per-brand step",
 }
 
 // sweepQuery is the rest of the query string the sweep sends, for
@@ -65,6 +58,7 @@ var sweepQuery = map[string]string{
 	"/v1/workspaces/{ws}/seo/history":       "report=keywords&host=bravo.example",
 	"/v1/workspaces/{ws}/analytics/compare": "host=bravo.example",
 	"/v1/workspaces/{ws}/records/lookup":    "namespace=email&value=leak@bravo.example",
+	"/v1/brands/{brand}/records/lookup":     "namespace=email&value=leak@bravo.example",
 }
 
 // TestNoBrandLeaks fills one brand (Bravo) with a row in every table that
@@ -107,7 +101,7 @@ func TestNoBrandLeaks(t *testing.T) {
 
 	leak := regexp.MustCompile(`(?i)bravo|` + regexp.QuoteMeta(bravo))
 	sweep := func(brand string) (checked int, found []string) {
-		for _, path := range workspaceGets(t) {
+		for _, path := range specGets(t, "/v1/workspaces/{ws}/") {
 			if _, ok := brandWide[path]; ok {
 				continue
 			}
@@ -147,11 +141,54 @@ func TestNoBrandLeaks(t *testing.T) {
 	if len(leaks) > 0 {
 		t.Fatalf("with Alpha picked, %d endpoints answer with Bravo's records:\n%s", len(leaks), strings.Join(leaks, "\n"))
 	}
+
+	// Brand routes answer for their brand only: Alpha's catalog, events,
+	// batches and the rest never hold Bravo's rows, and Bravo's do (so the
+	// sweep reaches them).
+	var alpha string
+	if err := e.pool.QueryRow(context.Background(), `SELECT id::text FROM brands WHERE workspace_id = $1 AND handle = 'alpha'`, ws).Scan(&alpha); err != nil {
+		t.Fatal(err)
+	}
+	brandSweep := func(id string) (checked int, found []string) {
+		for _, path := range specGets(t, "/v1/brands/{brand}/") {
+			p := strings.ReplaceAll(path, "{brand}", id)
+			if strings.Contains(p, "{") {
+				continue
+			}
+			if extra := sweepQuery[path]; extra != "" {
+				p += "?" + extra
+			}
+			req := httptest.NewRequest("GET", p, nil)
+			req.AddCookie(owner.cookie)
+			rec := httptest.NewRecorder()
+			e.h.ServeHTTP(rec, req)
+			if rec.Code != 200 {
+				continue
+			}
+			checked++
+			body := rec.Body.String()
+			if m := leak.FindString(body); m != "" {
+				at := strings.Index(body, m)
+				found = append(found, fmt.Sprintf("%s: …%s…", path, body[max(0, at-120):min(len(body), at+80)]))
+			}
+		}
+		return checked, found
+	}
+	if _, found := brandSweep(bravo); len(found) < 3 {
+		t.Fatalf("only %d brand routes show Bravo's rows for Bravo; the seeding is not reaching them", len(found))
+	}
+	checked, leaks = brandSweep(alpha)
+	if checked < 8 {
+		t.Fatalf("only %d brand routes answered; the sweep is not reaching them", checked)
+	}
+	if len(leaks) > 0 {
+		t.Fatalf("Alpha's brand routes answer with Bravo's records:\n%s", strings.Join(leaks, "\n"))
+	}
 }
 
-// workspaceGets lists the spec's GET paths under a workspace that need no
-// query parameter.
-func workspaceGets(t *testing.T) []string {
+// specGets lists the spec's GET paths under prefix (a workspace's or a
+// brand's) that need no query parameter, or have one in sweepQuery.
+func specGets(t *testing.T, prefix string) []string {
 	type param struct {
 		Ref      string `yaml:"$ref"`
 		In       string `yaml:"in"`
@@ -169,7 +206,7 @@ func workspaceGets(t *testing.T) []string {
 	var out []string
 	for p, ops := range doc.Paths {
 		node, ok := ops["get"]
-		if !ok || !strings.HasPrefix(p, "/v1/workspaces/{ws}/") {
+		if !ok || !strings.HasPrefix(p, prefix) {
 			continue
 		}
 		var op struct {
@@ -391,6 +428,11 @@ func (s *seeder) valueFor(tbl string, c column) (string, any) {
 	}
 	if tbl == "rules" && c.name == "trigger" {
 		return cast, `{"kind": "event", "event": "bravo.happened"}`
+	}
+	// The API returns a campaign's config as stored, so it has to be one
+	// the spec allows.
+	if tbl == "review_request_campaigns" && c.name == "config" {
+		return cast, `{"name": "bravo", "mode": "manual", "from": "leak@bravo.example", "reply_to": "leak@bravo.example", "subject": "bravo", "body": "bravo", "platforms": [], "audience": {"kind": "records", "record_ids": []}}`
 	}
 	if c.typ == "ARRAY" {
 		return cast, "{}"

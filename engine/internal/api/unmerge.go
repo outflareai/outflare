@@ -424,7 +424,7 @@ func unmerge(ctx context.Context, tx pgx.Tx, a *access, id string) (map[string]i
 	// The kept record's fields the merge filled, newest first, while they
 	// still hold what the merge put there.
 	slices.Reverse(led.fields)
-	c, err := loadCatalog(ctx, tx, a.WorkspaceID, false)
+	c, err := loadCatalog(ctx, tx, a.WorkspaceID, a.Brand, false)
 	if err != nil {
 		return nil, nil, err
 	}

@@ -536,6 +536,11 @@ func (s *Server) createBrand(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			return brandUnique(err)
 		}
+		// Decision 3: a new brand starts from the default catalog (the
+		// built-ins and the Deal type), never a copy of another brand's.
+		if _, err := tx.Exec(ctx, `SELECT outflare_brand_catalog($1)`, id); err != nil {
+			return err
+		}
 		if err := record(ctx, tx, &a.principal, a.WorkspaceID, "brand.created", "brand", id, map[string]any{
 			"handle": handle, "domains": len(domains), "platforms": platforms, "links": len(links),
 		}); err != nil {

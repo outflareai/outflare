@@ -143,10 +143,11 @@ func TestBrandEvents(t *testing.T) {
 		t.Fatalf("fixed and replayed: %v", ev)
 	}
 
-	// A person of another brand is never touched from this one.
+	// A person of another brand is never touched from this one: the same
+	// userId there is a second person, of that brand.
 	other := owner.must(202, "POST", "/v1/brands/"+rp+"/events", map[string]any{"type": "identify", "userId": "u1", "traits": map[string]any{"plan": "pro"}})
 	oid := other["events"].([]any)[0].(map[string]any)["id"].(string)
-	if ev := settled("/v1/brands/"+rp+"/events", oid)[0]; ev["status"] != "rejected" || ev["code"] != "other_brand" {
+	if ev := settled("/v1/brands/"+rp+"/events", oid)[0]; ev["status"] != "accepted" || ev["record_id"] == ada || ev["record_id"] == nil {
 		t.Fatalf("another brand's person: %v", ev)
 	}
 	// And a brand's events are only its own.

@@ -75,7 +75,7 @@ func SyncLeads(ctx context.Context, tx pgx.Tx, workspaceID string, leadIDs []str
 	}
 	rows, err := tx.Query(ctx, `
 		SELECT l.record_id::text, l.email, l.first_name, l.last_name, l.title, l.linkedin_url, l.phone, l.company, l.website,
-			r.name, r.attributes, r.attribute_sources
+			r.name, r.attributes, r.attribute_sources, COALESCE(r.brand_id::text, '')
 		FROM leads l JOIN records r ON r.id = l.record_id AND r.record_type = 'person' AND r.merged_into IS NULL
 		WHERE l.workspace_id = $1 AND l.id = ANY($2::uuid[])
 		ORDER BY l.record_id, l.updated_at
@@ -84,16 +84,16 @@ func SyncLeads(ctx context.Context, tx pgx.Tx, workspaceID string, leadIDs []str
 		return 0, err
 	}
 	type person struct {
-		id, email, first, last, title, linkedin, phone, company, website, name string
-		attrs                                                                  map[string]any
-		sources                                                                map[string]string
+		id, email, first, last, title, linkedin, phone, company, website, name, brand string
+		attrs                                                                         map[string]any
+		sources                                                                       map[string]string
 	}
 	var people []*person
 	byID := map[string]*person{}
 	for rows.Next() {
 		p := &person{}
 		if err := rows.Scan(&p.id, &p.email, &p.first, &p.last, &p.title, &p.linkedin, &p.phone, &p.company, &p.website,
-			&p.name, &p.attrs, &p.sources); err != nil {
+			&p.name, &p.attrs, &p.sources, &p.brand); err != nil {
 			rows.Close()
 			return 0, err
 		}
@@ -113,7 +113,8 @@ func SyncLeads(ctx context.Context, tx pgx.Tx, workspaceID string, leadIDs []str
 	// Companies first, all at once: the website's domain, or else the
 	// email's when it is a company's own.
 	intel := classify.Builtin()
-	var companies []Company
+	// A person's company is one of the person's brand.
+	companies := map[string][]Company{}
 	domainOf := map[string]string{}
 	for _, p := range people {
 		if refs, _ := p.attrs["companies"].([]any); len(refs) > 0 {
@@ -131,11 +132,19 @@ func SyncLeads(ctx context.Context, tx pgx.Tx, workspaceID string, leadIDs []str
 			continue
 		}
 		domainOf[p.id] = d
-		companies = append(companies, Company{Domain: d, Name: p.company})
+		companies[p.brand] = append(companies[p.brand], Company{Domain: d, Name: p.company})
 	}
-	accounts, err := EnsureCompanies(ctx, tx, workspaceID, nil, "lead", companies)
-	if err != nil {
-		return 0, err
+	accounts := map[string]map[string]string{}
+	for brand, list := range companies {
+		var b *string
+		if brand != "" {
+			b = &brand
+		}
+		found, err := EnsureCompanies(ctx, tx, workspaceID, b, "lead", list)
+		if err != nil {
+			return 0, err
+		}
+		accounts[brand] = found
 	}
 
 	changed := 0
@@ -143,7 +152,7 @@ func SyncLeads(ctx context.Context, tx pgx.Tx, workspaceID string, leadIDs []str
 	for _, p := range people {
 		want := map[string]any{"first_name": strings.TrimSpace(p.first), "last_name": strings.TrimSpace(p.last),
 			"job_title": strings.TrimSpace(p.title), "linkedin_url": leadURL(p.linkedin)}
-		if acct := accounts[domainOf[p.id]]; acct != "" {
+		if acct := accounts[p.brand][domainOf[p.id]]; acct != "" {
 			want["companies"] = []any{acct}
 		}
 		if p.attrs == nil {

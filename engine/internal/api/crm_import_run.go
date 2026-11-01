@@ -225,9 +225,10 @@ func getCRMImport(ctx context.Context, q crmQuerier, ws, id string) (crmImportVi
 // startCRMImport records an import and queues its first step, in the
 // caller's transaction.
 func startCRMImport(ctx context.Context, tx pgx.Tx, a *access, integrationID, connector string, objects []string) (crmImportView, error) {
-	var id string
+	var id, brand string
 	err := tx.QueryRow(ctx, `INSERT INTO crm_imports (workspace_id, integration_id, connector, objects, created_by, created_by_type)
-		VALUES ($1, $2, $3, $4, $5, $6) RETURNING id::text`, a.WorkspaceID, integrationID, connector, objects, nullIfEmpty(a.ActorID), a.ActorType).Scan(&id)
+		VALUES ($1, $2, $3, $4, $5, $6) RETURNING id::text, COALESCE(brand_id, outflare_first_brand(workspace_id))::text`,
+		a.WorkspaceID, integrationID, connector, objects, nullIfEmpty(a.ActorID), a.ActorType).Scan(&id, &brand)
 	if isUnique(err) {
 		return crmImportView{}, recordConflict{"conflict", "an import from this connection is already running; wait for it to finish (GET .../crm-imports)"}
 	}
@@ -236,8 +237,8 @@ func startCRMImport(ctx context.Context, tx pgx.Tx, a *access, integrationID, co
 	}
 	// The import is one batch (batches.go), with the import's id: every
 	// step marks what it writes with it. It belongs to the brand its
-	// records are made in: the workspace's first, as add does.
-	if _, err := startBatch(ctx, tx, &a.principal, a.WorkspaceID, "", batchCRMImport, connector, "", id); err != nil {
+	// records are made in: its connection's, or the workspace's first.
+	if _, err := startBatch(ctx, tx, &a.principal, a.WorkspaceID, brand, batchCRMImport, connector, "", id); err != nil {
 		return crmImportView{}, err
 	}
 	if err := inBatch(ctx, tx, ""); err != nil {
@@ -307,6 +308,9 @@ type crmRun struct {
 	progress crmProgress
 	sum      crmImportSummary
 	objects  []string
+	// brand is the brand the import's records and catalog changes belong
+	// to: its connection's, or the workspace's first.
+	brand string
 }
 
 // runCRMImportStep runs one step of an import: the plan first, then pages
@@ -321,8 +325,9 @@ func (s *Server) runCRMImportStep(ctx context.Context, ws, id string, last bool)
 	var progress []byte
 	err := s.pool.QueryRow(ctx, `UPDATE crm_imports SET status = 'running', started_at = coalesce(started_at, now())
 		WHERE workspace_id = $1 AND id = $2 AND status IN ('queued', 'running')
-		RETURNING integration_id::text, objects, progress, summary, created_by::text, created_by_type`, ws, id).
-		Scan(&integrationID, &run.objects, &progress, &run.sum, &actorID, &actorType)
+		RETURNING integration_id::text, objects, progress, summary, created_by::text, created_by_type,
+			COALESCE(brand_id, outflare_first_brand(workspace_id))::text`, ws, id).
+		Scan(&integrationID, &run.objects, &progress, &run.sum, &actorID, &actorType, &run.brand)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil // finished or gone
 	}
@@ -532,7 +537,7 @@ func (r *crmRun) plan(ctx context.Context) error {
 			}
 		}
 
-		c, err := loadCatalog(ctx, tx, r.a.WorkspaceID, false)
+		c, err := loadCatalog(ctx, tx, r.a.WorkspaceID, r.brand, false)
 		if err != nil {
 			return err
 		}
@@ -549,7 +554,7 @@ func (r *crmRun) plan(ctx context.Context) error {
 			types[o.Slug] = key
 			plan.Objects = append(plan.Objects, crmObjectPlan{Slug: o.Slug, Name: o.Plural, Type: key, Fields: map[string]crmFieldPlan{}})
 		}
-		if c, err = loadCatalog(ctx, tx, r.a.WorkspaceID, false); err != nil {
+		if c, err = loadCatalog(ctx, tx, r.a.WorkspaceID, r.brand, false); err != nil {
 			return err
 		}
 		for i, o := range objects {
@@ -568,7 +573,7 @@ func (r *crmRun) plan(ctx context.Context) error {
 				}
 				op.Fields[f.Slug] = fp
 				// A field just added is in the catalog for the next one.
-				if c, err = loadCatalog(ctx, tx, r.a.WorkspaceID, false); err != nil {
+				if c, err = loadCatalog(ctx, tx, r.a.WorkspaceID, r.brand, false); err != nil {
 					return err
 				}
 			}
@@ -606,12 +611,12 @@ func (r *crmRun) recordType(ctx context.Context, tx pgx.Tx, c *catalog, o connec
 	if plural == "" {
 		plural = name + "s"
 	}
-	if _, err := tx.Exec(ctx, `INSERT INTO record_types (workspace_id, key, name, plural, description, created_by) VALUES ($1, $2, $3, $4, $5, $6)`,
-		r.a.WorkspaceID, key, name, plural, "Imported from "+r.o.Connector.Definition().Name+".", nullIfEmpty(r.a.ActorID)); err != nil {
+	if _, err := tx.Exec(ctx, `INSERT INTO record_types (workspace_id, brand_id, key, name, plural, description, created_by) VALUES ($1, $7, $2, $3, $4, $5, $6)`,
+		r.a.WorkspaceID, key, name, plural, "Imported from "+r.o.Connector.Definition().Name+".", nullIfEmpty(r.a.ActorID), nullIfEmpty(c.Brand)); err != nil {
 		return "", err
 	}
 	r.sum.Catalog.TypesCreated = append(r.sum.Catalog.TypesCreated, key)
-	return key, record(ctx, tx, &r.a.principal, r.a.WorkspaceID, "record_type.created", "record_type", key, map[string]any{"via": "crm_import"})
+	return key, record(ctx, tx, &r.a.principal, r.a.WorkspaceID, "record_type.created", "record_type", key, catalogData(c, map[string]any{"via": "crm_import"}))
 }
 
 // field decides where a CRM field's values go, adding the field and its
@@ -717,14 +722,14 @@ func (r *crmRun) field(ctx context.Context, tx pgx.Tx, c *catalog, op *crmObject
 	if label == "" {
 		label = f.Slug
 	}
-	if _, err := tx.Exec(ctx, `INSERT INTO field_definitions (workspace_id, record_type, key, label, description, value_type, option_set, multiple, target_type, created_by)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`, r.a.WorkspaceID, op.Type, key, label, "Imported from "+r.o.Connector.Definition().Name+".",
-		vt, set, fp.Multiple, target, nullIfEmpty(r.a.ActorID)); err != nil {
+	if _, err := tx.Exec(ctx, `INSERT INTO field_definitions (workspace_id, brand_id, record_type, key, label, description, value_type, option_set, multiple, target_type, created_by)
+		VALUES ($1, $11, $2, $3, $4, $5, $6, $7, $8, $9, $10)`, r.a.WorkspaceID, op.Type, key, label, "Imported from "+r.o.Connector.Definition().Name+".",
+		vt, set, fp.Multiple, target, nullIfEmpty(r.a.ActorID), nullIfEmpty(c.Brand)); err != nil {
 		return fp, "", err
 	}
 	r.sum.Catalog.FieldsCreated = append(r.sum.Catalog.FieldsCreated, op.Type+"."+key)
 	return fp, "", record(ctx, tx, &r.a.principal, r.a.WorkspaceID, "field.created", "field", op.Type+"."+key,
-		map[string]any{"record_type": op.Type, "value_type": vt, "multiple": fp.Multiple, "via": "crm_import"})
+		catalogData(c, map[string]any{"record_type": op.Type, "value_type": vt, "multiple": fp.Multiple, "via": "crm_import"}))
 }
 
 // options maps the CRM's choices to the option list key's options, adding
@@ -780,23 +785,24 @@ func (r *crmRun) options(ctx context.Context, tx pgx.Tx, c *catalog, key, name s
 		if current == nil {
 			current = []catalogOption{}
 		}
-		if _, err := tx.Exec(ctx, `INSERT INTO option_sets (workspace_id, key, name, options, created_by) VALUES ($1, $2, $3, $4, $5)`,
-			r.a.WorkspaceID, key, name, current, nullIfEmpty(r.a.ActorID)); err != nil {
+		if _, err := tx.Exec(ctx, `INSERT INTO option_sets (workspace_id, brand_id, key, name, options, created_by) VALUES ($1, $6, $2, $3, $4, $5)`,
+			r.a.WorkspaceID, key, name, current, nullIfEmpty(r.a.ActorID), nullIfEmpty(c.Brand)); err != nil {
 			return nil, err
 		}
 		r.sum.Catalog.OptionSetsCreated = append(r.sum.Catalog.OptionSetsCreated, key)
 		return out, record(ctx, tx, &r.a.principal, r.a.WorkspaceID, "option_set.created", "option_set", key,
-			map[string]any{"options": len(current), "via": "crm_import"})
+			catalogData(c, map[string]any{"options": len(current), "via": "crm_import"}))
 	case added:
 		if len(current) > 500 {
 			return nil, errInvalid("option list " + key + " would have more than 500 options")
 		}
-		if _, err := tx.Exec(ctx, `UPDATE option_sets SET options = $3, updated_at = now() WHERE workspace_id = $1 AND key = $2`,
-			r.a.WorkspaceID, key, current); err != nil {
+		if _, err := tx.Exec(ctx, `UPDATE option_sets SET options = $3, updated_at = now()
+			WHERE workspace_id = $1 AND brand_id IS NOT DISTINCT FROM NULLIF($4, '')::uuid AND key = $2`,
+			r.a.WorkspaceID, key, current, c.Brand); err != nil {
 			return nil, err
 		}
 		return out, record(ctx, tx, &r.a.principal, r.a.WorkspaceID, "option_set.updated", "option_set", key,
-			map[string]any{"options": len(current), "via": "crm_import"})
+			catalogData(c, map[string]any{"options": len(current), "via": "crm_import"}))
 	}
 	return out, nil
 }
@@ -819,7 +825,7 @@ func (r *crmRun) batch(ctx context.Context, op *crmObjectPlan, res *crmObjectRes
 		if err := inBatch(ctx, tx, r.id); err != nil {
 			return err
 		}
-		c, err := loadCatalog(ctx, tx, r.a.WorkspaceID, false)
+		c, err := loadCatalog(ctx, tx, r.a.WorkspaceID, r.brand, false)
 		if err != nil {
 			return err
 		}
@@ -1115,9 +1121,9 @@ func minorDigits(code string) int {
 func (r *crmRun) find(ctx context.Context, tx pgx.Tx, namespace, value, recordType string) (string, error) {
 	var id string
 	err := tx.QueryRow(ctx, `SELECT coalesce(r.merged_into, r.id)::text FROM record_identities i JOIN records r ON r.id = i.record_id
-		WHERE i.workspace_id = $1 AND i.namespace = $2 AND i.value = $3 AND i.valid_to IS NULL
+		WHERE i.workspace_id = $1 AND i.brand_id = $5 AND i.namespace = $2 AND i.value = $3 AND i.valid_to IS NULL
 		  AND ($4 = '' OR (r.record_type = $4 AND i.verified AND r.merged_into IS NULL))
-		ORDER BY i.created_at LIMIT 1`, r.a.WorkspaceID, namespace, value, recordType).Scan(&id)
+		ORDER BY i.created_at LIMIT 1`, r.a.WorkspaceID, namespace, value, recordType, r.brand).Scan(&id)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return "", nil
 	}
@@ -1155,8 +1161,8 @@ func (r *crmRun) match(ctx context.Context, tx pgx.Tx, op *crmObjectPlan, rec co
 // add creates an empty record for a CRM record, with its CRM id.
 func (r *crmRun) add(ctx context.Context, tx pgx.Tx, recordType, crmID string) (string, error) {
 	var id string
-	if err := tx.QueryRow(ctx, `INSERT INTO records (workspace_id, record_type, brand_id, origin, acquired_via, created_by) VALUES ($1, $2, outflare_first_brand($1), 'import', $4, $3) RETURNING id::text`,
-		r.a.WorkspaceID, recordType, nullIfEmpty(r.a.ActorID), r.o.Integration.Connector).Scan(&id); err != nil {
+	if err := tx.QueryRow(ctx, `INSERT INTO records (workspace_id, record_type, brand_id, origin, acquired_via, created_by) VALUES ($1, $2, $5, 'import', $4, $3) RETURNING id::text`,
+		r.a.WorkspaceID, recordType, nullIfEmpty(r.a.ActorID), r.o.Integration.Connector, r.brand).Scan(&id); err != nil {
 		return "", err
 	}
 	_, err := tx.Exec(ctx, `INSERT INTO record_identities (workspace_id, record_id, namespace, value, verified, verified_at, source, created_by)

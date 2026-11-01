@@ -174,10 +174,14 @@ type partnerProgramView struct {
 	URLParams []string `json:"url_params"`
 	// BlockAdClicks and BlockSocialClicks: a website visit with a ref that
 	// came from a paid ad click, or from social media, doesn't credit.
-	BlockAdClicks     bool      `json:"block_ad_clicks"`
-	BlockSocialClicks bool      `json:"block_social_clicks"`
-	CreatedAt         time.Time `json:"created_at"`
-	UpdatedAt         time.Time `json:"updated_at"`
+	BlockAdClicks     bool `json:"block_ad_clicks"`
+	BlockSocialClicks bool `json:"block_social_clicks"`
+	// BlockedCountries: a website visit from one of these countries (by
+	// the site's proxy or the IP database, never the time zone), or a
+	// conversion whose call says one, doesn't credit.
+	BlockedCountries []string  `json:"blocked_countries"`
+	CreatedAt        time.Time `json:"created_at"`
+	UpdatedAt        time.Time `json:"updated_at"`
 }
 
 const partnerProgramSelect = `
@@ -187,7 +191,7 @@ const partnerProgramSelect = `
 	       (SELECT count(*) FROM partner_memberships m WHERE m.program_id = p.id)::int,
 	       COALESCE((SELECT i.connector FROM partner_imports i WHERE i.program_id = p.id AND i.workspace_id = p.workspace_id AND i.status = 'done'
 	                 ORDER BY i.created_at DESC LIMIT 1), ''), p.switched_over_at, p.lead_expiry_days, p.url_params,
-	       p.block_ad_clicks, p.block_social_clicks, p.created_at, p.updated_at
+	       p.block_ad_clicks, p.block_social_clicks, p.created_at, p.updated_at, p.blocked_countries
 	FROM partner_programs p WHERE p.workspace_id = $1`
 
 func scanPartnerProgram(row pgx.Row) (partnerProgramView, error) {
@@ -197,7 +201,7 @@ func scanPartnerProgram(row pgx.Row) (partnerProgramView, error) {
 		&v.CodesWin, &v.BlockSelfReferrals, &v.HoldDays, &v.AutoApprove, &v.AutoAccept, &v.PayBrowserSignups, &v.MinPayoutCents,
 		&v.PayoutTermDays, &v.PayoutMethods, &v.PayoutTokens, &v.TermsURL, &v.SalesSource, &v.PostbackHint,
 		&v.PortalEnabled, &v.PortalSubdomain, &portal, &v.DefaultGroupID, &v.Partners, &v.ImportedFrom, &v.SwitchedOverAt, &v.LeadExpiryDays, &v.URLParams,
-		&v.BlockAdClicks, &v.BlockSocialClicks, &v.CreatedAt, &v.UpdatedAt)
+		&v.BlockAdClicks, &v.BlockSocialClicks, &v.CreatedAt, &v.UpdatedAt, &v.BlockedCountries)
 	if err == nil {
 		v.Portal = portalFor(v.Kind, portal)
 	}
@@ -353,6 +357,7 @@ type partnerProgramInput struct {
 	URLParams          *[]string        `json:"url_params"`
 	BlockAdClicks      *bool            `json:"block_ad_clicks"`
 	BlockSocialClicks  *bool            `json:"block_social_clicks"`
+	BlockedCountries   *[]string        `json:"blocked_countries"`
 }
 
 var (
@@ -413,6 +418,18 @@ func (in partnerProgramInput) check() error {
 	}
 	if d := in.LeadExpiryDays.Value; d != nil && (*d < 1 || *d > 3650) {
 		return errInvalid("lead_expiry_days is 1 to 3650, or null for leads that never expire")
+	}
+	if in.BlockedCountries != nil {
+		if len(*in.BlockedCountries) > 250 {
+			return errInvalid("blocked_countries has at most 250 countries")
+		}
+		for i, c := range *in.BlockedCountries {
+			c = strings.ToUpper(strings.TrimSpace(c))
+			if !countryRe.MatchString(c) {
+				return errInvalid("blocked_countries are two-letter country codes, such as DE or BR")
+			}
+			(*in.BlockedCountries)[i] = c
+		}
 	}
 	if in.URLParams != nil {
 		if len(*in.URLParams) > 5 {
@@ -585,6 +602,11 @@ func (s *Server) createPartnerProgram(w http.ResponseWriter, r *http.Request) {
 			WHERE id = $1`, id, in.BlockAdClicks, in.BlockSocialClicks); err != nil {
 			return err
 		}
+		if in.BlockedCountries != nil {
+			if _, err := tx.Exec(ctx, `UPDATE partner_programs SET blocked_countries = $2 WHERE id = $1`, id, cleanCountries(*in.BlockedCountries)); err != nil {
+				return err
+			}
+		}
 		rules := p.Rules
 		if in.Rules != nil {
 			if rules, err = checkPartnerRules(*in.Rules, nil, nil); err != nil {
@@ -722,6 +744,13 @@ func (s *Server) updatePartnerProgram(w http.ResponseWriter, r *http.Request) {
 				changed = append(changed, "block_social_clicks")
 			}
 		}
+		if in.BlockedCountries != nil {
+			if _, err := tx.Exec(ctx, `UPDATE partner_programs SET blocked_countries = $3 WHERE workspace_id = $1 AND id = $2`,
+				a.WorkspaceID, cur.ID, cleanCountries(*in.BlockedCountries)); err != nil {
+				return err
+			}
+			changed = append(changed, "blocked_countries")
+		}
 		slices.Sort(changed)
 		return partnerRecord(ctx, tx, &a.principal, a.WorkspaceID, "partner_program.updated", "partner_program", cur.ID,
 			map[string]any{"kind": cur.Kind, "status": coalesce(in.Status, cur.Status), "changed": changed})
@@ -732,6 +761,13 @@ func (s *Server) updatePartnerProgram(w http.ResponseWriter, r *http.Request) {
 	if v, ok := s.findPartnerProgram(w, r, a.WorkspaceID, cur.ID); ok {
 		writeJSON(w, http.StatusOK, v)
 	}
+}
+
+// cleanCountries sorts the codes and drops repeats.
+func cleanCountries(cs []string) []string {
+	out := slices.Clone(cs)
+	slices.Sort(out)
+	return slices.Compact(out)
 }
 
 // cleanURLParams drops repeated names, keeping the order.

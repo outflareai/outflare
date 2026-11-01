@@ -16,14 +16,20 @@ import (
 )
 
 // The catalog: the record types, fields, option lists and events a
-// workspace's customer records use. It is the one definition of each fact
-// for every feature (the customer data platform, the CRM, imports, list
+// brand's customer records use. It is the one definition of each fact for
+// every feature (the customer data platform, the CRM, imports, list
 // filters, enrichment, merge tags) and what agents read to learn what data
 // exists. Built-in types, fields and option lists live here in code; a
-// workspace's own are rows on top.
+// brand's own are rows on top, starting with the default set every brand
+// gets (outflare_brand_catalog: the Deal type). Each brand's catalog is its
+// own (plans/brands/README.md, decision 3): nothing is shared or copied.
 
 func (s *Server) routesCatalog(mux *http.ServeMux) {
 	read, manage := auth.ScopeCustomersRead, auth.ScopeCatalogManage
+	// The workspace routes act on one brand's catalog: ?brand= picks it
+	// for reads, and otherwise (and for every change) it is the
+	// workspace's first brand. They stay until the contract step of
+	// plans/brands/README.md; the brand routes below are the ones to use.
 	mux.HandleFunc("GET /v1/workspaces/{ws}/catalog", s.inBrand(read, s.getCatalog))
 	mux.HandleFunc("GET /v1/workspaces/{ws}/catalog/types", s.inBrand(read, s.listRecordTypes))
 	mux.HandleFunc("POST /v1/workspaces/{ws}/catalog/types", s.inWorkspace(manage, s.createRecordType))
@@ -37,6 +43,26 @@ func (s *Server) routesCatalog(mux *http.ServeMux) {
 	mux.HandleFunc("GET /v1/workspaces/{ws}/catalog/events", s.inBrand(read, s.listEventDefinitions))
 	mux.HandleFunc("POST /v1/workspaces/{ws}/catalog/events", s.inWorkspace(manage, s.createEventDefinition))
 	mux.HandleFunc("PATCH /v1/workspaces/{ws}/catalog/events/{event}", s.inWorkspace(manage, s.updateEventDefinition))
+
+	// Decision 3: the catalog belongs to a brand.
+	b := "/v1/brands/{brand}/catalog"
+	mux.HandleFunc("GET "+b, s.onBrand(read, s.getCatalog))
+	mux.HandleFunc("GET "+b+"/types", s.onBrand(read, s.listRecordTypes))
+	mux.HandleFunc("POST "+b+"/types", s.onBrand(manage, s.createRecordType))
+	mux.HandleFunc("GET "+b+"/types/{type}", s.onBrand(read, s.getRecordType))
+	mux.HandleFunc("PATCH "+b+"/types/{type}", s.onBrand(manage, s.updateRecordType))
+	mux.HandleFunc("POST "+b+"/types/{type}/fields", s.onBrand(manage, s.createField))
+	mux.HandleFunc("PATCH "+b+"/types/{type}/fields/{field}", s.onBrand(manage, s.updateField))
+	mux.HandleFunc("GET "+b+"/option-sets", s.onBrand(read, s.listOptionSets))
+	mux.HandleFunc("POST "+b+"/option-sets", s.onBrand(manage, s.createOptionSet))
+	mux.HandleFunc("PATCH "+b+"/option-sets/{set}", s.onBrand(manage, s.updateOptionSet))
+	mux.HandleFunc("GET "+b+"/events", s.onBrand(read, s.listEventDefinitions))
+	mux.HandleFunc("POST "+b+"/events", s.onBrand(manage, s.createEventDefinition))
+	mux.HandleFunc("PATCH "+b+"/events/{event}", s.onBrand(manage, s.updateEventDefinition))
+	// Approving a held event name is part of fixing a brand's data (the
+	// Events page's "Approve and replay"), so customers.manage may do it;
+	// changing what an event means stays with catalog.manage.
+	mux.HandleFunc("POST "+b+"/events/{event}/approve", s.onBrand(auth.ScopeCustomersManage, s.approveEventName))
 }
 
 var (
@@ -245,11 +271,27 @@ var builtinOptionSets = func() []optionSetView {
 
 // ---- Loading ----
 
-// catalog is a workspace's whole catalog: the built-ins plus its own.
+// catalog is a brand's whole catalog: the built-ins plus its own.
 type catalog struct {
 	Types      []recordTypeView      `json:"types"`
 	OptionSets []optionSetView       `json:"option_sets"`
 	Events     []eventDefinitionView `json:"events"`
+	// Brand is the brand it belongs to, or "" for a workspace with no
+	// brand. Identity matching for writes that use the catalog happens in
+	// it too.
+	Brand string `json:"-"`
+}
+
+// catalogBrand resolves the brand whose catalog to use: brand when it is
+// one of the workspace's, else the workspace's first. It is nil only for a
+// workspace with no brand, which sign-up no longer leaves.
+func catalogBrand(ctx context.Context, q interface {
+	QueryRow(context.Context, string, ...any) pgx.Row
+}, ws, brand string) (*string, error) {
+	var id *string
+	err := q.QueryRow(ctx, `SELECT COALESCE((SELECT id FROM brands WHERE workspace_id = $1 AND id::text = $2), outflare_first_brand($1))::text`,
+		ws, brand).Scan(&id)
+	return id, err
 }
 
 func (c *catalog) recordType(key string) *recordTypeView {
@@ -279,15 +321,21 @@ func (t *recordTypeView) field(key string) *fieldView {
 	return nil
 }
 
-// loadCatalog reads the workspace's catalog. Events are left out unless
-// withEvents, since record writes do not need them.
-func loadCatalog(ctx context.Context, q pgx.Tx, ws string, withEvents bool) (*catalog, error) {
-	c := &catalog{}
+// loadCatalog reads one brand's catalog (catalogBrand: "" is the
+// workspace's first). Events are left out unless withEvents, since record
+// writes do not need them.
+func loadCatalog(ctx context.Context, q pgx.Tx, ws, brand string, withEvents bool) (*catalog, error) {
+	b, err := catalogBrand(ctx, q, ws, brand)
+	if err != nil {
+		return nil, err
+	}
+	c := &catalog{Brand: deref(b)}
 	for _, t := range builtinTypes {
 		t.Fields = slices.Clone(t.Fields)
 		c.Types = append(c.Types, t)
 	}
-	rows, err := q.Query(ctx, `SELECT key, name, plural, description, archived_at IS NOT NULL FROM record_types WHERE workspace_id = $1 ORDER BY created_at, key`, ws)
+	rows, err := q.Query(ctx, `SELECT key, name, plural, description, archived_at IS NOT NULL FROM record_types
+		WHERE workspace_id = $1 AND brand_id IS NOT DISTINCT FROM $2::uuid ORDER BY created_at, key`, ws, b)
 	if err != nil {
 		return nil, err
 	}
@@ -304,7 +352,7 @@ func loadCatalog(ctx context.Context, q pgx.Tx, ws string, withEvents bool) (*ca
 	rows, err = q.Query(ctx, `
 		SELECT record_type, key, label, description, value_type, option_set, multiple, target_type, write_policy, precedence,
 		       sensitivity, filterable, archived_at IS NOT NULL
-		FROM field_definitions WHERE workspace_id = $1 ORDER BY created_at, key`, ws)
+		FROM field_definitions WHERE workspace_id = $1 AND brand_id IS NOT DISTINCT FROM $2::uuid ORDER BY created_at, key`, ws, b)
 	if err != nil {
 		return nil, err
 	}
@@ -323,7 +371,7 @@ func loadCatalog(ctx context.Context, q pgx.Tx, ws string, withEvents bool) (*ca
 	}
 	for _, f := range fields {
 		if t := c.recordType(f.recordType); t != nil {
-			// A workspace field made before a built-in of the same key
+			// A brand's field made before a built-in of the same key
 			// existed keeps its place: the built-in steps aside for it.
 			if slices.Contains(lateBuiltins, f.Key) {
 				t.Fields = slices.DeleteFunc(t.Fields, func(b fieldView) bool { return b.Builtin && b.Key == f.Key })
@@ -332,7 +380,8 @@ func loadCatalog(ctx context.Context, q pgx.Tx, ws string, withEvents bool) (*ca
 		}
 	}
 	c.OptionSets = slices.Clone(builtinOptionSets)
-	rows, err = q.Query(ctx, `SELECT key, name, options FROM option_sets WHERE workspace_id = $1 ORDER BY created_at, key`, ws)
+	rows, err = q.Query(ctx, `SELECT key, name, options FROM option_sets WHERE workspace_id = $1 AND brand_id IS NOT DISTINCT FROM $2::uuid
+		ORDER BY created_at, key`, ws, b)
 	if err != nil {
 		return nil, err
 	}
@@ -345,9 +394,9 @@ func loadCatalog(ctx context.Context, q pgx.Tx, ws string, withEvents bool) (*ca
 		return nil, err
 	}
 	for _, o := range sets {
-		// Likewise a workspace's own set: the built-in set steps aside, and
+		// Likewise a brand's own set: the built-in set steps aside, and
 		// so do the built-in fields that use it, since their values would
-		// not fit the workspace's options.
+		// not fit the brand's options.
 		if slices.Contains(lateOptionSets, o.Key) {
 			c.OptionSets = slices.DeleteFunc(c.OptionSets, func(b optionSetView) bool { return b.Builtin && b.Key == o.Key })
 			for i := range c.Types {
@@ -360,18 +409,21 @@ func loadCatalog(ctx context.Context, q pgx.Tx, ws string, withEvents bool) (*ca
 	c.OptionSets = append(c.OptionSets, sets...)
 	c.Events = []eventDefinitionView{}
 	if withEvents {
-		if c.Events, err = loadEventDefinitions(ctx, q, ws, nil, ""); err != nil {
+		if c.Events, err = loadEventDefinitions(ctx, q, ws, c.Brand, nil, ""); err != nil {
 			return nil, err
 		}
 	}
 	return c, nil
 }
 
-func loadEventDefinitions(ctx context.Context, q pgx.Tx, ws string, name *string, status string) ([]eventDefinitionView, error) {
+// loadEventDefinitions reads a brand's event definitions; brand is a
+// resolved id (catalog.Brand).
+func loadEventDefinitions(ctx context.Context, q pgx.Tx, ws, brand string, name *string, status string) ([]eventDefinitionView, error) {
 	rows, err := q.Query(ctx, `
 		SELECT name, label, description, properties, status, sensitivity, first_seen_at, last_seen_at, seen_count, created_at, updated_at
-		FROM event_definitions WHERE workspace_id = $1 AND ($2::text IS NULL OR name = $2) AND ($3 = '' OR status = $3)
-		ORDER BY name`, ws, name, status)
+		FROM event_definitions WHERE workspace_id = $1 AND brand_id IS NOT DISTINCT FROM NULLIF($4, '')::uuid
+		  AND ($2::text IS NULL OR name = $2) AND ($3 = '' OR status = $3)
+		ORDER BY name`, ws, name, status, brand)
 	if err != nil {
 		return nil, err
 	}
@@ -383,23 +435,75 @@ func loadEventDefinitions(ctx context.Context, q pgx.Tx, ws string, name *string
 	})
 }
 
-// readCatalog loads the catalog in its own read-only transaction.
-func (s *Server) readCatalog(ctx context.Context, ws string, withEvents bool) (*catalog, error) {
+// readCatalog loads a brand's catalog in its own read-only transaction.
+func (s *Server) readCatalog(ctx context.Context, ws, brand string, withEvents bool) (*catalog, error) {
 	var c *catalog
 	err := pgx.BeginTxFunc(ctx, s.pool, pgx.TxOptions{AccessMode: pgx.ReadOnly}, func(tx pgx.Tx) error {
 		var err error
-		c, err = loadCatalog(ctx, tx, ws, withEvents)
+		c, err = loadCatalog(ctx, tx, ws, brand, withEvents)
 		return err
 	})
 	return c, err
 }
 
+// recordBrandOf is a record's brand, or "" (the workspace's first brand's
+// catalog) when it has none.
+func recordBrandOf(ctx context.Context, tx pgx.Tx, id string) string {
+	var b *string
+	_ = tx.QueryRow(ctx, `SELECT brand_id::text FROM records WHERE id = $1`, id).Scan(&b)
+	return deref(b)
+}
+
+// requestBrand is the brand a catalog request acts on: the path's on a
+// brand route; on a workspace route, for a read, the one ?brand= picks;
+// otherwise "" (the workspace's first), or a brand-limited caller's own
+// brand when it can't see the first.
+func (s *Server) requestBrand(w http.ResponseWriter, r *http.Request, read bool) (string, bool) {
+	a := accessFrom(r.Context())
+	if a.Brand != "" {
+		return a.Brand, true
+	}
+	if read {
+		sel, ok := s.brandFilter(w, r)
+		if !ok {
+			return "", false
+		}
+		if sel.id != "" && sel.id != "none" {
+			return sel.id, true
+		}
+	}
+	if a.Brands != nil {
+		first, err := catalogBrand(r.Context(), s.pool, a.WorkspaceID, "")
+		if err != nil {
+			s.internal(w, r, err)
+			return "", false
+		}
+		if first == nil || !slices.Contains(a.Brands, *first) {
+			return a.Brands[0], true
+		}
+	}
+	return "", true
+}
+
+// requestCatalog loads the catalog a read acts on.
+func (s *Server) requestCatalog(w http.ResponseWriter, r *http.Request, read, withEvents bool) (*catalog, bool) {
+	brand, ok := s.requestBrand(w, r, read)
+	if !ok {
+		return nil, false
+	}
+	c, err := s.readCatalog(r.Context(), accessFrom(r.Context()).WorkspaceID, brand, withEvents)
+	if err != nil {
+		s.internal(w, r, err)
+		return nil, false
+	}
+	return c, true
+}
+
 // ---- Handlers ----
 
 func (s *Server) getCatalog(w http.ResponseWriter, r *http.Request) {
-	c, err := s.readCatalog(r.Context(), accessFrom(r.Context()).WorkspaceID, true)
-	if err != nil {
-		s.internal(w, r, err)
+	c, ok := s.requestCatalog(w, r, true, true)
+	if !ok {
 		return
 	}
 	if r.URL.Query().Get("archived") != "true" {
@@ -421,9 +525,8 @@ func (c *catalog) hideArchived() {
 }
 
 func (s *Server) listRecordTypes(w http.ResponseWriter, r *http.Request) {
-	c, err := s.readCatalog(r.Context(), accessFrom(r.Context()).WorkspaceID, false)
-	if err != nil {
-		s.internal(w, r, err)
+	c, ok := s.requestCatalog(w, r, true, false)
+	if !ok {
 		return
 	}
 	if r.URL.Query().Get("archived") != "true" {
@@ -433,10 +536,11 @@ func (s *Server) listRecordTypes(w http.ResponseWriter, r *http.Request) {
 }
 
 // typeFor loads the {type} path value's record type, or writes a 404.
-func (s *Server) typeFor(w http.ResponseWriter, r *http.Request) (*catalog, *recordTypeView, bool) {
-	c, err := s.readCatalog(r.Context(), accessFrom(r.Context()).WorkspaceID, false)
-	if err != nil {
-		s.internal(w, r, err)
+// read says the request is a read, which ?brand= may point at another
+// brand on a workspace route.
+func (s *Server) typeFor(w http.ResponseWriter, r *http.Request, read bool) (*catalog, *recordTypeView, bool) {
+	c, ok := s.requestCatalog(w, r, read, false)
+	if !ok {
 		return nil, nil, false
 	}
 	t := c.recordType(r.PathValue("type"))
@@ -448,7 +552,7 @@ func (s *Server) typeFor(w http.ResponseWriter, r *http.Request) (*catalog, *rec
 }
 
 func (s *Server) getRecordType(w http.ResponseWriter, r *http.Request) {
-	if _, t, ok := s.typeFor(w, r); ok {
+	if _, t, ok := s.typeFor(w, r, true); ok {
 		writeJSON(w, http.StatusOK, t)
 	}
 }
@@ -511,6 +615,10 @@ func (s *Server) createRecordType(w http.ResponseWriter, r *http.Request) {
 	if req.Description != nil {
 		description = *req.Description
 	}
+	brand, ok := s.requestBrand(w, r, false)
+	if !ok {
+		return
+	}
 	ctx := r.Context()
 	var view *recordTypeView
 	err := pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
@@ -519,18 +627,24 @@ func (s *Server) createRecordType(w http.ResponseWriter, r *http.Request) {
 				return errInvalid(key + " is a built-in record type")
 			}
 		}
-		if _, err := tx.Exec(ctx, `INSERT INTO record_types (workspace_id, key, name, plural, description, created_by) VALUES ($1, $2, $3, $4, $5, $6)`,
-			a.WorkspaceID, key, *req.Name, plural, description, a.ActorID); err != nil {
+		c, err := loadCatalog(ctx, tx, a.WorkspaceID, brand, false)
+		if err != nil {
+			return err
+		}
+		if c.recordType(key) != nil {
+			return errInvalid("a record type with key " + key + " already exists")
+		}
+		if _, err := tx.Exec(ctx, `INSERT INTO record_types (workspace_id, brand_id, key, name, plural, description, created_by) VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+			a.WorkspaceID, nullIfEmpty(c.Brand), key, *req.Name, plural, description, a.ActorID); err != nil {
 			if isUnique(err) {
 				return errInvalid("a record type with key " + key + " already exists")
 			}
 			return err
 		}
-		if err := record(ctx, tx, &a.principal, a.WorkspaceID, "record_type.created", "record_type", key, map[string]any{}); err != nil {
+		if err := record(ctx, tx, &a.principal, a.WorkspaceID, "record_type.created", "record_type", key, catalogData(c, nil)); err != nil {
 			return err
 		}
-		c, err := loadCatalog(ctx, tx, a.WorkspaceID, false)
-		if err == nil {
+		if c, err = loadCatalog(ctx, tx, a.WorkspaceID, c.Brand, false); err == nil {
 			view = c.recordType(key)
 		}
 		return err
@@ -554,7 +668,7 @@ func (s *Server) updateRecordType(w http.ResponseWriter, r *http.Request) {
 	if err := req.validate(); s.allocError(w, r, err) {
 		return
 	}
-	_, t, ok := s.typeFor(w, r)
+	c, t, ok := s.typeFor(w, r, false)
 	if !ok {
 		return
 	}
@@ -573,17 +687,18 @@ func (s *Server) updateRecordType(w http.ResponseWriter, r *http.Request) {
 			UPDATE record_types SET name = COALESCE($3, name), plural = COALESCE($4, plural), description = COALESCE($5, description),
 				archived_at = CASE WHEN $6::text = 'true' THEN COALESCE(archived_at, now()) WHEN $6::text = 'false' THEN NULL ELSE archived_at END,
 				updated_at = now()
-			WHERE workspace_id = $1 AND key = $2`, a.WorkspaceID, t.Key, req.Name, req.Plural, req.Description, fmt.Sprint(archivedAt)); err != nil {
+			WHERE workspace_id = $1 AND brand_id IS NOT DISTINCT FROM NULLIF($7, '')::uuid AND key = $2`,
+			a.WorkspaceID, t.Key, req.Name, req.Plural, req.Description, fmt.Sprint(archivedAt), c.Brand); err != nil {
 			return err
 		}
 		action := "record_type.updated"
 		if req.Archived != nil && *req.Archived != t.Archived {
 			action = map[bool]string{true: "record_type.archived", false: "record_type.restored"}[*req.Archived]
 		}
-		if err := record(ctx, tx, &a.principal, a.WorkspaceID, action, "record_type", t.Key, map[string]any{}); err != nil {
+		if err := record(ctx, tx, &a.principal, a.WorkspaceID, action, "record_type", t.Key, catalogData(c, nil)); err != nil {
 			return err
 		}
-		c, err := loadCatalog(ctx, tx, a.WorkspaceID, false)
+		c, err := loadCatalog(ctx, tx, a.WorkspaceID, c.Brand, false)
 		if err == nil {
 			view = c.recordType(t.Key)
 		}
@@ -663,7 +778,7 @@ func (s *Server) createField(w http.ResponseWriter, r *http.Request) {
 	if err := req.validateCommon(); s.allocError(w, r, err) {
 		return
 	}
-	c, t, ok := s.typeFor(w, r)
+	c, t, ok := s.typeFor(w, r, false)
 	if !ok {
 		return
 	}
@@ -730,22 +845,22 @@ func (s *Server) createField(w http.ResponseWriter, r *http.Request) {
 	var view *fieldView
 	err = pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
 		if _, err := tx.Exec(ctx, `
-			INSERT INTO field_definitions (workspace_id, record_type, key, label, description, value_type, option_set, multiple, target_type,
+			INSERT INTO field_definitions (workspace_id, brand_id, record_type, key, label, description, value_type, option_set, multiple, target_type,
 				write_policy, precedence, sensitivity, filterable, created_by)
-			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)`,
+			VALUES ($1, $15, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)`,
 			a.WorkspaceID, t.Key, key, *req.Label, description, vt, req.OptionSet, multiple, req.TargetType, policy, precedence, sensitivity,
-			req.Filterable != nil && *req.Filterable, a.ActorID); err != nil {
+			req.Filterable != nil && *req.Filterable, a.ActorID, nullIfEmpty(c.Brand)); err != nil {
 			if isUnique(err) {
 				return errInvalid(t.Name + " already has a field " + key)
 			}
 			return err
 		}
-		if err := record(ctx, tx, &a.principal, a.WorkspaceID, "field.created", "field", t.Key+"."+key, map[string]any{
+		if err := record(ctx, tx, &a.principal, a.WorkspaceID, "field.created", "field", t.Key+"."+key, catalogData(c, map[string]any{
 			"record_type": t.Key, "value_type": vt, "multiple": multiple,
-		}); err != nil {
+		})); err != nil {
 			return err
 		}
-		c, err := loadCatalog(ctx, tx, a.WorkspaceID, false)
+		c, err := loadCatalog(ctx, tx, a.WorkspaceID, c.Brand, false)
 		if err == nil {
 			view = c.recordType(t.Key).field(key)
 		}
@@ -770,7 +885,7 @@ func (s *Server) updateField(w http.ResponseWriter, r *http.Request) {
 	if err := req.validateCommon(); s.allocError(w, r, err) {
 		return
 	}
-	_, t, ok := s.typeFor(w, r)
+	c, t, ok := s.typeFor(w, r, false)
 	if !ok {
 		return
 	}
@@ -796,18 +911,18 @@ func (s *Server) updateField(w http.ResponseWriter, r *http.Request) {
 				filterable = COALESCE($9, filterable),
 				archived_at = CASE WHEN $10 = 'true' THEN COALESCE(archived_at, now()) WHEN $10 = 'false' THEN NULL ELSE archived_at END,
 				updated_at = now()
-			WHERE workspace_id = $1 AND record_type = $2 AND key = $3`,
-			a.WorkspaceID, t.Key, f.Key, req.Label, req.Description, req.WritePolicy, req.Precedence, req.Sensitivity, req.Filterable, archived); err != nil {
+			WHERE workspace_id = $1 AND brand_id IS NOT DISTINCT FROM NULLIF($11, '')::uuid AND record_type = $2 AND key = $3`,
+			a.WorkspaceID, t.Key, f.Key, req.Label, req.Description, req.WritePolicy, req.Precedence, req.Sensitivity, req.Filterable, archived, c.Brand); err != nil {
 			return err
 		}
 		action := "field.updated"
 		if req.Archived != nil && *req.Archived != f.Archived {
 			action = map[bool]string{true: "field.archived", false: "field.restored"}[*req.Archived]
 		}
-		if err := record(ctx, tx, &a.principal, a.WorkspaceID, action, "field", t.Key+"."+f.Key, map[string]any{"record_type": t.Key}); err != nil {
+		if err := record(ctx, tx, &a.principal, a.WorkspaceID, action, "field", t.Key+"."+f.Key, catalogData(c, map[string]any{"record_type": t.Key})); err != nil {
 			return err
 		}
-		c, err := loadCatalog(ctx, tx, a.WorkspaceID, false)
+		c, err := loadCatalog(ctx, tx, a.WorkspaceID, c.Brand, false)
 		if err == nil {
 			view = c.recordType(t.Key).field(f.Key)
 		}
@@ -822,9 +937,8 @@ func (s *Server) updateField(w http.ResponseWriter, r *http.Request) {
 // ---- Option lists ----
 
 func (s *Server) listOptionSets(w http.ResponseWriter, r *http.Request) {
-	c, err := s.readCatalog(r.Context(), accessFrom(r.Context()).WorkspaceID, false)
-	if err != nil {
-		s.internal(w, r, err)
+	c, ok := s.requestCatalog(w, r, true, false)
+	if !ok {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"data": c.OptionSets})
@@ -908,16 +1022,27 @@ func (s *Server) createOptionSet(w http.ResponseWriter, r *http.Request) {
 	if options == nil {
 		options = []catalogOption{}
 	}
+	brand, ok := s.requestBrand(w, r, false)
+	if !ok {
+		return
+	}
 	ctx := r.Context()
 	err := pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
-		if _, err := tx.Exec(ctx, `INSERT INTO option_sets (workspace_id, key, name, options, created_by) VALUES ($1, $2, $3, $4, $5)`,
-			a.WorkspaceID, key, name, options, a.ActorID); err != nil {
+		c, err := loadCatalog(ctx, tx, a.WorkspaceID, brand, false)
+		if err != nil {
+			return err
+		}
+		if c.optionSet(key) != nil {
+			return errInvalid("an option list with key " + key + " already exists")
+		}
+		if _, err := tx.Exec(ctx, `INSERT INTO option_sets (workspace_id, brand_id, key, name, options, created_by) VALUES ($1, $2, $3, $4, $5, $6)`,
+			a.WorkspaceID, nullIfEmpty(c.Brand), key, name, options, a.ActorID); err != nil {
 			if isUnique(err) {
 				return errInvalid("an option list with key " + key + " already exists")
 			}
 			return err
 		}
-		return record(ctx, tx, &a.principal, a.WorkspaceID, "option_set.created", "option_set", key, map[string]any{"options": len(options)})
+		return record(ctx, tx, &a.principal, a.WorkspaceID, "option_set.created", "option_set", key, catalogData(c, map[string]any{"options": len(options)}))
 	})
 	if s.allocError(w, r, err) {
 		return
@@ -946,11 +1071,20 @@ func (s *Server) updateOptionSet(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	brand, ok := s.requestBrand(w, r, false)
+	if !ok {
+		return
+	}
 	ctx := r.Context()
 	var view optionSetView
 	err := pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
-		err := tx.QueryRow(ctx, `SELECT key, name, options FROM option_sets WHERE workspace_id = $1 AND key = $2 FOR UPDATE`, a.WorkspaceID, key).
-			Scan(&view.Key, &view.Name, &view.Options)
+		b, err := catalogBrand(ctx, tx, a.WorkspaceID, brand)
+		if err != nil {
+			return err
+		}
+		c := &catalog{Brand: deref(b)}
+		err = tx.QueryRow(ctx, `SELECT key, name, options FROM option_sets WHERE workspace_id = $1 AND brand_id IS NOT DISTINCT FROM $3::uuid AND key = $2 FOR UPDATE`,
+			a.WorkspaceID, key, b).Scan(&view.Key, &view.Name, &view.Options)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return errNotFound
 		}
@@ -965,11 +1099,12 @@ func (s *Server) updateOptionSet(w http.ResponseWriter, r *http.Request) {
 				return err
 			}
 		}
-		if _, err := tx.Exec(ctx, `UPDATE option_sets SET name = $3, options = $4, updated_at = now() WHERE workspace_id = $1 AND key = $2`,
-			a.WorkspaceID, key, view.Name, view.Options); err != nil {
+		if _, err := tx.Exec(ctx, `UPDATE option_sets SET name = $3, options = $4, updated_at = now()
+			WHERE workspace_id = $1 AND brand_id IS NOT DISTINCT FROM $5::uuid AND key = $2`,
+			a.WorkspaceID, key, view.Name, view.Options, b); err != nil {
 			return err
 		}
-		return record(ctx, tx, &a.principal, a.WorkspaceID, "option_set.updated", "option_set", key, map[string]any{"options": len(view.Options)})
+		return record(ctx, tx, &a.principal, a.WorkspaceID, "option_set.updated", "option_set", key, catalogData(c, map[string]any{"options": len(view.Options)}))
 	})
 	if s.allocError(w, r, err) {
 		return
@@ -985,10 +1120,17 @@ func (s *Server) listEventDefinitions(w http.ResponseWriter, r *http.Request) {
 		writeError(w, r, http.StatusBadRequest, "invalid_request", "status is quarantined, approved or deprecated")
 		return
 	}
+	brand, ok := s.requestBrand(w, r, true)
+	if !ok {
+		return
+	}
 	var list []eventDefinitionView
 	err := pgx.BeginTxFunc(r.Context(), s.pool, pgx.TxOptions{AccessMode: pgx.ReadOnly}, func(tx pgx.Tx) error {
-		var err error
-		list, err = loadEventDefinitions(r.Context(), tx, accessFrom(r.Context()).WorkspaceID, nil, status)
+		ws := accessFrom(r.Context()).WorkspaceID
+		b, err := catalogBrand(r.Context(), tx, ws, brand)
+		if err == nil {
+			list, err = loadEventDefinitions(r.Context(), tx, ws, deref(b), nil, status)
+		}
 		return err
 	})
 	if err != nil {
@@ -1072,32 +1214,72 @@ func (s *Server) createEventDefinition(w http.ResponseWriter, r *http.Request) {
 	if req.Properties != nil {
 		props = *req.Properties
 	}
+	brand, ok := s.requestBrand(w, r, false)
+	if !ok {
+		return
+	}
 	ctx := r.Context()
 	var view eventDefinitionView
 	err := pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
+		b, err := catalogBrand(ctx, tx, a.WorkspaceID, brand)
+		if err != nil {
+			return err
+		}
+		if err := eventNameFree(ctx, tx, a.WorkspaceID, deref(b), *req.Name); err != nil {
+			return err
+		}
 		if _, err := tx.Exec(ctx, `
-			INSERT INTO event_definitions (workspace_id, name, label, description, properties, status, sensitivity, created_by)
-			VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`, a.WorkspaceID, *req.Name, label, description, props, status, sensitivity, a.ActorID); err != nil {
+			INSERT INTO event_definitions (workspace_id, brand_id, name, label, description, properties, status, sensitivity, created_by)
+			VALUES ($1, $9, $2, $3, $4, $5, $6, $7, $8)`, a.WorkspaceID, *req.Name, label, description, props, status, sensitivity, a.ActorID, b); err != nil {
 			if isUnique(err) {
 				return errInvalid("event " + *req.Name + " is already defined; change it with PATCH")
 			}
 			return err
 		}
-		if err := record(ctx, tx, &a.principal, a.WorkspaceID, "event_definition.created", "event_definition", *req.Name, map[string]any{
+		if err := record(ctx, tx, &a.principal, a.WorkspaceID, "event_definition.created", "event_definition", *req.Name, catalogData(&catalog{Brand: deref(b)}, map[string]any{
 			"properties": len(props), "status": status,
-		}); err != nil {
+		})); err != nil {
 			return err
 		}
-		list, err := loadEventDefinitions(ctx, tx, a.WorkspaceID, req.Name, "")
+		list, err := loadEventDefinitions(ctx, tx, a.WorkspaceID, deref(b), req.Name, "")
 		if err == nil && len(list) == 1 {
 			view = list[0]
 		}
 		return err
 	})
-	if s.allocError(w, r, err) {
+	if s.recordError(w, r, err) {
 		return
 	}
 	writeJSON(w, http.StatusCreated, view)
+}
+
+// eventNameFree refuses a name another brand of the workspace defines.
+// Until the contract step of plans/brands/README.md, event_definitions
+// keeps its per-workspace unique constraint (the version before this one
+// upserts against it), so a name is defined in one brand at a time.
+func eventNameFree(ctx context.Context, tx pgx.Tx, ws, brand, name string) error {
+	var other bool
+	if err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM event_definitions WHERE workspace_id = $1 AND name = $2
+		AND brand_id IS DISTINCT FROM NULLIF($3, '')::uuid)`, ws, name, brand).Scan(&other); err != nil {
+		return err
+	}
+	if other {
+		return recordConflict{"event_name_in_other_brand", "another brand of this workspace defines " + name +
+			"; for now an event name is defined in one brand at a time, so rename the event in this brand's product, or deprecate it in the other brand and ask support to move it"}
+	}
+	return nil
+}
+
+// catalogData is a catalog change's audit data, with the brand it belongs
+// to.
+func catalogData(c *catalog, data map[string]any) map[string]any {
+	if data == nil {
+		data = map[string]any{}
+	}
+	if c != nil && c.Brand != "" {
+		data["brand_id"] = c.Brand
+	}
+	return data
 }
 
 func (s *Server) updateEventDefinition(w http.ResponseWriter, r *http.Request) {
@@ -1113,13 +1295,25 @@ func (s *Server) updateEventDefinition(w http.ResponseWriter, r *http.Request) {
 	if err := req.validate(); s.allocError(w, r, err) {
 		return
 	}
+	brand, ok := s.requestBrand(w, r, false)
+	if !ok {
+		return
+	}
 	name := r.PathValue("event")
 	ctx := r.Context()
 	var view eventDefinitionView
 	err := pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
+		b, err := catalogBrand(ctx, tx, a.WorkspaceID, brand)
+		if err != nil {
+			return err
+		}
 		var before string
-		err := tx.QueryRow(ctx, `SELECT status FROM event_definitions WHERE workspace_id = $1 AND name = $2 FOR UPDATE`, a.WorkspaceID, name).Scan(&before)
+		err = tx.QueryRow(ctx, `SELECT status FROM event_definitions WHERE workspace_id = $1 AND brand_id IS NOT DISTINCT FROM $3::uuid AND name = $2 FOR UPDATE`,
+			a.WorkspaceID, name, b).Scan(&before)
 		if errors.Is(err, pgx.ErrNoRows) {
+			if err := eventNameFree(ctx, tx, a.WorkspaceID, deref(b), name); err != nil {
+				return err
+			}
 			return errNotFound
 		}
 		if err != nil {
@@ -1128,23 +1322,76 @@ func (s *Server) updateEventDefinition(w http.ResponseWriter, r *http.Request) {
 		if _, err := tx.Exec(ctx, `
 			UPDATE event_definitions SET label = COALESCE($3, label), description = COALESCE($4, description),
 				properties = COALESCE($5, properties), status = COALESCE($6, status), sensitivity = COALESCE($7, sensitivity), updated_at = now()
-			WHERE workspace_id = $1 AND name = $2`, a.WorkspaceID, name, req.Label, req.Description, req.Properties, req.Status, req.Sensitivity); err != nil {
+			WHERE workspace_id = $1 AND brand_id IS NOT DISTINCT FROM $8::uuid AND name = $2`,
+			a.WorkspaceID, name, req.Label, req.Description, req.Properties, req.Status, req.Sensitivity, b); err != nil {
 			return err
 		}
 		action := "event_definition.updated"
 		if req.Status != nil && *req.Status != before {
 			action = "event_definition." + map[string]string{"approved": "approved", "quarantined": "quarantined", "deprecated": "deprecated"}[*req.Status]
 		}
-		if err := record(ctx, tx, &a.principal, a.WorkspaceID, action, "event_definition", name, map[string]any{}); err != nil {
+		if err := record(ctx, tx, &a.principal, a.WorkspaceID, action, "event_definition", name, catalogData(&catalog{Brand: deref(b)}, nil)); err != nil {
 			return err
 		}
-		list, err := loadEventDefinitions(ctx, tx, a.WorkspaceID, &name, "")
+		list, err := loadEventDefinitions(ctx, tx, a.WorkspaceID, deref(b), &name, "")
 		if err == nil && len(list) == 1 {
 			view = list[0]
 		}
 		return err
 	})
-	if s.allocError(w, r, err) {
+	if s.recordError(w, r, err) {
+		return
+	}
+	writeJSON(w, http.StatusOK, view)
+}
+
+// approveEventName approves a track name for the brand, defining it when
+// the brand has only seen it held. It changes nothing else about the
+// event, so it needs customers.manage, not catalog.manage.
+func (s *Server) approveEventName(w http.ResponseWriter, r *http.Request) {
+	a := accessFrom(r.Context())
+	name := r.PathValue("event")
+	if !eventName.MatchString(name) || len(name) > 100 {
+		writeError(w, r, http.StatusBadRequest, "invalid_request", "event is a catalog name: lowercase words joined by dots, such as order_completed")
+		return
+	}
+	ctx := r.Context()
+	var view eventDefinitionView
+	err := pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
+		var before *string
+		err := tx.QueryRow(ctx, `SELECT status FROM event_definitions WHERE workspace_id = $1 AND brand_id = $2 AND name = $3 FOR UPDATE`,
+			a.WorkspaceID, a.Brand, name).Scan(&before)
+		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+			return err
+		}
+		switch {
+		case before == nil:
+			if err := eventNameFree(ctx, tx, a.WorkspaceID, a.Brand, name); err != nil {
+				return err
+			}
+			if _, err := tx.Exec(ctx, `INSERT INTO event_definitions (workspace_id, brand_id, name, status, created_by) VALUES ($1, $2, $3, 'approved', $4)`,
+				a.WorkspaceID, a.Brand, name, nullIfEmpty(a.ActorID)); err != nil {
+				return err
+			}
+		case *before != "approved":
+			if _, err := tx.Exec(ctx, `UPDATE event_definitions SET status = 'approved', updated_at = now() WHERE workspace_id = $1 AND brand_id = $2 AND name = $3`,
+				a.WorkspaceID, a.Brand, name); err != nil {
+				return err
+			}
+		}
+		if before == nil || *before != "approved" {
+			if err := record(ctx, tx, &a.principal, a.WorkspaceID, "event_definition.approved", "event_definition", name,
+				map[string]any{"brand_id": a.Brand, "defined": before == nil}); err != nil {
+				return err
+			}
+		}
+		list, err := loadEventDefinitions(ctx, tx, a.WorkspaceID, a.Brand, &name, "")
+		if err == nil && len(list) == 1 {
+			view = list[0]
+		}
+		return err
+	})
+	if s.recordError(w, r, err) {
 		return
 	}
 	writeJSON(w, http.StatusOK, view)
