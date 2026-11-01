@@ -11584,31 +11584,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/v1/workspaces/{ws}/email-domains/{domain}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
-                ws: components["parameters"]["Workspace"];
-                /** @example proton.me */
-                domain: string;
-            };
-            cookie?: never;
-        };
-        /**
-         * What kind of email domain this is
-         * @description Scope: leads.read. The same answer as POST /classifications with `domain`, as a GET.
-         */
-        get: operations["getEmailDomain"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/v1/workspaces/{ws}/domain-lookups/{domain}": {
         parameters: {
             query?: never;
@@ -11623,8 +11598,7 @@ export interface paths {
         };
         /**
          * What kind of email domain this is
-         * @description Scope: leads.read. The same answer as GET /email-domains/{domain},
-         *     under a name that can't be mistaken for Lifecycle's email domains.
+         * @description Scope: leads.read. The same answer as POST /classifications with `domain`, as a GET.
          */
         get: operations["getDomainLookup"];
         put?: never;
@@ -18762,6 +18736,263 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/brands/{brand}/query/csv": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Download a query's results as CSV
+         * @description Scope: customers.read, and the read scope of each table the query reads. Runs the query exactly as
+         *     POST .../query does (one SELECT, this brand's rows only, 15 seconds at most) and answers its rows as a CSV
+         *     file to download: up to limit rows (default and at most 10,000, and 16 MB), a header row of column names,
+         *     jsonb as JSON and times as RFC 3339. Outflare-Query-Rows says how many rows it holds and
+         *     Outflare-Query-Truncated whether there were more. A cell that a spreadsheet would read as a formula starts
+         *     with '. Every download is recorded as query.exported in the activity log, without its SQL or rows; an
+         *     agent kept to missions downloads only inside one.
+         */
+        post: operations["exportBrandQuery"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/brands/{brand}/queries": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+            };
+            cookie?: never;
+        };
+        /**
+         * List saved queries
+         * @description Scope: customers.read. The brand's saved queries you can see, most recently changed first (at most 500): your
+         *     own private ones and every one shared with the brand. Archived ones are left out. Each comes with its current
+         *     SQL and chart; mine says it is yours, and can_edit whether you may change it.
+         */
+        get: operations["listSavedQueries"];
+        put?: never;
+        /**
+         * Save a query
+         * @description Scope: customers.manage. Saves SQL (and optionally how to chart its results) as version 1 of a new query for
+         *     this brand. It is private to you unless visibility is brand, which shares it with everyone who can query the
+         *     brand. The SQL isn't run: run it with POST .../queries/{saved_query}/run. A token that belongs to no person saves
+         *     only shared queries.
+         */
+        post: operations["createSavedQuery"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/brands/{brand}/queries/{saved_query}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                /** @description The saved query's id. */
+                saved_query: components["parameters"]["SavedQueryID"];
+            };
+            cookie?: never;
+        };
+        /**
+         * Get a saved query
+         * @description Scope: customers.read. A saved query with its current SQL and chart. Another person's private query is 404.
+         *     An archived one still opens, with archived_at set.
+         */
+        get: operations["getSavedQuery"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Change a saved query
+         * @description Scope: customers.manage. Send only what changes. A change to sql or chart makes a new version (note says what
+         *     it is), and the old one stays in the history; a new name or description doesn't. visibility shares the query
+         *     with the brand (brand) or makes it yours alone again (private), and only the person who saved it may change
+         *     it. Anyone with customers.manage may change a shared query. An archived query is 409 saved_query_archived.
+         */
+        patch: operations["updateSavedQuery"];
+        trace?: never;
+    };
+    "/v1/brands/{brand}/queries/{saved_query}/archive": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                /** @description The saved query's id. */
+                saved_query: components["parameters"]["SavedQueryID"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Archive a saved query
+         * @description Scope: customers.manage. Takes the query out of the list; it can no longer be changed or run, and its versions
+         *     are kept. You can archive your own queries and shared ones; a caller with workspace.manage (owners and admins)
+         *     can archive anyone's. Archiving an archived query changes nothing.
+         */
+        post: operations["archiveSavedQuery"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/brands/{brand}/queries/{saved_query}/versions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                /** @description The saved query's id. */
+                saved_query: components["parameters"]["SavedQueryID"];
+            };
+            cookie?: never;
+        };
+        /**
+         * List a saved query's versions
+         * @description Scope: customers.read. Every version of the query's SQL and chart, newest first (the newest 200), with who made
+         *     each, its note and which one is current.
+         */
+        get: operations["listSavedQueryVersions"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/brands/{brand}/queries/{saved_query}/versions/{version}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                /** @description The saved query's id. */
+                saved_query: components["parameters"]["SavedQueryID"];
+                /** @description The version's number, from 1. */
+                version: components["parameters"]["SavedQueryVersion"];
+            };
+            cookie?: never;
+        };
+        /**
+         * Get one version of a saved query
+         * @description Scope: customers.read. One version's SQL and chart.
+         */
+        get: operations["getSavedQueryVersion"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/brands/{brand}/queries/{saved_query}/versions/{version}/restore": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                /** @description The saved query's id. */
+                saved_query: components["parameters"]["SavedQueryID"];
+                /** @description The version's number, from 1. */
+                version: components["parameters"]["SavedQueryVersion"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Restore an old version of a saved query
+         * @description Scope: customers.manage. Makes a new version with this version's SQL and chart, so nothing in the history is
+         *     lost; restored_from says which. The current version is 409 conflict.
+         */
+        post: operations["restoreSavedQueryVersion"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/brands/{brand}/queries/{saved_query}/run": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                /** @description The saved query's id. */
+                saved_query: components["parameters"]["SavedQueryID"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Run a saved query
+         * @description Scope: customers.read, and the read scope of each table the query reads. Runs the current version (or version)
+         *     exactly as POST .../query runs SQL: this brand's rows only, whatever the SQL says, up to limit rows (default
+         *     100, at most 1000) and 15 seconds. It never changes anything, so an agent kept to missions may run it outside
+         *     one. An archived query is 409 saved_query_archived.
+         */
+        post: operations["runSavedQuery"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/brands/{brand}/queries/{saved_query}/csv": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                /** @description The saved query's id. */
+                saved_query: components["parameters"]["SavedQueryID"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Download a saved query's results as CSV
+         * @description Scope: customers.read. Runs the current version (or version) and answers its rows as a CSV file named after
+         *     the query, as POST .../query/csv does: up to limit rows (default and at most 10,000), recorded as
+         *     query.exported.
+         */
+        post: operations["exportSavedQuery"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/brands/{brand}/records/{record}/timeline": {
         parameters: {
             query?: never;
@@ -22536,6 +22767,81 @@ export interface paths {
         get: operations["listPartnerRewards"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/workspaces/{ws}/partner-leads": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+            };
+            cookie?: never;
+        };
+        /**
+         * List leads partners submitted, newest first
+         * @description Scope: partners.read. The people partners say they referred, submitted on the portal when its
+         *     lead_submissions setting is on: pending ones wait for you (review), approved ones are referrals via manual,
+         *     and rejected ones say why (your reason, or why it couldn't be taken, such as already_referred).
+         */
+        get: operations["listPartnerLeads"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/workspaces/{ws}/partner-leads/{id}/approve": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Take a submitted lead
+         * @description Scope: partners.manage. Binds the person to the partner as a referral (via manual), under the program's rules
+         *     and flows like any lead. When the program can't credit it (another partner referred them first, the partner
+         *     isn't active), the lead is rejected with that reason instead.
+         */
+        post: operations["approvePartnerLead"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/workspaces/{ws}/partner-leads/{id}/reject": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Turn down a submitted lead
+         * @description Scope: partners.manage. The partner sees it rejected, with your reason.
+         */
+        post: operations["rejectPartnerLead"];
         delete?: never;
         options?: never;
         head?: never;
@@ -30351,6 +30657,11 @@ export interface components {
             business_email_only?: boolean;
             /** @description A site key of the workspace (and of the program's brand, if any): the portal loads the workspace's own website script with it, so partners' visits show in its website analytics. The key takes events from the portal's address without adding it to its origins. "" for none. */
             site_key_id?: string;
+            /**
+             * @description Partners submit the email of someone they referred on the portal's Referrals page. review: each waits for you (GET .../partner-leads). auto: taken at once unless another partner has them. "": off.
+             * @enum {string}
+             */
+            lead_submissions?: "" | "review" | "auto";
             /** @description A Google Analytics 4 measurement id (G-...) to add to the portal. It loads through the website script, which holds it back until the visitor allows analytics where consent is needed, so it needs site_key_id. "" for none. */
             ga_measurement_id?: string;
             /** @description Discount offers from which active partners may generate codes; checkout creation requires the workspace billing connection. */
@@ -30859,6 +31170,37 @@ export interface components {
             };
             duration_ms: number;
             request_id: string;
+            /** Format: date-time */
+            created_at: string;
+        };
+        PartnerLead: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            program_id: string;
+            /** Format: uuid */
+            partner_id: string;
+            partner_name: string;
+            /**
+             * Format: uuid
+             * @description The person submitted, as a customer record.
+             */
+            record_id: string;
+            name: string;
+            email: string;
+            /** @description What the partner wrote about them. */
+            note: string;
+            /** @enum {string} */
+            status: "pending" | "approved" | "rejected";
+            /** @description Why it was rejected: your words, or a code such as already_referred. */
+            reason: string;
+            /**
+             * Format: uuid
+             * @description The referral it made, once approved.
+             */
+            referral_id: string | null;
+            /** Format: date-time */
+            decided_at: string | null;
             /** Format: date-time */
             created_at: string;
         };
@@ -38342,10 +38684,10 @@ export interface components {
          */
         Role: "owner" | "admin" | "operator" | "viewer";
         /**
-         * @description A starting role; member is the same as operator.
+         * @description A starting role. operator is shown as Member.
          * @enum {string}
          */
-        RoleRequest: "owner" | "admin" | "operator" | "member" | "viewer";
+        RoleRequest: "owner" | "admin" | "operator" | "viewer";
         WorkspaceRole: {
             /** @description A starting role's key (owner, admin, operator, viewer), or the id of a role the workspace made. */
             id: string;
@@ -38609,8 +38951,6 @@ export interface components {
                 name?: string;
                 confirmed?: boolean;
             } | null;
-            /** Format: uuid */
-            suggested_sender_id: string | null;
             /** @description The sequence this mailbox sends for now. Null when free. */
             assignment: {
                 /** Format: uuid */
@@ -40975,6 +41315,74 @@ export interface components {
             truncated: boolean;
             duration_ms: number;
         };
+        /** @description How a query's results are drawn. */
+        QueryChart: {
+            /** @enum {string} */
+            type: "bar" | "line" | "area";
+            /** @description The column along the bottom. */
+            x: string;
+            /** @description The columns drawn */
+            y: string[];
+        };
+        SavedQuery: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            brand_id: string;
+            /** @example Signups by plan */
+            name: string;
+            description: string;
+            /**
+             * @description private: only its owner sees it; brand: shared with everyone who can query the brand.
+             * @enum {string}
+             */
+            visibility: "private" | "brand";
+            /**
+             * Format: uuid
+             * @description The person it belongs to.
+             */
+            owner_id: string | null;
+            /** @description It is yours. */
+            mine: boolean;
+            /** @description You may change it (customers.manage */
+            can_edit: boolean;
+            current_version: number;
+            /** @description The current version's SQL. */
+            sql: string;
+            chart: components["schemas"]["QueryChart"] | null;
+            /**
+             * Format: uuid
+             * @description The actor who saved it.
+             */
+            created_by: string | null;
+            /** Format: uuid */
+            updated_by: string | null;
+            /** Format: date-time */
+            archived_at: string | null;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            updated_at: string;
+        };
+        SavedQueryVersion: {
+            version: number;
+            sql: string;
+            chart: components["schemas"]["QueryChart"] | null;
+            note: string;
+            /** @description The version this one restored. */
+            restored_from: number | null;
+            current: boolean;
+            /** Format: uuid */
+            created_by: string | null;
+            /** Format: date-time */
+            created_at: string;
+        };
+        SavedQueryRun: components["schemas"]["QueryResult"] & {
+            /** Format: uuid */
+            saved_query_id: string;
+            /** @description The version that ran. */
+            version: number;
+        };
         Record: {
             /** Format: uuid */
             id: string;
@@ -42714,7 +43122,7 @@ export interface components {
              * @description Who set the category: the built-in rules, the AI, a person, an API token, or an agent running a mission.
              * @enum {string|null}
              */
-            category_source: "rules" | "ai" | "human" | "api_token" | "agent" | "system" | null;
+            category_source: "rules" | "ai" | "human" | "api_token" | "agent" | null;
             /**
              * Format: uuid
              * @description The member handling it.
@@ -44905,6 +45313,10 @@ export interface components {
         DataBrand: string;
         /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
         BrandID: string;
+        /** @description The saved query's id. */
+        SavedQueryID: string;
+        /** @description The version's number, from 1. */
+        SavedQueryVersion: number;
         /** @description The brand's id or handle. */
         BrandRef: string;
         /** @description The record type's key: person, account or the workspace's own. */
@@ -52932,8 +53344,6 @@ export interface operations {
         parameters: {
             query?: {
                 theme?: "light" | "dark";
-                /** @description Ignored; changes the address so old cached copies are dropped. */
-                v?: string;
             };
             header?: never;
             path: {
@@ -66624,33 +67034,6 @@ export interface operations {
             default: components["responses"]["Error"];
         };
     };
-    getEmailDomain: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
-                ws: components["parameters"]["Workspace"];
-                /** @example proton.me */
-                domain: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description The classification. */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Classification"];
-                };
-            };
-            400: components["responses"]["Error"];
-            default: components["responses"]["Error"];
-        };
-    };
     getDomainLookup: {
         parameters: {
             query?: never;
@@ -78493,6 +78876,429 @@ export interface operations {
             default: components["responses"]["Error"];
         };
     };
+    exportBrandQuery: {
+        parameters: {
+            query?: never;
+            header?: {
+                /**
+                 * @description Makes the write safe to retry. A repeat with the same key from the same caller within 24 hours gets the first
+                 *     answer back (with `Idempotent-Replayed: true`) instead of running again. The same key for a different request
+                 *     is refused with 422 `idempotency_key_reused`; while the first is still running, 409 `idempotency_in_progress`.
+                 *     Use a new random key, such as a UUID, for each distinct write.
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @description One SELECT, such as select name, email from people. */
+                    sql: string;
+                    /** @description Rows to write. Default 10000. */
+                    limit?: number;
+                };
+            };
+        };
+        responses: {
+            /** @description The CSV file. */
+            200: {
+                headers: {
+                    /** @description attachment; filename="outflare-query-<time>.csv" */
+                    "Content-Disposition"?: string;
+                    /** @description Rows in the file. */
+                    "Outflare-Query-Rows"?: number;
+                    /** @description There were more rows than limit */
+                    "Outflare-Query-Truncated"?: boolean;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/csv": string;
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            default: components["responses"]["Error"];
+        };
+    };
+    listSavedQueries: {
+        parameters: {
+            query?: {
+                /** @description Find queries whose name or description contains this. */
+                q?: string;
+                /** @description private: only your own private ones; brand: only shared ones. */
+                visibility?: "private" | "brand";
+            };
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The saved queries. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["SavedQuery"][];
+                    };
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    createSavedQuery: {
+        parameters: {
+            query?: never;
+            header?: {
+                /**
+                 * @description Makes the write safe to retry. A repeat with the same key from the same caller within 24 hours gets the first
+                 *     answer back (with `Idempotent-Replayed: true`) instead of running again. The same key for a different request
+                 *     is refused with 422 `idempotency_key_reused`; while the first is still running, 409 `idempotency_in_progress`.
+                 *     Use a new random key, such as a UUID, for each distinct write.
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    name: string;
+                    description?: string;
+                    sql: string;
+                    chart?: components["schemas"]["QueryChart"] | null;
+                    /**
+                     * @default private
+                     * @enum {string}
+                     */
+                    visibility?: "private" | "brand";
+                    /** @description What this version is */
+                    note?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The saved query. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SavedQuery"];
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            default: components["responses"]["Error"];
+        };
+    };
+    getSavedQuery: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                /** @description The saved query's id. */
+                saved_query: components["parameters"]["SavedQueryID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The saved query. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SavedQuery"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    updateSavedQuery: {
+        parameters: {
+            query?: never;
+            header?: {
+                /**
+                 * @description Makes the write safe to retry. A repeat with the same key from the same caller within 24 hours gets the first
+                 *     answer back (with `Idempotent-Replayed: true`) instead of running again. The same key for a different request
+                 *     is refused with 422 `idempotency_key_reused`; while the first is still running, 409 `idempotency_in_progress`.
+                 *     Use a new random key, such as a UUID, for each distinct write.
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                /** @description The saved query's id. */
+                saved_query: components["parameters"]["SavedQueryID"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    name?: string;
+                    description?: string;
+                    sql?: string;
+                    /** @description How to draw the results; null shows a table. */
+                    chart?: components["schemas"]["QueryChart"] | null;
+                    /** @enum {string} */
+                    visibility?: "private" | "brand";
+                    /** @description What the new version is */
+                    note?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The saved query. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SavedQuery"];
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            default: components["responses"]["Error"];
+        };
+    };
+    archiveSavedQuery: {
+        parameters: {
+            query?: never;
+            header?: {
+                /**
+                 * @description Makes the write safe to retry. A repeat with the same key from the same caller within 24 hours gets the first
+                 *     answer back (with `Idempotent-Replayed: true`) instead of running again. The same key for a different request
+                 *     is refused with 422 `idempotency_key_reused`; while the first is still running, 409 `idempotency_in_progress`.
+                 *     Use a new random key, such as a UUID, for each distinct write.
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                /** @description The saved query's id. */
+                saved_query: components["parameters"]["SavedQueryID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The archived query. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SavedQuery"];
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            default: components["responses"]["Error"];
+        };
+    };
+    listSavedQueryVersions: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                /** @description The saved query's id. */
+                saved_query: components["parameters"]["SavedQueryID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The versions. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["SavedQueryVersion"][];
+                    };
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    getSavedQueryVersion: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                /** @description The saved query's id. */
+                saved_query: components["parameters"]["SavedQueryID"];
+                /** @description The version's number, from 1. */
+                version: components["parameters"]["SavedQueryVersion"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The version. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SavedQueryVersion"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    restoreSavedQueryVersion: {
+        parameters: {
+            query?: never;
+            header?: {
+                /**
+                 * @description Makes the write safe to retry. A repeat with the same key from the same caller within 24 hours gets the first
+                 *     answer back (with `Idempotent-Replayed: true`) instead of running again. The same key for a different request
+                 *     is refused with 422 `idempotency_key_reused`; while the first is still running, 409 `idempotency_in_progress`.
+                 *     Use a new random key, such as a UUID, for each distinct write.
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                /** @description The saved query's id. */
+                saved_query: components["parameters"]["SavedQueryID"];
+                /** @description The version's number, from 1. */
+                version: components["parameters"]["SavedQueryVersion"];
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": {
+                    /** @description Shown in the history. Default: Restored version N. */
+                    note?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The saved query, on its new version. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SavedQuery"];
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            default: components["responses"]["Error"];
+        };
+    };
+    runSavedQuery: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                /** @description The saved query's id. */
+                saved_query: components["parameters"]["SavedQueryID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": {
+                    /** @description The version to run. Default the current one. */
+                    version?: number;
+                    /** @description Rows to return. Default 100. */
+                    limit?: number;
+                };
+            };
+        };
+        responses: {
+            /** @description The rows. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SavedQueryRun"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    exportSavedQuery: {
+        parameters: {
+            query?: never;
+            header?: {
+                /**
+                 * @description Makes the write safe to retry. A repeat with the same key from the same caller within 24 hours gets the first
+                 *     answer back (with `Idempotent-Replayed: true`) instead of running again. The same key for a different request
+                 *     is refused with 422 `idempotency_key_reused`; while the first is still running, 409 `idempotency_in_progress`.
+                 *     Use a new random key, such as a UUID, for each distinct write.
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                /** @description The saved query's id. */
+                saved_query: components["parameters"]["SavedQueryID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": {
+                    /** @description The version to run. Default the current one. */
+                    version?: number;
+                    /** @description Rows to write. Default 10000. */
+                    limit?: number;
+                };
+            };
+        };
+        responses: {
+            /** @description The CSV file. */
+            200: {
+                headers: {
+                    /** @description attachment; filename="<query name>-<time>.csv" */
+                    "Content-Disposition"?: string;
+                    /** @description Rows in the file. */
+                    "Outflare-Query-Rows"?: number;
+                    /** @description There were more rows than limit */
+                    "Outflare-Query-Truncated"?: boolean;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/csv": string;
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            default: components["responses"]["Error"];
+        };
+    };
     getBrandRecordTimeline: {
         parameters: {
             query?: {
@@ -85408,6 +86214,138 @@ export interface operations {
                 };
             };
             400: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    listPartnerLeads: {
+        parameters: {
+            query?: {
+                /** @description Only records of this brand: its id or handle, none for records shared by every brand, or all (the default). */
+                brand?: components["parameters"]["Brand"];
+                /** @description A program's id or slug. */
+                program?: string;
+                status?: "pending" | "approved" | "rejected";
+                limit?: number;
+                before?: string;
+                /**
+                 * @description next_cursor from the previous page, unchanged. Every paged list takes it, so one loop pages them all:
+                 *     call, then call again with cursor=next_cursor until next_cursor is null. Cursors are opaque; don't build them.
+                 */
+                cursor?: components["parameters"]["Cursor"];
+                /**
+                 * @description Only these fields of each item, comma separated (fields=id,email,status); id always comes back.
+                 *     Paging fields stay. A field the items don't have answers 400 naming the ones they do. Any GET takes it.
+                 */
+                fields?: components["parameters"]["Fields"];
+            };
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Submitted leads. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["PartnerLead"][];
+                        /** Format: date-time */
+                        next_before: string | null;
+                        next_cursor?: components["schemas"]["NextCursor"];
+                    };
+                };
+            };
+            400: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    approvePartnerLead: {
+        parameters: {
+            query?: never;
+            header?: {
+                /**
+                 * @description Makes the write safe to retry. A repeat with the same key from the same caller within 24 hours gets the first
+                 *     answer back (with `Idempotent-Replayed: true`) instead of running again. The same key for a different request
+                 *     is refused with 422 `idempotency_key_reused`; while the first is still running, 409 `idempotency_in_progress`.
+                 *     Use a new random key, such as a UUID, for each distinct write.
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": Record<string, never>;
+            };
+        };
+        responses: {
+            /** @description The lead, approved or rejected. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PartnerLead"];
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    rejectPartnerLead: {
+        parameters: {
+            query?: never;
+            header?: {
+                /**
+                 * @description Makes the write safe to retry. A repeat with the same key from the same caller within 24 hours gets the first
+                 *     answer back (with `Idempotent-Replayed: true`) instead of running again. The same key for a different request
+                 *     is refused with 422 `idempotency_key_reused`; while the first is still running, 409 `idempotency_in_progress`.
+                 *     Use a new random key, such as a UUID, for each distinct write.
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": {
+                    /** @description Why; the partner sees it. */
+                    reason?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The lead. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PartnerLead"];
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            400: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
             default: components["responses"]["Error"];
         };
     };

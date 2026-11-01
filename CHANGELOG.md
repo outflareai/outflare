@@ -6,6 +6,17 @@ Each pull request that changes what Outflare does adds a change note in [changes
 
 ## [Unreleased]
 
+## [0.76.0] - 2026-11-01
+
+### Added
+
+- Query Studio: a Query page for each brand with an SQL editor that completes table and column names, every table and record type beside it, results as a table or a bar, line or area chart, CSV downloads of up to 10,000 rows, and saved queries, private or shared with the brand, with every version kept and restorable.
+
+### Changed
+
+- Partners can submit people they referred on the portal: an email and a note. You approve or reject each one on Partners → Leads, or have them taken at once. An approved lead becomes the partner's referred customer under the program's rules, and a customer another partner referred first stays with that partner.
+- More leftovers are gone: `GET /email-domains/{domain}` (use `/domain-lookups/{domain}`), the `member` role name (use `operator`), the old connector ids `hubspot_private_app` and `posthog_cloud`, the never-set `suggested_sender_id` on mailboxes, the `system` value of a reply's `category_source`, and the ignored `v` on connector logos.
+
 ## [0.75.0] - 2026-11-01
 
 ### Added

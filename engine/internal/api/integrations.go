@@ -63,15 +63,10 @@ type catalogEntry struct {
 	LogoDarkURL string `json:"logo_dark_url"`
 }
 
-// logoRev changes a logo's address once, so browsers drop the copies
-// they kept for a day before logos were revalidated. Logos are checked
-// against their ETag on every load now, so it never needs to change again.
-const logoRev = "2"
-
 func (s *Server) logoURL(id string, dark bool) string {
-	u := s.publicURL + "/v1/connectors/" + url.PathEscape(id) + "/logo.svg?v=" + logoRev
+	u := s.publicURL + "/v1/connectors/" + url.PathEscape(id) + "/logo.svg"
 	if dark {
-		u += "&theme=dark"
+		u += "?theme=dark"
 	}
 	return u
 }
@@ -233,9 +228,6 @@ func (s *Server) listIntegrations(w http.ResponseWriter, r *http.Request) {
 	}
 	list = integrationsFor(list, sel)
 	connector := r.URL.Query().Get("connector")
-	if connector != "" {
-		connector = s.integrations.Registry.Resolve(connector)
-	}
 	category := r.URL.Query().Get("category")
 	out := []integrationView{}
 	for _, i := range list {

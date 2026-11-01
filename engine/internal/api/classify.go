@@ -10,9 +10,6 @@ import (
 
 func (s *Server) routesClassify(mux *http.ServeMux) {
 	mux.HandleFunc("POST /v1/workspaces/{ws}/classifications", s.inWorkspace(auth.ScopeLeadsRead, s.classify))
-	mux.HandleFunc("GET /v1/workspaces/{ws}/email-domains/{domain}", s.inWorkspace(auth.ScopeLeadsRead, s.getEmailDomain))
-	// The same lookup under a name that says what it is: email-domains is
-	// also what people call Lifecycle sending domains.
 	mux.HandleFunc("GET /v1/workspaces/{ws}/domain-lookups/{domain}", s.inWorkspace(auth.ScopeLeadsRead, s.getEmailDomain))
 }
 

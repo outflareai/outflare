@@ -226,11 +226,34 @@ footer#powered a { color: inherit; }
     }, fail);
   }
   function referrals() {
-    api("GET", "referrals").then(function (r) {
+    var asks = [api("GET", "referrals")];
+    if (program.lead_submissions) asks.push(api("GET", "leads"));
+    Promise.all(asks).then(function (r) {
       render([el("div", { "class": "card" }, [table([["Customer", function (x) { return x.label; }], ["Status", function (x) { return x.status; }],
         ["Via", function (x) { return x.via; }], ["Sub-id", function (x) { return x.sub_id; }], ["Sales", function (x) { return money(x.sales_cents); }],
-        ["Since", function (x) { return date(x.created_at); }]], r.data, "No referred customers yet.")])]);
+        ["Since", function (x) { return date(x.created_at); }]], r[0].data, "No referred customers yet.")]),
+        program.lead_submissions ? leadCard(r[1].data) : null]);
     }, fail);
+  }
+  // leadCard lets a partner submit someone they referred, and lists what
+  // they submitted.
+  function leadCard(list) {
+    var email = el("input", { type: "email", required: "", placeholder: "customer@example.com" });
+    var text = el("textarea", { maxlength: "1000", rows: "2", placeholder: "How you referred them (optional)" });
+    var note = el("p", { "class": "muted" });
+    var form = el("form", { onsubmit: function (e) {
+      e.preventDefault();
+      if (me.read_only) { note.className = "err"; note.textContent = "Read-only preview."; return; }
+      api("POST", "leads", { email: email.value, note: text.value }).then(function (v) {
+        note.className = "banner ok";
+        note.textContent = v.status === "pending" ? "Submitted. The team will review it." : v.status === "approved" ? "Added to your referred customers." : "Not added: " + (v.reason || "it couldn't be taken");
+        setTimeout(referrals, 1500);
+      }, function (err) { note.className = "err"; note.textContent = err.message; });
+    } }, [el("label", { text: "Email" }), email, el("label", { text: "Note" }), text, el("p", {}, [el("button", { text: "Submit lead" })]), note]);
+    return el("div", { "class": "card" }, [el("h3", { text: "Submit a lead" }),
+      el("p", { "class": "muted", text: "Someone you referred who signed up without your link or code. A customer already referred by someone else stays theirs." }), form,
+      table([["Lead", function (x) { return x.label; }], ["Status", function (x) { return x.status; }], ["Reason", function (x) { return x.reason; }],
+        ["Note", function (x) { return x.note; }], ["Submitted", function (x) { return date(x.created_at); }]], list, "No leads submitted yet.")]);
   }
   function payouts() {
     Promise.all([api("GET", "rewards"), api("GET", "payouts")]).then(function (r) {

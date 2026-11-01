@@ -65,14 +65,10 @@ func TestServiceAccountCreds(t *testing.T) {
 	}
 }
 
-func TestRegistryResolvesOldIDs(t *testing.T) {
-	r := NewRegistry([]Connector{fakeConn{Definition{ID: "new", Auth: AuthOAuth2, AuthMethods: Both, Replaces: []string{"old"}}}}, nil)
-	d, ok := r.Definition("old")
-	if !ok || d.ID != "new" || !d.Supports(AuthAPIKey) || r.Resolve("old") != "new" {
-		t.Fatalf("old id: %+v %v", d, ok)
-	}
-	if _, ok := r.Get("old"); !ok {
-		t.Fatal("Get should resolve old ids")
+func TestRegistryAuthMethods(t *testing.T) {
+	r := NewRegistry([]Connector{fakeConn{Definition{ID: "new", Auth: AuthOAuth2, AuthMethods: Both}}}, nil)
+	if d, ok := r.Definition("new"); !ok || !d.Supports(AuthAPIKey) {
+		t.Fatalf("definition: %+v %v", d, ok)
 	}
 	if got := (Definition{Auth: AuthAPIKey}).normal().AuthMethods; len(got) != 1 || got[0] != AuthAPIKey {
 		t.Fatalf("single method: %v", got)

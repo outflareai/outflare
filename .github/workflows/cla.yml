@@ -2,9 +2,9 @@
 # cla-signatures branch. See docs/adr/0005-open-core-cloud.md. "Claude" and
 # "claude" (the login GitHub maps Claude Code's co-author address to) cover
 # commits written by Claude Code for the maintainers; outflare-publisher[bot]
-# writes the release pull requests; outflare-importer[bot] commits accepted
+# writes the release commits; outflare-importer[bot] commits accepted
 # pull requests from contributors who signed here, as their co-author;
-# outflare-merger[bot] merges main into pull requests to bring them current.
+# outflare-merger[bot] merges main into pull requests to resolve conflicts.
 name: CLA
 
 # pull_request_target and issue_comment are safe here: the job never checks
@@ -31,8 +31,12 @@ jobs:
   cla:
     # Only the two CLA comments start a job; any other comment on a pull
     # request (reviews, bots) doesn't take a runner.
+    # In the private engine, only imported contributions (import/ branches,
+    # written by the importer for people who opened a pull request on the
+    # public repository) need it: everything else is written by the team.
     if: >-
-      github.event_name == 'pull_request_target' ||
+      (github.event_name == 'pull_request_target' &&
+       (github.repository != 'outflareai/engine' || startsWith(github.event.pull_request.head.ref, 'import/'))) ||
       (github.event.issue.pull_request &&
        (github.event.comment.body == 'recheck' || github.event.comment.body == 'I have read the CLA Document and I hereby sign the CLA'))
     runs-on: ubuntu-latest

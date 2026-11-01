@@ -281,7 +281,7 @@ func Grants(scopes []string, want string) bool {
 	return slices.ContainsFunc(scopes, func(s string) bool { return strings.HasPrefix(s, area+".") })
 }
 
-// ValidScope reports whether s is a known scope, by its current or old name.
+// ValidScope reports whether s is a known scope.
 func ValidScope(s string) bool { return slices.Contains(AllScopes, s) }
 
 // RoleRank orders roles so that managers cannot act on someone above them.

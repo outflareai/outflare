@@ -5,6 +5,9 @@ on:
     branches: [main]
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review]
+  # Nightly: every test under the race detector, on main (scripts/test-shard.sh).
+  schedule:
+    - cron: "37 2 * * *"
   # For a push made with a workflow's own token, which starts no
   # workflows: that workflow starts this run itself.
   workflow_dispatch:
@@ -13,7 +16,7 @@ on:
 # billed per job, so finishing a superseded run is money for nothing. Runs
 # on main always finish.
 concurrency:
-  group: ci-${{ github.event.pull_request.number || github.sha }}
+  group: ci-${{ github.event_name }}-${{ github.event.pull_request.number || github.sha }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 # Read-only token: CI never writes to the repository.
@@ -24,16 +27,23 @@ jobs:
   # Decides how much of CI this commit needs, so a pull request doesn't hold
   # one of the organisation's few Actions runners for work that can't fail.
   #
-  # On main, a commit whose files are exactly a commit CI already passed on
-  # (a batch fast-forwarded to main, or a merge of a pull request that was
-  # current with main, whose head is its second parent) isn't tested again:
-  # every job below is skipped and the run counts as passed.
+  # Pull requests get light checks; the merge queue's batch gets everything
+  # once, for every pull request in it (Cloud's docs/merge-queue.md):
   #
-  # On a pull request, the Go tests (the engine job, about 30 runner-minutes)
-  # run only when it is ready for review, and only when it changes something
-  # they read, and not again when its newest commits only merge main. A draft
-  # gets the quick checks; marking it ready runs the rest, and it can't merge
-  # before that. Batch pull requests always run everything.
+  # - A pull request that is ready for review runs gofmt, go vet and the
+  #   tests of the packages it changes and the packages that import them
+  #   (the "light" part), and the web, SDK and Python jobs only when it
+  #   changes what they build. A draft runs none of the Go tests, nor does a
+  #   change to docs, change notes or web/ alone, nor a head that only merges
+  #   main into a commit whose tests passed. A change to go.mod, go.sum or
+  #   the migrations runs every part.
+  # - A batch (batch/*) runs every part, the Docker image when its inputs
+  #   changed, and the migrations job when it adds a migration.
+  # - On main, a commit whose files are exactly a commit CI already passed on
+  #   (the batch the merge queue fast-forwarded main to, or a merge whose
+  #   second parent is one) isn't tested again: every job is skipped and the
+  #   run counts as passed.
+  # - Nightly, every part runs on main under the race detector.
   same-files:
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -48,6 +58,10 @@ jobs:
       parts: ${{ steps.scope.outputs.parts || '[{"name":"api 1/2","part":"api 1 2"},{"name":"api 2/2","part":"api 2 2"},{"name":"rest","part":"rest"}]' }}
       migrations: ${{ steps.scope.outputs.migrations }}
       migration_parts: ${{ steps.scope.outputs.migration_parts }}
+      changed: ${{ steps.scope.outputs.changed }}
+      web: ${{ steps.scope.outputs.web || 'true' }}
+      python: ${{ steps.scope.outputs.python || 'true' }}
+      image: ${{ steps.scope.outputs.image || 'true' }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         if: github.event_name == 'push'
@@ -90,26 +104,32 @@ jobs:
           PR: ${{ github.event.pull_request.number }}
         run: |
           if [ "$EVENT" != pull_request ]; then echo "go=true" >> "$GITHUB_OUTPUT"; exit 0; fi
-          # A batch always runs everything. A release pull request changes
-          # only CHANGELOG.md, so it skips the Go tests like any docs change:
-          # its code is main's, which main's own CI tests.
-          case "$HEAD_REF" in batch/*) echo "go=true" >> "$GITHUB_OUTPUT"; echo "migrations=true" >> "$GITHUB_OUTPUT"; exit 0;; esac
+          batch=false
+          case "$HEAD_REF" in batch/*) batch=true ;; esac
           if ! listed=$(gh api --paginate "repos/$GITHUB_REPOSITORY/pulls/$PR/files" --jq '.[] | "\(.status)\t\(.filename)"'); then
             echo "go=true" >> "$GITHUB_OUTPUT"; echo "migrations=true" >> "$GITHUB_OUTPUT"; exit 0
           fi
           files=$(cut -f2 <<<"$listed")
-          # Only a pull request that adds a migration runs the previous
-          # version's tests; one that only edits the check needs the check.
-          if ! grep -qE '^added[[:space:]]engine/internal/db/migrations/' <<<"$listed"; then
+          has() { grep -qE "$1" <<<"$files"; }
+          # The migrations job checks the migration files (append-only, unique
+          # numbers, expand-only) on any pull request that touches them; the
+          # previous version's tests on the new schema run in the batch, and
+          # only when it adds a migration.
+          if has '^(engine/internal/db/migrations/|scripts/checkmigrations/)'; then echo "migrations=true" >> "$GITHUB_OUTPUT"; fi
+          if [ "$batch" = false ] || ! grep -qE '^added[[:space:]]engine/internal/db/migrations/' <<<"$listed"; then
             echo 'migration_parts=[{"name":"check","part":""}]' >> "$GITHUB_OUTPUT"
           fi
-          # The migrations job checks only migration files and the tool that
-          # checks them, so a pull request that touches neither skips it. The
-          # release pull request runs it anyway: Cloud's release merge job
-          # waits for its pass.
-          if [ "$HEAD_REF" = release/next ] || grep -qE '^(engine/internal/db/migrations/|scripts/checkmigrations/)' <<<"$files"; then
-            echo "migrations=true" >> "$GITHUB_OUTPUT"
+          if [ "$batch" = true ]; then
+            echo "::notice::A merge queue batch: everything runs."
+            echo "go=true" >> "$GITHUB_OUTPUT"
+            if ! has '^(Dockerfile|\.dockerignore|go\.(mod|sum)|pnpm-lock\.yaml|pnpm-workspace\.yaml|package\.json|[^/]+/package\.json)'; then echo "image=false" >> "$GITHUB_OUTPUT"; fi
+            exit 0
           fi
+          # A pull request on its own: only what it can break, and never the
+          # Docker image (its batch builds it).
+          echo "image=false" >> "$GITHUB_OUTPUT"
+          has '^(web/|sdk/|mcp/|api/|package\.json|pnpm-|[^/]+/package\.json|engine/internal/ownkeys/)' || echo "web=false" >> "$GITHUB_OUTPUT"
+          has '^(sdk/python/|api/)' || echo "python=false" >> "$GITHUB_OUTPUT"
           if [ "$DRAFT" = true ]; then
             echo "::notice::Draft: the Go tests run when this is marked ready for review."
             echo "go=false" >> "$GITHUB_OUTPUT"; exit 0
@@ -124,11 +144,8 @@ jobs:
           fi
           # A head that only merges main (git's own merge, nothing edited)
           # into a commit whose Go tests passed changes nothing of the pull
-          # request's: main's own CI tests main, and Revert red main backs out
-          # a clash. Walk back over such merges to the last commit the tests
-          # ran on. Half of all pull request CI minutes went on these. One
-          # exception (AGENTS.md, "Deploys and releases"): a pull request that
-          # adds a migration, when main brought in another one, is re-checked.
+          # request's: its batch tests it with main. Walk back over such
+          # merges to the last commit the tests ran on.
           c=$HEAD_SHA tested=
           for _ in $(seq 20); do
             read -r p1 p2 rest <<<"$(git rev-list --parents -n 1 "$c" | cut -d' ' -f2-)" || break
@@ -137,25 +154,25 @@ jobs:
             [ "$(git merge-tree --write-tree "$p1" "$p2" 2>/dev/null | head -1)" = "$(git rev-parse "$c^{tree}")" ] || break
             c=$p1
             passed=$(gh api "repos/$GITHUB_REPOSITORY/commits/$c/check-runs?per_page=100" \
-              --jq '[.check_runs[] | select(.conclusion == "success" and (.name | test("^engine \\((api [12]/2|rest)\\)$"))) | .name] | unique | length' || echo 0)
-            if [ "$passed" = 3 ]; then tested=$c; break; fi
+              --jq '[.check_runs[] | select(.conclusion == "success" and (.name | test("^engine \\((light|api [12]/2|rest)\\)$"))) | .name] | unique | join(",")' || echo)
+            case ",$passed," in *,engine\ \(light\),*|*engine\ \(api\ 1/2\),engine\ \(api\ 2/2\),engine\ \(rest\)*) tested=$c; break ;; esac
           done
-          if [ -n "$tested" ] && grep -q '^engine/internal/db/migrations/' <<<"$files" &&
-            [ -n "$(git diff --name-only "$tested" "$HEAD_SHA" -- engine/internal/db/migrations)" ]; then
-            # The re-check AGENTS.md asks for: the migrations job runs the
-            # previous version's tests on the new schema, and the "rest" part
-            # (the packages beside the API) runs on it. The API parts passed
-            # on this pull request's own change and on main's.
-            echo "::notice::Main brought in a migration and this adds one; the migrations job and the rest part run again."
-            echo 'parts=[{"name":"rest","part":"rest"}]' >> "$GITHUB_OUTPUT"
-            tested=
-          fi
           if [ -n "$tested" ]; then
             echo "::notice::Only main merged in since ${tested::7}, where the Go tests passed; they are skipped."
-            echo "go=false" >> "$GITHUB_OUTPUT"
-          else
-            echo "go=true" >> "$GITHUB_OUTPUT"
+            echo "go=false" >> "$GITHUB_OUTPUT"; exit 0
           fi
+          echo "go=true" >> "$GITHUB_OUTPUT"
+          # Dependencies and the schema can break any package: every part.
+          if has '^(go\.(mod|sum)|engine/internal/db/)'; then
+            echo "::notice::go.mod, go.sum or the database package changed; every part runs."
+            exit 0
+          fi
+          echo 'parts=[{"name":"light","part":"light"}]' >> "$GITHUB_OUTPUT"
+          {
+            echo "changed<<EOF_CHANGED"
+            echo "$files"
+            echo "EOF_CHANGED"
+          } >> "$GITHUB_OUTPUT"
 
   # The tests run in three parts side by side, each with its own database
   # (scripts/test-shard.sh): the API package split in two, and everything
@@ -229,7 +246,7 @@ jobs:
         run: |
           df -h /
           sudo nohup rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/.ghcup /usr/share/swift >/dev/null 2>&1 &
-      # The v2 in the key (here and in go-cache.yml) skips every cache saved
+      # The v3 in the key (here and in go-cache.yml) skips every cache saved
       # before it: bump it when a saved cache breaks restores.
       - name: Restore the Go build cache
         uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
@@ -237,21 +254,24 @@ jobs:
           path: |
             ~/.cache/go-build
             ~/go/pkg/mod
-          key: go-build-v2-${{ runner.os }}-${{ hashFiles('go.sum') }}-${{ github.sha }}
+          key: go-build-v3-${{ runner.os }}-${{ hashFiles('go.sum') }}-${{ github.sha }}
           restore-keys: |
-            go-build-v2-${{ runner.os }}-${{ hashFiles('go.sum') }}-
-            go-build-v2-${{ runner.os }}-
+            go-build-v3-${{ runner.os }}-${{ hashFiles('go.sum') }}-
+            go-build-v3-${{ runner.os }}-
       - name: Free space after the restore
         run: df -h /
       - name: gofmt
-        if: matrix.part == 'rest'
+        if: matrix.part == 'rest' || matrix.part == 'light'
         run: test -z "$(gofmt -l api engine)" || (gofmt -l api engine && exit 1)
-      - if: matrix.part == 'rest'
+      - if: matrix.part == 'rest' || matrix.part == 'light'
         run: go vet ./...
       - name: Tests (${{ matrix.name }})
         env:
           PART: ${{ matrix.part }}
           FLAKY_FILE: ${{ runner.temp }}/flaky.txt
+          CHANGED: ${{ needs.same-files.outputs.changed }}
+          # The race detector runs nightly (scripts/test-shard.sh).
+          RACE: ${{ github.event_name == 'schedule' && '-race' || '' }}
         run: scripts/test-shard.sh $PART
       # A test that failed and then passed on its own re-run (test-shard.sh)
       # doesn't fail the check, but gets an issue so it is fixed, not ignored.
@@ -281,8 +301,10 @@ jobs:
 
   web-and-sdk:
     needs: same-files
-    # Runs unless this exact tree already passed. Runs if same-files fails.
-    if: ${{ !cancelled() && needs.same-files.outputs.tested != 'true' }}
+    # Runs unless this exact tree already passed, a pull request doesn't
+    # touch what it builds, or it is the nightly race run. Runs if same-files
+    # fails.
+    if: ${{ !cancelled() && github.event_name != 'schedule' && needs.same-files.outputs.tested != 'true' && needs.same-files.outputs.web != 'false' }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -312,36 +334,26 @@ jobs:
       - name: Workspaces bring their own keys
         run: go test ./engine/internal/ownkeys/
 
-  # The engine and web jobs already compile everything, so on a pull request
-  # the image is only rebuilt when what goes into it changes. main always
-  # builds it.
+  # The engine and web jobs already compile everything, so the image is
+  # built only in a batch whose changes touch what goes into it, and on main
+  # when main wasn't tested as a batch.
   docker:
     needs: same-files
     # Runs unless this exact tree already passed. Runs if same-files fails.
-    if: ${{ !cancelled() && needs.same-files.outputs.tested != 'true' }}
+    if: ${{ !cancelled() && github.event_name != 'schedule' && needs.same-files.outputs.tested != 'true' && needs.same-files.outputs.image != 'false' }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           persist-credentials: false
-          fetch-depth: ${{ github.event_name == 'pull_request' && '0' || '1' }}
-      - name: Does this change touch the image?
-        id: image
-        run: |
-          if [ "${{ github.event_name }}" != pull_request ]; then echo "build=true" >> "$GITHUB_OUTPUT"; exit 0; fi
-          if git diff --name-only "${{ github.event.pull_request.base.sha }}"...HEAD | grep -qE '^(Dockerfile|\.dockerignore|go\.(mod|sum)|pnpm-lock\.yaml|pnpm-workspace\.yaml|package\.json|[^/]+/package\.json)'; then
-            echo "build=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "build=false" >> "$GITHUB_OUTPUT"
-          fi
-      - if: steps.image.outputs.build == 'true'
-        run: docker build -t outflare:ci .
+      - run: docker build -t outflare:ci .
 
   python-sdk:
     needs: same-files
-    # Runs unless this exact tree already passed. Runs if same-files fails.
-    if: ${{ !cancelled() && needs.same-files.outputs.tested != 'true' }}
+    # Runs unless this exact tree already passed, or a pull request doesn't
+    # touch the Python SDK or the API it calls. Runs if same-files fails.
+    if: ${{ !cancelled() && github.event_name != 'schedule' && needs.same-files.outputs.tested != 'true' && needs.same-files.outputs.python != 'false' }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     defaults:
@@ -369,8 +381,9 @@ jobs:
   # Every deploy must be safe to roll back, and must not break the version
   # still serving while it starts (docs/migrations.md). The previous
   # version's tests run in the same three parts as the engine job, each with
-  # its own database; in one job they took 16 minutes. A pull request that
-  # changes migrations without adding one runs only the checks.
+  # its own database; in one job they took 16 minutes. They run in a batch
+  # that adds a migration; any other pull request that touches migrations
+  # runs only the checks.
   migrations-part:
     needs: same-files
     # Only pull requests that change migrations (above). Runs if same-files
@@ -427,10 +440,10 @@ jobs:
           path: |
             ~/.cache/go-build
             ~/go/pkg/mod
-          key: go-build-v2-${{ runner.os }}-${{ hashFiles('go.sum') }}-${{ env.BASE }}
+          key: go-build-v3-${{ runner.os }}-${{ hashFiles('go.sum') }}-${{ env.BASE }}
           restore-keys: |
-            go-build-v2-${{ runner.os }}-${{ hashFiles('go.sum') }}-
-            go-build-v2-${{ runner.os }}-
+            go-build-v3-${{ runner.os }}-${{ hashFiles('go.sum') }}-
+            go-build-v3-${{ runner.os }}-
       - name: Append-only, unique numbers, expand-only
         if: matrix.name == 'rest' || matrix.part == ''
         run: go run ./scripts/checkmigrations -base "$BASE"
@@ -446,8 +459,8 @@ jobs:
           # shellcheck disable=SC2086 # the part is several words
           scripts/test-shard.sh $PART
 
-  # The one check the merge queue and the release merge wait for: passes when
-  # every part above passed, and is skipped with them.
+  # The one check the merge queue waits for: passes when every part above
+  # passed, and is skipped with them.
   migrations:
     needs: [same-files, migrations-part]
     if: ${{ !cancelled() && needs.migrations-part.result != 'skipped' }}
@@ -459,3 +472,24 @@ jobs:
         run: |
           echo "migrations parts: $RESULT"
           [ "$RESULT" = success ]
+
+  # The nightly race run has no pull request to tell: a failure opens an
+  # issue (or comments on the open one), only in the private engine
+  # repository, where the team works on them.
+  nightly-failed:
+    needs: [engine]
+    if: ${{ failure() && github.event_name == 'schedule' && github.repository == 'outflareai/engine' }}
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+    steps:
+      - name: Open or update the issue
+        run: |
+          title="The nightly race tests failed"
+          n=$(gh issue list --state open --search "\"$title\" in:title" --json number,title --jq "map(select(.title == \"$title\")) | .[0].number // empty")
+          body="The tests failed under the race detector on main at ${GITHUB_SHA::7}: $RUN_URL. Pull requests and batches run without it, so this is the only run that finds data races. Fix the race; never skip the test."
+          if [ -n "$n" ]; then gh issue comment "$n" --body "$body"; else gh issue create --title "$title" --body "$body"; fi

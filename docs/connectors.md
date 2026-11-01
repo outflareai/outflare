@@ -118,7 +118,7 @@ Signing in needs an app registered at the provider. Set `CONNECTOR_<ID>_CLIENT_I
 | Google | The server's Google client (see [analytics.md](analytics.md)) | `GOOGLE_OAUTH_CLIENT_ID`, `_SECRET` |
 | Microsoft | The server's Microsoft Entra app, with `Calendars.Read`, `User.Read`, `offline_access` | `MICROSOFT_OAUTH_CLIENT_ID`, `_SECRET` |
 
-PostHog and HubSpot used to be two connectors each, one per way in (`posthog_cloud`, `hubspot_private_app`). They are one connector each now; the old ids still work in API calls, and existing connections moved over.
+PostHog and HubSpot are one connector each, with both ways in (`posthog`, `hubspot`).
 
 ## One list of connections and domains
 

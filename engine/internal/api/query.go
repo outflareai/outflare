@@ -53,8 +53,11 @@ func readsOnly(r *http.Request) bool {
 	if r.Method != http.MethodPost {
 		return false
 	}
-	if b := r.PathValue("brand"); b != "" && r.URL.Path == "/v1/brands/"+b+"/query" {
-		return true
+	if b := r.PathValue("brand"); b != "" {
+		// Running a saved query only reads too. A CSV download is not
+		// here: personal data leaving the app in bulk waits for a mission.
+		q := r.PathValue("saved_query")
+		return r.URL.Path == "/v1/brands/"+b+"/query" || (q != "" && r.URL.Path == "/v1/brands/"+b+"/queries/"+q+"/run")
 	}
 	base := "/v1/workspaces/" + r.PathValue("ws")
 	// Asking the knowledge only reads it (it keeps the question, for the gaps).
@@ -203,39 +206,80 @@ func (s *Server) runQuery(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	ctx := r.Context()
 	var req queryInput
 	if !decode(w, r, &req) {
 		return
 	}
-	sql := strings.TrimSpace(req.SQL)
+	limit, ok := queryLimit(w, r, req.Limit, queryDefaultRows, queryMaxRows)
+	if !ok {
+		return
+	}
+	res, used, err := s.execQuery(r.Context(), a, req.SQL, limit, queryMaxBytes)
+	if s.queryFailed(w, r, err) {
+		return
+	}
+	s.trackQueryRan(r, a, used, res, nil)
+	writeJSON(w, http.StatusOK, res)
+}
+
+// queryLimit reads a request's row limit: def when it sends none.
+func queryLimit(w http.ResponseWriter, r *http.Request, n *int, def, most int) (int, bool) {
+	if n == nil {
+		return def, true
+	}
+	if *n < 1 || *n > most {
+		writeError(w, r, http.StatusBadRequest, "invalid_request", fmt.Sprintf("limit is 1 to %d rows", most))
+		return 0, false
+	}
+	return *n, true
+}
+
+// queryError is a query refused or failed for a reason the caller can fix,
+// answered with its status and code.
+type queryError struct {
+	status  int
+	code    string
+	message string
+}
+
+func (e *queryError) Error() string { return e.code + ": " + e.message }
+
+// queryFailed answers err, if there is one: a queryError as itself, and
+// anything else as an internal error.
+func (s *Server) queryFailed(w http.ResponseWriter, r *http.Request, err error) bool {
+	if err == nil {
+		return false
+	}
+	var qe *queryError
+	if errors.As(err, &qe) {
+		writeError(w, r, qe.status, qe.code, qe.message)
+		return true
+	}
+	s.internal(w, r, err)
+	return true
+}
+
+// execQuery runs one query for a: the ad hoc query, a saved one and a CSV
+// export all run through it, with the same checks, role and limits. It
+// returns the result and the tables the SQL names; a *queryError is the
+// caller's to fix.
+func (s *Server) execQuery(ctx context.Context, a *access, sql string, limit, maxBytes int) (queryResult, []string, error) {
+	sql = strings.TrimSpace(sql)
 	for strings.HasSuffix(sql, ";") {
 		sql = strings.TrimSpace(strings.TrimSuffix(sql, ";"))
 	}
 	switch {
 	case sql == "":
-		writeError(w, r, http.StatusBadRequest, "invalid_request", "sql is one SELECT over the tables GET .../query/tables lists")
-		return
+		return queryResult{}, nil, &queryError{http.StatusBadRequest, "invalid_request", "sql is one SELECT over the tables GET .../query/tables lists"}
 	case len(sql) > queryMaxSQL:
-		writeError(w, r, http.StatusBadRequest, "invalid_request", fmt.Sprintf("sql is at most %d characters", queryMaxSQL))
-		return
-	}
-	limit := queryDefaultRows
-	if req.Limit != nil {
-		if *req.Limit < 1 || *req.Limit > queryMaxRows {
-			writeError(w, r, http.StatusBadRequest, "invalid_request", fmt.Sprintf("limit is 1 to %d rows", queryMaxRows))
-			return
-		}
-		limit = *req.Limit
+		return queryResult{}, nil, &queryError{http.StatusBadRequest, "invalid_request", fmt.Sprintf("sql is at most %d characters", queryMaxSQL)}
 	}
 	if m := queryRefused.FindString(sql); m != "" {
-		writeError(w, r, http.StatusBadRequest, "query_invalid", "queries can't call "+strings.TrimRight(m, `'"`)+": read the tables with SELECT")
-		return
+		return queryResult{}, nil, &queryError{http.StatusBadRequest, "query_invalid", "queries can't call " + strings.TrimRight(m, `'"`) + ": read the tables with SELECT"}
 	}
 	types, err := s.queryTypeTables(ctx, a)
 	if err != nil {
-		s.internal(w, r, err)
-		return
+		return queryResult{}, nil, err
 	}
 	tables := slices.Clone(queryTables)
 	for _, t := range types {
@@ -260,14 +304,11 @@ func (s *Server) runQuery(w http.ResponseWriter, r *http.Request) {
 			if a.has(t.Scope) {
 				msg = t.Name + " has no brand, so it is hidden from callers kept to some brands"
 			}
-			writeError(w, r, http.StatusForbidden, "forbidden", "this query reads "+t.Name+": "+msg)
-			return
+			return queryResult{}, nil, &queryError{http.StatusForbidden, "forbidden", "this query reads " + t.Name + ": " + msg}
 		}
 	}
-
 	if len(scopes) == 0 {
-		writeError(w, r, http.StatusForbidden, "forbidden", "you can't read any of the query tables: each needs its read scope, such as customers.read for people")
-		return
+		return queryResult{}, nil, &queryError{http.StatusForbidden, "forbidden", "you can't read any of the query tables: each needs its read scope, such as customers.read for people"}
 	}
 	ctx, cancel := context.WithTimeout(ctx, queryTimeout)
 	defer cancel()
@@ -276,13 +317,12 @@ func (s *Server) runQuery(w http.ResponseWriter, r *http.Request) {
 	if err != nil && ctx.Err() == nil {
 		metrics.QueryRan("unavailable", time.Since(start), 0)
 		s.log.Error("query: no query role", "err", err, "request_id", RequestID(ctx))
-		writeError(w, r, http.StatusServiceUnavailable, "query_unavailable", "Query needs its own read-only database role, and Outflare couldn't set it up. "+
-			"The server's log says why; the database user needs to be able to create roles (CREATEROLE)")
-		return
+		return queryResult{}, nil, &queryError{http.StatusServiceUnavailable, "query_unavailable", "Query needs its own read-only database role, and Outflare couldn't set it up. " +
+			"The server's log says why; the database user needs to be able to create roles (CREATEROLE)"}
 	}
 	var res queryResult
 	if err == nil {
-		res, err = s.queryRun(ctx, conn, a, scopes, types, sql, limit)
+		res, err = s.queryRun(ctx, conn, a, scopes, types, sql, limit, maxBytes)
 		conn.Close(context.WithoutCancel(ctx)) //nolint:errcheck
 		s.query.slots <- struct{}{}
 	}
@@ -300,8 +340,7 @@ func (s *Server) runQuery(w http.ResponseWriter, r *http.Request) {
 	metrics.QueryRan(outcome, time.Since(start), res.RowCount)
 	switch {
 	case errors.Is(ctx.Err(), context.DeadlineExceeded):
-		writeError(w, r, http.StatusBadRequest, "query_timeout", fmt.Sprintf("the query ran for over %s: filter it more, or count instead of listing", queryTimeout))
-		return
+		return res, nil, &queryError{http.StatusBadRequest, "query_timeout", fmt.Sprintf("the query ran for over %s: filter it more, or count instead of listing", queryTimeout)}
 	case errors.As(err, &pgErr):
 		msg := pgErr.Message
 		if pgErr.Code == "42501" {
@@ -310,14 +349,17 @@ func (s *Server) runQuery(w http.ResponseWriter, r *http.Request) {
 		if pgErr.Hint != "" {
 			msg += " (" + pgErr.Hint + ")"
 		}
-		writeError(w, r, http.StatusBadRequest, "query_invalid", msg)
-		return
+		return res, nil, &queryError{http.StatusBadRequest, "query_invalid", msg}
 	case err != nil:
-		s.internal(w, r, err)
-		return
+		return res, nil, err
 	}
-	info := reqInfoFrom(ctx)
-	// Type tables are named after the brand's own types: counted, not named.
+	return res, used, nil
+}
+
+// queryEventProps are a query's product event properties: the tables it
+// read (type tables are named after the brand's own types, so counted, not
+// named), how many rows and how long. Never the SQL.
+func queryEventProps(r *http.Request, used []string, res queryResult) map[string]any {
 	named, typed := []string{}, 0
 	for _, u := range used {
 		if slices.ContainsFunc(queryTables, func(t queryTable) bool { return t.Name == u }) {
@@ -326,18 +368,27 @@ func (s *Server) runQuery(w http.ResponseWriter, r *http.Request) {
 			typed++
 		}
 	}
-	ev := track.Event{Name: "query.ran", UserID: a.UserID, ActorID: a.ActorID, ActorType: a.ActorType, WorkspaceID: a.WorkspaceID, RequestID: RequestID(ctx),
-		Props: map[string]any{"tables": named, "type_tables": typed, "brand_route": accessFrom(ctx).Brand != "", "rows": res.RowCount,
-			"truncated": res.Truncated, "duration_ms": res.DurationMS, "columns": len(res.Columns)}}
-	if info != nil {
+	return map[string]any{"tables": named, "type_tables": typed, "brand_route": accessFrom(r.Context()).Brand != "", "rows": res.RowCount,
+		"truncated": res.Truncated, "duration_ms": res.DurationMS, "columns": len(res.Columns)}
+}
+
+// trackQueryRan records query.ran for a query that ran, with extra
+// properties (a saved query's id and version).
+func (s *Server) trackQueryRan(r *http.Request, a *access, used []string, res queryResult, extra map[string]any) {
+	ctx := r.Context()
+	props := queryEventProps(r, used, res)
+	for k, v := range extra {
+		props[k] = v
+	}
+	ev := track.Event{Name: "query.ran", UserID: a.UserID, ActorID: a.ActorID, ActorType: a.ActorType, WorkspaceID: a.WorkspaceID, RequestID: RequestID(ctx), Props: props}
+	if info := reqInfoFrom(ctx); info != nil {
 		ev.Surface = surface(r, info)
 	}
-	track.Emit(r.Context(), ev)
-	writeJSON(w, http.StatusOK, res)
+	track.Emit(ctx, ev)
 }
 
 // queryRun runs sql on a query connection with the caller's scope.
-func (s *Server) queryRun(ctx context.Context, conn *pgx.Conn, a *access, scopes []string, types []queryTypeTable, sql string, limit int) (queryResult, error) {
+func (s *Server) queryRun(ctx context.Context, conn *pgx.Conn, a *access, scopes []string, types []queryTypeTable, sql string, limit, maxBytes int) (queryResult, error) {
 	res := queryResult{Columns: []queryColumn{}, Rows: [][]any{}}
 	pid := int(conn.PgConn().PID())
 	// A query for one brand: brand keeps every customer view to that
@@ -403,7 +454,7 @@ func (s *Server) queryRun(ctx context.Context, conn *pgx.Conn, a *access, scopes
 					size += len(b)
 				}
 			}
-			if size > queryMaxBytes {
+			if size > maxBytes {
 				res.Truncated = true
 				break
 			}

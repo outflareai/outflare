@@ -42,6 +42,8 @@ var Erased = []Ref{
 	{"partner_sign_in_links", "record_id"}, {"partner_sessions", "record_id"},
 	// The conversion calls that named them.
 	{"partner_conversion_log", "record_id"},
+	// Leads partners submitted with them.
+	{"partner_lead_submissions", "record_id"},
 	// Privacy exports of what was kept about them: the files go too.
 	{"privacy_exports", "record_id"},
 }

@@ -156,6 +156,9 @@ func (c *conversionRun) customerEvent(ctx context.Context, rec string, amount *i
 	if c.source == "billing" {
 		return nil // the payment sync recorded it already
 	}
+	if c.source == "manual" {
+		return nil // a lead a partner submitted didn't do anything themselves
+	}
 	in := c.in
 	props := map[string]any{"source": c.source}
 	if in.ProductID != "" {
@@ -580,6 +583,9 @@ func (c *conversionRun) leadOrSale(ctx context.Context) error {
 	m, via, clickID, err := c.named(ctx)
 	if err != nil {
 		return err
+	}
+	if c.source == "manual" && m != nil {
+		via = "manual" // a lead the partner submitted
 	}
 	var f *referralRow
 	program := c.program

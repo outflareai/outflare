@@ -14,7 +14,7 @@ curl -s "$OUTFLARE_URL/v1/workspaces/$WS/classifications" \
 
 Send `email` or `domain`, never both. A domain alone keeps the person's
 address out of the request. `GET /v1/workspaces/{ws}/domain-lookups/{domain}`
-is the same lookup as a GET (`/email-domains/{domain}` still works too). Scope `leads.read`. MCP: `classify_email`.
+is the same lookup as a GET. Scope `leads.read`. MCP: `classify_email`.
 
 ## What comes back
 

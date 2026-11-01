@@ -59,7 +59,6 @@ func (HubSpot) Definition() c.Definition {
 			Help: "In HubSpot: Settings, Integrations, Private apps, Create a private app. Give it the scopes " + strings.Join(scopes[1:], ", ") + ", and crm.objects.owners.read if reply tasks should go to the lead's owner."}},
 		Capabilities: []string{outcomes.CapDeals, outcomes.CapMeetings, outcomes.CapPushCRM, outcomes.CapPushReplies, c.CapPushContacts},
 		Pricing:      "Works on every HubSpot plan, including free",
-		Replaces:     []string{"hubspot_private_app"},
 	}
 }
 

@@ -5723,7 +5723,6 @@ paths:
       parameters:
         - { name: id, in: path, required: true, schema: { type: string }, example: hubspot }
         - { name: theme, in: query, schema: { type: string, enum: [light, dark], default: light } }
-        - { name: v, in: query, description: "Ignored; changes the address so old cached copies are dropped.", schema: { type: string } }
       responses:
         "200":
           description: The logo.
@@ -15974,24 +15973,6 @@ paths:
               schema: { $ref: "#/components/schemas/Classification" }
         "400": { $ref: "#/components/responses/Error" }
         default: { $ref: "#/components/responses/Error" }
-  /v1/workspaces/{ws}/email-domains/{domain}:
-    parameters:
-      - { $ref: "#/components/parameters/Workspace" }
-      - { name: domain, in: path, required: true, schema: { type: string }, example: proton.me }
-    get:
-      operationId: getEmailDomain
-      x-outflare-access: { scope: leads.read }
-      summary: What kind of email domain this is
-      description: "Scope: leads.read. The same answer as POST /classifications with `domain`, as a GET."
-      tags: [classification]
-      responses:
-        "200":
-          description: The classification.
-          content:
-            application/json:
-              schema: { $ref: "#/components/schemas/Classification" }
-        "400": { $ref: "#/components/responses/Error" }
-        default: { $ref: "#/components/responses/Error" }
   /v1/workspaces/{ws}/domain-lookups/{domain}:
     parameters:
       - { $ref: "#/components/parameters/Workspace" }
@@ -16000,9 +15981,7 @@ paths:
       operationId: getDomainLookup
       x-outflare-access: { scope: leads.read }
       summary: What kind of email domain this is
-      description: |
-        Scope: leads.read. The same answer as GET /email-domains/{domain},
-        under a name that can't be mistaken for Lifecycle's email domains.
+      description: "Scope: leads.read. The same answer as POST /classifications with `domain`, as a GET."
       tags: [classification]
       responses:
         "200":
@@ -24775,6 +24754,314 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/QueryResult" }
         default: { $ref: "#/components/responses/Error" }
+  /v1/brands/{brand}/query/csv:
+    parameters:
+      - { $ref: "#/components/parameters/BrandID" }
+    post:
+      operationId: exportBrandQuery
+      x-outflare-access: { scope: customers.read, brand: true }
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      summary: Download a query's results as CSV
+      description: |
+        Scope: customers.read, and the read scope of each table the query reads. Runs the query exactly as
+        POST .../query does (one SELECT, this brand's rows only, 15 seconds at most) and answers its rows as a CSV
+        file to download: up to limit rows (default and at most 10,000, and 16 MB), a header row of column names,
+        jsonb as JSON and times as RFC 3339. Outflare-Query-Rows says how many rows it holds and
+        Outflare-Query-Truncated whether there were more. A cell that a spreadsheet would read as a formula starts
+        with '. Every download is recorded as query.exported in the activity log, without its SQL or rows; an
+        agent kept to missions downloads only inside one.
+      tags: [query]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [sql]
+              properties:
+                sql: { type: string, maxLength: 20000, description: "One SELECT, such as select name, email from people." }
+                limit: { type: integer, minimum: 1, maximum: 10000, description: Rows to write. Default 10000. }
+      responses:
+        "200":
+          description: The CSV file.
+          headers:
+            Content-Disposition: { schema: { type: string }, description: "attachment; filename=\"outflare-query-<time>.csv\"" }
+            Outflare-Query-Rows: { schema: { type: integer }, description: Rows in the file. }
+            Outflare-Query-Truncated: { schema: { type: boolean }, description: There were more rows than limit, or the file passed 16 MB. }
+          content:
+            text/csv: { schema: { type: string } }
+        "202": { $ref: "#/components/responses/MissionHeld" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/brands/{brand}/queries:
+    parameters:
+      - { $ref: "#/components/parameters/BrandID" }
+    get:
+      operationId: listSavedQueries
+      x-outflare-access: { scope: customers.read, brand: true }
+      summary: List saved queries
+      description: |
+        Scope: customers.read. The brand's saved queries you can see, most recently changed first (at most 500): your
+        own private ones and every one shared with the brand. Archived ones are left out. Each comes with its current
+        SQL and chart; mine says it is yours, and can_edit whether you may change it.
+      tags: [query]
+      parameters:
+        - { name: q, in: query, description: Find queries whose name or description contains this., schema: { type: string, maxLength: 200 } }
+        - { name: visibility, in: query, description: "private: only your own private ones; brand: only shared ones.", schema: { type: string, enum: [private, brand] } }
+      responses:
+        "200":
+          description: The saved queries.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data: { type: array, items: { $ref: "#/components/schemas/SavedQuery" } }
+        default: { $ref: "#/components/responses/Error" }
+    post:
+      operationId: createSavedQuery
+      x-outflare-access: { scope: customers.manage, brand: true }
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      summary: Save a query
+      description: |
+        Scope: customers.manage. Saves SQL (and optionally how to chart its results) as version 1 of a new query for
+        this brand. It is private to you unless visibility is brand, which shares it with everyone who can query the
+        brand. The SQL isn't run: run it with POST .../queries/{saved_query}/run. A token that belongs to no person saves
+        only shared queries.
+      tags: [query]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [name, sql]
+              properties:
+                name: { type: string, minLength: 1, maxLength: 200 }
+                description: { type: string, maxLength: 2000 }
+                sql: { type: string, minLength: 1, maxLength: 20000 }
+                chart: { oneOf: [{ $ref: "#/components/schemas/QueryChart" }, { type: "null" }] }
+                visibility: { type: string, enum: [private, brand], default: private }
+                note: { type: string, maxLength: 500, description: What this version is, shown in the version history. }
+      responses:
+        "201":
+          description: The saved query.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SavedQuery" }
+        "202": { $ref: "#/components/responses/MissionHeld" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/brands/{brand}/queries/{saved_query}:
+    parameters:
+      - { $ref: "#/components/parameters/BrandID" }
+      - { $ref: "#/components/parameters/SavedQueryID" }
+    get:
+      operationId: getSavedQuery
+      x-outflare-access: { scope: customers.read, brand: true }
+      summary: Get a saved query
+      description: |
+        Scope: customers.read. A saved query with its current SQL and chart. Another person's private query is 404.
+        An archived one still opens, with archived_at set.
+      tags: [query]
+      responses:
+        "200":
+          description: The saved query.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SavedQuery" }
+        default: { $ref: "#/components/responses/Error" }
+    patch:
+      operationId: updateSavedQuery
+      x-outflare-access: { scope: customers.manage, brand: true }
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      summary: Change a saved query
+      description: |
+        Scope: customers.manage. Send only what changes. A change to sql or chart makes a new version (note says what
+        it is), and the old one stays in the history; a new name or description doesn't. visibility shares the query
+        with the brand (brand) or makes it yours alone again (private), and only the person who saved it may change
+        it. Anyone with customers.manage may change a shared query. An archived query is 409 saved_query_archived.
+      tags: [query]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                name: { type: string, minLength: 1, maxLength: 200 }
+                description: { type: string, maxLength: 2000 }
+                sql: { type: string, minLength: 1, maxLength: 20000 }
+                chart: { oneOf: [{ $ref: "#/components/schemas/QueryChart" }, { type: "null" }], description: How to draw the results; null shows a table. }
+                visibility: { type: string, enum: [private, brand] }
+                note: { type: string, maxLength: 500, description: What the new version is, when sql or chart changes. }
+      responses:
+        "200":
+          description: The saved query.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SavedQuery" }
+        "202": { $ref: "#/components/responses/MissionHeld" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/brands/{brand}/queries/{saved_query}/archive:
+    parameters:
+      - { $ref: "#/components/parameters/BrandID" }
+      - { $ref: "#/components/parameters/SavedQueryID" }
+    post:
+      operationId: archiveSavedQuery
+      x-outflare-access: { scope: customers.manage, brand: true }
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      summary: Archive a saved query
+      description: |
+        Scope: customers.manage. Takes the query out of the list; it can no longer be changed or run, and its versions
+        are kept. You can archive your own queries and shared ones; a caller with workspace.manage (owners and admins)
+        can archive anyone's. Archiving an archived query changes nothing.
+      tags: [query]
+      responses:
+        "200":
+          description: The archived query.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SavedQuery" }
+        "202": { $ref: "#/components/responses/MissionHeld" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/brands/{brand}/queries/{saved_query}/versions:
+    parameters:
+      - { $ref: "#/components/parameters/BrandID" }
+      - { $ref: "#/components/parameters/SavedQueryID" }
+    get:
+      operationId: listSavedQueryVersions
+      x-outflare-access: { scope: customers.read, brand: true }
+      summary: List a saved query's versions
+      description: |
+        Scope: customers.read. Every version of the query's SQL and chart, newest first (the newest 200), with who made
+        each, its note and which one is current.
+      tags: [query]
+      responses:
+        "200":
+          description: The versions.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data: { type: array, items: { $ref: "#/components/schemas/SavedQueryVersion" } }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/brands/{brand}/queries/{saved_query}/versions/{version}:
+    parameters:
+      - { $ref: "#/components/parameters/BrandID" }
+      - { $ref: "#/components/parameters/SavedQueryID" }
+      - { $ref: "#/components/parameters/SavedQueryVersion" }
+    get:
+      operationId: getSavedQueryVersion
+      x-outflare-access: { scope: customers.read, brand: true }
+      summary: Get one version of a saved query
+      description: "Scope: customers.read. One version's SQL and chart."
+      tags: [query]
+      responses:
+        "200":
+          description: The version.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SavedQueryVersion" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/brands/{brand}/queries/{saved_query}/versions/{version}/restore:
+    parameters:
+      - { $ref: "#/components/parameters/BrandID" }
+      - { $ref: "#/components/parameters/SavedQueryID" }
+      - { $ref: "#/components/parameters/SavedQueryVersion" }
+    post:
+      operationId: restoreSavedQueryVersion
+      x-outflare-access: { scope: customers.manage, brand: true }
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      summary: Restore an old version of a saved query
+      description: |
+        Scope: customers.manage. Makes a new version with this version's SQL and chart, so nothing in the history is
+        lost; restored_from says which. The current version is 409 conflict.
+      tags: [query]
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                note: { type: string, maxLength: 500, description: "Shown in the history. Default: Restored version N." }
+      responses:
+        "200":
+          description: The saved query, on its new version.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SavedQuery" }
+        "202": { $ref: "#/components/responses/MissionHeld" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/brands/{brand}/queries/{saved_query}/run:
+    parameters:
+      - { $ref: "#/components/parameters/BrandID" }
+      - { $ref: "#/components/parameters/SavedQueryID" }
+    post:
+      operationId: runSavedQuery
+      x-outflare-access: { scope: customers.read, brand: true }
+      summary: Run a saved query
+      description: |
+        Scope: customers.read, and the read scope of each table the query reads. Runs the current version (or version)
+        exactly as POST .../query runs SQL: this brand's rows only, whatever the SQL says, up to limit rows (default
+        100, at most 1000) and 15 seconds. It never changes anything, so an agent kept to missions may run it outside
+        one. An archived query is 409 saved_query_archived.
+      tags: [query]
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                version: { type: integer, minimum: 1, description: The version to run. Default the current one. }
+                limit: { type: integer, minimum: 1, maximum: 1000, description: Rows to return. Default 100. }
+      responses:
+        "200":
+          description: The rows.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SavedQueryRun" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/brands/{brand}/queries/{saved_query}/csv:
+    parameters:
+      - { $ref: "#/components/parameters/BrandID" }
+      - { $ref: "#/components/parameters/SavedQueryID" }
+    post:
+      operationId: exportSavedQuery
+      x-outflare-access: { scope: customers.read, brand: true }
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      summary: Download a saved query's results as CSV
+      description: |
+        Scope: customers.read. Runs the current version (or version) and answers its rows as a CSV file named after
+        the query, as POST .../query/csv does: up to limit rows (default and at most 10,000), recorded as
+        query.exported.
+      tags: [query]
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                version: { type: integer, minimum: 1, description: The version to run. Default the current one. }
+                limit: { type: integer, minimum: 1, maximum: 10000, description: Rows to write. Default 10000. }
+      responses:
+        "200":
+          description: The CSV file.
+          headers:
+            Content-Disposition: { schema: { type: string }, description: "attachment; filename=\"<query name>-<time>.csv\"" }
+            Outflare-Query-Rows: { schema: { type: integer }, description: Rows in the file. }
+            Outflare-Query-Truncated: { schema: { type: boolean }, description: There were more rows than limit, or the file passed 16 MB. }
+          content:
+            text/csv: { schema: { type: string } }
+        "202": { $ref: "#/components/responses/MissionHeld" }
+        default: { $ref: "#/components/responses/Error" }
   /v1/brands/{brand}/records/{record}/timeline:
     parameters:
       - { $ref: "#/components/parameters/BrandID" }
@@ -29649,6 +29936,96 @@ paths:
                   next_before: { type: [string, "null"], format: date-time }
                   next_cursor: { $ref: "#/components/schemas/NextCursor" }
         "400": { $ref: "#/components/responses/Error" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/workspaces/{ws}/partner-leads:
+    parameters: [{ $ref: "#/components/parameters/Workspace" }]
+    get:
+      operationId: listPartnerLeads
+      x-outflare-access: { scope: partners.read, brand_limited: true }
+      summary: List leads partners submitted, newest first
+      description: |
+        Scope: partners.read. The people partners say they referred, submitted on the portal when its
+        lead_submissions setting is on: pending ones wait for you (review), approved ones are referrals via manual,
+        and rejected ones say why (your reason, or why it couldn't be taken, such as already_referred).
+      tags: [partners]
+      parameters:
+        - { $ref: "#/components/parameters/Brand" }
+        - { name: program, in: query, description: "A program's id or slug.", schema: { type: string } }
+        - { name: status, in: query, schema: { type: string, enum: [pending, approved, rejected] } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 500, default: 100 } }
+        - { name: before, in: query, schema: { type: string, format: date-time } }
+        - { $ref: "#/components/parameters/Cursor" }
+        - { $ref: "#/components/parameters/Fields" }
+      responses:
+        "200":
+          description: Submitted leads.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, next_before]
+                properties:
+                  data: { type: array, items: { $ref: "#/components/schemas/PartnerLead" } }
+                  next_before: { type: [string, "null"], format: date-time }
+                  next_cursor: { $ref: "#/components/schemas/NextCursor" }
+        "400": { $ref: "#/components/responses/Error" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/workspaces/{ws}/partner-leads/{id}/approve:
+    parameters:
+      - { $ref: "#/components/parameters/Workspace" }
+      - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+    post:
+      operationId: approvePartnerLead
+      x-outflare-access: { scope: partners.manage, brand_limited: true }
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      summary: Take a submitted lead
+      description: |
+        Scope: partners.manage. Binds the person to the partner as a referral (via manual), under the program's rules
+        and flows like any lead. When the program can't credit it (another partner referred them first, the partner
+        isn't active), the lead is rejected with that reason instead.
+      tags: [partners]
+      requestBody:
+        content:
+          application/json:
+            schema: { type: object }
+      responses:
+        "200":
+          description: The lead, approved or rejected.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PartnerLead" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        "202": { $ref: "#/components/responses/MissionHeld" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/workspaces/{ws}/partner-leads/{id}/reject:
+    parameters:
+      - { $ref: "#/components/parameters/Workspace" }
+      - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+    post:
+      operationId: rejectPartnerLead
+      x-outflare-access: { scope: partners.manage, brand_limited: true }
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      summary: Turn down a submitted lead
+      description: "Scope: partners.manage. The partner sees it rejected, with your reason."
+      tags: [partners]
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                reason: { type: string, maxLength: 500, description: "Why; the partner sees it." }
+      responses:
+        "200":
+          description: The lead.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PartnerLead" }
+        "400": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        "202": { $ref: "#/components/responses/MissionHeld" }
         default: { $ref: "#/components/responses/Error" }
   /v1/workspaces/{ws}/partner-rewards/{id}/approve:
     parameters:
@@ -37389,6 +37766,18 @@ components:
       required: true
       description: The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is.
       schema: { type: string, format: uuid }
+    SavedQueryID:
+      name: saved_query
+      in: path
+      required: true
+      description: The saved query's id.
+      schema: { type: string, format: uuid }
+    SavedQueryVersion:
+      name: version
+      in: path
+      required: true
+      description: The version's number, from 1.
+      schema: { type: integer, minimum: 1 }
     BrandRef:
       name: brand
       in: path
@@ -39812,6 +40201,7 @@ components:
         site_key_id:
           type: string
           description: 'A site key of the workspace (and of the program''s brand, if any): the portal loads the workspace''s own website script with it, so partners'' visits show in its website analytics. The key takes events from the portal''s address without adding it to its origins. "" for none.'
+        lead_submissions: { type: string, enum: ["", review, auto], description: "Partners submit the email of someone they referred on the portal's Referrals page. review: each waits for you (GET .../partner-leads). auto: taken at once unless another partner has them. \"\": off." }
         ga_measurement_id:
           type: string
           description: A Google Analytics 4 measurement id (G-...) to add to the portal. It loads through the website script, which holds it back until the visitor allows analytics where consent is needed, so it needs site_key_id. "" for none.
@@ -40197,6 +40587,23 @@ components:
         response: { type: object, additionalProperties: true, description: "The answer's body." }
         duration_ms: { type: integer }
         request_id: { type: string }
+        created_at: { type: string, format: date-time }
+    PartnerLead:
+      type: object
+      required: [id, program_id, partner_id, partner_name, record_id, name, email, note, status, reason, referral_id, decided_at, created_at]
+      properties:
+        id: { type: string, format: uuid }
+        program_id: { type: string, format: uuid }
+        partner_id: { type: string, format: uuid }
+        partner_name: { type: string }
+        record_id: { type: string, format: uuid, description: "The person submitted, as a customer record." }
+        name: { type: string }
+        email: { type: string }
+        note: { type: string, description: "What the partner wrote about them." }
+        status: { type: string, enum: [pending, approved, rejected] }
+        reason: { type: string, description: "Why it was rejected: your words, or a code such as already_referred." }
+        referral_id: { type: [string, "null"], format: uuid, description: "The referral it made, once approved." }
+        decided_at: { type: [string, "null"], format: date-time }
         created_at: { type: string, format: date-time }
     PartnerConversionResult:
       type: object
@@ -46183,8 +46590,8 @@ components:
       description: "A starting role. operator is shown as Member. Someone on one of the workspace's own roles has role_id set, and role holds the starting role nearest below it."
     RoleRequest:
       type: string
-      enum: [owner, admin, operator, member, viewer]
-      description: "A starting role; member is the same as operator."
+      enum: [owner, admin, operator, viewer]
+      description: "A starting role. operator is shown as Member."
     WorkspaceRole:
       type: object
       required: [id, builtin, name, description, scopes, locked, edited, brand_limitable, members, invites]
@@ -46304,7 +46711,7 @@ components:
       enum: [verifying, active, paused, error]
     Mailbox:
       type: object
-      required: [id, email, domain, display_name, provider, auth_method, smtp_host, smtp_port, smtp_username, imap_host, imap_port, imap_username, status, status_reason, daily_limit, min_gap_seconds, smtp_ok, imap_ok, last_verified_at, last_synced_at, sync_error, source, pool_id, pool_name, warmup, sender, suggested_sender_id, assignment, lock, has_login, server_id, server_host, platforms, lifecycle, created_at, updated_at]
+      required: [id, email, domain, display_name, provider, auth_method, smtp_host, smtp_port, smtp_username, imap_host, imap_port, imap_username, status, status_reason, daily_limit, min_gap_seconds, smtp_ok, imap_ok, last_verified_at, last_synced_at, sync_error, source, pool_id, pool_name, warmup, sender, assignment, lock, has_login, server_id, server_host, platforms, lifecycle, created_at, updated_at]
       properties:
         lifecycle:
           type: object
@@ -46351,7 +46758,6 @@ components:
             id: { type: string, format: uuid }
             name: { type: string }
             confirmed: { type: boolean }
-        suggested_sender_id: { type: [string, "null"], format: uuid }
         assignment:
           type: [object, "null"]
           description: The sequence this mailbox sends for now. Null when free.
@@ -48249,6 +48655,55 @@ components:
         row_count: { type: integer }
         truncated: { type: boolean, description: There were more rows than limit, or the answer passed 4 MB. }
         duration_ms: { type: integer }
+    QueryChart:
+      type: object
+      additionalProperties: false
+      required: [type, x, y]
+      description: How a query's results are drawn.
+      properties:
+        type: { type: string, enum: [bar, line, area] }
+        x: { type: string, maxLength: 63, description: The column along the bottom. }
+        y: { type: array, minItems: 1, maxItems: 8, items: { type: string, maxLength: 63 }, description: The columns drawn, one series each. }
+    SavedQuery:
+      type: object
+      required: [id, brand_id, name, description, visibility, owner_id, mine, can_edit, current_version, sql, chart, created_by, updated_by, archived_at, created_at, updated_at]
+      properties:
+        id: { type: string, format: uuid }
+        brand_id: { type: string, format: uuid }
+        name: { type: string, example: Signups by plan }
+        description: { type: string }
+        visibility: { type: string, enum: [private, brand], description: "private: only its owner sees it; brand: shared with everyone who can query the brand." }
+        owner_id: { type: [string, "null"], format: uuid, description: The person it belongs to. }
+        mine: { type: boolean, description: It is yours. }
+        can_edit: { type: boolean, description: You may change it (customers.manage, and it is shared or yours). }
+        current_version: { type: integer }
+        sql: { type: string, description: The current version's SQL. }
+        chart: { oneOf: [{ $ref: "#/components/schemas/QueryChart" }, { type: "null" }] }
+        created_by: { type: [string, "null"], format: uuid, description: The actor who saved it. }
+        updated_by: { type: [string, "null"], format: uuid }
+        archived_at: { type: [string, "null"], format: date-time }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    SavedQueryVersion:
+      type: object
+      required: [version, sql, chart, note, restored_from, current, created_by, created_at]
+      properties:
+        version: { type: integer }
+        sql: { type: string }
+        chart: { oneOf: [{ $ref: "#/components/schemas/QueryChart" }, { type: "null" }] }
+        note: { type: string }
+        restored_from: { type: [integer, "null"], description: The version this one restored. }
+        current: { type: boolean }
+        created_by: { type: [string, "null"], format: uuid }
+        created_at: { type: string, format: date-time }
+    SavedQueryRun:
+      allOf:
+        - { $ref: "#/components/schemas/QueryResult" }
+        - type: object
+          required: [saved_query_id, version]
+          properties:
+            saved_query_id: { type: string, format: uuid }
+            version: { type: integer, description: The version that ran. }
     Record:
       type: object
       required: [id, type, name, brand_id, origin, attributes, attribute_sources, identities, needs_review, version, merged_into, archived, created_at, updated_at]
@@ -49452,7 +49907,7 @@ components:
           description: What the reply means. Set on arrival by built-in rules when they can tell, otherwise null until a person, agent or the AI labels it.
         category_source:
           type: [string, "null"]
-          enum: [rules, ai, human, api_token, agent, system, null]
+          enum: [rules, ai, human, api_token, agent, null]
           description: "Who set the category: the built-in rules, the AI, a person, an API token, or an agent running a mission."
         assigned_to: { type: [string, "null"], format: uuid, description: The member handling it. }
         assignee_name: { type: [string, "null"] }

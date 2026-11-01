@@ -10,7 +10,7 @@ import { PartnerPortalBrand } from "./PartnerPortalBrand";
 import { useCallback, useEffect, useState, type FormEvent, type ReactNode } from "react";
 import { appPath } from "@/lib/paths";
 import { track } from "@/lib/analytics";
-import type { Partner, PartnerAsset, PartnerGroup, PartnerStats, PartnerConversion, PartnerConversionLogEntry, PartnerImport, PartnerPayout, PartnerProgram, PartnerReferral, PartnerReward, PartnerRuleInput } from "@outflare/sdk";
+import type { Partner, PartnerAsset, PartnerGroup, PartnerStats, PartnerConversion, PartnerConversionLogEntry, PartnerImport, PartnerLead, PartnerPayout, PartnerProgram, PartnerReferral, PartnerReward, PartnerRuleInput } from "@outflare/sdk";
 import { api, errorMessage } from "../api";
 import { useBrand } from "@/lib/brand";
 import { Badge, Button, CopyButton, Empty, ErrorText, field, Input, Loading, Menu, PageHeader, Stat, Stats, ask, toast } from "../ui";
@@ -24,7 +24,7 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 
 type Props = { ws: string; canManage: boolean };
-type Section = "proposals" | "tasks" | "partners" | "groups" | "flows" | "conversions" | "log" | "rewards" | "payouts";
+type Section = "proposals" | "tasks" | "partners" | "groups" | "flows" | "leads" | "conversions" | "log" | "rewards" | "payouts";
 type Kind = PartnerProgram["kind"];
 
 const kinds: { id: Kind; label: string; blurb: string }[] = [
@@ -96,6 +96,7 @@ export function Partners({ ws, canManage }: Props) {
               <TabsTrigger value="partners" className="h-9 px-3 text-[12px]">Partners</TabsTrigger>
               <TabsTrigger value="groups" className="h-9 px-3 text-[12px]">Groups</TabsTrigger>
               <TabsTrigger value="flows" className="h-9 px-3 text-[12px]">Flows</TabsTrigger>
+              {current.portal.lead_submissions && <TabsTrigger value="leads" className="h-9 px-3 text-[12px]">Leads</TabsTrigger>}
               <TabsTrigger value="conversions" className="h-9 px-3 text-[12px]">Conversions</TabsTrigger>
               <TabsTrigger value="log" className="h-9 px-3 text-[12px]">Log</TabsTrigger>
               <TabsTrigger value="rewards" className="h-9 px-3 text-[12px]">Rewards</TabsTrigger>
@@ -107,6 +108,7 @@ export function Partners({ ws, canManage }: Props) {
           {section === "partners" && <PartnerList key={current.id} ws={ws} program={current} canManage={canManage} />}
           {section === "groups" && <Groups key={current.id} ws={ws} program={current} canManage={canManage} onChanged={load} />}
           {section === "flows" && <Flows key={current.id} ws={ws} program={current} canManage={canManage} onChanged={load} />}
+          {section === "leads" && <Leads key={current.id} ws={ws} program={current} canManage={canManage} />}
           {section === "conversions" && <Conversions key={current.id} ws={ws} program={current} />}
           {section === "log" && <ConversionLog key={current.id} ws={ws} program={current} />}
           {section === "rewards" && <Rewards key={current.id} ws={ws} program={current} canManage={canManage} />}
@@ -604,6 +606,62 @@ function ConversionLog({ ws, program }: { ws: string; program: PartnerProgram })
             <pre className="max-h-60 overflow-auto rounded bg-muted p-2 text-[12px]">{JSON.stringify(open.response, null, 2)}</pre>
           </DialogContent>
         </Dialog>
+      )}
+    </div>
+  );
+}
+
+// Leads are people partners submitted on the portal as referred.
+function Leads({ ws, program, canManage }: { ws: string; program: PartnerProgram; canManage: boolean }) {
+  const [status, setStatus] = useState<PartnerLead["status"] | "">("pending");
+  const get = useCallback(async (before?: string): Promise<Page<PartnerLead>> => {
+    const { data, error } = await api.GET("/v1/workspaces/{ws}/partner-leads", { params: { path: { ws }, query: { program: program.id, limit: pageSize, ...(status ? { status } : {}), ...(before ? { before } : {}) } } });
+    return { list: data?.data ?? [], next: data?.next_before ?? null, error: error ? errorMessage(error) : "" };
+  }, [ws, program.id, status]);
+  const { list, next, error, reload, more } = usePages(get);
+  useEffect(() => {
+    reload();
+  }, [reload]);
+  async function decide(l: PartnerLead, what: "approve" | "reject") {
+    let reason = "";
+    if (what === "reject") {
+      const r = await ask({ title: "Turn down this lead?", body: "Say why; the partner sees it.", input: { label: "Reason", maxLength: 500, optional: true }, choices: [{ label: "Cancel", value: "cancel", variant: "ghost" }, { label: "Reject", value: "ok", variant: "danger-solid" }] });
+      if (r?.choice !== "ok") return;
+      reason = r.value.trim();
+    }
+    const { data, error } = what === "approve"
+      ? await api.POST("/v1/workspaces/{ws}/partner-leads/{id}/approve", { params: { path: { ws, id: l.id } }, body: {} })
+      : await api.POST("/v1/workspaces/{ws}/partner-leads/{id}/reject", { params: { path: { ws, id: l.id } }, body: { reason } });
+    if (error) return toast(errorMessage(error), "error");
+    toast(data?.status === "approved" ? "Added as a referral." : data?.reason && what === "approve" ? `Couldn't add it: ${data.reason}.` : "Rejected.", data?.status === "approved" ? "ok" : "error");
+    reload();
+  }
+  const columns: ColumnDef<PartnerLead>[] = [
+    { id: "person", header: "Lead", accessorFn: (l) => l.name || l.email, cell: ({ row: { original: l } }) => <span className="block"><span className="block">{l.name || l.email}</span>{l.name && <span className="text-[12px] text-muted-foreground">{l.email}</span>}</span> },
+    { id: "partner", header: "Partner", accessorFn: (l) => l.partner_name },
+    { id: "note", header: "Note", accessorFn: (l) => l.note, cell: ({ getValue }) => <span className="text-[12px] text-muted-foreground">{getValue() as string}</span> },
+    { id: "status", header: "Status", accessorFn: (l) => l.status, cell: ({ row: { original: l } }) => <span className="flex items-center gap-2"><Badge tone={l.status === "approved" ? "green" : l.status === "rejected" ? "red" : "amber"}>{l.status}</Badge>{l.reason && <span className="text-[12px] text-muted-foreground">{l.reason}</span>}</span> },
+    { id: "when", header: "Submitted", accessorFn: (l) => l.created_at, cell: ({ row: { original: l } }) => ago(l.created_at) },
+    { id: "actions", header: "", enableSorting: false, cell: ({ row: { original: l } }) => canManage && l.status === "pending" && (
+      <span className="inline-flex gap-1"><Button variant="ghost" onClick={() => decide(l, "approve")}>Approve</Button><Button variant="ghost" onClick={() => decide(l, "reject")}>Reject</Button></span>
+    ) },
+  ];
+  return (
+    <div className="space-y-3">
+      <select aria-label="Status" className={field} value={status} onChange={(e) => setStatus(e.target.value as PartnerLead["status"] | "")}>
+        <option value="pending">Waiting for you</option>
+        <option value="approved">Approved</option>
+        <option value="rejected">Rejected</option>
+        <option value="">All</option>
+      </select>
+      <ErrorText>{error}</ErrorText>
+      {!list ? <Loading /> : list.length === 0 ? (
+        <Empty title={status === "pending" ? "No leads waiting" : "No leads"}>Partners submit people they referred on the portal's Referrals page. Approving one makes them the partner's referred customer.</Empty>
+      ) : (
+        <>
+          <DataTable columns={columns} data={list} rowId={(l) => l.id} empty="No leads match." />
+          <LoadMore next={next} onMore={more} shown={list.length} />
+        </>
       )}
     </div>
   );
@@ -1267,6 +1325,7 @@ function PortalSection({ ws, program: p, canManage }: { ws: string; program: Par
   const [poweredBy, setPoweredBy] = useState(!p.portal.hide_powered_by);
   const [businessOnly, setBusinessOnly] = useState(!!p.portal.business_email_only);
   const [siteKey, setSiteKey] = useState(p.portal.site_key_id ?? "");
+  const [leadMode, setLeadMode] = useState<"" | "review" | "auto">(p.portal.lead_submissions ?? "");
   const [ga, setGA] = useState(p.portal.ga_measurement_id ?? "");
   const [siteKeys, setSiteKeys] = useState<{ id: string; name: string }[]>([]);
   useEffect(() => {
@@ -1291,7 +1350,7 @@ function PortalSection({ ws, program: p, canManage }: { ws: string; program: Par
     const { data, error } = await api.PUT("/v1/workspaces/{ws}/partner-programs/{id}/portal", {
       params: { path: { ws, id: p.id } },
       body: { enabled, subdomain: sub.trim(), settings: { ...brandPortal, title: title.trim(), color, logo_url: logo.trim(), favicon_url: favicon.trim(), welcome: welcome.trim(), email_from: from.trim(), signup_open: signup, hide_powered_by: !poweredBy, business_email_only: businessOnly,
-        site_key_id: siteKey, ga_measurement_id: siteKey ? ga.trim().toUpperCase() : "" } },
+        site_key_id: siteKey, lead_submissions: leadMode, ga_measurement_id: siteKey ? ga.trim().toUpperCase() : "" } },
     });
     setBusy(false);
     if (error || !data) return setError(errorMessage(error));
@@ -1339,6 +1398,14 @@ function PortalSection({ ws, program: p, canManage }: { ws: string; program: Par
           <label className="flex items-center gap-2 text-[13px]"><input type="checkbox" checked={signup} onChange={(e) => setSignup(e.target.checked)} /> Anyone can apply</label>
           <label className="flex items-center gap-2 text-[13px]"><input type="checkbox" checked={businessOnly} onChange={(e) => setBusinessOnly(e.target.checked)} /> Work email addresses only: refuse applications from free, disposable and relay addresses</label>
           <label className="flex items-center gap-2 text-[13px]"><input type="checkbox" checked={poweredBy} onChange={(e) => setPoweredBy(e.target.checked)} /> Show "Powered by Outflare" at the foot of the portal</label>
+          <label className="block text-[13px]">
+            <span className="mb-1 block font-medium">Leads from partners</span>
+            <select className={field + " w-full sm:w-auto"} value={leadMode} onChange={(e) => setLeadMode(e.target.value as typeof leadMode)}>
+              <option value="">Off</option>
+              <option value="review">Partners submit leads, you approve each (Partners → Leads)</option>
+              <option value="auto">Partners submit leads, taken at once unless someone else has them</option>
+            </select>
+          </label>
           <div className="grid gap-3 sm:grid-cols-2">
             <label className="block text-[13px]">
               <span className="mb-1 block font-medium">Website analytics</span>

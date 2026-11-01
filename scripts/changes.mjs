@@ -12,9 +12,11 @@
 //       that added it. Lines added under Unreleased in CHANGELOG.md count too,
 //       until every open pull request has moved to notes. The daily changelog on
 //       outflare.ai is built from it.
-//   node scripts/changes.mjs fold
+//   node scripts/changes.mjs fold [--since <commit>]
 //       Adds the notes not released yet to CHANGELOG.md's Unreleased section.
-//       The automatic release cut runs it first (docs/releasing.md).
+//       The automatic release cut runs it first (docs/releasing.md), with
+//       --since set to the main commit the last release was cut from: release
+//       commits aren't merged into main, so main's history can't say.
 import { execFileSync } from 'node:child_process';
 import { existsSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -34,6 +36,7 @@ const opt = (name, fallback) => {
 };
 const dir = opt('dir', new URL('..', import.meta.url).pathname);
 const edition = opt('edition', 'open-source');
+const since = opt('since', '');
 // Paths whose changes a person using Outflare could notice (Cloud passes its own).
 const product = new RegExp(opt('product', '^(engine|web|api|mcp|sdk|cli|deploy|Dockerfile)'));
 const git = (...a) => execFileSync('git', ['-C', dir, ...a], { encoding: 'utf8', maxBuffer: 64 << 20 }).trim();
@@ -169,11 +172,11 @@ function lastRelease() {
 // Added, Changed, Fixed and Security, with upgrade steps last. The release cut
 // runs this before it turns Unreleased into the next version (docs/releasing.md).
 function fold() {
-	const since = lastRelease();
+	const from = since || lastRelease();
 	// The notes in HEAD's tree that weren't in the release's: a tree diff, not a
 	// commit range, so a note first written in a merge commit counts too.
-	const added = since
-		? git('diff', '--no-renames', '--diff-filter=A', '--name-only', since, 'HEAD', '--', 'changes')
+	const added = from
+		? git('diff', '--no-renames', '--diff-filter=A', '--name-only', from, 'HEAD', '--', 'changes')
 		: git('ls-tree', '-r', '--name-only', 'HEAD', '--', 'changes');
 	const notes = [];
 	for (const f of added.split('\n').filter(isNote)) {

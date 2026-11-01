@@ -608,6 +608,39 @@ export function registerPartnerTools(server: McpServer, gtm: MissionClient, work
   );
 
   server.registerTool(
+    "list_partner_leads",
+    {
+      title: "List leads partners submitted",
+      description: "People partners say they referred, submitted on the portal: pending ones wait for approval, approved ones are referrals via manual, rejected ones say why.",
+      inputSchema: { program: z.string().optional(), status: z.enum(["pending", "approved", "rejected"]).optional(), ...page },
+      annotations: read,
+    },
+    (query) => call(() => gtm.GET("/v1/workspaces/{ws}/partner-leads", { params: { path: path(), query } })),
+  );
+
+  server.registerTool(
+    "approve_partner_lead",
+    {
+      title: "Approve a submitted lead",
+      description: "Make the person the partner's referred customer (via manual), under the program's rules. If another partner has them already, the lead is rejected with that reason.",
+      inputSchema: { lead_id: id },
+      annotations: write,
+    },
+    ({ lead_id }) => call(() => gtm.POST("/v1/workspaces/{ws}/partner-leads/{id}/approve", { params: { path: { ws: workspace(), id: lead_id } }, body: {} })),
+  );
+
+  server.registerTool(
+    "reject_partner_lead",
+    {
+      title: "Reject a submitted lead",
+      description: "Turn down a lead a partner submitted; the partner sees the reason.",
+      inputSchema: { lead_id: id, reason: z.string().max(500).optional() },
+      annotations: write,
+    },
+    ({ lead_id, reason }) => call(() => gtm.POST("/v1/workspaces/{ws}/partner-leads/{id}/reject", { params: { path: { ws: workspace(), id: lead_id } }, body: { reason } })),
+  );
+
+  server.registerTool(
     "approve_partner_reward",
     {
       title: "Approve a held partner reward",
@@ -725,6 +758,7 @@ export function registerPartnerTools(server: McpServer, gtm: MissionClient, work
           hide_powered_by: z.boolean().optional().describe('Hide the "Powered by Outflare" line at the foot of the portal.'),
           business_email_only: z.boolean().optional().describe("Refuse applications from free, disposable and relay email addresses."),
           site_key_id: z.string().optional().describe("A site key id: the portal loads the workspace's website script with it, so partners' visits show in its analytics."),
+          lead_submissions: z.enum(["", "review", "auto"]).optional().describe("Partners submit people they referred on the portal: review (you approve each), auto (taken at once unless another partner has them) or off."),
           ga_measurement_id: z.string().optional().describe("A Google Analytics 4 id (G-...), loaded through the website script once the visitor allows analytics. Needs site_key_id."),
         }).optional(),
       },

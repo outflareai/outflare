@@ -278,6 +278,18 @@ var (
 		Namespace: namespace, Subsystem: "query", Name: "type_tables_failed_total",
 		Help: "Brand queries that ran without their record type tables, because the database refused to make them.",
 	})
+	querySavedRuns = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Namespace: namespace, Subsystem: "query", Name: "saved_runs_total",
+		Help: "Saved queries run (Query Studio, run_saved_query), by outcome (success, invalid, timeout, unavailable, error).",
+	}, []string{"outcome"})
+	queryExports = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Namespace: namespace, Subsystem: "query", Name: "exports_total",
+		Help: "Query results downloaded as CSV, by outcome (success, invalid, timeout, unavailable, error).",
+	}, []string{"outcome"})
+	queryExportRows = prometheus.NewCounter(prometheus.CounterOpts{
+		Namespace: namespace, Subsystem: "query", Name: "export_rows_total",
+		Help: "Rows written to CSV downloads of query results.",
+	})
 	// Meaning-based search: vectors made with workspaces' own AI keys.
 	semanticRuns = prometheus.NewCounterVec(prometheus.CounterOpts{
 		Namespace: namespace, Subsystem: "semantic_search", Name: "embed_runs_total",
@@ -671,7 +683,7 @@ var own = []prometheus.Collector{
 	connectionLimitAlerts, connectionLimitStops,
 	hooksReceived, hookEvents, hookLag,
 	domainConnectLookups, domainConnectDuration,
-	queryRuns, queryDuration, queryRows, queryTypeTablesFailed,
+	queryRuns, queryDuration, queryRows, queryTypeTablesFailed, querySavedRuns, queryExports, queryExportRows,
 	ruleEvaluations, emailsGuarded, journeyCalls, journeyCallDuration, journeyEntriesRefused, excluded, sequencerPushes, crmContactPushes, adAudienceSyncs,
 	semanticRuns, semanticItems, semanticDuration, semanticAvailable, semanticWorkspaces, knowledgeAsks, knowledgeAskDuration,
 	dataNetworkLookups, dataNetworkShared, dataNetworkShareRuns, dataNetworkMembers, dataNetworkWithdrawals, dataNetworkOverdue, dataNetworkLag,
@@ -916,6 +928,16 @@ func QueryRan(outcome string, d time.Duration, rows int) {
 // QueryTypeTablesFailed records a brand query that ran without its record
 // type tables.
 func QueryTypeTablesFailed() { queryTypeTablesFailed.Inc() }
+
+// QuerySavedRan records one run of a saved query, by outcome.
+func QuerySavedRan(outcome string) { querySavedRuns.WithLabelValues(outcome).Inc() }
+
+// QueryExported records one CSV download of a query's results: its
+// outcome and the rows written.
+func QueryExported(outcome string, rows int) {
+	queryExports.WithLabelValues(outcome).Inc()
+	queryExportRows.Add(float64(rows))
+}
 
 // SemanticEmbedded records one embedding job: its outcome, how many items
 // it embedded and how long it took.

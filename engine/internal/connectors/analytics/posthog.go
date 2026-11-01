@@ -35,7 +35,6 @@ func (PostHog) Definition() c.Definition {
 		Scopes:         []string{"openid", "user:read", "project:read", "query:read"},
 		ClientMetadata: true,
 	}
-	d.Replaces = []string{"posthog_cloud"}
 	return d
 }
 

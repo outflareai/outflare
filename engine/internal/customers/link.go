@@ -375,6 +375,7 @@ var Follows = []Ref{
 	{"partner_memberships", "record_id"}, {"partner_referrals", "record_id"}, {"partner_conversions", "record_id"},
 	{"partner_rewards", "recipient_id"}, {"partner_sign_in_links", "record_id"}, {"partner_sessions", "record_id"},
 	{"partner_conversion_log", "record_id"},
+	{"partner_lead_submissions", "record_id"},
 	// Privacy exports made for the person.
 	{"privacy_exports", "record_id"},
 }

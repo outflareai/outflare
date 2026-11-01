@@ -42,7 +42,7 @@ function repo() {
 		return out;
 	};
 	const land = () => git('merge', '-q', '--no-ff', '-m', 'Merge pull request from release/next', 'release/next');
-	const fold = () => execFileSync('node', [script, 'fold', '--dir', dir], { encoding: 'utf8' }).trim();
+	const fold = (...extra) => execFileSync('node', [script, 'fold', '--dir', dir, ...extra], { encoding: 'utf8' }).trim();
 	const changelog = () => readFileSync(join(dir, 'CHANGELOG.md'), 'utf8');
 	const unreleased = () => changelog().split(/^## \[Unreleased\]\n/m)[1].split(/^## \[/m)[0];
 
@@ -51,7 +51,7 @@ function repo() {
 	write('CHANGELOG.md', '# Changelog\n\n## [Unreleased]\n\n## [0.1.0] - 2026-10-28\n\n### Added\n\n- The first release.\n');
 	write('changes/README.md', 'Change notes.\n');
 	commit('Start');
-	return { git, write, note, commit, pr, cut, land, fold, changelog, unreleased };
+	return { dir, git, write, note, commit, pr, cut, land, fold, changelog, unreleased };
 }
 
 test('a pull request merged between the cut and the release is in the next release', () => {
@@ -118,4 +118,15 @@ test('a branch that merges main after a release keeps its own notes', () => {
 	r.git('merge', '-q', '--ff-only', 'batch');
 	r.fold();
 	assert.match(r.unreleased(), /Note D on a long-lived branch/);
+});
+
+test('with --since, only the notes added after that main commit are folded', () => {
+	const r = repo();
+	r.pr('a', () => r.note('a', 'Note A was in the last release.'));
+	const base = r.git('rev-parse', 'HEAD');
+	r.pr('b', () => r.note('b', 'Note B is new.'));
+	r.fold('--since', base);
+	const u = r.unreleased();
+	assert.match(u, /Note B is new\./);
+	assert.doesNotMatch(u, /Note A/);
 });

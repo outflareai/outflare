@@ -58,7 +58,7 @@ func TestFilesAreSafeSVG(t *testing.T) {
 }
 
 func TestGet(t *testing.T) {
-	if b, ok := Get("hubspot_private_app", "HubSpot (private app token)", false); !ok || !bytes.Contains(b, []byte("<svg")) {
+	if b, ok := Get("vercel_analytics", "Vercel Analytics", false); !ok || !bytes.Contains(b, []byte("<svg")) {
 		t.Error("aliases share the company mark")
 	}
 	if a, _ := Get("cheapverifier", "", false); !bytes.Equal(a, must(Get("cheapinboxes", "", false))) {

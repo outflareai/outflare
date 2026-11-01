@@ -183,6 +183,7 @@ export type PartnerConversion = Schemas["PartnerConversion"];
 export type PartnerConversionInput = Schemas["PartnerConversionInput"];
 export type PartnerConversionLogEntry = Schemas["PartnerConversionLogEntry"];
 export type PartnerConversionResult = Schemas["PartnerConversionResult"];
+export type PartnerLead = Schemas["PartnerLead"];
 export type PartnerReferral = Schemas["PartnerReferral"];
 export type PartnerReward = Schemas["PartnerReward"];
 export type PartnerPayout = Schemas["PartnerPayout"];

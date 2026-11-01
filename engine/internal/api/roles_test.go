@@ -46,7 +46,7 @@ func TestAdminsDoEverythingButRemovePeople(t *testing.T) {
 	admin.must(200, "PATCH", base, map[string]any{"name": "Acme Outbound 2"})
 
 	// They raise someone's role, but don't remove or demote anyone.
-	_, memberID := joinAs(t, admin, ws, "mo@acme.example", map[string]any{"role": "member"})
+	_, memberID := joinAs(t, admin, ws, "mo@acme.example", map[string]any{"role": "operator"})
 	admin.must(200, "PATCH", base+"/members/"+memberID, map[string]any{"role": "admin"})
 	admin.must(403, "PATCH", base+"/members/"+memberID, map[string]any{"role": "viewer"})
 	admin.must(403, "DELETE", base+"/members/"+otherAdminID, nil)

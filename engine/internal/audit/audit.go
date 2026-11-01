@@ -70,6 +70,7 @@ var brandOf = map[string]string{
 	"story":                `SELECT brand_id FROM stories WHERE id = $1::uuid AND workspace_id = $2`,
 	"pr_expert":            `SELECT brand_id FROM pr_experts WHERE id = $1::uuid AND workspace_id = $2`,
 	"story_pitch":          `SELECT s.brand_id FROM story_pitches p JOIN stories s ON s.id = p.story_id WHERE p.id = $1::uuid AND p.workspace_id = $2`,
+	"saved_query":          `SELECT brand_id FROM saved_queries WHERE id = $1::uuid AND workspace_id = $2`,
 	// A domain's id is its name.
 	"domain": `SELECT brand_id FROM sending_domains WHERE domain = lower($1) AND workspace_id = $2`,
 }

@@ -229,6 +229,7 @@ Read (always available):
 | `list_partners`, `get_partner` | Partners with their ref code, short link, campaign link, promo codes and totals (clicks, referrals, customers, sales, cash pending, approved, paid and due) |
 | `list_partner_conversions`, `list_partner_referrals` | Leads, sales and refunds credited to partners, and each referred customer with how they were credited |
 | `list_partner_conversion_log` | Every conversion call from the last 30 days with what it sent, the answer and why it was or wasn't credited |
+| `list_partner_leads`, `approve_partner_lead`, `reject_partner_lead` | Leads partners submitted on the portal, and taking or turning them down |
 | `list_partner_rewards`, `list_partner_payouts` | The reward ledger (cash, fees, actions, adjustments) and payouts |
 | `list_partner_assets` | Banners, copy and links a program shows partners on its portal |
 | `list_partner_postbacks`, `export_partner_payouts` | A partner's postbacks to their own tracker, and payouts as CSV with payout details for paying them |
@@ -250,6 +251,7 @@ Write (left out when `OUTFLARE_MCP_READ_ONLY=1`):
 | `search_workspace` | Find records by name, attribute text, email, phone or id, and emails sent and received, meetings, deals and lifecycle email by their words, ranked, with whose each one is. With `mode: meaning`, find records, replies, meetings and deals by what they mean |
 | `get_semantic_search`, `set_semantic_search` | Read whether meaning-based search is on and how far along it is, or turn it off and on |
 | `list_query_tables`, `run_query` | Read-only SQL over one brand's data (`brand`; people, companies, product events, each of the brand's record types as a table of its own, deals, outreach, replies, emails, visits): counts, sums, rates and joins in one call. No SQL reaches another brand's rows; it sees only what the connection may read, and never changes anything |
+| `list_saved_queries`, `get_saved_query`, `run_saved_query`, `save_query` | Queries saved in Query Studio for one brand (`brand`): find them, read their SQL and versions, run one (read-only, the same rules as `run_query`), and save SQL as a new query or a new version of one (private, or shared with the brand; needs `customers.manage`) |
 | `get_catalog` | Everything a brand's customer records can hold: record types (person, account and the brand's own, starting with Deal), their fields, the option lists and product events. Each brand has its own catalog (`brand` is a handle or id). Read it before writing records |
 | `list_records`, `get_record`, `lookup_record`, `review_record` | Find a brand's people, companies and other records by type, name, identity or field values; `lookup_record` says which record holds an email or id verified; approve or reject records held for review. Each brand has its own people: every record tool takes `brand` (a handle or id) and reaches that brand's records only |
 | `get_record_history`, `list_record_identities`, `list_record_links` | A record's changes (who, when, which source), its emails, phones and ids (closed ones too) and its links |

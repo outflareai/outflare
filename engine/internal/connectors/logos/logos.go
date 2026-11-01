@@ -25,8 +25,6 @@ var files embed.FS
 
 // Connectors that share another connector's mark.
 var aliases = map[string]string{
-	"posthog_cloud":            "posthog",
-	"hubspot_private_app":      "hubspot",
 	"cloudflare_web_analytics": "cloudflare",
 	"vercel_analytics":         "vercel",
 	"vercel_ai_gateway":        "vercel",

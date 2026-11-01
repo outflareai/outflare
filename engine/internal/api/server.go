@@ -462,6 +462,7 @@ func (s *Server) buildHandler() http.Handler {
 	s.routesCustomerEvents(mux)
 	s.routesMerges(mux)
 	s.routesQuery(mux)
+	s.routesSavedQueries(mux)
 	s.routesSearch(mux)
 	s.routesSemanticSearch(mux)
 	s.routesAnalyticsBrands(mux)

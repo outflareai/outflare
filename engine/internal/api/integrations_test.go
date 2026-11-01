@@ -52,7 +52,7 @@ func TestConnectWithAPIKey(t *testing.T) {
 	if zb == nil || zb["status"] != "available" || zb["auth"] != "api_key" {
 		t.Fatalf("zerobounce in catalog: %v", zb)
 	}
-	if u, _ := zb["logo_url"].(string); !strings.HasSuffix(u, "/v1/connectors/zerobounce/logo.svg?v=2") || zb["logo_dark_url"] != u+"&theme=dark" {
+	if u, _ := zb["logo_url"].(string); !strings.HasSuffix(u, "/v1/connectors/zerobounce/logo.svg") || zb["logo_dark_url"] != u+"?theme=dark" {
 		t.Fatalf("logo urls: %v %v", zb["logo_url"], zb["logo_dark_url"])
 	}
 	for path, want := range map[string]int{"/v1/connectors/hubspot/logo.svg?theme=dark": 200, "/v1/connectors/zerobounce/logo.svg": 200, "/v1/connectors/nope/logo.svg": 404} {
@@ -65,12 +65,12 @@ func TestConnectWithAPIKey(t *testing.T) {
 
 	// Logos revalidate: the same ETag answers 304, so a new logo shows at once.
 	rec := httptest.NewRecorder()
-	e.h.ServeHTTP(rec, httptest.NewRequest("GET", "/v1/connectors/zerobounce/logo.svg?v=2", nil))
+	e.h.ServeHTTP(rec, httptest.NewRequest("GET", "/v1/connectors/zerobounce/logo.svg", nil))
 	etag := rec.Header().Get("ETag")
 	if etag == "" || rec.Header().Get("Cache-Control") != "public, no-cache" {
 		t.Fatalf("logo caching: %q %q", etag, rec.Header().Get("Cache-Control"))
 	}
-	req := httptest.NewRequest("GET", "/v1/connectors/zerobounce/logo.svg?v=2", nil)
+	req := httptest.NewRequest("GET", "/v1/connectors/zerobounce/logo.svg", nil)
 	req.Header.Set("If-None-Match", etag)
 	rec = httptest.NewRecorder()
 	e.h.ServeHTTP(rec, req)

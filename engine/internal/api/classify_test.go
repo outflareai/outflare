@@ -28,7 +28,7 @@ func TestClassify(t *testing.T) {
 	}
 
 	// An unknown business domain: mail servers are known, the category is not.
-	body = owner.must(200, "GET", base+"/email-domains/acme-widgets.test", nil)
+	body = owner.must(200, "GET", base+"/domain-lookups/acme-widgets.test", nil)
 	attrs = global(body)["attributes"].(map[string]any)
 	if body["scope"] != "domain" || global(body)["category"] != "unknown" || attrs["has_mx"] != true ||
 		attrs["mx_provider_id"] != "microsoft" || attrs["is_disposable"] != "unknown" || effective(body)["action"] != "verify" {
@@ -57,7 +57,7 @@ func TestClassify(t *testing.T) {
 		ws); err != nil {
 		t.Fatal(err)
 	}
-	body = owner.must(200, "GET", base+"/email-domains/acme-widgets.test", nil)
+	body = owner.must(200, "GET", base+"/domain-lookups/acme-widgets.test", nil)
 	r, ok := body["research"].(map[string]any)
 	if !ok || r["category"] != "disposable" || r["model"] != "claude-haiku-5-5" {
 		t.Fatalf("research: %v", body)
@@ -79,7 +79,7 @@ func TestClassify(t *testing.T) {
 			t.Errorf("%v: %d %v", req, status, body)
 		}
 	}
-	if status, _ := owner.do("GET", base+"/email-domains/not_a_domain", nil); status != 400 {
+	if status, _ := owner.do("GET", base+"/domain-lookups/not_a_domain", nil); status != 400 {
 		t.Errorf("bad domain: %d", status)
 	}
 }

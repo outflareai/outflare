@@ -287,8 +287,8 @@ export function Mailboxes({ ws, canManage, openOAuth, go }: { ws: string; canMan
               cell: ({ row: { original: m } }) =>
                 canManage && senders.length > 0 ? (
                   <select aria-label={`Sender for ${m.email}`} className={`${field} max-w-44 ${m.sender?.confirmed ? "" : "text-amber-700 dark:text-amber-400"}`} value={m.sender?.confirmed ? m.sender.id : ""} onChange={(e) => setSender(m, e.target.value)}>
-                    <option value="">{m.suggested_sender_id ? "Confirm…" : "Not confirmed"}</option>
-                    {senders.filter((x) => x.status === "active" || x.id === m.sender?.id).map((x) => <option key={x.id} value={x.id}>{x.name}{x.id === m.suggested_sender_id ? " (suggested)" : ""}</option>)}
+                    <option value="">Not confirmed</option>
+                    {senders.filter((x) => x.status === "active" || x.id === m.sender?.id).map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}
                   </select>
                 ) : (
                   m.sender?.confirmed ? m.sender.name : <span className="text-muted-foreground">Not confirmed</span>

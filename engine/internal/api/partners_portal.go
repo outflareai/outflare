@@ -126,6 +126,10 @@ type portalSettings struct {
 	// GAMeasurementID adds Google Analytics 4 (G-...) through that script,
 	// held back until the visitor allows analytics where consent is needed.
 	GAMeasurementID string `json:"ga_measurement_id"`
+	// LeadSubmissions lets partners submit the email of someone they
+	// referred: "review" (the team approves each), "auto" (taken when
+	// nobody else has them) or "" (off).
+	LeadSubmissions string `json:"lead_submissions"`
 }
 
 // portalFor reads stored settings over the kind's defaults: affiliates get
@@ -250,6 +254,8 @@ func (p *portalSettings) check() error {
 		return errInvalid("portal.signup_fields has at most 20 questions")
 	case len(p.SignInTemplate) > 100:
 		return errInvalid("portal.sign_in_template is a template's id or handle")
+	case !slices.Contains(leadSubmissionModes, p.LeadSubmissions):
+		return errInvalid(`portal.lead_submissions is "review", "auto" or "" (off)`)
 	case p.SiteKeyID != "" && !validUUID(p.SiteKeyID):
 		return errInvalid("portal.site_key_id is a site key's id (Settings → Website tracking)")
 	}
@@ -336,6 +342,7 @@ func (s *Server) routesPartnerPortal(mux *http.ServeMux) {
 	s.routesPartnerPostbacks(mux)
 	s.routesPartnerImports(mux)
 	s.routesPartnerSite(mux)
+	s.routesPartnerLeads(mux)
 	read, manage := auth.ScopePartnersRead, auth.ScopePartnersManage
 	mux.HandleFunc("PUT /v1/workspaces/{ws}/partner-programs/{id}/portal", s.inBrand(manage, s.setPartnerPortal))
 	mux.HandleFunc("GET /v1/workspaces/{ws}/partner-programs/{id}/assets", s.inBrand(read, s.listPartnerAssets))
@@ -814,6 +821,8 @@ type portalPublicInfo struct {
 	TermsURL        string                  `json:"terms_url"`
 	Currency        string                  `json:"currency"`
 	PoweredBy       bool                    `json:"powered_by"`
+	// LeadSubmissions: partners can submit leads on the Referrals page.
+	LeadSubmissions bool `json:"lead_submissions"`
 }
 
 func (p *portalProgram) public() portalPublicInfo {
@@ -837,7 +846,7 @@ func (p *portalProgram) public() portalPublicInfo {
 		HeaderLinks: p.settings.HeaderLinks, FooterLinks: p.settings.FooterLinks, HelpArticles: p.settings.HelpArticles, LandingPages: p.settings.LandingPages,
 		PayoutTerms: p.settings.PayoutTerms, TermsVersion: p.termsVersion(), Name: p.name, Kind: p.kind, Title: t, LogoURL: p.settings.LogoURL, FaviconURL: p.settings.FaviconURL, Color: p.settings.Color, CustomCSS: p.settings.CustomCSS,
 		Welcome: p.settings.Welcome, Pages: p.settings.Pages, SignupOpen: p.settings.SignupOpen && p.status == "active", SignupFields: p.settings.SignupFields,
-		TermsURL: p.termsURL, Currency: p.currency, PoweredBy: !p.settings.HidePoweredBy}
+		TermsURL: p.termsURL, Currency: p.currency, PoweredBy: !p.settings.HidePoweredBy, LeadSubmissions: p.settings.LeadSubmissions != ""}
 }
 
 func (s *Server) portalProgramInfo(w http.ResponseWriter, r *http.Request) {

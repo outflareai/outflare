@@ -160,10 +160,7 @@ func DefaultBackoff(attempt int) time.Duration {
 // Retired lists job kinds whose handler was removed. A leftover job of
 // one, enqueued by the old version during a deploy, is closed quietly
 // instead of dying as an error. Its removal migration deletes the rest.
-var Retired = map[string]bool{
-	"warmup.send":  true, // Outflare's own warm-up, removed in migration 0091
-	"warmup.check": true,
-}
+var Retired = map[string]bool{}
 
 // Handle registers the handler for a job kind. Call before Run.
 func (q *Queue) Handle(kind string, h Handler) { q.handlers[kind] = h }

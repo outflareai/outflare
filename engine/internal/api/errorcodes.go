@@ -159,6 +159,7 @@ var errorCodes = []errorCode{
 	// Query.
 	{"query_invalid", []int{400}, "The SQL was refused or failed: the message is the database's own. Queries are one SELECT over the tables GET .../query/tables lists.", false},
 	{"query_timeout", []int{400}, "The query ran too long and was stopped. Filter it more, or count and group instead of listing rows.", false},
+	{"saved_query_archived", []int{409}, "The saved query is archived, so it can't be changed or run. Save its SQL as a new query.", false},
 	{"query_unavailable", []int{503}, "Query couldn't set up its read-only database role. The server's log says why; the database user needs to be able to create roles.", true},
 
 	// Search.

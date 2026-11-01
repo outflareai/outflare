@@ -160,13 +160,9 @@ func loadRoles(ctx context.Context, q querier, ws string) ([]roleView, error) {
 	return out, nil
 }
 
-// findRole picks a role by its id, its starting key, or "member" for the
-// operator role.
+// findRole picks a role by its id or its starting key.
 func findRole(list []roleView, ref string) (roleView, bool) {
 	ref = strings.TrimSpace(ref)
-	if strings.EqualFold(ref, "member") {
-		ref = auth.RoleOperator
-	}
 	for _, v := range list {
 		if v.ID == ref {
 			return v, true

@@ -405,6 +405,14 @@ groups:
         annotations:
           summary: "Over a quarter of queries are running past 15 seconds: the query views may need an index, or the database is overloaded."
 
+      - alert: OutflareQueryExportsFailing
+        # A CSV download that ran its query but failed on Outflare's side
+        # (writing its query.exported activity entry, or the database).
+        expr: sum(increase(outflare_query_exports_total{outcome="error"}[30m])) > 3
+        labels: { severity: warning }
+        annotations:
+          summary: "Query Studio CSV downloads are failing on Outflare's side; check the engine log for errors on exportBrandQuery and exportSavedQuery."
+
       - alert: OutflareMeetingEventsBacklog
         # Meetings tied to a person are recorded as customer events every
         # minute; a backlog that stays means the loop keeps failing.

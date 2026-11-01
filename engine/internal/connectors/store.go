@@ -107,9 +107,6 @@ func scanIntegration(row pgx.Row) (Integration, error) {
 
 // List returns the workspace's integrations, optionally for one connector.
 func (s *Store) List(ctx context.Context, q Querier, ws, connector string) ([]Integration, error) {
-	if connector != "" && s.Registry != nil {
-		connector = s.Registry.Resolve(connector)
-	}
 	rows, err := q.Query(ctx, `SELECT `+integrationCols+` FROM integrations
 		WHERE workspace_id = $1 AND ($2 = '' OR connector = $2) ORDER BY created_at`, ws, connector)
 	if err != nil {

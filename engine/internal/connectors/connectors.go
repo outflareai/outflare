@@ -159,9 +159,6 @@ type Definition struct {
 	// Other OAuth connectors the same sign-in connects too, when the
 	// person grants their scopes (Google Analytics and Search Console).
 	AlsoConnects []string `json:"also_connects,omitempty"`
-	// Older connector ids this one replaces, so saved connections and
-	// API calls that use them keep working.
-	Replaces []string `json:"-"`
 	// Who built it and how far it is trusted. Connectors written in the
 	// engine are Outflare's own; manifests in integrations/ name their
 	// publisher, and integrations/publishers.yaml says who is verified.
@@ -405,19 +402,14 @@ func HTTPError(name string, status int, body string) *Error {
 type Registry struct {
 	byID    map[string]Connector
 	planned map[string]Definition
-	alias   map[string]string
 }
 
 // NewRegistry builds a registry from available connectors and planned
 // definitions.
 func NewRegistry(available []Connector, planned []Definition) *Registry {
-	r := &Registry{byID: map[string]Connector{}, planned: map[string]Definition{}, alias: map[string]string{}}
+	r := &Registry{byID: map[string]Connector{}, planned: map[string]Definition{}}
 	for _, c := range available {
-		d := c.Definition()
-		r.byID[d.ID] = c
-		for _, old := range d.Replaces {
-			r.alias[old] = d.ID
-		}
+		r.byID[c.Definition().ID] = c
 	}
 	for _, d := range planned {
 		if _, ok := r.byID[d.ID]; !ok {
@@ -428,23 +420,14 @@ func NewRegistry(available []Connector, planned []Definition) *Registry {
 	return r
 }
 
-// Resolve maps an old connector id to the one that replaced it.
-func (r *Registry) Resolve(id string) string {
-	if to, ok := r.alias[id]; ok {
-		return to
-	}
-	return id
-}
-
 // Get returns an available connector.
 func (r *Registry) Get(id string) (Connector, bool) {
-	c, ok := r.byID[r.Resolve(id)]
+	c, ok := r.byID[id]
 	return c, ok
 }
 
 // Definition returns any connector's definition, available or planned.
 func (r *Registry) Definition(id string) (Definition, bool) {
-	id = r.Resolve(id)
 	if c, ok := r.byID[id]; ok {
 		d := c.Definition()
 		d.Status = Available

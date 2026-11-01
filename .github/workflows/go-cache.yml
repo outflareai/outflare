@@ -1,8 +1,10 @@
 # Fills the Go build cache that CI's test parts restore (ci.yml, "Restore the
-# Go build cache"), on every push to main. Most pushes to main skip CI's tests
-# because their files already passed (batches, and merges of pull requests
-# that were current), and a cache saved by a pull request can't be shared, so
-# without this the cache would never be refreshed.
+# Go build cache"), on every push to main that changes Go code or its
+# dependencies. Most pushes to main skip CI's tests because their files
+# already passed (the merge queue's batches), and a cache saved by a pull
+# request can't be shared, so without this the cache would never be
+# refreshed. It builds without the race detector, as pull requests and
+# batches test; the nightly race run compiles its own.
 #
 # It compiles everything the tests and go vet compile, without running
 # anything, and keeps only what that build used: restoring the last cache and
@@ -15,6 +17,7 @@ name: Go cache
 on:
   push:
     branches: [main]
+    paths: ["**.go", go.mod, go.sum, .github/workflows/go-cache.yml]
 
 # Only the newest commit's cache is worth filling.
 concurrency:
@@ -40,10 +43,10 @@ jobs:
           path: |
             ~/.cache/go-build
             ~/go/pkg/mod
-          key: go-build-v2-${{ runner.os }}-${{ hashFiles('go.sum') }}-${{ github.sha }}
+          key: go-build-v3-${{ runner.os }}-${{ hashFiles('go.sum') }}-${{ github.sha }}
           restore-keys: |
-            go-build-v2-${{ runner.os }}-${{ hashFiles('go.sum') }}-
-            go-build-v2-${{ runner.os }}-
+            go-build-v3-${{ runner.os }}-${{ hashFiles('go.sum') }}-
+            go-build-v3-${{ runner.os }}-
       # Go refreshes a cache file's modification time when a build uses it
       # (if it is more than an hour old), so marking every restored file as
       # old, building, and deleting what is still old leaves exactly what
@@ -60,7 +63,7 @@ jobs:
           # -exec /bin/true builds and links every test binary like CI does,
           # then "runs" each with /bin/true, so no test (or database) runs.
           # (-c -o dir can't be used: several packages share a name.)
-          go test -race -exec /bin/true ./...
+          go test -exec /bin/true ./...
       - name: Drop what this build didn't use
         run: |
           find ~/.cache/go-build -mindepth 2 -type f ! -newer "$RUNNER_TEMP/unused-before" -delete
@@ -70,4 +73,4 @@ jobs:
           path: |
             ~/.cache/go-build
             ~/go/pkg/mod
-          key: go-build-v2-${{ runner.os }}-${{ hashFiles('go.sum') }}-${{ github.sha }}
+          key: go-build-v3-${{ runner.os }}-${{ hashFiles('go.sum') }}-${{ github.sha }}

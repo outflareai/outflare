@@ -474,6 +474,33 @@ test("reddit tools: guide, campaign prompt, actions and the report; read-only le
   assert.ok(!names.includes("place_reddit_action") && !names.includes("approve_reddit_action"));
 });
 
+test("saved query tools use the brand routes; save_query makes or changes one; read-only leaves it out", async () => {
+  const BRAND = "33333333-3333-4333-8333-333333333333";
+  const { client, calls } = await connect(() => [200, { data: [], columns: [], rows: [] }]);
+  await client.callTool({ name: "list_saved_queries", arguments: { brand: BRAND, q: "plan" } });
+  assert.equal(calls[0].url.pathname, `/v1/brands/${BRAND}/queries`);
+  assert.equal(calls[0].url.search, "?q=plan");
+  await client.callTool({ name: "get_saved_query", arguments: { brand: BRAND, query_id: SEQ, versions: true } });
+  assert.equal(calls[1].url.pathname, `/v1/brands/${BRAND}/queries/${SEQ}/versions`);
+  await client.callTool({ name: "run_saved_query", arguments: { brand: BRAND, query_id: SEQ, version: 2 } });
+  assert.equal(calls[2].method, "POST");
+  assert.equal(calls[2].url.pathname, `/v1/brands/${BRAND}/queries/${SEQ}/run`);
+  assert.deepEqual(JSON.parse(calls[2].body), { version: 2 });
+  await client.callTool({ name: "save_query", arguments: { brand: BRAND, name: "By plan", sql: "select 1", visibility: "brand" } });
+  assert.equal(calls[3].method, "POST");
+  assert.equal(calls[3].url.pathname, `/v1/brands/${BRAND}/queries`);
+  assert.deepEqual(JSON.parse(calls[3].body), { name: "By plan", sql: "select 1", visibility: "brand" });
+  await client.callTool({ name: "save_query", arguments: { brand: BRAND, query_id: SEQ, sql: "select 2", note: "two" } });
+  assert.equal(calls[4].method, "PATCH");
+  assert.equal(calls[4].url.pathname, `/v1/brands/${BRAND}/queries/${SEQ}`);
+  const missing = await client.callTool({ name: "save_query", arguments: { brand: BRAND, sql: "select 1" } });
+  assert.equal(missing.isError, true);
+  assert.equal(calls.length, 5);
+  const ro = await connect(() => [200, {}], { readOnly: true });
+  const roTools = (await ro.client.listTools()).tools.map((t) => t.name);
+  assert.ok(roTools.includes("run_saved_query") && !roTools.includes("save_query"));
+});
+
 test("search insights retain brand routing, model assumptions and write permissions", async () => {
   const { client, calls } = await connect(() => [200, { report: "forecast", status: "ready", data: [], notes: [], summary: {} }]);
   await client.callTool({ name: "get_search_insights", arguments: { brand: WS, site: SEQ, report: "forecast", weeks: 12, growth: .2, currency: "EUR", order_value: 25 } });

@@ -72,11 +72,8 @@ func TestConnectorOffersOAuthAndAPIKey(t *testing.T) {
 	if key["auth_method"] != "api_key" || key["connector"] != "hubspot" {
 		t.Fatalf("key connection: %v", key)
 	}
-	// The old id still works for API clients that use it.
-	old := owner.must(201, "POST", base+"/integrations", map[string]any{"connector": "hubspot_private_app", "name": "Old id", "credentials": map[string]string{"api_key": "pat-good"}})
-	if old["connector"] != "hubspot" || old["connector_name"] != "HubSpot" {
-		t.Fatalf("old id: %v", old)
-	}
+	// The ids from before the two ways in were one connector are gone.
+	owner.must(400, "POST", base+"/integrations", map[string]any{"connector": "hubspot_private_app", "name": "Old id", "credentials": map[string]string{"api_key": "pat-good"}})
 
 	// With an app, OAuth becomes the recommended way.
 	e.integrations.OAuthApps = map[string]connectors.OAuthApp{"hubspot": {ClientID: "cid", ClientSecret: "sec"}}

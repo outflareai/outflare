@@ -66,10 +66,9 @@ type mailboxView struct {
 	ServerHost *string    `json:"server_host"`
 	Warmup     warmupView `json:"warmup"`
 	// Mailbox allocation: who it sends as, where it sends now, and any lock.
-	Sender            *mailboxSender     `json:"sender"`
-	SuggestedSenderID *string            `json:"suggested_sender_id"`
-	Assignment        *mailboxAssignment `json:"assignment"`
-	Lock              *mailboxLock       `json:"lock"`
+	Sender     *mailboxSender     `json:"sender"`
+	Assignment *mailboxAssignment `json:"assignment"`
+	Lock       *mailboxLock       `json:"lock"`
 	// Where it is in its working life; only ready mailboxes send cold email.
 	Lifecycle mailboxLifecycle `json:"lifecycle"`
 	// False for a mailbox Outflare only knows from an outside platform:
@@ -180,7 +179,7 @@ func scanMailbox(r pgx.CollectableRow) (mailboxView, error) {
 		&w.Enabled, &w.StartedAt,
 		&wp.id, &wp.name, &wp.enabled, &wp.score, &wp.observed,
 		&m.CreatedAt, &m.UpdatedAt,
-		&senderID, &senderName, &senderConfirmed, &m.SuggestedSenderID,
+		&senderID, &senderName, &senderConfirmed,
 		&asg.SequenceID, &asg.SequenceName, &asg.State, &asg.NextSequenceID, &asg.Source, &asg.Reason,
 		&lock.Kind, &lock.SequenceID, &lock.TeamID, &lock.Until, &lock.Note,
 		&asg.Platform, &asgConfirmed, &m.HasLogin, &m.Platforms,
@@ -217,7 +216,7 @@ const mailboxSelect = `
 	       m.warmup_enabled, m.warmup_started_at,
 	       m.warmup_integration_id::text, wi.name, wpl.warmup_enabled, wpl.warmup_score, wpl.observed_at,
 	       m.created_at, m.updated_at,
-	       m.sender_id::text, sn.name, m.sender_confirmed_at IS NOT NULL, m.suggested_sender_id::text,
+	       m.sender_id::text, sn.name, m.sender_confirmed_at IS NOT NULL,
 	       ma.sequence_id::text, sq.name, ma.state, ma.next_sequence_id::text, ma.source, ma.reason,
 	       lk.kind, lk.sequence_id::text, lk.team_id::text, lk.until, lk.note,
 	       ai.name, ma.link_id IS NULL OR ma.confirmed_at IS NOT NULL, m.has_login,

@@ -80,6 +80,7 @@ export const tabNames: Record<Tab, string> = {
   outcomes: "Outcomes",
   sequences: "Sequences",
   people: "People",
+  query: "Query",
   leads: "Leads",
   lists: "Lists",
   "lead-finder": "Lead finder",
@@ -135,6 +136,7 @@ export const tabBlurbs: Record<Tab, string> = {
   missions: "Goals your agents work toward, such as 10 meetings by a date. Approve the plan, see every call, stop it any time.",
   sequences: "The emails and follow-ups each lead gets, the schedule they send on, and who is in them.",
   people: "Every person and company Outflare knows: their fields, timeline, consent and duplicates.",
+  query: "Ask the brand's data anything in SQL: every table and record type, results as a table or a chart, CSV downloads, and saved queries with their versions.",
   leads: "Everyone you can contact, where they came from, and what has been sent to them.",
   lists: "Saved searches that build lead lists from your data providers and keep them fresh.",
   "lead-finder": "AI that searches the web for companies that fit your ideal customer, reads their websites and says which fit and why.",
@@ -289,7 +291,7 @@ export const everyday: Tab[] = ["overview", "inbox", "missions"];
 
 export type Module = { id: string; label: string; icon: IconName; tabs: Tab[] };
 export const modules: Module[] = [
-  { id: "crm", label: "CRM", icon: "leads", tabs: ["people", "leads", "lists", "lead-finder", "email-finder", "suppression"] },
+  { id: "crm", label: "CRM", icon: "leads", tabs: ["people", "query", "leads", "lists", "lead-finder", "email-finder", "suppression"] },
   { id: "visitors", label: "Visitors", icon: "visitors", tabs: ["visitors"] },
   { id: "outreach", label: "Outreach", icon: "sequences", tabs: ["sequences", "link-building", "link-autopilot", "coverage", "news", "stories", "pr-autopilot", "allocation", "reports"] },
   { id: "deliverability", label: "Deliverability", icon: "mailboxes", tabs: ["infrastructure", "mailboxes", "domains", "warmup", "servers", "senders"] },
@@ -315,7 +317,7 @@ const allModules = modules;
 
 // Pages that work for someone kept to some brands. The others need every
 // brand (the API answers 403), so they are hidden from them.
-const brandTabs: readonly Tab[] = ["overview", "seo-overview", "search-insights", "audits", "fixes", "experiments", "keywords", "ai-visibility", "backlinks", "competitors", "link-building", "link-autopilot", "coverage", "news", "stories", "pr-autopilot", "reddit", "reddit-campaigns", "social", "reviews", "ads", "visitors", "tracking", "flags", "ab-tests", "inbox", "sequences", "people", "leads", "lists", "rules", "lead-finder", "suppression", "mailboxes", "domains", "knowledge", "company", "brands", "setup", "ideal-customers", "members", "account", "instance", "ai-accounts", "support", "help-centre"];
+const brandTabs: readonly Tab[] = ["overview", "seo-overview", "search-insights", "audits", "fixes", "experiments", "keywords", "ai-visibility", "backlinks", "competitors", "link-building", "link-autopilot", "coverage", "news", "stories", "pr-autopilot", "reddit", "reddit-campaigns", "social", "reviews", "ads", "visitors", "tracking", "flags", "ab-tests", "inbox", "sequences", "people", "query", "leads", "lists", "rules", "lead-finder", "suppression", "mailboxes", "domains", "knowledge", "company", "brands", "setup", "ideal-customers", "members", "account", "instance", "ai-accounts", "support", "help-centre"];
 // Pages of parts of Outflare switched on per workspace while they are
 // tested (GET /v1/me lists each workspace's features).
 const featureTabs: Partial<Record<Tab, string>> = { "ai-accounts": "ai_accounts" };
@@ -1016,6 +1018,10 @@ function callFor(tab: Tab, ws: string, item?: string): Call {
           : item === "duplicates"
           ? { title: "Possible duplicates", path: "/v1/brands/{brand}/records/duplicates", params: { brand: "BRAND_ID" }, mcp: "list_record_duplicates", ask: "Which possible duplicates are safe to merge, and which look like two different people?", scope: "customers.read" }
           : { title: item === "companies" ? "Companies" : "People", path: "/v1/brands/{brand}/records", params: { brand: "BRAND_ID" }, query: { type: item === "companies" ? "account" : "person", limit: 50 }, mcp: "list_records", ask: "Which customers at fintech companies haven't heard from us this month?", scope: "customers.read" };
+    case "query":
+      return item && /^[0-9a-f-]{36}$/.test(item)
+        ? { title: "One saved query", path: "/v1/brands/{brand}/queries/{saved_query}", params: { brand: "BRAND_ID", saved_query: item }, mcp: "get_saved_query", ask: "Run this saved query and tell me what changed since last month.", scope: "customers.read" }
+        : { title: "Saved queries", path: "/v1/brands/{brand}/queries", params: { brand: "BRAND_ID" }, mcp: "list_saved_queries", ask: "How many people signed up each week this quarter, by plan? Save the query for the team.", scope: "customers.read" };
     case "leads":
       return { title: "Leads", path: "/v1/workspaces/{ws}/leads", params: base, query: { limit: 50 }, mcp: "list_leads", ask: "Find leads at companies in fintech.", scope: "leads.read" };
     case "lists":

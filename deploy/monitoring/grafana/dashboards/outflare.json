@@ -9772,6 +9772,121 @@
           "legendFormat": "{{outcome}}"
         }
       ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Saved queries run and CSV downloads",
+      "description": "Saved queries run from Query Studio or run_saved_query, and query results downloaded as CSV, per hour, by outcome. They run through the same query path as above, so their failures show there too. Normal: follows how much people use Query Studio; many invalid saved runs mean saved SQL broke, often after a field or type was archived.",
+      "id": 475,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 765
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (outcome) (increase(outflare_query_saved_runs_total{job=\"$job\"}[1h]))",
+          "legendFormat": "saved · {{outcome}}",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          }
+        },
+        {
+          "refId": "B",
+          "expr": "sum by (outcome) (increase(outflare_query_exports_total{job=\"$job\"}[1h]))",
+          "legendFormat": "csv · {{outcome}}",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "fillOpacity": 10,
+            "stacking": {
+              "mode": "none"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "mean",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Rows downloaded as CSV",
+      "description": "Rows written to CSV downloads of query results per hour (each download holds at most 10,000). Every download is a query.exported entry in the workspace's activity log. Normal: small and bursty; a steady high level means something downloads customer data in bulk on a schedule.",
+      "id": 476,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 765
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum(increase(outflare_query_export_rows_total{job=\"$job\"}[1h]))",
+          "legendFormat": "rows",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "fillOpacity": 10,
+            "stacking": {
+              "mode": "none"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "mean",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
     }
   ]
 }

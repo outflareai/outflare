@@ -1535,6 +1535,32 @@ class Operations(_Mixin):
             idempotency_key=idempotency_key,
         )
 
+    def approve_partner_lead(
+        self,
+        id: str,
+        *,
+        ws: str | None = None,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Take a submitted lead.
+
+        Scope: partners.manage. Binds the person to the partner as a referral (via manual), under the program's rules
+        and flows like any lead. When the program can't credit it (another partner referred them first, the partner
+        isn't active), the lead is rejected with that reason instead.
+
+        Needs: the partners.manage scope.
+        POST /v1/workspaces/{ws}/partner-leads/{id}/approve
+        """
+        return self._call(
+            "POST",
+            "/v1/workspaces/{ws}/partner-leads/{id}/approve",
+            path={"id": id, "ws": ws},
+            body={},
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
     def approve_partner_reward(
         self,
         id: str,
@@ -1843,6 +1869,29 @@ class Operations(_Mixin):
             "POST",
             "/v1/workspaces/{ws}/rules/{id}/archive",
             path={"id": id, "ws": ws},
+            idempotency_key=idempotency_key,
+        )
+
+    def archive_saved_query(
+        self,
+        brand: str,
+        saved_query: str,
+        *,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Archive a saved query.
+
+        Scope: customers.manage. Takes the query out of the list; it can no longer be changed or run, and its versions
+        are kept. You can archive your own queries and shared ones; a caller with workspace.manage (owners and admins)
+        can archive anyone's. Archiving an archived query changes nothing.
+
+        Needs: the customers.manage scope.
+        POST /v1/brands/{brand}/queries/{saved_query}/archive
+        """
+        return self._call(
+            "POST",
+            "/v1/brands/{brand}/queries/{saved_query}/archive",
+            path={"brand": brand, "saved_query": saved_query},
             idempotency_key=idempotency_key,
         )
 
@@ -5003,7 +5052,7 @@ class Operations(_Mixin):
         ws: str | None = None,
         brand_ids: list[str] | None = None,
         email: str,
-        role: Literal["owner", "admin", "operator", "member", "viewer"] | None = None,
+        role: Literal["owner", "admin", "operator", "viewer"] | None = None,
         role_id: str | None = None,
         extra_body: dict[str, Any] | None = None,
         idempotency_key: str | None = None,
@@ -6427,6 +6476,45 @@ class Operations(_Mixin):
                 "name": name,
                 "record_type": record_type,
                 "trigger": trigger,
+            },
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
+    def create_saved_query(
+        self,
+        brand: str,
+        *,
+        chart: Any | None = None,
+        description: str | None = None,
+        name: str,
+        note: str | None = None,
+        sql: str,
+        visibility: Literal["private", "brand"] | None = None,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Save a query.
+
+        Scope: customers.manage. Saves SQL (and optionally how to chart its results) as version 1 of a new query for
+        this brand. It is private to you unless visibility is brand, which shares it with everyone who can query the
+        brand. The SQL isn't run: run it with POST .../queries/{saved_query}/run. A token that belongs to no person saves
+        only shared queries.
+
+        Needs: the customers.manage scope.
+        POST /v1/brands/{brand}/queries
+        """
+        return self._call(
+            "POST",
+            "/v1/brands/{brand}/queries",
+            path={"brand": brand},
+            body={
+                "chart": chart,
+                "description": description,
+                "name": name,
+                "note": note,
+                "sql": sql,
+                "visibility": visibility,
             },
             extra_body=extra_body,
             idempotency_key=idempotency_key,
@@ -9036,6 +9124,37 @@ class Operations(_Mixin):
             idempotency_key=idempotency_key,
         )
 
+    def export_brand_query(
+        self,
+        brand: str,
+        *,
+        limit: int | None = None,
+        sql: str,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Download a query's results as CSV.
+
+        Scope: customers.read, and the read scope of each table the query reads. Runs the query exactly as
+        POST .../query does (one SELECT, this brand's rows only, 15 seconds at most) and answers its rows as a CSV
+        file to download: up to limit rows (default and at most 10,000, and 16 MB), a header row of column names,
+        jsonb as JSON and times as RFC 3339. Outflare-Query-Rows says how many rows it holds and
+        Outflare-Query-Truncated whether there were more. A cell that a spreadsheet would read as a formula starts
+        with '. Every download is recorded as query.exported in the activity log, without its SQL or rows; an
+        agent kept to missions downloads only inside one.
+
+        Needs: the customers.read scope.
+        POST /v1/brands/{brand}/query/csv
+        """
+        return self._call(
+            "POST",
+            "/v1/brands/{brand}/query/csv",
+            path={"brand": brand},
+            body={"limit": limit, "sql": sql},
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
     def export_kit(
         self,
         *,
@@ -9191,6 +9310,34 @@ class Operations(_Mixin):
             "/v1/workspaces/{ws}/partner-payouts/export",
             path={"ws": ws},
             query={"brand": brand, "status": status, "program": program},
+        )
+
+    def export_saved_query(
+        self,
+        brand: str,
+        saved_query: str,
+        *,
+        limit: int | None = None,
+        version: int | None = None,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Download a saved query's results as CSV.
+
+        Scope: customers.read. Runs the current version (or version) and answers its rows as a CSV file named after
+        the query, as POST .../query/csv does: up to limit rows (default and at most 10,000), recorded as
+        query.exported.
+
+        Needs: the customers.read scope.
+        POST /v1/brands/{brand}/queries/{saved_query}/csv
+        """
+        return self._call(
+            "POST",
+            "/v1/brands/{brand}/queries/{saved_query}/csv",
+            path={"brand": brand, "saved_query": saved_query},
+            body={"limit": limit, "version": version},
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
         )
 
     def extract_coverage_document_terms(
@@ -10616,7 +10763,6 @@ class Operations(_Mixin):
         id: str,
         *,
         theme: Literal["light", "dark"] | None = None,
-        v: str | None = None,
     ) -> Any:
         """Get a connector's logo.
 
@@ -10632,7 +10778,7 @@ class Operations(_Mixin):
             "GET",
             "/v1/connectors/{id}/logo.svg",
             path={"id": id},
-            query={"theme": theme, "v": v},
+            query={"theme": theme},
         )
 
     def get_consent_banner(
@@ -11432,8 +11578,7 @@ class Operations(_Mixin):
     ) -> Any:
         """What kind of email domain this is.
 
-        Scope: leads.read. The same answer as GET /email-domains/{domain},
-        under a name that can't be mistaken for Lifecycle's email domains.
+        Scope: leads.read. The same answer as POST /classifications with `domain`, as a GET.
 
         Needs: the leads.read scope.
         GET /v1/workspaces/{ws}/domain-lookups/{domain}
@@ -11480,25 +11625,6 @@ class Operations(_Mixin):
             "GET",
             "/v1/workspaces/{ws}/email-broadcasts/{id}",
             path={"id": id, "ws": ws},
-        )
-
-    def get_email_domain(
-        self,
-        domain: str,
-        *,
-        ws: str | None = None,
-    ) -> Any:
-        """What kind of email domain this is.
-
-        Scope: leads.read. The same answer as POST /classifications with `domain`, as a GET.
-
-        Needs: the leads.read scope.
-        GET /v1/workspaces/{ws}/email-domains/{domain}
-        """
-        return self._call(
-            "GET",
-            "/v1/workspaces/{ws}/email-domains/{domain}",
-            path={"domain": domain, "ws": ws},
         )
 
     def get_email_guardrails(
@@ -13183,6 +13309,44 @@ class Operations(_Mixin):
             "GET",
             "/v1/workspaces/{ws}/rules/{id}",
             path={"id": id, "ws": ws},
+        )
+
+    def get_saved_query(
+        self,
+        brand: str,
+        saved_query: str,
+    ) -> Any:
+        """Get a saved query.
+
+        Scope: customers.read. A saved query with its current SQL and chart. Another person's private query is 404.
+        An archived one still opens, with archived_at set.
+
+        Needs: the customers.read scope.
+        GET /v1/brands/{brand}/queries/{saved_query}
+        """
+        return self._call(
+            "GET",
+            "/v1/brands/{brand}/queries/{saved_query}",
+            path={"brand": brand, "saved_query": saved_query},
+        )
+
+    def get_saved_query_version(
+        self,
+        brand: str,
+        saved_query: str,
+        version: str,
+    ) -> Any:
+        """Get one version of a saved query.
+
+        Scope: customers.read. One version's SQL and chart.
+
+        Needs: the customers.read scope.
+        GET /v1/brands/{brand}/queries/{saved_query}/versions/{version}
+        """
+        return self._call(
+            "GET",
+            "/v1/brands/{brand}/queries/{saved_query}/versions/{version}",
+            path={"brand": brand, "saved_query": saved_query, "version": version},
         )
 
     def get_search_insights(
@@ -19750,6 +19914,42 @@ class Operations(_Mixin):
             path={"id": id, "ws": ws},
         )
 
+    def list_partner_leads(
+        self,
+        *,
+        ws: str | None = None,
+        brand: str | None = None,
+        program: str | None = None,
+        status: Literal["pending", "approved", "rejected"] | None = None,
+        limit: int | None = None,
+        before: str | None = None,
+        cursor: str | None = None,
+        fields: list[str] | None = None,
+    ) -> Any:
+        """List leads partners submitted, newest first.
+
+        Scope: partners.read. The people partners say they referred, submitted on the portal when its
+        lead_submissions setting is on: pending ones wait for you (review), approved ones are referrals via manual,
+        and rejected ones say why (your reason, or why it couldn't be taken, such as already_referred).
+
+        Needs: the partners.read scope.
+        GET /v1/workspaces/{ws}/partner-leads
+        """
+        return self._call(
+            "GET",
+            "/v1/workspaces/{ws}/partner-leads",
+            path={"ws": ws},
+            query={
+                "brand": brand,
+                "program": program,
+                "status": status,
+                "limit": limit,
+                "before": before,
+                "cursor": cursor,
+                "fields": fields,
+            },
+        )
+
     def list_partner_payouts(
         self,
         *,
@@ -20714,6 +20914,48 @@ class Operations(_Mixin):
             "/v1/workspaces/{ws}/rules",
             path={"ws": ws},
             query={"brand": brand, "status": status},
+        )
+
+    def list_saved_queries(
+        self,
+        brand: str,
+        *,
+        q: str | None = None,
+        visibility: Literal["private", "brand"] | None = None,
+    ) -> Any:
+        """List saved queries.
+
+        Scope: customers.read. The brand's saved queries you can see, most recently changed first (at most 500): your
+        own private ones and every one shared with the brand. Archived ones are left out. Each comes with its current
+        SQL and chart; mine says it is yours, and can_edit whether you may change it.
+
+        Needs: the customers.read scope.
+        GET /v1/brands/{brand}/queries
+        """
+        return self._call(
+            "GET",
+            "/v1/brands/{brand}/queries",
+            path={"brand": brand},
+            query={"q": q, "visibility": visibility},
+        )
+
+    def list_saved_query_versions(
+        self,
+        brand: str,
+        saved_query: str,
+    ) -> Any:
+        """List a saved query's versions.
+
+        Scope: customers.read. Every version of the query's SQL and chart, newest first (the newest 200), with who made
+        each, its note and which one is current.
+
+        Needs: the customers.read scope.
+        GET /v1/brands/{brand}/queries/{saved_query}/versions
+        """
+        return self._call(
+            "GET",
+            "/v1/brands/{brand}/queries/{saved_query}/versions",
+            path={"brand": brand, "saved_query": saved_query},
         )
 
     def list_search_groups(
@@ -23796,6 +24038,31 @@ class Operations(_Mixin):
             idempotency_key=idempotency_key,
         )
 
+    def reject_partner_lead(
+        self,
+        id: str,
+        *,
+        ws: str | None = None,
+        reason: str | None = None,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Turn down a submitted lead.
+
+        Scope: partners.manage. The partner sees it rejected, with your reason.
+
+        Needs: the partners.manage scope.
+        POST /v1/workspaces/{ws}/partner-leads/{id}/reject
+        """
+        return self._call(
+            "POST",
+            "/v1/workspaces/{ws}/partner-leads/{id}/reject",
+            path={"id": id, "ws": ws},
+            body={"reason": reason},
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
     def reject_partner_reward(
         self,
         id: str,
@@ -24681,6 +24948,33 @@ class Operations(_Mixin):
             idempotency_key=idempotency_key,
         )
 
+    def restore_saved_query_version(
+        self,
+        brand: str,
+        saved_query: str,
+        version: str,
+        *,
+        note: str | None = None,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Restore an old version of a saved query.
+
+        Scope: customers.manage. Makes a new version with this version's SQL and chart, so nothing in the history is
+        lost; restored_from says which. The current version is 409 conflict.
+
+        Needs: the customers.manage scope.
+        POST /v1/brands/{brand}/queries/{saved_query}/versions/{version}/restore
+        """
+        return self._call(
+            "POST",
+            "/v1/brands/{brand}/queries/{saved_query}/versions/{version}/restore",
+            path={"brand": brand, "saved_query": saved_query, "version": version},
+            body={"note": note},
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
     def resume_mission(
         self,
         id: str,
@@ -25232,6 +25526,35 @@ class Operations(_Mixin):
             path={"ws": ws},
             query={"brand": brand},
             body={"limit": limit, "sql": sql},
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
+    def run_saved_query(
+        self,
+        brand: str,
+        saved_query: str,
+        *,
+        limit: int | None = None,
+        version: int | None = None,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Run a saved query.
+
+        Scope: customers.read, and the read scope of each table the query reads. Runs the current version (or version)
+        exactly as POST .../query runs SQL: this brand's rows only, whatever the SQL says, up to limit rows (default
+        100, at most 1000) and 15 seconds. It never changes anything, so an agent kept to missions may run it outside
+        one. An archived query is 409 saved_query_archived.
+
+        Needs: the customers.read scope.
+        POST /v1/brands/{brand}/queries/{saved_query}/run
+        """
+        return self._call(
+            "POST",
+            "/v1/brands/{brand}/queries/{saved_query}/run",
+            path={"brand": brand, "saved_query": saved_query},
+            body={"limit": limit, "version": version},
             extra_body=extra_body,
             idempotency_key=idempotency_key,
         )
@@ -31030,7 +31353,7 @@ class Operations(_Mixin):
         *,
         ws: str | None = None,
         brand_ids: list[str] | None = None,
-        role: Literal["owner", "admin", "operator", "member", "viewer"] | None = None,
+        role: Literal["owner", "admin", "operator", "viewer"] | None = None,
         role_id: str | None = None,
         extra_body: dict[str, Any] | None = None,
         idempotency_key: str | None = None,
@@ -31969,6 +32292,46 @@ class Operations(_Mixin):
                 "name": name,
                 "record_type": record_type,
                 "trigger": trigger,
+            },
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
+    def update_saved_query(
+        self,
+        brand: str,
+        saved_query: str,
+        *,
+        chart: Any | None = None,
+        description: str | None = None,
+        name: str | None = None,
+        note: str | None = None,
+        sql: str | None = None,
+        visibility: Literal["private", "brand"] | None = None,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Change a saved query.
+
+        Scope: customers.manage. Send only what changes. A change to sql or chart makes a new version (note says what
+        it is), and the old one stays in the history; a new name or description doesn't. visibility shares the query
+        with the brand (brand) or makes it yours alone again (private), and only the person who saved it may change
+        it. Anyone with customers.manage may change a shared query. An archived query is 409 saved_query_archived.
+
+        Needs: the customers.manage scope.
+        PATCH /v1/brands/{brand}/queries/{saved_query}
+        """
+        return self._call(
+            "PATCH",
+            "/v1/brands/{brand}/queries/{saved_query}",
+            path={"brand": brand, "saved_query": saved_query},
+            body={
+                "chart": chart,
+                "description": description,
+                "name": name,
+                "note": note,
+                "sql": sql,
+                "visibility": visibility,
             },
             extra_body=extra_body,
             idempotency_key=idempotency_key,

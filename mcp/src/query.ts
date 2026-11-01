@@ -56,6 +56,61 @@ export function registerQueryTools(server: McpServer, gtm: MissionClient, worksp
   );
 
   server.registerTool(
+    "list_saved_queries",
+    {
+      title: "List a brand's saved queries",
+      description:
+        "Queries people saved in Query Studio for one brand: your own private ones and those shared with the brand, newest first, each with " +
+        "its current SQL and chart. Look here before writing SQL for a common question; run one with run_saved_query.",
+      inputSchema: {
+        brand: brandRef,
+        q: z.string().max(200).optional().describe("Only queries whose name or description contains this."),
+        visibility: z.enum(["private", "brand"]).optional().describe("private: only yours; brand: only shared ones."),
+      },
+      annotations: read,
+    },
+    ({ brand, q, visibility }) =>
+      call(() => onBrand(brand, (b) => gtm.GET("/v1/brands/{brand}/queries", { params: { path: { brand: b }, query: { q, visibility } } }))),
+  );
+
+  server.registerTool(
+    "get_saved_query",
+    {
+      title: "Read a saved query",
+      description: "One saved query with its current SQL and chart. versions: true also lists its versions, newest first.",
+      inputSchema: {
+        brand: brandRef,
+        query_id: z.string().uuid(),
+        versions: z.boolean().optional(),
+      },
+      annotations: read,
+    },
+    ({ brand, query_id, versions }) =>
+      versions
+        ? call(() => onBrand(brand, (b) => gtm.GET("/v1/brands/{brand}/queries/{saved_query}/versions", { params: { path: { brand: b, saved_query: query_id } } })))
+        : call(() => onBrand(brand, (b) => gtm.GET("/v1/brands/{brand}/queries/{saved_query}", { params: { path: { brand: b, saved_query: query_id } } }))),
+  );
+
+  server.registerTool(
+    "run_saved_query",
+    {
+      title: "Run a saved query",
+      description:
+        "Runs a saved query's current version (or version) exactly as run_query runs SQL: the brand's rows only, up to limit rows (default 100, " +
+        "at most 1000), 15 seconds at most. It never changes anything, so it needs no mission.",
+      inputSchema: {
+        brand: brandRef,
+        query_id: z.string().uuid(),
+        version: z.number().int().min(1).optional(),
+        limit: z.number().int().min(1).max(1000).optional(),
+      },
+      annotations: read,
+    },
+    ({ brand, query_id, ...body }) =>
+      call(() => onBrand(brand, (b) => gtm.POST("/v1/brands/{brand}/queries/{saved_query}/run", { params: { path: { brand: b, saved_query: query_id } }, body }))),
+  );
+
+  server.registerTool(
     "search_workspace",
     {
       title: "Search records and their history",
@@ -96,6 +151,41 @@ export function registerQueryTools(server: McpServer, gtm: MissionClient, worksp
   );
 
   if (readOnly) return;
+  server.registerTool(
+    "save_query",
+    {
+      title: "Save a query for a brand",
+      description:
+        "Saves SQL (check it with run_query first) as a query people can open in Query Studio. Without query_id it makes a new one, private to " +
+        "the person this connection belongs to unless visibility is brand (shared with everyone who can query the brand). With query_id it " +
+        "changes that query: new sql or chart makes a new version, and the old one stays in its history. Needs customers.manage.",
+      inputSchema: {
+        brand: brandRef,
+        query_id: z.string().uuid().optional(),
+        name: z.string().min(1).max(200).optional().describe("Required for a new query."),
+        description: z.string().max(2000).optional(),
+        sql: z.string().min(1).max(20000).optional().describe("Required for a new query."),
+        chart: z
+          .object({ type: z.enum(["bar", "line", "area"]), x: z.string().max(63), y: z.array(z.string().max(63)).min(1).max(8) })
+          .nullable()
+          .optional()
+          .describe("How to draw the results: one x column and up to 8 y columns. null shows a table."),
+        visibility: z.enum(["private", "brand"]).optional(),
+        note: z.string().max(500).optional().describe("What this version is, shown in its history."),
+      },
+      annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
+    },
+    ({ brand, query_id, ...body }) => {
+      if (query_id) {
+        return call(() => onBrand(brand, (b) => gtm.PATCH("/v1/brands/{brand}/queries/{saved_query}", { params: { path: { brand: b, saved_query: query_id } }, body })));
+      }
+      const { name, sql } = body;
+      if (!name || !sql) {
+        return Promise.resolve({ isError: true, content: [{ type: "text" as const, text: "A new query needs name and sql (or pass query_id to change one)." }] });
+      }
+      return call(() => onBrand(brand, (b) => gtm.POST("/v1/brands/{brand}/queries", { params: { path: { brand: b } }, body: { ...body, name, sql } })));
+    },
+  );
   server.registerTool(
     "set_semantic_search",
     {

@@ -28,6 +28,7 @@ import { Logs } from "./pages/Logs";
 import { Mailboxes } from "./pages/Mailboxes";
 import { Leads } from "./pages/Leads";
 import { People } from "./pages/People";
+import { Query } from "./pages/Query";
 import { Suppression } from "./pages/Suppression";
 import { Lists } from "./pages/Lists";
 import { Sequences } from "./pages/Sequences";
@@ -617,6 +618,7 @@ function Shell({ me, onSignOut, onReload }: { me: Me; onSignOut: () => void; onR
         {ready && ws && tab === "senders" && <Senders key={ws.id} ws={ws.id} canManage={writer} canManageTeams={isAdmin} />}
         {ready && ws && tab === "servers" && <Servers key={ws.id} ws={ws.id} canManage={writer} open={item ?? ""} onOpen={(id) => setItem(id || undefined)} go={setTab} />}
         {ready && ws && tab === "people" && <People key={ws.id} ws={ws.id} canManage={can("customers.manage")} open={item ?? ""} onOpen={(it) => setItem(it || undefined)} go={setTab} />}
+        {ready && ws && tab === "query" && <Query key={ws.id} ws={ws.id} canManage={can("customers.manage")} open={item ?? ""} onOpen={(it) => setItem(it || undefined)} />}
         {ready && ws && tab === "leads" && <Leads key={ws.id} ws={ws.id} canManage={writer} go={setTab} />}
         {ready && ws && tab === "lists" && <Lists key={ws.id} ws={ws.id} canManage={writer} open={item} setOpen={setItem} go={setTab} />}
         {ready && ws && tab === "lead-finder" && (

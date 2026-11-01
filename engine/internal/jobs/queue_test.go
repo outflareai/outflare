@@ -187,12 +187,14 @@ func TestRetiredKindClosesQuietly(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	jobs.Enqueue(ctx, pool, jobs.NewJob{Kind: "warmup.send"})
+	jobs.Retired["old.kind"] = true
+	t.Cleanup(func() { delete(jobs.Retired, "old.kind") })
+	jobs.Enqueue(ctx, pool, jobs.NewJob{Kind: "old.kind"})
 	go newQueue(pool).Run(ctx, 1)
 
 	waitFor(t, func() bool { return countStatus(t, pool, "dead") == 1 })
 	var last string
-	pool.QueryRow(ctx, `SELECT last_error FROM jobs WHERE kind = 'warmup.send'`).Scan(&last)
+	pool.QueryRow(ctx, `SELECT last_error FROM jobs WHERE kind = 'old.kind'`).Scan(&last)
 	if last != "job kind retired" {
 		t.Fatalf("last_error = %q", last)
 	}

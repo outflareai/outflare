@@ -79,6 +79,8 @@ Every Outflare metric starts with `outflare_`, so it is easy to keep only those 
 | `outflare_hooks_handle_lag_seconds` | `connector` | Time from a webhook arriving to its event being handled. |
 | `outflare_query_runs_total` | `outcome` (`success`, `invalid`, `timeout`, `unavailable`, `error`) | [Queries](query.md) run. |
 | `outflare_query_duration_seconds`, `outflare_query_rows_total` | | How long queries took, and the rows they returned. |
+| `outflare_query_saved_runs_total`, `outflare_query_exports_total` | `outcome` (as above) | [Saved queries](query.md#query-studio) run, and query results downloaded as CSV. |
+| `outflare_query_export_rows_total` | | Rows written to CSV downloads. |
 | `outflare_smart_lists_lists`, `outflare_smart_lists_oldest_refresh_seconds`, `outflare_smart_lists_failing` | | [Smart lists](lists.md#smart-lists): how many there are, how long since the least recently refreshed one was brought up to date (normal is under 20 minutes), and how many failed their last refresh. |
 | `outflare_rules_evaluations_total` | `trigger`, `outcome` | [Rules](rules.md) evaluated for a record: `fired`, or why not (`no_match`, `duplicate`, `cooldown`, `late`, `before_live`, `too_deep`, `manual`), and absence clocks `started` and `stopped`. |
 | `outflare_emails_guarded_total` | `trigger`, `outcome` | Marketing emails from journeys and broadcasts that a workspace's guardrails stopped (`frequency_cap`) or held until morning (`quiet_hours`). |
@@ -291,6 +293,7 @@ The database numbers are read when Prometheus scrapes, at most once every 10 sec
 - help centre pages taking over a second to build at the 95th percentile (info)
 - a privacy export failing for Outflare's own reasons (`OutflarePrivacyExportsFailing`)
 - brand queries running without their record type tables (`OutflareQueryTypeTablesFailing`)
+- CSV downloads of query results failing on Outflare's side (`OutflareQueryExportsFailing`)
 - deleted customer data staying over 6 hours past its 7 days in Recently deleted (`OutflareRecoveryPurgeBehind`: the purge is failing)
 - a batch undo failing in the background (`OutflareBatchUndoFailing`)
 - adjust them in your copy
