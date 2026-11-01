@@ -1456,21 +1456,18 @@ function ReferencePicker({
             await list(brand, f.reference as Resource, { q, limit: 100 })
           ).data.map((r) => ({ id: r.id, name: nameOf(r) }));
         else if (f.reference === "records") {
-          const responses = await Promise.all(
-            [brand, "none"].map((scope) =>
-              api.GET("/v1/workspaces/{ws}/records", {
-                params: {
-                  path: { ws },
-                  query: {
-                    brand: scope,
-                    type: f.name === "record_id" ? "account" : "person",
-                    q,
-                    limit: 50,
-                  },
+          const responses = [
+            await api.GET("/v1/brands/{brand}/records", {
+              params: {
+                path: { brand },
+                query: {
+                  type: f.name === "record_id" ? "account" : "person",
+                  q,
+                  limit: 50,
                 },
-              }),
-            ),
-          );
+              },
+            }),
+          ];
           const found = new Map<string, { id: string; name: string }>();
           for (const result of responses) {
             if (result.error) throw new Error(errorMessage(result.error));
@@ -2910,10 +2907,10 @@ function CoverageRelationshipContext({
           return;
         }
         const r = await api.GET(
-          "/v1/workspaces/{ws}/records/{record}/timeline",
+          "/v1/brands/{brand}/records/{record}/timeline",
           {
             params: {
-              path: { ws, record: id },
+              path: { brand, record: id },
               query: { limit: 20, people: "true" },
             },
           },
@@ -2987,10 +2984,10 @@ function CoverageRelationshipContext({
           onClick={async () => {
             try {
               const r = await api.GET(
-                "/v1/workspaces/{ws}/records/{record}/timeline",
+                "/v1/brands/{brand}/records/{record}/timeline",
                 {
                   params: {
-                    path: { ws, record: company },
+                    path: { brand, record: company },
                     query: { limit: 20, before: next, people: "true" },
                   },
                 },

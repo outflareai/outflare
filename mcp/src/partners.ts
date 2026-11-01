@@ -179,6 +179,27 @@ export function registerPartnerTools(server: McpServer, gtm: MissionClient, work
   );
 
   server.registerTool(
+    "list_partner_conversion_log",
+    {
+      title: "List inbound conversion calls",
+      description:
+        "Every conversion the workspace's backend or tracker reported in the last 30 days (API or postback URL), newest first, " +
+        "with what it sent, the answer and the outcome (credited, not_credited with its reason, duplicate, rejected, error). " +
+        "Use it to find out why a sale wasn't credited. q finds a call by external_id, customer_id, ref, promo code, email or request id.",
+      inputSchema: {
+        program: z.string().optional(),
+        source: z.enum(["api", "postback"]).optional(),
+        outcome: z.enum(["credited", "not_credited", "duplicate", "rejected", "error"]).optional(),
+        q: z.string().max(200).optional(),
+        limit: z.number().int().min(1).max(200).optional(),
+        before: z.string().optional(),
+      },
+      annotations: read,
+    },
+    (query) => call(() => gtm.GET("/v1/workspaces/{ws}/partner-conversion-log", { params: { path: path(), query } })),
+  );
+
+  server.registerTool(
     "list_partner_referrals",
     {
       title: "List referred customers",

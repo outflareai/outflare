@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
-import type { WebhookDelivery, WebhookEndpoint, WebhookEventType } from "@outflare/sdk";
+import type { WebhookAttempt, WebhookDelivery, WebhookEndpoint, WebhookEventType } from "@outflare/sdk";
 import { api, errorMessage } from "../api";
 import { ask, Badge, Button, Card, confirmAction, Empty, ErrorText, field, Input, Loading, Menu, PageHeader, Status, toast } from "../ui";
 import { CopyButton, Snippet } from "./Tokens";
 import { ago, plural, stamp } from "../format";
 import { DataTable } from "@/components/data-table";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { useBrand } from "@/lib/brand";
 
 // Which reply labels an endpoint hears about; the API takes groups and
@@ -250,6 +251,7 @@ export function Webhooks({ ws, canManage, open, onOpen }: { ws: string; canManag
             { id: "url", header: "Endpoint", accessorFn: (e) => e.url, cell: ({ row: { original: e } }) => <span className="block min-w-0"><span className="block break-all font-mono text-[12px]">{e.url}</span>{(e.description || e.brand_id) && <span className="block text-[12px] text-muted-foreground">{[e.description, e.brand_id && `Only ${byId(e.brand_id)?.name ?? "one brand"}`].filter(Boolean).join(" · ")}</span>}</span> },
             { id: "events", header: "Events", accessorFn: (e) => e.events.length, cell: ({ row: { original: e } }) => <span className="text-[12px] text-muted-foreground" title={e.events.join("\n")}>{eventsLabel(e.events)}</span> },
             { id: "status", header: "Status", accessorFn: (e) => (e.enabled ? (e.failing_since ? 1 : 0) : 2), cell: ({ row: { original: e } }) => endpointStatus(e) },
+            { id: "errors", header: "Errors (24h)", accessorFn: (e) => (e.attempts_24h ? e.failed_attempts_24h / e.attempts_24h : -1), cell: ({ row: { original: e } }) => <span className="whitespace-nowrap text-[12px] text-muted-foreground">{errorRate(e.failed_attempts_24h, e.attempts_24h)}</span> },
             { id: "last", header: "Last delivered", accessorFn: (e) => e.last_success_at ?? "", cell: ({ row: { original: e } }) => <span className="whitespace-nowrap text-muted-foreground" title={e.last_success_at ? stamp(e.last_success_at) : undefined}>{e.last_success_at ? ago(e.last_success_at) : "Never"}</span> },
             { id: "actions", header: () => <span className="sr-only">Actions</span>, enableSorting: false, meta: { align: "right" }, cell: ({ row: { original: e } }) => (
               <span className="inline-flex gap-1">
@@ -277,17 +279,58 @@ export function Webhooks({ ws, canManage, open, onOpen }: { ws: string; canManag
   );
 }
 
+// errorRate says what share of tries failed, or that there were none.
+function errorRate(failed: number, attempts: number): string {
+  if (attempts === 0) return "No tries";
+  const pct = (failed / attempts) * 100;
+  return `${pct < 1 && failed > 0 ? "<1" : Math.round(pct)}% of ${plural(attempts, "try", "tries")}`;
+}
+
+type Activity = { days: { day: string; attempts: number; failed: number; delivered: number; avg_ms: number }[]; attempts: number; failed: number; error_rate: number; p95_ms: number };
+type Attempt = WebhookAttempt;
+
+// ActivityBars is an endpoint's last seven days of tries, failed in red.
+function ActivityBars({ activity }: { activity: Activity }) {
+  const top = Math.max(1, ...activity.days.map((d) => d.attempts));
+  return (
+    <div className="space-y-2">
+      <div className="flex h-12 items-end gap-1" aria-label="Tries per day, last 7 days">
+        {activity.days.map((d) => (
+          <div key={d.day} className="flex h-full w-6 flex-col justify-end" title={`${d.day}: ${plural(d.attempts, "try", "tries")}, ${d.failed} failed, ${d.avg_ms} ms on average`}>
+            <div className="w-full rounded-t-sm bg-red-500/70" style={{ height: `${(d.failed / top) * 100}%` }} />
+            <div className="w-full bg-emerald-500/70" style={{ height: `${(d.delivered / top) * 100}%` }} />
+          </div>
+        ))}
+      </div>
+      <p className="text-[12px] text-muted-foreground">
+        Last 7 days: {plural(activity.attempts, "try", "tries")}, {errorRate(activity.failed, activity.attempts).replace(/ of .*/, "")} failed{activity.attempts > 0 && `, 95% answered within ${activity.p95_ms.toLocaleString()} ms`}.
+      </p>
+    </div>
+  );
+}
+
 function Deliveries({ ws, endpoint, canManage, back, onTest }: { ws: string; endpoint: WebhookEndpoint; canManage: boolean; back: () => void; onTest: () => Promise<void> }) {
   const [rows, setRows] = useState<WebhookDelivery[] | null>(null);
   const [next, setNext] = useState<number | null>(null);
   const [status, setStatus] = useState<"" | WebhookDelivery["status"]>("");
-  const [openRow, setOpenRow] = useState<number | null>(null);
+  const [open, setOpen] = useState<{ delivery: WebhookDelivery; attempts: Attempt[] } | null>(null);
+  const [activity, setActivity] = useState<Activity | null>(null);
 
   const load = useCallback(async (before?: number) => {
     const { data } = await api.GET("/v1/workspaces/{ws}/webhooks/{id}/deliveries", { params: { path: { ws, id: endpoint.id }, query: { before, status: status || undefined, limit: 50 } } });
     setRows((r) => (before ? [...(r ?? []), ...(data?.data ?? [])] : data?.data ?? []));
     setNext(data?.next_before ?? null);
+    if (!before) {
+      const a = await api.GET("/v1/workspaces/{ws}/webhooks/{id}/activity", { params: { path: { ws, id: endpoint.id }, query: { days: 7 } } });
+      setActivity(a.data ?? null);
+    }
   }, [ws, endpoint.id, status]);
+
+  async function show(d: WebhookDelivery) {
+    const { data, error } = await api.GET("/v1/workspaces/{ws}/webhooks/{id}/deliveries/{delivery}", { params: { path: { ws, id: endpoint.id, delivery: d.id } } });
+    if (error) return toast(errorMessage(error), "error");
+    if (data) setOpen(data);
+  }
 
   useEffect(() => {
     load();
@@ -298,18 +341,18 @@ function Deliveries({ ws, endpoint, canManage, back, onTest }: { ws: string; end
     if (error) return toast(errorMessage(error), "error");
     toast(data?.status === "delivered" ? "Delivered." : `Still failing: ${data?.last_status_code ?? data?.last_error ?? "no answer"}.`, data?.status === "delivered" ? "ok" : "error");
     load();
+    if (open?.delivery.id === d.id) show(d);
   }
-
-  const counts = rows ? { delivered: rows.filter((r) => r.status === "delivered").length, failed: rows.filter((r) => r.status === "failed").length } : null;
 
   return (
     <div className="space-y-6">
       <PageHeader
         back={{ label: "Webhooks", onClick: back }}
         title={<span className="break-all font-mono text-[15px]">{endpoint.url}</span>}
-        description={<span className="inline-flex flex-wrap items-center gap-3">{endpointStatus(endpoint)}<span>{eventsLabel(endpoint.events)}</span>{counts && <span>{counts.delivered.toLocaleString()} delivered · {counts.failed.toLocaleString()} failed in this list</span>}</span>}
+        description={<span className="inline-flex flex-wrap items-center gap-3">{endpointStatus(endpoint)}<span>{eventsLabel(endpoint.events)}</span></span>}
         action={canManage && <Button variant="ghost" onClick={async () => { await onTest(); load(); }}>Send a test event</Button>}
       />
+      {activity && <ActivityBars activity={activity} />}
       <div className="flex items-center gap-2">
         <label className="sr-only" htmlFor="delivery-status">Status</label>
         <select id="delivery-status" className={field} value={status} onChange={(e) => setStatus(e.target.value as typeof status)}>
@@ -329,21 +372,15 @@ function Deliveries({ ws, endpoint, canManage, back, onTest }: { ws: string; end
             data={rows}
             rowId={(d) => String(d.id)}
             columnsMenu={false}
-            onRowClick={(d) => setOpenRow(openRow === d.id ? null : d.id)}
+            onRowClick={(d) => show(d)}
             mobile={(d) => (
               <span className="block space-y-1">
                 <span className="flex items-center justify-between gap-2"><span className="font-mono text-[12px]">{d.event_type}</span><Badge tone={deliveryTone[d.status]}>{d.status === "pending" ? "retrying" : d.status}</Badge></span>
                 <span className="block text-[12px] text-muted-foreground">{d.last_status_code ?? "No answer"} · {plural(d.attempts, "try", "tries")} · {ago(d.created_at)}</span>
-                {openRow === d.id && <pre className="max-h-80 overflow-auto rounded-md border bg-muted/40 p-2 text-[11px] leading-4">{JSON.stringify(d.payload, null, 2)}</pre>}
               </span>
             )}
             columns={[
-              { id: "event", header: "Event", accessorFn: (d) => d.event_type, cell: ({ row: { original: d } }) => (
-                <span className="block min-w-0">
-                  <span className="font-mono text-[12px]">{d.event_type}</span>
-                  {openRow === d.id && <pre className="mt-2 max-h-80 overflow-auto rounded-md border bg-muted/40 p-2 text-[11px] leading-4">{JSON.stringify(d.payload, null, 2)}</pre>}
-                </span>
-              ) },
+              { id: "event", header: "Event", accessorFn: (d) => d.event_type, cell: ({ row: { original: d } }) => <span className="font-mono text-[12px]">{d.event_type}</span> },
               { id: "status", header: "Status", accessorFn: (d) => d.status, cell: ({ row: { original: d } }) => <Badge tone={deliveryTone[d.status]}>{d.status === "pending" ? "retrying" : d.status}</Badge> },
               { id: "answer", header: "Answer", accessorFn: (d) => d.last_status_code ?? 0, cell: ({ row: { original: d } }) => <span className="text-[12px] text-muted-foreground" title={d.last_error ?? undefined}>{d.last_status_code ?? (d.last_error ? "No answer" : "—")}{d.attempts > 1 && ` · ${plural(d.attempts, "try", "tries")}`}</span> },
               { id: "created", header: "Sent", accessorFn: (d) => d.created_at, cell: ({ row: { original: d } }) => <span className="whitespace-nowrap text-muted-foreground" title={stamp(d.created_at)}>{ago(d.created_at)}</span> },
@@ -352,6 +389,35 @@ function Deliveries({ ws, endpoint, canManage, back, onTest }: { ws: string; end
           />
           {next !== null && <Button variant="ghost" onClick={() => load(next)}>Show older</Button>}
         </>
+      )}
+      {open && (
+        <Dialog open onOpenChange={(o) => !o && setOpen(null)}>
+          <DialogContent className="max-w-2xl">
+            <DialogHeader>
+              <DialogTitle className="font-mono text-[14px]">{open.delivery.event_type}</DialogTitle>
+              <DialogDescription>
+                {open.delivery.status === "pending" ? "Retrying" : open.delivery.status} · webhook-id {open.delivery.event_id} · created {stamp(open.delivery.created_at)}
+              </DialogDescription>
+            </DialogHeader>
+            <p className="text-[12px] font-medium">Tries</p>
+            {open.attempts.length === 0 ? (
+              <p className="text-[12px] text-muted-foreground">{plural(open.delivery.attempts, "try", "tries")} before tries were kept one by one; the last answered {open.delivery.last_status_code ?? open.delivery.last_error ?? "nothing"}.</p>
+            ) : (
+              <ul className="space-y-1 text-[12px]">
+                {open.attempts.map((t) => (
+                  <li key={t.id} className="flex flex-wrap items-center gap-2">
+                    <Badge tone={t.ok ? "green" : "red"}>{t.status_code ?? "No answer"}</Badge>
+                    <span className="text-muted-foreground" title={stamp(t.at)}>{ago(t.at)} · {t.duration_ms.toLocaleString()} ms{t.manual ? " · sent by hand" : ""}</span>
+                    {t.error && <span className="w-full break-all font-mono text-[11px] text-muted-foreground">{t.error}</span>}
+                  </li>
+                ))}
+              </ul>
+            )}
+            <p className="text-[12px] font-medium">Payload</p>
+            <pre className="max-h-72 overflow-auto rounded-md border bg-muted/40 p-2 text-[11px] leading-4">{JSON.stringify(open.delivery.payload, null, 2)}</pre>
+            {canManage && <div><Button variant="ghost" onClick={() => redeliver(open.delivery)}>Send again</Button></div>}
+          </DialogContent>
+        </Dialog>
       )}
     </div>
   );

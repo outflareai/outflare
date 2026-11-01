@@ -6,6 +6,12 @@ Each pull request that changes what Outflare does adds a change note in [changes
 
 ## [Unreleased]
 
+## [0.74.0] - 2026-11-01
+
+### Changed
+
+- People, companies, their history, lists, imports and duplicates now live under each brand, with API routes under `/v1/brands/{brand}/`, and every customer page works inside the brand you pick. Query runs for one brand, and each custom record type is a table of its own.
+
 ## [0.73.4] - 2026-11-01
 
 ### Fixed

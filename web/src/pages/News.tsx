@@ -264,6 +264,7 @@ function Articles({ ws, brand }: { ws: string; brand: { brand?: string } }) {
 }
 
 function Journalists({ ws, canLists, brand }: { ws: string; canLists: boolean; brand: { brand?: string } }) {
+  const brandID = useBrand(ws).brand?.id;
   const [list, setList] = useState<Journalist[] | null>(null);
   const [searches, setSearches] = useState<NewsSearch[]>([]);
   const [search, setSearch] = useState("");
@@ -289,9 +290,11 @@ function Journalists({ ws, canLists, brand }: { ws: string; canLists: boolean; b
   const mediaList = async () => {
     const s = searches.find((x) => x.id === search);
     if (!s) return;
+    // A media list is a smart list, which belongs to one brand.
+    if (!brandID) return setError("Pick a brand in the brand switcher first: a media list belongs to one brand.");
     setBusy(true);
-    const { error } = await api.POST("/v1/workspaces/{ws}/smart-lists", {
-      params: { path: { ws } },
+    const { error } = await api.POST("/v1/brands/{brand}/smart-lists", {
+      params: { path: { brand: brandID } },
       body: { name: `Journalists: ${s.name}`.slice(0, 200), description: `People who wrote an article the "${s.name}" news search found in the last year.`.slice(0, 2000),
         rules: [{ news_search: s.id, op: "exists", within_days: 365 }] },
     });

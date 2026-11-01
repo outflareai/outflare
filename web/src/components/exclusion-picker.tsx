@@ -6,6 +6,7 @@
 import { useEffect, useState, type KeyboardEvent } from "react";
 import type { Schemas } from "@outflare/sdk";
 import { api } from "@/api";
+import { useBrand } from "@/lib/brand";
 import { field } from "@/ui";
 
 export type Exclusion = Schemas["Exclusion"];
@@ -21,9 +22,12 @@ export function ExclusionPicker({ ws, value, onChange, disabled, what }: {
 }) {
   const [lists, setLists] = useState<ListRef[]>([]);
   const [tag, setTag] = useState("");
+  // The picked brand's lists: a list belongs to one brand.
+  const brand = useBrand(ws).brand?.id;
   useEffect(() => {
-    api.GET("/v1/workspaces/{ws}/smart-lists", { params: { path: { ws } } }).then(({ data }) => setLists((data?.data ?? []) as ListRef[]));
-  }, [ws]);
+    if (!brand) return setLists([]);
+    api.GET("/v1/brands/{brand}/smart-lists", { params: { path: { brand } } }).then(({ data }) => setLists((data?.data ?? []) as ListRef[]));
+  }, [brand]);
   const name = (id: string) => lists.find((l) => l.id === id)?.name ?? "A deleted list";
   const addTag = () => {
     const t = tag.trim().toLowerCase();

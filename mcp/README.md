@@ -128,6 +128,7 @@ Read (always available):
 | `list_jobs`, `get_job` | Background work (syncs, imports, DNS checks) and how it went; `status=failed` shows what broke. A call that queues work returns `job.id` to follow |
 | `list_logs`, `get_log` | Every API call in the workspace (web app, API, MCP, CLI, missions) with status, duration, error code and who made it; filter by level, surface, operation, tool and time, or look one up by the `request_id` an error returned. Needs `audit.read` |
 | `list_webhook_event_types`, `list_webhooks`, `list_webhook_deliveries` | The events webhooks can send; the workspace's webhooks and their health; what was sent to one and how the receiver answered |
+| `get_webhook_delivery`, `get_webhook_activity` | One delivery with every try and its answer; a webhook's tries per day, error rate and answer time |
 | `get_email_overview` | Lifecycle email: how far setup has got (provider, delivery events, verified domain, test send) and 30 days of sends, deliveries, bounces and complaints |
 | `list_email_provider_guides` | Step-by-step setup for Amazon SES, Postmark and Resend, with a prompt for an agent that has the provider's console (keys never go through the chat) |
 | `list_email_providers`, `list_email_domains` | Connected email providers (default, purposes, events, SES sandbox or production); lifecycle sending domains with each DNS record and whether it is in place |
@@ -141,7 +142,7 @@ Read (always available):
 | `list_emails`, `get_email`, `get_email_recipient` | Transactional and lifecycle emails with delivery status, opens, clicks and what triggered each; one email's content and timeline; everything one address was sent |
 | `list_lead_lists`, `get_lead_list` | Lead lists with sizes, search settings and the latest build |
 | `list_lead_list_members` | A list's leads with their ICP fit score and reasons, best first |
-| `list_smart_lists`, `get_smart_list`, `list_smart_list_members`, `preview_smart_list` | Smart lists: people on customer records who match rules now (a field, an event in the last N days, being in a lead list), who is in each, and how many a set of rules would pick |
+| `list_smart_lists`, `get_smart_list`, `list_smart_list_members`, `preview_smart_list` | Smart lists: people on customer records who match rules now (a field, an event in the last N days, being in a lead list), who is in each, and how many a set of rules would pick. A list is one brand's: these and the list tools below take `brand` (a handle or id) |
 | `list_ai_devices` | Computers running Outflare for desktop, when each last reported and any AI tool it couldn't read |
 | `list_ai_receipts`, `get_receipt_forwarding` | AI receipts people forwarded and how each was matched, and where to forward them (Outflare Cloud) |
 | `list_ai_accounts`, `get_ai_account`, `get_outflare_ai_account` | AI Accounts: the AI subscriptions and API accounts people pay for (Claude, ChatGPT, Cursor, Copilot, the Anthropic and OpenAI APIs), with plan, price, renewal, who pays, resets available and who they belong to. Your own, or everyone's with `ai_accounts.read`; and what Outflare's own AI spent this month (`ai_spend.read`) |
@@ -173,7 +174,7 @@ Read (always available):
 | `get_connection_request` | Whether the user has finished a connection link yet |
 | `preview_import`, `get_import` | What a connected Instantly or Smartlead account holds, and how an import went |
 | `preview_crm_import` | What a connected CRM (Attio) holds: objects, fields, pipeline stages, lists and counts, before moving it over |
-| `start_crm_import`, `list_crm_imports`, `get_crm_import` | Copy a connected CRM (Attio) into customer records once (safe to run again), and how each import went |
+| `start_crm_import`, `list_crm_imports`, `get_crm_import` | Copy a connected CRM (Attio) into one brand's customer records once (safe to run again; `brand` is where they go, and the connection must serve it), and how each import went |
 | `get_payment_sync`, `run_payment_sync` | How a payment connection (Stripe) is syncing customers, subscriptions, payments and refunds into customer records, and a sync now |
 | `get_connection_hook`, `set_up_connection_hook`, `rotate_connection_hook`, `remove_connection_hook` | A connection's live updates: its own webhook address, which Outflare registers at the tool when it can (Geonode), whether events arrive, a new address, and turning them off |
 | `list_hook_events`, `replay_hook_event` | The events connectors sent by webhook, with what happened to each, and handling one again |
@@ -227,6 +228,7 @@ Read (always available):
 | `get_partner_program_stats` | A program's totals across all its partners: partners by status, clicks, referred customers, sales, and rewards on hold, due and paid |
 | `list_partners`, `get_partner` | Partners with their ref code, short link, campaign link, promo codes and totals (clicks, referrals, customers, sales, cash pending, approved, paid and due) |
 | `list_partner_conversions`, `list_partner_referrals` | Leads, sales and refunds credited to partners, and each referred customer with how they were credited |
+| `list_partner_conversion_log` | Every conversion call from the last 30 days with what it sent, the answer and why it was or wasn't credited |
 | `list_partner_rewards`, `list_partner_payouts` | The reward ledger (cash, fees, actions, adjustments) and payouts |
 | `list_partner_assets` | Banners, copy and links a program shows partners on its portal |
 | `list_partner_postbacks`, `export_partner_payouts` | A partner's postbacks to their own tracker, and payouts as CSV with payout details for paying them |
@@ -247,9 +249,9 @@ Write (left out when `OUTFLARE_MCP_READ_ONLY=1`):
 | `add_to_brand`, `remove_from_brand` | Move domains, mailboxes, lead lists, sequences or missions into a brand, or make them shared by every brand again |
 | `search_workspace` | Find records by name, attribute text, email, phone or id, and emails sent and received, meetings, deals and lifecycle email by their words, ranked, with whose each one is. With `mode: meaning`, find records, replies, meetings and deals by what they mean |
 | `get_semantic_search`, `set_semantic_search` | Read whether meaning-based search is on and how far along it is, or turn it off and on |
-| `list_query_tables`, `run_query` | Read-only SQL over the workspace's own data (people, companies, product events, deals, outreach, replies, emails, visits): counts, sums, rates and joins in one call. It sees only what the connection may read, and never changes anything |
+| `list_query_tables`, `run_query` | Read-only SQL over one brand's data (`brand`; people, companies, product events, each of the brand's record types as a table of its own, deals, outreach, replies, emails, visits): counts, sums, rates and joins in one call. No SQL reaches another brand's rows; it sees only what the connection may read, and never changes anything |
 | `get_catalog` | Everything a brand's customer records can hold: record types (person, account and the brand's own, starting with Deal), their fields, the option lists and product events. Each brand has its own catalog (`brand` is a handle or id). Read it before writing records |
-| `list_records`, `get_record`, `lookup_record`, `review_record` | Find people, companies and other records by type, name, identity or field values; `lookup_record` says which record holds an email or id verified (each brand has its own people: pass `brand`); approve or reject records held for review |
+| `list_records`, `get_record`, `lookup_record`, `review_record` | Find a brand's people, companies and other records by type, name, identity or field values; `lookup_record` says which record holds an email or id verified; approve or reject records held for review. Each brand has its own people: every record tool takes `brand` (a handle or id) and reaches that brand's records only |
 | `get_record_history`, `list_record_identities`, `list_record_links` | A record's changes (who, when, which source), its emails, phones and ids (closed ones too) and its links |
 | `get_record_timeline`, `list_record_consents`, `list_customer_events` | One timeline per person or company across every module (product events, changes, identities, consent, cold email and replies, meetings, deals, visits, opt-outs, journeys; a company with its people), a person's current consents, and product events (unmatched anonymous ones too) |
 | `list_record_duplicates` | Pairs of records that may be the same human (a shared email or phone), with both records |

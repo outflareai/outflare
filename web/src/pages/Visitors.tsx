@@ -106,7 +106,7 @@ export function Visitors({ ws, canManage, go }: Props) {
       {header}
       {error && <ErrorText>{error}</ErrorText>}
       {showSettings && canManage && <SettingsCard ws={ws} onSaved={load} go={go} />}
-      {canManage && <ReviewCard ws={ws} />}
+      {canManage && brand.brand && <ReviewCard brand={brand.brand.id} />}
 
       {!hasKeys && (
         <>
@@ -208,12 +208,14 @@ function VisitorSheet({ ws, v, canManage, onClose, onChanged, go }: {
   const [error, setError] = useState("");
   const fromLookup = v.kind === "company" && v.identified_by.includes("company_ip") && !!v.domain;
 
+  // The person's pages, from their record in the brand picked.
+  const brand = useBrand(ws).brand?.id;
   useEffect(() => {
-    if (v.kind !== "person" || !v.record_id) return;
-    api.GET("/v1/workspaces/{ws}/records/{record}/timeline", { params: { path: { ws, record: v.record_id }, query: { kinds: "event", limit: 100 } } }).then(({ data }) =>
+    if (v.kind !== "person" || !v.record_id || !brand) return;
+    api.GET("/v1/brands/{brand}/records/{record}/timeline", { params: { path: { brand, record: v.record_id }, query: { kinds: "event", limit: 100 } } }).then(({ data }) =>
       setPages((data?.data ?? []).filter((t) => t.title === "page.viewed" && t.source === "browser").slice(0, 25)),
     );
-  }, [ws, v]);
+  }, [brand, v]);
 
   async function addToCRM() {
     setBusy(true);
@@ -456,23 +458,23 @@ function SettingsCard({ ws, onSaved, go }: { ws: string; onSaved: () => void; go
 // ReviewCard lists the people a visitor identification tool named, for
 // someone to approve (they join the people list and may get cold email) or
 // reject (archived).
-function ReviewCard({ ws }: { ws: string }) {
+function ReviewCard({ brand }: { brand: string }) {
   const [held, setHeld] = useState<RecordView[] | null>(null);
   const [busy, setBusy] = useState("");
   const [error, setError] = useState("");
 
   const load = useCallback(async () => {
-    const { data, error } = await api.GET("/v1/workspaces/{ws}/records", { params: { path: { ws }, query: { type: "person", review: "needs_review", limit: 50 } } });
+    const { data, error } = await api.GET("/v1/brands/{brand}/records", { params: { path: { brand }, query: { type: "person", review: "needs_review", limit: 50 } } });
     if (error || !data) return setError(errorMessage(error));
     setHeld(data.data);
-  }, [ws]);
+  }, [brand]);
   useEffect(() => {
     load();
   }, [load]);
 
   async function decide(r: RecordView, decision: "approve" | "reject") {
     setBusy(r.id);
-    const { error } = await api.POST("/v1/workspaces/{ws}/records/{record}/review", { params: { path: { ws, record: r.id } }, body: { decision } });
+    const { error } = await api.POST("/v1/brands/{brand}/records/{record}/review", { params: { path: { brand, record: r.id } }, body: { decision } });
     setBusy("");
     if (error) return setError(errorMessage(error));
     toast(decision === "approve" ? `${r.name || "Person"} approved.` : `${r.name || "Person"} rejected and archived.`);

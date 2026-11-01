@@ -1,4 +1,4 @@
-// PersonPicker searches the workspace's people by name or email and picks
+// PersonPicker searches the selected brand's people by name or email and picks
 // one: for testing a journey with someone, or seeing what reaches them on
 // the automation map.
 
@@ -7,6 +7,7 @@ import { Search } from "lucide-react";
 import type { Schemas } from "@outflare/sdk";
 import { api } from "../api";
 import { cn } from "@/lib/utils";
+import { useBrand } from "@/lib/brand";
 import { Command, CommandEmpty, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 
@@ -14,14 +15,16 @@ export type Person = { id: string; name: string; email?: string };
 
 function usePeople(ws: string, q: string) {
   const [list, setList] = useState<Person[] | null>(null);
+  const brand = useBrand(ws).brand?.id;
   useEffect(() => {
     let live = true;
+    if (!brand) { setList([]); return; }
     const t = setTimeout(async () => {
-      const { data } = await api.GET("/v1/workspaces/{ws}/records", { params: { path: { ws }, query: { type: "person", limit: 8, ...(q.trim() ? { q: q.trim() } : {}) } } });
+      const { data } = await api.GET("/v1/brands/{brand}/records", { params: { path: { brand }, query: { type: "person", limit: 8, ...(q.trim() ? { q: q.trim() } : {}) } } });
       if (live) setList((data?.data ?? []).map((r: Schemas["Record"]) => ({ id: r.id, name: r.name, email: r.identities.find((i) => i.namespace === "email")?.value })));
     }, q ? 250 : 0);
     return () => { live = false; clearTimeout(t); };
-  }, [ws, q]);
+  }, [brand, q]);
   return list;
 }
 

@@ -42,7 +42,7 @@ function localInput(iso: unknown): string {
 
 // FieldInput edits one value the way its field's type is written
 // (FieldValueType in api/openapi.yaml).
-export function FieldInput({ ws, f, value, names, cat, onChange }: { ws: string; f: Field; value: unknown; names: Record<string, string>; cat: Catalog; onChange: (v: unknown) => void }) {
+export function FieldInput({ ws, brand, f, value, names, cat, onChange }: { ws: string; brand: string; f: Field; value: unknown; names: Record<string, string>; cat: Catalog; onChange: (v: unknown) => void }) {
   const id = `field-${f.key}`;
   const cls = `${field} w-full`;
   switch (f.value_type) {
@@ -102,7 +102,7 @@ export function FieldInput({ ws, f, value, names, cat, onChange }: { ws: string;
       );
     }
     case "record_reference":
-      return <RecordPicker ws={ws} type={f.target_type ?? "account"} multiple={f.multiple} value={value} names={names} onChange={onChange} />;
+      return <RecordPicker brand={brand} type={f.target_type ?? "account"} multiple={f.multiple} value={value} names={names} onChange={onChange} />;
     case "actor_reference":
       return <MemberPicker ws={ws} id={id} value={value} onChange={onChange} />;
   }
@@ -111,7 +111,7 @@ export function FieldInput({ ws, f, value, names, cat, onChange }: { ws: string;
 
 // RecordPicker sets a reference to other records, such as a person's
 // companies: what is set, and a search to add one.
-function RecordPicker({ ws, type, multiple, value, names, onChange }: { ws: string; type: string; multiple: boolean; value: unknown; names: Record<string, string>; onChange: (v: unknown) => void }) {
+function RecordPicker({ brand, type, multiple, value, names, onChange }: { brand: string; type: string; multiple: boolean; value: unknown; names: Record<string, string>; onChange: (v: unknown) => void }) {
   const ids = (Array.isArray(value) ? value : value ? [value] : []) as string[];
   const [q, setQ] = useState("");
   const [found, setFound] = useState<Rec[]>([]);
@@ -119,10 +119,10 @@ function RecordPicker({ ws, type, multiple, value, names, onChange }: { ws: stri
   useEffect(() => {
     if (!q.trim()) return setFound([]);
     const t = setTimeout(() => {
-      api.GET("/v1/workspaces/{ws}/records", { params: { path: { ws }, query: { type, q: q.trim(), limit: 8 } } }).then(({ data }) => setFound(data?.data ?? []));
+      api.GET("/v1/brands/{brand}/records", { params: { path: { brand }, query: { type, q: q.trim(), limit: 8 } } }).then(({ data }) => setFound(data?.data ?? []));
     }, 200);
     return () => clearTimeout(t);
-  }, [ws, type, q]);
+  }, [brand, type, q]);
   const name = (id: string) => known[id] ?? names[id] ?? "A record";
   const set = (next: string[]) => onChange(multiple ? next : (next[0] ?? null));
   return (
@@ -179,8 +179,10 @@ function MemberPicker({ ws, id, value, onChange }: { ws: string; id: string; val
 }
 
 // RecordDialog adds a person or company, or changes one's name and fields.
-export function RecordDialog({ ws, type, rec, cat, names, onClose, onSaved }: {
+export function RecordDialog({ ws, brand, type, rec, cat, names, onClose, onSaved }: {
   ws: string;
+  // The brand the record is made in, or is in.
+  brand: string;
   type: string;
   rec: Rec | null;
   cat: Catalog;
@@ -213,15 +215,15 @@ export function RecordDialog({ ws, type, rec, cat, names, onClose, onSaved }: {
     const attributes = Object.fromEntries(changed.map((k) => [k, empty(values[k]) ? null : values[k]]));
     let res;
     if (rec) {
-      res = await api.PATCH("/v1/workspaces/{ws}/records/{record}", {
-        params: { path: { ws, record: rec.id } },
+      res = await api.PATCH("/v1/brands/{brand}/records/{record}", {
+        params: { path: { brand: rec.brand_id ?? brand, record: rec.id } },
         body: { version: rec.version, ...(name.trim() !== rec.name ? { name: name.trim() } : {}), ...(changed.length ? { attributes } : {}) },
       });
     } else {
       const value = ident.trim();
       const ns = person ? "email" : "domain";
-      res = await api.POST("/v1/workspaces/{ws}/records", {
-        params: { path: { ws } },
+      res = await api.POST("/v1/brands/{brand}/records", {
+        params: { path: { brand } },
         body: {
           type,
           origin: "manual",
@@ -286,7 +288,7 @@ export function RecordDialog({ ws, type, rec, cat, names, onClose, onSaved }: {
             {shown.map((f) => (
               <div key={f.key} className={f.value_type === "record_reference" || f.value_type === "location" || f.value_type === "url" ? "sm:col-span-2" : ""}>
                 <label htmlFor={`field-${f.key}`} className="mb-1 block font-medium" title={f.description || undefined}>{f.label}</label>
-                <FieldInput ws={ws} f={f} value={values[f.key]} names={names} cat={cat} onChange={(v) => setValues({ ...values, [f.key]: v })} />
+                <FieldInput ws={ws} brand={rec?.brand_id ?? brand} f={f} value={values[f.key]} names={names} cat={cat} onChange={(v) => setValues({ ...values, [f.key]: v })} />
               </div>
             ))}
           </div>
@@ -366,7 +368,7 @@ export async function softDeleteEvent(brand: string, event: string, name: string
 }
 
 // eraseRecord asks, then deletes a record for good. True when it went.
-export async function eraseRecord(ws: string, rec: Rec, label: string): Promise<boolean> {
+export async function eraseRecord(rec: Rec, label: string): Promise<boolean> {
   const person = rec.type === "person";
   const r = await ask({
     title: `Erase ${label} permanently?`,
@@ -388,8 +390,8 @@ export async function eraseRecord(ws: string, rec: Rec, label: string): Promise<
     ],
   });
   if (!r || r.choice === "cancel") return false;
-  const { data, error } = await api.DELETE("/v1/workspaces/{ws}/records/{record}", {
-    params: { path: { ws, record: rec.id }, query: { version: rec.version, suppress: r.choice === "suppress" } },
+  const { data, error } = await api.DELETE("/v1/brands/{brand}/records/{record}", {
+    params: { path: { brand: rec.brand_id ?? "", record: rec.id }, query: { version: rec.version, suppress: r.choice === "suppress" } },
   });
   if (error) {
     toast(errorMessage(error), "error");
@@ -402,7 +404,7 @@ export async function eraseRecord(ws: string, rec: Rec, label: string): Promise<
 }
 
 // AddIdentity adds an email, phone or id to a record.
-export function AddIdentity({ ws, rec, onAdded }: { ws: string; rec: Rec; onAdded: () => void }) {
+export function AddIdentity({ rec, onAdded }: { rec: Rec; onAdded: () => void }) {
   const [open, setOpen] = useState(false);
   const [ns, setNs] = useState(rec.type === "person" ? "email" : "domain");
   const [value, setValue] = useState("");
@@ -415,8 +417,8 @@ export function AddIdentity({ ws, rec, onAdded }: { ws: string; rec: Rec; onAdde
   async function submit(e: FormEvent) {
     e.preventDefault();
     setBusy(true);
-    const { error } = await api.POST("/v1/workspaces/{ws}/records/{record}/identities", {
-      params: { path: { ws, record: rec.id } },
+    const { error } = await api.POST("/v1/brands/{brand}/records/{record}/identities", {
+      params: { path: { brand: rec.brand_id ?? "", record: rec.id } },
       body: { namespace: ns, value: value.trim(), source: "manual", ...(checks ? { verified } : {}) },
     });
     setBusy(false);
@@ -453,7 +455,7 @@ const channels = ["email", "sms", "push", "whatsapp", "in_app", "ads"] as const;
 
 // RecordConsent notes that a person agreed to something or took it back,
 // such as on a call.
-export function RecordConsent({ ws, id, onAdded }: { ws: string; id: string; onAdded: () => void }) {
+export function RecordConsent({ brand, id, onAdded }: { brand: string; id: string; onAdded: () => void }) {
   const [open, setOpen] = useState(false);
   const [channel, setChannel] = useState<(typeof channels)[number]>("email");
   const [topic, setTopic] = useState("");
@@ -463,8 +465,8 @@ export function RecordConsent({ ws, id, onAdded }: { ws: string; id: string; onA
 
   async function submit(e: FormEvent) {
     e.preventDefault();
-    const { error } = await api.POST("/v1/workspaces/{ws}/records/{record}/consents", {
-      params: { path: { ws, record: id } },
+    const { error } = await api.POST("/v1/brands/{brand}/records/{record}/consents", {
+      params: { path: { brand, record: id } },
       body: { channel, status, source: "manual", ...(topic.trim() ? { topic: topic.trim() } : {}) },
     });
     if (error) return setError(errorMessage(error));

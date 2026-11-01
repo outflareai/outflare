@@ -424,6 +424,29 @@ test("brand tools reach the brand routes, and OUTFLARE_BRAND is the list default
   assert.ok(calls.some((c) => c.url.pathname.endsWith("/context") && c.url.search === "?brand=repocket"));
 });
 
+test("customer tools and run_query use the brand routes, looking a handle up first", async () => {
+  const BRAND = "33333333-3333-4333-8333-333333333333";
+  const { client, calls } = await connect((req) => {
+    const u = new URL(req.url);
+    if (u.pathname.endsWith("/brands/repocket")) return [200, { id: BRAND, handle: "repocket" }];
+    return [200, { data: [], columns: [], rows: [] }];
+  });
+  await client.callTool({ name: "list_records", arguments: { brand: "repocket", type: "person" } });
+  assert.equal(calls[0].url.pathname, `/v1/workspaces/${WS}/brands/repocket`);
+  assert.equal(calls[1].url.pathname, `/v1/brands/${BRAND}/records`);
+  assert.equal(calls[1].url.search, "?type=person");
+  await client.callTool({ name: "get_record_timeline", arguments: { brand: BRAND, record_id: SEQ } });
+  assert.equal(calls[2].url.pathname, `/v1/brands/${BRAND}/records/${SEQ}/timeline`);
+  await client.callTool({ name: "run_query", arguments: { brand: BRAND, sql: "select count(*) from people" } });
+  assert.equal(calls[3].method, "POST");
+  assert.equal(calls[3].url.pathname, `/v1/brands/${BRAND}/query`);
+  assert.deepEqual(JSON.parse(calls[3].body), { sql: "select count(*) from people" });
+  await client.callTool({ name: "add_to_static_list", arguments: { brand: BRAND, list_id: SEQ, record_ids: [WS] } });
+  assert.equal(calls[4].url.pathname, `/v1/brands/${BRAND}/smart-lists/${SEQ}/members`);
+  const missing = await client.callTool({ name: "list_records", arguments: {} });
+  assert.equal(missing.isError, true);
+});
+
 test("reddit tools: guide, campaign prompt, actions and the report; read-only leaves out placing", async () => {
   const { client, calls } = await connect(() => [200, { data: [] }]);
   const guide = await client.readResource({ uri: "outflare://reddit-guide" });

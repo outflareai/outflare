@@ -90,11 +90,14 @@ export function Lists({ ws, canManage, open, setOpen, go }: { ws: string; canMan
   const [connecting, setConnecting] = useState<DataProvider | null>(null);
   const [error, setError] = useState("");
 
-  const brand = useBrand(ws).brand?.handle;
+  const picked = useBrand(ws).brand;
+  const brand = picked?.handle;
+  const brandID = picked?.id;
   const load = useCallback(async () => {
     const [l, sl, p, pr] = await Promise.all([
       api.GET("/v1/workspaces/{ws}/lead-lists", { params: { path: { ws }, query: { ...(brand ? { brand } : {}) } } }),
-      api.GET("/v1/workspaces/{ws}/smart-lists", { params: { path: { ws }, query: { ...(brand ? { brand } : {}) } } }),
+      // Smart lists are a brand's: with all brands picked there are none to show.
+      brandID ? api.GET("/v1/brands/{brand}/smart-lists", { params: { path: { brand: brandID } } }) : Promise.resolve({ data: { data: [] as SmartList[] } }),
       api.GET("/v1/workspaces/{ws}/data-providers", { params: { path: { ws } } }),
       api.GET("/v1/workspaces/{ws}/ideal-customer-profiles", { params: { path: { ws } } }),
     ]);
@@ -103,7 +106,7 @@ export function Lists({ ws, canManage, open, setOpen, go }: { ws: string; canMan
     setSmart(sl.data?.data ?? []);
     if (p.data) setProviders(p.data.data);
     if (pr.data) setProfiles(pr.data.data);
-  }, [ws, brand]);
+  }, [ws, brand, brandID]);
 
   useEffect(() => {
     load();
@@ -143,8 +146,10 @@ export function Lists({ ws, canManage, open, setOpen, go }: { ws: string; canMan
           onClose={() => setChoosing(false)}
           onPick={(k) => {
             setChoosing(false);
-            if (k === "smart") setEditingSmart("new");
-            else setEditing("new");
+            if (k === "smart") {
+              if (brandID) setEditingSmart("new");
+              else toast("Smart lists belong to one brand: pick it in the brand switcher first.", "error");
+            } else setEditing("new");
           }}
         />
       )}

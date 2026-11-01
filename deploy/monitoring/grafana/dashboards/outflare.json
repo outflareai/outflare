@@ -3351,7 +3351,7 @@
     {
       "type": "timeseries",
       "title": "Queries by outcome",
-      "description": "Queries run per minute, by outcome: invalid is SQL the database refused, timeout ran over 15 seconds, unavailable means the query role couldn't be set up.",
+      "description": "Queries run per minute, by outcome: invalid is SQL the database refused, timeout ran over 15 seconds, unavailable means the query role couldn't be set up. type tables failed counts brand queries that ran without their record type tables; normal is none.",
       "id": 68,
       "datasource": {
         "type": "prometheus",
@@ -3368,6 +3368,15 @@
           "refId": "A",
           "expr": "sum by (outcome) (rate(outflare_query_runs_total{job=\"$job\"}[5m])) * 60",
           "legendFormat": "{{outcome}}",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          }
+        },
+        {
+          "refId": "B",
+          "expr": "sum(rate(outflare_query_type_tables_failed_total{job=\"$job\"}[5m])) * 60",
+          "legendFormat": "type tables failed",
           "datasource": {
             "type": "prometheus",
             "uid": "${datasource}"

@@ -1424,6 +1424,56 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/workspaces/{ws}/webhooks/{id}/deliveries/{delivery}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                id: string;
+                delivery: number;
+            };
+            cookie?: never;
+        };
+        /**
+         * One delivery with every try
+         * @description Scope: webhooks.read. The delivery, its payload, and each try oldest first: when, the receiver's status code
+         *     or what went wrong, how long it took, and whether a person sent it (a redelivery or a test).
+         */
+        get: operations["getWebhookDelivery"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/workspaces/{ws}/webhooks/{id}/activity": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        /**
+         * An endpoint's tries per day and error rate
+         * @description Scope: webhooks.read. Tries per UTC day over the last days (oldest first), how many failed, the error rate and the 95th percentile answer time.
+         */
+        get: operations["getWebhookActivity"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/workspaces/{ws}/webhooks/{id}/deliveries/{delivery}/redeliver": {
         parameters: {
             query?: never;
@@ -2443,17 +2493,21 @@ export interface paths {
         };
         /**
          * List smart lists
+         * @deprecated
          * @description Scope: customers.read. Groups of people on customer records that keep themselves up to date from rules, by name.
          *     Lead lists (GET .../lead-lists) hold the leads someone picked or a search found; a smart list holds whoever
          *     matches its rules now.
+         *     Deprecated: use GET /v1/brands/{brand}/smart-lists. This workspace route stays until the brands contract step; without ?brand= it lists the workspace's first brand (a member or token kept to some brands gets its own), and ?brand=all lists every brand you can see, as before.
          */
         get: operations["listSmartLists"];
         put?: never;
         /**
          * Create a smart list
+         * @deprecated
          * @description Scope: customers.manage. The list fills itself straight away, then stays up to date: Outflare adds people who
          *     start matching and removes people who stop, within about 15 minutes. Check the count first with
          *     POST .../smart-lists/preview. A brand's list holds that brand's people and those shared by every brand.
+         *     Deprecated: use POST /v1/brands/{brand}/smart-lists. This workspace route stays until the brands contract step; it acts on the record's, list's or the workspace's first brand.
          */
         post: operations["createSmartList"];
         delete?: never;
@@ -2476,8 +2530,10 @@ export interface paths {
         put?: never;
         /**
          * Count who rules pick, without saving
+         * @deprecated
          * @description Scope: customers.read. How many people the rules pick right now and the 10 newest of them, so you can check a
          *     list before saving it. Nothing is stored.
+         *     Deprecated: use POST /v1/brands/{brand}/smart-lists/preview. This workspace route stays until the brands contract step; without brand_id it counts the workspace's people as before.
          */
         post: operations["previewSmartList"];
         delete?: never;
@@ -2499,22 +2555,28 @@ export interface paths {
         };
         /**
          * Get a smart list
+         * @deprecated
          * @description Scope: customers.read.
+         *     Deprecated: use GET /v1/brands/{brand}/smart-lists/{id}. This workspace route stays until the brands contract step; it reads the item in its own brand.
          */
         get: operations["getSmartList"];
         put?: never;
         post?: never;
         /**
          * Delete a smart list. Its people stay.
+         * @deprecated
          * @description Scope: customers.manage.
+         *     Deprecated: use DELETE /v1/brands/{brand}/smart-lists/{id}. This workspace route stays until the brands contract step; it acts on the record's, list's or the workspace's first brand.
          */
         delete: operations["deleteSmartList"];
         options?: never;
         head?: never;
         /**
          * Change a smart list
+         * @deprecated
          * @description Scope: customers.manage. Send only what changes. Changing the rules, match or brand refreshes the members
          *     straight away.
+         *     Deprecated: use PATCH /v1/brands/{brand}/smart-lists/{id}. This workspace route stays until the brands contract step; it acts on the record's, list's or the workspace's first brand.
          */
         patch: operations["updateSmartList"];
         trace?: never;
@@ -2532,15 +2594,19 @@ export interface paths {
         };
         /**
          * Who is in a smart list now, newest to join first
+         * @deprecated
          * @description Scope: customers.read. As of the list's refreshed_at. Page with cursor=next_cursor.
+         *     Deprecated: use GET /v1/brands/{brand}/smart-lists/{id}/members. This workspace route stays until the brands contract step; it reads the item in its own brand.
          */
         get: operations["listSmartListMembers"];
         put?: never;
         /**
          * Put people in a static list
+         * @deprecated
          * @description Scope: customers.manage. Only a static list takes people; a smart list fills itself (409). People only: not
          *     companies, merged or archived records, or, for a brand's list, another brand's people. Rules acting on people
          *     joining the list hear of it.
+         *     Deprecated: use POST /v1/brands/{brand}/smart-lists/{id}/members. This workspace route stays until the brands contract step; it acts on the record's, list's or the workspace's first brand.
          */
         post: operations["addStaticListMembers"];
         delete?: never;
@@ -2564,7 +2630,9 @@ export interface paths {
         put?: never;
         /**
          * Take people out of a static list
+         * @deprecated
          * @description Scope: customers.manage. Rules acting on people leaving the list hear of it.
+         *     Deprecated: use POST /v1/brands/{brand}/smart-lists/{id}/members/remove. This workspace route stays until the brands contract step; it acts on the record's, list's or the workspace's first brand.
          */
         post: operations["removeStaticListMembers"];
         delete?: never;
@@ -2588,7 +2656,9 @@ export interface paths {
         put?: never;
         /**
          * Bring a smart list's members up to date now
+         * @deprecated
          * @description Scope: customers.manage. Lists refresh on their own every 15 minutes; this does it now. Watch refreshed_at.
+         *     Deprecated: use POST /v1/brands/{brand}/smart-lists/{id}/refresh. This workspace route stays until the brands contract step; it acts on the record's, list's or the workspace's first brand.
          */
         post: operations["refreshSmartList"];
         delete?: never;
@@ -13382,7 +13452,9 @@ export interface paths {
         };
         /**
          * List CRM imports
+         * @deprecated
          * @description Scope: customers.read. The 50 newest.
+         *     Deprecated: use GET /v1/brands/{brand}/crm-imports. This workspace route stays until the brands contract step; without ?brand= it lists the workspace's first brand (a member or token kept to some brands gets its own), and ?brand=all lists every brand you can see, as before.
          */
         get: operations["listCRMImports"];
         put?: never;
@@ -13406,7 +13478,9 @@ export interface paths {
         };
         /**
          * Get a CRM import
+         * @deprecated
          * @description Scope: customers.read. Its status, and once it runs, what it did: records seen, created, matched to records already here, updated and unchanged for each object; the record types, fields and option lists it added; members matched by email; placeholders for records another record points at that the CRM did not return; and values it left out, with why.
+         *     Deprecated: use GET /v1/brands/{brand}/crm-imports/{import}. This workspace route stays until the brands contract step; it reads the item in its own brand.
          */
         get: operations["getCRMImport"];
         put?: never;
@@ -14991,20 +15065,24 @@ export interface paths {
         };
         /**
          * List customer records
+         * @deprecated
          * @description Scope: customers.read. People, companies and the workspace's own record types, newest first. Merged records
          *     are left out. q matches the name or any active identity, such as part of an email. attribute narrows by
          *     the catalog's fields.
+         *     Deprecated: use GET /v1/brands/{brand}/records. This workspace route stays until the brands contract step; without ?brand= it lists the workspace's first brand (a member or token kept to some brands gets its own), and ?brand=all lists every brand you can see, as before.
          */
         get: operations["listRecords"];
         put?: never;
         /**
          * Add a customer record
+         * @deprecated
          * @description Scope: customers.manage. Attributes are checked against the type's fields in the catalog; an unknown key is
          *     refused, so add the field first. Identities say who the record is: email and phone count only when verified
          *     (default false), and the workspace's own ids, payment customers and domains are trusted as sent. A verified
          *     identity another record of the same brand already holds is refused with identity_taken; look it up with GET
          *     .../records/lookup. The record's catalog and its identities are its brand's: the same email in another brand
          *     is another person there. A person with no name takes first_name and last_name.
+         *     Deprecated: use POST /v1/brands/{brand}/records. This workspace route stays until the brands contract step; it acts on the record's, list's or the workspace's first brand.
          */
         post: operations["createRecord"];
         delete?: never;
@@ -15025,10 +15103,12 @@ export interface paths {
         };
         /**
          * List possible duplicates
+         * @deprecated
          * @description Scope: customers.read. Pairs of records that may be the same human, because they share an email or phone,
          *     newest first, with both records. open pairs can be merged (POST .../records/{record}/merge), linked or
          *     dismissed; blocked pairs both have their own user id, so they are two accounts in your product and can only be
          *     linked or dismissed. Default status open and blocked.
+         *     Deprecated: use GET /v1/brands/{brand}/records/duplicates. This workspace route stays until the brands contract step; without ?brand= it lists the workspace's first brand (a member or token kept to some brands gets its own), and ?brand=all lists every brand you can see, as before.
          */
         get: operations["listRecordDuplicates"];
         put?: never;
@@ -15054,7 +15134,9 @@ export interface paths {
         put?: never;
         /**
          * Not the same human
+         * @deprecated
          * @description Scope: customers.manage. The pair is not asked about again.
+         *     Deprecated: use POST /v1/brands/{brand}/records/duplicates/{candidate}/dismiss. This workspace route stays until the brands contract step; it acts on the record's, list's or the workspace's first brand.
          */
         post: operations["dismissRecordDuplicate"];
         delete?: never;
@@ -15078,8 +15160,10 @@ export interface paths {
         put?: never;
         /**
          * The same human, kept apart
+         * @deprecated
          * @description Scope: customers.manage. Links the two records as the same human (a same_human link) without merging them, such
          *     as one person with two accounts in your product.
+         *     Deprecated: use POST /v1/brands/{brand}/records/duplicates/{candidate}/link. This workspace route stays until the brands contract step; it acts on the record's, list's or the workspace's first brand.
          */
         post: operations["linkRecordDuplicate"];
         delete?: never;
@@ -15127,13 +15211,16 @@ export interface paths {
         };
         /**
          * Read a customer record
+         * @deprecated
          * @description Scope: customers.read. With its active identities.
+         *     Deprecated: use GET /v1/brands/{brand}/records/{record}. This workspace route stays until the brands contract step; it reads the item in its own brand.
          */
         get: operations["getRecord"];
         put?: never;
         post?: never;
         /**
          * Erase a customer record
+         * @deprecated
          * @description Scope: customers.manage. Deletes a person or company for good, such as for an erasure request; to hide one
          *     and keep its history, archive it instead (PATCH with archived: true), and to delete one with 7 days to
          *     change your mind, use POST /v1/brands/{brand}/records/{record}/delete. Works on a record in Recently deleted
@@ -15146,17 +15233,20 @@ export interface paths {
          *     without payout details or notes, so commission totals still add up, and keep their codes so their links still lead
          *     to the site; their payouts' notes and references are cleared unless partner settings' erase_payout_notes is off; a company's people stay, unlinked from it. erased counts the rows removed, by
          *     table. A deal is deleted with DELETE .../deals/{deal}.
+         *     Deprecated: use DELETE /v1/brands/{brand}/records/{record}. This workspace route stays until the brands contract step; it acts on the record's, list's or the workspace's first brand.
          */
         delete: operations["deleteRecord"];
         options?: never;
         head?: never;
         /**
          * Change or archive a customer record
+         * @deprecated
          * @description Scope: customers.manage. attributes merges: a key set to null clears it, keys left out stay. Each value keeps
          *     the source that set it, and a write from a lower-precedence source (by default manual, then first_party,
          *     crm_sync, enrichment) leaves it as it is and lists it in skipped. Send version to refuse the change with
          *     record_changed if someone else changed the record since you read it. Agents (the MCP server, a connected
          *     AI app or a mission) must send it: without it the change is refused with version_required.
+         *     Deprecated: use PATCH /v1/brands/{brand}/records/{record}. This workspace route stays until the brands contract step; it acts on the record's, list's or the workspace's first brand.
          */
         patch: operations["updateRecord"];
         trace?: never;
@@ -15174,7 +15264,9 @@ export interface paths {
         };
         /**
          * A record's change history
+         * @deprecated
          * @description Scope: customers.read. Every change to its name and attributes, newest first, with who made it and from which source.
+         *     Deprecated: use GET /v1/brands/{brand}/records/{record}/history. This workspace route stays until the brands contract step; it reads the item in its own brand.
          */
         get: operations["getRecordHistory"];
         put?: never;
@@ -15200,9 +15292,11 @@ export interface paths {
         put?: never;
         /**
          * Approve or reject a record held for review
+         * @deprecated
          * @description Scope: customers.manage. For a record with needs_review true, such as a person a visitor identification tool named.
          *     approve lists it like any other and lets the policy check send to it (it stays a third-party prospect: cold email
          *     only, never marketing without their consent). reject archives it. A record not held is refused with not_held (409).
+         *     Deprecated: use POST /v1/brands/{brand}/records/{record}/review. This workspace route stays until the brands contract step; it acts on the record's, list's or the workspace's first brand.
          */
         post: operations["reviewRecord"];
         delete?: never;
@@ -15224,17 +15318,21 @@ export interface paths {
         };
         /**
          * A record's identities
+         * @deprecated
          * @description Scope: customers.read. Active ones, and with closed=true the closed ones too, such as an email the person changed.
+         *     Deprecated: use GET /v1/brands/{brand}/records/{record}/identities. This workspace route stays until the brands contract step; it reads the item in its own brand.
          */
         get: operations["listRecordIdentities"];
         put?: never;
         /**
          * Add, verify or change an identity
+         * @deprecated
          * @description Scope: customers.manage. Adds an identity, or updates the record's own copy of it: sending verified: true for
          *     an email the record holds unverified verifies it (200). When a person changes their email, send the new one
          *     with replaces set to the old identity's id: the old one is closed as changed and kept in the history. A
          *     verified value another record of the same brand holds is refused with identity_taken, never moved or merged;
          *     another brand's person with the same value is someone else and never blocks it.
+         *     Deprecated: use POST /v1/brands/{brand}/records/{record}/identities. This workspace route stays until the brands contract step; it acts on the record's, list's or the workspace's first brand.
          */
         post: operations["addRecordIdentity"];
         delete?: never;
@@ -15259,7 +15357,9 @@ export interface paths {
         put?: never;
         /**
          * Remove an identity
+         * @deprecated
          * @description Scope: customers.manage. It stops pointing at the record and stays in its history as removed.
+         *     Deprecated: use POST /v1/brands/{brand}/records/{record}/identities/{identity}/close. This workspace route stays until the brands contract step; it acts on the record's, list's or the workspace's first brand.
          */
         post: operations["closeRecordIdentity"];
         delete?: never;
@@ -15281,13 +15381,17 @@ export interface paths {
         };
         /**
          * A record's links
+         * @deprecated
          * @description Scope: customers.read. Links both ways, including record reference fields' values (field_key set). ended=true includes ended links.
+         *     Deprecated: use GET /v1/brands/{brand}/records/{record}/relationships. This workspace route stays until the brands contract step; it reads the item in its own brand.
          */
         get: operations["listRecordRelationships"];
         put?: never;
         /**
          * Link two records
+         * @deprecated
          * @description Scope: customers.manage. A typed link from this record, such as partner_of. Record reference fields (companies) are set through attributes instead.
+         *     Deprecated: use POST /v1/brands/{brand}/records/{record}/relationships. This workspace route stays until the brands contract step; it acts on the record's, list's or the workspace's first brand.
          */
         post: operations["addRecordRelationship"];
         delete?: never;
@@ -15312,7 +15416,9 @@ export interface paths {
         put?: never;
         /**
          * End a link
+         * @deprecated
          * @description Scope: customers.manage. It is kept with its end time.
+         *     Deprecated: use POST /v1/brands/{brand}/records/{record}/relationships/{relationship}/end. This workspace route stays until the brands contract step; it acts on the record's, list's or the workspace's first brand.
          */
         post: operations["endRecordRelationship"];
         delete?: never;
@@ -15336,6 +15442,7 @@ export interface paths {
         put?: never;
         /**
          * Merge a duplicate into this record
+         * @deprecated
          * @description Scope: customers.manage. Merges from into this record, which is kept. from's identities, links, product events
          *     and consents move here; its attributes fill in what this record lacks, or replace a value a lower-precedence
          *     source set, and lists such as companies are joined. from is kept, archived, with merged_into set, so its
@@ -15343,6 +15450,7 @@ export interface paths {
          *     (two accounts in your product), are refused with merge_refused: link those instead. Send version (this
          *     record's, as read) to refuse the merge with record_changed if it changed since; agents must send it
          *     (version_required).
+         *     Deprecated: use POST /v1/brands/{brand}/records/{record}/merge. This workspace route stays until the brands contract step; it acts on the record's, list's or the workspace's first brand.
          */
         post: operations["mergeRecords"];
         delete?: never;
@@ -15426,9 +15534,11 @@ export interface paths {
         };
         /**
          * List the tables a query can read
+         * @deprecated
          * @description Any caller in the workspace. The tables Query reads, with their columns and the read scope each needs. available
          *     says whether you hold it; a table you can't read returns no rows. Tables show only this workspace's rows and,
          *     for a caller kept to some brands, those brands' rows and the shared ones.
+         *     Deprecated: use GET /v1/brands/{brand}/query/tables. This workspace route stays until the brands contract step; without ?brand= it queries the workspace's first brand (a member or token kept to some brands gets its own), and ?brand=all queries every brand you can see, as before.
          */
         get: operations["listQueryTables"];
         put?: never;
@@ -15453,12 +15563,14 @@ export interface paths {
         put?: never;
         /**
          * Run a read-only SQL query
+         * @deprecated
          * @description The read scope of each table the query reads (GET .../query/tables), such as customers.read. Runs one
          *     SELECT (or WITH ... SELECT) in a read-only transaction, as a database role that can read only the query
          *     tables, so it sees exactly what you can see through the API: this workspace, your brands, your scopes.
          *     It never changes anything, so an agent kept to missions may run it outside one. Up to limit rows come back
          *     (default 100, at most 1000), with truncated set when there were more; a query running over 15 seconds is
          *     stopped with query_timeout. SQL the database refuses fails with query_invalid and its message.
+         *     Deprecated: use POST /v1/brands/{brand}/query. This workspace route stays until the brands contract step; without ?brand= it queries the workspace's first brand (a member or token kept to some brands gets its own), and ?brand=all queries every brand you can see, as before.
          */
         post: operations["runQuery"];
         delete?: never;
@@ -15480,6 +15592,7 @@ export interface paths {
         };
         /**
          * A record's timeline
+         * @deprecated
          * @description Scope: customers.read. One timeline per person or company, newest first, across every module: their
          *     product events (and, for a company, the group calls that named it), changes to their attributes,
          *     identities added and closed, consent given or withdrawn, the cold email Outflare sent them and their
@@ -15490,6 +15603,7 @@ export interface paths {
          *     A company's timeline includes its people's (the people linked to it), each item's `record_id` saying whose
          *     it is; `people=false` leaves them out. `brand` keeps one brand's items and the ones no brand owns. Kind
          *     names are stable: new kinds may be added.
+         *     Deprecated: use GET /v1/brands/{brand}/records/{record}/timeline. This workspace route stays until the brands contract step; it reads the item in its own brand.
          */
         get: operations["getRecordTimeline"];
         put?: never;
@@ -15513,17 +15627,21 @@ export interface paths {
         };
         /**
          * A person's consents
+         * @deprecated
          * @description Scope: customers.read. The current consent for each channel, topic and purpose the person was asked about: the
          *     latest grant or withdrawal. history=true lists every one, newest first. A topic's own row wins over the whole
          *     channel's, except a later withdrawal from the whole channel.
+         *     Deprecated: use GET /v1/brands/{brand}/records/{record}/consents. This workspace route stays until the brands contract step; it reads the item in its own brand.
          */
         get: operations["listRecordConsents"];
         put?: never;
         /**
          * Record consent
+         * @deprecated
          * @description Scope: customers.manage. Records that a person granted or withdrew consent, with where and what proves it.
          *     Nothing is overwritten: the latest one counts, and the rest stay as the history. Lifecycle email sends
          *     marketing only to people whose current email consent is granted.
+         *     Deprecated: use POST /v1/brands/{brand}/records/{record}/consents. This workspace route stays until the brands contract step; it acts on the record's, list's or the workspace's first brand.
          */
         post: operations["recordConsent"];
         delete?: never;
@@ -17007,7 +17125,9 @@ export interface paths {
         };
         /**
          * List product events
+         * @deprecated
          * @description Scope: customers.read. Product events, newest first. matched=false lists anonymous visitors' events not yet linked to a person.
+         *     Deprecated: use GET /v1/brands/{brand}/customer-events. This workspace route stays until the brands contract step; without ?brand= it lists the workspace's first brand (a member or token kept to some brands gets its own), and ?brand=all lists every brand you can see, as before.
          */
         get: operations["listCustomerEvents"];
         put?: never;
@@ -18013,6 +18133,717 @@ export interface paths {
          *     failed. 409 batch_already_undone; 409 batch_undo_running.
          */
         post: operations["undoBatch"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/brands/{brand}/crm-imports": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+            };
+            cookie?: never;
+        };
+        /**
+         * List a brand's CRM imports
+         * @description Scope: customers.read. The 50 newest imports into this brand.
+         */
+        get: operations["listBrandCRMImports"];
+        put?: never;
+        /**
+         * Import another CRM into a brand's customer records, once
+         * @description Scope: catalog.manage and customers.manage. As POST /v1/workspaces/{ws}/integrations/{id}/crm-imports, into
+         *     this brand: its records, identities and catalog changes are the brand's. integration_id is the CRM
+         *     connection, which must serve the brand (its own, or a workspace connection shared with it); any other is
+         *     404. Read it with GET /v1/brands/{brand}/crm-imports/{import}.
+         */
+        post: operations["startBrandCRMImport"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/brands/{brand}/smart-lists": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+            };
+            cookie?: never;
+        };
+        /**
+         * List smart lists
+         * @description Scope: customers.read. Groups of people on customer records that keep themselves up to date from rules, by name.
+         *     Lead lists (GET .../lead-lists) hold the leads someone picked or a search found; a smart list holds whoever
+         *     matches its rules now.
+         */
+        get: operations["listBrandSmartLists"];
+        put?: never;
+        /**
+         * Create a smart list
+         * @description Scope: customers.manage. The list fills itself straight away, then stays up to date: Outflare adds people who
+         *     start matching and removes people who stop, within about 15 minutes. Check the count first with
+         *     POST .../smart-lists/preview. A brand's list holds that brand's people and those shared by every brand.
+         */
+        post: operations["createBrandSmartList"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/brands/{brand}/smart-lists/preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Count who rules pick, without saving
+         * @description Scope: customers.read. How many people the rules pick right now and the 10 newest of them, so you can check a
+         *     list before saving it. Nothing is stored.
+         */
+        post: operations["previewBrandSmartList"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/brands/{brand}/smart-lists/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        /**
+         * Get a smart list
+         * @description Scope: customers.read.
+         */
+        get: operations["getBrandSmartList"];
+        put?: never;
+        post?: never;
+        /**
+         * Delete a smart list. Its people stay.
+         * @description Scope: customers.manage.
+         */
+        delete: operations["deleteBrandSmartList"];
+        options?: never;
+        head?: never;
+        /**
+         * Change a smart list
+         * @description Scope: customers.manage. Send only what changes. Changing the rules, match or brand refreshes the members
+         *     straight away.
+         */
+        patch: operations["updateBrandSmartList"];
+        trace?: never;
+    };
+    "/v1/brands/{brand}/smart-lists/{id}/members": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        /**
+         * Who is in a smart list now, newest to join first
+         * @description Scope: customers.read. As of the list's refreshed_at. Page with cursor=next_cursor.
+         */
+        get: operations["listBrandSmartListMembers"];
+        put?: never;
+        /**
+         * Put people in a static list
+         * @description Scope: customers.manage. Only a static list takes people; a smart list fills itself (409). People only: not
+         *     companies, merged or archived records, or, for a brand's list, another brand's people. Rules acting on people
+         *     joining the list hear of it.
+         */
+        post: operations["addBrandStaticListMembers"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/brands/{brand}/smart-lists/{id}/members/remove": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Take people out of a static list
+         * @description Scope: customers.manage. Rules acting on people leaving the list hear of it.
+         */
+        post: operations["removeBrandStaticListMembers"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/brands/{brand}/smart-lists/{id}/refresh": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Bring a smart list's members up to date now
+         * @description Scope: customers.manage. Lists refresh on their own every 15 minutes; this does it now. Watch refreshed_at.
+         */
+        post: operations["refreshBrandSmartList"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/brands/{brand}/crm-imports/{import}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                import: string;
+            };
+            cookie?: never;
+        };
+        /**
+         * Get a CRM import
+         * @description Scope: customers.read. Its status, and once it runs, what it did: records seen, created, matched to records already here, updated and unchanged for each object; the record types, fields and option lists it added; members matched by email; placeholders for records another record points at that the CRM did not return; and values it left out, with why.
+         */
+        get: operations["getBrandCRMImport"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/brands/{brand}/records": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+            };
+            cookie?: never;
+        };
+        /**
+         * List customer records
+         * @description Scope: customers.read. People, companies and the workspace's own record types, newest first. Merged records
+         *     are left out. q matches the name or any active identity, such as part of an email. attribute narrows by
+         *     the catalog's fields.
+         */
+        get: operations["listBrandRecords"];
+        put?: never;
+        /**
+         * Add a customer record
+         * @description Scope: customers.manage. Attributes are checked against the type's fields in the catalog; an unknown key is
+         *     refused, so add the field first. Identities say who the record is: email and phone count only when verified
+         *     (default false), and the workspace's own ids, payment customers and domains are trusted as sent. A verified
+         *     identity another record of the same brand already holds is refused with identity_taken; look it up with GET
+         *     .../records/lookup. The record's catalog and its identities are its brand's: the same email in another brand
+         *     is another person there. A person with no name takes first_name and last_name.
+         */
+        post: operations["createBrandRecord"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/brands/{brand}/records/duplicates": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+            };
+            cookie?: never;
+        };
+        /**
+         * List possible duplicates
+         * @description Scope: customers.read. Pairs of records that may be the same human, because they share an email or phone,
+         *     newest first, with both records. open pairs can be merged (POST .../records/{record}/merge), linked or
+         *     dismissed; blocked pairs both have their own user id, so they are two accounts in your product and can only be
+         *     linked or dismissed. Default status open and blocked.
+         */
+        get: operations["listBrandRecordDuplicates"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/brands/{brand}/records/duplicates/{candidate}/dismiss": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                candidate: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Not the same human
+         * @description Scope: customers.manage. The pair is not asked about again.
+         */
+        post: operations["dismissBrandRecordDuplicate"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/brands/{brand}/records/duplicates/{candidate}/link": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                candidate: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * The same human, kept apart
+         * @description Scope: customers.manage. Links the two records as the same human (a same_human link) without merging them, such
+         *     as one person with two accounts in your product.
+         */
+        post: operations["linkBrandRecordDuplicate"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/brands/{brand}/records/{record}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                record: components["parameters"]["RecordID"];
+            };
+            cookie?: never;
+        };
+        /**
+         * Read a customer record
+         * @description Scope: customers.read. With its active identities.
+         */
+        get: operations["getBrandRecord"];
+        put?: never;
+        post?: never;
+        /**
+         * Erase a customer record
+         * @description Scope: customers.manage. Deletes a person or company for good, such as for an erasure request; to hide one
+         *     and keep its history, archive it instead (PATCH with archived: true), and to delete one with 7 days to
+         *     change your mind, use POST /v1/brands/{brand}/records/{record}/delete. Works on a record in Recently deleted
+         *     too, and its deletions go with it. Goes with it: the records merged into
+         *     it, its identities, links, field history and consents and, for a person, everything about them: their
+         *     leads (also any lead with one of their emails), the cold email sent to them and their replies, meetings,
+         *     lifecycle email sent to them alone, product events, website visits, journey runs, partner referrals and
+         *     partner portal sign-ins. Deals, payments and opt-outs stay, unlinked; a partner's memberships, rewards and
+         *     payouts stay on a new archived record named "Erased partner" with no name or identities, suspended and
+         *     without payout details or notes, so commission totals still add up, and keep their codes so their links still lead
+         *     to the site; their payouts' notes and references are cleared unless partner settings' erase_payout_notes is off; a company's people stay, unlinked from it. erased counts the rows removed, by
+         *     table. A deal is deleted with DELETE .../deals/{deal}.
+         */
+        delete: operations["deleteBrandRecord"];
+        options?: never;
+        head?: never;
+        /**
+         * Change or archive a customer record
+         * @description Scope: customers.manage. attributes merges: a key set to null clears it, keys left out stay. Each value keeps
+         *     the source that set it, and a write from a lower-precedence source (by default manual, then first_party,
+         *     crm_sync, enrichment) leaves it as it is and lists it in skipped. Send version to refuse the change with
+         *     record_changed if someone else changed the record since you read it. Agents (the MCP server, a connected
+         *     AI app or a mission) must send it: without it the change is refused with version_required.
+         */
+        patch: operations["updateBrandRecord"];
+        trace?: never;
+    };
+    "/v1/brands/{brand}/records/{record}/history": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                record: components["parameters"]["RecordID"];
+            };
+            cookie?: never;
+        };
+        /**
+         * A record's change history
+         * @description Scope: customers.read. Every change to its name and attributes, newest first, with who made it and from which source.
+         */
+        get: operations["getBrandRecordHistory"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/brands/{brand}/records/{record}/review": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                record: components["parameters"]["RecordID"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Approve or reject a record held for review
+         * @description Scope: customers.manage. For a record with needs_review true, such as a person a visitor identification tool named.
+         *     approve lists it like any other and lets the policy check send to it (it stays a third-party prospect: cold email
+         *     only, never marketing without their consent). reject archives it. A record not held is refused with not_held (409).
+         */
+        post: operations["reviewBrandRecord"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/brands/{brand}/records/{record}/identities": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                record: components["parameters"]["RecordID"];
+            };
+            cookie?: never;
+        };
+        /**
+         * A record's identities
+         * @description Scope: customers.read. Active ones, and with closed=true the closed ones too, such as an email the person changed.
+         */
+        get: operations["listBrandRecordIdentities"];
+        put?: never;
+        /**
+         * Add, verify or change an identity
+         * @description Scope: customers.manage. Adds an identity, or updates the record's own copy of it: sending verified: true for
+         *     an email the record holds unverified verifies it (200). When a person changes their email, send the new one
+         *     with replaces set to the old identity's id: the old one is closed as changed and kept in the history. A
+         *     verified value another record of the same brand holds is refused with identity_taken, never moved or merged;
+         *     another brand's person with the same value is someone else and never blocks it.
+         */
+        post: operations["addBrandRecordIdentity"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/brands/{brand}/records/{record}/identities/{identity}/close": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                record: components["parameters"]["RecordID"];
+                identity: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Remove an identity
+         * @description Scope: customers.manage. It stops pointing at the record and stays in its history as removed.
+         */
+        post: operations["closeBrandRecordIdentity"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/brands/{brand}/records/{record}/relationships": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                record: components["parameters"]["RecordID"];
+            };
+            cookie?: never;
+        };
+        /**
+         * A record's links
+         * @description Scope: customers.read. Links both ways, including record reference fields' values (field_key set). ended=true includes ended links.
+         */
+        get: operations["listBrandRecordRelationships"];
+        put?: never;
+        /**
+         * Link two records
+         * @description Scope: customers.manage. A typed link from this record, such as partner_of. Record reference fields (companies) are set through attributes instead.
+         */
+        post: operations["addBrandRecordRelationship"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/brands/{brand}/records/{record}/relationships/{relationship}/end": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                record: components["parameters"]["RecordID"];
+                relationship: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * End a link
+         * @description Scope: customers.manage. It is kept with its end time.
+         */
+        post: operations["endBrandRecordRelationship"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/brands/{brand}/records/{record}/merge": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                record: components["parameters"]["RecordID"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Merge a duplicate into this record
+         * @description Scope: customers.manage. Merges from into this record, which is kept. from's identities, links, product events
+         *     and consents move here; its attributes fill in what this record lacks, or replace a value a lower-precedence
+         *     source set, and lists such as companies are joined. from is kept, archived, with merged_into set, so its
+         *     history and old links still lead here. Records of different types, or two records with their own user ids
+         *     (two accounts in your product), are refused with merge_refused: link those instead. Send version (this
+         *     record's, as read) to refuse the merge with record_changed if it changed since; agents must send it
+         *     (version_required).
+         */
+        post: operations["mergeBrandRecords"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/brands/{brand}/query/tables": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+            };
+            cookie?: never;
+        };
+        /**
+         * List the tables a query can read
+         * @description Any caller in the workspace. The tables Query reads, with their columns and the read scope each needs. available
+         *     says whether you hold it; a table you can't read returns no rows. Customer tables show only this brand's
+         *     rows, and the brand's own record types (such as deal or subscription) are listed as tables too, with a
+         *     column per field.
+         */
+        get: operations["listBrandQueryTables"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/brands/{brand}/query": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Run a read-only SQL query
+         * @description The read scope of each table the query reads (GET .../query/tables), such as customers.read. Runs one
+         *     SELECT (or WITH ... SELECT) in a read-only transaction, as a database role that can read only the query
+         *     tables. Every customer table holds this brand's rows only, whatever the SQL filters on or joins, and each of
+         *     the brand's record types is a table of its own (a subscription type is subscription, one column per
+         *     field). Tables of areas not yet moved to brands (outreach, outcomes, email, website, social) show this
+         *     brand's rows and those no brand owns; leads, which have no brand, are not readable here.
+         *     It never changes anything, so an agent kept to missions may run it outside one. Up to limit rows come back
+         *     (default 100, at most 1000), with truncated set when there were more; a query running over 15 seconds is
+         *     stopped with query_timeout. SQL the database refuses fails with query_invalid and its message.
+         */
+        post: operations["runBrandQuery"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/brands/{brand}/records/{record}/timeline": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                record: components["parameters"]["RecordID"];
+            };
+            cookie?: never;
+        };
+        /**
+         * A record's timeline
+         * @description Scope: customers.read. One timeline per person or company, newest first, across every module: their
+         *     product events (and, for a company, the group calls that named it), changes to their attributes,
+         *     identities added and closed, consent given or withdrawn, the cold email Outflare sent them and their
+         *     replies (`message`, with `direction` out or in), meetings, deals, website visits (`visit`), opt-out list
+         *     entries (`opt_out`) and journeys entered and finished (`journey`). Lifecycle email and payments show as the
+         *     events Outflare records for them (`email.sent`, `email.delivered` and so on, with `source: lifecycle`).
+         *
+         *     A company's timeline includes its people's (the people linked to it), each item's `record_id` saying whose
+         *     it is; `people=false` leaves them out. `brand` keeps one brand's items and the ones no brand owns. Kind
+         *     names are stable: new kinds may be added.
+         */
+        get: operations["getBrandRecordTimeline"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/brands/{brand}/records/{record}/consents": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                record: components["parameters"]["RecordID"];
+            };
+            cookie?: never;
+        };
+        /**
+         * A person's consents
+         * @description Scope: customers.read. The current consent for each channel, topic and purpose the person was asked about: the
+         *     latest grant or withdrawal. history=true lists every one, newest first. A topic's own row wins over the whole
+         *     channel's, except a later withdrawal from the whole channel.
+         */
+        get: operations["listBrandRecordConsents"];
+        put?: never;
+        /**
+         * Record consent
+         * @description Scope: customers.manage. Records that a person granted or withdrew consent, with where and what proves it.
+         *     Nothing is overwritten: the latest one counts, and the rest stay as the history. Lifecycle email sends
+         *     marketing only to people whose current email consent is granted.
+         */
+        post: operations["recordBrandConsent"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/brands/{brand}/customer-events": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+            };
+            cookie?: never;
+        };
+        /**
+         * List product events
+         * @description Scope: customers.read. Product events, newest first. matched=false lists anonymous visitors' events not yet linked to a person.
+         */
+        get: operations["listBrandCustomerEvents"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -21558,6 +22389,33 @@ export interface paths {
          * @description Scope: partners.manage. Positive adds, negative takes away; it nets in their next payout. note (why) is required. The ledger never edits an entry: corrections are new entries.
          */
         post: operations["addPartnerAdjustment"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/workspaces/{ws}/partner-conversion-log": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+            };
+            cookie?: never;
+        };
+        /**
+         * List inbound conversion calls, newest first
+         * @description Scope: partners.read. Every conversion your backend or tracker reported in the last 30 days, by the API
+         *     (POST .../partner-conversions) or a postback URL, with what it sent, what Outflare answered and the outcome:
+         *     credited, not_credited (with its reason, such as no_partner), duplicate, rejected (bad input; the reason is
+         *     the error code) or error. Use it to find out why a sale wasn't credited. The email a call sent is never kept:
+         *     request shows "(sent)", and q finds the call by the full address.
+         */
+        get: operations["listPartnerConversionLog"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -27473,6 +28331,10 @@ export interface components {
             id: string;
             /** Format: uri */
             url: string;
+            /** @description Delivery tries in the last 24 hours, retries and redeliveries included. */
+            attempts_24h: number;
+            /** @description How many of those failed: the error rate is failed_attempts_24h / attempts_24h. */
+            failed_attempts_24h: number;
             description: string;
             /** @description Event types, category wildcards ("lead.*") or "*". */
             events: string[];
@@ -27574,6 +28436,19 @@ export interface components {
             /** Format: date-time */
             created_at: string;
             payload: components["schemas"]["WebhookEvent"];
+        };
+        WebhookAttempt: {
+            id: number;
+            /** @description The receiver's answer; null when there was none (timeout, refused). */
+            status_code: number | null;
+            /** @description What went wrong, with the start of the receiver's answer. */
+            error: string | null;
+            duration_ms: number;
+            /** @description A redelivery or test a person sent. */
+            manual: boolean;
+            ok: boolean;
+            /** Format: date-time */
+            at: string;
         };
         WebhookRef: {
             /** @description For an actor: human, api_token, agent or system. For a target: the record type, such as lead or mailbox. */
@@ -29750,6 +30625,47 @@ export interface components {
             interval?: "day" | "week" | "month" | "year" | "one_time" | "monthly" | "yearly" | "annual";
             /** @description The customer's country as you know it, such as from their billing address. A program that blocks it doesn't take them as a new referral (reason country_blocked). */
             country?: string;
+        };
+        PartnerConversionLogEntry: {
+            /** Format: uuid */
+            id: string;
+            /**
+             * Format: uuid
+             * @description The program the call named or was judged in.
+             */
+            program_id: string | null;
+            /**
+             * Format: uuid
+             * @description The customer's record, when the call got that far.
+             */
+            record_id: string | null;
+            /**
+             * Format: uuid
+             * @description The conversion it stored, when credited.
+             */
+            conversion_id: string | null;
+            /** @enum {string} */
+            source: "api" | "postback";
+            /** @description The conversion type it sent ('' when unreadable). */
+            type: string;
+            /** @description What the call sent, as Outflare read it, without empty fields. An email shows as "(sent)". */
+            request: {
+                [key: string]: unknown;
+            };
+            /** @description The HTTP status Outflare answered with. */
+            status: number;
+            /** @enum {string} */
+            outcome: "credited" | "not_credited" | "duplicate" | "rejected" | "error";
+            /** @description Why it wasn't credited (no_partner, lead_expired, ...), or the error code when rejected. */
+            reason: string;
+            /** @description The answer's body. */
+            response: {
+                [key: string]: unknown;
+            };
+            duration_ms: number;
+            request_id: string;
+            /** Format: date-time */
+            created_at: string;
         };
         PartnerConversionResult: {
             credited: boolean;
@@ -43668,6 +44584,8 @@ export interface components {
         LogSince: string;
         /** @description Before this time, in the same forms as since. */
         LogUntil: string;
+        /** @description Whose data: a brand's id or handle. The default is the workspace's first brand (a member or token kept to some brands gets its own); all reads every brand you can see, as before brands owned their data. Deprecated with its route: use the /v1/brands/{brand}/ route. */
+        DataBrand: string;
         /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
         BrandID: string;
         /** @description The brand's id or handle. */
@@ -46506,6 +47424,80 @@ export interface operations {
             default: components["responses"]["Error"];
         };
     };
+    getWebhookDelivery: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                id: string;
+                delivery: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The delivery and its tries. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        delivery: components["schemas"]["WebhookDelivery"];
+                        attempts: components["schemas"]["WebhookAttempt"][];
+                    };
+                };
+            };
+            404: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    getWebhookActivity: {
+        parameters: {
+            query?: {
+                days?: number;
+            };
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Activity. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        days: {
+                            /** Format: date */
+                            day: string;
+                            attempts: number;
+                            failed: number;
+                            delivered: number;
+                            /** @description The average answer time that day. */
+                            avg_ms: number;
+                        }[];
+                        attempts: number;
+                        failed: number;
+                        /** @description failed / attempts, from 0 to 1; 0 with no tries. */
+                        error_rate: number;
+                        p95_ms: number;
+                    };
+                };
+            };
+            400: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
     redeliverWebhook: {
         parameters: {
             query?: never;
@@ -48516,8 +49508,8 @@ export interface operations {
     listSmartLists: {
         parameters: {
             query?: {
-                /** @description Only records of this brand: its id or handle, none for records shared by every brand, or all (the default). */
-                brand?: components["parameters"]["Brand"];
+                /** @description Whose data: a brand's id or handle. The default is the workspace's first brand (a member or token kept to some brands gets its own); all reads every brand you can see, as before brands owned their data. Deprecated with its route: use the /v1/brands/{brand}/ route. */
+                brand?: components["parameters"]["DataBrand"];
             };
             header?: never;
             path: {
@@ -68348,7 +69340,10 @@ export interface operations {
     };
     listCRMImports: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description Whose data: a brand's id or handle. The default is the workspace's first brand (a member or token kept to some brands gets its own); all reads every brand you can see, as before brands owned their data. Deprecated with its route: use the /v1/brands/{brand}/ route. */
+                brand?: components["parameters"]["DataBrand"];
+            };
             header?: never;
             path: {
                 /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
@@ -71186,8 +72181,8 @@ export interface operations {
                 review?: "approved" | "needs_review" | "all";
                 /** @description Only records from these tools, comma-separated, such as rb2b,vector. */
                 acquired_via?: string;
-                /** @description Only records of this brand: its id or handle, none for records shared by every brand, or all (the default). */
-                brand?: components["parameters"]["Brand"];
+                /** @description Whose data: a brand's id or handle. The default is the workspace's first brand (a member or token kept to some brands gets its own); all reads every brand you can see, as before brands owned their data. Deprecated with its route: use the /v1/brands/{brand}/ route. */
+                brand?: components["parameters"]["DataBrand"];
                 limit?: number;
                 before?: string;
                 /**
@@ -71272,8 +72267,8 @@ export interface operations {
                 type?: string;
                 /** @description Only pairs with this record. */
                 record?: string;
-                /** @description Only records of this brand: its id or handle, none for records shared by every brand, or all (the default). */
-                brand?: components["parameters"]["Brand"];
+                /** @description Whose data: a brand's id or handle. The default is the workspace's first brand (a member or token kept to some brands gets its own); all reads every brand you can see, as before brands owned their data. Deprecated with its route: use the /v1/brands/{brand}/ route. */
+                brand?: components["parameters"]["DataBrand"];
                 limit?: number;
                 before?: string;
                 /**
@@ -71986,7 +72981,10 @@ export interface operations {
     };
     listQueryTables: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description Whose data: a brand's id or handle. The default is the workspace's first brand (a member or token kept to some brands gets its own); all reads every brand you can see, as before brands owned their data. Deprecated with its route: use the /v1/brands/{brand}/ route. */
+                brand?: components["parameters"]["DataBrand"];
+            };
             header?: never;
             path: {
                 /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
@@ -72012,7 +73010,10 @@ export interface operations {
     };
     runQuery: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description Whose data: a brand's id or handle. The default is the workspace's first brand (a member or token kept to some brands gets its own); all reads every brand you can see, as before brands owned their data. Deprecated with its route: use the /v1/brands/{brand}/ route. */
+                brand?: components["parameters"]["DataBrand"];
+            };
             header?: never;
             path: {
                 /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
@@ -74409,8 +75410,8 @@ export interface operations {
                 anonymous_id?: string;
                 matched?: "true" | "false" | "all";
                 since?: string;
-                /** @description Only records of this brand: its id or handle, none for records shared by every brand, or all (the default). */
-                brand?: components["parameters"]["Brand"];
+                /** @description Whose data: a brand's id or handle. The default is the workspace's first brand (a member or token kept to some brands gets its own); all reads every brand you can see, as before brands owned their data. Deprecated with its route: use the /v1/brands/{brand}/ route. */
+                brand?: components["parameters"]["DataBrand"];
                 limit?: number;
                 before?: string;
                 /**
@@ -75959,6 +76960,1380 @@ export interface operations {
             400: components["responses"]["Error"];
             404: components["responses"]["Error"];
             409: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    listBrandCRMImports: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description CRM imports, newest first. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["CRMImport"][];
+                    };
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    startBrandCRMImport: {
+        parameters: {
+            query?: never;
+            header?: {
+                /**
+                 * @description Makes the write safe to retry. A repeat with the same key from the same caller within 24 hours gets the first
+                 *     answer back (with `Idempotent-Replayed: true`) instead of running again. The same key for a different request
+                 *     is refused with 422 `idempotency_key_reused`; while the first is still running, 409 `idempotency_in_progress`.
+                 *     Use a new random key, such as a UUID, for each distinct write.
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /**
+                     * Format: uuid
+                     * @description The CRM connection to import from.
+                     */
+                    integration_id: string;
+                    /** @description Only these objects, by slug from the preview, such as people or deals. Default every object. */
+                    objects?: string[];
+                };
+            };
+        };
+        responses: {
+            /** @description Queued. Inside a mission, a MissionHeld answer when the call was held for approval or dry-run instead. */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CRMImport"] | components["schemas"]["MissionHeld"];
+                };
+            };
+            400: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    listBrandSmartLists: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Smart lists. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["SmartList"][];
+                    };
+                };
+            };
+            404: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    createBrandSmartList: {
+        parameters: {
+            query?: never;
+            header?: {
+                /**
+                 * @description Makes the write safe to retry. A repeat with the same key from the same caller within 24 hours gets the first
+                 *     answer back (with `Idempotent-Replayed: true`) instead of running again. The same key for a different request
+                 *     is refused with 422 `idempotency_key_reused`; while the first is still running, 409 `idempotency_in_progress`.
+                 *     Use a new random key, such as a UUID, for each distinct write.
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SmartListInput"];
+            };
+        };
+        responses: {
+            /** @description The list. Its members fill in a few seconds. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SmartList"];
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            400: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    previewBrandSmartList: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @description A brand's id or handle; null or left out for every brand. */
+                    brand_id?: string | null;
+                    rules?: components["schemas"]["SmartListRule"][];
+                    /**
+                     * @default all
+                     * @enum {string}
+                     */
+                    match?: "all" | "any";
+                };
+            };
+        };
+        responses: {
+            /** @description The count and a sample. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @description How many people match now. */
+                        members: number;
+                        sample: components["schemas"]["SmartListPerson"][];
+                    };
+                };
+            };
+            400: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    getBrandSmartList: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The list. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SmartList"];
+                };
+            };
+            404: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    deleteBrandSmartList: {
+        parameters: {
+            query?: never;
+            header?: {
+                /**
+                 * @description Makes the write safe to retry. A repeat with the same key from the same caller within 24 hours gets the first
+                 *     answer back (with `Idempotent-Replayed: true`) instead of running again. The same key for a different request
+                 *     is refused with 422 `idempotency_key_reused`; while the first is still running, 409 `idempotency_in_progress`.
+                 *     Use a new random key, such as a UUID, for each distinct write.
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            202: components["responses"]["MissionHeld"];
+            /** @description Deleted. */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    updateBrandSmartList: {
+        parameters: {
+            query?: never;
+            header?: {
+                /**
+                 * @description Makes the write safe to retry. A repeat with the same key from the same caller within 24 hours gets the first
+                 *     answer back (with `Idempotent-Replayed: true`) instead of running again. The same key for a different request
+                 *     is refused with 422 `idempotency_key_reused`; while the first is still running, 409 `idempotency_in_progress`.
+                 *     Use a new random key, such as a UUID, for each distinct write.
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SmartListInput"];
+            };
+        };
+        responses: {
+            /** @description The list. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SmartList"];
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            400: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    listBrandSmartListMembers: {
+        parameters: {
+            query?: {
+                limit?: number;
+                /** @description From next_before. */
+                before?: string;
+                /**
+                 * @description next_cursor from the previous page, unchanged. Every paged list takes it, so one loop pages them all:
+                 *     call, then call again with cursor=next_cursor until next_cursor is null. Cursors are opaque; don't build them.
+                 */
+                cursor?: components["parameters"]["Cursor"];
+                /**
+                 * @description Only these fields of each item, comma separated (fields=id,email,status); id always comes back.
+                 *     Paging fields stay. A field the items don't have answers 400 naming the ones they do. Any GET takes it.
+                 */
+                fields?: components["parameters"]["Fields"];
+            };
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Members. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["SmartListPerson"][];
+                        next_before?: string | null;
+                        next_cursor?: components["schemas"]["NextCursor"];
+                    };
+                };
+            };
+            400: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    addBrandStaticListMembers: {
+        parameters: {
+            query?: never;
+            header?: {
+                /**
+                 * @description Makes the write safe to retry. A repeat with the same key from the same caller within 24 hours gets the first
+                 *     answer back (with `Idempotent-Replayed: true`) instead of running again. The same key for a different request
+                 *     is refused with 422 `idempotency_key_reused`; while the first is still running, 409 `idempotency_in_progress`.
+                 *     Use a new random key, such as a UUID, for each distinct write.
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["StaticListMembersInput"];
+            };
+        };
+        responses: {
+            /** @description How many joined, and the count now. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StaticListChange"];
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            400: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    removeBrandStaticListMembers: {
+        parameters: {
+            query?: never;
+            header?: {
+                /**
+                 * @description Makes the write safe to retry. A repeat with the same key from the same caller within 24 hours gets the first
+                 *     answer back (with `Idempotent-Replayed: true`) instead of running again. The same key for a different request
+                 *     is refused with 422 `idempotency_key_reused`; while the first is still running, 409 `idempotency_in_progress`.
+                 *     Use a new random key, such as a UUID, for each distinct write.
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["StaticListMembersInput"];
+            };
+        };
+        responses: {
+            /** @description How many left, and the count now. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StaticListChange"];
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            400: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    refreshBrandSmartList: {
+        parameters: {
+            query?: never;
+            header?: {
+                /**
+                 * @description Makes the write safe to retry. A repeat with the same key from the same caller within 24 hours gets the first
+                 *     answer back (with `Idempotent-Replayed: true`) instead of running again. The same key for a different request
+                 *     is refused with 422 `idempotency_key_reused`; while the first is still running, 409 `idempotency_in_progress`.
+                 *     Use a new random key, such as a UUID, for each distinct write.
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Queued. */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Queued"] | components["schemas"]["MissionHeld"];
+                };
+            };
+            404: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    getBrandCRMImport: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                import: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The import. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CRMImport"];
+                };
+            };
+            404: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    listBrandRecords: {
+        parameters: {
+            query?: {
+                /** @description A record type's key: person, account or the workspace's own. */
+                type?: string;
+                q?: string;
+                /**
+                 * @description A field's key and a value, such as lifecycle_stage:customer; repeat it for more (at most 20). Values of one
+                 *     field are alternatives, different fields must all match. A list field, such as a person's companies (by
+                 *     record id), matches when it holds the value.
+                 */
+                attribute?: string[];
+                origin?: components["schemas"]["RecordOrigin"];
+                /** @description Default false. */
+                archived?: "false" | "true" | "all";
+                /** @description Default approved: records held for review are left out. needs_review lists only those. */
+                review?: "approved" | "needs_review" | "all";
+                /** @description Only records from these tools, comma-separated, such as rb2b,vector. */
+                acquired_via?: string;
+                limit?: number;
+                before?: string;
+                /**
+                 * @description next_cursor from the previous page, unchanged. Every paged list takes it, so one loop pages them all:
+                 *     call, then call again with cursor=next_cursor until next_cursor is null. Cursors are opaque; don't build them.
+                 */
+                cursor?: components["parameters"]["Cursor"];
+                /**
+                 * @description Only these fields of each item, comma separated (fields=id,email,status); id always comes back.
+                 *     Paging fields stay. A field the items don't have answers 400 naming the ones they do. Any GET takes it.
+                 */
+                fields?: components["parameters"]["Fields"];
+            };
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Records. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["Record"][];
+                        next_before: string | null;
+                        next_cursor: components["schemas"]["NextCursor"];
+                    };
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    createBrandRecord: {
+        parameters: {
+            query?: never;
+            header?: {
+                /**
+                 * @description Makes the write safe to retry. A repeat with the same key from the same caller within 24 hours gets the first
+                 *     answer back (with `Idempotent-Replayed: true`) instead of running again. The same key for a different request
+                 *     is refused with 422 `idempotency_key_reused`; while the first is still running, 409 `idempotency_in_progress`.
+                 *     Use a new random key, such as a UUID, for each distinct write.
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RecordInput"] & unknown;
+            };
+        };
+        responses: {
+            /** @description The record. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Record"];
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            default: components["responses"]["Error"];
+        };
+    };
+    listBrandRecordDuplicates: {
+        parameters: {
+            query?: {
+                /** @description Comma-separated: open, blocked, merged, linked, dismissed; or all. */
+                status?: string;
+                /** @description A record type's key, such as person. */
+                type?: string;
+                /** @description Only pairs with this record. */
+                record?: string;
+                limit?: number;
+                before?: string;
+                /**
+                 * @description next_cursor from the previous page, unchanged. Every paged list takes it, so one loop pages them all:
+                 *     call, then call again with cursor=next_cursor until next_cursor is null. Cursors are opaque; don't build them.
+                 */
+                cursor?: components["parameters"]["Cursor"];
+                /**
+                 * @description Only these fields of each item, comma separated (fields=id,email,status); id always comes back.
+                 *     Paging fields stay. A field the items don't have answers 400 naming the ones they do. Any GET takes it.
+                 */
+                fields?: components["parameters"]["Fields"];
+            };
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Pairs. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["RecordDuplicate"][];
+                        next_before: string | null;
+                        next_cursor: components["schemas"]["NextCursor"];
+                    };
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    dismissBrandRecordDuplicate: {
+        parameters: {
+            query?: never;
+            header?: {
+                /**
+                 * @description Makes the write safe to retry. A repeat with the same key from the same caller within 24 hours gets the first
+                 *     answer back (with `Idempotent-Replayed: true`) instead of running again. The same key for a different request
+                 *     is refused with 422 `idempotency_key_reused`; while the first is still running, 409 `idempotency_in_progress`.
+                 *     Use a new random key, such as a UUID, for each distinct write.
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                candidate: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The pair. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RecordDuplicate"];
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            default: components["responses"]["Error"];
+        };
+    };
+    linkBrandRecordDuplicate: {
+        parameters: {
+            query?: never;
+            header?: {
+                /**
+                 * @description Makes the write safe to retry. A repeat with the same key from the same caller within 24 hours gets the first
+                 *     answer back (with `Idempotent-Replayed: true`) instead of running again. The same key for a different request
+                 *     is refused with 422 `idempotency_key_reused`; while the first is still running, 409 `idempotency_in_progress`.
+                 *     Use a new random key, such as a UUID, for each distinct write.
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                candidate: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The pair. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RecordDuplicate"];
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            default: components["responses"]["Error"];
+        };
+    };
+    getBrandRecord: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                record: components["parameters"]["RecordID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The record. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Record"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    deleteBrandRecord: {
+        parameters: {
+            query?: {
+                /** @description true adds a person's emails (a company's domains) to the opt-out list first (reason do_not_contact), so a later import or sync can't contact them again. */
+                suppress?: boolean;
+                /** @description The record's version, as read: the delete is refused with record_changed if it changed since. Agents must send it (version_required). */
+                version?: number;
+            };
+            header?: {
+                /**
+                 * @description Makes the write safe to retry. A repeat with the same key from the same caller within 24 hours gets the first
+                 *     answer back (with `Idempotent-Replayed: true`) instead of running again. The same key for a different request
+                 *     is refused with 422 `idempotency_key_reused`; while the first is still running, 409 `idempotency_in_progress`.
+                 *     Use a new random key, such as a UUID, for each distinct write.
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                record: components["parameters"]["RecordID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description What was erased. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** Format: uuid */
+                        id: string;
+                        type: string;
+                        /** @description Rows removed, by table, such as records, leads and messages. */
+                        erased: {
+                            [key: string]: number;
+                        };
+                        /** @description Opt-out entries added. */
+                        suppressed: number;
+                    };
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            default: components["responses"]["Error"];
+        };
+    };
+    updateBrandRecord: {
+        parameters: {
+            query?: never;
+            header?: {
+                /**
+                 * @description Makes the write safe to retry. A repeat with the same key from the same caller within 24 hours gets the first
+                 *     answer back (with `Idempotent-Replayed: true`) instead of running again. The same key for a different request
+                 *     is refused with 422 `idempotency_key_reused`; while the first is still running, 409 `idempotency_in_progress`.
+                 *     Use a new random key, such as a UUID, for each distinct write.
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                record: components["parameters"]["RecordID"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RecordInput"];
+            };
+        };
+        responses: {
+            /** @description The record. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Record"];
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            default: components["responses"]["Error"];
+        };
+    };
+    getBrandRecordHistory: {
+        parameters: {
+            query?: {
+                /** @description Only this field's changes (name for the record's name). */
+                field?: string;
+                limit?: number;
+                before?: number;
+                /**
+                 * @description next_cursor from the previous page, unchanged. Every paged list takes it, so one loop pages them all:
+                 *     call, then call again with cursor=next_cursor until next_cursor is null. Cursors are opaque; don't build them.
+                 */
+                cursor?: components["parameters"]["Cursor"];
+                /**
+                 * @description Only these fields of each item, comma separated (fields=id,email,status); id always comes back.
+                 *     Paging fields stay. A field the items don't have answers 400 naming the ones they do. Any GET takes it.
+                 */
+                fields?: components["parameters"]["Fields"];
+            };
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                record: components["parameters"]["RecordID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Changes. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["AttributeChange"][];
+                        next_before: number | null;
+                        next_cursor: components["schemas"]["NextCursor"];
+                    };
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    reviewBrandRecord: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                record: components["parameters"]["RecordID"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @enum {string} */
+                    decision: "approve" | "reject";
+                };
+            };
+        };
+        responses: {
+            /** @description The record now. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Record"];
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            default: components["responses"]["Error"];
+        };
+    };
+    listBrandRecordIdentities: {
+        parameters: {
+            query?: {
+                closed?: boolean;
+            };
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                record: components["parameters"]["RecordID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Identities, active first. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["RecordIdentity"][];
+                    };
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    addBrandRecordIdentity: {
+        parameters: {
+            query?: never;
+            header?: {
+                /**
+                 * @description Makes the write safe to retry. A repeat with the same key from the same caller within 24 hours gets the first
+                 *     answer back (with `Idempotent-Replayed: true`) instead of running again. The same key for a different request
+                 *     is refused with 422 `idempotency_key_reused`; while the first is still running, 409 `idempotency_in_progress`.
+                 *     Use a new random key, such as a UUID, for each distinct write.
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                record: components["parameters"]["RecordID"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RecordIdentityInput"];
+            };
+        };
+        responses: {
+            /** @description The identity the record already had, now verified or updated. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RecordIdentity"];
+                };
+            };
+            /** @description The new identity. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RecordIdentity"];
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            default: components["responses"]["Error"];
+        };
+    };
+    closeBrandRecordIdentity: {
+        parameters: {
+            query?: never;
+            header?: {
+                /**
+                 * @description Makes the write safe to retry. A repeat with the same key from the same caller within 24 hours gets the first
+                 *     answer back (with `Idempotent-Replayed: true`) instead of running again. The same key for a different request
+                 *     is refused with 422 `idempotency_key_reused`; while the first is still running, 409 `idempotency_in_progress`.
+                 *     Use a new random key, such as a UUID, for each distinct write.
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                record: components["parameters"]["RecordID"];
+                identity: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The closed identity. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RecordIdentity"];
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            default: components["responses"]["Error"];
+        };
+    };
+    listBrandRecordRelationships: {
+        parameters: {
+            query?: {
+                ended?: boolean;
+            };
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                record: components["parameters"]["RecordID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Links, active first. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["RecordRelationship"][];
+                    };
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    addBrandRecordRelationship: {
+        parameters: {
+            query?: never;
+            header?: {
+                /**
+                 * @description Makes the write safe to retry. A repeat with the same key from the same caller within 24 hours gets the first
+                 *     answer back (with `Idempotent-Replayed: true`) instead of running again. The same key for a different request
+                 *     is refused with 422 `idempotency_key_reused`; while the first is still running, 409 `idempotency_in_progress`.
+                 *     Use a new random key, such as a UUID, for each distinct write.
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                record: components["parameters"]["RecordID"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** Format: uuid */
+                    to: string;
+                    /** @example partner_of */
+                    kind: string;
+                    properties?: {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+        responses: {
+            /** @description The link. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RecordRelationship"];
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            default: components["responses"]["Error"];
+        };
+    };
+    endBrandRecordRelationship: {
+        parameters: {
+            query?: never;
+            header?: {
+                /**
+                 * @description Makes the write safe to retry. A repeat with the same key from the same caller within 24 hours gets the first
+                 *     answer back (with `Idempotent-Replayed: true`) instead of running again. The same key for a different request
+                 *     is refused with 422 `idempotency_key_reused`; while the first is still running, 409 `idempotency_in_progress`.
+                 *     Use a new random key, such as a UUID, for each distinct write.
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                record: components["parameters"]["RecordID"];
+                relationship: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The ended link. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RecordRelationship"];
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            default: components["responses"]["Error"];
+        };
+    };
+    mergeBrandRecords: {
+        parameters: {
+            query?: never;
+            header?: {
+                /**
+                 * @description Makes the write safe to retry. A repeat with the same key from the same caller within 24 hours gets the first
+                 *     answer back (with `Idempotent-Replayed: true`) instead of running again. The same key for a different request
+                 *     is refused with 422 `idempotency_key_reused`; while the first is still running, 409 `idempotency_in_progress`.
+                 *     Use a new random key, such as a UUID, for each distinct write.
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                record: components["parameters"]["RecordID"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /**
+                     * Format: uuid
+                     * @description The record merged into this one.
+                     */
+                    from: string;
+                    /** @description This record's version, as read. */
+                    version?: number;
+                };
+            };
+        };
+        responses: {
+            /** @description The record kept. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        record: components["schemas"]["Record"];
+                        /** Format: uuid */
+                        merged_from: string;
+                        moved: {
+                            identities: number;
+                            attributes: number;
+                            relationships: number;
+                            events: number;
+                            consents: number;
+                            /** @description Subscriptions from payment connections. */
+                            subscriptions: number;
+                            /** @description Leads, cold emails, replies, meetings, deals, lifecycle emails, broadcast sends and journey runs that moved to the record kept. */
+                            activity: number;
+                        };
+                    };
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            default: components["responses"]["Error"];
+        };
+    };
+    listBrandQueryTables: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The tables. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["QueryTable"][];
+                    };
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    runBrandQuery: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @description One SELECT, such as select stage, count(*) from deals group by stage. */
+                    sql: string;
+                    /** @description Rows to return. Default 100. */
+                    limit?: number;
+                };
+            };
+        };
+        responses: {
+            /** @description The rows. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["QueryResult"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    getBrandRecordTimeline: {
+        parameters: {
+            query?: {
+                /** @description Comma-separated: event, attribute_change, identity, consent, message, meeting, deal, visit, opt_out, journey. Default all. */
+                kinds?: string;
+                /** @description For a company, include its people's items (the default). false shows the company's own. */
+                people?: "true" | "false";
+                limit?: number;
+                before?: string;
+                /**
+                 * @description next_cursor from the previous page, unchanged. Every paged list takes it, so one loop pages them all:
+                 *     call, then call again with cursor=next_cursor until next_cursor is null. Cursors are opaque; don't build them.
+                 */
+                cursor?: components["parameters"]["Cursor"];
+                /**
+                 * @description Only these fields of each item, comma separated (fields=id,email,status); id always comes back.
+                 *     Paging fields stay. A field the items don't have answers 400 naming the ones they do. Any GET takes it.
+                 */
+                fields?: components["parameters"]["Fields"];
+            };
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                record: components["parameters"]["RecordID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The timeline. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["TimelineItem"][];
+                        next_before: string | null;
+                        next_cursor: components["schemas"]["NextCursor"];
+                    };
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    listBrandRecordConsents: {
+        parameters: {
+            query?: {
+                history?: "true" | "false";
+            };
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                record: components["parameters"]["RecordID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Consents. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["Consent"][];
+                    };
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    recordBrandConsent: {
+        parameters: {
+            query?: never;
+            header?: {
+                /**
+                 * @description Makes the write safe to retry. A repeat with the same key from the same caller within 24 hours gets the first
+                 *     answer back (with `Idempotent-Replayed: true`) instead of running again. The same key for a different request
+                 *     is refused with 422 `idempotency_key_reused`; while the first is still running, 409 `idempotency_in_progress`.
+                 *     Use a new random key, such as a UUID, for each distinct write.
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                record: components["parameters"]["RecordID"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ConsentInput"];
+            };
+        };
+        responses: {
+            /** @description The consent. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Consent"];
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            default: components["responses"]["Error"];
+        };
+    };
+    listBrandCustomerEvents: {
+        parameters: {
+            query?: {
+                /** @description A catalog name, such as order_completed or page.viewed. */
+                name?: string;
+                kind?: "track" | "identify" | "page" | "screen" | "group" | "alias";
+                user_id?: string;
+                anonymous_id?: string;
+                matched?: "true" | "false" | "all";
+                since?: string;
+                limit?: number;
+                before?: string;
+                /**
+                 * @description next_cursor from the previous page, unchanged. Every paged list takes it, so one loop pages them all:
+                 *     call, then call again with cursor=next_cursor until next_cursor is null. Cursors are opaque; don't build them.
+                 */
+                cursor?: components["parameters"]["Cursor"];
+                /**
+                 * @description Only these fields of each item, comma separated (fields=id,email,status); id always comes back.
+                 *     Paging fields stay. A field the items don't have answers 400 naming the ones they do. Any GET takes it.
+                 */
+                fields?: components["parameters"]["Fields"];
+            };
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Events. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["CustomerEvent"][];
+                        next_before: string | null;
+                        next_cursor: components["schemas"]["NextCursor"];
+                    };
+                };
+            };
             default: components["responses"]["Error"];
         };
     };
@@ -82342,6 +84717,57 @@ export interface operations {
             202: components["responses"]["MissionHeld"];
             400: components["responses"]["Error"];
             404: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    listPartnerConversionLog: {
+        parameters: {
+            query?: {
+                /** @description Only records of this brand: its id or handle, none for records shared by every brand, or all (the default). */
+                brand?: components["parameters"]["Brand"];
+                /** @description A program's id or slug. */
+                program?: string;
+                source?: "api" | "postback";
+                outcome?: "credited" | "not_credited" | "duplicate" | "rejected" | "error";
+                /** @description An external_id, customer_id, refund_of, ref, promo code, email address or request id the call sent. */
+                q?: string;
+                limit?: number;
+                before?: string;
+                /**
+                 * @description next_cursor from the previous page, unchanged. Every paged list takes it, so one loop pages them all:
+                 *     call, then call again with cursor=next_cursor until next_cursor is null. Cursors are opaque; don't build them.
+                 */
+                cursor?: components["parameters"]["Cursor"];
+                /**
+                 * @description Only these fields of each item, comma separated (fields=id,email,status); id always comes back.
+                 *     Paging fields stay. A field the items don't have answers 400 naming the ones they do. Any GET takes it.
+                 */
+                fields?: components["parameters"]["Fields"];
+            };
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Logged calls. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["PartnerConversionLogEntry"][];
+                        /** Format: date-time */
+                        next_before: string | null;
+                        next_cursor?: components["schemas"]["NextCursor"];
+                    };
+                };
+            };
+            400: components["responses"]["Error"];
             default: components["responses"]["Error"];
         };
     };

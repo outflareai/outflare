@@ -7,7 +7,7 @@
 import { useCallback, useEffect, useState, type FormEvent, type ReactNode } from "react";
 import { appPath } from "@/lib/paths";
 import { track } from "@/lib/analytics";
-import type { Partner, PartnerAsset, PartnerGroup, PartnerStats, PartnerConversion, PartnerImport, PartnerPayout, PartnerProgram, PartnerReferral, PartnerReward, PartnerRuleInput } from "@outflare/sdk";
+import type { Partner, PartnerAsset, PartnerGroup, PartnerStats, PartnerConversion, PartnerConversionLogEntry, PartnerImport, PartnerPayout, PartnerProgram, PartnerReferral, PartnerReward, PartnerRuleInput } from "@outflare/sdk";
 import { api, errorMessage } from "../api";
 import { useBrand } from "@/lib/brand";
 import { Badge, Button, CopyButton, Empty, ErrorText, field, Input, Loading, Menu, PageHeader, Stat, Stats, ask, toast } from "../ui";
@@ -20,7 +20,7 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 
 type Props = { ws: string; canManage: boolean };
-type Section = "partners" | "groups" | "flows" | "conversions" | "rewards" | "payouts";
+type Section = "partners" | "groups" | "flows" | "conversions" | "log" | "rewards" | "payouts";
 type Kind = PartnerProgram["kind"];
 
 const kinds: { id: Kind; label: string; blurb: string }[] = [
@@ -91,6 +91,7 @@ export function Partners({ ws, canManage }: Props) {
               <TabsTrigger value="groups" className="px-3 text-[12px]">Groups</TabsTrigger>
               <TabsTrigger value="flows" className="px-3 text-[12px]">Flows</TabsTrigger>
               <TabsTrigger value="conversions" className="px-3 text-[12px]">Conversions</TabsTrigger>
+              <TabsTrigger value="log" className="px-3 text-[12px]">Log</TabsTrigger>
               <TabsTrigger value="rewards" className="px-3 text-[12px]">Rewards</TabsTrigger>
               <TabsTrigger value="payouts" className="px-3 text-[12px]">Payouts</TabsTrigger>
             </TabsList>
@@ -99,6 +100,7 @@ export function Partners({ ws, canManage }: Props) {
           {section === "groups" && <Groups key={current.id} ws={ws} program={current} canManage={canManage} onChanged={load} />}
           {section === "flows" && <Flows key={current.id} ws={ws} program={current} canManage={canManage} onChanged={load} />}
           {section === "conversions" && <Conversions key={current.id} ws={ws} program={current} />}
+          {section === "log" && <ConversionLog key={current.id} ws={ws} program={current} />}
           {section === "rewards" && <Rewards key={current.id} ws={ws} program={current} canManage={canManage} />}
           {section === "payouts" && <Payouts key={current.id} ws={ws} program={current} canManage={canManage} />}
         </>
@@ -517,6 +519,91 @@ function Conversions({ ws, program }: { ws: string; program: PartnerProgram }) {
       <ErrorText>{error}</ErrorText>
       <DataTable columns={columns} data={list} rowId={(v) => v.id} searchPlaceholder="Search conversions" empty="No conversions match." />
       <LoadMore next={next} onMore={more} shown={list.length} />
+    </div>
+  );
+}
+
+const logOutcomes: { id: PartnerConversionLogEntry["outcome"]; label: string; tone: "green" | "grey" | "amber" | "red" }[] = [
+  { id: "credited", label: "Credited", tone: "green" },
+  { id: "not_credited", label: "Not credited", tone: "amber" },
+  { id: "duplicate", label: "Duplicate", tone: "grey" },
+  { id: "rejected", label: "Rejected", tone: "red" },
+  { id: "error", label: "Error", tone: "red" },
+];
+
+// ConversionLog is every conversion call from the last 30 days (API and
+// postback URL), with what it sent and what Outflare answered.
+function ConversionLog({ ws, program }: { ws: string; program: PartnerProgram }) {
+  const [outcome, setOutcome] = useState<PartnerConversionLogEntry["outcome"] | "">("");
+  const [all, setAll] = useState(false);
+  const [q, setQ] = useState("");
+  const [search, setSearch] = useState("");
+  const [open, setOpen] = useState<PartnerConversionLogEntry | null>(null);
+  const get = useCallback(async (before?: string): Promise<Page<PartnerConversionLogEntry>> => {
+    const { data, error } = await api.GET("/v1/workspaces/{ws}/partner-conversion-log", {
+      params: { path: { ws }, query: { limit: pageSize, ...(all ? {} : { program: program.id }), ...(outcome ? { outcome } : {}), ...(search ? { q: search } : {}), ...(before ? { before } : {}) } },
+    });
+    return { list: data?.data ?? [], next: data?.next_before ?? null, error: error ? errorMessage(error) : "" };
+  }, [ws, program.id, outcome, all, search]);
+  const { list, next, error, reload, more } = usePages(get);
+  useEffect(() => {
+    reload();
+  }, [reload]);
+  const columns: ColumnDef<PartnerConversionLogEntry>[] = [
+    { id: "when", header: "When", accessorFn: (v) => v.created_at, cell: ({ row: { original: v } }) => ago(v.created_at) },
+    { id: "source", header: "From", accessorFn: (v) => (v.source === "api" ? "API" : "Postback URL") },
+    { id: "type", header: "Type", accessorFn: (v) => v.type || "?" },
+    { id: "external", header: "Your id", accessorFn: (v) => String(v.request.external_id ?? v.request.customer_id ?? ""), cell: ({ getValue }) => <span className="font-mono text-[12px]">{getValue() as string}</span> },
+    {
+      id: "outcome", header: "Result", accessorFn: (v) => v.outcome,
+      cell: ({ row: { original: v } }) => {
+        const o = logOutcomes.find((x) => x.id === v.outcome);
+        return <span className="flex items-center gap-2"><Badge tone={o?.tone ?? "grey"}>{o?.label ?? v.outcome}</Badge>{v.reason && <span className="font-mono text-[12px] text-muted-foreground">{v.reason}</span>}</span>;
+      },
+    },
+    { id: "view", header: "", cell: ({ row: { original: v } }) => <Button variant="ghost" onClick={() => setOpen(v)}>View</Button> },
+  ];
+  return (
+    <div className="space-y-3">
+      <form className="flex flex-wrap items-center gap-2" onSubmit={(e) => { e.preventDefault(); setSearch(q.trim()); }}>
+        <input aria-label="Search the log" className={field + " w-72"} value={q} onChange={(e) => setQ(e.target.value)} placeholder="Order id, customer id, ref, promo code or email" maxLength={200} />
+        <select aria-label="Result" className={field} value={outcome} onChange={(e) => setOutcome(e.target.value as PartnerConversionLogEntry["outcome"] | "")}>
+          <option value="">Every result</option>
+          {logOutcomes.map((o) => <option key={o.id} value={o.id}>{o.label}</option>)}
+        </select>
+        <select aria-label="Programs" className={field} value={all ? "all" : "this"} onChange={(e) => setAll(e.target.value === "all")}>
+          <option value="this">This program</option>
+          <option value="all">Every call (also those that named no program)</option>
+        </select>
+        <Button type="submit" variant="ghost">Search</Button>
+      </form>
+      <ErrorText>{error}</ErrorText>
+      {!list ? <Loading /> : list.length === 0 ? (
+        <Empty title={search || outcome ? "No calls match" : "No conversion calls in the last 30 days"}>
+          Every conversion your backend or tracker reports, by the API or the postback URL, shows here for 30 days with what it sent, what Outflare answered and why it was or wasn't credited.
+        </Empty>
+      ) : (
+        <>
+          <DataTable columns={columns} data={list} rowId={(v) => v.id} empty="No calls match." />
+          <LoadMore next={next} onMore={more} shown={list.length} />
+        </>
+      )}
+      {open && (
+        <Dialog open onOpenChange={(o) => !o && setOpen(null)}>
+          <DialogContent className="max-w-2xl">
+            <DialogHeader>
+              <DialogTitle>{open.source === "api" ? "API call" : "Postback URL call"}, {ago(open.created_at)}</DialogTitle>
+              <DialogDescription>
+                HTTP {open.status} in {open.duration_ms} ms{open.request_id ? `, request ${open.request_id}` : ""}. An email the call sent is not kept; it shows as (sent).
+              </DialogDescription>
+            </DialogHeader>
+            <p className="text-[12px] font-medium">Sent</p>
+            <pre className="max-h-60 overflow-auto rounded bg-muted p-2 text-[12px]">{JSON.stringify(open.request, null, 2)}</pre>
+            <p className="text-[12px] font-medium">Answer</p>
+            <pre className="max-h-60 overflow-auto rounded bg-muted p-2 text-[12px]">{JSON.stringify(open.response, null, 2)}</pre>
+          </DialogContent>
+        </Dialog>
+      )}
     </div>
   );
 }

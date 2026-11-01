@@ -5,6 +5,7 @@ import { api, errorMessage } from "../api";
 import { Badge, Button, Card, confirmAction, Empty, ErrorText, field, Loading, Menu, PageHeader, toast } from "../ui";
 import { DataTable } from "@/components/data-table";
 import { BrandBadge } from "@/components/brand-badge";
+import { PickBrand } from "@/components/pick-brand";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useBrand } from "@/lib/brand";
 import { isID } from "@/lib/paths";
@@ -80,7 +81,8 @@ function RecordList({ ws, view, cat, canManage, tabs, onOpen }: { ws: string; vi
   const [show, setShow] = useState<"active" | "review" | "archived">("active");
   // Field filters: one value per field key.
   const [filters, setFilters] = useState<Record<string, string>>({});
-  const { query: brandQuery } = useBrand(ws);
+  const { brand, active } = useBrand(ws);
+  const brandID = brand?.id ?? "";
 
   // The fields worth filtering by: the catalog marks them, and a choice
   // from a list fits a dropdown.
@@ -89,10 +91,11 @@ function RecordList({ ws, view, cat, canManage, tabs, onOpen }: { ws: string; vi
 
   const load = useCallback(
     async (before?: string) => {
+      if (!brandID) return;
       const attribute = Object.entries(filters).filter(([, v]) => v).map(([k, v]) => `${k}:${v}`);
-      const { data, error } = await api.GET("/v1/workspaces/{ws}/records", {
+      const { data, error } = await api.GET("/v1/brands/{brand}/records", {
         params: {
-          path: { ws },
+          path: { brand: brandID },
           query: {
             type: view,
             limit: 100,
@@ -101,7 +104,6 @@ function RecordList({ ws, view, cat, canManage, tabs, onOpen }: { ws: string; vi
             ...(show === "review" ? { review: "needs_review" as const } : {}),
             ...(show === "archived" ? { archived: "true" as const } : {}),
             ...(before ? { before } : {}),
-            ...brandQuery,
           },
         },
       });
@@ -111,7 +113,7 @@ function RecordList({ ws, view, cat, canManage, tabs, onOpen }: { ws: string; vi
       setRows((prev) => (before ? [...prev, ...data.data] : data.data));
       setNext(data.next_before ?? null);
     },
-    [ws, view, q, show, filterKey, brandQuery.brand], // eslint-disable-line react-hooks/exhaustive-deps
+    [brandID, view, q, show, filterKey], // eslint-disable-line react-hooks/exhaustive-deps
   );
 
   useEffect(() => {
@@ -138,20 +140,21 @@ function RecordList({ ws, view, cat, canManage, tabs, onOpen }: { ws: string; vi
             ? "Everyone your business knows: customers from your product, leads, CRM contacts and the people who reply. One record each, shared by every feature."
             : "The companies your people work at, from your product, your CRM, leads' websites and imports."
         }
-        action={canManage && cat.catalog && <Button onClick={() => setAdding(true)}>{people ? "Add person" : "Add company"}</Button>}
+        action={canManage && cat.catalog && brandID && <Button onClick={() => setAdding(true)}>{people ? "Add person" : "Add company"}</Button>}
       />
-      {adding && <RecordDialog ws={ws} type={view} rec={null} cat={cat} names={{}} onClose={() => setAdding(false)} onSaved={(r) => onOpen(r.id)} />}
+      {adding && <RecordDialog ws={ws} brand={brandID} type={view} rec={null} cat={cat} names={{}} onClose={() => setAdding(false)} onSaved={(r) => onOpen(r.id)} />}
       {tabs}
-      <ErrorText>{error || cat.error}</ErrorText>
-      {!loaded && <Loading />}
-      {loaded && !filtered && rows.length === 0 && (
+      {!brandID && <PickBrand what={people ? "People" : "Companies"} brands={active.length} />}
+      <ErrorText>{brandID && (error || cat.error)}</ErrorText>
+      {brandID && !loaded && <Loading />}
+      {brandID && loaded && !filtered && rows.length === 0 && (
         <Empty title={people ? "No people yet" : "No companies yet"}>
           {people
             ? "People arrive from your product (sign-ups and payments), leads you import, your CRM and the replies you get. Connect a source or import leads to start."
             : "Companies arrive with your people: from their email domains, your CRM and leads' websites."}
         </Empty>
       )}
-      {loaded && (filtered || rows.length > 0) && (
+      {brandID && loaded && (filtered || rows.length > 0) && (
         <div className="space-y-3">
           <DataTable
             data={rows}
@@ -289,20 +292,25 @@ function RecordPage({ ws, id, cat: picked, canManage, onOpen, go }: { ws: string
   const [tick, setTick] = useState(0);
   const changed = () => setTick((t) => t + 1);
   const [twins, setTwins] = useState<Rec[]>([]);
+  // A record is opened inside the brand picked: brand routes only.
+  const { brand: pickedBrand, active } = useBrand(ws);
+  const brand = pickedBrand?.id ?? "";
 
   useEffect(() => {
-    const path = { ws, record: id };
-    api.GET("/v1/workspaces/{ws}/records/{record}", { params: { path } }).then(({ data, error }) => {
+    if (!brand) return;
+    const path = { brand, record: id };
+    api.GET("/v1/brands/{brand}/records/{record}", { params: { path } }).then(({ data, error }) => {
       if (!data) return setError(errorMessage(error));
       setRec(data);
       window.dispatchEvent(new CustomEvent("outflare:item-name", { detail: { id, name: displayName(data) } }));
     });
-    api.GET("/v1/workspaces/{ws}/records/{record}/relationships", { params: { path } }).then(({ data }) => data && setLinks(data.data));
-    api.GET("/v1/workspaces/{ws}/records/duplicates", { params: { path: { ws }, query: { record: id, status: "open,blocked" } } }).then(({ data }) =>
+    api.GET("/v1/brands/{brand}/records/{record}/relationships", { params: { path } }).then(({ data }) => data && setLinks(data.data));
+    api.GET("/v1/brands/{brand}/records/duplicates", { params: { path: { brand }, query: { record: id, status: "open,blocked" } } }).then(({ data }) =>
       setTwins((data?.data ?? []).flatMap((p) => p.records.filter((r) => r.id !== id))),
     );
-  }, [ws, id, tick]);
+  }, [brand, id, tick]);
 
+  if (!brand) return <div className="space-y-6"><PageHeader title="Record" back={{ label: "People", onClick: () => onOpen("") }} /><PickBrand what="Records" brands={active.length} /></div>;
   if (error) return <div className="space-y-6"><PageHeader title="Record" back={{ label: "People", onClick: () => onOpen("") }} /><ErrorText>{error}</ErrorText></div>;
   if (!rec) return <Loading />;
 
@@ -318,7 +326,7 @@ function RecordPage({ ws, id, cat: picked, canManage, onOpen, go }: { ws: string
   const manage = canManage && !rec.merged_into;
 
   async function archive(archived: boolean) {
-    const { error } = await api.PATCH("/v1/workspaces/{ws}/records/{record}", { params: { path: { ws, record: rec!.id } }, body: { archived, version: rec!.version } });
+    const { error } = await api.PATCH("/v1/brands/{brand}/records/{record}", { params: { path: { brand, record: rec!.id } }, body: { archived, version: rec!.version } });
     if (error) return toast(errorMessage(error), "error");
     toast(archived ? "Archived. It's under Archived in the list, and can be restored." : "Restored.");
     changed();
@@ -326,14 +334,14 @@ function RecordPage({ ws, id, cat: picked, canManage, onOpen, go }: { ws: string
 
   async function review(decision: "approve" | "reject") {
     if (decision === "reject" && !(await confirmAction(`Reject ${displayName(rec!)}?`, "They are archived, and nothing is sent to them.", "Reject"))) return;
-    const { error } = await api.POST("/v1/workspaces/{ws}/records/{record}/review", { params: { path: { ws, record: rec!.id } }, body: { decision } });
+    const { error } = await api.POST("/v1/brands/{brand}/records/{record}/review", { params: { path: { brand, record: rec!.id } }, body: { decision } });
     if (error) return toast(errorMessage(error), "error");
     toast(decision === "approve" ? "Approved. They can now be emailed as a prospect (cold email only, never marketing without consent)." : "Rejected.");
     changed();
   }
 
   async function erase() {
-    if (await eraseRecord(ws, rec!, displayName(rec!))) onOpen(list);
+    if (await eraseRecord(rec!, displayName(rec!))) onOpen(list);
   }
 
   async function softDelete() {
@@ -376,7 +384,7 @@ function RecordPage({ ws, id, cat: picked, canManage, onOpen, go }: { ws: string
           )
         }
       />
-      {editing && <RecordDialog ws={ws} type={rec.type} rec={rec} cat={cat} names={names} onClose={() => setEditing(false)} onSaved={() => changed()} />}
+      {editing && <RecordDialog ws={ws} brand={brand} type={rec.type} rec={rec} cat={cat} names={names} onClose={() => setEditing(false)} onSaved={() => changed()} />}
       {twins.length > 0 && !rec.merged_into && (
         <p className="rounded-md border border-amber-500/40 bg-amber-500/5 p-3 text-sm">
           This may be the same {people ? "person" : "company"} as{" "}
@@ -412,9 +420,9 @@ function RecordPage({ ws, id, cat: picked, canManage, onOpen, go }: { ws: string
             {blank.length > 0 && <button className="mt-3 text-xs underline" onClick={() => setEmpty(!empty)}>{empty ? "Hide empty fields" : `Show ${blank.length} empty fields`}</button>}
           </Card>
           {rec.contactability && <Contact c={rec.contactability} />}
-          <Identities key={`i${tick}`} ws={ws} rec={rec} canManage={manage} onChange={changed} />
+          <Identities key={`i${tick}`} rec={rec} canManage={manage} onChange={changed} />
           <Links links={links} fields={fields} onOpen={onOpen} />
-          {people && <Consents key={`c${tick}`} ws={ws} id={id} canManage={manage} onChange={changed} go={go} />}
+          {people && <Consents key={`c${tick}`} brand={brand} id={id} canManage={manage} onChange={changed} go={go} />}
           {people && <div className="rounded-md border p-4 text-sm empty:hidden"><RecordPartners ws={ws} record={id} go={() => go("partners")} /></div>}
           {rec.brand_id && !rec.merged_into && <PrivacyExports key={`p${tick}`} brand={rec.brand_id} record={id} canManage={canManage} />}
           {rec.brand_id && <RecordMerges key={`m${tick}`} brand={rec.brand_id} record={id} canManage={canManage} onOpen={onOpen} onChange={changed} />}
@@ -426,8 +434,8 @@ function RecordPage({ ws, id, cat: picked, canManage, onOpen, go }: { ws: string
               <TabsTrigger value="history" className="px-3 text-[12px]">Field history</TabsTrigger>
             </TabsList>
           </Tabs>
-          {section === "timeline" && <Timeline key={tick} ws={ws} rec={rec} cat={cat} names={names} onOpen={onOpen} canManage={manage} />}
-          {section === "history" && <History key={tick} ws={ws} rec={rec} cat={cat} names={names} onOpen={onOpen} />}
+          {section === "timeline" && <Timeline key={tick} brand={brand} rec={rec} cat={cat} names={names} onOpen={onOpen} canManage={manage} />}
+          {section === "history" && <History key={tick} brand={brand} rec={rec} cat={cat} names={names} onOpen={onOpen} />}
         </div>
       </div>
     </div>
@@ -465,18 +473,19 @@ function Contact({ c }: { c: Schemas["Contactability"] }) {
   );
 }
 
-function Identities({ ws, rec, canManage, onChange }: { ws: string; rec: Rec; canManage: boolean; onChange: () => void }) {
+function Identities({ rec, canManage, onChange }: { rec: Rec; canManage: boolean; onChange: () => void }) {
   const id = rec.id;
+  const brand = rec.brand_id ?? "";
   const [list, setList] = useState<Identity[] | null>(null);
   const [past, setPast] = useState(false);
   useEffect(() => {
-    api.GET("/v1/workspaces/{ws}/records/{record}/identities", { params: { path: { ws, record: id }, query: { closed: true } } }).then(({ data }) => setList(data?.data ?? []));
-  }, [ws, id]);
+    api.GET("/v1/brands/{brand}/records/{record}/identities", { params: { path: { brand, record: id }, query: { closed: true } } }).then(({ data }) => setList(data?.data ?? []));
+  }, [brand, id]);
   if (!list) return null;
   const active = list.filter((i) => !i.valid_to);
   async function remove(i: Identity) {
     if (!(await confirmAction(`Remove ${i.value}?`, "It stops pointing at this record and stays in its history as removed. Nothing else changes.", "Remove"))) return;
-    const { error } = await api.POST("/v1/workspaces/{ws}/records/{record}/identities/{identity}/close", { params: { path: { ws, record: id, identity: i.id } } });
+    const { error } = await api.POST("/v1/brands/{brand}/records/{record}/identities/{identity}/close", { params: { path: { brand, record: id, identity: i.id } } });
     if (error) return toast(errorMessage(error), "error");
     onChange();
   }
@@ -508,7 +517,7 @@ function Identities({ ws, rec, canManage, onChange }: { ws: string; rec: Rec; ca
           {past && <ul className="mt-2 space-y-2">{closed.map(row)}</ul>}
         </div>
       )}
-      {canManage && <AddIdentity ws={ws} rec={rec} onAdded={onChange} />}
+      {canManage && <AddIdentity rec={rec} onAdded={onChange} />}
     </Card>
   );
 }
@@ -530,12 +539,12 @@ function Links({ links, fields, onOpen }: { links: Link[]; fields: Field[]; onOp
   );
 }
 
-function Consents({ ws, id, canManage, onChange, go }: { ws: string; id: string; canManage: boolean; onChange: () => void; go: (t: Tab) => void }) {
+function Consents({ brand, id, canManage, onChange, go }: { brand: string; id: string; canManage: boolean; onChange: () => void; go: (t: Tab) => void }) {
   const [list, setList] = useState<Consent[] | null>(null);
   const [history, setHistory] = useState(false);
   useEffect(() => {
-    api.GET("/v1/workspaces/{ws}/records/{record}/consents", { params: { path: { ws, record: id }, query: history ? { history: "true" } : {} } }).then(({ data }) => setList(data?.data ?? []));
-  }, [ws, id, history]);
+    api.GET("/v1/brands/{brand}/records/{record}/consents", { params: { path: { brand, record: id }, query: history ? { history: "true" } : {} } }).then(({ data }) => setList(data?.data ?? []));
+  }, [brand, id, history]);
   if (!list) return null;
   return (
     <Card
@@ -555,7 +564,7 @@ function Consents({ ws, id, canManage, onChange, go }: { ws: string; id: string;
           </li>
         ))}
       </ul>
-      {canManage && <RecordConsent ws={ws} id={id} onAdded={onChange} />}
+      {canManage && <RecordConsent brand={brand} id={id} onAdded={onChange} />}
     </Card>
   );
 }
@@ -666,7 +675,7 @@ const kinds: Record<TimelineItem["kind"], string> = {
   journey: "Journey",
 };
 
-function Timeline({ ws, rec, cat, names, onOpen, canManage }: { ws: string; rec: Rec; cat: CatalogInfo; names: Record<string, string>; onOpen: (item: string) => void; canManage: boolean }) {
+function Timeline({ brand, rec, cat, names, onOpen, canManage }: { brand: string; rec: Rec; cat: CatalogInfo; names: Record<string, string>; onOpen: (item: string) => void; canManage: boolean }) {
   const [items, setItems] = useState<TimelineItem[] | null>(null);
   const [next, setNext] = useState<string | null>(null);
   const [kind, setKind] = useState("");
@@ -676,15 +685,15 @@ function Timeline({ ws, rec, cat, names, onOpen, canManage }: { ws: string; rec:
 
   const load = useCallback(
     async (before?: string) => {
-      const { data, error } = await api.GET("/v1/workspaces/{ws}/records/{record}/timeline", {
-        params: { path: { ws, record: rec.id }, query: { limit: 50, ...(kind ? { kinds: kind } : {}), ...(company && !people ? { people: "false" as const } : {}), ...(before ? { before } : {}) } },
+      const { data, error } = await api.GET("/v1/brands/{brand}/records/{record}/timeline", {
+        params: { path: { brand, record: rec.id }, query: { limit: 50, ...(kind ? { kinds: kind } : {}), ...(company && !people ? { people: "false" as const } : {}), ...(before ? { before } : {}) } },
       });
       if (!data) return setError(errorMessage(error));
       setError("");
       setItems((prev) => (before ? [...(prev ?? []), ...data.data] : data.data));
       setNext(data.next_before ?? null);
     },
-    [ws, rec.id, kind, people, company],
+    [brand, rec.id, kind, people, company],
   );
   useEffect(() => {
     load();
@@ -792,7 +801,7 @@ function itemDetail(it: TimelineItem, type: string, cat: CatalogInfo, names: Rec
   return "";
 }
 
-function History({ ws, rec, cat, names, onOpen }: { ws: string; rec: Rec; cat: CatalogInfo; names: Record<string, string>; onOpen: (item: string) => void }) {
+function History({ brand, rec, cat, names, onOpen }: { brand: string; rec: Rec; cat: CatalogInfo; names: Record<string, string>; onOpen: (item: string) => void }) {
   const [list, setList] = useState<Change[] | null>(null);
   const [next, setNext] = useState<number | null>(null);
   const [error, setError] = useState("");
@@ -800,12 +809,12 @@ function History({ ws, rec, cat, names, onOpen }: { ws: string; rec: Rec; cat: C
 
   const load = useCallback(
     async (before?: number) => {
-      const { data, error } = await api.GET("/v1/workspaces/{ws}/records/{record}/history", { params: { path: { ws, record: rec.id }, query: { limit: 50, ...(before ? { before } : {}) } } });
+      const { data, error } = await api.GET("/v1/brands/{brand}/records/{record}/history", { params: { path: { brand, record: rec.id }, query: { limit: 50, ...(before ? { before } : {}) } } });
       if (!data) return setError(errorMessage(error));
       setList((prev) => (before ? [...(prev ?? []), ...data.data] : data.data));
       setNext(data.next_before ?? null);
     },
-    [ws, rec.id],
+    [brand, rec.id],
   );
   useEffect(() => {
     load();

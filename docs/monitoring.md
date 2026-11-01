@@ -290,6 +290,7 @@ The database numbers are read when Prometheus scrapes, at most once every 10 sec
 - help centre views not being counted (info)
 - help centre pages taking over a second to build at the 95th percentile (info)
 - a privacy export failing for Outflare's own reasons (`OutflarePrivacyExportsFailing`)
+- brand queries running without their record type tables (`OutflareQueryTypeTablesFailing`)
 - deleted customer data staying over 6 hours past its 7 days in Recently deleted (`OutflareRecoveryPurgeBehind`: the purge is failing)
 - a batch undo failing in the background (`OutflareBatchUndoFailing`)
 - adjust them in your copy

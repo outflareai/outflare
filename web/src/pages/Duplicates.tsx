@@ -3,6 +3,8 @@ import type { Schemas } from "@outflare/sdk";
 import { api, errorMessage } from "../api";
 import { ask, Badge, Button, Empty, ErrorText, field, Loading, PageHeader, toast } from "../ui";
 import { ago, plural } from "../format";
+import { useBrand } from "@/lib/brand";
+import { PickBrand } from "@/components/pick-brand";
 import { displayName, fieldLabelValue, nameItem, namespaces, originPhrases, origins, type CatalogInfo, type Rec } from "@/lib/records";
 
 // Duplicates: pairs of records that may be the same human because they
@@ -25,18 +27,21 @@ export function Duplicates({ ws, cat, canManage, tabs, onOpen }: { ws: string; c
   const [error, setError] = useState("");
   const [decided, setDecided] = useState(false);
   const [type, setType] = useState("");
+  const { brand: picked, active } = useBrand(ws);
+  const brand = picked?.id ?? "";
 
   const load = useCallback(
     async (before?: string) => {
-      const { data, error } = await api.GET("/v1/workspaces/{ws}/records/duplicates", {
-        params: { path: { ws }, query: { limit: 50, ...(decided ? { status: "merged,linked,dismissed" } : {}), ...(type ? { type } : {}), ...(before ? { before } : {}) } },
+      if (!brand) return;
+      const { data, error } = await api.GET("/v1/brands/{brand}/records/duplicates", {
+        params: { path: { brand }, query: { limit: 50, ...(decided ? { status: "merged,linked,dismissed" } : {}), ...(type ? { type } : {}), ...(before ? { before } : {}) } },
       });
       if (!data) return setError(errorMessage(error));
       setError("");
       setPairs((prev) => (before ? [...(prev ?? []), ...data.data] : data.data));
       setNext(data.next_before ?? null);
     },
-    [ws, decided, type],
+    [brand, decided, type],
   );
   useEffect(() => {
     load();
@@ -50,6 +55,8 @@ export function Duplicates({ ws, cat, canManage, tabs, onOpen }: { ws: string; c
         description="People and companies that may be the same, because they share an email, phone or domain. Merge them into one record, link them when they are one person with two accounts in your product, or say they're not the same."
       />
       {tabs}
+      {!brand && <PickBrand what="Duplicates" brands={active.length} />}
+      {brand && <>
       <div className="flex flex-wrap items-center gap-2">
         <select aria-label="Show" className={field} value={decided ? "decided" : "review"} onChange={(e) => setDecided(e.target.value === "decided")}>
           <option value="review">To review</option>
@@ -70,15 +77,16 @@ export function Duplicates({ ws, cat, canManage, tabs, onOpen }: { ws: string; c
       )}
       {pairs && pairs.length > 0 && (
         <ul className="space-y-4">
-          {pairs.map((p) => <PairCard key={p.id} ws={ws} pair={p} cat={cat} canManage={canManage} onDone={() => load()} onOpen={onOpen} />)}
+          {pairs.map((p) => <PairCard key={p.id} brand={brand} pair={p} cat={cat} canManage={canManage} onDone={() => load()} onOpen={onOpen} />)}
         </ul>
       )}
       {next && <Button variant="ghost" onClick={() => load(next)}>Show more</Button>}
+      </>}
     </div>
   );
 }
 
-function PairCard({ ws, pair, cat, canManage, onDone, onOpen }: { ws: string; pair: Pair; cat: CatalogInfo; canManage: boolean; onDone: () => void; onOpen: (item: string) => void }) {
+function PairCard({ brand, pair, cat, canManage, onDone, onOpen }: { brand: string; pair: Pair; cat: CatalogInfo; canManage: boolean; onDone: () => void; onOpen: (item: string) => void }) {
   const [busy, setBusy] = useState(false);
   const [a, b] = pair.records;
   if (!a || !b) return null;
@@ -109,8 +117,8 @@ function PairCard({ ws, pair, cat, canManage, onDone, onOpen }: { ws: string; pa
     });
     if (r?.choice !== "merge") return;
     setBusy(true);
-    const { data, error } = await api.POST("/v1/workspaces/{ws}/records/{record}/merge", {
-      params: { path: { ws, record: keep.id } },
+    const { data, error } = await api.POST("/v1/brands/{brand}/records/{record}/merge", {
+      params: { path: { brand, record: keep.id } },
       body: { from: from.id, version: keep.version },
     });
     setBusy(false);
@@ -124,8 +132,8 @@ function PairCard({ ws, pair, cat, canManage, onDone, onOpen }: { ws: string; pa
 
   async function decide(how: "link" | "dismiss") {
     setBusy(true);
-    const path = { params: { path: { ws, candidate: pair.id } } };
-    const { error } = how === "link" ? await api.POST("/v1/workspaces/{ws}/records/duplicates/{candidate}/link", path) : await api.POST("/v1/workspaces/{ws}/records/duplicates/{candidate}/dismiss", path);
+    const path = { params: { path: { brand, candidate: pair.id } } };
+    const { error } = how === "link" ? await api.POST("/v1/brands/{brand}/records/duplicates/{candidate}/link", path) : await api.POST("/v1/brands/{brand}/records/duplicates/{candidate}/dismiss", path);
     setBusy(false);
     if (error) return toast(errorMessage(error), "error");
     toast(how === "link" ? "Linked as the same person, kept as two records." : "Marked as not the same. You won't be asked again.");

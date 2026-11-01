@@ -1996,6 +1996,71 @@ paths:
         "400": { $ref: "#/components/responses/Error" }
         "404": { $ref: "#/components/responses/Error" }
         default: { $ref: "#/components/responses/Error" }
+  /v1/workspaces/{ws}/webhooks/{id}/deliveries/{delivery}:
+    parameters:
+      - { $ref: "#/components/parameters/Workspace" }
+      - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      - { name: delivery, in: path, required: true, schema: { type: integer } }
+    get:
+      operationId: getWebhookDelivery
+      x-outflare-access: { scope: webhooks.read }
+      summary: One delivery with every try
+      description: |
+        Scope: webhooks.read. The delivery, its payload, and each try oldest first: when, the receiver's status code
+        or what went wrong, how long it took, and whether a person sent it (a redelivery or a test).
+      tags: [webhooks]
+      responses:
+        "200":
+          description: The delivery and its tries.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [delivery, attempts]
+                properties:
+                  delivery: { $ref: "#/components/schemas/WebhookDelivery" }
+                  attempts: { type: array, items: { $ref: "#/components/schemas/WebhookAttempt" } }
+        "404": { $ref: "#/components/responses/Error" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/workspaces/{ws}/webhooks/{id}/activity:
+    parameters:
+      - { $ref: "#/components/parameters/Workspace" }
+      - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+    get:
+      operationId: getWebhookActivity
+      x-outflare-access: { scope: webhooks.read }
+      summary: An endpoint's tries per day and error rate
+      description: "Scope: webhooks.read. Tries per UTC day over the last days (oldest first), how many failed, the error rate and the 95th percentile answer time."
+      tags: [webhooks]
+      parameters:
+        - { name: days, in: query, schema: { type: integer, minimum: 1, maximum: 30, default: 7 } }
+      responses:
+        "200":
+          description: Activity.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [days, attempts, failed, error_rate, p95_ms]
+                properties:
+                  days:
+                    type: array
+                    items:
+                      type: object
+                      required: [day, attempts, failed, delivered, avg_ms]
+                      properties:
+                        day: { type: string, format: date }
+                        attempts: { type: integer }
+                        failed: { type: integer }
+                        delivered: { type: integer }
+                        avg_ms: { type: integer, description: "The average answer time that day." }
+                  attempts: { type: integer }
+                  failed: { type: integer }
+                  error_rate: { type: number, description: "failed / attempts, from 0 to 1; 0 with no tries." }
+                  p95_ms: { type: integer }
+        "400": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        default: { $ref: "#/components/responses/Error" }
   /v1/workspaces/{ws}/webhooks/{id}/deliveries/{delivery}/redeliver:
     parameters:
       - { $ref: "#/components/parameters/Workspace" }
@@ -3338,15 +3403,17 @@ paths:
     parameters: [{ $ref: "#/components/parameters/Workspace" }]
     get:
       operationId: listSmartLists
+      deprecated: true
       x-outflare-access: { scope: customers.read, brand_limited: true }
       summary: List smart lists
       description: |
         Scope: customers.read. Groups of people on customer records that keep themselves up to date from rules, by name.
         Lead lists (GET .../lead-lists) hold the leads someone picked or a search found; a smart list holds whoever
         matches its rules now.
+        Deprecated: use GET /v1/brands/{brand}/smart-lists. This workspace route stays until the brands contract step; without ?brand= it lists the workspace's first brand (a member or token kept to some brands gets its own), and ?brand=all lists every brand you can see, as before.
       tags: [lists]
       parameters:
-        - { $ref: "#/components/parameters/Brand" }
+        - { $ref: "#/components/parameters/DataBrand" }
       responses:
         "200":
           description: Smart lists.
@@ -3361,6 +3428,7 @@ paths:
         default: { $ref: "#/components/responses/Error" }
     post:
       operationId: createSmartList
+      deprecated: true
       x-outflare-access: { scope: customers.manage, brand_limited: true }
       parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
       summary: Create a smart list
@@ -3368,6 +3436,7 @@ paths:
         Scope: customers.manage. The list fills itself straight away, then stays up to date: Outflare adds people who
         start matching and removes people who stop, within about 15 minutes. Check the count first with
         POST .../smart-lists/preview. A brand's list holds that brand's people and those shared by every brand.
+        Deprecated: use POST /v1/brands/{brand}/smart-lists. This workspace route stays until the brands contract step; it acts on the record's, list's or the workspace's first brand.
       tags: [lists]
       requestBody:
         required: true
@@ -3389,11 +3458,13 @@ paths:
     parameters: [{ $ref: "#/components/parameters/Workspace" }]
     post:
       operationId: previewSmartList
+      deprecated: true
       x-outflare-access: { scope: customers.read, brand_limited: true }
       summary: Count who rules pick, without saving
       description: |
         Scope: customers.read. How many people the rules pick right now and the 10 newest of them, so you can check a
         list before saving it. Nothing is stored.
+        Deprecated: use POST /v1/brands/{brand}/smart-lists/preview. This workspace route stays until the brands contract step; without brand_id it counts the workspace's people as before.
       tags: [lists]
       requestBody:
         required: true
@@ -3424,9 +3495,12 @@ paths:
       - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
     get:
       operationId: getSmartList
+      deprecated: true
       x-outflare-access: { scope: customers.read, brand_limited: true }
       summary: Get a smart list
-      description: "Scope: customers.read."
+      description: |
+        Scope: customers.read.
+        Deprecated: use GET /v1/brands/{brand}/smart-lists/{id}. This workspace route stays until the brands contract step; it reads the item in its own brand.
       tags: [lists]
       responses:
         "200":
@@ -3438,12 +3512,14 @@ paths:
         default: { $ref: "#/components/responses/Error" }
     patch:
       operationId: updateSmartList
+      deprecated: true
       x-outflare-access: { scope: customers.manage, brand_limited: true }
       parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
       summary: Change a smart list
       description: |
         Scope: customers.manage. Send only what changes. Changing the rules, match or brand refreshes the members
         straight away.
+        Deprecated: use PATCH /v1/brands/{brand}/smart-lists/{id}. This workspace route stays until the brands contract step; it acts on the record's, list's or the workspace's first brand.
       tags: [lists]
       requestBody:
         required: true
@@ -3464,10 +3540,13 @@ paths:
         default: { $ref: "#/components/responses/Error" }
     delete:
       operationId: deleteSmartList
+      deprecated: true
       x-outflare-access: { scope: customers.manage, brand_limited: true }
       parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
       summary: Delete a smart list. Its people stay.
-      description: "Scope: customers.manage."
+      description: |
+        Scope: customers.manage.
+        Deprecated: use DELETE /v1/brands/{brand}/smart-lists/{id}. This workspace route stays until the brands contract step; it acts on the record's, list's or the workspace's first brand.
       tags: [lists]
       responses:
         "204": { description: Deleted. }
@@ -3481,9 +3560,12 @@ paths:
       - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
     get:
       operationId: listSmartListMembers
+      deprecated: true
       x-outflare-access: { scope: customers.read, brand_limited: true }
       summary: Who is in a smart list now, newest to join first
-      description: "Scope: customers.read. As of the list's refreshed_at. Page with cursor=next_cursor."
+      description: |
+        Scope: customers.read. As of the list's refreshed_at. Page with cursor=next_cursor.
+        Deprecated: use GET /v1/brands/{brand}/smart-lists/{id}/members. This workspace route stays until the brands contract step; it reads the item in its own brand.
       tags: [lists]
       parameters:
         - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 200, default: 50 } }
@@ -3507,6 +3589,7 @@ paths:
         default: { $ref: "#/components/responses/Error" }
     post:
       operationId: addStaticListMembers
+      deprecated: true
       x-outflare-access: { scope: customers.manage, brand_limited: true }
       parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
       summary: Put people in a static list
@@ -3514,6 +3597,7 @@ paths:
         Scope: customers.manage. Only a static list takes people; a smart list fills itself (409). People only: not
         companies, merged or archived records, or, for a brand's list, another brand's people. Rules acting on people
         joining the list hear of it.
+        Deprecated: use POST /v1/brands/{brand}/smart-lists/{id}/members. This workspace route stays until the brands contract step; it acts on the record's, list's or the workspace's first brand.
       tags: [lists]
       requestBody:
         required: true
@@ -3538,10 +3622,13 @@ paths:
       - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
     post:
       operationId: removeStaticListMembers
+      deprecated: true
       x-outflare-access: { scope: customers.manage, brand_limited: true }
       parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
       summary: Take people out of a static list
-      description: "Scope: customers.manage. Rules acting on people leaving the list hear of it."
+      description: |
+        Scope: customers.manage. Rules acting on people leaving the list hear of it.
+        Deprecated: use POST /v1/brands/{brand}/smart-lists/{id}/members/remove. This workspace route stays until the brands contract step; it acts on the record's, list's or the workspace's first brand.
       tags: [lists]
       requestBody:
         required: true
@@ -3566,10 +3653,13 @@ paths:
       - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
     post:
       operationId: refreshSmartList
+      deprecated: true
       x-outflare-access: { scope: customers.manage, brand_limited: true }
       parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
       summary: Bring a smart list's members up to date now
-      description: "Scope: customers.manage. Lists refresh on their own every 15 minutes; this does it now. Watch refreshed_at."
+      description: |
+        Scope: customers.manage. Lists refresh on their own every 15 minutes; this does it now. Watch refreshed_at.
+        Deprecated: use POST /v1/brands/{brand}/smart-lists/{id}/refresh. This workspace route stays until the brands contract step; it acts on the record's, list's or the workspace's first brand.
       tags: [lists]
       responses:
         "202":
@@ -17972,9 +18062,14 @@ paths:
       - { $ref: "#/components/parameters/Workspace" }
     get:
       operationId: listCRMImports
+      deprecated: true
       x-outflare-access: { scope: customers.read }
       summary: List CRM imports
-      description: "Scope: customers.read. The 50 newest."
+      description: |
+        Scope: customers.read. The 50 newest.
+        Deprecated: use GET /v1/brands/{brand}/crm-imports. This workspace route stays until the brands contract step; without ?brand= it lists the workspace's first brand (a member or token kept to some brands gets its own), and ?brand=all lists every brand you can see, as before.
+      parameters:
+        - { $ref: "#/components/parameters/DataBrand" }
       tags: [imports]
       responses:
         "200":
@@ -17993,9 +18088,12 @@ paths:
       - { name: import, in: path, required: true, schema: { type: string, format: uuid } }
     get:
       operationId: getCRMImport
+      deprecated: true
       x-outflare-access: { scope: customers.read }
       summary: Get a CRM import
-      description: "Scope: customers.read. Its status, and once it runs, what it did: records seen, created, matched to records already here, updated and unchanged for each object; the record types, fields and option lists it added; members matched by email; placeholders for records another record points at that the CRM did not return; and values it left out, with why."
+      description: |
+        Scope: customers.read. Its status, and once it runs, what it did: records seen, created, matched to records already here, updated and unchanged for each object; the record types, fields and option lists it added; members matched by email; placeholders for records another record points at that the CRM did not return; and values it left out, with why.
+        Deprecated: use GET /v1/brands/{brand}/crm-imports/{import}. This workspace route stays until the brands contract step; it reads the item in its own brand.
       tags: [imports]
       responses:
         "200":
@@ -20001,12 +20099,14 @@ paths:
     parameters: [{ $ref: "#/components/parameters/Workspace" }]
     get:
       operationId: listRecords
+      deprecated: true
       x-outflare-access: { scope: customers.read, brand_limited: true }
       summary: List customer records
       description: |
         Scope: customers.read. People, companies and the workspace's own record types, newest first. Merged records
         are left out. q matches the name or any active identity, such as part of an email. attribute narrows by
         the catalog's fields.
+        Deprecated: use GET /v1/brands/{brand}/records. This workspace route stays until the brands contract step; without ?brand= it lists the workspace's first brand (a member or token kept to some brands gets its own), and ?brand=all lists every brand you can see, as before.
       tags: [records]
       parameters:
         - { name: type, in: query, description: "A record type's key: person, account or the workspace's own.", schema: { type: string } }
@@ -20025,7 +20125,7 @@ paths:
         - { name: archived, in: query, description: Default false., schema: { type: string, enum: ["false", "true", all] } }
         - { name: review, in: query, description: "Default approved: records held for review are left out. needs_review lists only those.", schema: { type: string, enum: [approved, needs_review, all] } }
         - { name: acquired_via, in: query, description: "Only records from these tools, comma-separated, such as rb2b,vector.", schema: { type: string } }
-        - { $ref: "#/components/parameters/Brand" }
+        - { $ref: "#/components/parameters/DataBrand" }
         - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 200, default: 50 } }
         - { name: before, in: query, schema: { type: string, format: uuid } }
         - { $ref: "#/components/parameters/Cursor" }
@@ -20045,6 +20145,7 @@ paths:
         default: { $ref: "#/components/responses/Error" }
     post:
       operationId: createRecord
+      deprecated: true
       x-outflare-access: { scope: customers.manage, brand_limited: true }
       parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
       summary: Add a customer record
@@ -20055,6 +20156,7 @@ paths:
         identity another record of the same brand already holds is refused with identity_taken; look it up with GET
         .../records/lookup. The record's catalog and its identities are its brand's: the same email in another brand
         is another person there. A person with no name takes first_name and last_name.
+        Deprecated: use POST /v1/brands/{brand}/records. This workspace route stays until the brands contract step; it acts on the record's, list's or the workspace's first brand.
       tags: [records]
       requestBody:
         required: true
@@ -20076,6 +20178,7 @@ paths:
     parameters: [{ $ref: "#/components/parameters/Workspace" }]
     get:
       operationId: listRecordDuplicates
+      deprecated: true
       x-outflare-access: { scope: customers.read, brand_limited: true }
       summary: List possible duplicates
       description: |
@@ -20083,12 +20186,13 @@ paths:
         newest first, with both records. open pairs can be merged (POST .../records/{record}/merge), linked or
         dismissed; blocked pairs both have their own user id, so they are two accounts in your product and can only be
         linked or dismissed. Default status open and blocked.
+        Deprecated: use GET /v1/brands/{brand}/records/duplicates. This workspace route stays until the brands contract step; without ?brand= it lists the workspace's first brand (a member or token kept to some brands gets its own), and ?brand=all lists every brand you can see, as before.
       tags: [records]
       parameters:
         - { name: status, in: query, description: "Comma-separated: open, blocked, merged, linked, dismissed; or all.", schema: { type: string } }
         - { name: type, in: query, description: "A record type's key, such as person.", schema: { type: string } }
         - { name: record, in: query, description: Only pairs with this record., schema: { type: string, format: uuid } }
-        - { $ref: "#/components/parameters/Brand" }
+        - { $ref: "#/components/parameters/DataBrand" }
         - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 200, default: 50 } }
         - { name: before, in: query, schema: { type: string } }
         - { $ref: "#/components/parameters/Cursor" }
@@ -20112,10 +20216,13 @@ paths:
       - { name: candidate, in: path, required: true, schema: { type: string, format: uuid } }
     post:
       operationId: dismissRecordDuplicate
+      deprecated: true
       x-outflare-access: { scope: customers.manage, brand_limited: true }
       parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
       summary: Not the same human
-      description: "Scope: customers.manage. The pair is not asked about again."
+      description: |
+        Scope: customers.manage. The pair is not asked about again.
+        Deprecated: use POST /v1/brands/{brand}/records/duplicates/{candidate}/dismiss. This workspace route stays until the brands contract step; it acts on the record's, list's or the workspace's first brand.
       tags: [records]
       responses:
         "200":
@@ -20131,12 +20238,14 @@ paths:
       - { name: candidate, in: path, required: true, schema: { type: string, format: uuid } }
     post:
       operationId: linkRecordDuplicate
+      deprecated: true
       x-outflare-access: { scope: customers.manage, brand_limited: true }
       parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
       summary: The same human, kept apart
       description: |
         Scope: customers.manage. Links the two records as the same human (a same_human link) without merging them, such
         as one person with two accounts in your product.
+        Deprecated: use POST /v1/brands/{brand}/records/duplicates/{candidate}/link. This workspace route stays until the brands contract step; it acts on the record's, list's or the workspace's first brand.
       tags: [records]
       responses:
         "200":
@@ -20180,9 +20289,12 @@ paths:
       - { $ref: "#/components/parameters/RecordID" }
     get:
       operationId: getRecord
+      deprecated: true
       x-outflare-access: { scope: customers.read, brand_limited: true }
       summary: Read a customer record
-      description: "Scope: customers.read. With its active identities."
+      description: |
+        Scope: customers.read. With its active identities.
+        Deprecated: use GET /v1/brands/{brand}/records/{record}. This workspace route stays until the brands contract step; it reads the item in its own brand.
       tags: [records]
       responses:
         "200":
@@ -20193,6 +20305,7 @@ paths:
         default: { $ref: "#/components/responses/Error" }
     patch:
       operationId: updateRecord
+      deprecated: true
       x-outflare-access: { scope: customers.manage, brand_limited: true }
       parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
       summary: Change or archive a customer record
@@ -20202,6 +20315,7 @@ paths:
         crm_sync, enrichment) leaves it as it is and lists it in skipped. Send version to refuse the change with
         record_changed if someone else changed the record since you read it. Agents (the MCP server, a connected
         AI app or a mission) must send it: without it the change is refused with version_required.
+        Deprecated: use PATCH /v1/brands/{brand}/records/{record}. This workspace route stays until the brands contract step; it acts on the record's, list's or the workspace's first brand.
       tags: [records]
       requestBody:
         required: true
@@ -20218,6 +20332,7 @@ paths:
         default: { $ref: "#/components/responses/Error" }
     delete:
       operationId: deleteRecord
+      deprecated: true
       x-outflare-access: { scope: customers.manage, brand_limited: true }
       parameters:
         - { $ref: "#/components/parameters/IdempotencyKey" }
@@ -20237,6 +20352,7 @@ paths:
         without payout details or notes, so commission totals still add up, and keep their codes so their links still lead
         to the site; their payouts' notes and references are cleared unless partner settings' erase_payout_notes is off; a company's people stay, unlinked from it. erased counts the rows removed, by
         table. A deal is deleted with DELETE .../deals/{deal}.
+        Deprecated: use DELETE /v1/brands/{brand}/records/{record}. This workspace route stays until the brands contract step; it acts on the record's, list's or the workspace's first brand.
       tags: [records]
       responses:
         "200":
@@ -20259,9 +20375,12 @@ paths:
       - { $ref: "#/components/parameters/RecordID" }
     get:
       operationId: getRecordHistory
+      deprecated: true
       x-outflare-access: { scope: customers.read, brand_limited: true }
       summary: A record's change history
-      description: "Scope: customers.read. Every change to its name and attributes, newest first, with who made it and from which source."
+      description: |
+        Scope: customers.read. Every change to its name and attributes, newest first, with who made it and from which source.
+        Deprecated: use GET /v1/brands/{brand}/records/{record}/history. This workspace route stays until the brands contract step; it reads the item in its own brand.
       tags: [records]
       parameters:
         - { name: field, in: query, description: Only this field's changes (name for the record's name)., schema: { type: string } }
@@ -20288,12 +20407,14 @@ paths:
       - { $ref: "#/components/parameters/RecordID" }
     post:
       operationId: reviewRecord
+      deprecated: true
       x-outflare-access: { scope: customers.manage, brand_limited: true }
       summary: Approve or reject a record held for review
       description: |
         Scope: customers.manage. For a record with needs_review true, such as a person a visitor identification tool named.
         approve lists it like any other and lets the policy check send to it (it stays a third-party prospect: cold email
         only, never marketing without their consent). reject archives it. A record not held is refused with not_held (409).
+        Deprecated: use POST /v1/brands/{brand}/records/{record}/review. This workspace route stays until the brands contract step; it acts on the record's, list's or the workspace's first brand.
       tags: [records]
       requestBody:
         required: true
@@ -20315,9 +20436,12 @@ paths:
       - { $ref: "#/components/parameters/RecordID" }
     get:
       operationId: listRecordIdentities
+      deprecated: true
       x-outflare-access: { scope: customers.read, brand_limited: true }
       summary: A record's identities
-      description: "Scope: customers.read. Active ones, and with closed=true the closed ones too, such as an email the person changed."
+      description: |
+        Scope: customers.read. Active ones, and with closed=true the closed ones too, such as an email the person changed.
+        Deprecated: use GET /v1/brands/{brand}/records/{record}/identities. This workspace route stays until the brands contract step; it reads the item in its own brand.
       tags: [records]
       parameters:
         - { name: closed, in: query, schema: { type: boolean, default: false } }
@@ -20334,6 +20458,7 @@ paths:
         default: { $ref: "#/components/responses/Error" }
     post:
       operationId: addRecordIdentity
+      deprecated: true
       x-outflare-access: { scope: customers.manage, brand_limited: true }
       parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
       summary: Add, verify or change an identity
@@ -20343,6 +20468,7 @@ paths:
         with replaces set to the old identity's id: the old one is closed as changed and kept in the history. A
         verified value another record of the same brand holds is refused with identity_taken, never moved or merged;
         another brand's person with the same value is someone else and never blocks it.
+        Deprecated: use POST /v1/brands/{brand}/records/{record}/identities. This workspace route stays until the brands contract step; it acts on the record's, list's or the workspace's first brand.
       tags: [records]
       requestBody:
         required: true
@@ -20369,10 +20495,13 @@ paths:
       - { name: identity, in: path, required: true, schema: { type: string, format: uuid } }
     post:
       operationId: closeRecordIdentity
+      deprecated: true
       x-outflare-access: { scope: customers.manage, brand_limited: true }
       parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
       summary: Remove an identity
-      description: "Scope: customers.manage. It stops pointing at the record and stays in its history as removed."
+      description: |
+        Scope: customers.manage. It stops pointing at the record and stays in its history as removed.
+        Deprecated: use POST /v1/brands/{brand}/records/{record}/identities/{identity}/close. This workspace route stays until the brands contract step; it acts on the record's, list's or the workspace's first brand.
       tags: [records]
       responses:
         "200":
@@ -20388,9 +20517,12 @@ paths:
       - { $ref: "#/components/parameters/RecordID" }
     get:
       operationId: listRecordRelationships
+      deprecated: true
       x-outflare-access: { scope: customers.read, brand_limited: true }
       summary: A record's links
-      description: "Scope: customers.read. Links both ways, including record reference fields' values (field_key set). ended=true includes ended links."
+      description: |
+        Scope: customers.read. Links both ways, including record reference fields' values (field_key set). ended=true includes ended links.
+        Deprecated: use GET /v1/brands/{brand}/records/{record}/relationships. This workspace route stays until the brands contract step; it reads the item in its own brand.
       tags: [records]
       parameters:
         - { name: ended, in: query, schema: { type: boolean, default: false } }
@@ -20407,10 +20539,13 @@ paths:
         default: { $ref: "#/components/responses/Error" }
     post:
       operationId: addRecordRelationship
+      deprecated: true
       x-outflare-access: { scope: customers.manage, brand_limited: true }
       parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
       summary: Link two records
-      description: "Scope: customers.manage. A typed link from this record, such as partner_of. Record reference fields (companies) are set through attributes instead."
+      description: |
+        Scope: customers.manage. A typed link from this record, such as partner_of. Record reference fields (companies) are set through attributes instead.
+        Deprecated: use POST /v1/brands/{brand}/records/{record}/relationships. This workspace route stays until the brands contract step; it acts on the record's, list's or the workspace's first brand.
       tags: [records]
       requestBody:
         required: true
@@ -20439,10 +20574,13 @@ paths:
       - { name: relationship, in: path, required: true, schema: { type: string, format: uuid } }
     post:
       operationId: endRecordRelationship
+      deprecated: true
       x-outflare-access: { scope: customers.manage, brand_limited: true }
       parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
       summary: End a link
-      description: "Scope: customers.manage. It is kept with its end time."
+      description: |
+        Scope: customers.manage. It is kept with its end time.
+        Deprecated: use POST /v1/brands/{brand}/records/{record}/relationships/{relationship}/end. This workspace route stays until the brands contract step; it acts on the record's, list's or the workspace's first brand.
       tags: [records]
       responses:
         "200":
@@ -20458,6 +20596,7 @@ paths:
       - { $ref: "#/components/parameters/RecordID" }
     post:
       operationId: mergeRecords
+      deprecated: true
       x-outflare-access: { scope: customers.manage, brand_limited: true }
       parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
       summary: Merge a duplicate into this record
@@ -20469,6 +20608,7 @@ paths:
         (two accounts in your product), are refused with merge_refused: link those instead. Send version (this
         record's, as read) to refuse the merge with record_changed if it changed since; agents must send it
         (version_required).
+        Deprecated: use POST /v1/brands/{brand}/records/{record}/merge. This workspace route stays until the brands contract step; it acts on the record's, list's or the workspace's first brand.
       tags: [records]
       requestBody:
         required: true
@@ -20605,12 +20745,16 @@ paths:
       - { $ref: "#/components/parameters/Workspace" }
     get:
       operationId: listQueryTables
+      deprecated: true
       x-outflare-access: { brand_limited: true }
       summary: List the tables a query can read
       description: |
         Any caller in the workspace. The tables Query reads, with their columns and the read scope each needs. available
         says whether you hold it; a table you can't read returns no rows. Tables show only this workspace's rows and,
         for a caller kept to some brands, those brands' rows and the shared ones.
+        Deprecated: use GET /v1/brands/{brand}/query/tables. This workspace route stays until the brands contract step; without ?brand= it queries the workspace's first brand (a member or token kept to some brands gets its own), and ?brand=all queries every brand you can see, as before.
+      parameters:
+        - { $ref: "#/components/parameters/DataBrand" }
       tags: [query]
       responses:
         "200":
@@ -20628,6 +20772,7 @@ paths:
       - { $ref: "#/components/parameters/Workspace" }
     post:
       operationId: runQuery
+      deprecated: true
       x-outflare-access: { brand_limited: true }
       summary: Run a read-only SQL query
       description: |
@@ -20637,6 +20782,9 @@ paths:
         It never changes anything, so an agent kept to missions may run it outside one. Up to limit rows come back
         (default 100, at most 1000), with truncated set when there were more; a query running over 15 seconds is
         stopped with query_timeout. SQL the database refuses fails with query_invalid and its message.
+        Deprecated: use POST /v1/brands/{brand}/query. This workspace route stays until the brands contract step; without ?brand= it queries the workspace's first brand (a member or token kept to some brands gets its own), and ?brand=all queries every brand you can see, as before.
+      parameters:
+        - { $ref: "#/components/parameters/DataBrand" }
       tags: [query]
       requestBody:
         required: true
@@ -20662,6 +20810,7 @@ paths:
       - { $ref: "#/components/parameters/RecordID" }
     get:
       operationId: getRecordTimeline
+      deprecated: true
       x-outflare-access: { scope: customers.read, brand_limited: true }
       summary: A record's timeline
       description: |
@@ -20675,6 +20824,7 @@ paths:
         A company's timeline includes its people's (the people linked to it), each item's `record_id` saying whose
         it is; `people=false` leaves them out. `brand` keeps one brand's items and the ones no brand owns. Kind
         names are stable: new kinds may be added.
+        Deprecated: use GET /v1/brands/{brand}/records/{record}/timeline. This workspace route stays until the brands contract step; it reads the item in its own brand.
       tags: [records]
       parameters:
         - { name: kinds, in: query, description: "Comma-separated: event, attribute_change, identity, consent, message, meeting, deal, visit, opt_out, journey. Default all.", schema: { type: string } }
@@ -20703,12 +20853,14 @@ paths:
       - { $ref: "#/components/parameters/RecordID" }
     get:
       operationId: listRecordConsents
+      deprecated: true
       x-outflare-access: { scope: customers.read, brand_limited: true }
       summary: A person's consents
       description: |
         Scope: customers.read. The current consent for each channel, topic and purpose the person was asked about: the
         latest grant or withdrawal. history=true lists every one, newest first. A topic's own row wins over the whole
         channel's, except a later withdrawal from the whole channel.
+        Deprecated: use GET /v1/brands/{brand}/records/{record}/consents. This workspace route stays until the brands contract step; it reads the item in its own brand.
       tags: [records]
       parameters:
         - { name: history, in: query, schema: { type: string, enum: ["true", "false"] } }
@@ -20725,6 +20877,7 @@ paths:
         default: { $ref: "#/components/responses/Error" }
     post:
       operationId: recordConsent
+      deprecated: true
       x-outflare-access: { scope: customers.manage, brand_limited: true }
       parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
       summary: Record consent
@@ -20732,6 +20885,7 @@ paths:
         Scope: customers.manage. Records that a person granted or withdrew consent, with where and what proves it.
         Nothing is overwritten: the latest one counts, and the rest stay as the history. Lifecycle email sends
         marketing only to people whose current email consent is granted.
+        Deprecated: use POST /v1/brands/{brand}/records/{record}/consents. This workspace route stays until the brands contract step; it acts on the record's, list's or the workspace's first brand.
       tags: [records]
       requestBody:
         required: true
@@ -22582,9 +22736,12 @@ paths:
     parameters: [{ $ref: "#/components/parameters/Workspace" }]
     get:
       operationId: listCustomerEvents
+      deprecated: true
       x-outflare-access: { scope: customers.read, brand_limited: true }
       summary: List product events
-      description: "Scope: customers.read. Product events, newest first. matched=false lists anonymous visitors' events not yet linked to a person."
+      description: |
+        Scope: customers.read. Product events, newest first. matched=false lists anonymous visitors' events not yet linked to a person.
+        Deprecated: use GET /v1/brands/{brand}/customer-events. This workspace route stays until the brands contract step; without ?brand= it lists the workspace's first brand (a member or token kept to some brands gets its own), and ?brand=all lists every brand you can see, as before.
       tags: [records]
       parameters:
         - { name: name, in: query, description: "A catalog name, such as order_completed or page.viewed.", schema: { type: string } }
@@ -22593,7 +22750,7 @@ paths:
         - { name: anonymous_id, in: query, schema: { type: string } }
         - { name: matched, in: query, schema: { type: string, enum: ["true", "false", all] } }
         - { name: since, in: query, schema: { type: string, format: date-time } }
-        - { $ref: "#/components/parameters/Brand" }
+        - { $ref: "#/components/parameters/DataBrand" }
         - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 200, default: 50 } }
         - { name: before, in: query, schema: { type: string } }
         - { $ref: "#/components/parameters/Cursor" }
@@ -23766,6 +23923,978 @@ paths:
         "400": { $ref: "#/components/responses/Error" }
         "404": { $ref: "#/components/responses/Error" }
         "409": { $ref: "#/components/responses/Error" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/brands/{brand}/crm-imports:
+    parameters:
+      - { $ref: "#/components/parameters/BrandID" }
+    get:
+      operationId: listBrandCRMImports
+      x-outflare-access: { scope: customers.read, brand: true }
+      summary: List a brand's CRM imports
+      description: "Scope: customers.read. The 50 newest imports into this brand."
+      tags: [imports]
+      responses:
+        "200":
+          description: CRM imports, newest first.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data: { type: array, items: { $ref: "#/components/schemas/CRMImport" } }
+        default: { $ref: "#/components/responses/Error" }
+    post:
+      operationId: startBrandCRMImport
+      x-outflare-access: { scope: catalog.manage, brand: true }
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      summary: Import another CRM into a brand's customer records, once
+      description: |
+        Scope: catalog.manage and customers.manage. As POST /v1/workspaces/{ws}/integrations/{id}/crm-imports, into
+        this brand: its records, identities and catalog changes are the brand's. integration_id is the CRM
+        connection, which must serve the brand (its own, or a workspace connection shared with it); any other is
+        404. Read it with GET /v1/brands/{brand}/crm-imports/{import}.
+      tags: [imports]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [integration_id]
+              properties:
+                integration_id: { type: string, format: uuid, description: "The CRM connection to import from." }
+                objects: { type: array, maxItems: 100, items: { type: string }, description: "Only these objects, by slug from the preview, such as people or deals. Default every object." }
+      responses:
+        "202":
+          description: "Queued. Inside a mission, a MissionHeld answer when the call was held for approval or dry-run instead."
+          content:
+            application/json:
+              schema: { oneOf: [{ $ref: "#/components/schemas/CRMImport" }, { $ref: "#/components/schemas/MissionHeld" }] }
+        "400": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/brands/{brand}/smart-lists:
+    parameters: [{ $ref: "#/components/parameters/BrandID" }]
+    get:
+      operationId: listBrandSmartLists
+      x-outflare-access: { scope: customers.read, brand: true }
+      summary: List smart lists
+      description: |
+        Scope: customers.read. Groups of people on customer records that keep themselves up to date from rules, by name.
+        Lead lists (GET .../lead-lists) hold the leads someone picked or a search found; a smart list holds whoever
+        matches its rules now.
+      tags: [lists]
+      responses:
+        "200":
+          description: Smart lists.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data: { type: array, items: { $ref: "#/components/schemas/SmartList" } }
+        "404": { $ref: "#/components/responses/Error" }
+        default: { $ref: "#/components/responses/Error" }
+    post:
+      operationId: createBrandSmartList
+      x-outflare-access: { scope: customers.manage, brand: true }
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      summary: Create a smart list
+      description: |
+        Scope: customers.manage. The list fills itself straight away, then stays up to date: Outflare adds people who
+        start matching and removes people who stop, within about 15 minutes. Check the count first with
+        POST .../smart-lists/preview. A brand's list holds that brand's people and those shared by every brand.
+      tags: [lists]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/SmartListInput" }
+      responses:
+        "201":
+          description: The list. Its members fill in a few seconds.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SmartList" }
+        "400": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        "202": { $ref: "#/components/responses/MissionHeld" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/brands/{brand}/smart-lists/preview:
+    parameters: [{ $ref: "#/components/parameters/BrandID" }]
+    post:
+      operationId: previewBrandSmartList
+      x-outflare-access: { scope: customers.read, brand: true }
+      summary: Count who rules pick, without saving
+      description: |
+        Scope: customers.read. How many people the rules pick right now and the 10 newest of them, so you can check a
+        list before saving it. Nothing is stored.
+      tags: [lists]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                brand_id: { type: [string, "null"], description: "A brand's id or handle; null or left out for every brand." }
+                rules: { type: array, maxItems: 20, items: { $ref: "#/components/schemas/SmartListRule" } }
+                match: { type: string, enum: [all, any], default: all }
+      responses:
+        "200":
+          description: The count and a sample.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [members, sample]
+                properties:
+                  members: { type: integer, description: How many people match now. }
+                  sample: { type: array, items: { $ref: "#/components/schemas/SmartListPerson" } }
+        "400": { $ref: "#/components/responses/Error" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/brands/{brand}/smart-lists/{id}:
+    parameters:
+      - { $ref: "#/components/parameters/BrandID" }
+      - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+    get:
+      operationId: getBrandSmartList
+      x-outflare-access: { scope: customers.read, brand: true }
+      summary: Get a smart list
+      description: "Scope: customers.read."
+      tags: [lists]
+      responses:
+        "200":
+          description: The list.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SmartList" }
+        "404": { $ref: "#/components/responses/Error" }
+        default: { $ref: "#/components/responses/Error" }
+    patch:
+      operationId: updateBrandSmartList
+      x-outflare-access: { scope: customers.manage, brand: true }
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      summary: Change a smart list
+      description: |
+        Scope: customers.manage. Send only what changes. Changing the rules, match or brand refreshes the members
+        straight away.
+      tags: [lists]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/SmartListInput" }
+      responses:
+        "200":
+          description: The list.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SmartList" }
+        "400": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        "202": { $ref: "#/components/responses/MissionHeld" }
+        default: { $ref: "#/components/responses/Error" }
+    delete:
+      operationId: deleteBrandSmartList
+      x-outflare-access: { scope: customers.manage, brand: true }
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      summary: Delete a smart list. Its people stay.
+      description: "Scope: customers.manage."
+      tags: [lists]
+      responses:
+        "204": { description: Deleted. }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "202": { $ref: "#/components/responses/MissionHeld" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/brands/{brand}/smart-lists/{id}/members:
+    parameters:
+      - { $ref: "#/components/parameters/BrandID" }
+      - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+    get:
+      operationId: listBrandSmartListMembers
+      x-outflare-access: { scope: customers.read, brand: true }
+      summary: Who is in a smart list now, newest to join first
+      description: "Scope: customers.read. As of the list's refreshed_at. Page with cursor=next_cursor."
+      tags: [lists]
+      parameters:
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 200, default: 50 } }
+        - { name: before, in: query, schema: { type: string }, description: From next_before. }
+        - { $ref: "#/components/parameters/Cursor" }
+        - { $ref: "#/components/parameters/Fields" }
+      responses:
+        "200":
+          description: Members.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data: { type: array, items: { $ref: "#/components/schemas/SmartListPerson" } }
+                  next_before: { type: [string, "null"] }
+                  next_cursor: { $ref: "#/components/schemas/NextCursor" }
+        "400": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        default: { $ref: "#/components/responses/Error" }
+    post:
+      operationId: addBrandStaticListMembers
+      x-outflare-access: { scope: customers.manage, brand: true }
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      summary: Put people in a static list
+      description: |
+        Scope: customers.manage. Only a static list takes people; a smart list fills itself (409). People only: not
+        companies, merged or archived records, or, for a brand's list, another brand's people. Rules acting on people
+        joining the list hear of it.
+      tags: [lists]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/StaticListMembersInput" }
+      responses:
+        "200":
+          description: How many joined, and the count now.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/StaticListChange" }
+        "400": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        "202": { $ref: "#/components/responses/MissionHeld" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/brands/{brand}/smart-lists/{id}/members/remove:
+    parameters:
+      - { $ref: "#/components/parameters/BrandID" }
+      - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+    post:
+      operationId: removeBrandStaticListMembers
+      x-outflare-access: { scope: customers.manage, brand: true }
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      summary: Take people out of a static list
+      description: "Scope: customers.manage. Rules acting on people leaving the list hear of it."
+      tags: [lists]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/StaticListMembersInput" }
+      responses:
+        "200":
+          description: How many left, and the count now.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/StaticListChange" }
+        "400": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        "202": { $ref: "#/components/responses/MissionHeld" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/brands/{brand}/smart-lists/{id}/refresh:
+    parameters:
+      - { $ref: "#/components/parameters/BrandID" }
+      - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+    post:
+      operationId: refreshBrandSmartList
+      x-outflare-access: { scope: customers.manage, brand: true }
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      summary: Bring a smart list's members up to date now
+      description: "Scope: customers.manage. Lists refresh on their own every 15 minutes; this does it now. Watch refreshed_at."
+      tags: [lists]
+      responses:
+        "202":
+          description: Queued.
+          content:
+            application/json:
+              schema: { oneOf: [{ $ref: "#/components/schemas/Queued" }, { $ref: "#/components/schemas/MissionHeld" }] }
+        "404": { $ref: "#/components/responses/Error" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/brands/{brand}/crm-imports/{import}:
+    parameters:
+      - { $ref: "#/components/parameters/BrandID" }
+      - { name: import, in: path, required: true, schema: { type: string, format: uuid } }
+    get:
+      operationId: getBrandCRMImport
+      x-outflare-access: { scope: customers.read, brand: true }
+      summary: Get a CRM import
+      description: "Scope: customers.read. Its status, and once it runs, what it did: records seen, created, matched to records already here, updated and unchanged for each object; the record types, fields and option lists it added; members matched by email; placeholders for records another record points at that the CRM did not return; and values it left out, with why."
+      tags: [imports]
+      responses:
+        "200":
+          description: The import.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CRMImport" }
+        "404": { $ref: "#/components/responses/Error" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/brands/{brand}/records:
+    parameters: [{ $ref: "#/components/parameters/BrandID" }]
+    get:
+      operationId: listBrandRecords
+      x-outflare-access: { scope: customers.read, brand: true }
+      summary: List customer records
+      description: |
+        Scope: customers.read. People, companies and the workspace's own record types, newest first. Merged records
+        are left out. q matches the name or any active identity, such as part of an email. attribute narrows by
+        the catalog's fields.
+      tags: [records]
+      parameters:
+        - { name: type, in: query, description: "A record type's key: person, account or the workspace's own.", schema: { type: string } }
+        - { name: q, in: query, schema: { type: string } }
+        - name: attribute
+          in: query
+          description: |
+            A field's key and a value, such as lifecycle_stage:customer; repeat it for more (at most 20). Values of one
+            field are alternatives, different fields must all match. A list field, such as a person's companies (by
+            record id), matches when it holds the value.
+          style: form
+          explode: true
+          allowReserved: true
+          schema: { type: array, maxItems: 20, items: { type: string, example: "lifecycle_stage:customer" } }
+        - { name: origin, in: query, schema: { $ref: "#/components/schemas/RecordOrigin" } }
+        - { name: archived, in: query, description: Default false., schema: { type: string, enum: ["false", "true", all] } }
+        - { name: review, in: query, description: "Default approved: records held for review are left out. needs_review lists only those.", schema: { type: string, enum: [approved, needs_review, all] } }
+        - { name: acquired_via, in: query, description: "Only records from these tools, comma-separated, such as rb2b,vector.", schema: { type: string } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 200, default: 50 } }
+        - { name: before, in: query, schema: { type: string, format: uuid } }
+        - { $ref: "#/components/parameters/Cursor" }
+        - { $ref: "#/components/parameters/Fields" }
+      responses:
+        "200":
+          description: Records.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, next_before, next_cursor]
+                properties:
+                  data: { type: array, items: { $ref: "#/components/schemas/Record" } }
+                  next_before: { type: [string, "null"] }
+                  next_cursor: { $ref: "#/components/schemas/NextCursor" }
+        default: { $ref: "#/components/responses/Error" }
+    post:
+      operationId: createBrandRecord
+      x-outflare-access: { scope: customers.manage, brand: true }
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      summary: Add a customer record
+      description: |
+        Scope: customers.manage. Attributes are checked against the type's fields in the catalog; an unknown key is
+        refused, so add the field first. Identities say who the record is: email and phone count only when verified
+        (default false), and the workspace's own ids, payment customers and domains are trusted as sent. A verified
+        identity another record of the same brand already holds is refused with identity_taken; look it up with GET
+        .../records/lookup. The record's catalog and its identities are its brand's: the same email in another brand
+        is another person there. A person with no name takes first_name and last_name.
+      tags: [records]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: "#/components/schemas/RecordInput"
+                - required: [type]
+      responses:
+        "201":
+          description: The record.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Record" }
+        "202": { $ref: "#/components/responses/MissionHeld" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/brands/{brand}/records/duplicates:
+    parameters: [{ $ref: "#/components/parameters/BrandID" }]
+    get:
+      operationId: listBrandRecordDuplicates
+      x-outflare-access: { scope: customers.read, brand: true }
+      summary: List possible duplicates
+      description: |
+        Scope: customers.read. Pairs of records that may be the same human, because they share an email or phone,
+        newest first, with both records. open pairs can be merged (POST .../records/{record}/merge), linked or
+        dismissed; blocked pairs both have their own user id, so they are two accounts in your product and can only be
+        linked or dismissed. Default status open and blocked.
+      tags: [records]
+      parameters:
+        - { name: status, in: query, description: "Comma-separated: open, blocked, merged, linked, dismissed; or all.", schema: { type: string } }
+        - { name: type, in: query, description: "A record type's key, such as person.", schema: { type: string } }
+        - { name: record, in: query, description: Only pairs with this record., schema: { type: string, format: uuid } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 200, default: 50 } }
+        - { name: before, in: query, schema: { type: string } }
+        - { $ref: "#/components/parameters/Cursor" }
+        - { $ref: "#/components/parameters/Fields" }
+      responses:
+        "200":
+          description: Pairs.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, next_before, next_cursor]
+                properties:
+                  data: { type: array, items: { $ref: "#/components/schemas/RecordDuplicate" } }
+                  next_before: { type: [string, "null"] }
+                  next_cursor: { $ref: "#/components/schemas/NextCursor" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/brands/{brand}/records/duplicates/{candidate}/dismiss:
+    parameters:
+      - { $ref: "#/components/parameters/BrandID" }
+      - { name: candidate, in: path, required: true, schema: { type: string, format: uuid } }
+    post:
+      operationId: dismissBrandRecordDuplicate
+      x-outflare-access: { scope: customers.manage, brand: true }
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      summary: Not the same human
+      description: "Scope: customers.manage. The pair is not asked about again."
+      tags: [records]
+      responses:
+        "200":
+          description: The pair.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RecordDuplicate" }
+        "202": { $ref: "#/components/responses/MissionHeld" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/brands/{brand}/records/duplicates/{candidate}/link:
+    parameters:
+      - { $ref: "#/components/parameters/BrandID" }
+      - { name: candidate, in: path, required: true, schema: { type: string, format: uuid } }
+    post:
+      operationId: linkBrandRecordDuplicate
+      x-outflare-access: { scope: customers.manage, brand: true }
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      summary: The same human, kept apart
+      description: |
+        Scope: customers.manage. Links the two records as the same human (a same_human link) without merging them, such
+        as one person with two accounts in your product.
+      tags: [records]
+      responses:
+        "200":
+          description: The pair.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RecordDuplicate" }
+        "202": { $ref: "#/components/responses/MissionHeld" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/brands/{brand}/records/{record}:
+    parameters:
+      - { $ref: "#/components/parameters/BrandID" }
+      - { $ref: "#/components/parameters/RecordID" }
+    get:
+      operationId: getBrandRecord
+      x-outflare-access: { scope: customers.read, brand: true }
+      summary: Read a customer record
+      description: "Scope: customers.read. With its active identities."
+      tags: [records]
+      responses:
+        "200":
+          description: The record.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Record" }
+        default: { $ref: "#/components/responses/Error" }
+    patch:
+      operationId: updateBrandRecord
+      x-outflare-access: { scope: customers.manage, brand: true }
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      summary: Change or archive a customer record
+      description: |
+        Scope: customers.manage. attributes merges: a key set to null clears it, keys left out stay. Each value keeps
+        the source that set it, and a write from a lower-precedence source (by default manual, then first_party,
+        crm_sync, enrichment) leaves it as it is and lists it in skipped. Send version to refuse the change with
+        record_changed if someone else changed the record since you read it. Agents (the MCP server, a connected
+        AI app or a mission) must send it: without it the change is refused with version_required.
+      tags: [records]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/RecordInput" }
+      responses:
+        "200":
+          description: The record.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Record" }
+        "202": { $ref: "#/components/responses/MissionHeld" }
+        default: { $ref: "#/components/responses/Error" }
+    delete:
+      operationId: deleteBrandRecord
+      x-outflare-access: { scope: customers.manage, brand: true }
+      parameters:
+        - { $ref: "#/components/parameters/IdempotencyKey" }
+        - { name: suppress, in: query, description: "true adds a person's emails (a company's domains) to the opt-out list first (reason do_not_contact), so a later import or sync can't contact them again.", schema: { type: boolean, default: false } }
+        - { name: version, in: query, description: "The record's version, as read: the delete is refused with record_changed if it changed since. Agents must send it (version_required).", schema: { type: integer } }
+      summary: Erase a customer record
+      description: |
+        Scope: customers.manage. Deletes a person or company for good, such as for an erasure request; to hide one
+        and keep its history, archive it instead (PATCH with archived: true), and to delete one with 7 days to
+        change your mind, use POST /v1/brands/{brand}/records/{record}/delete. Works on a record in Recently deleted
+        too, and its deletions go with it. Goes with it: the records merged into
+        it, its identities, links, field history and consents and, for a person, everything about them: their
+        leads (also any lead with one of their emails), the cold email sent to them and their replies, meetings,
+        lifecycle email sent to them alone, product events, website visits, journey runs, partner referrals and
+        partner portal sign-ins. Deals, payments and opt-outs stay, unlinked; a partner's memberships, rewards and
+        payouts stay on a new archived record named "Erased partner" with no name or identities, suspended and
+        without payout details or notes, so commission totals still add up, and keep their codes so their links still lead
+        to the site; their payouts' notes and references are cleared unless partner settings' erase_payout_notes is off; a company's people stay, unlinked from it. erased counts the rows removed, by
+        table. A deal is deleted with DELETE .../deals/{deal}.
+      tags: [records]
+      responses:
+        "200":
+          description: What was erased.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [id, type, erased, suppressed]
+                properties:
+                  id: { type: string, format: uuid }
+                  type: { type: string }
+                  erased: { type: object, additionalProperties: { type: integer }, description: "Rows removed, by table, such as records, leads and messages." }
+                  suppressed: { type: integer, description: Opt-out entries added. }
+        "202": { $ref: "#/components/responses/MissionHeld" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/brands/{brand}/records/{record}/history:
+    parameters:
+      - { $ref: "#/components/parameters/BrandID" }
+      - { $ref: "#/components/parameters/RecordID" }
+    get:
+      operationId: getBrandRecordHistory
+      x-outflare-access: { scope: customers.read, brand: true }
+      summary: A record's change history
+      description: "Scope: customers.read. Every change to its name and attributes, newest first, with who made it and from which source."
+      tags: [records]
+      parameters:
+        - { name: field, in: query, description: Only this field's changes (name for the record's name)., schema: { type: string } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 200, default: 50 } }
+        - { name: before, in: query, schema: { type: integer } }
+        - { $ref: "#/components/parameters/Cursor" }
+        - { $ref: "#/components/parameters/Fields" }
+      responses:
+        "200":
+          description: Changes.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, next_before, next_cursor]
+                properties:
+                  data: { type: array, items: { $ref: "#/components/schemas/AttributeChange" } }
+                  next_before: { type: [integer, "null"] }
+                  next_cursor: { $ref: "#/components/schemas/NextCursor" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/brands/{brand}/records/{record}/review:
+    parameters:
+      - { $ref: "#/components/parameters/BrandID" }
+      - { $ref: "#/components/parameters/RecordID" }
+    post:
+      operationId: reviewBrandRecord
+      x-outflare-access: { scope: customers.manage, brand: true }
+      summary: Approve or reject a record held for review
+      description: |
+        Scope: customers.manage. For a record with needs_review true, such as a person a visitor identification tool named.
+        approve lists it like any other and lets the policy check send to it (it stays a third-party prospect: cold email
+        only, never marketing without their consent). reject archives it. A record not held is refused with not_held (409).
+      tags: [records]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [decision]
+              properties:
+                decision: { type: string, enum: [approve, reject] }
+      responses:
+        "200": { description: The record now., content: { application/json: { schema: { $ref: "#/components/schemas/Record" } } } }
+        "202": { $ref: "#/components/responses/MissionHeld" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/brands/{brand}/records/{record}/identities:
+    parameters:
+      - { $ref: "#/components/parameters/BrandID" }
+      - { $ref: "#/components/parameters/RecordID" }
+    get:
+      operationId: listBrandRecordIdentities
+      x-outflare-access: { scope: customers.read, brand: true }
+      summary: A record's identities
+      description: "Scope: customers.read. Active ones, and with closed=true the closed ones too, such as an email the person changed."
+      tags: [records]
+      parameters:
+        - { name: closed, in: query, schema: { type: boolean, default: false } }
+      responses:
+        "200":
+          description: Identities, active first.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data: { type: array, items: { $ref: "#/components/schemas/RecordIdentity" } }
+        default: { $ref: "#/components/responses/Error" }
+    post:
+      operationId: addBrandRecordIdentity
+      x-outflare-access: { scope: customers.manage, brand: true }
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      summary: Add, verify or change an identity
+      description: |
+        Scope: customers.manage. Adds an identity, or updates the record's own copy of it: sending verified: true for
+        an email the record holds unverified verifies it (200). When a person changes their email, send the new one
+        with replaces set to the old identity's id: the old one is closed as changed and kept in the history. A
+        verified value another record of the same brand holds is refused with identity_taken, never moved or merged;
+        another brand's person with the same value is someone else and never blocks it.
+      tags: [records]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/RecordIdentityInput" }
+      responses:
+        "200":
+          description: The identity the record already had, now verified or updated.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RecordIdentity" }
+        "201":
+          description: The new identity.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RecordIdentity" }
+        "202": { $ref: "#/components/responses/MissionHeld" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/brands/{brand}/records/{record}/identities/{identity}/close:
+    parameters:
+      - { $ref: "#/components/parameters/BrandID" }
+      - { $ref: "#/components/parameters/RecordID" }
+      - { name: identity, in: path, required: true, schema: { type: string, format: uuid } }
+    post:
+      operationId: closeBrandRecordIdentity
+      x-outflare-access: { scope: customers.manage, brand: true }
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      summary: Remove an identity
+      description: "Scope: customers.manage. It stops pointing at the record and stays in its history as removed."
+      tags: [records]
+      responses:
+        "200":
+          description: The closed identity.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RecordIdentity" }
+        "202": { $ref: "#/components/responses/MissionHeld" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/brands/{brand}/records/{record}/relationships:
+    parameters:
+      - { $ref: "#/components/parameters/BrandID" }
+      - { $ref: "#/components/parameters/RecordID" }
+    get:
+      operationId: listBrandRecordRelationships
+      x-outflare-access: { scope: customers.read, brand: true }
+      summary: A record's links
+      description: "Scope: customers.read. Links both ways, including record reference fields' values (field_key set). ended=true includes ended links."
+      tags: [records]
+      parameters:
+        - { name: ended, in: query, schema: { type: boolean, default: false } }
+      responses:
+        "200":
+          description: Links, active first.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data: { type: array, items: { $ref: "#/components/schemas/RecordRelationship" } }
+        default: { $ref: "#/components/responses/Error" }
+    post:
+      operationId: addBrandRecordRelationship
+      x-outflare-access: { scope: customers.manage, brand: true }
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      summary: Link two records
+      description: "Scope: customers.manage. A typed link from this record, such as partner_of. Record reference fields (companies) are set through attributes instead."
+      tags: [records]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [to, kind]
+              properties:
+                to: { type: string, format: uuid }
+                kind: { type: string, pattern: "^[a-z][a-z0-9_]{1,62}$", example: partner_of }
+                properties: { type: object, additionalProperties: true }
+      responses:
+        "201":
+          description: The link.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RecordRelationship" }
+        "202": { $ref: "#/components/responses/MissionHeld" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/brands/{brand}/records/{record}/relationships/{relationship}/end:
+    parameters:
+      - { $ref: "#/components/parameters/BrandID" }
+      - { $ref: "#/components/parameters/RecordID" }
+      - { name: relationship, in: path, required: true, schema: { type: string, format: uuid } }
+    post:
+      operationId: endBrandRecordRelationship
+      x-outflare-access: { scope: customers.manage, brand: true }
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      summary: End a link
+      description: "Scope: customers.manage. It is kept with its end time."
+      tags: [records]
+      responses:
+        "200":
+          description: The ended link.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RecordRelationship" }
+        "202": { $ref: "#/components/responses/MissionHeld" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/brands/{brand}/records/{record}/merge:
+    parameters:
+      - { $ref: "#/components/parameters/BrandID" }
+      - { $ref: "#/components/parameters/RecordID" }
+    post:
+      operationId: mergeBrandRecords
+      x-outflare-access: { scope: customers.manage, brand: true }
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      summary: Merge a duplicate into this record
+      description: |
+        Scope: customers.manage. Merges from into this record, which is kept. from's identities, links, product events
+        and consents move here; its attributes fill in what this record lacks, or replace a value a lower-precedence
+        source set, and lists such as companies are joined. from is kept, archived, with merged_into set, so its
+        history and old links still lead here. Records of different types, or two records with their own user ids
+        (two accounts in your product), are refused with merge_refused: link those instead. Send version (this
+        record's, as read) to refuse the merge with record_changed if it changed since; agents must send it
+        (version_required).
+      tags: [records]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [from]
+              properties:
+                from: { type: string, format: uuid, description: The record merged into this one. }
+                version: { type: integer, description: "This record's version, as read." }
+      responses:
+        "200":
+          description: The record kept.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [record, merged_from, moved]
+                properties:
+                  record: { $ref: "#/components/schemas/Record" }
+                  merged_from: { type: string, format: uuid }
+                  moved:
+                    type: object
+                    required: [identities, attributes, relationships, events, consents, subscriptions, activity]
+                    properties:
+                      identities: { type: integer }
+                      attributes: { type: integer }
+                      relationships: { type: integer }
+                      events: { type: integer }
+                      consents: { type: integer }
+                      subscriptions: { type: integer, description: Subscriptions from payment connections. }
+                      activity: { type: integer, description: "Leads, cold emails, replies, meetings, deals, lifecycle emails, broadcast sends and journey runs that moved to the record kept." }
+        "202": { $ref: "#/components/responses/MissionHeld" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/brands/{brand}/query/tables:
+    parameters:
+      - { $ref: "#/components/parameters/BrandID" }
+    get:
+      operationId: listBrandQueryTables
+      x-outflare-access: { brand: true }
+      summary: List the tables a query can read
+      description: |
+        Any caller in the workspace. The tables Query reads, with their columns and the read scope each needs. available
+        says whether you hold it; a table you can't read returns no rows. Customer tables show only this brand's
+        rows, and the brand's own record types (such as deal or subscription) are listed as tables too, with a
+        column per field.
+      tags: [query]
+      responses:
+        "200":
+          description: The tables.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data: { type: array, items: { $ref: "#/components/schemas/QueryTable" } }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/brands/{brand}/query:
+    parameters:
+      - { $ref: "#/components/parameters/BrandID" }
+    post:
+      operationId: runBrandQuery
+      x-outflare-access: { brand: true }
+      summary: Run a read-only SQL query
+      description: |
+        The read scope of each table the query reads (GET .../query/tables), such as customers.read. Runs one
+        SELECT (or WITH ... SELECT) in a read-only transaction, as a database role that can read only the query
+        tables. Every customer table holds this brand's rows only, whatever the SQL filters on or joins, and each of
+        the brand's record types is a table of its own (a subscription type is subscription, one column per
+        field). Tables of areas not yet moved to brands (outreach, outcomes, email, website, social) show this
+        brand's rows and those no brand owns; leads, which have no brand, are not readable here.
+        It never changes anything, so an agent kept to missions may run it outside one. Up to limit rows come back
+        (default 100, at most 1000), with truncated set when there were more; a query running over 15 seconds is
+        stopped with query_timeout. SQL the database refuses fails with query_invalid and its message.
+      tags: [query]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [sql]
+              properties:
+                sql: { type: string, maxLength: 20000, description: "One SELECT, such as select stage, count(*) from deals group by stage." }
+                limit: { type: integer, minimum: 1, maximum: 1000, description: Rows to return. Default 100. }
+      responses:
+        "200":
+          description: The rows.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/QueryResult" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/brands/{brand}/records/{record}/timeline:
+    parameters:
+      - { $ref: "#/components/parameters/BrandID" }
+      - { $ref: "#/components/parameters/RecordID" }
+    get:
+      operationId: getBrandRecordTimeline
+      x-outflare-access: { scope: customers.read, brand: true }
+      summary: A record's timeline
+      description: |
+        Scope: customers.read. One timeline per person or company, newest first, across every module: their
+        product events (and, for a company, the group calls that named it), changes to their attributes,
+        identities added and closed, consent given or withdrawn, the cold email Outflare sent them and their
+        replies (`message`, with `direction` out or in), meetings, deals, website visits (`visit`), opt-out list
+        entries (`opt_out`) and journeys entered and finished (`journey`). Lifecycle email and payments show as the
+        events Outflare records for them (`email.sent`, `email.delivered` and so on, with `source: lifecycle`).
+
+        A company's timeline includes its people's (the people linked to it), each item's `record_id` saying whose
+        it is; `people=false` leaves them out. `brand` keeps one brand's items and the ones no brand owns. Kind
+        names are stable: new kinds may be added.
+      tags: [records]
+      parameters:
+        - { name: kinds, in: query, description: "Comma-separated: event, attribute_change, identity, consent, message, meeting, deal, visit, opt_out, journey. Default all.", schema: { type: string } }
+        - { name: people, in: query, description: "For a company, include its people's items (the default). false shows the company's own.", schema: { type: string, enum: ["true", "false"] } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 200, default: 50 } }
+        - { name: before, in: query, schema: { type: string } }
+        - { $ref: "#/components/parameters/Cursor" }
+        - { $ref: "#/components/parameters/Fields" }
+      responses:
+        "200":
+          description: The timeline.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, next_before, next_cursor]
+                properties:
+                  data: { type: array, items: { $ref: "#/components/schemas/TimelineItem" } }
+                  next_before: { type: [string, "null"] }
+                  next_cursor: { $ref: "#/components/schemas/NextCursor" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/brands/{brand}/records/{record}/consents:
+    parameters:
+      - { $ref: "#/components/parameters/BrandID" }
+      - { $ref: "#/components/parameters/RecordID" }
+    get:
+      operationId: listBrandRecordConsents
+      x-outflare-access: { scope: customers.read, brand: true }
+      summary: A person's consents
+      description: |
+        Scope: customers.read. The current consent for each channel, topic and purpose the person was asked about: the
+        latest grant or withdrawal. history=true lists every one, newest first. A topic's own row wins over the whole
+        channel's, except a later withdrawal from the whole channel.
+      tags: [records]
+      parameters:
+        - { name: history, in: query, schema: { type: string, enum: ["true", "false"] } }
+      responses:
+        "200":
+          description: Consents.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data: { type: array, items: { $ref: "#/components/schemas/Consent" } }
+        default: { $ref: "#/components/responses/Error" }
+    post:
+      operationId: recordBrandConsent
+      x-outflare-access: { scope: customers.manage, brand: true }
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      summary: Record consent
+      description: |
+        Scope: customers.manage. Records that a person granted or withdrew consent, with where and what proves it.
+        Nothing is overwritten: the latest one counts, and the rest stay as the history. Lifecycle email sends
+        marketing only to people whose current email consent is granted.
+      tags: [records]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ConsentInput" }
+      responses:
+        "201":
+          description: The consent.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Consent" }
+        "202": { $ref: "#/components/responses/MissionHeld" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/brands/{brand}/customer-events:
+    parameters: [{ $ref: "#/components/parameters/BrandID" }]
+    get:
+      operationId: listBrandCustomerEvents
+      x-outflare-access: { scope: customers.read, brand: true }
+      summary: List product events
+      description: "Scope: customers.read. Product events, newest first. matched=false lists anonymous visitors' events not yet linked to a person."
+      tags: [records]
+      parameters:
+        - { name: name, in: query, description: "A catalog name, such as order_completed or page.viewed.", schema: { type: string } }
+        - { name: kind, in: query, schema: { type: string, enum: [track, identify, page, screen, group, alias] } }
+        - { name: user_id, in: query, schema: { type: string } }
+        - { name: anonymous_id, in: query, schema: { type: string } }
+        - { name: matched, in: query, schema: { type: string, enum: ["true", "false", all] } }
+        - { name: since, in: query, schema: { type: string, format: date-time } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 200, default: 50 } }
+        - { name: before, in: query, schema: { type: string } }
+        - { $ref: "#/components/parameters/Cursor" }
+        - { $ref: "#/components/parameters/Fields" }
+      responses:
+        "200":
+          description: Events.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, next_before, next_cursor]
+                properties:
+                  data: { type: array, items: { $ref: "#/components/schemas/CustomerEvent" } }
+                  next_before: { type: [string, "null"] }
+                  next_cursor: { $ref: "#/components/schemas/NextCursor" }
         default: { $ref: "#/components/responses/Error" }
   /v1/workspaces/{ws}/brands/{brand}:
     parameters:
@@ -28210,6 +29339,43 @@ paths:
         "400": { $ref: "#/components/responses/Error" }
         "404": { $ref: "#/components/responses/Error" }
         "202": { $ref: "#/components/responses/MissionHeld" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/workspaces/{ws}/partner-conversion-log:
+    parameters: [{ $ref: "#/components/parameters/Workspace" }]
+    get:
+      operationId: listPartnerConversionLog
+      x-outflare-access: { scope: partners.read, brand_limited: true }
+      summary: List inbound conversion calls, newest first
+      description: |
+        Scope: partners.read. Every conversion your backend or tracker reported in the last 30 days, by the API
+        (POST .../partner-conversions) or a postback URL, with what it sent, what Outflare answered and the outcome:
+        credited, not_credited (with its reason, such as no_partner), duplicate, rejected (bad input; the reason is
+        the error code) or error. Use it to find out why a sale wasn't credited. The email a call sent is never kept:
+        request shows "(sent)", and q finds the call by the full address.
+      tags: [partners]
+      parameters:
+        - { $ref: "#/components/parameters/Brand" }
+        - { name: program, in: query, description: "A program's id or slug.", schema: { type: string } }
+        - { name: source, in: query, schema: { type: string, enum: [api, postback] } }
+        - { name: outcome, in: query, schema: { type: string, enum: [credited, not_credited, duplicate, rejected, error] } }
+        - { name: q, in: query, description: "An external_id, customer_id, refund_of, ref, promo code, email address or request id the call sent.", schema: { type: string, maxLength: 200 } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 200, default: 50 } }
+        - { name: before, in: query, schema: { type: string, format: date-time } }
+        - { $ref: "#/components/parameters/Cursor" }
+        - { $ref: "#/components/parameters/Fields" }
+      responses:
+        "200":
+          description: Logged calls.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, next_before]
+                properties:
+                  data: { type: array, items: { $ref: "#/components/schemas/PartnerConversionLogEntry" } }
+                  next_before: { type: [string, "null"], format: date-time }
+                  next_cursor: { $ref: "#/components/schemas/NextCursor" }
+        "400": { $ref: "#/components/responses/Error" }
         default: { $ref: "#/components/responses/Error" }
   /v1/workspaces/{ws}/partner-conversions:
     parameters: [{ $ref: "#/components/parameters/Workspace" }]
@@ -35747,6 +36913,11 @@ components:
       in: query
       description: Before this time, in the same forms as since.
       schema: { type: string }
+    DataBrand:
+      name: brand
+      in: query
+      description: "Whose data: a brand's id or handle. The default is the workspace's first brand (a member or token kept to some brands gets its own); all reads every brand you can see, as before brands owned their data. Deprecated with its route: use the /v1/brands/{brand}/ route."
+      schema: { type: string }
     BrandID:
       name: brand
       in: path
@@ -36677,10 +37848,12 @@ components:
         description: { type: string }
     WebhookEndpoint:
       type: object
-      required: [id, url, description, events, categories, enabled, disabled_reason, failing_since, last_success_at, created_at, updated_at]
+      required: [id, url, description, events, categories, enabled, disabled_reason, failing_since, last_success_at, created_at, updated_at, attempts_24h, failed_attempts_24h]
       properties:
         id: { type: string, format: uuid }
         url: { type: string, format: uri }
+        attempts_24h: { type: integer, description: "Delivery tries in the last 24 hours, retries and redeliveries included." }
+        failed_attempts_24h: { type: integer, description: "How many of those failed: the error rate is failed_attempts_24h / attempts_24h." }
         description: { type: string }
         events:
           type: array
@@ -36768,6 +37941,17 @@ components:
         delivered_at: { type: [string, "null"], format: date-time }
         created_at: { type: string, format: date-time }
         payload: { $ref: "#/components/schemas/WebhookEvent" }
+    WebhookAttempt:
+      type: object
+      required: [id, status_code, error, duration_ms, manual, ok, at]
+      properties:
+        id: { type: integer }
+        status_code: { type: [integer, "null"], description: "The receiver's answer; null when there was none (timeout, refused)." }
+        error: { type: [string, "null"], description: "What went wrong, with the start of the receiver's answer." }
+        duration_ms: { type: integer }
+        manual: { type: boolean, description: "A redelivery or test a person sent." }
+        ok: { type: boolean }
+        at: { type: string, format: date-time }
     WebhookRef:
       type: object
       required: [type, id]
@@ -38381,6 +39565,24 @@ components:
         payment_source: { type: string, maxLength: 40, description: "The payment provider, such as stripe or paddle (Tolt's source). Flows can test it (transaction.payment_source)." }
         interval: { type: string, enum: [day, week, month, year, one_time, monthly, yearly, annual], description: "How it bills; monthly, yearly and annual are stored as month and year. Flows can test it (transaction.interval)." }
         country: { type: string, pattern: "^[A-Za-z]{2}$", description: "The customer's country as you know it, such as from their billing address. A program that blocks it doesn't take them as a new referral (reason country_blocked)." }
+    PartnerConversionLogEntry:
+      type: object
+      required: [id, program_id, record_id, conversion_id, source, type, request, status, outcome, reason, response, duration_ms, request_id, created_at]
+      properties:
+        id: { type: string, format: uuid }
+        program_id: { type: [string, "null"], format: uuid, description: "The program the call named or was judged in." }
+        record_id: { type: [string, "null"], format: uuid, description: "The customer's record, when the call got that far." }
+        conversion_id: { type: [string, "null"], format: uuid, description: "The conversion it stored, when credited." }
+        source: { type: string, enum: [api, postback] }
+        type: { type: string, description: "The conversion type it sent ('' when unreadable)." }
+        request: { type: object, additionalProperties: true, description: "What the call sent, as Outflare read it, without empty fields. An email shows as \"(sent)\"." }
+        status: { type: integer, description: "The HTTP status Outflare answered with." }
+        outcome: { type: string, enum: [credited, not_credited, duplicate, rejected, error] }
+        reason: { type: string, description: "Why it wasn't credited (no_partner, lead_expired, ...), or the error code when rejected." }
+        response: { type: object, additionalProperties: true, description: "The answer's body." }
+        duration_ms: { type: integer }
+        request_id: { type: string }
+        created_at: { type: string, format: date-time }
     PartnerConversionResult:
       type: object
       required: [credited, duplicate, partner_id, referral_id, conversion, rewards]

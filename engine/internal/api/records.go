@@ -36,23 +36,34 @@ import (
 
 func (s *Server) routesRecords(mux *http.ServeMux) {
 	read, manage := auth.ScopeCustomersRead, auth.ScopeCustomersManage
-	base := "/v1/workspaces/{ws}/records"
-	mux.HandleFunc("GET "+base, s.inBrand(read, s.listRecords))
-	mux.HandleFunc("POST "+base, s.inBrand(manage, s.createRecord))
-	mux.HandleFunc("GET "+base+"/lookup", s.inBrand(read, s.lookupRecords))
+	// Each route is served twice by the same handler: under the brand
+	// (plans/brands/README.md, decision 6), where every row is the
+	// route's brand's (access.Brand), and under the workspace, kept for
+	// older callers until the contract step, where lists take ?brand= and
+	// default to the first brand, and records keep their own brand.
+	for _, base := range []string{"/v1/brands/{brand}/records", "/v1/workspaces/{ws}/records"} {
+		on := s.inBrand
+		if strings.HasPrefix(base, "/v1/brands/") {
+			on = s.onBrand
+		} else {
+			mux.HandleFunc("GET "+base+"/lookup", s.inBrand(read, s.lookupRecords))
+		}
+		mux.HandleFunc("GET "+base, on(read, s.listRecords))
+		mux.HandleFunc("POST "+base, on(manage, s.createRecord))
+		mux.HandleFunc("GET "+base+"/{record}", on(read, s.getRecord))
+		mux.HandleFunc("PATCH "+base+"/{record}", on(manage, s.updateRecord))
+		mux.HandleFunc("DELETE "+base+"/{record}", on(manage, s.deleteRecord))
+		mux.HandleFunc("POST "+base+"/{record}/review", on(manage, s.reviewRecord))
+		mux.HandleFunc("GET "+base+"/{record}/history", on(read, s.recordHistory))
+		mux.HandleFunc("GET "+base+"/{record}/identities", on(read, s.listIdentities))
+		mux.HandleFunc("POST "+base+"/{record}/identities", on(manage, s.addIdentity))
+		mux.HandleFunc("POST "+base+"/{record}/identities/{identity}/close", on(manage, s.closeIdentity))
+		mux.HandleFunc("GET "+base+"/{record}/relationships", on(read, s.listRelationships))
+		mux.HandleFunc("POST "+base+"/{record}/relationships", on(manage, s.addRelationship))
+		mux.HandleFunc("POST "+base+"/{record}/relationships/{relationship}/end", on(manage, s.endRelationship))
+	}
 	// Who an email or id belongs to in one brand.
 	mux.HandleFunc("GET /v1/brands/{brand}/records/lookup", s.onBrand(read, s.lookupRecords))
-	mux.HandleFunc("GET "+base+"/{record}", s.inBrand(read, s.getRecord))
-	mux.HandleFunc("PATCH "+base+"/{record}", s.inBrand(manage, s.updateRecord))
-	mux.HandleFunc("DELETE "+base+"/{record}", s.inBrand(manage, s.deleteRecord))
-	mux.HandleFunc("POST "+base+"/{record}/review", s.inBrand(manage, s.reviewRecord))
-	mux.HandleFunc("GET "+base+"/{record}/history", s.inBrand(read, s.recordHistory))
-	mux.HandleFunc("GET "+base+"/{record}/identities", s.inBrand(read, s.listIdentities))
-	mux.HandleFunc("POST "+base+"/{record}/identities", s.inBrand(manage, s.addIdentity))
-	mux.HandleFunc("POST "+base+"/{record}/identities/{identity}/close", s.inBrand(manage, s.closeIdentity))
-	mux.HandleFunc("GET "+base+"/{record}/relationships", s.inBrand(read, s.listRelationships))
-	mux.HandleFunc("POST "+base+"/{record}/relationships", s.inBrand(manage, s.addRelationship))
-	mux.HandleFunc("POST "+base+"/{record}/relationships/{relationship}/end", s.inBrand(manage, s.endRelationship))
 }
 
 var (
@@ -870,6 +881,10 @@ func (in *recordInput) common() (string, error) {
 // a record every brand shares.
 func (s *Server) recordBrand(ctx context.Context, a *access, raw json.RawMessage) (*string, error) {
 	if len(raw) == 0 || string(raw) == "null" {
+		// On a brand route, the record is the route's brand's.
+		if a.Brand != "" {
+			return &a.Brand, nil
+		}
 		return nil, nil
 	}
 	var ref string
@@ -877,6 +892,9 @@ func (s *Server) recordBrand(ctx context.Context, a *access, raw json.RawMessage
 		return nil, errInvalid("brand_id is a brand's id or handle, or null")
 	}
 	id, err := s.brandIDFor(ctx, a.WorkspaceID, ref)
+	if a.Brand != "" && err == nil && id != a.Brand {
+		return nil, errInvalid("records stay in their brand: brand_id can only be this route's brand")
+	}
 	if errors.Is(err, errNotFound) || (err == nil && !a.sees(&id)) {
 		return nil, errInvalid("brand_id is not a brand in this workspace")
 	}
@@ -1210,7 +1228,7 @@ func (s *Server) listRecords(w http.ResponseWriter, r *http.Request) {
 	if s.allocError(w, r, err) {
 		return
 	}
-	sel, ok := s.brandFilter(w, r)
+	sel, ok := s.dataBrand(w, r)
 	if !ok {
 		return
 	}

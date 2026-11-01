@@ -1,9 +1,9 @@
 # Query
 
-Query runs read-only SQL over the workspace's own data, so a question such as "win rate by source this quarter" or "people who visited pricing and have no deal" gets an exact answer in one call, instead of being paged together from lists. People and agents use the same tool, and it sees exactly what the caller may see through the API.
+Query runs read-only SQL over one brand's data, so a question such as "win rate by source this quarter" or "people who visited pricing and have no deal" gets an exact answer in one call, instead of being paged together from lists. People and agents use the same tool, and it sees exactly what the caller may see through the API.
 
 ```sh
-curl -X POST "$OUTFLARE_URL/v1/workspaces/$WS/query" \
+curl -X POST "$OUTFLARE_URL/v1/brands/$BRAND/query" \
   -H "Authorization: Bearer $OUTFLARE_TOKEN" -H 'Content-Type: application/json' \
   -d '{"sql": "select stage, count(*), sum(amount_cents) from deals group by stage order by 2 desc"}'
 ```
@@ -16,11 +16,13 @@ curl -X POST "$OUTFLARE_URL/v1/workspaces/$WS/query" \
 }
 ```
 
-Agents use the MCP tools `list_query_tables` and `run_query`.
+`$BRAND` is the brand's id. Agents use the MCP tools `list_query_tables` and `run_query`, which take the brand's handle or id.
+
+A query belongs to one brand (`plans/brands/README.md`): different brands are different businesses, so their data is never queried together. The workspace routes `GET /v1/workspaces/{ws}/query/tables` and `POST /v1/workspaces/{ws}/query` are deprecated and stay until the brands contract step: they query the brand `?brand=` picks (a handle or id), else the workspace's first brand (a member or token kept to some brands gets its own), and `?brand=all` queries every brand you can see, as before.
 
 ## Tables
 
-`GET /v1/workspaces/{ws}/query/tables` (MCP `list_query_tables`) lists the tables with their columns, the read scope each needs, and whether you hold it.
+`GET /v1/brands/{brand}/query/tables` (MCP `list_query_tables`) lists the tables with their columns, the read scope each needs, and whether you hold it.
 
 | Table | Scope | What it holds |
 | --- | --- | --- |
@@ -28,8 +30,8 @@ Agents use the MCP tools `list_query_tables` and `run_query`.
 | `records` | `customers.read` | Every record of every type, including merged (`merged_into`) and archived ones |
 | `record_identities`, `record_relationships` | `customers.read` | Emails, phones, ids and domains; links between records |
 | `customer_events`, `consents`, `subscriptions` | `customers.read` | Product events, the consent log, payment subscriptions (`monthly_minor` is MRR in minor units) |
-| `brands` | `workspace.read` | The workspace's brands |
-| `leads` | `leads.read` | Leads for outreach |
+| `brands` | `workspace.read` | The brand itself |
+| `leads` | `leads.read` | Leads for outreach; they have no brand yet, so a brand's query can't read them |
 | `sequences`, `enrollments`, `messages` | `sequences.read` | Sequences, who is in them, and the emails they sent (without bodies) |
 | `replies` | `inbox.read` | Mail received, with its AI label, without bodies |
 | `deals`, `meetings`, `spend` | `outcomes.read` | Outcomes and money spent |
@@ -40,10 +42,15 @@ Agents use the MCP tools `list_query_tables` and `run_query`.
 
 jsonb columns such as `attributes` are read with `->>`: `select attributes->>'plan' as plan, count(*) from people group by 1`.
 
+### A table per record type
+
+Each of the brand's own record types is a table too, named by its key: a `subscription` type is `select plan, seats from subscription`, and the default `deal` type is `deal` (beside `deals`, the outcomes table). A type's table has `id`, `brand_id`, `name`, one column per active field (numbers and ratings as `numeric`, checkboxes as `boolean`, currencies, locations and multi-value fields as `jsonb`, the rest as `text`; a value of another kind reads as null), then `attributes`, `origin`, `created_at` and `updated_at`, without merged or archived records. It needs `customers.read`, and `GET .../query/tables` lists it with its columns. A type whose key another table already has (such as `people`) isn't added, and `person` and `account` are `people` and `companies`.
+
 ## What a query can see
 
 - **This workspace only.** Every table shows only the workspace's own rows.
-- **Your brands.** A caller kept to some brands (a brand token, or a member limited to brands) sees those brands' rows and the shared ones, as in the API. Where a row's brand comes from elsewhere, it is the same as on a record's timeline: a message's, meeting's or deal's sequence, a reply's mailbox, a record's own brand for its identities and consents. `leads` has no brand, so it is hidden from brand-limited callers.
+- **One brand.** Every customer table (`records`, `people`, `companies`, the type tables, `record_identities`, `record_relationships`, `customer_events`, `consents`, `subscriptions`) and `brands` hold only rows whose own `brand_id` is the query's brand; a row with no brand is not the brand's and is left out too. No SQL text changes that: a `brand_id` filter, a subquery, a CTE or a join only ever sees the brand's rows, and the tables underneath can't be read at all. Another brand's token or a member kept to other brands gets `404` for the brand's query routes.
+- **Areas not yet moved to brands.** The outreach, outcomes, email, website and social tables keep the rule they had for a caller kept to some brands: the brand's rows and the ones no brand owns, where a row's brand comes from the same place as on a record's timeline (a message's, meeting's or deal's sequence, a reply's mailbox). `leads` has no brand, so a brand's query can't read it. Each area becomes strict as it moves (`plans/brands/README.md`, "Order").
 - **Your scopes.** Each table needs its read scope. A query naming a table you can't read is refused with `forbidden`, naming the scope.
 
 ## What a query can do
@@ -55,10 +62,10 @@ jsonb columns such as `attributes` are read with `->>`: `select attributes->>'pl
 
 ## How it is kept safe
 
-Query runs as a database role of its own, one per workspace, that can read only the views in the `query` schema (migration `0199`) and no table. Each view filters by the workspace, brands and scopes of the request, which the server writes for the query's database connection just before it runs and removes after. The role can neither read nor change that. Every query opens a fresh connection that is closed afterwards, so nothing a query sets lasts. Because each workspace has its own role, the database never shows one workspace's running query to another. Functions that change settings, take locks, signal other sessions or run SQL from a string are refused too. That gives a clear message, but the boundary is the role and the read-only transaction.
+Query runs as a database role of its own, one per workspace, that can read only the views in the `query` schema (migration `0199`) and no table. Each view filters by the workspace, brand and scopes of the request, which the server writes for the query's database connection just before it runs and removes after (the brand since migration `0342`). The role can neither read nor change that, and the views are security barriers, so the query's own conditions never see a row before the view's filter has dropped it. The type tables are temporary views the query's own connection makes just before the query, over `query.records`, so they hold no more than it does; the query's transaction is read-only, so it can't make or change one, and they go when the connection closes. Every query opens a fresh connection that is closed afterwards, so nothing a query sets lasts. Because each workspace has its own role, the database never shows one workspace's running query to another. Functions that change settings, take locks, signal other sessions or run SQL from a string are refused too. That gives a clear message, but the boundary is the role and the read-only transaction.
 
 **Self-hosting:** Query needs the database user in `DATABASE_URL` to be able to create roles (`CREATEROLE`, or a superuser, as with the Docker Compose and most managed Postgres). The role's password is derived from `OUTFLARE_SECRET_KEY`, and the role logs in with the same host and options as `DATABASE_URL`, so `pg_hba.conf` must allow password logins for it. Without that, Query answers `query_unavailable` and the log says why. Each server runs at most 3 queries at once (`OUTFLARE_QUERY_CONNECTIONS`, 0 turns Query off), each on its own connection, so allow for that many more connections per API server.
 
 ## Events
 
-Each query is an `api.called` event (`runQuery`), and a successful one also records `query.ran` with the tables it read, the row count, whether it was truncated and how long it took. The SQL itself is never sent. A failure to set up the role is `query.setup_failed`. Metrics: `outflare_query_runs_total{outcome}`, `outflare_query_duration_seconds` and `outflare_query_rows_total`, on the Grafana dashboard's Query row.
+Each query is an `api.called` event (`runBrandQuery`, or `runQuery` on the workspace route), and a successful one also records `query.ran` with the tables it read (type tables are counted in `type_tables`, not named), `brand_route`, the row count, whether it was truncated and how long it took. The SQL itself is never sent. A failure to set up the role is `query.setup_failed`, and a database that refuses the type tables (temporary views need the `TEMP` privilege, which Postgres gives every role by default) is `query.type_tables_failed`: the query still runs without them. Metrics: `outflare_query_runs_total{outcome}`, `outflare_query_duration_seconds`, `outflare_query_rows_total` and `outflare_query_type_tables_failed_total` (alert `OutflareQueryTypeTablesFailing`), on the Grafana dashboard's Query row.

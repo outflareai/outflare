@@ -210,6 +210,10 @@ func (b brandSel) all() bool { return b.id == "" && b.in == nil }
 // caller is kept to its brands, and gets a 404 for any other.
 func (s *Server) brandFilter(w http.ResponseWriter, r *http.Request) (brandSel, bool) {
 	a := accessFrom(r.Context())
+	// A brand route's brand is in its path: ?brand= can't widen it.
+	if a.Brand != "" {
+		return brandSel{id: a.Brand, in: []string{a.Brand}}, true
+	}
 	sel := brandSel{in: a.Brands}
 	b := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("brand")))
 	if b == "" || b == "none" || b == "all" {
@@ -231,6 +235,46 @@ func (s *Server) brandFilter(w http.ResponseWriter, r *http.Request) (brandSel, 
 	sel.id = id
 	noteBrand(r.Context(), id)
 	return sel, true
+}
+
+// dataBrand is the brand filter of a customer data list. On a brand route
+// it is the route's brand. The workspace routes it serves are kept for
+// older callers until the contract step of plans/brands/README.md: ?brand=
+// picks a brand there (all keeps the old view of every brand), and without
+// it the list is the workspace's first brand's, or a brand-limited
+// caller's own first brand when it can't see that one. Brands never mix
+// in a list unless asked to.
+func (s *Server) dataBrand(w http.ResponseWriter, r *http.Request) (brandSel, bool) {
+	a := accessFrom(r.Context())
+	if a.Brand != "" || r.URL.Query().Get("brand") != "" {
+		return s.brandFilter(w, r)
+	}
+	id, err := s.defaultBrand(r.Context(), a)
+	if err != nil {
+		s.internal(w, r, err)
+		return brandSel{}, false
+	}
+	return brandSel{id: id, in: a.Brands}, true
+}
+
+// defaultBrand is the brand a workspace route acts on when none is named:
+// the workspace's first, or a brand-limited caller's first brand when it
+// can't see that one.
+func (s *Server) defaultBrand(ctx context.Context, a *access) (string, error) {
+	if a.Brand != "" {
+		return a.Brand, nil
+	}
+	first, err := catalogBrand(ctx, s.pool, a.WorkspaceID, "")
+	if err != nil {
+		return "", err
+	}
+	if a.Brands != nil && (first == nil || !slices.Contains(a.Brands, *first)) {
+		return a.Brands[0], nil
+	}
+	if first == nil {
+		return "none", nil
+	}
+	return *first, nil
 }
 
 // matches reports whether a record with brand id passes the filter.

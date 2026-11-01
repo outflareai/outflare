@@ -49,7 +49,7 @@ func TestQuery(t *testing.T) {
 	other := owner.must(201, "POST", "/v1/workspaces", map[string]string{"name": "Other"})["id"].(string)
 	owner.must(201, "POST", "/v1/workspaces/"+other+"/records", map[string]any{"type": "person", "name": "Elsewhere"})
 
-	out := owner.must(200, "POST", base+"/query", map[string]any{"sql": "select name, email from people order by name;"})
+	out := owner.must(200, "POST", base+"/query?brand=all", map[string]any{"sql": "select name, email from people order by name;"})
 	rows := queryRows(t, out)
 	if len(rows) != 3 || rows[0][0] != "Ada" || rows[0][1] != "ada@acme.example" || rows[2][0] != "Shared" {
 		t.Fatalf("people: %v", out)
@@ -57,13 +57,13 @@ func TestQuery(t *testing.T) {
 	if cols := out["columns"].([]any); cols[0].(map[string]any)["name"] != "name" || cols[0].(map[string]any)["type"] != "text" {
 		t.Fatalf("columns: %v", cols)
 	}
-	out = owner.must(200, "POST", base+"/query", map[string]any{"sql": "select record_type, count(*) from records group by 1 order by 1"})
+	out = owner.must(200, "POST", base+"/query?brand=all", map[string]any{"sql": "select record_type, count(*) from records group by 1 order by 1"})
 	if rows := queryRows(t, out); len(rows) != 2 || rows[0][0] != "account" || rows[1][1] != float64(3) {
 		t.Fatalf("counts: %v", out)
 	}
 
 	// Limits.
-	out = owner.must(200, "POST", base+"/query", map[string]any{"sql": "select * from people", "limit": 2})
+	out = owner.must(200, "POST", base+"/query?brand=all", map[string]any{"sql": "select * from people", "limit": 2})
 	if out["row_count"] != float64(2) || out["truncated"] != true {
 		t.Fatalf("limit: %v", out)
 	}
@@ -156,7 +156,8 @@ func TestQuery(t *testing.T) {
 func TestQueryTablesMatchSchema(t *testing.T) {
 	h := freshServer(t)
 	owner, ws := setupOwner(t, h)
-	listed := owner.must(200, "GET", "/v1/workspaces/"+ws+"/query/tables", nil)["data"].([]any)
+	// Every brand: a brand's query lists its record types too.
+	listed := owner.must(200, "GET", "/v1/workspaces/"+ws+"/query/tables?brand=all", nil)["data"].([]any)
 	pool, err := pgx.Connect(context.Background(), os.Getenv("TEST_DATABASE_URL"))
 	if err != nil {
 		t.Fatal(err)

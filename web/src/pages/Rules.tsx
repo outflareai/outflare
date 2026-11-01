@@ -9,6 +9,7 @@
 import { useCallback, useEffect, useState, type ReactNode } from "react";
 import type { EmailTemplate, Journey, Rule, RuleCondition, RuleSimulation, RuleTrigger, SmartList } from "@outflare/sdk";
 import { api, errorMessage } from "../api";
+import { useBrand } from "@/lib/brand";
 import { track } from "@/lib/analytics";
 import { Badge, Button, Card, confirmAction, Empty, ErrorText, field, Input, Loading, Menu, PageHeader, Stat, Stats, toast } from "../ui";
 import { ago, plural, stamp } from "../format";
@@ -53,11 +54,15 @@ function StatusBadge({ r }: { r: Rule }) {
   return <Badge tone={statusTone[r.status]}>{statusText[r.status]}</Badge>;
 }
 
+// The picked brand's smart lists (lists belong to one brand; none with
+// all brands picked).
 function useLists(ws: string) {
   const [lists, setLists] = useState<SmartList[]>([]);
+  const brand = useBrand(ws).brand?.id;
   useEffect(() => {
-    api.GET("/v1/workspaces/{ws}/smart-lists", { params: { path: { ws } } }).then(({ data }) => setLists(data?.data ?? []));
-  }, [ws]);
+    if (!brand) return setLists([]);
+    api.GET("/v1/brands/{brand}/smart-lists", { params: { path: { brand } } }).then(({ data }) => setLists(data?.data ?? []));
+  }, [brand]);
   return lists;
 }
 

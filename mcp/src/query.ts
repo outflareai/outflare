@@ -9,6 +9,7 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import type { MissionClient } from "@outflare/sdk";
 import { z } from "zod";
+import { brandCaller, brandRef } from "./records.js";
 
 type Call = (fn: () => Promise<{ data?: unknown; error?: unknown; response: Response }>) => Promise<CallToolResult>;
 
@@ -18,6 +19,7 @@ const kinds = z.enum(["record", "message", "meeting", "deal", "email"]);
 
 export function registerQueryTools(server: McpServer, gtm: MissionClient, workspace: () => string, readOnly: boolean, call: Call): void {
   const path = () => ({ ws: workspace() });
+  const onBrand = brandCaller(gtm, workspace);
 
   server.registerTool(
     "list_query_tables",
@@ -25,11 +27,12 @@ export function registerQueryTools(server: McpServer, gtm: MissionClient, worksp
       title: "List the tables run_query can read",
       description:
         "The tables run_query reads (people, companies, customer_events, deals, messages, replies, emails, visits and more), their columns, and " +
-        "whether this connection holds the read scope each needs. Read it before writing SQL.",
-      inputSchema: {},
+        "whether this connection holds the read scope each needs. A query is for one brand: its customer tables hold that brand's rows only, and " +
+        "each of its record types (such as deal or subscription) is a table of its own, with a column per field. Read it before writing SQL.",
+      inputSchema: { brand: brandRef },
       annotations: read,
     },
-    () => call(() => gtm.GET("/v1/workspaces/{ws}/query/tables", { params: { path: path() } })),
+    ({ brand }) => call(() => onBrand(brand, (b) => gtm.GET("/v1/brands/{brand}/query/tables", { params: { path: { brand: b } } }))),
   );
 
   server.registerTool(
@@ -41,14 +44,15 @@ export function registerQueryTools(server: McpServer, gtm: MissionClient, worksp
         "select stage, count(*), sum(amount_cents) from deals group by stage. Prefer it to paging through list tools when the answer is a " +
         "count, sum, rate or join. It never changes anything, so it needs no mission. Up to limit rows come back (default 100, at most 1000; " +
         "truncated says there were more); it stops after 15 seconds (query_timeout), so aggregate rather than list. jsonb columns such as " +
-        "attributes are read with ->> (attributes->>'plan').",
+        "attributes are read with ->> (attributes->>'plan'). It reads one brand's data: nothing in the SQL reaches another brand's rows.",
       inputSchema: {
+        brand: brandRef,
         sql: z.string().min(1).max(20000),
         limit: z.number().int().min(1).max(1000).optional(),
       },
       annotations: read,
     },
-    (body) => call(() => gtm.POST("/v1/workspaces/{ws}/query", { params: { path: path() }, body })),
+    ({ brand, ...body }) => call(() => onBrand(brand, (b) => gtm.POST("/v1/brands/{brand}/query", { params: { path: { brand: b } }, body }))),
   );
 
   server.registerTool(

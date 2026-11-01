@@ -15,7 +15,7 @@ type Call = (fn: () => Promise<{ data?: unknown; error?: unknown; response: Resp
 const id = z.string().uuid();
 const read = { readOnlyHint: true, openWorldHint: false } as const;
 const write = { readOnlyHint: false, destructiveHint: false, openWorldHint: false } as const;
-const brandRef = z.string().min(1).describe("The brand's handle (such as repocket) or id, from list_brands.");
+export const brandRef = z.string().min(1).describe("The brand's handle (such as repocket) or id, from list_brands.");
 const typeKey = z.string().min(1).describe("A record type's key: person, account, or one from get_catalog.");
 const valueTypes = z.enum(["text", "number", "currency", "date", "timestamp", "checkbox", "select", "status", "rating", "email", "phone", "url", "location", "record_reference", "actor_reference"]);
 const sources = z.enum(["manual", "first_party", "crm_sync", "enrichment", "import"]);
@@ -40,12 +40,11 @@ const attributes = z
   .describe("Values by field key, as get_catalog defines them; null clears one. Unknown keys are refused: add the field with create_field first.");
 const eventProperties = z.array(z.object({ key: z.string().min(1), value_type: valueTypes, description: z.string().optional() })).max(100);
 
-export function registerRecordTools(server: McpServer, gtm: MissionClient, workspace: () => string, readOnly: boolean, call: Call): void {
-  const path = () => ({ ws: workspace() });
-  const recordPath = (record: string) => ({ ws: workspace(), record });
-  // Brand routes take the brand's id; a handle is looked up first.
+// brandCaller runs a call on a brand route (/v1/brands/{brand}/...), which
+// takes the brand's id: a handle is looked up first.
+export function brandCaller(gtm: MissionClient, workspace: () => string) {
   const uuidShape = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-  const onBrand = async <T extends { data?: unknown; error?: unknown; response: Response }>(
+  return async <T extends { data?: unknown; error?: unknown; response: Response }>(
     brand: string,
     fn: (id: string) => Promise<T>,
   ): Promise<{ data?: unknown; error?: unknown; response: Response }> => {
@@ -54,6 +53,12 @@ export function registerRecordTools(server: McpServer, gtm: MissionClient, works
     if (!found.data) return found;
     return fn(found.data.id);
   };
+}
+
+export function registerRecordTools(server: McpServer, gtm: MissionClient, workspace: () => string, readOnly: boolean, call: Call): void {
+  const path = () => ({ ws: workspace() });
+  const recordPath = (record: string) => ({ ws: workspace(), record });
+  const onBrand = brandCaller(gtm, workspace);
 
   server.registerTool(
     "get_catalog",
@@ -77,6 +82,7 @@ export function registerRecordTools(server: McpServer, gtm: MissionClient, works
         "People, companies or another record type, newest first. q matches the name or any identity, such as part of an email. " +
         "Records held for review (people a visitor identification tool named) are left out unless review is needs_review or all.",
       inputSchema: {
+        brand: brandRef,
         type: typeKey.optional(),
         q: z.string().optional(),
         attribute: z
@@ -88,13 +94,12 @@ export function registerRecordTools(server: McpServer, gtm: MissionClient, works
         archived: z.enum(["false", "true", "all"]).optional(),
         review: z.enum(["approved", "needs_review", "all"]).optional(),
         acquired_via: z.string().optional().describe("Only records from these tools, comma-separated, such as rb2b,vector."),
-        brand: z.string().optional().describe("A brand's handle or id, none for shared records, or all."),
         limit: z.number().int().min(1).max(200).optional(),
         cursor: z.string().optional().describe("next_cursor from the previous page."),
       },
       annotations: read,
     },
-    (q) => call(() => gtm.GET("/v1/workspaces/{ws}/records", { params: { path: path(), query: q } })),
+    ({ brand, ...q }) => call(() => onBrand(brand, (b) => gtm.GET("/v1/brands/{brand}/records", { params: { path: { brand: b }, query: q } }))),
   );
 
   server.registerTool(
@@ -102,10 +107,10 @@ export function registerRecordTools(server: McpServer, gtm: MissionClient, works
     {
       title: "Read a customer record",
       description: "One record with its attributes, which source set each one, and its active identities.",
-      inputSchema: { record_id: id },
+      inputSchema: { brand: brandRef, record_id: id },
       annotations: read,
     },
-    ({ record_id }) => call(() => gtm.GET("/v1/workspaces/{ws}/records/{record}", { params: { path: recordPath(record_id) } })),
+    ({ brand, record_id }) => call(() => onBrand(brand, (b) => gtm.GET("/v1/brands/{brand}/records/{record}", { params: { path: { brand: b, record: record_id } } }))),
   );
 
   server.registerTool(
@@ -127,10 +132,10 @@ export function registerRecordTools(server: McpServer, gtm: MissionClient, works
     {
       title: "A record's change history",
       description: "Every change to a record's name and attributes, newest first, with who made it and from which source.",
-      inputSchema: { record_id: id, field: z.string().optional(), limit: z.number().int().min(1).max(200).optional(), cursor: z.string().optional() },
+      inputSchema: { brand: brandRef, record_id: id, field: z.string().optional(), limit: z.number().int().min(1).max(200).optional(), cursor: z.string().optional() },
       annotations: read,
     },
-    ({ record_id, ...q }) => call(() => gtm.GET("/v1/workspaces/{ws}/records/{record}/history", { params: { path: recordPath(record_id), query: q } })),
+    ({ brand, record_id, ...q }) => call(() => onBrand(brand, (b) => gtm.GET("/v1/brands/{brand}/records/{record}/history", { params: { path: { brand: b, record: record_id }, query: q } }))),
   );
 
   server.registerTool(
@@ -138,10 +143,10 @@ export function registerRecordTools(server: McpServer, gtm: MissionClient, works
     {
       title: "A record's identities",
       description: "Its emails, phones, ids and domains; closed: true adds closed ones, such as an email the person changed.",
-      inputSchema: { record_id: id, closed: z.boolean().optional() },
+      inputSchema: { brand: brandRef, record_id: id, closed: z.boolean().optional() },
       annotations: read,
     },
-    ({ record_id, ...q }) => call(() => gtm.GET("/v1/workspaces/{ws}/records/{record}/identities", { params: { path: recordPath(record_id), query: q } })),
+    ({ brand, record_id, ...q }) => call(() => onBrand(brand, (b) => gtm.GET("/v1/brands/{brand}/records/{record}/identities", { params: { path: { brand: b, record: record_id }, query: q } }))),
   );
 
   server.registerTool(
@@ -149,10 +154,10 @@ export function registerRecordTools(server: McpServer, gtm: MissionClient, works
     {
       title: "A record's links",
       description: "Links both ways, such as the companies a person belongs to (field links) and partner_of links.",
-      inputSchema: { record_id: id, ended: z.boolean().optional() },
+      inputSchema: { brand: brandRef, record_id: id, ended: z.boolean().optional() },
       annotations: read,
     },
-    ({ record_id, ...q }) => call(() => gtm.GET("/v1/workspaces/{ws}/records/{record}/relationships", { params: { path: recordPath(record_id), query: q } })),
+    ({ brand, record_id, ...q }) => call(() => onBrand(brand, (b) => gtm.GET("/v1/brands/{brand}/records/{record}/relationships", { params: { path: { brand: b, record: record_id }, query: q } }))),
   );
 
   server.registerTool(
@@ -164,19 +169,19 @@ export function registerRecordTools(server: McpServer, gtm: MissionClient, works
         "attribute changes, identities added and closed, consent given or withdrawn, cold email sent and replies, meetings, deals, website visits, " +
         "opt-out list entries and journeys. A company's timeline includes its people's; each item's record_id says whose it is.",
       inputSchema: {
+        brand: brandRef,
         record_id: id,
         kinds: z
           .string()
           .optional()
           .describe("Comma-separated: event, attribute_change, identity, consent, message (cold email and replies), meeting, deal, visit, opt_out, journey. Default all."),
         people: z.enum(["true", "false"]).optional().describe("For a company: false shows only the company's own items, without its people's."),
-        brand: z.string().optional().describe("A brand's id or handle: its items and the ones no brand owns."),
         limit: z.number().int().min(1).max(200).optional(),
         cursor: z.string().optional(),
       },
       annotations: read,
     },
-    ({ record_id, ...q }) => call(() => gtm.GET("/v1/workspaces/{ws}/records/{record}/timeline", { params: { path: recordPath(record_id), query: q } })),
+    ({ brand, record_id, ...q }) => call(() => onBrand(brand, (b) => gtm.GET("/v1/brands/{brand}/records/{record}/timeline", { params: { path: { brand: b, record: record_id }, query: q } }))),
   );
 
   server.registerTool(
@@ -186,15 +191,15 @@ export function registerRecordTools(server: McpServer, gtm: MissionClient, works
       description:
         "The current consent for each channel, topic and purpose (the latest grant or withdrawal); history: true lists every one. " +
         "Check it before any marketing message: no grant means do not send.",
-      inputSchema: { record_id: id, history: z.boolean().optional() },
+      inputSchema: { brand: brandRef, record_id: id, history: z.boolean().optional() },
       annotations: read,
     },
-    ({ record_id, history }) =>
+    ({ brand, record_id, history }) =>
       call(() =>
-        gtm.GET("/v1/workspaces/{ws}/records/{record}/consents", {
-          params: { path: recordPath(record_id), query: history === undefined ? {} : { history: history ? "true" : "false" } },
+        onBrand(brand, (b) => gtm.GET("/v1/brands/{brand}/records/{record}/consents", {
+          params: { path: { brand: b, record: record_id }, query: history === undefined ? {} : { history: history ? "true" : "false" } },
         }),
-      ),
+      )),
   );
 
   server.registerTool(
@@ -203,19 +208,19 @@ export function registerRecordTools(server: McpServer, gtm: MissionClient, works
       title: "List product events",
       description: "Product events, newest first. matched: false lists anonymous visitors' events not yet linked to a person.",
       inputSchema: {
+        brand: brandRef,
         name: z.string().optional().describe("A catalog name, such as order_completed or page.viewed."),
         kind: z.enum(["track", "identify", "page", "screen", "group", "alias"]).optional(),
         user_id: z.string().optional(),
         anonymous_id: z.string().optional(),
         matched: z.enum(["true", "false", "all"]).optional(),
         since: z.string().datetime().optional(),
-        brand: z.string().optional(),
         limit: z.number().int().min(1).max(200).optional(),
         cursor: z.string().optional(),
       },
       annotations: read,
     },
-    (q) => call(() => gtm.GET("/v1/workspaces/{ws}/customer-events", { params: { path: path(), query: q } })),
+    ({ brand, ...q }) => call(() => onBrand(brand, (b) => gtm.GET("/v1/brands/{brand}/customer-events", { params: { path: { brand: b }, query: q } }))),
   );
 
   server.registerTool(
@@ -227,6 +232,7 @@ export function registerRecordTools(server: McpServer, gtm: MissionClient, works
         "(merge_records), linked or dismissed; blocked pairs both have their own user id (two accounts in the product) and are never merged. " +
         "Compare the two before deciding, and ask the user when unsure.",
       inputSchema: {
+        brand: brandRef,
         status: z.string().optional().describe("Comma-separated: open, blocked, merged, linked, dismissed; or all. Default open,blocked."),
         type: typeKey.optional(),
         record: id.optional().describe("Only pairs with this record."),
@@ -235,7 +241,7 @@ export function registerRecordTools(server: McpServer, gtm: MissionClient, works
       },
       annotations: read,
     },
-    (q) => call(() => gtm.GET("/v1/workspaces/{ws}/records/duplicates", { params: { path: path(), query: q } })),
+    ({ brand, ...q }) => call(() => onBrand(brand, (b) => gtm.GET("/v1/brands/{brand}/records/duplicates", { params: { path: { brand: b }, query: q } }))),
   );
 
   server.registerTool(
@@ -409,11 +415,11 @@ export function registerRecordTools(server: McpServer, gtm: MissionClient, works
       description:
         "For a record with needs_review true, such as a person RB2B, Vector or Warmly named on the website. approve lists it and lets cold " +
         "email reach it (never marketing without their consent); reject archives it. Ask the user before deciding for them.",
-      inputSchema: { record_id: id, decision: z.enum(["approve", "reject"]) },
+      inputSchema: { brand: brandRef, record_id: id, decision: z.enum(["approve", "reject"]) },
       annotations: write,
     },
-    ({ record_id, decision }) =>
-      call(() => gtm.POST("/v1/workspaces/{ws}/records/{record}/review", { params: { path: recordPath(record_id) }, body: { decision } })),
+    ({ brand, record_id, decision }) =>
+      call(() => onBrand(brand, (b) => gtm.POST("/v1/brands/{brand}/records/{record}/review", { params: { path: { brand: b, record: record_id } }, body: { decision } }))),
   );
 
   server.registerTool(
@@ -424,17 +430,17 @@ export function registerRecordTools(server: McpServer, gtm: MissionClient, works
         "Add a person, company or other record. Look it up first with lookup_record. A verified identity another record holds is refused " +
         "with identity_taken (the message names that record): change that one instead.",
       inputSchema: {
+        brand: brandRef,
         type: typeKey,
         name: z.string().max(500).optional().describe("A person with no name takes first_name and last_name."),
         attributes: attributes.optional(),
         identities: z.array(identity).max(50).optional(),
         origin: origins.optional().describe("Where it came from. Default manual."),
         source: sources.optional().describe("Who the values come from, for precedence. Default manual."),
-        brand_id: z.string().nullable().optional().describe("A brand's handle or id; leave out or null for a record every brand shares."),
       },
       annotations: write,
     },
-    (body) => call(() => gtm.POST("/v1/workspaces/{ws}/records", { params: { path: path() }, body })),
+    ({ brand, ...body }) => call(() => onBrand(brand, (b) => gtm.POST("/v1/brands/{brand}/records", { params: { path: { brand: b } }, body }))),
   );
 
   server.registerTool(
@@ -446,18 +452,18 @@ export function registerRecordTools(server: McpServer, gtm: MissionClient, works
         "version is required: send the version from get_record. If someone changed the record since (record_changed), read it again, " +
         "check your change still makes sense and send the new version.",
       inputSchema: {
+        brand: brandRef,
         record_id: id,
         name: z.string().max(500).optional(),
         attributes: attributes.optional(),
         source: sources.optional(),
         origin: origins.optional(),
-        brand_id: z.string().nullable().optional(),
         archived: z.boolean().optional(),
         version: z.number().int().describe("The record's version, from get_record."),
       },
       annotations: write,
     },
-    ({ record_id, ...body }) => call(() => gtm.PATCH("/v1/workspaces/{ws}/records/{record}", { params: { path: recordPath(record_id) }, body })),
+    ({ brand, record_id, ...body }) => call(() => onBrand(brand, (b) => gtm.PATCH("/v1/brands/{brand}/records/{record}", { params: { path: { brand: b, record: record_id } }, body }))),
   );
 
   server.registerTool(
@@ -470,13 +476,14 @@ export function registerRecordTools(server: McpServer, gtm: MissionClient, works
         "archive it with update_record instead. suppress adds their emails (a company's domains) to the opt-out list. Only when the user asked " +
         "for this record to be deleted. version is required: send the version from get_record.",
       inputSchema: {
+        brand: brandRef,
         record_id: id,
         suppress: z.boolean().optional().describe("Also never contact them again."),
         version: z.number().int().describe("The record's version, from get_record."),
       },
       annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: false },
     },
-    ({ record_id, ...query }) => call(() => gtm.DELETE("/v1/workspaces/{ws}/records/{record}", { params: { path: recordPath(record_id), query } })),
+    ({ brand, record_id, ...query }) => call(() => onBrand(brand, (b) => gtm.DELETE("/v1/brands/{brand}/records/{record}", { params: { path: { brand: b, record: record_id }, query } }))),
   );
 
   server.registerTool(
@@ -486,10 +493,10 @@ export function registerRecordTools(server: McpServer, gtm: MissionClient, works
       description:
         "Add an email, phone, id or domain to a record, or verify one it holds unverified. When a person changes their email, pass the old " +
         "identity's id as replaces: it is closed and kept in the history. Never verify an email or phone the person has not proved they own.",
-      inputSchema: { record_id: id, ...identity.shape, replaces: id.optional() },
+      inputSchema: { brand: brandRef, record_id: id, ...identity.shape, replaces: id.optional() },
       annotations: write,
     },
-    ({ record_id, ...body }) => call(() => gtm.POST("/v1/workspaces/{ws}/records/{record}/identities", { params: { path: recordPath(record_id) }, body })),
+    ({ brand, record_id, ...body }) => call(() => onBrand(brand, (b) => gtm.POST("/v1/brands/{brand}/records/{record}/identities", { params: { path: { brand: b, record: record_id } }, body }))),
   );
 
   server.registerTool(
@@ -497,11 +504,11 @@ export function registerRecordTools(server: McpServer, gtm: MissionClient, works
     {
       title: "Remove an identity",
       description: "It stops pointing at the record and stays in its history.",
-      inputSchema: { record_id: id, identity_id: id },
+      inputSchema: { brand: brandRef, record_id: id, identity_id: id },
       annotations: write,
     },
-    ({ record_id, identity_id }) =>
-      call(() => gtm.POST("/v1/workspaces/{ws}/records/{record}/identities/{identity}/close", { params: { path: { ...recordPath(record_id), identity: identity_id } } })),
+    ({ brand, record_id, identity_id }) =>
+      call(() => onBrand(brand, (b) => gtm.POST("/v1/brands/{brand}/records/{record}/identities/{identity}/close", { params: { path: { brand: b, record: record_id, identity: identity_id } } }))),
   );
 
   server.registerTool(
@@ -509,10 +516,10 @@ export function registerRecordTools(server: McpServer, gtm: MissionClient, works
     {
       title: "Link two records",
       description: "A typed link such as partner_of. Record reference fields, such as a person's companies, are set with update_record instead.",
-      inputSchema: { record_id: id, to: id, kind: z.string().regex(/^[a-z][a-z0-9_]{1,62}$/), properties: z.record(z.string(), z.unknown()).optional() },
+      inputSchema: { brand: brandRef, record_id: id, to: id, kind: z.string().regex(/^[a-z][a-z0-9_]{1,62}$/), properties: z.record(z.string(), z.unknown()).optional() },
       annotations: write,
     },
-    ({ record_id, ...body }) => call(() => gtm.POST("/v1/workspaces/{ws}/records/{record}/relationships", { params: { path: recordPath(record_id) }, body })),
+    ({ brand, record_id, ...body }) => call(() => onBrand(brand, (b) => gtm.POST("/v1/brands/{brand}/records/{record}/relationships", { params: { path: { brand: b, record: record_id } }, body }))),
   );
 
   server.registerTool(
@@ -520,13 +527,13 @@ export function registerRecordTools(server: McpServer, gtm: MissionClient, works
     {
       title: "End a link",
       description: "The link is kept with its end time.",
-      inputSchema: { record_id: id, link_id: id },
+      inputSchema: { brand: brandRef, record_id: id, link_id: id },
       annotations: write,
     },
-    ({ record_id, link_id }) =>
+    ({ brand, record_id, link_id }) =>
       call(() =>
-        gtm.POST("/v1/workspaces/{ws}/records/{record}/relationships/{relationship}/end", { params: { path: { ...recordPath(record_id), relationship: link_id } } }),
-      ),
+        onBrand(brand, (b) => gtm.POST("/v1/brands/{brand}/records/{record}/relationships/{relationship}/end", { params: { path: { brand: b, record: record_id, relationship: link_id } } }),
+      )),
   );
 
   server.registerTool(
@@ -1000,6 +1007,7 @@ export function registerRecordTools(server: McpServer, gtm: MissionClient, works
         "Record that a person granted or withdrew consent on a channel, with where it happened and what proves it. Nothing is overwritten; " +
         "the latest counts. Only record what the person actually did (a form, a preference centre, an unsubscribe), never assume consent.",
       inputSchema: {
+        brand: brandRef,
         record_id: id,
         channel: z.enum(["email", "sms", "push", "whatsapp", "in_app"]),
         status: z.enum(["granted", "withdrawn"]),
@@ -1011,7 +1019,7 @@ export function registerRecordTools(server: McpServer, gtm: MissionClient, works
       },
       annotations: write,
     },
-    ({ record_id, ...body }) => call(() => gtm.POST("/v1/workspaces/{ws}/records/{record}/consents", { params: { path: recordPath(record_id) }, body })),
+    ({ brand, record_id, ...body }) => call(() => onBrand(brand, (b) => gtm.POST("/v1/brands/{brand}/records/{record}/consents", { params: { path: { brand: b, record: record_id } }, body }))),
   );
 
   server.registerTool(
@@ -1022,10 +1030,10 @@ export function registerRecordTools(server: McpServer, gtm: MissionClient, works
         "Merge from into record_id, which is kept: identities, links, product events and consents move to it, and from's attributes fill in " +
         "what it lacks. from is archived with merged_into set. Two records with their own user ids are refused (merge_refused): use " +
         "link_record_duplicate. Merge only when the records are clearly the same human.",
-      inputSchema: { record_id: id.describe("The record to keep."), from: id.describe("The duplicate merged into it."), version: z.number().int().describe("The kept record's version, from get_record.") },
+      inputSchema: { brand: brandRef, record_id: id.describe("The record to keep."), from: id.describe("The duplicate merged into it."), version: z.number().int().describe("The kept record's version, from get_record.") },
       annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: false },
     },
-    ({ record_id, ...body }) => call(() => gtm.POST("/v1/workspaces/{ws}/records/{record}/merge", { params: { path: recordPath(record_id) }, body })),
+    ({ brand, record_id, ...body }) => call(() => onBrand(brand, (b) => gtm.POST("/v1/brands/{brand}/records/{record}/merge", { params: { path: { brand: b, record: record_id } }, body }))),
   );
 
   server.registerTool(
@@ -1033,11 +1041,11 @@ export function registerRecordTools(server: McpServer, gtm: MissionClient, works
     {
       title: "Not the same human",
       description: "Answer a possible duplicate: these are different people. The pair is not asked about again.",
-      inputSchema: { candidate_id: id },
+      inputSchema: { brand: brandRef, candidate_id: id },
       annotations: write,
     },
-    ({ candidate_id }) =>
-      call(() => gtm.POST("/v1/workspaces/{ws}/records/duplicates/{candidate}/dismiss", { params: { path: { ws: workspace(), candidate: candidate_id } } })),
+    ({ brand, candidate_id }) =>
+      call(() => onBrand(brand, (b) => gtm.POST("/v1/brands/{brand}/records/duplicates/{candidate}/dismiss", { params: { path: { brand: b, candidate: candidate_id } } }))),
   );
 
   server.registerTool(
@@ -1045,10 +1053,10 @@ export function registerRecordTools(server: McpServer, gtm: MissionClient, works
     {
       title: "The same human, kept apart",
       description: "Link a possible duplicate as the same human without merging, such as one person with two accounts in the product.",
-      inputSchema: { candidate_id: id },
+      inputSchema: { brand: brandRef, candidate_id: id },
       annotations: write,
     },
-    ({ candidate_id }) =>
-      call(() => gtm.POST("/v1/workspaces/{ws}/records/duplicates/{candidate}/link", { params: { path: { ws: workspace(), candidate: candidate_id } } })),
+    ({ brand, candidate_id }) =>
+      call(() => onBrand(brand, (b) => gtm.POST("/v1/brands/{brand}/records/duplicates/{candidate}/link", { params: { path: { brand: b, candidate: candidate_id } } }))),
   );
 }

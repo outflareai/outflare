@@ -85,16 +85,33 @@ type access struct {
 }
 
 // sees reports whether the caller may see a record owned by brand (nil for
-// shared).
+// shared). On a /v1/brands/{brand}/ route only the route's brand's rows
+// are seen: nothing is shared across brands there.
 func (a *access) sees(brand *string) bool {
+	if a.Brand != "" {
+		return brand != nil && *brand == a.Brand
+	}
 	return a.Brands == nil || brand == nil || slices.Contains(a.Brands, *brand)
 }
 
 // writes reports whether the caller may change a record owned by brand. A
 // brand-limited caller only reads shared records, since changing them would
-// change every brand.
+// change every brand. On a brand route only the route's brand's rows
+// change.
 func (a *access) writes(brand *string) bool {
+	if a.Brand != "" {
+		return brand != nil && *brand == a.Brand
+	}
 	return a.Brands == nil || (brand != nil && slices.Contains(a.Brands, *brand))
+}
+
+// seenBrands is the brands a query may show the caller: the route's brand
+// on a brand route, else the brands it is limited to (nil for every brand).
+func (a *access) seenBrands() []string {
+	if a.Brand != "" {
+		return []string{a.Brand}
+	}
+	return a.Brands
 }
 
 // brandLimitedMessage is the 403 a brand-limited caller gets on a route that

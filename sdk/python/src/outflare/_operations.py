@@ -219,6 +219,101 @@ class Operations(_Mixin):
             idempotency_key=idempotency_key,
         )
 
+    def add_brand_record_identity(
+        self,
+        brand: str,
+        record: str,
+        *,
+        namespace: str,
+        properties: dict[str, Any] | None = None,
+        replaces: str | None = None,
+        source: str | None = None,
+        value: str,
+        verified: bool | None = None,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Add, verify or change an identity.
+
+        Scope: customers.manage. Adds an identity, or updates the record's own copy of it: sending verified: true for
+        an email the record holds unverified verifies it (200). When a person changes their email, send the new one
+        with replaces set to the old identity's id: the old one is closed as changed and kept in the history. A
+        verified value another record of the same brand holds is refused with identity_taken, never moved or merged;
+        another brand's person with the same value is someone else and never blocks it.
+
+        Needs: the customers.manage scope.
+        POST /v1/brands/{brand}/records/{record}/identities
+        """
+        return self._call(
+            "POST",
+            "/v1/brands/{brand}/records/{record}/identities",
+            path={"brand": brand, "record": record},
+            body={
+                "namespace": namespace,
+                "properties": properties,
+                "replaces": replaces,
+                "source": source,
+                "value": value,
+                "verified": verified,
+            },
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
+    def add_brand_record_relationship(
+        self,
+        brand: str,
+        record: str,
+        *,
+        kind: str,
+        properties: dict[str, Any] | None = None,
+        to: str,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Link two records.
+
+        Scope: customers.manage. A typed link from this record, such as partner_of. Record reference fields (companies) are set through attributes instead.
+
+        Needs: the customers.manage scope.
+        POST /v1/brands/{brand}/records/{record}/relationships
+        """
+        return self._call(
+            "POST",
+            "/v1/brands/{brand}/records/{record}/relationships",
+            path={"brand": brand, "record": record},
+            body={"kind": kind, "properties": properties, "to": to},
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
+    def add_brand_static_list_members(
+        self,
+        brand: str,
+        id: str,
+        *,
+        record_ids: list[str],
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Put people in a static list.
+
+        Scope: customers.manage. Only a static list takes people; a smart list fills itself (409). People only: not
+        companies, merged or archived records, or, for a brand's list, another brand's people. Rules acting on people
+        joining the list hear of it.
+
+        Needs: the customers.manage scope.
+        POST /v1/brands/{brand}/smart-lists/{id}/members
+        """
+        return self._call(
+            "POST",
+            "/v1/brands/{brand}/smart-lists/{id}/members",
+            path={"brand": brand, "id": id},
+            body={"record_ids": record_ids},
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
     def add_conversion_preset(
         self,
         preset: str,
@@ -597,6 +692,7 @@ class Operations(_Mixin):
         with replaces set to the old identity's id: the old one is closed as changed and kept in the history. A
         verified value another record of the same brand holds is refused with identity_taken, never moved or merged;
         another brand's person with the same value is someone else and never blocks it.
+        Deprecated: use POST /v1/brands/{brand}/records/{record}/identities. This workspace route stays until the brands contract step; it acts on the record's, list's or the workspace's first brand.
 
         Needs: the customers.manage scope.
         POST /v1/workspaces/{ws}/records/{record}/identities
@@ -631,6 +727,7 @@ class Operations(_Mixin):
         """Link two records.
 
         Scope: customers.manage. A typed link from this record, such as partner_of. Record reference fields (companies) are set through attributes instead.
+        Deprecated: use POST /v1/brands/{brand}/records/{record}/relationships. This workspace route stays until the brands contract step; it acts on the record's, list's or the workspace's first brand.
 
         Needs: the customers.manage scope.
         POST /v1/workspaces/{ws}/records/{record}/relationships
@@ -826,6 +923,7 @@ class Operations(_Mixin):
         Scope: customers.manage. Only a static list takes people; a smart list fills itself (409). People only: not
         companies, merged or archived records, or, for a brand's list, another brand's people. Rules acting on people
         joining the list hear of it.
+        Deprecated: use POST /v1/brands/{brand}/smart-lists/{id}/members. This workspace route stays until the brands contract step; it acts on the record's, list's or the workspace's first brand.
 
         Needs: the customers.manage scope.
         POST /v1/workspaces/{ws}/smart-lists/{id}/members
@@ -2710,6 +2808,28 @@ class Operations(_Mixin):
             idempotency_key=idempotency_key,
         )
 
+    def close_brand_record_identity(
+        self,
+        brand: str,
+        record: str,
+        identity: str,
+        *,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Remove an identity.
+
+        Scope: customers.manage. It stops pointing at the record and stays in its history as removed.
+
+        Needs: the customers.manage scope.
+        POST /v1/brands/{brand}/records/{record}/identities/{identity}/close
+        """
+        return self._call(
+            "POST",
+            "/v1/brands/{brand}/records/{record}/identities/{identity}/close",
+            path={"brand": brand, "record": record, "identity": identity},
+            idempotency_key=idempotency_key,
+        )
+
     def close_record_identity(
         self,
         record: str,
@@ -2721,6 +2841,7 @@ class Operations(_Mixin):
         """Remove an identity.
 
         Scope: customers.manage. It stops pointing at the record and stays in its history as removed.
+        Deprecated: use POST /v1/brands/{brand}/records/{record}/identities/{identity}/close. This workspace route stays until the brands contract step; it acts on the record's, list's or the workspace's first brand.
 
         Needs: the customers.manage scope.
         POST /v1/workspaces/{ws}/records/{record}/identities/{identity}/close
@@ -3272,6 +3393,55 @@ class Operations(_Mixin):
             idempotency_key=idempotency_key,
         )
 
+    def create_brand_record(
+        self,
+        brand: str,
+        *,
+        acquired_via: str | None = None,
+        archived: bool | None = None,
+        attributes: dict[str, Any] | None = None,
+        brand_id: str | None = None,
+        identities: list[dict[str, Any]] | None = None,
+        name: str | None = None,
+        origin: Literal["first_party", "prospect", "crm_sync", "import", "manual"] | None = None,
+        source: Literal["manual", "first_party", "crm_sync", "enrichment", "import"] | None = None,
+        type: str | None = None,
+        version: int | None = None,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Add a customer record.
+
+        Scope: customers.manage. Attributes are checked against the type's fields in the catalog; an unknown key is
+        refused, so add the field first. Identities say who the record is: email and phone count only when verified
+        (default false), and the workspace's own ids, payment customers and domains are trusted as sent. A verified
+        identity another record of the same brand already holds is refused with identity_taken; look it up with GET
+        .../records/lookup. The record's catalog and its identities are its brand's: the same email in another brand
+        is another person there. A person with no name takes first_name and last_name.
+
+        Needs: the customers.manage scope.
+        POST /v1/brands/{brand}/records
+        """
+        return self._call(
+            "POST",
+            "/v1/brands/{brand}/records",
+            path={"brand": brand},
+            body={
+                "acquired_via": acquired_via,
+                "archived": archived,
+                "attributes": attributes,
+                "brand_id": brand_id,
+                "identities": identities,
+                "name": name,
+                "origin": origin,
+                "source": source,
+                "type": type,
+                "version": version,
+            },
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
     def create_brand_record_type(
         self,
         brand: str,
@@ -3298,6 +3468,44 @@ class Operations(_Mixin):
             "/v1/brands/{brand}/catalog/types",
             path={"brand": brand},
             body={"archived": archived, "description": description, "key": key, "name": name, "plural": plural},
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
+    def create_brand_smart_list(
+        self,
+        brand: str,
+        *,
+        brand_id: str | None = None,
+        description: str | None = None,
+        kind: Literal["smart", "static"] | None = None,
+        match: Literal["all", "any"] | None = None,
+        name: str | None = None,
+        rules: list[dict[str, Any]] | None = None,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Create a smart list.
+
+        Scope: customers.manage. The list fills itself straight away, then stays up to date: Outflare adds people who
+        start matching and removes people who stop, within about 15 minutes. Check the count first with
+        POST .../smart-lists/preview. A brand's list holds that brand's people and those shared by every brand.
+
+        Needs: the customers.manage scope.
+        POST /v1/brands/{brand}/smart-lists
+        """
+        return self._call(
+            "POST",
+            "/v1/brands/{brand}/smart-lists",
+            path={"brand": brand},
+            body={
+                "brand_id": brand_id,
+                "description": description,
+                "kind": kind,
+                "match": match,
+                "name": name,
+                "rules": rules,
+            },
             extra_body=extra_body,
             idempotency_key=idempotency_key,
         )
@@ -5786,6 +5994,7 @@ class Operations(_Mixin):
         identity another record of the same brand already holds is refused with identity_taken; look it up with GET
         .../records/lookup. The record's catalog and its identities are its brand's: the same email in another brand
         is another person there. A person with no name takes first_name and last_name.
+        Deprecated: use POST /v1/brands/{brand}/records. This workspace route stays until the brands contract step; it acts on the record's, list's or the workspace's first brand.
 
         Needs: the customers.manage scope.
         POST /v1/workspaces/{ws}/records
@@ -6348,6 +6557,7 @@ class Operations(_Mixin):
         Scope: customers.manage. The list fills itself straight away, then stays up to date: Outflare adds people who
         start matching and removes people who stop, within about 15 minutes. Check the count first with
         POST .../smart-lists/preview. A brand's list holds that brand's people and those shared by every brand.
+        Deprecated: use POST /v1/brands/{brand}/smart-lists. This workspace route stays until the brands contract step; it acts on the record's, list's or the workspace's first brand.
 
         Needs: the customers.manage scope.
         POST /v1/workspaces/{ws}/smart-lists
@@ -6859,6 +7069,62 @@ class Operations(_Mixin):
             "DELETE",
             "/v1/workspaces/{ws}/ai-cohorts/{cohort}/prompts/{prompt}",
             path={"cohort": cohort, "prompt": prompt, "ws": ws},
+            idempotency_key=idempotency_key,
+        )
+
+    def delete_brand_record(
+        self,
+        brand: str,
+        record: str,
+        *,
+        suppress: bool | None = None,
+        version: int | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Erase a customer record.
+
+        Scope: customers.manage. Deletes a person or company for good, such as for an erasure request; to hide one
+        and keep its history, archive it instead (PATCH with archived: true), and to delete one with 7 days to
+        change your mind, use POST /v1/brands/{brand}/records/{record}/delete. Works on a record in Recently deleted
+        too, and its deletions go with it. Goes with it: the records merged into
+        it, its identities, links, field history and consents and, for a person, everything about them: their
+        leads (also any lead with one of their emails), the cold email sent to them and their replies, meetings,
+        lifecycle email sent to them alone, product events, website visits, journey runs, partner referrals and
+        partner portal sign-ins. Deals, payments and opt-outs stay, unlinked; a partner's memberships, rewards and
+        payouts stay on a new archived record named "Erased partner" with no name or identities, suspended and
+        without payout details or notes, so commission totals still add up, and keep their codes so their links still lead
+        to the site; their payouts' notes and references are cleared unless partner settings' erase_payout_notes is off; a company's people stay, unlinked from it. erased counts the rows removed, by
+        table. A deal is deleted with DELETE .../deals/{deal}.
+
+        Needs: the customers.manage scope.
+        DELETE /v1/brands/{brand}/records/{record}
+        """
+        return self._call(
+            "DELETE",
+            "/v1/brands/{brand}/records/{record}",
+            path={"brand": brand, "record": record},
+            query={"suppress": suppress, "version": version},
+            idempotency_key=idempotency_key,
+        )
+
+    def delete_brand_smart_list(
+        self,
+        brand: str,
+        id: str,
+        *,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Delete a smart list. Its people stay.
+
+        Scope: customers.manage.
+
+        Needs: the customers.manage scope.
+        DELETE /v1/brands/{brand}/smart-lists/{id}
+        """
+        return self._call(
+            "DELETE",
+            "/v1/brands/{brand}/smart-lists/{id}",
+            path={"brand": brand, "id": id},
             idempotency_key=idempotency_key,
         )
 
@@ -7564,6 +7830,7 @@ class Operations(_Mixin):
         without payout details or notes, so commission totals still add up, and keep their codes so their links still lead
         to the site; their payouts' notes and references are cleared unless partner settings' erase_payout_notes is off; a company's people stay, unlinked from it. erased counts the rows removed, by
         table. A deal is deleted with DELETE .../deals/{deal}.
+        Deprecated: use DELETE /v1/brands/{brand}/records/{record}. This workspace route stays until the brands contract step; it acts on the record's, list's or the workspace's first brand.
 
         Needs: the customers.manage scope.
         DELETE /v1/workspaces/{ws}/records/{record}
@@ -7843,6 +8110,7 @@ class Operations(_Mixin):
         """Delete a smart list. Its people stay.
 
         Scope: customers.manage.
+        Deprecated: use DELETE /v1/brands/{brand}/smart-lists/{id}. This workspace route stays until the brands contract step; it acts on the record's, list's or the workspace's first brand.
 
         Needs: the customers.manage scope.
         DELETE /v1/workspaces/{ws}/smart-lists/{id}
@@ -8146,6 +8414,27 @@ class Operations(_Mixin):
             idempotency_key=idempotency_key,
         )
 
+    def dismiss_brand_record_duplicate(
+        self,
+        brand: str,
+        candidate: str,
+        *,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Not the same human.
+
+        Scope: customers.manage. The pair is not asked about again.
+
+        Needs: the customers.manage scope.
+        POST /v1/brands/{brand}/records/duplicates/{candidate}/dismiss
+        """
+        return self._call(
+            "POST",
+            "/v1/brands/{brand}/records/duplicates/{candidate}/dismiss",
+            path={"brand": brand, "candidate": candidate},
+            idempotency_key=idempotency_key,
+        )
+
     def dismiss_knowledge_gap(
         self,
         *,
@@ -8181,6 +8470,7 @@ class Operations(_Mixin):
         """Not the same human.
 
         Scope: customers.manage. The pair is not asked about again.
+        Deprecated: use POST /v1/brands/{brand}/records/duplicates/{candidate}/dismiss. This workspace route stays until the brands contract step; it acts on the record's, list's or the workspace's first brand.
 
         Needs: the customers.manage scope.
         POST /v1/workspaces/{ws}/records/duplicates/{candidate}/dismiss
@@ -8487,6 +8777,28 @@ class Operations(_Mixin):
             idempotency_key=idempotency_key,
         )
 
+    def end_brand_record_relationship(
+        self,
+        brand: str,
+        record: str,
+        relationship: str,
+        *,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """End a link.
+
+        Scope: customers.manage. It is kept with its end time.
+
+        Needs: the customers.manage scope.
+        POST /v1/brands/{brand}/records/{record}/relationships/{relationship}/end
+        """
+        return self._call(
+            "POST",
+            "/v1/brands/{brand}/records/{record}/relationships/{relationship}/end",
+            path={"brand": brand, "record": record, "relationship": relationship},
+            idempotency_key=idempotency_key,
+        )
+
     def end_record_relationship(
         self,
         record: str,
@@ -8498,6 +8810,7 @@ class Operations(_Mixin):
         """End a link.
 
         Scope: customers.manage. It is kept with its end time.
+        Deprecated: use POST /v1/brands/{brand}/records/{record}/relationships/{relationship}/end. This workspace route stays until the brands contract step; it acts on the record's, list's or the workspace's first brand.
 
         Needs: the customers.manage scope.
         POST /v1/workspaces/{ws}/records/{record}/relationships/{relationship}/end
@@ -9834,6 +10147,24 @@ class Operations(_Mixin):
             path={"brand": brand, "ws": ws},
         )
 
+    def get_brand_crm_import(
+        self,
+        brand: str,
+        import_: str,
+    ) -> Any:
+        """Get a CRM import.
+
+        Scope: customers.read. Its status, and once it runs, what it did: records seen, created, matched to records already here, updated and unchanged for each object; the record types, fields and option lists it added; members matched by email; placeholders for records another record points at that the CRM did not return; and values it left out, with why.
+
+        Needs: the customers.read scope.
+        GET /v1/brands/{brand}/crm-imports/{import}
+        """
+        return self._call(
+            "GET",
+            "/v1/brands/{brand}/crm-imports/{import}",
+            path={"brand": brand, "import": import_},
+        )
+
     def get_brand_dns(
         self,
         brand: str,
@@ -9896,6 +10227,91 @@ class Operations(_Mixin):
             "GET",
             "/v1/brands/{brand}/events/summary",
             path={"brand": brand},
+        )
+
+    def get_brand_record(
+        self,
+        brand: str,
+        record: str,
+    ) -> Any:
+        """Read a customer record.
+
+        Scope: customers.read. With its active identities.
+
+        Needs: the customers.read scope.
+        GET /v1/brands/{brand}/records/{record}
+        """
+        return self._call(
+            "GET",
+            "/v1/brands/{brand}/records/{record}",
+            path={"brand": brand, "record": record},
+        )
+
+    def get_brand_record_history(
+        self,
+        brand: str,
+        record: str,
+        *,
+        field: str | None = None,
+        limit: int | None = None,
+        before: int | None = None,
+        cursor: str | None = None,
+        fields: list[str] | None = None,
+    ) -> Any:
+        """A record's change history.
+
+        Scope: customers.read. Every change to its name and attributes, newest first, with who made it and from which source.
+
+        Needs: the customers.read scope.
+        GET /v1/brands/{brand}/records/{record}/history
+        """
+        return self._call(
+            "GET",
+            "/v1/brands/{brand}/records/{record}/history",
+            path={"brand": brand, "record": record},
+            query={"field": field, "limit": limit, "before": before, "cursor": cursor, "fields": fields},
+        )
+
+    def get_brand_record_timeline(
+        self,
+        brand: str,
+        record: str,
+        *,
+        kinds: str | None = None,
+        people: Literal["true", "false"] | None = None,
+        limit: int | None = None,
+        before: str | None = None,
+        cursor: str | None = None,
+        fields: list[str] | None = None,
+    ) -> Any:
+        """A record's timeline.
+
+        Scope: customers.read. One timeline per person or company, newest first, across every module: their
+        product events (and, for a company, the group calls that named it), changes to their attributes,
+        identities added and closed, consent given or withdrawn, the cold email Outflare sent them and their
+        replies (`message`, with `direction` out or in), meetings, deals, website visits (`visit`), opt-out list
+        entries (`opt_out`) and journeys entered and finished (`journey`). Lifecycle email and payments show as the
+        events Outflare records for them (`email.sent`, `email.delivered` and so on, with `source: lifecycle`).
+
+        A company's timeline includes its people's (the people linked to it), each item's `record_id` saying whose
+        it is; `people=false` leaves them out. `brand` keeps one brand's items and the ones no brand owns. Kind
+        names are stable: new kinds may be added.
+
+        Needs: the customers.read scope.
+        GET /v1/brands/{brand}/records/{record}/timeline
+        """
+        return self._call(
+            "GET",
+            "/v1/brands/{brand}/records/{record}/timeline",
+            path={"brand": brand, "record": record},
+            query={
+                "kinds": kinds,
+                "people": people,
+                "limit": limit,
+                "before": before,
+                "cursor": cursor,
+                "fields": fields,
+            },
         )
 
     def get_brand_record_type(
@@ -9966,6 +10382,24 @@ class Operations(_Mixin):
             "GET",
             "/v1/workspaces/{ws}/brands/{brand}/setup",
             path={"brand": brand, "ws": ws},
+        )
+
+    def get_brand_smart_list(
+        self,
+        brand: str,
+        id: str,
+    ) -> Any:
+        """Get a smart list.
+
+        Scope: customers.read.
+
+        Needs: the customers.read scope.
+        GET /v1/brands/{brand}/smart-lists/{id}
+        """
+        return self._call(
+            "GET",
+            "/v1/brands/{brand}/smart-lists/{id}",
+            path={"brand": brand, "id": id},
         )
 
     def get_catalog(
@@ -10661,6 +11095,7 @@ class Operations(_Mixin):
         """Get a CRM import.
 
         Scope: customers.read. Its status, and once it runs, what it did: records seen, created, matched to records already here, updated and unchanged for each object; the record types, fields and option lists it added; members matched by email; placeholders for records another record points at that the CRM did not return; and values it left out, with why.
+        Deprecated: use GET /v1/brands/{brand}/crm-imports/{import}. This workspace route stays until the brands contract step; it reads the item in its own brand.
 
         Needs: the customers.read scope.
         GET /v1/workspaces/{ws}/crm-imports/{import}
@@ -12293,6 +12728,7 @@ class Operations(_Mixin):
         """Read a customer record.
 
         Scope: customers.read. With its active identities.
+        Deprecated: use GET /v1/brands/{brand}/records/{record}. This workspace route stays until the brands contract step; it reads the item in its own brand.
 
         Needs: the customers.read scope.
         GET /v1/workspaces/{ws}/records/{record}
@@ -12317,6 +12753,7 @@ class Operations(_Mixin):
         """A record's change history.
 
         Scope: customers.read. Every change to its name and attributes, newest first, with who made it and from which source.
+        Deprecated: use GET /v1/brands/{brand}/records/{record}/history. This workspace route stays until the brands contract step; it reads the item in its own brand.
 
         Needs: the customers.read scope.
         GET /v1/workspaces/{ws}/records/{record}/history
@@ -12353,6 +12790,7 @@ class Operations(_Mixin):
         A company's timeline includes its people's (the people linked to it), each item's `record_id` saying whose
         it is; `people=false` leaves them out. `brand` keeps one brand's items and the ones no brand owns. Kind
         names are stable: new kinds may be added.
+        Deprecated: use GET /v1/brands/{brand}/records/{record}/timeline. This workspace route stays until the brands contract step; it reads the item in its own brand.
 
         Needs: the customers.read scope.
         GET /v1/workspaces/{ws}/records/{record}/timeline
@@ -13401,6 +13839,7 @@ class Operations(_Mixin):
         """Get a smart list.
 
         Scope: customers.read.
+        Deprecated: use GET /v1/brands/{brand}/smart-lists/{id}. This workspace route stays until the brands contract step; it reads the item in its own brand.
 
         Needs: the customers.read scope.
         GET /v1/workspaces/{ws}/smart-lists/{id}
@@ -13863,6 +14302,48 @@ class Operations(_Mixin):
             path={"id": id, "ws": ws},
         )
 
+    def get_webhook_activity(
+        self,
+        id: str,
+        *,
+        ws: str | None = None,
+        days: int | None = None,
+    ) -> Any:
+        """An endpoint's tries per day and error rate.
+
+        Scope: webhooks.read. Tries per UTC day over the last days (oldest first), how many failed, the error rate and the 95th percentile answer time.
+
+        Needs: the webhooks.read scope.
+        GET /v1/workspaces/{ws}/webhooks/{id}/activity
+        """
+        return self._call(
+            "GET",
+            "/v1/workspaces/{ws}/webhooks/{id}/activity",
+            path={"id": id, "ws": ws},
+            query={"days": days},
+        )
+
+    def get_webhook_delivery(
+        self,
+        id: str,
+        delivery: str,
+        *,
+        ws: str | None = None,
+    ) -> Any:
+        """One delivery with every try.
+
+        Scope: webhooks.read. The delivery, its payload, and each try oldest first: when, the receiver's status code
+        or what went wrong, how long it took, and whether a person sent it (a redelivery or a test).
+
+        Needs: the webhooks.read scope.
+        GET /v1/workspaces/{ws}/webhooks/{id}/deliveries/{delivery}
+        """
+        return self._call(
+            "GET",
+            "/v1/workspaces/{ws}/webhooks/{id}/deliveries/{delivery}",
+            path={"id": id, "delivery": delivery, "ws": ws},
+        )
+
     def get_webhook_secret(
         self,
         id: str,
@@ -14301,6 +14782,28 @@ class Operations(_Mixin):
             idempotency_key=idempotency_key,
         )
 
+    def link_brand_record_duplicate(
+        self,
+        brand: str,
+        candidate: str,
+        *,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """The same human, kept apart.
+
+        Scope: customers.manage. Links the two records as the same human (a same_human link) without merging them, such
+        as one person with two accounts in your product.
+
+        Needs: the customers.manage scope.
+        POST /v1/brands/{brand}/records/duplicates/{candidate}/link
+        """
+        return self._call(
+            "POST",
+            "/v1/brands/{brand}/records/duplicates/{candidate}/link",
+            path={"brand": brand, "candidate": candidate},
+            idempotency_key=idempotency_key,
+        )
+
     def link_inbound_forwarder(
         self,
         *,
@@ -14336,6 +14839,7 @@ class Operations(_Mixin):
 
         Scope: customers.manage. Links the two records as the same human (a same_human link) without merging them, such
         as one person with two accounts in your product.
+        Deprecated: use POST /v1/brands/{brand}/records/duplicates/{candidate}/link. This workspace route stays until the brands contract step; it acts on the record's, list's or the workspace's first brand.
 
         Needs: the customers.manage scope.
         POST /v1/workspaces/{ws}/records/duplicates/{candidate}/link
@@ -15306,6 +15810,63 @@ class Operations(_Mixin):
             query={"kind": kind, "limit": limit, "before": before, "cursor": cursor, "fields": fields},
         )
 
+    def list_brand_crm_imports(
+        self,
+        brand: str,
+    ) -> Any:
+        """List a brand's CRM imports.
+
+        Scope: customers.read. The 50 newest imports into this brand.
+
+        Needs: the customers.read scope.
+        GET /v1/brands/{brand}/crm-imports
+        """
+        return self._call(
+            "GET",
+            "/v1/brands/{brand}/crm-imports",
+            path={"brand": brand},
+        )
+
+    def list_brand_customer_events(
+        self,
+        brand: str,
+        *,
+        name: str | None = None,
+        kind: Literal["track", "identify", "page", "screen", "group", "alias"] | None = None,
+        user_id: str | None = None,
+        anonymous_id: str | None = None,
+        matched: Literal["true", "false", "all"] | None = None,
+        since: str | None = None,
+        limit: int | None = None,
+        before: str | None = None,
+        cursor: str | None = None,
+        fields: list[str] | None = None,
+    ) -> Any:
+        """List product events.
+
+        Scope: customers.read. Product events, newest first. matched=false lists anonymous visitors' events not yet linked to a person.
+
+        Needs: the customers.read scope.
+        GET /v1/brands/{brand}/customer-events
+        """
+        return self._call(
+            "GET",
+            "/v1/brands/{brand}/customer-events",
+            path={"brand": brand},
+            query={
+                "name": name,
+                "kind": kind,
+                "user_id": user_id,
+                "anonymous_id": anonymous_id,
+                "matched": matched,
+                "since": since,
+                "limit": limit,
+                "before": before,
+                "cursor": cursor,
+                "fields": fields,
+            },
+        )
+
     def list_brand_event_definitions(
         self,
         brand: str,
@@ -15414,6 +15975,127 @@ class Operations(_Mixin):
             path={"brand": brand},
         )
 
+    def list_brand_query_tables(
+        self,
+        brand: str,
+    ) -> Any:
+        """List the tables a query can read.
+
+        Any caller in the workspace. The tables Query reads, with their columns and the read scope each needs. available
+        says whether you hold it; a table you can't read returns no rows. Customer tables show only this brand's
+        rows, and the brand's own record types (such as deal or subscription) are listed as tables too, with a
+        column per field.
+
+        GET /v1/brands/{brand}/query/tables
+        """
+        return self._call(
+            "GET",
+            "/v1/brands/{brand}/query/tables",
+            path={"brand": brand},
+        )
+
+    def list_brand_record_consents(
+        self,
+        brand: str,
+        record: str,
+        *,
+        history: Literal["true", "false"] | None = None,
+    ) -> Any:
+        """A person's consents.
+
+        Scope: customers.read. The current consent for each channel, topic and purpose the person was asked about: the
+        latest grant or withdrawal. history=true lists every one, newest first. A topic's own row wins over the whole
+        channel's, except a later withdrawal from the whole channel.
+
+        Needs: the customers.read scope.
+        GET /v1/brands/{brand}/records/{record}/consents
+        """
+        return self._call(
+            "GET",
+            "/v1/brands/{brand}/records/{record}/consents",
+            path={"brand": brand, "record": record},
+            query={"history": history},
+        )
+
+    def list_brand_record_duplicates(
+        self,
+        brand: str,
+        *,
+        status: str | None = None,
+        type: str | None = None,
+        record: str | None = None,
+        limit: int | None = None,
+        before: str | None = None,
+        cursor: str | None = None,
+        fields: list[str] | None = None,
+    ) -> Any:
+        """List possible duplicates.
+
+        Scope: customers.read. Pairs of records that may be the same human, because they share an email or phone,
+        newest first, with both records. open pairs can be merged (POST .../records/{record}/merge), linked or
+        dismissed; blocked pairs both have their own user id, so they are two accounts in your product and can only be
+        linked or dismissed. Default status open and blocked.
+
+        Needs: the customers.read scope.
+        GET /v1/brands/{brand}/records/duplicates
+        """
+        return self._call(
+            "GET",
+            "/v1/brands/{brand}/records/duplicates",
+            path={"brand": brand},
+            query={
+                "status": status,
+                "type": type,
+                "record": record,
+                "limit": limit,
+                "before": before,
+                "cursor": cursor,
+                "fields": fields,
+            },
+        )
+
+    def list_brand_record_identities(
+        self,
+        brand: str,
+        record: str,
+        *,
+        closed: bool | None = None,
+    ) -> Any:
+        """A record's identities.
+
+        Scope: customers.read. Active ones, and with closed=true the closed ones too, such as an email the person changed.
+
+        Needs: the customers.read scope.
+        GET /v1/brands/{brand}/records/{record}/identities
+        """
+        return self._call(
+            "GET",
+            "/v1/brands/{brand}/records/{record}/identities",
+            path={"brand": brand, "record": record},
+            query={"closed": closed},
+        )
+
+    def list_brand_record_relationships(
+        self,
+        brand: str,
+        record: str,
+        *,
+        ended: bool | None = None,
+    ) -> Any:
+        """A record's links.
+
+        Scope: customers.read. Links both ways, including record reference fields' values (field_key set). ended=true includes ended links.
+
+        Needs: the customers.read scope.
+        GET /v1/brands/{brand}/records/{record}/relationships
+        """
+        return self._call(
+            "GET",
+            "/v1/brands/{brand}/records/{record}/relationships",
+            path={"brand": brand, "record": record},
+            query={"ended": ended},
+        )
+
     def list_brand_record_types(
         self,
         brand: str,
@@ -15432,6 +16114,93 @@ class Operations(_Mixin):
             "/v1/brands/{brand}/catalog/types",
             path={"brand": brand},
             query={"archived": archived},
+        )
+
+    def list_brand_records(
+        self,
+        brand: str,
+        *,
+        type: str | None = None,
+        q: str | None = None,
+        attribute: list[str] | None = None,
+        origin: Literal["first_party", "prospect", "crm_sync", "import", "manual"] | None = None,
+        archived: Literal["false", "true", "all"] | None = None,
+        review: Literal["approved", "needs_review", "all"] | None = None,
+        acquired_via: str | None = None,
+        limit: int | None = None,
+        before: str | None = None,
+        cursor: str | None = None,
+        fields: list[str] | None = None,
+    ) -> Any:
+        """List customer records.
+
+        Scope: customers.read. People, companies and the workspace's own record types, newest first. Merged records
+        are left out. q matches the name or any active identity, such as part of an email. attribute narrows by
+        the catalog's fields.
+
+        Needs: the customers.read scope.
+        GET /v1/brands/{brand}/records
+        """
+        return self._call(
+            "GET",
+            "/v1/brands/{brand}/records",
+            path={"brand": brand},
+            query={
+                "type": type,
+                "q": q,
+                "attribute": attribute,
+                "origin": origin,
+                "archived": archived,
+                "review": review,
+                "acquired_via": acquired_via,
+                "limit": limit,
+                "before": before,
+                "cursor": cursor,
+                "fields": fields,
+            },
+        )
+
+    def list_brand_smart_list_members(
+        self,
+        brand: str,
+        id: str,
+        *,
+        limit: int | None = None,
+        before: str | None = None,
+        cursor: str | None = None,
+        fields: list[str] | None = None,
+    ) -> Any:
+        """Who is in a smart list now, newest to join first.
+
+        Scope: customers.read. As of the list's refreshed_at. Page with cursor=next_cursor.
+
+        Needs: the customers.read scope.
+        GET /v1/brands/{brand}/smart-lists/{id}/members
+        """
+        return self._call(
+            "GET",
+            "/v1/brands/{brand}/smart-lists/{id}/members",
+            path={"brand": brand, "id": id},
+            query={"limit": limit, "before": before, "cursor": cursor, "fields": fields},
+        )
+
+    def list_brand_smart_lists(
+        self,
+        brand: str,
+    ) -> Any:
+        """List smart lists.
+
+        Scope: customers.read. Groups of people on customer records that keep themselves up to date from rules, by name.
+        Lead lists (GET .../lead-lists) hold the leads someone picked or a search found; a smart list holds whoever
+        matches its rules now.
+
+        Needs: the customers.read scope.
+        GET /v1/brands/{brand}/smart-lists
+        """
+        return self._call(
+            "GET",
+            "/v1/brands/{brand}/smart-lists",
+            path={"brand": brand},
         )
 
     def list_brands(
@@ -16436,10 +17205,12 @@ class Operations(_Mixin):
         self,
         *,
         ws: str | None = None,
+        brand: str | None = None,
     ) -> Any:
         """List CRM imports.
 
         Scope: customers.read. The 50 newest.
+        Deprecated: use GET /v1/brands/{brand}/crm-imports. This workspace route stays until the brands contract step; without ?brand= it lists the workspace's first brand (a member or token kept to some brands gets its own), and ?brand=all lists every brand you can see, as before.
 
         Needs: the customers.read scope.
         GET /v1/workspaces/{ws}/crm-imports
@@ -16448,6 +17219,7 @@ class Operations(_Mixin):
             "GET",
             "/v1/workspaces/{ws}/crm-imports",
             path={"ws": ws},
+            query={"brand": brand},
         )
 
     def list_customer_events(
@@ -16469,6 +17241,7 @@ class Operations(_Mixin):
         """List product events.
 
         Scope: customers.read. Product events, newest first. matched=false lists anonymous visitors' events not yet linked to a person.
+        Deprecated: use GET /v1/brands/{brand}/customer-events. This workspace route stays until the brands contract step; without ?brand= it lists the workspace's first brand (a member or token kept to some brands gets its own), and ?brand=all lists every brand you can see, as before.
 
         Needs: the customers.read scope.
         GET /v1/workspaces/{ws}/customer-events
@@ -18720,6 +19493,48 @@ class Operations(_Mixin):
             path={"id": id, "ws": ws},
         )
 
+    def list_partner_conversion_log(
+        self,
+        *,
+        ws: str | None = None,
+        brand: str | None = None,
+        program: str | None = None,
+        source: Literal["api", "postback"] | None = None,
+        outcome: Literal["credited", "not_credited", "duplicate", "rejected", "error"] | None = None,
+        q: str | None = None,
+        limit: int | None = None,
+        before: str | None = None,
+        cursor: str | None = None,
+        fields: list[str] | None = None,
+    ) -> Any:
+        """List inbound conversion calls, newest first.
+
+        Scope: partners.read. Every conversion your backend or tracker reported in the last 30 days, by the API
+        (POST .../partner-conversions) or a postback URL, with what it sent, what Outflare answered and the outcome:
+        credited, not_credited (with its reason, such as no_partner), duplicate, rejected (bad input; the reason is
+        the error code) or error. Use it to find out why a sale wasn't credited. The email a call sent is never kept:
+        request shows "(sent)", and q finds the call by the full address.
+
+        Needs: the partners.read scope.
+        GET /v1/workspaces/{ws}/partner-conversion-log
+        """
+        return self._call(
+            "GET",
+            "/v1/workspaces/{ws}/partner-conversion-log",
+            path={"ws": ws},
+            query={
+                "brand": brand,
+                "program": program,
+                "source": source,
+                "outcome": outcome,
+                "q": q,
+                "limit": limit,
+                "before": before,
+                "cursor": cursor,
+                "fields": fields,
+            },
+        )
+
     def list_partner_conversions(
         self,
         *,
@@ -19164,12 +19979,14 @@ class Operations(_Mixin):
         self,
         *,
         ws: str | None = None,
+        brand: str | None = None,
     ) -> Any:
         """List the tables a query can read.
 
         Any caller in the workspace. The tables Query reads, with their columns and the read scope each needs. available
         says whether you hold it; a table you can't read returns no rows. Tables show only this workspace's rows and,
         for a caller kept to some brands, those brands' rows and the shared ones.
+        Deprecated: use GET /v1/brands/{brand}/query/tables. This workspace route stays until the brands contract step; without ?brand= it queries the workspace's first brand (a member or token kept to some brands gets its own), and ?brand=all queries every brand you can see, as before.
 
         GET /v1/workspaces/{ws}/query/tables
         """
@@ -19177,6 +19994,7 @@ class Operations(_Mixin):
             "GET",
             "/v1/workspaces/{ws}/query/tables",
             path={"ws": ws},
+            query={"brand": brand},
         )
 
     def list_rankings(
@@ -19245,6 +20063,7 @@ class Operations(_Mixin):
         Scope: customers.read. The current consent for each channel, topic and purpose the person was asked about: the
         latest grant or withdrawal. history=true lists every one, newest first. A topic's own row wins over the whole
         channel's, except a later withdrawal from the whole channel.
+        Deprecated: use GET /v1/brands/{brand}/records/{record}/consents. This workspace route stays until the brands contract step; it reads the item in its own brand.
 
         Needs: the customers.read scope.
         GET /v1/workspaces/{ws}/records/{record}/consents
@@ -19275,6 +20094,7 @@ class Operations(_Mixin):
         newest first, with both records. open pairs can be merged (POST .../records/{record}/merge), linked or
         dismissed; blocked pairs both have their own user id, so they are two accounts in your product and can only be
         linked or dismissed. Default status open and blocked.
+        Deprecated: use GET /v1/brands/{brand}/records/duplicates. This workspace route stays until the brands contract step; without ?brand= it lists the workspace's first brand (a member or token kept to some brands gets its own), and ?brand=all lists every brand you can see, as before.
 
         Needs: the customers.read scope.
         GET /v1/workspaces/{ws}/records/duplicates
@@ -19305,6 +20125,7 @@ class Operations(_Mixin):
         """A record's identities.
 
         Scope: customers.read. Active ones, and with closed=true the closed ones too, such as an email the person changed.
+        Deprecated: use GET /v1/brands/{brand}/records/{record}/identities. This workspace route stays until the brands contract step; it reads the item in its own brand.
 
         Needs: the customers.read scope.
         GET /v1/workspaces/{ws}/records/{record}/identities
@@ -19326,6 +20147,7 @@ class Operations(_Mixin):
         """A record's links.
 
         Scope: customers.read. Links both ways, including record reference fields' values (field_key set). ended=true includes ended links.
+        Deprecated: use GET /v1/brands/{brand}/records/{record}/relationships. This workspace route stays until the brands contract step; it reads the item in its own brand.
 
         Needs: the customers.read scope.
         GET /v1/workspaces/{ws}/records/{record}/relationships
@@ -19380,6 +20202,7 @@ class Operations(_Mixin):
         Scope: customers.read. People, companies and the workspace's own record types, newest first. Merged records
         are left out. q matches the name or any active identity, such as part of an email. attribute narrows by
         the catalog's fields.
+        Deprecated: use GET /v1/brands/{brand}/records. This workspace route stays until the brands contract step; without ?brand= it lists the workspace's first brand (a member or token kept to some brands gets its own), and ?brand=all lists every brand you can see, as before.
 
         Needs: the customers.read scope.
         GET /v1/workspaces/{ws}/records
@@ -20063,6 +20886,7 @@ class Operations(_Mixin):
         """Who is in a smart list now, newest to join first.
 
         Scope: customers.read. As of the list's refreshed_at. Page with cursor=next_cursor.
+        Deprecated: use GET /v1/brands/{brand}/smart-lists/{id}/members. This workspace route stays until the brands contract step; it reads the item in its own brand.
 
         Needs: the customers.read scope.
         GET /v1/workspaces/{ws}/smart-lists/{id}/members
@@ -20085,6 +20909,7 @@ class Operations(_Mixin):
         Scope: customers.read. Groups of people on customer records that keep themselves up to date from rules, by name.
         Lead lists (GET .../lead-lists) hold the leads someone picked or a search found; a smart list holds whoever
         matches its rules now.
+        Deprecated: use GET /v1/brands/{brand}/smart-lists. This workspace route stays until the brands contract step; without ?brand= it lists the workspace's first brand (a member or token kept to some brands gets its own), and ?brand=all lists every brand you can see, as before.
 
         Needs: the customers.read scope.
         GET /v1/workspaces/{ws}/smart-lists
@@ -21116,6 +21941,38 @@ class Operations(_Mixin):
             idempotency_key=idempotency_key,
         )
 
+    def merge_brand_records(
+        self,
+        brand: str,
+        record: str,
+        *,
+        from_: str,
+        version: int | None = None,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Merge a duplicate into this record.
+
+        Scope: customers.manage. Merges from into this record, which is kept. from's identities, links, product events
+        and consents move here; its attributes fill in what this record lacks, or replace a value a lower-precedence
+        source set, and lists such as companies are joined. from is kept, archived, with merged_into set, so its
+        history and old links still lead here. Records of different types, or two records with their own user ids
+        (two accounts in your product), are refused with merge_refused: link those instead. Send version (this
+        record's, as read) to refuse the merge with record_changed if it changed since; agents must send it
+        (version_required).
+
+        Needs: the customers.manage scope.
+        POST /v1/brands/{brand}/records/{record}/merge
+        """
+        return self._call(
+            "POST",
+            "/v1/brands/{brand}/records/{record}/merge",
+            path={"brand": brand, "record": record},
+            body={"from": from_, "version": version},
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
     def merge_records(
         self,
         record: str,
@@ -21135,6 +21992,7 @@ class Operations(_Mixin):
         (two accounts in your product), are refused with merge_refused: link those instead. Send version (this
         record's, as read) to refuse the merge with record_changed if it changed since; agents must send it
         (version_required).
+        Deprecated: use POST /v1/brands/{brand}/records/{record}/merge. This workspace route stays until the brands contract step; it acts on the record's, list's or the workspace's first brand.
 
         Needs: the customers.manage scope.
         POST /v1/workspaces/{ws}/records/{record}/merge
@@ -21632,6 +22490,33 @@ class Operations(_Mixin):
             path={"brand": brand, "batch": batch},
         )
 
+    def preview_brand_smart_list(
+        self,
+        brand: str,
+        *,
+        brand_id: str | None = None,
+        match: Literal["all", "any"] | None = None,
+        rules: list[dict[str, Any]] | None = None,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Count who rules pick, without saving.
+
+        Scope: customers.read. How many people the rules pick right now and the 10 newest of them, so you can check a
+        list before saving it. Nothing is stored.
+
+        Needs: the customers.read scope.
+        POST /v1/brands/{brand}/smart-lists/preview
+        """
+        return self._call(
+            "POST",
+            "/v1/brands/{brand}/smart-lists/preview",
+            path={"brand": brand},
+            body={"brand_id": brand_id, "match": match, "rules": rules},
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
     def preview_data_network(
         self,
         *,
@@ -21931,6 +22816,7 @@ class Operations(_Mixin):
 
         Scope: customers.read. How many people the rules pick right now and the 10 newest of them, so you can check a
         list before saving it. Nothing is stored.
+        Deprecated: use POST /v1/brands/{brand}/smart-lists/preview. This workspace route stays until the brands contract step; without brand_id it counts the workspace's people as before.
 
         Needs: the customers.read scope.
         POST /v1/workspaces/{ws}/smart-lists/preview
@@ -22438,6 +23324,47 @@ class Operations(_Mixin):
             idempotency_key=idempotency_key,
         )
 
+    def record_brand_consent(
+        self,
+        brand: str,
+        record: str,
+        *,
+        channel: Literal["email", "sms", "push", "whatsapp", "in_app", "ads", "web"],
+        evidence: dict[str, Any] | None = None,
+        occurred_at: str | None = None,
+        purpose: str | None = None,
+        source: str | None = None,
+        status: Literal["granted", "withdrawn"],
+        topic: str | None = None,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Record consent.
+
+        Scope: customers.manage. Records that a person granted or withdrew consent, with where and what proves it.
+        Nothing is overwritten: the latest one counts, and the rest stay as the history. Lifecycle email sends
+        marketing only to people whose current email consent is granted.
+
+        Needs: the customers.manage scope.
+        POST /v1/brands/{brand}/records/{record}/consents
+        """
+        return self._call(
+            "POST",
+            "/v1/brands/{brand}/records/{record}/consents",
+            path={"brand": brand, "record": record},
+            body={
+                "channel": channel,
+                "evidence": evidence,
+                "occurred_at": occurred_at,
+                "purpose": purpose,
+                "source": source,
+                "status": status,
+                "topic": topic,
+            },
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
     def record_consent(
         self,
         record: str,
@@ -22458,6 +23385,7 @@ class Operations(_Mixin):
         Scope: customers.manage. Records that a person granted or withdrew consent, with where and what proves it.
         Nothing is overwritten: the latest one counts, and the rest stay as the history. Lifecycle email sends
         marketing only to people whose current email consent is granted.
+        Deprecated: use POST /v1/brands/{brand}/records/{record}/consents. This workspace route stays until the brands contract step; it acts on the record's, list's or the workspace's first brand.
 
         Needs: the customers.manage scope.
         POST /v1/workspaces/{ws}/records/{record}/consents
@@ -22558,6 +23486,27 @@ class Operations(_Mixin):
             idempotency_key=idempotency_key,
         )
 
+    def refresh_brand_smart_list(
+        self,
+        brand: str,
+        id: str,
+        *,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Bring a smart list's members up to date now.
+
+        Scope: customers.manage. Lists refresh on their own every 15 minutes; this does it now. Watch refreshed_at.
+
+        Needs: the customers.manage scope.
+        POST /v1/brands/{brand}/smart-lists/{id}/refresh
+        """
+        return self._call(
+            "POST",
+            "/v1/brands/{brand}/smart-lists/{id}/refresh",
+            path={"brand": brand, "id": id},
+            idempotency_key=idempotency_key,
+        )
+
     def refresh_infra_plan(
         self,
         id: str,
@@ -22614,6 +23563,7 @@ class Operations(_Mixin):
         """Bring a smart list's members up to date now.
 
         Scope: customers.manage. Lists refresh on their own every 15 minutes; this does it now. Watch refreshed_at.
+        Deprecated: use POST /v1/brands/{brand}/smart-lists/{id}/refresh. This workspace route stays until the brands contract step; it acts on the record's, list's or the workspace's first brand.
 
         Needs: the customers.manage scope.
         POST /v1/workspaces/{ws}/smart-lists/{id}/refresh
@@ -22771,6 +23721,31 @@ class Operations(_Mixin):
             "/v1/workspaces/{ws}/mailboxes/release",
             path={"ws": ws},
             body={"mailbox_ids": mailbox_ids},
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
+    def remove_brand_static_list_members(
+        self,
+        brand: str,
+        id: str,
+        *,
+        record_ids: list[str],
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Take people out of a static list.
+
+        Scope: customers.manage. Rules acting on people leaving the list hear of it.
+
+        Needs: the customers.manage scope.
+        POST /v1/brands/{brand}/smart-lists/{id}/members/remove
+        """
+        return self._call(
+            "POST",
+            "/v1/brands/{brand}/smart-lists/{id}/members/remove",
+            path={"brand": brand, "id": id},
+            body={"record_ids": record_ids},
             extra_body=extra_body,
             idempotency_key=idempotency_key,
         )
@@ -22952,6 +23927,7 @@ class Operations(_Mixin):
         """Take people out of a static list.
 
         Scope: customers.manage. Rules acting on people leaving the list hear of it.
+        Deprecated: use POST /v1/brands/{brand}/smart-lists/{id}/members/remove. This workspace route stays until the brands contract step; it acts on the record's, list's or the workspace's first brand.
 
         Needs: the customers.manage scope.
         POST /v1/workspaces/{ws}/smart-lists/{id}/members/remove
@@ -23583,6 +24559,33 @@ class Operations(_Mixin):
             idempotency_key=idempotency_key,
         )
 
+    def review_brand_record(
+        self,
+        brand: str,
+        record: str,
+        *,
+        decision: Literal["approve", "reject"],
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Approve or reject a record held for review.
+
+        Scope: customers.manage. For a record with needs_review true, such as a person a visitor identification tool named.
+        approve lists it like any other and lets the policy check send to it (it stays a third-party prospect: cold email
+        only, never marketing without their consent). reject archives it. A record not held is refused with not_held (409).
+
+        Needs: the customers.manage scope.
+        POST /v1/brands/{brand}/records/{record}/review
+        """
+        return self._call(
+            "POST",
+            "/v1/brands/{brand}/records/{record}/review",
+            path={"brand": brand, "record": record},
+            body={"decision": decision},
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
     def review_coverage_accuracy(
         self,
         brand: str,
@@ -23668,6 +24671,7 @@ class Operations(_Mixin):
         Scope: customers.manage. For a record with needs_review true, such as a person a visitor identification tool named.
         approve lists it like any other and lets the policy check send to it (it stays a third-party prospect: cold email
         only, never marketing without their consent). reject archives it. A record not held is refused with not_held (409).
+        Deprecated: use POST /v1/brands/{brand}/records/{record}/review. This workspace route stays until the brands contract step; it acts on the record's, list's or the workspace's first brand.
 
         Needs: the customers.manage scope.
         POST /v1/workspaces/{ws}/records/{record}/review
@@ -23882,6 +24886,38 @@ class Operations(_Mixin):
             idempotency_key=idempotency_key,
         )
 
+    def run_brand_query(
+        self,
+        brand: str,
+        *,
+        limit: int | None = None,
+        sql: str,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Run a read-only SQL query.
+
+        The read scope of each table the query reads (GET .../query/tables), such as customers.read. Runs one
+        SELECT (or WITH ... SELECT) in a read-only transaction, as a database role that can read only the query
+        tables. Every customer table holds this brand's rows only, whatever the SQL filters on or joins, and each of
+        the brand's record types is a table of its own (a subscription type is subscription, one column per
+        field). Tables of areas not yet moved to brands (outreach, outcomes, email, website, social) show this
+        brand's rows and those no brand owns; leads, which have no brand, are not readable here.
+        It never changes anything, so an agent kept to missions may run it outside one. Up to limit rows come back
+        (default 100, at most 1000), with truncated set when there were more; a query running over 15 seconds is
+        stopped with query_timeout. SQL the database refuses fails with query_invalid and its message.
+
+        POST /v1/brands/{brand}/query
+        """
+        return self._call(
+            "POST",
+            "/v1/brands/{brand}/query",
+            path={"brand": brand},
+            body={"limit": limit, "sql": sql},
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
     def run_news_search(
         self,
         search: str,
@@ -23976,6 +25012,7 @@ class Operations(_Mixin):
         self,
         *,
         ws: str | None = None,
+        brand: str | None = None,
         limit: int | None = None,
         sql: str,
         extra_body: dict[str, Any] | None = None,
@@ -23989,6 +25026,7 @@ class Operations(_Mixin):
         It never changes anything, so an agent kept to missions may run it outside one. Up to limit rows come back
         (default 100, at most 1000), with truncated set when there were more; a query running over 15 seconds is
         stopped with query_timeout. SQL the database refuses fails with query_invalid and its message.
+        Deprecated: use POST /v1/brands/{brand}/query. This workspace route stays until the brands contract step; without ?brand= it queries the workspace's first brand (a member or token kept to some brands gets its own), and ?brand=all queries every brand you can see, as before.
 
         POST /v1/workspaces/{ws}/query
         """
@@ -23996,6 +25034,7 @@ class Operations(_Mixin):
             "POST",
             "/v1/workspaces/{ws}/query",
             path={"ws": ws},
+            query={"brand": brand},
             body={"limit": limit, "sql": sql},
             extra_body=extra_body,
             idempotency_key=idempotency_key,
@@ -25389,6 +26428,34 @@ class Operations(_Mixin):
             "POST",
             "/v1/workspaces/{ws}/ai-cohorts/{cohort}/runs",
             path={"cohort": cohort, "ws": ws},
+            idempotency_key=idempotency_key,
+        )
+
+    def start_brand_crm_import(
+        self,
+        brand: str,
+        *,
+        integration_id: str,
+        objects: list[str] | None = None,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Import another CRM into a brand's customer records, once.
+
+        Scope: catalog.manage and customers.manage. As POST /v1/workspaces/{ws}/integrations/{id}/crm-imports, into
+        this brand: its records, identities and catalog changes are the brand's. integration_id is the CRM
+        connection, which must serve the brand (its own, or a workspace connection shared with it); any other is
+        404. Read it with GET /v1/brands/{brand}/crm-imports/{import}.
+
+        Needs: the catalog.manage scope.
+        POST /v1/brands/{brand}/crm-imports
+        """
+        return self._call(
+            "POST",
+            "/v1/brands/{brand}/crm-imports",
+            path={"brand": brand},
+            body={"integration_id": integration_id, "objects": objects},
+            extra_body=extra_body,
             idempotency_key=idempotency_key,
         )
 
@@ -27474,6 +28541,55 @@ class Operations(_Mixin):
             idempotency_key=idempotency_key,
         )
 
+    def update_brand_record(
+        self,
+        brand: str,
+        record: str,
+        *,
+        acquired_via: str | None = None,
+        archived: bool | None = None,
+        attributes: dict[str, Any] | None = None,
+        brand_id: str | None = None,
+        identities: list[dict[str, Any]] | None = None,
+        name: str | None = None,
+        origin: Literal["first_party", "prospect", "crm_sync", "import", "manual"] | None = None,
+        source: Literal["manual", "first_party", "crm_sync", "enrichment", "import"] | None = None,
+        type: str | None = None,
+        version: int | None = None,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Change or archive a customer record.
+
+        Scope: customers.manage. attributes merges: a key set to null clears it, keys left out stay. Each value keeps
+        the source that set it, and a write from a lower-precedence source (by default manual, then first_party,
+        crm_sync, enrichment) leaves it as it is and lists it in skipped. Send version to refuse the change with
+        record_changed if someone else changed the record since you read it. Agents (the MCP server, a connected
+        AI app or a mission) must send it: without it the change is refused with version_required.
+
+        Needs: the customers.manage scope.
+        PATCH /v1/brands/{brand}/records/{record}
+        """
+        return self._call(
+            "PATCH",
+            "/v1/brands/{brand}/records/{record}",
+            path={"brand": brand, "record": record},
+            body={
+                "acquired_via": acquired_via,
+                "archived": archived,
+                "attributes": attributes,
+                "brand_id": brand_id,
+                "identities": identities,
+                "name": name,
+                "origin": origin,
+                "source": source,
+                "type": type,
+                "version": version,
+            },
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
     def update_brand_record_type(
         self,
         brand: str,
@@ -27554,6 +28670,44 @@ class Operations(_Mixin):
             "/v1/workspaces/{ws}/brands/{brand}/setup",
             path={"brand": brand, "ws": ws},
             body={"dismissed": dismissed, "skip": skip, "unskip": unskip},
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
+    def update_brand_smart_list(
+        self,
+        brand: str,
+        id: str,
+        *,
+        brand_id: str | None = None,
+        description: str | None = None,
+        kind: Literal["smart", "static"] | None = None,
+        match: Literal["all", "any"] | None = None,
+        name: str | None = None,
+        rules: list[dict[str, Any]] | None = None,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Change a smart list.
+
+        Scope: customers.manage. Send only what changes. Changing the rules, match or brand refreshes the members
+        straight away.
+
+        Needs: the customers.manage scope.
+        PATCH /v1/brands/{brand}/smart-lists/{id}
+        """
+        return self._call(
+            "PATCH",
+            "/v1/brands/{brand}/smart-lists/{id}",
+            path={"brand": brand, "id": id},
+            body={
+                "brand_id": brand_id,
+                "description": description,
+                "kind": kind,
+                "match": match,
+                "name": name,
+                "rules": rules,
+            },
             extra_body=extra_body,
             idempotency_key=idempotency_key,
         )
@@ -30226,6 +31380,7 @@ class Operations(_Mixin):
         crm_sync, enrichment) leaves it as it is and lists it in skipped. Send version to refuse the change with
         record_changed if someone else changed the record since you read it. Agents (the MCP server, a connected
         AI app or a mission) must send it: without it the change is refused with version_required.
+        Deprecated: use PATCH /v1/brands/{brand}/records/{record}. This workspace route stays until the brands contract step; it acts on the record's, list's or the workspace's first brand.
 
         Needs: the customers.manage scope.
         PATCH /v1/workspaces/{ws}/records/{record}
@@ -30932,6 +32087,7 @@ class Operations(_Mixin):
 
         Scope: customers.manage. Send only what changes. Changing the rules, match or brand refreshes the members
         straight away.
+        Deprecated: use PATCH /v1/brands/{brand}/smart-lists/{id}. This workspace route stays until the brands contract step; it acts on the record's, list's or the workspace's first brand.
 
         Needs: the customers.manage scope.
         PATCH /v1/workspaces/{ws}/smart-lists/{id}

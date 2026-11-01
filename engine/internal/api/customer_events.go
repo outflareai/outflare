@@ -43,6 +43,12 @@ func (s *Server) routesCustomerEvents(mux *http.ServeMux) {
 	mux.HandleFunc("GET /v1/workspaces/{ws}/records/{record}/timeline", s.inBrand(read, s.recordTimeline))
 	mux.HandleFunc("GET /v1/workspaces/{ws}/records/{record}/consents", s.inBrand(read, s.listConsents))
 	mux.HandleFunc("POST /v1/workspaces/{ws}/records/{record}/consents", s.inBrand(manage, s.addConsent))
+	// The same, for one brand. Events are sent to POST /v1/brands/{brand}/events
+	// (brand_events.go); these are the ones it stored.
+	mux.HandleFunc("GET /v1/brands/{brand}/customer-events", s.onBrand(read, s.listCustomerEvents))
+	mux.HandleFunc("GET /v1/brands/{brand}/records/{record}/timeline", s.onBrand(read, s.recordTimeline))
+	mux.HandleFunc("GET /v1/brands/{brand}/records/{record}/consents", s.onBrand(read, s.listConsents))
+	mux.HandleFunc("POST /v1/brands/{brand}/records/{record}/consents", s.onBrand(manage, s.addConsent))
 }
 
 const (
@@ -1158,7 +1164,7 @@ func (s *Server) listCustomerEvents(w http.ResponseWriter, r *http.Request) {
 		}
 		add("e.occurred_at >= ?", t)
 	}
-	sel, ok := s.brandFilter(w, r)
+	sel, ok := s.dataBrand(w, r)
 	if !ok {
 		return
 	}

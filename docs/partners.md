@@ -114,6 +114,18 @@ https://outflare.example.com/v1/partner-postbacks/ofb_...?type=sale&ref=ana&user
 
 Anyone with the URL can report conversions to the program, so treat it like a password.
 
+### Conversion log
+
+Partners → Log lists every conversion your backend or tracker reported in the last 30 days, by the API or a postback URL, newest first: what the call sent, what Outflare answered, and the outcome.
+
+- **credited:** it earned the partner a referral or reward.
+- **not credited:** it was stored for the customer, but no partner got it, with the reason (`no_partner`, `lead_expired`, `country_blocked` and the rest; see the conversion API).
+- **duplicate:** a retry of a call already counted.
+- **rejected:** the call was wrong, with the error code (a missing `amount_cents`, an unknown program).
+- **error:** something broke on Outflare's side; retry it.
+
+Search by the `external_id`, `customer_id`, `ref`, promo code, email address or request id a call sent. The log never keeps the email: it shows "(sent)", and a search by the full address still finds the call. Use it while switching over to check that every sale your backend sends arrives and is credited the way you expect (`GET .../partner-conversion-log`, MCP `list_partner_conversion_log`).
+
 ### Postbacks to your partners' trackers
 
 Affiliates who run their own tracker (Voluum, RedTrack, Binom and the like) want each conversion sent back to it. A partner's `postback_url` is that tracker's address, set by the partner on the portal (Settings) or by your team (`PATCH .../partners/{id}`, or Postback URL in the partner's menu). It must start with `https://` and can carry these placeholders:
@@ -317,6 +329,7 @@ Operators get all three. Viewers get `partners.read`.
 | `PUT .../partner-programs/{id}/rules`, `POST .../groups`, `PATCH`/`DELETE .../groups/{group}`, `POST .../groups/{group}/partners`, `POST .../postback` | manage |
 | `GET`/`POST .../partners`, `GET`/`PATCH .../partners/{id}`, `POST`/`DELETE .../promo-codes`, `POST .../fees`, `POST .../adjustments` | read / manage |
 | `POST .../partner-conversions`, `POST .../partner-programs/{id}/widget-sessions` | conversions |
+| `GET .../partner-conversion-log`: every conversion call from the last 30 days, with `program`, `source`, `outcome` and `q` (50 a page, up to 200) | read |
 | `GET .../partner-conversions`, `GET .../partner-referrals`, `GET .../partner-rewards`, `GET .../partner-payouts` (newest first, 100 a page by default, up to 500; `before` is the last page's `next_before`; payouts filter by `program` too) | read |
 | `POST .../partner-rewards/{id}/approve`, `.../reject`, `POST .../partner-rewards/bulk` | manage |
 | `POST .../partner-rewards/{id}/fulfil` | conversions |

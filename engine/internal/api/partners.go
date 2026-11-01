@@ -60,6 +60,7 @@ func (s *Server) routesPartners(mux *http.ServeMux) {
 
 	mux.HandleFunc("POST /v1/workspaces/{ws}/partner-conversions", s.inWorkspace(conv, s.createPartnerConversion))
 	mux.HandleFunc("GET /v1/workspaces/{ws}/partner-conversions", s.inBrand(read, s.listPartnerConversions))
+	mux.HandleFunc("GET /v1/workspaces/{ws}/partner-conversion-log", s.inBrand(read, s.listPartnerConversionLog))
 	mux.HandleFunc("GET /v1/workspaces/{ws}/partner-referrals", s.inBrand(read, s.listPartnerReferrals))
 
 	mux.HandleFunc("GET /v1/workspaces/{ws}/partner-rewards", s.inBrand(read, s.listPartnerRewards))

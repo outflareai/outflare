@@ -37,6 +37,8 @@ var Erased = []Ref{
 	// portal sign-ins.
 	{"partner_referrals", "record_id"}, {"partner_conversions", "record_id"},
 	{"partner_sign_in_links", "record_id"}, {"partner_sessions", "record_id"},
+	// The conversion calls that named them.
+	{"partner_conversion_log", "record_id"},
 	// Privacy exports of what was kept about them: the files go too.
 	{"privacy_exports", "record_id"},
 }

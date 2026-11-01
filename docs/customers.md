@@ -6,6 +6,26 @@ This covers the customer data platform so far: records, their identities and lin
 
 Everything here works the same from the REST API and the MCP server.
 
+## Each brand's data, under its brand
+
+A brand owns its customer data (`plans/brands/README.md`): the same email in two brands is two people, and nothing reads across brands. So the customer API lives under the brand, `/v1/brands/{brand}/...` with the brand's id, and a brand's URLs stay the same wherever the brand goes:
+
+| What | Routes under `/v1/brands/{brand}` |
+| --- | --- |
+| Records (people, companies, the brand's own types) | `GET`/`POST /records`, `GET`/`PATCH`/`DELETE /records/{record}`, `POST /records/{record}/review`, `GET /records/lookup` |
+| A record's history, identities, links, timeline and consent | `GET /records/{record}/history`, `GET`/`POST /records/{record}/identities`, `POST .../identities/{identity}/close`, `GET`/`POST /records/{record}/relationships`, `POST .../relationships/{relationship}/end`, `GET /records/{record}/timeline`, `GET`/`POST /records/{record}/consents` |
+| Duplicates and merges | `GET /records/duplicates`, `POST /records/duplicates/{candidate}/dismiss` and `/link`, `POST /records/{record}/merge`, `GET /merges`, `POST /merges/{merge}/undo` |
+| Product events | `POST`/`GET /events` (the inbox), `GET /customer-events` (the events stored) |
+| Smart and static lists | `GET`/`POST /smart-lists`, `POST /smart-lists/preview`, `GET`/`PATCH`/`DELETE /smart-lists/{id}`, `GET`/`POST /smart-lists/{id}/members`, `POST .../members/remove`, `POST .../refresh` |
+| Imports | `GET`/`POST /crm-imports` (`integration_id` names the connection, which must serve the brand), `GET /crm-imports/{import}`, `GET /batches` and the undo routes |
+| The catalog, Recently deleted, privacy exports, Query | `/catalog/...`, `/recently-deleted/...`, `/privacy-exports/...`, `/query` and `/query/tables` ([Query](query.md)) |
+
+Every row these routes read or write is the brand's: a record, list, pair or import of another brand is `404` there, a `brand_id` in a body can only be the route's brand, and `?brand=` can't widen a list. A token made for one brand, and a member kept to some brands, get `404` for any other brand's routes.
+
+The workspace routes (`/v1/workspaces/{ws}/records/...`, `/smart-lists/...`, `/crm-imports/...`, `GET /customer-events`, `/query`) are deprecated and keep working until the brands contract step, for SDKs and scripts written before: a list reads the brand `?brand=` picks (a handle or id), else the workspace's first brand (a member or token kept to some brands gets its own), and `?brand=all` lists every brand you can see, as before; one record, list or import is read in its own brand; and changes act on the record's or list's brand, or the workspace's first. Install health warns while anything still calls them. `POST /v1/workspaces/{ws}/customer-events` stays as it is for now (see Product events).
+
+In the app every customer page (People and Companies, a record's page, Duplicates, Events, Imports, Recently deleted and Lists) works inside the brand picked in the brand switcher, and asks for a brand when all brands are picked.
+
 ## The catalog
 
 The catalog says what records can hold. Each brand has its own: the record types, fields, option lists and event definitions belong to a brand, and a field one brand adds is never seen by another. Read it first (`GET /v1/brands/{brand}/catalog`, MCP `get_catalog`) and reuse what is there before adding anything.
@@ -23,12 +43,12 @@ The brand routes are under `/v1/brands/{brand}/catalog` (`types`, `types/{type}`
 
 ## Records
 
-`POST /v1/workspaces/{ws}/records` adds a record with its `type`, `name`, `attributes` and `identities`; `PATCH .../records/{record}` changes one. Attributes are checked against the type's fields: an unknown key is refused with a pointer to adding the field, and values are normalized (emails lowercase, phones in E.164).
+`POST /v1/brands/{brand}/records` adds a record to the brand with its `type`, `name`, `attributes` and `identities`; `PATCH .../records/{record}` changes one. Attributes are checked against the type's fields: an unknown key is refused with a pointer to adding the field, and values are normalized (emails lowercase, phones in E.164).
 
 Each record also has:
 
 - **origin**: where it came from (`first_party` for your own product, billing or forms, `prospect` for lead lists and data providers, `crm_sync`, `import` or `manual`). With consent it sets each person's contact basis, which decides what may go out to them ([docs/opt-outs.md](opt-outs.md)). `acquired_via` names the tool the record came from.
-- **brand_id**: the brand the record belongs to; one made without a brand goes to the workspace's first. Its identities are matched in that brand only (see Identities), and its fields are that brand's catalog's. People limited to some brands see and change only their brands' records.
+- **brand_id**: the brand the record belongs to: the route's, or on the deprecated workspace route the one given, else the workspace's first. A record never moves to another brand through a brand route. Its identities are matched in that brand only (see Identities), and its fields are that brand's catalog's. People limited to some brands see and change only their brands' records.
 - **version**: goes up on every change. Send the version you read with a `PATCH` (or a merge) and an edit made against an old copy is refused with `record_changed`. Agents must send it: a change from the MCP server, a connected AI app or a mission without a version is refused with `version_required`, so two agents working on one record never overwrite each other. People in the app and scripts with a plain API token may leave it out.
 - **history**: `GET .../records/{record}/history` lists every change to the name and attributes, with who made it and from which source.
 
@@ -165,7 +185,7 @@ Outflare merges on its own in one case only: when your product sends a verified 
 | `opt_out` | An entry on the opt-out list for them: why, how and from which tool (see [docs/opt-outs.md](opt-outs.md)) |
 | `journey` | A journey entered, and finished or left |
 
-`kinds=visit,message` narrows it. A company's timeline includes its people's (everyone linked to it), and each item's `record_id` says whose it is; `people=false` shows only the company's own. `brand=<id or handle>` keeps one brand's items and the ones no brand owns, and people limited to some brands only see their brands' items and shared ones. Pages are 50 items (up to 200 with `limit`); pass `next_before` as `before` for the next. Kind names don't change once shipped; new kinds may be added.
+`kinds=visit,message` narrows it. A company's timeline includes its people's (everyone linked to it), and each item's `record_id` says whose it is; `people=false` shows only the company's own. On the brand route it holds the brand's items and the ones no brand owns (an email sent outside a sequence); on the workspace route `brand=<id or handle>` does the same, and people limited to some brands only see their brands' items and shared ones. Pages are 50 items (up to 200 with `limit`); pass `next_before` as `before` for the next. Kind names don't change once shipped; new kinds may be added.
 
 ## Consent
 

@@ -72,7 +72,46 @@ type deprecatedOperation struct {
 	sunset time.Time
 }
 
-var deprecatedOperations = map[string]deprecatedOperation{}
+// The customer data routes moved under /v1/brands/{brand}/
+// (plans/brands/README.md, decision 6). The workspace routes stay until
+// the contract step.
+var deprecatedOperations = map[string]deprecatedOperation{
+	"addRecordIdentity":       {instead: "POST /v1/brands/{brand}/records/{record}/identities"},
+	"addRecordRelationship":   {instead: "POST /v1/brands/{brand}/records/{record}/relationships"},
+	"addStaticListMembers":    {instead: "POST /v1/brands/{brand}/smart-lists/{id}/members"},
+	"closeRecordIdentity":     {instead: "POST /v1/brands/{brand}/records/{record}/identities/{identity}/close"},
+	"createRecord":            {instead: "POST /v1/brands/{brand}/records"},
+	"createSmartList":         {instead: "POST /v1/brands/{brand}/smart-lists"},
+	"deleteRecord":            {instead: "DELETE /v1/brands/{brand}/records/{record}"},
+	"deleteSmartList":         {instead: "DELETE /v1/brands/{brand}/smart-lists/{id}"},
+	"dismissRecordDuplicate":  {instead: "POST /v1/brands/{brand}/records/duplicates/{candidate}/dismiss"},
+	"endRecordRelationship":   {instead: "POST /v1/brands/{brand}/records/{record}/relationships/{relationship}/end"},
+	"getCRMImport":            {instead: "GET /v1/brands/{brand}/crm-imports/{import}"},
+	"getRecord":               {instead: "GET /v1/brands/{brand}/records/{record}"},
+	"getRecordHistory":        {instead: "GET /v1/brands/{brand}/records/{record}/history"},
+	"getRecordTimeline":       {instead: "GET /v1/brands/{brand}/records/{record}/timeline"},
+	"getSmartList":            {instead: "GET /v1/brands/{brand}/smart-lists/{id}"},
+	"linkRecordDuplicate":     {instead: "POST /v1/brands/{brand}/records/duplicates/{candidate}/link"},
+	"listCRMImports":          {instead: "GET /v1/brands/{brand}/crm-imports"},
+	"listCustomerEvents":      {instead: "GET /v1/brands/{brand}/customer-events"},
+	"listQueryTables":         {instead: "GET /v1/brands/{brand}/query/tables"},
+	"listRecordConsents":      {instead: "GET /v1/brands/{brand}/records/{record}/consents"},
+	"listRecordDuplicates":    {instead: "GET /v1/brands/{brand}/records/duplicates"},
+	"listRecordIdentities":    {instead: "GET /v1/brands/{brand}/records/{record}/identities"},
+	"listRecordRelationships": {instead: "GET /v1/brands/{brand}/records/{record}/relationships"},
+	"listRecords":             {instead: "GET /v1/brands/{brand}/records"},
+	"listSmartListMembers":    {instead: "GET /v1/brands/{brand}/smart-lists/{id}/members"},
+	"listSmartLists":          {instead: "GET /v1/brands/{brand}/smart-lists"},
+	"mergeRecords":            {instead: "POST /v1/brands/{brand}/records/{record}/merge"},
+	"previewSmartList":        {instead: "POST /v1/brands/{brand}/smart-lists/preview"},
+	"recordConsent":           {instead: "POST /v1/brands/{brand}/records/{record}/consents"},
+	"refreshSmartList":        {instead: "POST /v1/brands/{brand}/smart-lists/{id}/refresh"},
+	"removeStaticListMembers": {instead: "POST /v1/brands/{brand}/smart-lists/{id}/members/remove"},
+	"reviewRecord":            {instead: "POST /v1/brands/{brand}/records/{record}/review"},
+	"runQuery":                {instead: "POST /v1/brands/{brand}/query"},
+	"updateRecord":            {instead: "PATCH /v1/brands/{brand}/records/{record}"},
+	"updateSmartList":         {instead: "PATCH /v1/brands/{brand}/smart-lists/{id}"},
+}
 
 // semverLess compares dotted version numbers; anything unreadable is not
 // less.

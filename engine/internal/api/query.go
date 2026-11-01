@@ -39,6 +39,11 @@ func (s *Server) routesQuery(mux *http.ServeMux) {
 	// Any caller in the workspace: each table needs its own read scope.
 	mux.HandleFunc("GET /v1/workspaces/{ws}/query/tables", s.inBrand("", s.listQueryTables))
 	mux.HandleFunc("POST /v1/workspaces/{ws}/query", s.inBrand("", s.runQuery))
+	// Query for one brand: every customer table holds that brand's rows
+	// only, and each of its record types is a table of its own
+	// (query_brand.go).
+	mux.HandleFunc("GET /v1/brands/{brand}/query/tables", s.onBrand("", s.listQueryTables))
+	mux.HandleFunc("POST /v1/brands/{brand}/query", s.onBrand("", s.runQuery))
 }
 
 // readsOnly reports whether a POST only reads, so an agent kept to
@@ -47,6 +52,9 @@ func (s *Server) routesQuery(mux *http.ServeMux) {
 func readsOnly(r *http.Request) bool {
 	if r.Method != http.MethodPost {
 		return false
+	}
+	if b := r.PathValue("brand"); b != "" && r.URL.Path == "/v1/brands/"+b+"/query" {
+		return true
 	}
 	base := "/v1/workspaces/" + r.PathValue("ws")
 	// Asking the knowledge only reads it (it keeps the question, for the gaps).
@@ -119,12 +127,21 @@ func queryReadable(a *access, t queryTable) bool {
 	if a.ViewID != "" && t.Name == "messages" {
 		return false
 	}
-	// Leads have no brand, so a caller kept to some brands sees none.
-	return t.Name != "leads" || a.Brands == nil
+	// Leads have no brand, so a caller kept to some brands, or a query
+	// for one brand, sees none.
+	return t.Name != "leads" || a.seenBrands() == nil
 }
 
 func (s *Server) listQueryTables(w http.ResponseWriter, r *http.Request) {
-	a := accessFrom(r.Context())
+	a, ok := s.queryAccess(w, r)
+	if !ok {
+		return
+	}
+	types, err := s.queryTypeTables(r.Context(), a)
+	if err != nil {
+		s.internal(w, r, err)
+		return
+	}
 	rows, err := s.pool.Query(r.Context(), `SELECT table_name, column_name, data_type FROM information_schema.columns
 		WHERE table_schema = 'query' ORDER BY table_name, ordinal_position`)
 	if err != nil {
@@ -153,6 +170,9 @@ func (s *Server) listQueryTables(w http.ResponseWriter, r *http.Request) {
 		}
 		out = append(out, queryTableView{Name: t.Name, Description: t.Description, Scope: t.Scope, Available: queryReadable(a, t), Columns: cols[t.Name]})
 	}
+	for _, t := range types {
+		out = append(out, queryTableView{Name: t.Name, Description: t.Description, Scope: t.Scope, Available: queryReadable(a, t.queryTable), Columns: t.Columns})
+	}
 	writeJSON(w, http.StatusOK, map[string]any{"data": out})
 }
 
@@ -179,7 +199,10 @@ type queryResult struct {
 var queryRefused = regexp.MustCompile(`(?i)\b(set_config|pg_(try_)?advisory\w*|pg_sleep\w*|pg_terminate_backend|pg_cancel_backend|pg_reload_conf|pg_rotate_logfile|pg_stat\w*|lo_\w+|dblink\w*|txid_current\w*|pg_notify|\w*_to_xml\w*|ts_stat)\b|\bu&['"]`)
 
 func (s *Server) runQuery(w http.ResponseWriter, r *http.Request) {
-	a := accessFrom(r.Context())
+	a, ok := s.queryAccess(w, r)
+	if !ok {
+		return
+	}
 	ctx := r.Context()
 	var req queryInput
 	if !decode(w, r, &req) {
@@ -209,10 +232,19 @@ func (s *Server) runQuery(w http.ResponseWriter, r *http.Request) {
 		writeError(w, r, http.StatusBadRequest, "query_invalid", "queries can't call "+strings.TrimRight(m, `'"`)+": read the tables with SELECT")
 		return
 	}
+	types, err := s.queryTypeTables(ctx, a)
+	if err != nil {
+		s.internal(w, r, err)
+		return
+	}
+	tables := slices.Clone(queryTables)
+	for _, t := range types {
+		tables = append(tables, t.queryTable)
+	}
 	// A clearer answer than no rows: name the table and the scope it needs.
 	lower := strings.ToLower(sql)
 	var scopes, used []string
-	for _, t := range queryTables {
+	for _, t := range tables {
 		mentioned := regexp.MustCompile(`\b` + t.Name + `\b`).MatchString(lower)
 		if queryReadable(a, t) {
 			if !slices.Contains(scopes, t.Scope) {
@@ -250,7 +282,7 @@ func (s *Server) runQuery(w http.ResponseWriter, r *http.Request) {
 	}
 	var res queryResult
 	if err == nil {
-		res, err = s.queryRun(ctx, conn, a, scopes, sql, limit)
+		res, err = s.queryRun(ctx, conn, a, scopes, types, sql, limit)
 		conn.Close(context.WithoutCancel(ctx)) //nolint:errcheck
 		s.query.slots <- struct{}{}
 	}
@@ -285,8 +317,18 @@ func (s *Server) runQuery(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	info := reqInfoFrom(ctx)
+	// Type tables are named after the brand's own types: counted, not named.
+	named, typed := []string{}, 0
+	for _, u := range used {
+		if slices.ContainsFunc(queryTables, func(t queryTable) bool { return t.Name == u }) {
+			named = append(named, u)
+		} else {
+			typed++
+		}
+	}
 	ev := track.Event{Name: "query.ran", UserID: a.UserID, ActorID: a.ActorID, ActorType: a.ActorType, WorkspaceID: a.WorkspaceID, RequestID: RequestID(ctx),
-		Props: map[string]any{"tables": used, "rows": res.RowCount, "truncated": res.Truncated, "duration_ms": res.DurationMS, "columns": len(res.Columns)}}
+		Props: map[string]any{"tables": named, "type_tables": typed, "brand_route": accessFrom(ctx).Brand != "", "rows": res.RowCount,
+			"truncated": res.Truncated, "duration_ms": res.DurationMS, "columns": len(res.Columns)}}
 	if info != nil {
 		ev.Surface = surface(r, info)
 	}
@@ -295,16 +337,18 @@ func (s *Server) runQuery(w http.ResponseWriter, r *http.Request) {
 }
 
 // queryRun runs sql on a query connection with the caller's scope.
-func (s *Server) queryRun(ctx context.Context, conn *pgx.Conn, a *access, scopes []string, sql string, limit int) (queryResult, error) {
+func (s *Server) queryRun(ctx context.Context, conn *pgx.Conn, a *access, scopes []string, types []queryTypeTable, sql string, limit int) (queryResult, error) {
 	res := queryResult{Columns: []queryColumn{}, Rows: [][]any{}}
 	pid := int(conn.PgConn().PID())
-	var brands []string
-	if a.Brands != nil {
-		brands = a.Brands
-	}
-	if _, err := s.pool.Exec(ctx, `INSERT INTO query_scopes (pid, workspace_id, brands, scopes) VALUES ($1, $2, $3, $4)
-		ON CONFLICT (pid) DO UPDATE SET workspace_id = EXCLUDED.workspace_id, brands = EXCLUDED.brands, scopes = EXCLUDED.scopes, created_at = now()`,
-		pid, a.WorkspaceID, brands, scopes); err != nil {
+	// A query for one brand: brand keeps every customer view to that
+	// brand's own rows (migration 0342), and brands keeps the views of
+	// areas not yet moved to brands to it and the shared rows, as for a
+	// brand-limited caller.
+	brands := a.seenBrands()
+	if _, err := s.pool.Exec(ctx, `INSERT INTO query_scopes (pid, workspace_id, brands, scopes, brand) VALUES ($1, $2, $3, $4, $5)
+		ON CONFLICT (pid) DO UPDATE SET workspace_id = EXCLUDED.workspace_id, brands = EXCLUDED.brands, scopes = EXCLUDED.scopes,
+			brand = EXCLUDED.brand, created_at = now()`,
+		pid, a.WorkspaceID, brands, scopes, nullIfEmpty(a.Brand)); err != nil {
 		return res, err
 	}
 	defer func() {
@@ -315,6 +359,9 @@ func (s *Server) queryRun(ctx context.Context, conn *pgx.Conn, a *access, scopes
 			s.log.Error("query: scope not removed", "err", err, "pid", pid)
 		}
 	}()
+	if err := s.makeTypeViews(ctx, conn, a, types); err != nil {
+		return res, err
+	}
 	err := pgx.BeginTxFunc(ctx, conn, pgx.TxOptions{AccessMode: pgx.ReadOnly, IsoLevel: pgx.RepeatableRead}, func(tx pgx.Tx) error {
 		// The first statement fixes the snapshot, so the query can no
 		// longer make the transaction read-write.

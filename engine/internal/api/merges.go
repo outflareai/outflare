@@ -29,11 +29,13 @@ import (
 
 func (s *Server) routesMerges(mux *http.ServeMux) {
 	read, manage := auth.ScopeCustomersRead, auth.ScopeCustomersManage
-	base := "/v1/workspaces/{ws}/records"
-	mux.HandleFunc("GET "+base+"/duplicates", s.inBrand(read, s.listDuplicates))
-	mux.HandleFunc("POST "+base+"/duplicates/{candidate}/dismiss", s.inBrand(manage, s.decideDuplicate))
-	mux.HandleFunc("POST "+base+"/duplicates/{candidate}/link", s.inBrand(manage, s.decideDuplicate))
-	mux.HandleFunc("POST "+base+"/{record}/merge", s.inBrand(manage, s.mergeRecord))
+	for base, on := range map[string]func(string, http.HandlerFunc) http.HandlerFunc{
+		"/v1/brands/{brand}/records": s.onBrand, "/v1/workspaces/{ws}/records": s.inBrand} {
+		mux.HandleFunc("GET "+base+"/duplicates", on(read, s.listDuplicates))
+		mux.HandleFunc("POST "+base+"/duplicates/{candidate}/dismiss", on(manage, s.decideDuplicate))
+		mux.HandleFunc("POST "+base+"/duplicates/{candidate}/link", on(manage, s.decideDuplicate))
+		mux.HandleFunc("POST "+base+"/{record}/merge", on(manage, s.mergeRecord))
+	}
 }
 
 // The identities that make two records look like one person.
@@ -532,7 +534,7 @@ func (s *Server) listDuplicates(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
-	sel, ok := s.brandFilter(w, r)
+	sel, ok := s.dataBrand(w, r)
 	if !ok {
 		return
 	}

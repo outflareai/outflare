@@ -1010,12 +1010,12 @@ function callFor(tab: Tab, ws: string, item?: string): Call {
         : { title: "All sequences", path: "/v1/workspaces/{ws}/sequences", params: base, mcp: "list_sequences", ask: "List my active sequences and their reply rates.", scope: "sequences.read" };
     case "people":
       return item && /^[0-9a-f-]{36}$/.test(item)
-        ? { title: "One record", path: "/v1/workspaces/{ws}/records/{record}", params: { ...base, record: item }, mcp: "get_record", ask: "Summarise this person's history with us and what to do next.", scope: "customers.read" }
+        ? { title: "One record", path: "/v1/brands/{brand}/records/{record}", params: { brand: "BRAND_ID", record: item }, mcp: "get_record", ask: "Summarise this person's history with us and what to do next.", scope: "customers.read" }
         : item === "events"
           ? { title: "A brand's received product events", path: "/v1/brands/{brand}/events/summary", params: { brand: "BRAND_ID" }, mcp: "get_brand_events_summary", ask: "Which of our product events were rejected or held this week, and what should we fix?", scope: "customers.read" }
           : item === "duplicates"
-          ? { title: "Possible duplicates", path: "/v1/workspaces/{ws}/records/duplicates", params: base, mcp: "list_record_duplicates", ask: "Which possible duplicates are safe to merge, and which look like two different people?", scope: "customers.read" }
-          : { title: item === "companies" ? "Companies" : "People", path: "/v1/workspaces/{ws}/records", params: base, query: { type: item === "companies" ? "account" : "person", limit: 50 }, mcp: "list_records", ask: "Which customers at fintech companies haven't heard from us this month?", scope: "customers.read" };
+          ? { title: "Possible duplicates", path: "/v1/brands/{brand}/records/duplicates", params: { brand: "BRAND_ID" }, mcp: "list_record_duplicates", ask: "Which possible duplicates are safe to merge, and which look like two different people?", scope: "customers.read" }
+          : { title: item === "companies" ? "Companies" : "People", path: "/v1/brands/{brand}/records", params: { brand: "BRAND_ID" }, query: { type: item === "companies" ? "account" : "person", limit: 50 }, mcp: "list_records", ask: "Which customers at fintech companies haven't heard from us this month?", scope: "customers.read" };
     case "leads":
       return { title: "Leads", path: "/v1/workspaces/{ws}/leads", params: base, query: { limit: 50 }, mcp: "list_leads", ask: "Find leads at companies in fintech.", scope: "leads.read" };
     case "lists":

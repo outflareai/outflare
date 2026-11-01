@@ -279,6 +279,9 @@ type conversionResult struct {
 	ReferralID *string                `json:"referral_id"`
 	Conversion *partnerConversionView `json:"conversion"`
 	Rewards    []partnerRewardView    `json:"rewards"`
+	// For the conversion log: the customer's record and the program the
+	// call was judged in, when known.
+	recordID, programID string
 }
 
 // membershipRow is what crediting needs to know about a partner.
@@ -567,6 +570,7 @@ func (c *conversionRun) leadOrSale(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	c.res.recordID, c.res.programID = rec, c.program
 	if err := c.customerEvent(ctx, rec, in.AmountCents, ""); err != nil {
 		return err
 	}
@@ -592,6 +596,9 @@ func (c *conversionRun) leadOrSale(ctx context.Context) error {
 			return err
 		}
 		via = "visit"
+	}
+	if m != nil {
+		c.res.programID = m.programID
 	}
 	switch {
 	case m == nil:
@@ -962,18 +969,23 @@ func (c *conversionRun) reverse(ctx context.Context, m *membershipRow, w partner
 
 func (s *Server) createPartnerConversion(w http.ResponseWriter, r *http.Request) {
 	a := accessFrom(r.Context())
+	l := newConversionLog(w, "api")
+	defer s.saveConversionLog(r, a.WorkspaceID, l)
 	var in conversionInput
-	if !decode(w, r, &in) {
+	if !decode(l, r, &in) {
 		return
 	}
-	s.servePartnerConversion(w, r, a.WorkspaceID, &a.principal, in, "api")
+	l.in = &in
+	l.res = s.servePartnerConversion(l, r, a.WorkspaceID, &a.principal, in, "api")
 }
 
-func (s *Server) servePartnerConversion(w http.ResponseWriter, r *http.Request, ws string, p *principal, in conversionInput, source string) {
+// servePartnerConversion records the conversion and answers; it returns
+// what it did, or nil when it answered with an error.
+func (s *Server) servePartnerConversion(w http.ResponseWriter, r *http.Request, ws string, p *principal, in conversionInput, source string) *conversionResult {
 	if err := in.check(time.Now()); err != nil {
 		metrics.PartnerConversion(in.Type, source, "rejected")
 		s.allocError(w, r, err)
-		return
+		return nil
 	}
 	res, err := s.recordPartnerConversion(r.Context(), ws, p, in, source)
 	if errors.Is(err, errConflict) {
@@ -982,13 +994,14 @@ func (s *Server) servePartnerConversion(w http.ResponseWriter, r *http.Request, 
 		res, err = s.recordPartnerConversion(r.Context(), ws, p, in, source)
 	}
 	if s.allocError(w, r, err) {
-		return
+		return nil
 	}
 	status := http.StatusOK
 	if res.Credited && !res.Duplicate {
 		status = http.StatusCreated
 	}
 	writeJSON(w, status, res)
+	return &res
 }
 
 // partnerPostback takes a conversion by URL, for partners' trackers and
@@ -1014,6 +1027,10 @@ func (s *Server) partnerPostback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	noteWorkspace(r, ws)
+	l := newConversionLog(w, "postback")
+	l.program = program
+	defer s.saveConversionLog(r, ws, l)
+	w = l
 	vals := r.URL.Query()
 	if r.Method == http.MethodPost {
 		body, err := io.ReadAll(io.LimitReader(r.Body, 64<<10))
@@ -1047,7 +1064,8 @@ func (s *Server) partnerPostback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	in.Program = program
-	s.servePartnerConversion(w, r, ws, nil, in, "postback")
+	l.in = &in
+	l.res = s.servePartnerConversion(w, r, ws, nil, in, "postback")
 }
 
 // postbackInput reads a postback's parameters, accepting the usual aliases.

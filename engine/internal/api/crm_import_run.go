@@ -226,9 +226,11 @@ func getCRMImport(ctx context.Context, q crmQuerier, ws, id string) (crmImportVi
 // caller's transaction.
 func startCRMImport(ctx context.Context, tx pgx.Tx, a *access, integrationID, connector string, objects []string) (crmImportView, error) {
 	var id, brand string
-	err := tx.QueryRow(ctx, `INSERT INTO crm_imports (workspace_id, integration_id, connector, objects, created_by, created_by_type)
-		VALUES ($1, $2, $3, $4, $5, $6) RETURNING id::text, COALESCE(brand_id, outflare_first_brand(workspace_id))::text`,
-		a.WorkspaceID, integrationID, connector, objects, nullIfEmpty(a.ActorID), a.ActorType).Scan(&id, &brand)
+	// On a brand route the records go to that brand; otherwise the
+	// connection's (the brand_id trigger).
+	err := tx.QueryRow(ctx, `INSERT INTO crm_imports (workspace_id, integration_id, connector, objects, created_by, created_by_type, brand_id)
+		VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id::text, COALESCE(brand_id, outflare_first_brand(workspace_id))::text`,
+		a.WorkspaceID, integrationID, connector, objects, nullIfEmpty(a.ActorID), a.ActorType, nullIfEmpty(a.Brand)).Scan(&id, &brand)
 	if isUnique(err) {
 		return crmImportView{}, recordConflict{"conflict", "an import from this connection is already running; wait for it to finish (GET .../crm-imports)"}
 	}

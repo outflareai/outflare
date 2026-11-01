@@ -3,6 +3,7 @@ import type { CRMImport, CRMImportPreview, Integration } from "@outflare/sdk";
 import { api, errorMessage } from "../api";
 import { Badge, Button, ErrorText, Loading } from "../ui";
 import { plural } from "../format";
+import { useBrand } from "@/lib/brand";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 
 // Moving over from another CRM, once: see what it holds, pick objects,
@@ -14,6 +15,9 @@ export function CRMImportDialog({ ws, integration, onClose }: { ws: string; inte
   const [run, setRun] = useState<CRMImport | null>(null);
   const [busy, setBusy] = useState(false);
   const tool = integration.connector_name;
+  // The records go to one brand: the connection's own, or the one picked.
+  const { brand: pickedBrand, byId } = useBrand(ws);
+  const brand = integration.brand_id ?? pickedBrand?.id ?? "";
 
   useEffect(() => {
     api.GET("/v1/workspaces/{ws}/integrations/{id}/crm-import-preview", { params: { path: { ws, id: integration.id } }, signal: AbortSignal.timeout(90_000) }).then(({ data, error }) => {
@@ -27,18 +31,18 @@ export function CRMImportDialog({ ws, integration, onClose }: { ws: string; inte
   useEffect(() => {
     if (!run || run.status === "done" || run.status === "failed") return;
     const t = setTimeout(async () => {
-      const { data } = await api.GET("/v1/workspaces/{ws}/crm-imports/{import}", { params: { path: { ws, import: run.id } } });
+      const { data } = await api.GET("/v1/brands/{brand}/crm-imports/{import}", { params: { path: { brand, import: run.id } } });
       if (data) setRun(data);
     }, 1500);
     return () => clearTimeout(t);
-  }, [run, ws]);
+  }, [run, brand]);
 
   async function start() {
-    if (!preview) return;
+    if (!preview || !brand) return;
     setBusy(true);
     setError("");
     const objects = picked.size === preview.objects.length ? [] : [...picked];
-    const { data, error } = await api.POST("/v1/workspaces/{ws}/integrations/{id}/crm-imports", { params: { path: { ws, id: integration.id } }, body: { objects } });
+    const { data, error } = await api.POST("/v1/brands/{brand}/crm-imports", { params: { path: { brand } }, body: { integration_id: integration.id, objects } });
     setBusy(false);
     if (error || !data) return setError(errorMessage(error));
     if ("id" in data) setRun(data);
@@ -129,10 +133,15 @@ export function CRMImportDialog({ ws, integration, onClose }: { ws: string; inte
           </div>
         )}
 
+        {preview && !run && (
+          <p className="text-[12px] text-muted-foreground">
+            {brand ? `The records go to ${byId(brand)?.name ?? "this brand"}.` : "The records go to one brand: pick it in the brand switcher first."}
+          </p>
+        )}
         <ErrorText>{error}</ErrorText>
         <DialogFooter className="flex-row justify-end gap-2">
           {!run && <Button type="button" variant="ghost" onClick={onClose}>Cancel</Button>}
-          {!run && preview && <Button disabled={busy || picked.size === 0} onClick={start}>{busy ? "Starting…" : `Import ${plural(picked.size, "object")}`}</Button>}
+          {!run && preview && <Button disabled={busy || picked.size === 0 || !brand} onClick={start}>{busy ? "Starting…" : `Import ${plural(picked.size, "object")}`}</Button>}
           {run && <Button variant={run.status === "done" ? undefined : "ghost"} onClick={onClose}>{run.status === "done" ? "Done" : "Close"}</Button>}
         </DialogFooter>
       </DialogContent>

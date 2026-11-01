@@ -181,6 +181,7 @@ export type PartnerInput = Schemas["PartnerInput"];
 export type PartnerStats = Schemas["PartnerStats"];
 export type PartnerConversion = Schemas["PartnerConversion"];
 export type PartnerConversionInput = Schemas["PartnerConversionInput"];
+export type PartnerConversionLogEntry = Schemas["PartnerConversionLogEntry"];
 export type PartnerConversionResult = Schemas["PartnerConversionResult"];
 export type PartnerReferral = Schemas["PartnerReferral"];
 export type PartnerReward = Schemas["PartnerReward"];
@@ -378,6 +379,7 @@ export type EmailEvent = Schemas["EmailEvent"];
 export type EmailStatus = Schemas["EmailStatus"];
 export type SendEmailInput = Schemas["SendEmailInput"];
 export type WebhookDelivery = Schemas["WebhookDelivery"];
+export type WebhookAttempt = Schemas["WebhookAttempt"];
 export type WebhookEventType = Schemas["WebhookEventType"];
 /** The body of a webhook delivery. */
 export type WebhookEvent = Schemas["WebhookEvent"];

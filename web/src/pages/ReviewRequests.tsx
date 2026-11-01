@@ -164,16 +164,16 @@ function CampaignEditor({ brand, brandName, ws, catalog, campaign, onClose, onSa
   const [step, updateStep] = useState(0);
   const setStep = (step: number) => { updateStep(step); track("ui.review_campaign_step_opened", { step }); };
   const [selectedPeople, setSelectedPeople] = useState<Person[]>([]);
-  useEffect(() => { let live=true; const ids=campaign?.config.audience.record_ids ?? []; void Promise.all(ids.slice(0,50).map(async record => { const { data }=await api.GET("/v1/workspaces/{ws}/records/{record}",{params:{path:{ws,record}}});return data ? {id:data.id,name:data.name,email:data.identities.find(i=>i.namespace==="email")?.value} : null; })).then(people=>{if(live)setSelectedPeople(people.filter(p=>p!==null));});return()=>{live=false;}; },[ws,campaign?.id]);
+  useEffect(() => { let live=true; const ids=campaign?.config.audience.record_ids ?? []; void Promise.all(ids.slice(0,50).map(async record => { const { data }=await api.GET("/v1/brands/{brand}/records/{record}",{params:{path:{brand,record}}});return data ? {id:data.id,name:data.name,email:data.identities.find(i=>i.namespace==="email")?.value} : null; })).then(people=>{if(live)setSelectedPeople(people.filter(p=>p!==null));});return()=>{live=false;}; },[brand,campaign?.id]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [preview, setPreview] = useState<Schemas["ReviewRequestPreview"]>();
   const [lists, setLists] = useState<Schemas["SmartList"][]>([]);
   const [sendAt, setSendAt] = useState("");
   const [testTo, setTestTo] = useState("");
-  const choices = useRuleChoices(ws);
+  const choices = useRuleChoices(ws, brand);
   useEffect(() => { if (!campaign) { try { sessionStorage.setItem(savedKey(brand), JSON.stringify(config)); } catch { /* Storage can be unavailable. */ } } }, [brand, campaign, config]);
-  useEffect(() => { api.GET("/v1/workspaces/{ws}/smart-lists", { params: { path: { ws } } }).then(({ data }) => setLists(data?.data.filter(l => l.brand_id === brand) ?? [])); }, [ws, brand]);
+  useEffect(() => { api.GET("/v1/brands/{brand}/smart-lists", { params: { path: { brand } } }).then(({ data }) => setLists(data?.data ?? [])); }, [ws, brand]);
   function change(next: Partial<Config>) { setConfig(c => ({ ...c, ...next })); setPreview(undefined); }
   async function save(): Promise<string | undefined> {
     setError(""); const body = config;

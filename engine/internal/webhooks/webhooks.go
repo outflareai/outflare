@@ -318,7 +318,9 @@ func (s *Service) attempt(ctx context.Context, deliveryID int64, lastTry, force 
 		}
 	}
 
+	started := time.Now()
 	code, errText := s.send(ctx, rawURL, secrets, eventID, payload)
+	took := time.Since(started).Milliseconds()
 	ok := code >= 200 && code < 300
 	final := ok || lastTry || code == http.StatusGone
 	newStatus := "pending"
@@ -337,6 +339,12 @@ func (s *Service) attempt(ctx context.Context, deliveryID int64, lastTry, force 
 			UPDATE webhook_deliveries SET status = $2, attempts = attempts + 1, last_status_code = $3, last_error = $4,
 			       last_attempt_at = now(), delivered_at = CASE WHEN $2 = 'delivered' THEN now() END, updated_at = now()
 			 WHERE id = $1`, deliveryID, newStatus, codePtr, nullIf(errText)); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(ctx, `
+			INSERT INTO webhook_delivery_attempts (delivery_id, endpoint_id, workspace_id, brand_id, status_code, error, duration_ms, manual, ok)
+			SELECT $1, e.id, e.workspace_id, e.brand_id, $3, $4, $5, $6, $7 FROM webhook_endpoints e WHERE e.id = $2`,
+			deliveryID, endpointID, codePtr, nullIf(errText), took, force, ok); err != nil {
 			return err
 		}
 		if ok {

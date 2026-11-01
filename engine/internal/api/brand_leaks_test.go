@@ -43,7 +43,6 @@ var brandWide = map[string]string{
 	"/v1/workspaces/{ws}/sending-servers":   "sending servers are shared by every brand",
 	"/v1/workspaces/{ws}/suppressions":      "an unsubscribe counts for every brand",
 	"/v1/workspaces/{ws}/imports":           "imports bring in the workspace's records",
-	"/v1/workspaces/{ws}/crm-imports":       "imports bring in the workspace's records",
 	"/v1/workspaces/{ws}/verifications":     "an address checked once is known for every brand",
 	"/v1/workspaces/{ws}/digests/preview":   "digests report on the whole workspace",
 	"/v1/workspaces/{ws}/digests":           "digests report on the whole workspace",

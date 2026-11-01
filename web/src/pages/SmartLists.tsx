@@ -17,20 +17,21 @@ type Field = { key: string; label: string };
 // useRuleChoices loads what rules can pick from: the person fields and
 // approved events in the catalog, the workspace's lead lists, and its news
 // searches (for media lists; empty without seo.read).
-export function useRuleChoices(ws: string) {
+export function useRuleChoices(ws: string, brand: string) {
   const [fields, setFields] = useState<Field[]>([]);
   const [events, setEvents] = useState<string[]>([]);
   const [leadLists, setLeadLists] = useState<LeadList[]>([]);
   const [newsSearches, setNewsSearches] = useState<NewsSearch[]>([]);
   useEffect(() => {
-    api.GET("/v1/workspaces/{ws}/catalog", { params: { path: { ws } } }).then(({ data }) => {
+    if (!brand) return;
+    api.GET("/v1/brands/{brand}/catalog", { params: { path: { brand } } }).then(({ data }) => {
       const person = data?.types.find((t) => t.key === "person");
       setFields((person?.fields ?? []).filter((f) => !f.archived).map((f) => ({ key: f.key, label: f.label })));
       setEvents((data?.events ?? []).filter((e) => e.status === "approved").map((e) => e.name));
     });
     api.GET("/v1/workspaces/{ws}/lead-lists", { params: { path: { ws } } }).then(({ data }) => setLeadLists(data?.data ?? []));
     api.GET("/v1/workspaces/{ws}/news-searches", { params: { path: { ws } } }).then(({ data }) => setNewsSearches(data?.data ?? []));
-  }, [ws]);
+  }, [ws, brand]);
   return { fields, events, leadLists, newsSearches };
 }
 
@@ -178,11 +179,12 @@ const ready = (rules: SmartListRule[]) =>
   });
 
 export function SmartListSheet({ ws, list, onClose, onSaved }: { ws: string; list: SmartList | null; onClose: () => void; onSaved: (l: SmartList) => void }) {
-  const { brand, active } = useBrand(ws);
-  const { fields, events, leadLists, newsSearches } = useRuleChoices(ws);
+  const { brand, byId } = useBrand(ws);
+  // A list belongs to one brand: its own, or the one picked for a new one.
+  const brandID = (list ? list.brand_id : brand?.id) ?? "";
+  const { fields, events, leadLists, newsSearches } = useRuleChoices(ws, brandID);
   const [name, setName] = useState(list?.name ?? "");
   const [description, setDescription] = useState(list?.description ?? "");
-  const [brandID, setBrandID] = useState<string>(list ? list.brand_id ?? "" : brand?.id ?? "");
   const [match, setMatch] = useState<SmartList["match"]>(list?.match ?? "all");
   const [rules, setRules] = useState<SmartListRule[]>(list?.rules ?? [{ attribute: "", op: "eq", value: "" }]);
   const [count, setCount] = useState<{ members: number; sample: SmartListPerson[] } | null>(null);
@@ -193,25 +195,25 @@ export function SmartListSheet({ ws, list, onClose, onSaved }: { ws: string; lis
 
   // Count as the rules change, a moment after the last edit.
   useEffect(() => {
-    if (!ready(rules)) return;
+    if (!ready(rules) || !brandID) return;
     setCounting(true);
     const t = setTimeout(async () => {
-      const { data, error } = await api.POST("/v1/workspaces/{ws}/smart-lists/preview", { params: { path: { ws } }, body: { rules, match, brand_id: brandID || null } });
+      const { data, error } = await api.POST("/v1/brands/{brand}/smart-lists/preview", { params: { path: { brand: brandID } }, body: { rules, match } });
       setCounting(false);
       setCountError(error ? errorMessage(error) : "");
       if (data) setCount(data);
     }, 400);
     return () => clearTimeout(t);
-  }, [ws, rules, match, brandID]);
+  }, [rules, match, brandID]);
 
   async function submit(e: FormEvent) {
     e.preventDefault();
     setBusy(true);
     setError("");
-    const body = { name, description, brand_id: brandID || null, rules, match };
+    const body = { name, description, rules, match };
     const res = list
-      ? await api.PATCH("/v1/workspaces/{ws}/smart-lists/{id}", { params: { path: { ws, id: list.id } }, body })
-      : await api.POST("/v1/workspaces/{ws}/smart-lists", { params: { path: { ws } }, body });
+      ? await api.PATCH("/v1/brands/{brand}/smart-lists/{id}", { params: { path: { brand: brandID, id: list.id } }, body })
+      : await api.POST("/v1/brands/{brand}/smart-lists", { params: { path: { brand: brandID } }, body });
     setBusy(false);
     if (res.error) return setError(errorMessage(res.error));
     if (res.data) {
@@ -237,16 +239,7 @@ export function SmartListSheet({ ws, list, onClose, onSaved }: { ws: string; lis
               <span className="mb-1 block font-medium">Description <span className="font-normal text-muted-foreground">(optional)</span></span>
               <input className={`${field} w-full`} maxLength={2000} value={description} onChange={(e) => setDescription(e.target.value)} />
             </label>
-            {active.length > 0 && (
-              <label className="block">
-                <span className="mb-1 block font-medium">Brand</span>
-                <select className={`${field} w-full`} value={brandID} onChange={(e) => setBrandID(e.target.value)}>
-                  <option value="">Every brand</option>
-                  {active.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
-                </select>
-                <span className="mt-1 block text-[12px] text-muted-foreground">{brandID ? "This brand's people, and people shared by every brand." : "People of every brand."}</span>
-              </label>
-            )}
+            <p className="text-[12px] text-muted-foreground">{byId(brandID)?.name ?? "This brand"}'s people only: a list belongs to one brand.</p>
           </div>
 
           <div className="space-y-2">
@@ -288,7 +281,8 @@ export function SmartListSheet({ ws, list, onClose, onSaved }: { ws: string; lis
 }
 
 export function SmartListDetail({ ws, list: initial, canManage, onBack, onEdit, onChanged }: { ws: string; list: SmartList; canManage: boolean; onBack: () => void; onEdit: (l: SmartList) => void; onChanged: () => void }) {
-  const { fields, leadLists, newsSearches } = useRuleChoices(ws);
+  const brand = initial.brand_id ?? "";
+  const { fields, leadLists, newsSearches } = useRuleChoices(ws, brand);
   const [list, setList] = useState(initial);
   const [people, setPeople] = useState<SmartListPerson[] | null>(null);
   const [next, setNext] = useState<string | null>(null);
@@ -297,8 +291,8 @@ export function SmartListDetail({ ws, list: initial, canManage, onBack, onEdit, 
 
   const load = useCallback(async () => {
     const [l, m] = await Promise.all([
-      api.GET("/v1/workspaces/{ws}/smart-lists/{id}", { params: { path: { ws, id: initial.id } } }),
-      api.GET("/v1/workspaces/{ws}/smart-lists/{id}/members", { params: { path: { ws, id: initial.id }, query: { limit: 100 } } }),
+      api.GET("/v1/brands/{brand}/smart-lists/{id}", { params: { path: { brand, id: initial.id } } }),
+      api.GET("/v1/brands/{brand}/smart-lists/{id}/members", { params: { path: { brand, id: initial.id }, query: { limit: 100 } } }),
     ]);
     if (l.data) setList(l.data);
     if (m.data) {
@@ -306,7 +300,7 @@ export function SmartListDetail({ ws, list: initial, canManage, onBack, onEdit, 
       setNext(m.data.next_cursor ?? null);
     } else setError(errorMessage(m.error ?? l.error));
     return l.data;
-  }, [ws, initial.id]);
+  }, [brand, initial.id]);
 
   useEffect(() => {
     load();
@@ -326,7 +320,7 @@ export function SmartListDetail({ ws, list: initial, canManage, onBack, onEdit, 
 
   async function more() {
     if (!next) return;
-    const { data } = await api.GET("/v1/workspaces/{ws}/smart-lists/{id}/members", { params: { path: { ws, id: list.id }, query: { limit: 100, cursor: next } } });
+    const { data } = await api.GET("/v1/brands/{brand}/smart-lists/{id}/members", { params: { path: { brand, id: list.id }, query: { limit: 100, cursor: next } } });
     if (data) {
       setPeople((p) => [...(p ?? []), ...data.data]);
       setNext(data.next_cursor ?? null);
@@ -334,7 +328,7 @@ export function SmartListDetail({ ws, list: initial, canManage, onBack, onEdit, 
   }
 
   async function refresh() {
-    const { error } = await api.POST("/v1/workspaces/{ws}/smart-lists/{id}/refresh", { params: { path: { ws, id: list.id } } });
+    const { error } = await api.POST("/v1/brands/{brand}/smart-lists/{id}/refresh", { params: { path: { brand, id: list.id } } });
     if (error) return toast(errorMessage(error));
     toast("Updating who's in it.");
     setWaiting(true);
@@ -342,7 +336,7 @@ export function SmartListDetail({ ws, list: initial, canManage, onBack, onEdit, 
 
   async function remove() {
     if (!(await confirmAction(`Delete ${list.name}?`, "The list goes; the people in it stay on your customer records.", "Delete list"))) return;
-    const { error } = await api.DELETE("/v1/workspaces/{ws}/smart-lists/{id}", { params: { path: { ws, id: list.id } } });
+    const { error } = await api.DELETE("/v1/brands/{brand}/smart-lists/{id}", { params: { path: { brand, id: list.id } } });
     if (error) return toast(errorMessage(error));
     toast(`Deleted ${list.name}.`);
     onChanged();

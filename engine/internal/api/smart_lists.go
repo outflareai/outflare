@@ -22,16 +22,22 @@ import (
 
 func (s *Server) routesSmartLists(mux *http.ServeMux) {
 	read, manage := auth.ScopeCustomersRead, auth.ScopeCustomersManage
-	mux.HandleFunc("GET /v1/workspaces/{ws}/smart-lists", s.inBrand(read, s.listSmartLists))
-	mux.HandleFunc("POST /v1/workspaces/{ws}/smart-lists", s.inBrand(manage, s.createSmartList))
-	mux.HandleFunc("POST /v1/workspaces/{ws}/smart-lists/preview", s.inBrand(read, s.previewSmartList))
-	mux.HandleFunc("GET /v1/workspaces/{ws}/smart-lists/{id}", s.inBrand(read, s.getSmartList))
-	mux.HandleFunc("PATCH /v1/workspaces/{ws}/smart-lists/{id}", s.inBrand(manage, s.updateSmartList))
-	mux.HandleFunc("DELETE /v1/workspaces/{ws}/smart-lists/{id}", s.inBrand(manage, s.deleteSmartList))
-	mux.HandleFunc("GET /v1/workspaces/{ws}/smart-lists/{id}/members", s.inBrand(read, s.listSmartListMembers))
-	mux.HandleFunc("POST /v1/workspaces/{ws}/smart-lists/{id}/refresh", s.inBrand(manage, s.refreshSmartList))
-	mux.HandleFunc("POST /v1/workspaces/{ws}/smart-lists/{id}/members", s.inBrand(manage, s.addStaticMembers))
-	mux.HandleFunc("POST /v1/workspaces/{ws}/smart-lists/{id}/members/remove", s.inBrand(manage, s.removeStaticMembers))
+	// The same handlers serve both: a brand's lists under its path, and
+	// the workspace routes kept until the contract step
+	// (plans/brands/README.md), whose list defaults to the first brand.
+	for base, on := range map[string]func(string, http.HandlerFunc) http.HandlerFunc{
+		"/v1/brands/{brand}/smart-lists": s.onBrand, "/v1/workspaces/{ws}/smart-lists": s.inBrand} {
+		mux.HandleFunc("GET "+base, on(read, s.listSmartLists))
+		mux.HandleFunc("POST "+base, on(manage, s.createSmartList))
+		mux.HandleFunc("POST "+base+"/preview", on(read, s.previewSmartList))
+		mux.HandleFunc("GET "+base+"/{id}", on(read, s.getSmartList))
+		mux.HandleFunc("PATCH "+base+"/{id}", on(manage, s.updateSmartList))
+		mux.HandleFunc("DELETE "+base+"/{id}", on(manage, s.deleteSmartList))
+		mux.HandleFunc("GET "+base+"/{id}/members", on(read, s.listSmartListMembers))
+		mux.HandleFunc("POST "+base+"/{id}/refresh", on(manage, s.refreshSmartList))
+		mux.HandleFunc("POST "+base+"/{id}/members", on(manage, s.addStaticMembers))
+		mux.HandleFunc("POST "+base+"/{id}/members/remove", on(manage, s.removeStaticMembers))
+	}
 }
 
 type smartListView struct {
@@ -77,7 +83,7 @@ func scanSmartList(row pgx.Row) (smartListView, error) {
 
 func (s *Server) listSmartLists(w http.ResponseWriter, r *http.Request) {
 	a := accessFrom(r.Context())
-	sel, ok := s.brandFilter(w, r)
+	sel, ok := s.dataBrand(w, r)
 	if !ok {
 		return
 	}
@@ -163,6 +169,10 @@ func (s *Server) applySmartList(r *http.Request, a *access, f smartListFields, v
 				return err
 			}
 			v.BrandID = &id
+		}
+		// A brand's list holds that brand's people only.
+		if a.Brand != "" && (v.BrandID == nil || *v.BrandID != a.Brand) {
+			return errInvalid("lists stay in their brand: brand_id can only be this route's brand")
 		}
 	}
 	if v.Kind == smartlists.KindStatic {
@@ -257,6 +267,9 @@ func (s *Server) createSmartList(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		v.Kind = *f.Kind
+	}
+	if a.Brand != "" {
+		v.BrandID = &a.Brand
 	}
 	if !s.smartListApplied(w, r, s.applySmartList(r, a, f, &v)) {
 		return
@@ -420,7 +433,9 @@ func (s *Server) previewSmartList(w http.ResponseWriter, r *http.Request) {
 		in.Rules = []smartlists.Rule{}
 	}
 	var brand *string
-	if in.BrandID != nil {
+	if a.Brand != "" {
+		brand = &a.Brand
+	} else if in.BrandID != nil {
 		id, err := s.brandIDFor(r.Context(), a.WorkspaceID, *in.BrandID)
 		if errors.Is(err, errNotFound) || (err == nil && !a.sees(&id)) {
 			writeError(w, r, http.StatusBadRequest, "invalid_request", "brand_id must be one of the workspace's brands, or null for every brand")
@@ -459,7 +474,7 @@ func (s *Server) smartPreview(r *http.Request, a *access, rules []smartlists.Rul
 			return err
 		}
 		var err error
-		n, sample, err = smartlists.Preview(ctx, tx, a.WorkspaceID, rules, match, brand, a.Brands, 10)
+		n, sample, err = smartlists.Preview(ctx, tx, a.WorkspaceID, rules, match, brand, a.seenBrands(), 10)
 		return err
 	})
 	return n, sample, err
@@ -486,7 +501,7 @@ func (s *Server) listSmartListMembers(w http.ResponseWriter, r *http.Request) {
 		}
 		after, afterID = &t, id
 	}
-	list, err := smartlists.Members(r.Context(), s.pool, a.WorkspaceID, v.ID, a.Brands, after, afterID, limit)
+	list, err := smartlists.Members(r.Context(), s.pool, a.WorkspaceID, v.ID, a.seenBrands(), after, afterID, limit)
 	if err != nil {
 		s.internal(w, r, err)
 		return

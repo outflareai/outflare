@@ -28,18 +28,40 @@ func (s *Server) routesCRMImport(mux *http.ServeMux) {
 	mux.HandleFunc("POST /v1/workspaces/{ws}/integrations/{id}/crm-imports", s.inWorkspace(auth.ScopeCatalogManage, s.startCRMImport))
 	mux.HandleFunc("GET /v1/workspaces/{ws}/crm-imports", s.inWorkspace(auth.ScopeCustomersRead, s.listCRMImports))
 	mux.HandleFunc("GET /v1/workspaces/{ws}/crm-imports/{import}", s.inWorkspace(auth.ScopeCustomersRead, s.getCRMImportHandler))
+	// A brand's imports: the records land in the brand, from a connection
+	// that serves it (its own, or a workspace one shared with it).
+	mux.HandleFunc("POST /v1/brands/{brand}/crm-imports", s.onBrand(auth.ScopeCatalogManage, s.startCRMImport))
+	mux.HandleFunc("GET /v1/brands/{brand}/crm-imports", s.onBrand(auth.ScopeCustomersRead, s.listCRMImports))
+	mux.HandleFunc("GET /v1/brands/{brand}/crm-imports/{import}", s.onBrand(auth.ScopeCustomersRead, s.getCRMImportHandler))
 }
 
 // crmImporter opens the {id} connection as a CRM, or writes the error.
 func (s *Server) crmImporter(w http.ResponseWriter, r *http.Request) (*connectors.Opened, connectors.CRMImporter, bool) {
+	return s.crmImporterFor(w, r, r.PathValue("id"))
+}
+
+// crmImporterFor is crmImporter for connection id. On a brand route the
+// connection must serve the brand; another brand's is not found.
+func (s *Server) crmImporterFor(w http.ResponseWriter, r *http.Request, id string) (*connectors.Opened, connectors.CRMImporter, bool) {
 	if !s.needIntegrations(w, r) {
 		return nil, nil, false
 	}
 	a := accessFrom(r.Context())
-	id := r.PathValue("id")
 	if !validUUID(id) {
 		writeError(w, r, http.StatusNotFound, "not_found", "integration not found")
 		return nil, nil, false
+	}
+	if a.Brand != "" {
+		all, err := s.integrations.List(r.Context(), s.pool, a.WorkspaceID, "")
+		if err != nil {
+			s.internal(w, r, err)
+			return nil, nil, false
+		}
+		i := slices.IndexFunc(all, func(i connectors.Integration) bool { return i.ID == id })
+		if i < 0 || !all[i].Serves(a.Brand, all) {
+			writeError(w, r, http.StatusNotFound, "not_found", "integration not found: it must be this brand's connection, or a workspace connection shared with it")
+			return nil, nil, false
+		}
 	}
 	o, err := s.integrations.Open(r.Context(), s.pool, a.WorkspaceID, id)
 	if errors.Is(err, connectors.ErrNotFound) {
@@ -83,7 +105,9 @@ func (s *Server) crmImportPreview(w http.ResponseWriter, r *http.Request) {
 func (s *Server) startCRMImport(w http.ResponseWriter, r *http.Request) {
 	a := accessFrom(r.Context())
 	var req struct {
-		Objects []string `json:"objects"`
+		// On a brand route: the connection to import from.
+		IntegrationID *string  `json:"integration_id"`
+		Objects       []string `json:"objects"`
 	}
 	if !decode(w, r, &req) {
 		return
@@ -106,7 +130,18 @@ func (s *Server) startCRMImport(w http.ResponseWriter, r *http.Request) {
 			objects = append(objects, o)
 		}
 	}
-	o, _, ok := s.crmImporter(w, r)
+	integration := r.PathValue("id")
+	if a.Brand != "" {
+		if req.IntegrationID == nil {
+			writeError(w, r, http.StatusBadRequest, "invalid_request", "integration_id is the CRM connection to import from")
+			return
+		}
+		integration = *req.IntegrationID
+	} else if req.IntegrationID != nil {
+		writeError(w, r, http.StatusBadRequest, "invalid_request", "integration_id is in the path here")
+		return
+	}
+	o, _, ok := s.crmImporterFor(w, r, integration)
 	if !ok {
 		return
 	}
@@ -123,8 +158,14 @@ func (s *Server) startCRMImport(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) listCRMImports(w http.ResponseWriter, r *http.Request) {
-	rows, err := s.pool.Query(r.Context(), `SELECT `+crmImportCols+` FROM crm_imports WHERE workspace_id = $1 ORDER BY created_at DESC LIMIT 50`,
-		accessFrom(r.Context()).WorkspaceID)
+	a := accessFrom(r.Context())
+	sel, ok := s.dataBrand(w, r)
+	if !ok {
+		return
+	}
+	args := []any{a.WorkspaceID}
+	rows, err := s.pool.Query(r.Context(), `SELECT `+crmImportCols+` FROM crm_imports WHERE workspace_id = $1`+sel.sql("brand_id", &args)+
+		` ORDER BY created_at DESC LIMIT 50`, args...)
 	if err != nil {
 		s.internal(w, r, err)
 		return
@@ -143,7 +184,15 @@ func (s *Server) getCRMImportHandler(w http.ResponseWriter, r *http.Request) {
 		writeError(w, r, http.StatusNotFound, "not_found", "import not found")
 		return
 	}
-	v, err := getCRMImport(r.Context(), s.pool, accessFrom(r.Context()).WorkspaceID, id)
+	a := accessFrom(r.Context())
+	v, err := getCRMImport(r.Context(), s.pool, a.WorkspaceID, id)
+	if err == nil && a.Brand != "" {
+		var brand *string
+		err = s.pool.QueryRow(r.Context(), `SELECT brand_id::text FROM crm_imports WHERE id = $1`, id).Scan(&brand)
+		if err == nil && !a.sees(brand) {
+			err = pgx.ErrNoRows
+		}
+	}
 	if errors.Is(err, pgx.ErrNoRows) {
 		writeError(w, r, http.StatusNotFound, "not_found", "import not found")
 		return

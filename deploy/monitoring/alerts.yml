@@ -383,6 +383,14 @@ groups:
         annotations:
           summary: "Query couldn't set up its read-only database role; check the engine log for \"query: no query role\" (the database user needs CREATEROLE)."
 
+      - alert: OutflareQueryTypeTablesFailing
+        # A brand's record types (subscription, deal) are temporary views
+        # each query's connection makes; the queries still run without them.
+        expr: sum(increase(outflare_query_type_tables_failed_total[30m])) > 0
+        labels: { severity: warning }
+        annotations:
+          summary: "Brand queries are running without their record type tables: the database refused the temporary views (the query role needs the TEMP privilege); check the engine log for query.type_tables_failed."
+
       - alert: OutflareQueriesTimingOut
         expr: sum(rate(outflare_query_runs_total{outcome="timeout"}[15m])) / sum(rate(outflare_query_runs_total[15m])) > 0.25 and sum(increase(outflare_query_runs_total[15m])) > 20
         for: 15m

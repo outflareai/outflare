@@ -274,6 +274,10 @@ var (
 		Namespace: namespace, Subsystem: "query", Name: "rows_total",
 		Help: "Rows queries returned.",
 	})
+	queryTypeTablesFailed = prometheus.NewCounter(prometheus.CounterOpts{
+		Namespace: namespace, Subsystem: "query", Name: "type_tables_failed_total",
+		Help: "Brand queries that ran without their record type tables, because the database refused to make them.",
+	})
 	// Meaning-based search: vectors made with workspaces' own AI keys.
 	semanticRuns = prometheus.NewCounterVec(prometheus.CounterOpts{
 		Namespace: namespace, Subsystem: "semantic_search", Name: "embed_runs_total",
@@ -667,7 +671,7 @@ var own = []prometheus.Collector{
 	connectionLimitAlerts, connectionLimitStops,
 	hooksReceived, hookEvents, hookLag,
 	domainConnectLookups, domainConnectDuration,
-	queryRuns, queryDuration, queryRows,
+	queryRuns, queryDuration, queryRows, queryTypeTablesFailed,
 	ruleEvaluations, emailsGuarded, journeyCalls, journeyCallDuration, journeyEntriesRefused, excluded, sequencerPushes, crmContactPushes, adAudienceSyncs,
 	semanticRuns, semanticItems, semanticDuration, semanticAvailable, semanticWorkspaces, knowledgeAsks, knowledgeAskDuration,
 	dataNetworkLookups, dataNetworkShared, dataNetworkShareRuns, dataNetworkMembers, dataNetworkWithdrawals, dataNetworkOverdue, dataNetworkLag,
@@ -908,6 +912,10 @@ func QueryRan(outcome string, d time.Duration, rows int) {
 	queryDuration.Observe(d.Seconds())
 	queryRows.Add(float64(rows))
 }
+
+// QueryTypeTablesFailed records a brand query that ran without its record
+// type tables.
+func QueryTypeTablesFailed() { queryTypeTablesFailed.Inc() }
 
 // SemanticEmbedded records one embedding job: its outcome, how many items
 // it embedded and how long it took.

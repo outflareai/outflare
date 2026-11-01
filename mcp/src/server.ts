@@ -12,7 +12,7 @@ import { registerCoverageTools } from "./coverage.js";
 import { registerBrandTools } from "./brands.js";
 import { registerSetupTools } from "./setup.js";
 import { registerQueryTools } from "./query.js";
-import { registerRecordTools } from "./records.js";
+import { brandCaller, brandRef, registerRecordTools } from "./records.js";
 import { registerContextTools } from "./context.js";
 import { registerKnowledgeTools } from "./knowledge.js";
 import { registerSupportTools } from "./support.js";
@@ -304,6 +304,8 @@ export function createServer({ client: gtm, workspace, readOnly = false, mission
   // withBrand fills in the default brand (OUTFLARE_BRAND) when a list call
   // names none; brand "all" asks for every brand.
   const withBrand = <T extends { brand?: string }>(q: T): T => (q.brand === undefined && defaultBrand ? { ...q, brand: defaultBrand } : q);
+  // Customer data lives under its brand (/v1/brands/{brand}/...).
+  const onBrand = brandCaller(gtm, () => ws);
 
   // What Outflare knows and what is blocked: the first call of a conversation.
   registerContextTools(server, gtm, () => ws, readOnly, call, withBrand);
@@ -527,7 +529,6 @@ export function createServer({ client: gtm, workspace, readOnly = false, mission
   const smartListFields = {
     name: z.string().min(1).max(200).optional(),
     description: z.string().max(2000).optional(),
-    brand_id: z.string().nullable().optional().describe("A brand's handle or id: only that brand's people and the shared ones. null for every brand."),
     rules: z.array(smartRule).max(20).optional().describe("The tests a person must pass. Set one of attribute, event, in_list or news_search in each."),
     match: z.enum(["all", "any"]).optional().describe("all (default): every rule must hold. any: one is enough."),
   };
@@ -537,16 +538,16 @@ export function createServer({ client: gtm, workspace, readOnly = false, mission
     {
       title: "List smart lists",
       description: "Groups of people on customer records that keep themselves up to date from rules (such as paid in the last 90 days), with how many are in each now.",
-      inputSchema: { brand: brandParam },
+      inputSchema: { brand: brandRef },
       annotations: read,
     },
-    (q) => call(() => gtm.GET("/v1/workspaces/{ws}/smart-lists", { params: { path, query: withBrand(q) } })),
+    ({ brand }) => call(() => onBrand(brand, (b) => gtm.GET("/v1/brands/{brand}/smart-lists", { params: { path: { brand: b } } }))),
   );
 
   server.registerTool(
     "get_smart_list",
-    { title: "Get a smart list", description: "A smart list's rules, size and when it was last brought up to date.", inputSchema: { list_id: id }, annotations: read },
-    ({ list_id }) => call(() => gtm.GET("/v1/workspaces/{ws}/smart-lists/{id}", { params: { path: { ...path, id: list_id } } })),
+    { title: "Get a smart list", description: "A smart list's rules, size and when it was last brought up to date.", inputSchema: { brand: brandRef, list_id: id }, annotations: read },
+    ({ brand, list_id }) => call(() => onBrand(brand, (b) => gtm.GET("/v1/brands/{brand}/smart-lists/{id}", { params: { path: { brand: b, id: list_id } } }))),
   );
 
   server.registerTool(
@@ -554,10 +555,10 @@ export function createServer({ client: gtm, workspace, readOnly = false, mission
     {
       title: "List who is in a smart list",
       description: "The people in a smart list now, newest to join first, with their email.",
-      inputSchema: { list_id: id, limit: limit(200), cursor },
+      inputSchema: { brand: brandRef, list_id: id, limit: limit(200), cursor },
       annotations: read,
     },
-    ({ list_id, ...q }) => call(() => gtm.GET("/v1/workspaces/{ws}/smart-lists/{id}/members", { params: { path: { ...path, id: list_id }, query: q } })),
+    ({ brand, list_id, ...q }) => call(() => onBrand(brand, (b) => gtm.GET("/v1/brands/{brand}/smart-lists/{id}/members", { params: { path: { brand: b, id: list_id }, query: q } }))),
   );
 
   server.registerTool(
@@ -565,10 +566,10 @@ export function createServer({ client: gtm, workspace, readOnly = false, mission
     {
       title: "Count who rules pick",
       description: "How many people the rules pick right now and the 10 newest, without saving. Check this before create_smart_list.",
-      inputSchema: { brand_id: smartListFields.brand_id, rules: smartListFields.rules, match: smartListFields.match },
+      inputSchema: { brand: brandRef, rules: smartListFields.rules, match: smartListFields.match },
       annotations: read,
     },
-    (body) => call(() => gtm.POST("/v1/workspaces/{ws}/smart-lists/preview", { params: { path }, body })),
+    ({ brand, ...body }) => call(() => onBrand(brand, (b) => gtm.POST("/v1/brands/{brand}/smart-lists/preview", { params: { path: { brand: b } }, body }))),
   );
 
   server.registerTool(
@@ -1181,10 +1182,10 @@ export function createServer({ client: gtm, workspace, readOnly = false, mission
     {
       title: "List CRM imports",
       description: "The 50 newest imports from another CRM, with status and counts.",
-      inputSchema: {},
+      inputSchema: { brand: brandRef },
       annotations: read,
     },
-    () => call(() => gtm.GET("/v1/workspaces/{ws}/crm-imports", { params: { path: { ws } } })),
+    ({ brand }) => call(() => onBrand(brand, (b) => gtm.GET("/v1/brands/{brand}/crm-imports", { params: { path: { brand: b } } }))),
   );
 
   server.registerTool(
@@ -1194,10 +1195,10 @@ export function createServer({ client: gtm, workspace, readOnly = false, mission
       description:
         "Status of an import from another CRM (queued, running, done, failed) and what it did per object: records seen, created, matched to records already " +
         "here, updated and unchanged; record types, fields and option lists added; members matched; and values left out, with why.",
-      inputSchema: { import_id: id },
+      inputSchema: { brand: brandRef, import_id: id },
       annotations: read,
     },
-    ({ import_id }) => call(() => gtm.GET("/v1/workspaces/{ws}/crm-imports/{import}", { params: { path: { ws, import: import_id } } })),
+    ({ brand, import_id }) => call(() => onBrand(brand, (b) => gtm.GET("/v1/brands/{brand}/crm-imports/{import}", { params: { path: { brand: b, import: import_id } } }))),
   );
 
   server.registerTool(
@@ -1928,6 +1929,28 @@ export function createServer({ client: gtm, workspace, readOnly = false, mission
       annotations: read,
     },
     ({ webhook_id, ...query }) => call(() => gtm.GET("/v1/workspaces/{ws}/webhooks/{id}/deliveries", { params: { path: { ws, id: webhook_id }, query } })),
+  );
+
+  server.registerTool(
+    "get_webhook_delivery",
+    {
+      title: "Get a webhook delivery with every try",
+      description: "One delivery's payload and each try, oldest first: when, the receiver's status code or error, how long it took, and whether a person sent it.",
+      inputSchema: { webhook_id: id, delivery_id: z.number().int() },
+      annotations: read,
+    },
+    ({ webhook_id, delivery_id }) => call(() => gtm.GET("/v1/workspaces/{ws}/webhooks/{id}/deliveries/{delivery}", { params: { path: { ws, id: webhook_id, delivery: delivery_id } } })),
+  );
+
+  server.registerTool(
+    "get_webhook_activity",
+    {
+      title: "Get a webhook's activity and error rate",
+      description: "One webhook's delivery tries per UTC day over the last days (default 7, up to 30), how many failed, the error rate and the 95th percentile answer time.",
+      inputSchema: { webhook_id: id, days: z.number().int().min(1).max(30).optional() },
+      annotations: read,
+    },
+    ({ webhook_id, ...query }) => call(() => gtm.GET("/v1/workspaces/{ws}/webhooks/{id}/activity", { params: { path: { ws, id: webhook_id }, query } })),
   );
 
   const emailPurpose = z.enum(["transactional", "lifecycle"]);
@@ -5939,10 +5962,10 @@ export function createServer({ client: gtm, workspace, readOnly = false, mission
       title: "Create a smart list",
       description:
         "A list that fills itself from rules and stays up to date as people's records and events change (kind smart, the default), or a static list that holds the people put in it (kind static: add_to_static_list). It can then be used for email, journeys and ads.",
-      inputSchema: { ...smartListFields, name: z.string().min(1).max(200), kind: z.enum(["smart", "static"]).optional() },
+      inputSchema: { brand: brandRef, ...smartListFields, name: z.string().min(1).max(200), kind: z.enum(["smart", "static"]).optional() },
       annotations: write,
     },
-    (body) => call(() => gtm.POST("/v1/workspaces/{ws}/smart-lists", { params: { path }, body })),
+    ({ brand, ...body }) => call(() => onBrand(brand, (b) => gtm.POST("/v1/brands/{brand}/smart-lists", { params: { path: { brand: b } }, body }))),
   );
 
   server.registerTool(
@@ -5950,10 +5973,10 @@ export function createServer({ client: gtm, workspace, readOnly = false, mission
     {
       title: "Change a smart list",
       description: "Rename it or change its rules, match or brand; changing who it picks refreshes it straight away.",
-      inputSchema: { list_id: id, ...smartListFields },
+      inputSchema: { brand: brandRef, list_id: id, ...smartListFields },
       annotations: write,
     },
-    ({ list_id, ...body }) => call(() => gtm.PATCH("/v1/workspaces/{ws}/smart-lists/{id}", { params: { path: { ...path, id: list_id } }, body })),
+    ({ brand, list_id, ...body }) => call(() => onBrand(brand, (b) => gtm.PATCH("/v1/brands/{brand}/smart-lists/{id}", { params: { path: { brand: b, id: list_id } }, body }))),
   );
 
   server.registerTool(
@@ -5961,10 +5984,10 @@ export function createServer({ client: gtm, workspace, readOnly = false, mission
     {
       title: "Put people in a static list",
       description: "Add people (customer record ids) to a static list. Rules acting on people joining the list hear of it.",
-      inputSchema: { list_id: id, record_ids: z.array(z.string()).min(1).max(10000) },
+      inputSchema: { brand: brandRef, list_id: id, record_ids: z.array(z.string()).min(1).max(10000) },
       annotations: write,
     },
-    ({ list_id, ...body }) => call(() => gtm.POST("/v1/workspaces/{ws}/smart-lists/{id}/members", { params: { path: { ...path, id: list_id } }, body })),
+    ({ brand, list_id, ...body }) => call(() => onBrand(brand, (b) => gtm.POST("/v1/brands/{brand}/smart-lists/{id}/members", { params: { path: { brand: b, id: list_id } }, body }))),
   );
 
   server.registerTool(
@@ -5972,11 +5995,11 @@ export function createServer({ client: gtm, workspace, readOnly = false, mission
     {
       title: "Take people out of a static list",
       description: "Remove people (customer record ids) from a static list.",
-      inputSchema: { list_id: id, record_ids: z.array(z.string()).min(1).max(10000) },
+      inputSchema: { brand: brandRef, list_id: id, record_ids: z.array(z.string()).min(1).max(10000) },
       annotations: write,
     },
-    ({ list_id, ...body }) =>
-      call(() => gtm.POST("/v1/workspaces/{ws}/smart-lists/{id}/members/remove", { params: { path: { ...path, id: list_id } }, body })),
+    ({ brand, list_id, ...body }) =>
+      call(() => onBrand(brand, (b) => gtm.POST("/v1/brands/{brand}/smart-lists/{id}/members/remove", { params: { path: { brand: b, id: list_id } }, body }))),
   );
 
   server.registerTool(
@@ -5984,10 +6007,10 @@ export function createServer({ client: gtm, workspace, readOnly = false, mission
     {
       title: "Refresh a smart list now",
       description: "Bring a smart list's members up to date now instead of within 15 minutes.",
-      inputSchema: { list_id: id },
+      inputSchema: { brand: brandRef, list_id: id },
       annotations: write,
     },
-    ({ list_id }) => call(() => gtm.POST("/v1/workspaces/{ws}/smart-lists/{id}/refresh", { params: { path: { ...path, id: list_id } } })),
+    ({ brand, list_id }) => call(() => onBrand(brand, (b) => gtm.POST("/v1/brands/{brand}/smart-lists/{id}/refresh", { params: { path: { brand: b, id: list_id } } }))),
   );
 
   server.registerTool(
@@ -5995,10 +6018,10 @@ export function createServer({ client: gtm, workspace, readOnly = false, mission
     {
       title: "Delete a smart list",
       description: "Delete a smart list. The people stay; only the list goes.",
-      inputSchema: { list_id: id },
+      inputSchema: { brand: brandRef, list_id: id },
       annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: false },
     },
-    ({ list_id }) => call(() => gtm.DELETE("/v1/workspaces/{ws}/smart-lists/{id}", { params: { path: { ...path, id: list_id } } })),
+    ({ brand, list_id }) => call(() => onBrand(brand, (b) => gtm.DELETE("/v1/brands/{brand}/smart-lists/{id}", { params: { path: { brand: b, id: list_id } } }))),
   );
 
   server.registerTool(
@@ -7632,12 +7655,13 @@ export function createServer({ client: gtm, workspace, readOnly = false, mission
         "verified email or domain is filled in, not duplicated. Values never overwrite what someone typed in Outflare. Safe to run again: it updates the same " +
         "records. Lists, notes and tasks are not imported yet. Runs in the background: poll get_crm_import. Show the user preview_crm_import first.",
       inputSchema: {
+        brand: brandRef.describe("The brand the records go to (handle or id); the connection must serve it."),
         integration_id: id,
         objects: z.array(z.string()).optional().describe("Only these objects, by slug from preview_crm_import (people, companies, deals). Default all."),
       },
       annotations: { ...write, openWorldHint: true },
     },
-    ({ integration_id, ...body }) => call(() => gtm.POST("/v1/workspaces/{ws}/integrations/{id}/crm-imports", { params: { path: { ws, id: integration_id } }, body })),
+    ({ brand, ...body }) => call(() => onBrand(brand, (b) => gtm.POST("/v1/brands/{brand}/crm-imports", { params: { path: { brand: b } }, body }))),
   );
 
   server.registerTool(
