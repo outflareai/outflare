@@ -170,7 +170,7 @@ export const tabBlurbs: Record<Tab, string> = {
   "ab-tests": "See which version of a flag wins at a goal, with numbers that stay honest however often you check.",
   channels: "Visits, sign-ups, revenue and cost for every channel, credited the same way in every report.",
   links: "Tag every link with one channel, source and campaign, so each visit, lead and sale is credited to the right place.",
-  partners: "Referral, affiliate and influencer programs: partners' links and codes, the sales they bring, their rewards and payouts.",
+  partners: "Referral, affiliate and influencer programs: paid or voluntary tasks, partner websites and channels, referral links, rewards and payouts.",
   "seo-overview": "Is each brand growing in search: branded search, visitors, domain rating and links, with their trends.",
   experiments: "Did a change help? Hold back a matched group of pages and measure the difference from Search Console.",
   audits: "OutflareBot crawls your websites, scores their health and finds what to fix, page by page.",

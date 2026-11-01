@@ -596,3 +596,19 @@ or weekly collection. `delete_search_report` removes its snapshots;
 `delete_search_schedule` keeps collection history. These writes are excluded
 from read-only sessions. `refresh_search_insights` is one-time collection;
 it does not implicitly create a recurring schedule.
+
+### Partner task tools
+
+| Tool | What it does |
+| --- | --- |
+| `list_partner_tasks` | Read opportunities and assignments in a program. |
+| `list_partner_audiences` | Read partner websites, channels, reach sources and ownership status. |
+| `create_partner_task` | Create a paid, unpaid or product reward task, including a private website proposal. |
+| `update_partner_task` | Pause or resume an opportunity. |
+| `review_partner_task` | Offer a price, approve submitted work or reject it. |
+
+Reads need `partners.read`; writes need `partners.manage`. Website proposals stay hidden from partners until they verify the exact hostname. Reach reads and automatic website link checks use the workspace's own connected page reader.
+
+`create_partner_portal_session` creates a short-lived, single-use hosted sign-in handoff for a brand-authenticated customer. Call from a trusted backend with the stable customer ID; never expose a workspace token to a partner.
+
+Partnerships: `list_partner_proposals`, `create_partner_proposal`, and `update_partner_proposal` manage recipient-specific offers, invitations, publication verification and explicit milestone approval. These use workspace partner scopes, not a recipient's portal session.

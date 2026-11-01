@@ -29241,53 +29241,124 @@ paths:
         default: { $ref: "#/components/responses/Error" }
   /v1/workspaces/{ws}/partners/{id}/promo-codes:
     parameters:
-      - { $ref: "#/components/parameters/Workspace" }
-      - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+    - $ref: '#/components/parameters/Workspace'
+    - name: id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
     post:
       operationId: addPartnerPromoCode
-      x-outflare-access: { scope: partners.manage, brand_limited: true }
-      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      x-outflare-access:
+        scope: partners.manage
+        brand_limited: true
+      parameters:
+      - $ref: '#/components/parameters/IdempotencyKey'
       summary: Tie a promo code to a partner
-      description: "Scope: partners.manage. The code as customers type it at checkout (matched in any case). A conversion that reports it (promo_code) credits the partner. Make the code in your billing system yourself, or pass coupon to have Outflare make it there (status shows how that went)."
-      tags: [partners]
+      description: 'Scope: partners.manage. The code as customers type it at checkout (matched in any case). A conversion that reports it (promo_code) credits the partner. Make the code in your billing system yourself, or pass coupon to have Outflare make it there (status shows how that went).'
+      tags:
+      - partners
       requestBody:
         required: true
         content:
           application/json:
             schema:
               type: object
-              required: [code]
+              required:
+              - code
               properties:
-                code: { type: string, maxLength: 64 }
-                coupon: { type: string, maxLength: 200, description: "A coupon's id in the workspace's billing account (Stripe): Outflare makes the code there too, with the workspace's own key, which needs Write access to Promotion codes. Leave it out when you make the code yourself." }
+                code:
+                  type: string
+                  maxLength: 64
+                rules:
+                  $ref: '#/components/schemas/PartnerPromoRules'
+                coupon:
+                  type: string
+                  maxLength: 200
+                  description: 'A coupon''s id in the workspace''s billing account (Stripe): Outflare makes the code there too, with the workspace''s own key, which needs Write access to Promotion codes. Leave it out when you make the code yourself.'
       responses:
-        "201":
+        '201':
           description: The partner.
           content:
             application/json:
-              schema: { $ref: "#/components/schemas/Partner" }
-        "400": { $ref: "#/components/responses/Error" }
-        "404": { $ref: "#/components/responses/Error" }
-        "409": { $ref: "#/components/responses/Error" }
-        "202": { $ref: "#/components/responses/MissionHeld" }
-        default: { $ref: "#/components/responses/Error" }
+              schema:
+                $ref: '#/components/schemas/Partner'
+        '400':
+          $ref: '#/components/responses/Error'
+        '404':
+          $ref: '#/components/responses/Error'
+        '409':
+          $ref: '#/components/responses/Error'
+        '202':
+          $ref: '#/components/responses/MissionHeld'
+        default:
+          $ref: '#/components/responses/Error'
   /v1/workspaces/{ws}/partners/{id}/promo-codes/{code}:
     parameters:
-      - { $ref: "#/components/parameters/Workspace" }
-      - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
-      - { name: code, in: path, required: true, schema: { type: string } }
+    - $ref: '#/components/parameters/Workspace'
+    - name: id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    - name: code
+      in: path
+      required: true
+      schema:
+        type: string
+    patch:
+      operationId: updatePartnerPromoCode
+      x-outflare-access:
+        scope: partners.manage
+        brand_limited: true
+      summary: Enable or disable a partner promo code
+      description: Updates attribution immediately and queues the matching checkout change for connected billing codes. Local codes must also be updated in your own checkout.
+      tags:
+      - partners
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+              - enabled
+              properties:
+                enabled:
+                  type: boolean
+      responses:
+        '200':
+          description: The partner with updated codes.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Partner'
+        '202':
+          $ref: '#/components/responses/MissionHeld'
+        default:
+          $ref: '#/components/responses/Error'
     delete:
       operationId: removePartnerPromoCode
-      x-outflare-access: { scope: partners.manage, brand_limited: true }
-      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      x-outflare-access:
+        scope: partners.manage
+        brand_limited: true
+      parameters:
+      - $ref: '#/components/parameters/IdempotencyKey'
       summary: Remove a partner's promo code
-      description: "Scope: partners.manage."
-      tags: [partners]
+      description: 'Scope: partners.manage.'
+      tags:
+      - partners
       responses:
-        "204": { description: Removed. }
-        "404": { $ref: "#/components/responses/Error" }
-        "202": { $ref: "#/components/responses/MissionHeld" }
-        default: { $ref: "#/components/responses/Error" }
+        '204':
+          description: Removed.
+        '404':
+          $ref: '#/components/responses/Error'
+        '202':
+          $ref: '#/components/responses/MissionHeld'
+        default:
+          $ref: '#/components/responses/Error'
   /v1/workspaces/{ws}/partners/{id}/fees:
     parameters:
       - { $ref: "#/components/parameters/Workspace" }
@@ -34124,6 +34195,400 @@ paths:
         '204':
           description: Deleted
 
+  /v1/workspaces/{ws}/partner-programs/{id}/portal-sessions:
+    parameters:
+    - $ref: '#/components/parameters/Workspace'
+    - name: id
+      in: path
+      required: true
+      description: A program's id or slug.
+      schema:
+        type: string
+    post:
+      operationId: createPartnerPortalSession
+      x-outflare-access:
+        scope: partners.conversions
+        brand_limited: true
+      parameters:
+      - $ref: '#/components/parameters/IdempotencyKey'
+      summary: Automatically sign a customer into the hosted partner portal
+      description: 'Scope: partners.conversions. Backend-only automatic provisioning and sign-in for an open portal.
+
+        Supply your stable customer_id and optionally email/name. Returns a single-use sign-in URL valid for 60 seconds.
+
+        Redirect only the authenticated customer to it; never cache it. Existing identity resolution is shared with
+
+        conversions and embedded sessions. Program admission and explicit terms acceptance still apply.
+
+        '
+      tags:
+      - partners
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                customer_id:
+                  type: string
+                  description: Your own id for the customer.
+                email:
+                  type: string
+                  format: email
+                record_id:
+                  type: string
+                  format: uuid
+                name:
+                  type: string
+                  description: Set on a new customer record only.
+      responses:
+        '201':
+          description: The one-use portal handoff.
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                - sign_in_url
+                - expires_in_seconds
+                - partner_id
+                - status
+                properties:
+                  sign_in_url:
+                    type: string
+                  expires_in_seconds:
+                    type: integer
+                  partner_id:
+                    type: string
+                    format: uuid
+                  status:
+                    type: string
+                    enum:
+                    - pending
+                    - active
+                    - suspended
+                    - rejected
+                  code:
+                    type: string
+                  link:
+                    type: string
+        '400':
+          $ref: '#/components/responses/Error'
+        '403':
+          $ref: '#/components/responses/Error'
+        '404':
+          $ref: '#/components/responses/Error'
+        '202':
+          $ref: '#/components/responses/MissionHeld'
+        default:
+          $ref: '#/components/responses/Error'
+  /v1/workspaces/{ws}/partner-programs/{id}/tasks:
+    parameters:
+    - name: ws
+      in: path
+      required: true
+      schema:
+        type: string
+    - name: id
+      in: path
+      required: true
+      schema:
+        type: string
+    get:
+      operationId: listPartnerTasks
+      summary: List tasks, custom website proposals and submissions
+      tags:
+      - partners
+      responses:
+        '200':
+          description: Result.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        default:
+          $ref: '#/components/responses/Error'
+      x-outflare-access:
+        scope: partners.read
+        brand_limited: true
+    post:
+      operationId: createPartnerTask
+      summary: Create a paid or voluntary partner task
+      tags:
+      - partners
+      responses:
+        '200':
+          description: Result.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        '202':
+          $ref: '#/components/responses/MissionHeld'
+        default:
+          $ref: '#/components/responses/Error'
+      x-outflare-access:
+        scope: partners.manage
+        brand_limited: true
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PartnerTaskInput'
+  /v1/workspaces/{ws}/partner-programs/{id}/tasks/{task}:
+    parameters:
+    - name: ws
+      in: path
+      required: true
+      schema:
+        type: string
+    - name: id
+      in: path
+      required: true
+      schema:
+        type: string
+    - name: task
+      in: path
+      required: true
+      schema:
+        type: string
+    post:
+      operationId: updatePartnerTask
+      summary: Pause or resume a partner task
+      tags:
+      - partners
+      responses:
+        '200':
+          description: Result.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        '202':
+          $ref: '#/components/responses/MissionHeld'
+        default:
+          $ref: '#/components/responses/Error'
+      x-outflare-access:
+        scope: partners.manage
+        brand_limited: true
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PartnerTaskAction'
+  /v1/workspaces/{ws}/partner-programs/{id}/task-submissions/{submission}:
+    parameters:
+    - name: ws
+      in: path
+      required: true
+      schema:
+        type: string
+    - name: id
+      in: path
+      required: true
+      schema:
+        type: string
+    - name: submission
+      in: path
+      required: true
+      schema:
+        type: string
+    post:
+      operationId: reviewPartnerTask
+      summary: Offer a price, approve or reject submitted work
+      tags:
+      - partners
+      responses:
+        '200':
+          description: Result.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        '202':
+          $ref: '#/components/responses/MissionHeld'
+        default:
+          $ref: '#/components/responses/Error'
+      x-outflare-access:
+        scope: partners.manage
+        brand_limited: true
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PartnerTaskAction'
+  /v1/workspaces/{ws}/partner-programs/{id}/audiences:
+    parameters:
+    - name: ws
+      in: path
+      required: true
+      schema:
+        type: string
+    - name: id
+      in: path
+      required: true
+      schema:
+        type: string
+    get:
+      operationId: listPartnerAudiences
+      summary: List partner social profiles, websites and communities
+      tags:
+      - partners
+      responses:
+        '200':
+          description: Result.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        default:
+          $ref: '#/components/responses/Error'
+      x-outflare-access:
+        scope: partners.read
+        brand_limited: true
+  /v1/workspaces/{ws}/partner-programs/{id}/proposals:
+    parameters:
+    - $ref: '#/components/parameters/Workspace'
+    - name: id
+      in: path
+      required: true
+      schema:
+        type: string
+    get:
+      operationId: listPartnerProposals
+      x-outflare-access:
+        scope: partners.read
+        brand_limited: true
+      summary: List one-to-one partnership proposals
+      tags:
+      - partners
+      responses:
+        '200':
+          description: Proposals and their milestone progress.
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                - data
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/PartnerProposal'
+        default:
+          $ref: '#/components/responses/Error'
+    post:
+      operationId: createPartnerProposal
+      x-outflare-access:
+        scope: partners.manage
+        brand_limited: true
+      summary: Draft a proposal for exactly one recipient
+      description: Assign an existing partner_id or supply an email to provision a customer-backed partner. Invite with updatePartnerProposal after reviewing the draft. No outreach is sent automatically.
+      tags:
+      - partners
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+              - config
+              properties:
+                partner_id:
+                  type: string
+                email:
+                  type: string
+                name:
+                  type: string
+                  maxLength: 200
+                config:
+                  $ref: '#/components/schemas/PartnerProposalConfig'
+      responses:
+        '200':
+          description: The proposal.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PartnerProposal'
+        '202':
+          $ref: '#/components/responses/MissionHeld'
+        default:
+          $ref: '#/components/responses/Error'
+  /v1/workspaces/{ws}/partner-programs/{id}/proposals/{proposal}:
+    parameters:
+    - $ref: '#/components/parameters/Workspace'
+    - name: id
+      in: path
+      required: true
+      schema:
+        type: string
+    - name: proposal
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    post:
+      operationId: updatePartnerProposal
+      x-outflare-access:
+        scope: partners.manage
+        brand_limited: true
+      summary: Revise, invite, verify a deliverable or approve a milestone
+      description: Manual approval is mandatory. verify anchors a deliverable's required live period; approve creates rewards only after its milestone wait. Accepted agreements cannot be edited. invite returns an unguessable preview URL; the recipient must verify their email to accept.
+      tags:
+      - partners
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+              - action
+              - version
+              properties:
+                action:
+                  type: string
+                  enum:
+                  - revise
+                  - invite
+                  - verify
+                  - approve
+                  - complete
+                version:
+                  type: integer
+                config:
+                  $ref: '#/components/schemas/PartnerProposalConfig'
+                deliverable_id:
+                  type: string
+                milestone_id:
+                  type: string
+                note:
+                  type: string
+                  maxLength: 4000
+      responses:
+        '200':
+          description: Updated proposal. invitation_url is returned only when a link is generated.
+          content:
+            application/json:
+              schema:
+                allOf:
+                - $ref: '#/components/schemas/PartnerProposal'
+        '202':
+          $ref: '#/components/responses/MissionHeld'
+        default:
+          $ref: '#/components/responses/Error'
 webhooks:
   lead.replied:
     post:
@@ -39289,21 +39754,152 @@ components:
     PartnerPortalSettings:
       type: object
       properties:
-        title: { type: string, maxLength: 120, description: "The portal's name; the program's when empty." }
-        logo_url: { type: string, description: An https address of an image. }
-        favicon_url: { type: string, description: "The browser tab's icon: an https address of an image (.ico, .png or .svg)." }
-        color: { type: string, description: "The accent colour, such as #0f766e." }
-        custom_css: { type: string, maxLength: 20000 }
-        welcome: { type: string, maxLength: 4000, description: Shown on the sign-in page. Plain text. }
-        pages: { type: array, items: { type: string, enum: [dashboard, links, assets, referrals, payouts, settings] } }
-        signup_open: { type: boolean, description: Anyone can apply on the portal. }
-        signup_fields: { type: array, maxItems: 20, items: { $ref: "#/components/schemas/PartnerPortalField" } }
-        email_from: { type: string, description: "The sender of sign-in links, on a verified sending domain of the workspace's own email provider. The portal can't sign anyone in without it." }
-        sign_in_template: { type: string, description: "An email template's id or handle for the sign-in email, with sign_in_url, program_name and partner_name; Outflare's own wording when empty." }
-        hide_powered_by: { type: boolean, description: "Hide the \"Powered by Outflare\" line at the foot of the portal, shown by default." }
-        business_email_only: { type: boolean, description: "Applications must use a work email address: free, disposable and relay addresses are refused (personal_email), as Outflare's email classifier sees them." }
-        site_key_id: { type: string, description: "A site key of the workspace (and of the program's brand, if any): the portal loads the workspace's own website script with it, so partners' visits show in its website analytics. The key takes events from the portal's address without adding it to its origins. \"\" for none." }
-        ga_measurement_id: { type: string, description: "A Google Analytics 4 measurement id (G-...) to add to the portal. It loads through the website script, which holds it back until the visitor allows analytics where consent is needed, so it needs site_key_id. \"\" for none." }
+        title:
+          type: string
+          maxLength: 120
+          description: The portal's name; the program's when empty.
+        logo_url:
+          type: string
+          description: An https address of an image.
+        favicon_url:
+          type: string
+          description: 'The browser tab''s icon: an https address of an image (.ico, .png or .svg).'
+        color:
+          type: string
+          description: 'The accent colour, such as #0f766e.'
+        custom_css:
+          type: string
+          maxLength: 20000
+        welcome:
+          type: string
+          maxLength: 4000
+          description: Shown on the sign-in page. Plain text.
+        pages:
+          type: array
+          items:
+            type: string
+            enum:
+            - dashboard
+            - tasks
+            - profiles
+            - links
+            - assets
+            - referrals
+            - payouts
+            - settings
+            - help
+            - proposals
+        signup_open:
+          type: boolean
+          description: Anyone can apply on the portal.
+        signup_fields:
+          type: array
+          maxItems: 20
+          items:
+            $ref: '#/components/schemas/PartnerPortalField'
+        email_from:
+          type: string
+          description: The sender of sign-in links, on a verified sending domain of the workspace's own email provider. The portal can't sign anyone in without it.
+        sign_in_template:
+          type: string
+          description: An email template's id or handle for the sign-in email, with sign_in_url, program_name and partner_name; Outflare's own wording when empty.
+        hide_powered_by:
+          type: boolean
+          description: Hide the "Powered by Outflare" line at the foot of the portal, shown by default.
+        business_email_only:
+          type: boolean
+          description: 'Applications must use a work email address: free, disposable and relay addresses are refused (personal_email), as Outflare''s email classifier sees them.'
+        site_key_id:
+          type: string
+          description: 'A site key of the workspace (and of the program''s brand, if any): the portal loads the workspace''s own website script with it, so partners'' visits show in its website analytics. The key takes events from the portal''s address without adding it to its origins. "" for none.'
+        ga_measurement_id:
+          type: string
+          description: A Google Analytics 4 measurement id (G-...) to add to the portal. It loads through the website script, which holds it back until the visitor allows analytics where consent is needed, so it needs site_key_id. "" for none.
+        coupon_templates:
+          type: array
+          maxItems: 12
+          description: Discount offers from which active partners may generate codes; checkout creation requires the workspace billing connection.
+          items:
+            type: object
+            required:
+            - id
+            - label
+            - coupon
+            - rules
+            properties:
+              id:
+                type: string
+              label:
+                type: string
+                maxLength: 100
+              coupon:
+                type: string
+                maxLength: 200
+              rules:
+                $ref: '#/components/schemas/PartnerPromoRules'
+        home_url:
+          type: string
+          description: Brand homepage; https or empty.
+        support_url:
+          type: string
+          description: Brand support page; https or empty.
+        support_email:
+          type: string
+          description: Public program support email; empty to hide.
+        terms_revision:
+          type: string
+          maxLength: 100
+          description: Change this when the terms at terms_url change to require fresh acceptance.
+        payout_terms:
+          type: string
+          maxLength: 6000
+          description: Plain text payment schedule and program-specific payout guidance.
+        header_links:
+          type: array
+          maxItems: 12
+          items:
+            $ref: '#/components/schemas/PartnerPortalLink'
+        footer_links:
+          type: array
+          maxItems: 12
+          items:
+            $ref: '#/components/schemas/PartnerPortalLink'
+        landing_pages:
+          type: array
+          maxItems: 12
+          items:
+            $ref: '#/components/schemas/PartnerPortalLink'
+          description: Suggested landing pages partners can select in the link builder.
+        help_articles:
+          type: array
+          maxItems: 40
+          items:
+            type: object
+            required:
+            - id
+            - title
+            - category
+            - body
+            properties:
+              id:
+                type: string
+                pattern: ^[a-z][a-z0-9_]{0,39}$
+              title:
+                type: string
+                maxLength: 160
+              category:
+                type: string
+                enum:
+                - getting_started
+                - promotion
+                - tracking
+                - payouts
+                - integrations
+                - rules
+              body:
+                type: string
+                maxLength: 20000
+                description: Plain text; never rendered as HTML.
     PartnerImport:
       type: object
       required: [id, program_id, integration_id, connector, source_program, status, summary, error, created_at, started_at, finished_at]
@@ -39466,12 +40062,31 @@ components:
         updated_at: { type: string, format: date-time }
     PartnerPromoCode:
       type: object
-      required: [code, coupon, status, error]
+      required:
+      - code
+      - coupon
+      - status
+      - error
       properties:
-        code: { type: string, description: As customers type it at checkout. }
-        coupon: { type: string, description: "The billing account's coupon it was made for; '' when made there by you." }
-        status: { type: string, enum: [local, pending, created, failed], description: "local: kept in Outflare only (you made it in your billing system). pending, created or failed: Outflare making it in the workspace's billing account." }
-        error: { type: string, description: What went wrong when failed. }
+        rules:
+          $ref: '#/components/schemas/PartnerPromoRules'
+        code:
+          type: string
+          description: As customers type it at checkout.
+        coupon:
+          type: string
+          description: The billing account's coupon it was made for; '' when made there by you.
+        status:
+          type: string
+          enum:
+          - local
+          - pending
+          - created
+          - failed
+          description: 'local: kept in Outflare only (you made it in your billing system). pending, created or failed: Outflare making it in the workspace''s billing account.'
+        error:
+          type: string
+          description: What went wrong when failed.
     PartnerInput:
       type: object
       properties:
@@ -52187,3 +52802,344 @@ components:
       - leads
       - conversions
       - notes
+    PartnerTaskInput:
+      type: object
+      additionalProperties: false
+      required:
+      - title
+      - description
+      properties:
+        title:
+          type: string
+          maxLength: 160
+        description:
+          type: string
+          maxLength: 6000
+        category:
+          type: string
+          enum:
+          - blog
+          - video
+          - social
+          - newsletter
+          - banner
+          - community
+          - other
+        reward_kind:
+          type: string
+          enum:
+          - free
+          - cash
+          - action
+        pricing:
+          type: string
+          enum:
+          - fixed
+          - range
+          - custom
+        amount_cents:
+          type: integer
+          minimum: 0
+          maximum: 100000000
+        max_amount_cents:
+          type: integer
+          minimum: 0
+          maximum: 100000000
+        reward_label:
+          type: string
+          maxLength: 200
+        action:
+          type: string
+          maxLength: 60
+        action_data:
+          type: object
+          additionalProperties: true
+        claim_mode:
+          type: string
+          enum:
+          - instant
+          - application
+        verification:
+          type: string
+          enum:
+          - human
+          - auto
+          - auto_hold
+        hold_days:
+          type: integer
+          minimum: 0
+          maximum: 365
+        asset_kind:
+          type: string
+          enum:
+          - ''
+          - website
+          - youtube
+          - x
+          - linkedin
+          - instagram
+          - tiktok
+          - newsletter
+          - reddit
+          - facebook
+          - discord
+          - podcast
+          - other
+        min_reach:
+          type: integer
+          minimum: 0
+        target_host:
+          type: string
+          maxLength: 253
+        required_link:
+          type: string
+          maxLength: 2000
+        slots:
+          type: integer
+          minimum: 1
+          maximum: 10000
+    PartnerTaskAction:
+      type: object
+      additionalProperties: false
+      required:
+      - action
+      properties:
+        action:
+          type: string
+          enum:
+          - offer
+          - approve
+          - reject
+          - pause
+          - resume
+        note:
+          type: string
+          maxLength: 2000
+        amount_cents:
+          type: integer
+          minimum: 0
+          maximum: 100000000
+    PartnerPortalLink:
+      type: object
+      required:
+      - label
+      - url
+      properties:
+        label:
+          type: string
+          minLength: 1
+          maxLength: 80
+        url:
+          type: string
+          description: An https address.
+    PartnerPromoRules:
+      type: object
+      properties:
+        disabled:
+          type: boolean
+        starts_at:
+          type:
+          - string
+          - 'null'
+          format: date-time
+        ends_at:
+          type:
+          - string
+          - 'null'
+          format: date-time
+        percent_bp:
+          type: integer
+          minimum: 0
+          maximum: 10000
+          description: Customer discount in basis points; 1000 is 10%. Mutually exclusive with amount_cents and an existing billing coupon.
+        amount_cents:
+          type: integer
+          minimum: 0
+          maximum: 100000000
+        currency:
+          type: string
+        max_redemptions:
+          type: integer
+          minimum: 0
+          maximum: 1000000
+          description: Zero leaves the provider limit unset; this is per code.
+        first_order_only:
+          type: boolean
+        min_order_cents:
+          type: integer
+          minimum: 0
+          maximum: 100000000
+        duration:
+          type: string
+          enum:
+          - once
+          - repeating
+          - forever
+          - ''
+        months:
+          type: integer
+        product_ids:
+          type:
+          - array
+          - 'null'
+          items:
+            type: string
+          maxItems: 50
+    PartnerProposalConfig:
+      type: object
+      required:
+      - title
+      - brief
+      - deliverables
+      - milestones
+      properties:
+        partner_site_name:
+          type: string
+          maxLength: 160
+          description: Public name on the invitation teaser.
+        partner_site_url:
+          type: string
+          description: Public website or channel URL on the invitation teaser.
+        partner_site_icon_url:
+          type: string
+          description: Optional https icon; the website favicon is used when omitted.
+        title:
+          type: string
+          maxLength: 160
+        brief:
+          type: string
+          maxLength: 10000
+        request_quote:
+          type: boolean
+        reply_to:
+          type: string
+        brand_kit_url:
+          type: string
+        product_url:
+          type: string
+        terms:
+          type: string
+          maxLength: 10000
+        commission_terms:
+          type: string
+          maxLength: 2000
+          description: Describes the program reward rules; does not independently change commission calculation.
+        deliverables:
+          type: array
+          minItems: 1
+          maxItems: 30
+          items:
+            type: object
+            required:
+            - id
+            - title
+            properties:
+              id:
+                type: string
+              title:
+                type: string
+              channel:
+                type: string
+                description: Free-form channel or platform.
+              format:
+                type: string
+              placement_url:
+                type: string
+              requirements:
+                type: string
+              deadline:
+                type: string
+                description: Brand-written deadline or timing.
+              live_days:
+                type: integer
+                minimum: 0
+                maximum: 3650
+              link_url:
+                type: string
+              link_text:
+                type: string
+              link_attribute:
+                type: string
+        milestones:
+          type: array
+          maxItems: 30
+          items:
+            type: object
+            required:
+            - id
+            - title
+            - deliverable_id
+            properties:
+              id:
+                type: string
+              title:
+                type: string
+              deliverable_id:
+                type: string
+              amount_cents:
+                type: integer
+                minimum: 0
+                maximum: 100000000
+              benefit:
+                type: string
+                description: Product/credit benefit fulfilled through the existing action reward workflow.
+              wait_days:
+                type: integer
+                minimum: 0
+                maximum: 3650
+    PartnerProposal:
+      type: object
+      required:
+      - id
+      - membership_id
+      - record_id
+      - recipient
+      - status
+      - version
+      - config
+      - progress
+      - accepted_at
+      - created_at
+      - updated_at
+      properties:
+        id:
+          type: string
+          format: uuid
+        membership_id:
+          type: string
+          format: uuid
+        record_id:
+          type: string
+          format: uuid
+        recipient:
+          type: string
+        status:
+          type: string
+          enum:
+          - draft
+          - quote_requested
+          - quote_received
+          - offered
+          - accepted
+          - declined
+          - completed
+        version:
+          type: integer
+        config:
+          $ref: '#/components/schemas/PartnerProposalConfig'
+        progress:
+          type: object
+          additionalProperties: true
+        accepted_at:
+          type:
+          - string
+          - 'null'
+          format: date-time
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+        invitation_url:
+          type: string

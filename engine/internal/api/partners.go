@@ -653,12 +653,13 @@ func (s *Server) updatePartnerProgram(w http.ResponseWriter, r *http.Request) {
 		return
 	case in.Currency != nil && *in.Currency != cur.Currency:
 		var n int
-		if err := s.pool.QueryRow(r.Context(), `SELECT count(*) FROM partner_rewards WHERE program_id = $1`, cur.ID).Scan(&n); err != nil {
+		if err := s.pool.QueryRow(r.Context(), `SELECT (SELECT count(*) FROM partner_rewards WHERE program_id=$1 AND workspace_id=$2)
+ + (SELECT count(*) FROM partner_tasks WHERE program_id=$1 AND workspace_id=$2 AND brand_id IS NOT DISTINCT FROM $3::uuid AND config->>'reward_kind'='cash') + (SELECT count(*) FROM partner_proposals WHERE program_id=$1 AND workspace_id=$2 AND brand_id IS NOT DISTINCT FROM $3::uuid)`, cur.ID, a.WorkspaceID, cur.BrandID).Scan(&n); err != nil {
 			s.internal(w, r, err)
 			return
 		}
 		if n > 0 {
-			writeError(w, r, http.StatusBadRequest, "invalid_request", "currency can't change once the program has rewards")
+			writeError(w, r, http.StatusBadRequest, "invalid_request", "currency can't change once the program has proposals, cash tasks or rewards")
 			return
 		}
 	}
@@ -705,6 +706,13 @@ func (s *Server) updatePartnerProgram(w http.ResponseWriter, r *http.Request) {
 			in.CodesWin, in.HoldDays, in.AutoApprove, in.AutoAccept, in.MinPayoutCents, terms, in.SalesSource, in.PayBrowserSignups, in.BlockSelfReferrals,
 			in.PayoutTermDays.Set, in.PayoutTermDays.Value, cleanList(in.PayoutMethods), cleanList(in.PayoutTokens)); err != nil {
 			return err
+		}
+		if in.Brand != nil {
+			for _, table := range []string{"partner_tasks", "partner_audiences", "partner_task_submissions", "partner_proposals"} {
+				if _, err := tx.Exec(ctx, "UPDATE "+table+" SET brand_id=$3 WHERE workspace_id=$1 AND program_id=$2", a.WorkspaceID, cur.ID, brand); err != nil {
+					return err
+				}
+			}
 		}
 		changed := []string{}
 		for k, set := range map[string]bool{"name": in.Name != nil, "status": in.Status != nil, "brand": in.Brand != nil,

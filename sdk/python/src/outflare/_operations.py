@@ -652,6 +652,7 @@ class Operations(_Mixin):
         ws: str | None = None,
         code: str,
         coupon: str | None = None,
+        rules: dict[str, Any] | None = None,
         extra_body: dict[str, Any] | None = None,
         idempotency_key: str | None = None,
     ) -> Any:
@@ -666,7 +667,7 @@ class Operations(_Mixin):
             "POST",
             "/v1/workspaces/{ws}/partners/{id}/promo-codes",
             path={"id": id, "ws": ws},
-            body={"code": code, "coupon": coupon},
+            body={"code": code, "coupon": coupon, "rules": rules},
             extra_body=extra_body,
             idempotency_key=idempotency_key,
         )
@@ -5750,6 +5751,37 @@ class Operations(_Mixin):
             idempotency_key=idempotency_key,
         )
 
+    def create_partner_portal_session(
+        self,
+        id: str,
+        *,
+        ws: str | None = None,
+        customer_id: str | None = None,
+        email: str | None = None,
+        name: str | None = None,
+        record_id: str | None = None,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Automatically sign a customer into the hosted partner portal.
+
+        Scope: partners.conversions. Backend-only automatic provisioning and sign-in for an open portal.
+        Supply your stable customer_id and optionally email/name. Returns a single-use sign-in URL valid for 60 seconds.
+        Redirect only the authenticated customer to it; never cache it. Existing identity resolution is shared with
+        conversions and embedded sessions. Program admission and explicit terms acceptance still apply.
+
+        Needs: the partners.conversions scope.
+        POST /v1/workspaces/{ws}/partner-programs/{id}/portal-sessions
+        """
+        return self._call(
+            "POST",
+            "/v1/workspaces/{ws}/partner-programs/{id}/portal-sessions",
+            path={"id": id, "ws": ws},
+            body={"customer_id": customer_id, "email": email, "name": name, "record_id": record_id},
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
     def create_partner_program(
         self,
         *,
@@ -5827,6 +5859,93 @@ class Operations(_Mixin):
                 "status": status,
                 "terms_url": terms_url,
                 "url_params": url_params,
+            },
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
+    def create_partner_proposal(
+        self,
+        id: str,
+        *,
+        ws: str | None = None,
+        config: dict[str, Any],
+        email: str | None = None,
+        name: str | None = None,
+        partner_id: str | None = None,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Draft a proposal for exactly one recipient.
+
+        Assign an existing partner_id or supply an email to provision a customer-backed partner. Invite with updatePartnerProposal after reviewing the draft. No outreach is sent automatically.
+
+        Needs: the partners.manage scope.
+        POST /v1/workspaces/{ws}/partner-programs/{id}/proposals
+        """
+        return self._call(
+            "POST",
+            "/v1/workspaces/{ws}/partner-programs/{id}/proposals",
+            path={"id": id, "ws": ws},
+            body={"config": config, "email": email, "name": name, "partner_id": partner_id},
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
+    def create_partner_task(
+        self,
+        id: str,
+        *,
+        ws: str | None = None,
+        action: str | None = None,
+        action_data: dict[str, Any] | None = None,
+        amount_cents: int | None = None,
+        asset_kind: str | None = None,
+        category: Literal["blog", "video", "social", "newsletter", "banner", "community", "other"] | None = None,
+        claim_mode: Literal["instant", "application"] | None = None,
+        description: str,
+        hold_days: int | None = None,
+        max_amount_cents: int | None = None,
+        min_reach: int | None = None,
+        pricing: Literal["fixed", "range", "custom"] | None = None,
+        required_link: str | None = None,
+        reward_kind: Literal["free", "cash", "action"] | None = None,
+        reward_label: str | None = None,
+        slots: int | None = None,
+        target_host: str | None = None,
+        title: str,
+        verification: Literal["human", "auto", "auto_hold"] | None = None,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Create a paid or voluntary partner task.
+
+        Needs: the partners.manage scope.
+        POST /v1/workspaces/{ws}/partner-programs/{id}/tasks
+        """
+        return self._call(
+            "POST",
+            "/v1/workspaces/{ws}/partner-programs/{id}/tasks",
+            path={"id": id, "ws": ws},
+            body={
+                "action": action,
+                "action_data": action_data,
+                "amount_cents": amount_cents,
+                "asset_kind": asset_kind,
+                "category": category,
+                "claim_mode": claim_mode,
+                "description": description,
+                "hold_days": hold_days,
+                "max_amount_cents": max_amount_cents,
+                "min_reach": min_reach,
+                "pricing": pricing,
+                "required_link": required_link,
+                "reward_kind": reward_kind,
+                "reward_label": reward_label,
+                "slots": slots,
+                "target_host": target_host,
+                "title": title,
+                "verification": verification,
             },
             extra_body=extra_body,
             idempotency_key=idempotency_key,
@@ -19493,6 +19612,23 @@ class Operations(_Mixin):
             path={"id": id, "ws": ws},
         )
 
+    def list_partner_audiences(
+        self,
+        id: str,
+        *,
+        ws: str | None = None,
+    ) -> Any:
+        """List partner social profiles, websites and communities.
+
+        Needs: the partners.read scope.
+        GET /v1/workspaces/{ws}/partner-programs/{id}/audiences
+        """
+        return self._call(
+            "GET",
+            "/v1/workspaces/{ws}/partner-programs/{id}/audiences",
+            path={"id": id, "ws": ws},
+        )
+
     def list_partner_conversion_log(
         self,
         *,
@@ -19690,6 +19826,23 @@ class Operations(_Mixin):
             query={"brand": brand, "status": status},
         )
 
+    def list_partner_proposals(
+        self,
+        id: str,
+        *,
+        ws: str | None = None,
+    ) -> Any:
+        """List one-to-one partnership proposals.
+
+        Needs: the partners.read scope.
+        GET /v1/workspaces/{ws}/partner-programs/{id}/proposals
+        """
+        return self._call(
+            "GET",
+            "/v1/workspaces/{ws}/partner-programs/{id}/proposals",
+            path={"id": id, "ws": ws},
+        )
+
     def list_partner_referrals(
         self,
         *,
@@ -19764,6 +19917,23 @@ class Operations(_Mixin):
                 "cursor": cursor,
                 "fields": fields,
             },
+        )
+
+    def list_partner_tasks(
+        self,
+        id: str,
+        *,
+        ws: str | None = None,
+    ) -> Any:
+        """List tasks, custom website proposals and submissions.
+
+        Needs: the partners.read scope.
+        GET /v1/workspaces/{ws}/partner-programs/{id}/tasks
+        """
+        return self._call(
+            "GET",
+            "/v1/workspaces/{ws}/partner-programs/{id}/tasks",
+            path={"id": id, "ws": ws},
         )
 
     def list_partners(
@@ -24632,6 +24802,32 @@ class Operations(_Mixin):
             "/v1/workspaces/{ws}/fix-tickets/{ticket}/review",
             path={"ticket": ticket, "ws": ws},
             body={"decision": decision, "guideline": guideline, "note": note},
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
+    def review_partner_task(
+        self,
+        id: str,
+        submission: str,
+        *,
+        ws: str | None = None,
+        action: Literal["offer", "approve", "reject", "pause", "resume"],
+        amount_cents: int | None = None,
+        note: str | None = None,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Offer a price, approve or reject submitted work.
+
+        Needs: the partners.manage scope.
+        POST /v1/workspaces/{ws}/partner-programs/{id}/task-submissions/{submission}
+        """
+        return self._call(
+            "POST",
+            "/v1/workspaces/{ws}/partner-programs/{id}/task-submissions/{submission}",
+            path={"id": id, "submission": submission, "ws": ws},
+            body={"action": action, "amount_cents": amount_cents, "note": note},
             extra_body=extra_body,
             idempotency_key=idempotency_key,
         )
@@ -31243,6 +31439,70 @@ class Operations(_Mixin):
             idempotency_key=idempotency_key,
         )
 
+    def update_partner_promo_code(
+        self,
+        id: str,
+        code: str,
+        *,
+        ws: str | None = None,
+        enabled: bool,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Enable or disable a partner promo code.
+
+        Updates attribution immediately and queues the matching checkout change for connected billing codes. Local codes must also be updated in your own checkout.
+
+        Needs: the partners.manage scope.
+        PATCH /v1/workspaces/{ws}/partners/{id}/promo-codes/{code}
+        """
+        return self._call(
+            "PATCH",
+            "/v1/workspaces/{ws}/partners/{id}/promo-codes/{code}",
+            path={"id": id, "code": code, "ws": ws},
+            body={"enabled": enabled},
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
+    def update_partner_proposal(
+        self,
+        id: str,
+        proposal: str,
+        *,
+        ws: str | None = None,
+        action: Literal["revise", "invite", "verify", "approve", "complete"],
+        config: dict[str, Any] | None = None,
+        deliverable_id: str | None = None,
+        milestone_id: str | None = None,
+        note: str | None = None,
+        version: int,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Revise, invite, verify a deliverable or approve a milestone.
+
+        Manual approval is mandatory. verify anchors a deliverable's required live period; approve creates rewards only after its milestone wait. Accepted agreements cannot be edited. invite returns an unguessable preview URL; the recipient must verify their email to accept.
+
+        Needs: the partners.manage scope.
+        POST /v1/workspaces/{ws}/partner-programs/{id}/proposals/{proposal}
+        """
+        return self._call(
+            "POST",
+            "/v1/workspaces/{ws}/partner-programs/{id}/proposals/{proposal}",
+            path={"id": id, "proposal": proposal, "ws": ws},
+            body={
+                "action": action,
+                "config": config,
+                "deliverable_id": deliverable_id,
+                "milestone_id": milestone_id,
+                "note": note,
+                "version": version,
+            },
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
     def update_partner_settings(
         self,
         *,
@@ -31263,6 +31523,32 @@ class Operations(_Mixin):
             "/v1/workspaces/{ws}/partner-settings",
             path={"ws": ws},
             body={"erase_payout_notes": erase_payout_notes},
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
+    def update_partner_task(
+        self,
+        id: str,
+        task: str,
+        *,
+        ws: str | None = None,
+        action: Literal["offer", "approve", "reject", "pause", "resume"],
+        amount_cents: int | None = None,
+        note: str | None = None,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Pause or resume a partner task.
+
+        Needs: the partners.manage scope.
+        POST /v1/workspaces/{ws}/partner-programs/{id}/tasks/{task}
+        """
+        return self._call(
+            "POST",
+            "/v1/workspaces/{ws}/partner-programs/{id}/tasks/{task}",
+            path={"id": id, "task": task, "ws": ws},
+            body={"action": action, "amount_cents": amount_cents, "note": note},
             extra_body=extra_body,
             idempotency_key=idempotency_key,
         )

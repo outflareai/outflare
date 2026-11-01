@@ -30,6 +30,13 @@ groups:
         annotations:
           summary: "95th percentile request time is over 2 seconds."
 
+      - alert: OutflarePartnerTaskChecksFailing
+        expr: sum(increase(outflare_jobs_processed_total{kind="partners.task_check",outcome=~"retried|dead"}[15m])) > 3
+        for: 5m
+        labels: { severity: warning }
+        annotations:
+          summary: "Partner task checks are failing repeatedly; inspect job logs and the workspace page-reader connection."
+
       - alert: OutflareJobBacklog
         expr: max by (kind) (outflare_jobs_oldest_due_seconds) > 600
         for: 10m

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net"
 	"net/http"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -83,6 +84,12 @@ func (s *Server) trackingHostsOnly(next http.Handler) http.Handler {
 			return
 		}
 		if e.program != "" {
+			// Compiled portal components and fonts share the dashboard's asset bundle.
+			// Serve only the asset directory here, never the app's API or HTML fallback.
+			if s.webDir != "" && strings.HasPrefix(r.URL.Path, "/assets/") {
+				http.StripPrefix("/assets/", http.FileServer(http.Dir(filepath.Join(s.webDir, "assets")))).ServeHTTP(w, r)
+				return
+			}
 			// A partner portal's host serves only its portal, at its root.
 			r2 := r.Clone(context.WithValue(r.Context(), ctxPortalHostKey{}, true))
 			r2.URL.Path = "/p/" + e.program + r.URL.Path

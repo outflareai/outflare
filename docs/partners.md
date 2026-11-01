@@ -343,3 +343,107 @@ The MCP tools are listed in [mcp/README.md](../mcp/README.md): `list_partner_pro
 ## Coming next
 
 - A fraud review queue with partner checks (self-referral, matching payment details, cookie stuffing). It's on hold for now.
+
+## Tasks and audience profiles
+
+Creating the first task adds Opportunities and Your profiles to that program's
+portal; other programs keep their existing navigation. New programs created in
+the app let partners participate immediately by default; brands can require
+approval instead.
+
+A program's Tasks tab offers fixed cash rewards, price ranges, custom quotes,
+product rewards delivered through the existing action webhook, or voluntary
+unpaid tasks. Choose immediate claims or applications. An application receives
+an offer that the partner accepts before starting work. Slots include pending
+applications, so the brand cannot overbook a task. Pause stops new claims;
+existing partners can still submit their work.
+
+Partners add their websites, social channels, newsletters and communities under
+Your profiles. They state their role, topics and reach. Self-reported reach is
+labeled; when the workspace connects its own Geonode/page-reader account in
+Connections, adding a profile queues a public reach read. Refresh reach asks for
+a new read. Missing or ambiguous counts preserve the earlier figure and show
+why. A public count is not proof that the partner owns a channel. OAuth-based
+social ownership and analytics are not part of this version.
+
+A private proposal names an exact website hostname. Its invitation link is the
+program portal followed by `?website=example.com#profiles`. It reveals no offer
+terms. After sign-in, the partner adds that website and publishes the supplied
+DNS TXT record at `_outflare-partner.example.com`, with value
+`outflare-partner=<their challenge>`. Verification runs as a job. Only that
+partner's verified website unlocks its proposals. Other profiles and offers
+remain private to their program and brand. Creating an invitation does not send
+an email; use your normal outreach workflow and its send policy.
+
+Human review works for every task category. Partners can submit a published URL
+or a completion note, so tasks such as feedback sessions do not require a
+public post. Automatic checking requires evidence
+on a verified website and an exact required link, read through the workspace's
+own page-reader connection. It checks link presence, not editorial quality.
+Automatic checks can hold work for a configurable number of days so a person
+can approve or reject it. When the hold ends, the page is checked again before
+approval. Missing connections or failed checks leave the work for human review.
+Unpaid tasks must also follow the destination platform's rules.
+
+Approved cash enters the existing partner payout ledger exactly once. Product
+rewards emit the existing reward approval webhook for the brand's system to
+fulfil. This version does not hold brand funds or transfer money: managed,
+prefunded payouts require a separate payment-provider integration.
+
+For the full portal inside your product, create a widget session on your backend
+as usual, then use `/p/<program>/embed?view=portal#token=<session token>` as the
+iframe source (or the program's own portal host and `/embed` path). Keep the
+token in the fragment, never a query parameter. The session is held in memory,
+removed from the displayed URL, and used as a bearer token. This works without
+third-party cookies; the ordinary referral widget stays available.
+
+### Portal design
+
+The hosted and full embedded portal use the dashboard's shared React components,
+Geist fonts, design tokens, and light/dark themes. A compact opportunity feed
+opens task briefs and submissions in a side panel. Partners manage channels in
+profile cards and verify ownership in a step-by-step dialog.
+
+The web build emits `portal.html` alongside the dashboard. Both are included by
+`pnpm --filter @outflare/web build`; API-only installs without built web assets
+retain the standalone portal. Brand logos, portal titles, custom CSS and brand
+colour remain configurable. Custom CSS targeting old template classes should
+be reviewed for the new component structure.
+
+### Brand identity, help and program terms
+
+Portal settings include the brand homepage, support page/email, ordered header/footer links, named landing pages, plain-text help articles and payment guidance. The dashboard editor previews identity and groups these settings under Navigation, Help center, Terms & payments and Landing pages. Partner help includes practical getting-started, promotion, tracking, task and payout guides alongside brand-authored articles. Help articles are rendered as text, never executable HTML. Landing pages must use the program landing website or a subdomain; arbitrary external redirects are not accepted.
+
+Set `terms_url` on the program and `portal.terms_revision` when that document changes. Signed-in partners explicitly accept the current address/revision before submitting work or changing their account. Acceptance records its version and time and emits `partner.terms_accepted`. Sign-in and help remain available for reviewing the rules; a team preview cannot consent for a partner. Existing partners must review current terms after this upgrade.
+
+### Automatic hosted sign-in
+
+A brand backend can call `POST /v1/workspaces/{ws}/partner-programs/{id}/portal-sessions` with `customer_id` and optional `email`/`name`, using `partners.conversions`. Only send an email after verifying it in your own app; otherwise omit it. Identify the customer from the authenticated server session, never an arbitrary browser-supplied user ID. Redirect that customer to `sign_in_url`. The URL carries a single-use code in its fragment and expires after 60 seconds; the portal exchanges it for an HttpOnly cookie and clears the fragment. Never cache the URL, log it, share it, or put an administrative key in the browser.
+
+This uses the same customer identity and membership as embedded widget sessions and conversion tracking. Send the stable customer ID on every call so email changes do not create a new partner. Admission rules and the program terms still apply. This is a backend handoff; it does not configure an external OpenID Connect identity provider.
+
+### Payout requests and memorable website links
+
+An active partner with payout details can request their eligible approved cash from Earnings. The request allocates the existing rewards into a due payout, visible in the brand's Payouts tab. Minimums, Net N terms, source holds and existing payout allocations apply. Repeated requests cannot allocate the same rewards again. The brand sends payment through its own process and marks it paid; Outflare does not transfer funds.
+
+The link builder offers the brand's named landing pages and campaign labels (`sub`/sub IDs). For a memorable link such as `https://northpeak.example/maya`, configure a temporary redirect on that website or its CDN to the complete partner tracking link. A tracking subdomain already serves `/r/{code}`; DNS by itself cannot map a root-domain path. Preserve the chosen tracking destination and campaign parameters, reserve existing website paths, and test that the final landing URL carries referral attribution. Changing a website redirect does not alter historical clicks.
+
+### Checkout discounts and partner-generated codes
+
+A coupon's customer discount is separate from the program's partner reward. Brands can assign a percentage/fixed discount or an existing billing coupon, with start/end timestamps, first-time-purchase eligibility, a minimum order amount, per-code total redemption limit, eligible billing product IDs, and first-invoice, repeating-month or ongoing duration. Codes with a start time are created in billing by the existing job at that time. Expiration and redemption restrictions are enforced natively by the connected Stripe checkout; discount stacking remains a checkout setting. API-reported conversions must represent genuine checkout events, not a substitute for enforcing discounts.
+
+Publish `portal.coupon_templates` to let active partners generate codes from approved rules. Partners choose a template and code, not arbitrary discount values. Changes to a template affect newly generated codes only. Assigned codes can be enabled/disabled through `PATCH .../partners/{id}/promo-codes/{code}`; attribution changes immediately and a job applies the corresponding native checkout update. Check sync status before sharing a code. Local codes are attribution mappings only: their actual discount and enabled state must also be managed in the brand's checkout. Global cross-code redemption budgets and arbitrary per-customer limits are not represented by these per-code limits.
+
+### One-to-one partnership proposals
+
+Partners → Proposals manages privately assigned agreements rather than claimable tasks. Draft for a specific existing partner or recipient email. Each proposal contains cross-platform deliverables, requirements, deadlines, minimum live periods, optional brand-kit/product links, reply-to email, additional terms and manually approved milestones. Milestones may combine cash with product/credit benefits. Commission wording describes the program's existing reward rules; configure calculation in Flows.
+
+Create an invitation link after reviewing the draft, then place it in your own outreach. This action sends no outreach. The unguessable fragment opens a branded teaser showing only the configured website/channel name, URL and icon. The brief, compensation, deliverables and terms are returned only after the assigned recipient signs in. The recipient requests a single-use email sign-in link sent through the workspace's configured sender. Only the assigned, authenticated partner can quote, accept, decline or submit work; forwarding a preview does not transfer that right. Configure the portal and email sender before sending invitations. Regenerating a link or revising a draft invalidates the previous preview link.
+
+Quote requests accept a price and optional note. Discuss other changes by email, revise the draft, turn off quote mode and send a final priced offer. Acceptance locks the version and terms; different terms after acceptance require a new proposal. The portal provides a downloadable text copy, payout-settings access, invoice/receipt instructions and publication evidence submission.
+
+Verify publication manually, then explicitly approve each eligible milestone. Waiting periods start at brand verification, not at an unverified partner-supplied date. A timer never releases payment. A 50/50 arrangement can use two milestones linked to one deliverable: half at verification, half after 30 days. Cash enters the existing ledger and its payout terms; benefit rewards use `partner_benefit` and the existing fulfillment workflow. Approving a milestone twice cannot create a duplicate reward. Completion also requires all deliverables to finish their specified live periods. This first version leaves disputes and cancellation decisions to the brand; it does not automate legal enforcement, monitoring or money transfers.
+
+A program’s currency is locked once it has a proposal, so quoted and accepted cash amounts retain their currency. Accepted agreement downloads include the currency and recipient. Brand changes carry the program’s proposal facts with its other partner data.
+
+Set `partner_site_name`, `partner_site_url`, and optional `partner_site_icon_url` on a proposal to personalize its invitation teaser. The portal uses the site favicon when an icon is omitted, with a globe fallback. Login and signup use the same email-verification flow bound to the invited address. No third-party favicon lookup service is used.

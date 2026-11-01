@@ -1,3 +1,6 @@
+import { PartnerProposals } from "./PartnerProposals";
+import { PartnerCouponDialog } from "./PartnerCoupons";
+import { PartnerPortalBrand } from "./PartnerPortalBrand";
 // Partners: customer referral, affiliate and influencer programs on one
 // platform. A program holds the rules; partners are customer records with a
 // ref code, links and promo codes; the workspace's backend reports
@@ -15,18 +18,19 @@ import { ago, plural } from "../format";
 import { DataTable, type ColumnDef } from "@/components/data-table";
 import { Flows } from "./PartnerFlows";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { PartnerTasks } from "./PartnerTasks";
 import { PartnerInstall } from "./PartnerInstall";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 
 type Props = { ws: string; canManage: boolean };
-type Section = "partners" | "groups" | "flows" | "conversions" | "log" | "rewards" | "payouts";
+type Section = "proposals" | "tasks" | "partners" | "groups" | "flows" | "conversions" | "log" | "rewards" | "payouts";
 type Kind = PartnerProgram["kind"];
 
 const kinds: { id: Kind; label: string; blurb: string }[] = [
-  { id: "affiliate", label: "Affiliate", blurb: "Marketers and review sites earn a share of each sale (20% to start), held 30 days for refunds and paid above a minimum." },
-  { id: "referral", label: "Customer referral", blurb: "Customers share a link; on the friend's first sale both get a reward your own product grants, such as credit." },
-  { id: "influencer", label: "Influencer", blurb: "Track what creators' links and codes bring. Log their fixed fees so cost per sale works." },
+  { id: "affiliate", label: "Sales commissions", blurb: "Marketers and review sites earn a share of each sale (20% to start), held 30 days for refunds and paid above a minimum." },
+  { id: "referral", label: "Customer rewards", blurb: "Customers share a link; on the friend's first sale both get a reward your own product grants, such as credit." },
+  { id: "influencer", label: "Creator partnerships", blurb: "Track what creators' links and codes bring. Log their fixed fees so cost per sale works." },
 ];
 
 export const money = (cents: number, currency: string) => {
@@ -66,13 +70,13 @@ export function Partners({ ws, canManage }: Props) {
     <div className="space-y-6">
       <PageHeader
         title="Partners"
-        description="Customer referrals, affiliates and influencers on one platform. Partners are customer records with their own links and codes; your backend reports sign-ups, sales and refunds; rewards wait out a hold, then you pay from your own account and mark them paid."
+        description="Invite your users to grow with you through referrals, paid or voluntary tasks, and custom website proposals. Partners manage their profiles and opportunities in your hosted or embedded portal; approved rewards join your payout ledger."
         action={canManage && <Button onClick={() => setCreating(true)}>New program</Button>}
       />
       <ErrorText>{error}</ErrorText>
       {programs.length === 0 || !current ? (
         <Empty title="No partner programs yet" action={canManage && <Button onClick={() => setCreating(true)}>New program</Button>}>
-          Start from a preset: affiliates earn a share of each sale, customer referrals reward both sides with something your product grants, and influencer programs track what each creator brings. Every setting can be changed.
+          Create one partner program for tasks, introductions and purchases. Choose a starting reward setup; every rule can be customized.
         </Empty>
       ) : (
         <>
@@ -80,22 +84,26 @@ export function Partners({ ws, canManage }: Props) {
             <select aria-label="Program" className={field} value={program} onChange={(e) => setProgram(e.target.value)}>
               {programs.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
             </select>
-            <Badge tone="grey">{kinds.find((k) => k.id === current.kind)?.label}</Badge>
+            <Badge tone="grey">Partner program</Badge>
             {current.status === "paused" && <Badge tone="amber">Paused</Badge>}
             <span className="text-[12px] text-muted-foreground">{rulesSummary(current)}</span>
             <Button variant="ghost" className="ml-auto" onClick={() => setSettings(true)}>Settings</Button>
           </div>
           <Tabs value={section} onValueChange={(v) => setSection(v as Section)}>
-            <TabsList>
-              <TabsTrigger value="partners" className="px-3 text-[12px]">Partners</TabsTrigger>
-              <TabsTrigger value="groups" className="px-3 text-[12px]">Groups</TabsTrigger>
-              <TabsTrigger value="flows" className="px-3 text-[12px]">Flows</TabsTrigger>
-              <TabsTrigger value="conversions" className="px-3 text-[12px]">Conversions</TabsTrigger>
-              <TabsTrigger value="log" className="px-3 text-[12px]">Log</TabsTrigger>
-              <TabsTrigger value="rewards" className="px-3 text-[12px]">Rewards</TabsTrigger>
-              <TabsTrigger value="payouts" className="px-3 text-[12px]">Payouts</TabsTrigger>
+            <TabsList className="h-auto max-w-full flex-wrap">
+              <TabsTrigger value="proposals" className="h-9 px-3 text-[12px]">Proposals</TabsTrigger>
+              <TabsTrigger value="tasks" className="h-9 px-3 text-[12px]">Tasks</TabsTrigger>
+              <TabsTrigger value="partners" className="h-9 px-3 text-[12px]">Partners</TabsTrigger>
+              <TabsTrigger value="groups" className="h-9 px-3 text-[12px]">Groups</TabsTrigger>
+              <TabsTrigger value="flows" className="h-9 px-3 text-[12px]">Flows</TabsTrigger>
+              <TabsTrigger value="conversions" className="h-9 px-3 text-[12px]">Conversions</TabsTrigger>
+              <TabsTrigger value="log" className="h-9 px-3 text-[12px]">Log</TabsTrigger>
+              <TabsTrigger value="rewards" className="h-9 px-3 text-[12px]">Rewards</TabsTrigger>
+              <TabsTrigger value="payouts" className="h-9 px-3 text-[12px]">Payouts</TabsTrigger>
             </TabsList>
           </Tabs>
+          {section === "proposals" && <PartnerProposals key={current.id} ws={ws} program={current} canManage={canManage}/>}
+          {section === "tasks" && <PartnerTasks key={current.id} ws={ws} program={current} canManage={canManage} />}
           {section === "partners" && <PartnerList key={current.id} ws={ws} program={current} canManage={canManage} />}
           {section === "groups" && <Groups key={current.id} ws={ws} program={current} canManage={canManage} onChanged={load} />}
           {section === "flows" && <Flows key={current.id} ws={ws} program={current} canManage={canManage} onChanged={load} />}
@@ -187,6 +195,7 @@ function LoadMore({ next, onMore, shown }: { next: string | null; onMore: () => 
 const pageSize = 100;
 
 function PartnerList({ ws, program, canManage }: { ws: string; program: PartnerProgram; canManage: boolean }) {
+  const [couponPartner,setCouponPartner]=useState<Partner|null>(null);
   const [rules, setRules] = useState(program.rules);
   const [groups, setGroups] = useState<PartnerGroup[]>([]);
   const [picked, setPicked] = useState<Set<string>>(new Set());
@@ -244,16 +253,7 @@ function PartnerList({ ws, program, canManage }: { ws: string; program: PartnerP
     toast(status === "active" ? `${p.name || p.code} is active.` : `${p.name || p.code} is ${status}. Their links still land, uncounted.`);
     load();
   }
-  async function addCode(p: Partner) {
-    const r = await ask({ title: "Add a promo code", body: "The code as customers type it at checkout.", input: { label: "Code", placeholder: "ANA20", maxLength: 64 }, choices: [{ label: "Cancel", value: "cancel", variant: "ghost" }, { label: "Add", value: "ok" }] });
-    if (r?.choice !== "ok" || !r.value.trim()) return;
-    const c = await ask({ title: "Make it in Stripe too?", body: "Give the id of a coupon in your connected Stripe account and Outflare makes the code there with your own key. Leave it empty if you make the code yourself.", input: { label: "Coupon id", placeholder: "co_...", maxLength: 200, optional: true }, choices: [{ label: "Cancel", value: "cancel", variant: "ghost" }, { label: "Add", value: "ok" }] });
-    if (c?.choice !== "ok") return;
-    const { error } = await api.POST("/v1/workspaces/{ws}/partners/{id}/promo-codes", { params: { path: { ws, id: p.id } }, body: { code: r.value.trim(), ...(c.value.trim() ? { coupon: c.value.trim() } : {}) } });
-    if (error) return toast(errorMessage(error), "error");
-    toast(`Added ${r.value.trim()}.`);
-    load();
-  }
+  function addCode(p: Partner) {setCouponPartner(p);track("ui.partner_coupon_composer_opened");}
   async function ledger(p: Partner, kind: "fees" | "adjustments") {
     const fee = kind === "fees";
     const r = await ask({
@@ -385,6 +385,7 @@ function PartnerList({ ws, program, canManage }: { ws: string; program: PartnerP
   return (
     <div className="space-y-4">
       <ErrorText>{error}</ErrorText>
+      {couponPartner&&<PartnerCouponDialog ws={ws} partner={couponPartner} currency={program.currency} onClose={()=>setCouponPartner(null)} onSaved={()=>{setCouponPartner(null);load();}}/>}
       {totals && (
         <Stats>
           <Stat label="Partners" value={totals.partners.active} sub={totals.partners.pending ? `${totals.partners.pending} waiting for approval` : undefined} />
@@ -876,6 +877,7 @@ function NewProgram({ ws, onClose, onSaved }: { ws: string; onClose: () => void;
   const [name, setName] = useState("");
   const [brand, setBrand] = useState("");
   const [landing, setLanding] = useState("");
+  const [autoAccept, setAutoAccept] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   async function save(e: FormEvent) {
@@ -883,7 +885,7 @@ function NewProgram({ ws, onClose, onSaved }: { ws: string; onClose: () => void;
     setBusy(true);
     const { data, error } = await api.POST("/v1/workspaces/{ws}/partner-programs", {
       params: { path: { ws } },
-      body: { name: name.trim(), kind, brand: brand || undefined, landing_url: landing.trim() || undefined },
+      body: { name: name.trim(), kind, brand: brand || undefined, landing_url: landing.trim() || undefined, auto_accept: autoAccept },
     });
     setBusy(false);
     if (error || !data) return setError(errorMessage(error));
@@ -895,10 +897,10 @@ function NewProgram({ ws, onClose, onSaved }: { ws: string; onClose: () => void;
       <DialogContent className="sm:max-w-lg">
         <DialogHeader>
           <DialogTitle>New partner program</DialogTitle>
-          <DialogDescription>Pick a preset; every setting it fills in can be changed afterwards.</DialogDescription>
+          <DialogDescription>One program for tasks, introductions and purchases. Start with sales commissions, then customize any reward.</DialogDescription>
         </DialogHeader>
         <form onSubmit={save} className="space-y-3">
-          <div className="grid gap-2">
+          <details className="rounded-lg border p-3"><summary className="cursor-pointer text-xs font-medium">Customize starting rewards (optional)</summary>          <div className="grid gap-2">
             {kinds.map((k) => (
               <label key={k.id} className={`flex cursor-pointer gap-3 rounded-md border p-3 text-[13px] ${kind === k.id ? "border-primary" : ""}`}>
                 <input type="radio" name="kind" checked={kind === k.id} onChange={() => setKind(k.id)} className="mt-0.5" />
@@ -906,7 +908,8 @@ function NewProgram({ ws, onClose, onSaved }: { ws: string; onClose: () => void;
               </label>
             ))}
           </div>
-          <Input label="Name" value={name} onChange={(e) => setName(e.target.value)} placeholder="Northpeak affiliates" maxLength={120} required />
+</details>
+          <Input label="Name" value={name} onChange={(e) => setName(e.target.value)} placeholder="Northpeak partners" maxLength={120} required />
           {brands.length > 0 && (
             <label className="block space-y-1 text-[13px]">
               <span className="font-medium">Brand</span>
@@ -916,6 +919,7 @@ function NewProgram({ ws, onClose, onSaved }: { ws: string; onClose: () => void;
               </select>
             </label>
           )}
+          <label className="flex items-center gap-2 text-[13px]"><input type="checkbox" checked={autoAccept} onChange={e => setAutoAccept(e.target.checked)} /> Let new partners participate immediately</label>
           <Input label="Landing page" type="url" value={landing} onChange={(e) => setLanding(e.target.value)} placeholder="https://example.com/pricing" maxLength={2000} hint="Where partner links land." />
           <ErrorText>{error}</ErrorText>
           <div className="flex justify-end gap-2">
@@ -985,13 +989,13 @@ function ProgramSettings({ ws, program: p, canManage, onClose }: { ws: string; p
 
   return (
     <Sheet open onOpenChange={(o) => !o && onClose()}>
-      <SheetContent className="w-full overflow-y-auto sm:max-w-xl">
+      <SheetContent className="w-full overflow-y-auto overflow-x-hidden sm:max-w-3xl">
         <SheetHeader>
           <SheetTitle>{p.name}</SheetTitle>
           <SheetDescription>The program's own credit rule, rewards and payouts. They never follow the workspace's attribution settings.</SheetDescription>
         </SheetHeader>
         <form onSubmit={save} className="space-y-6 px-4 pb-6">
-          <fieldset disabled={!canManage} className="space-y-3">
+          <fieldset disabled={!canManage} className="min-w-0 space-y-3">
             <Input label="Landing page" type="url" value={landing} onChange={(e) => setLanding(e.target.value)} placeholder="https://example.com/pricing" maxLength={2000} />
             <div className="grid gap-3 sm:grid-cols-2">
               <Input label="Credit window (days)" type="number" min={1} max={365} value={windowDays} onChange={(e) => setWindowDays(e.target.value)} hint="How long after a visit a sale still counts." />
@@ -1250,6 +1254,7 @@ function PortalPreview({ title, color, logo, favicon, welcome, poweredBy }: { ti
 }
 
 function PortalSection({ ws, program: p, canManage }: { ws: string; program: PartnerProgram; canManage: boolean }) {
+  const [brandPortal,setBrandPortal]=useState(p.portal);
   const [enabled, setEnabled] = useState(p.portal_enabled);
   const [sub, setSub] = useState(p.portal_subdomain ?? "");
   const [title, setTitle] = useState(p.portal.title ?? "");
@@ -1285,7 +1290,7 @@ function PortalSection({ ws, program: p, canManage }: { ws: string; program: Par
     setError("");
     const { data, error } = await api.PUT("/v1/workspaces/{ws}/partner-programs/{id}/portal", {
       params: { path: { ws, id: p.id } },
-      body: { enabled, subdomain: sub.trim(), settings: { ...p.portal, title: title.trim(), color, logo_url: logo.trim(), favicon_url: favicon.trim(), welcome: welcome.trim(), email_from: from.trim(), signup_open: signup, hide_powered_by: !poweredBy, business_email_only: businessOnly,
+      body: { enabled, subdomain: sub.trim(), settings: { ...brandPortal, title: title.trim(), color, logo_url: logo.trim(), favicon_url: favicon.trim(), welcome: welcome.trim(), email_from: from.trim(), signup_open: signup, hide_powered_by: !poweredBy, business_email_only: businessOnly,
         site_key_id: siteKey, ga_measurement_id: siteKey ? ga.trim().toUpperCase() : "" } },
     });
     setBusy(false);
@@ -1318,16 +1323,17 @@ function PortalSection({ ws, program: p, canManage }: { ws: string; program: Par
       <form onSubmit={save} className="space-y-3">
         <h3 className="text-[13px] font-medium">Partner portal</h3>
         <p className="text-[12px] text-muted-foreground">Where partners apply, sign in with a link emailed through your own email provider, and see their links, referred customers (never their names), rewards and payouts. Point your own domain at it from Domains, Tracking domains. To show customers their referral link inside your own app instead, your backend opens the referral widget (<code>POST …/widget-sessions</code>), which works while the portal is closed.</p>
-        <fieldset disabled={!canManage} className="space-y-3">
+        <fieldset disabled={!canManage} className="min-w-0 space-y-3">
           <label className="flex items-center gap-2 text-[13px]"><input type="checkbox" checked={enabled} onChange={(e) => setEnabled(e.target.checked)} /> Open the portal</label>
           <div className="grid gap-3 sm:grid-cols-2">
             <Input label="Subdomain" value={sub} onChange={(e) => setSub(e.target.value)} placeholder="northpeak" maxLength={63} hint="Used when the server has a partners domain." />
             <Input label="Title" value={title} onChange={(e) => setTitle(e.target.value)} placeholder={p.name} maxLength={120} />
-            <Input label="Sender" value={from} onChange={(e) => setFrom(e.target.value)} placeholder="Partners <partners@example.com>" hint="On a verified sending domain. Needed to sign anyone in." />
+            <Input label="Sender" value={from} onChange={(e) => setFrom(e.target.value)} placeholder="Partners <partners@example.com>" hint="On a verified sending domain. Needed for email sign-in; your app can also use automatic sign-in." />
             <Input label="Colour" type="color" value={color} onChange={(e) => setColor(e.target.value)} />
             <Input label="Logo" type="url" value={logo} onChange={(e) => setLogo(e.target.value)} placeholder="https://example.com/logo.svg" maxLength={2000} />
             <Input label="Favicon" type="url" value={favicon} onChange={(e) => setFavicon(e.target.value)} placeholder="https://example.com/favicon.png" maxLength={2000} hint="The browser tab's icon." />
           </div>
+          <PartnerPortalBrand currency={p.currency} value={brandPortal} onChange={setBrandPortal}/>
           <PortalPreview title={title.trim() || p.name} color={color} logo={logo.trim()} favicon={favicon.trim()} welcome={welcome.trim()} poweredBy={poweredBy} />
           <Input label="Welcome" value={welcome} onChange={(e) => setWelcome(e.target.value)} maxLength={4000} placeholder="Earn 20% of every sale you send our way." />
           <label className="flex items-center gap-2 text-[13px]"><input type="checkbox" checked={signup} onChange={(e) => setSignup(e.target.checked)} /> Anyone can apply</label>

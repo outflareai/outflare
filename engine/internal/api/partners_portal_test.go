@@ -112,7 +112,7 @@ func TestPartnerPortal(t *testing.T) {
 
 	// Applying: the form's questions and the terms are checked.
 	anon.must(400, "POST", "api/signup", map[string]any{"email": "eve@example.com", "name": "Eve", "accept_terms": true})
-	anon.must(400, "POST", "api/signup", map[string]any{"email": "eve@example.com", "name": "Eve", "answers": map[string]any{"website": "https://eve.example"}})
+	anon.must(201, "POST", "api/signup", map[string]any{"email": "eve@example.com", "name": "Eve", "answers": map[string]any{"website": "https://eve.example"}})
 	anon.must(201, "POST", "api/signup", map[string]any{"email": "eve@example.com", "name": "Eve", "accept_terms": true, "answers": map[string]any{"website": "https://eve.example"}})
 	var text string
 	if err := e.pool.QueryRow(ctx, `SELECT text_body FROM emails WHERE workspace_id = $1 AND 'eve@example.com' = ANY(to_addresses) ORDER BY created_at DESC LIMIT 1`, ws).Scan(&text); err != nil {
@@ -140,6 +140,7 @@ func TestPartnerPortal(t *testing.T) {
 		t.Fatalf("me = %v", me)
 	}
 	other.must(401, "GET", "api/me", nil)
+	anon.must(200, "POST", "api/accept-terms", map[string]any{"accept": true, "version": me["program"].(map[string]any)["terms_version"]})
 	if me := anon.must(200, "PATCH", "api/me", map[string]any{"payout_method": "PayPal: eve@example.com", "notify": map[string]any{"conversions": false}}); me["notify"].(map[string]any)["conversions"] != false {
 		t.Fatalf("me after patch = %v", me)
 	}

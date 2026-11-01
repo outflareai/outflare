@@ -1,4 +1,4 @@
-# Local development. Needs Go 1.25+, Node 22+, pnpm and a Postgres 16 you can reach.
+# Local development. Needs Go 1.26+, Node 22+, pnpm and a Postgres 16 you can reach.
 DATABASE_URL ?= postgres://postgres@localhost:5432/outflare?sslmode=disable
 TEST_DATABASE_URL ?= postgres://postgres@localhost:5432/outflare_test?sslmode=disable
 # A fixed key for local development only. Never use it for real mailboxes.

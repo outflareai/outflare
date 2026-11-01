@@ -2,12 +2,16 @@ package api
 
 import (
 	"context"
+	"crypto/sha256"
 	_ "embed"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"html"
 	"net/http"
 	"net/mail"
+	"os"
+	"path/filepath"
 	"regexp"
 	"slices"
 	"strings"
@@ -17,6 +21,7 @@ import (
 
 	"github.com/outflareai/outflare/engine/internal/auth"
 	"github.com/outflareai/outflare/engine/internal/classify"
+	"github.com/outflareai/outflare/engine/internal/connectors"
 	"github.com/outflareai/outflare/engine/internal/customers"
 	"github.com/outflareai/outflare/engine/internal/emails"
 	"github.com/outflareai/outflare/engine/internal/partners"
@@ -51,7 +56,7 @@ const (
 )
 
 // portalPages are the pages a portal can show.
-var portalPages = []string{"dashboard", "links", "assets", "referrals", "payouts", "settings"}
+var portalPages = []string{"proposals", "dashboard", "tasks", "profiles", "links", "assets", "referrals", "payouts", "settings", "help"}
 
 // portalField is one question on the portal's sign-up form.
 type portalField struct {
@@ -62,11 +67,38 @@ type portalField struct {
 	Options  []string `json:"options"`
 }
 
+type partnerCouponTemplate struct {
+	ID     string                    `json:"id"`
+	Label  string                    `json:"label"`
+	Coupon string                    `json:"coupon"`
+	Rules  connectors.PromoCodeRules `json:"rules"`
+}
+type portalNavLink struct {
+	Label string `json:"label"`
+	URL   string `json:"url"`
+}
+type portalArticle struct {
+	ID       string `json:"id"`
+	Title    string `json:"title"`
+	Category string `json:"category"`
+	Body     string `json:"body"`
+}
+
 // portalSettings are a program portal's look, pages, sign-up form and
 // sender.
 type portalSettings struct {
-	Title   string `json:"title"`
-	LogoURL string `json:"logo_url"`
+	CouponTemplates []partnerCouponTemplate `json:"coupon_templates"`
+	HomeURL         string                  `json:"home_url"`
+	SupportURL      string                  `json:"support_url"`
+	SupportEmail    string                  `json:"support_email"`
+	HeaderLinks     []portalNavLink         `json:"header_links"`
+	FooterLinks     []portalNavLink         `json:"footer_links"`
+	HelpArticles    []portalArticle         `json:"help_articles"`
+	LandingPages    []portalNavLink         `json:"landing_pages"`
+	PayoutTerms     string                  `json:"payout_terms"`
+	TermsRevision   string                  `json:"terms_revision"`
+	Title           string                  `json:"title"`
+	LogoURL         string                  `json:"logo_url"`
 	// FaviconURL is the browser tab's icon, an https image.
 	FaviconURL   string        `json:"favicon_url"`
 	Color        string        `json:"color"`
@@ -117,6 +149,7 @@ func portalFor(kind string, raw []byte) portalSettings {
 	if p.SignupFields == nil {
 		p.SignupFields = []portalField{}
 	}
+	p.normalizeLists()
 	return p
 }
 
@@ -127,8 +160,83 @@ var (
 	reservedSubs = []string{"www", "app", "api", "admin", "mail", "partners", "portal", "static", "assets"}
 )
 
+func (p *portalSettings) normalizeLists() {
+	if p.CouponTemplates == nil {
+		p.CouponTemplates = []partnerCouponTemplate{}
+	}
+	if p.HeaderLinks == nil {
+		p.HeaderLinks = []portalNavLink{}
+	}
+	if p.FooterLinks == nil {
+		p.FooterLinks = []portalNavLink{}
+	}
+	if p.LandingPages == nil {
+		p.LandingPages = []portalNavLink{}
+	}
+	if p.HelpArticles == nil {
+		p.HelpArticles = []portalArticle{}
+	}
+}
 func (p *portalSettings) check() error {
+	p.normalizeLists()
+	if len(p.CouponTemplates) > 12 {
+		return errInvalid("at most 12 coupon templates")
+	}
+	templates := map[string]bool{}
+	for i, t := range p.CouponTemplates {
+		if !fieldKeyRE.MatchString(t.ID) || templates[t.ID] || strings.TrimSpace(t.Label) == "" || len(t.Label) > 100 {
+			return errInvalid("coupon templates need a unique lowercase id and a label")
+		}
+		templates[t.ID] = true
+		if err := checkPartnerPromoRules(&t.Rules, t.Coupon); err != nil {
+			return err
+		}
+		if t.Coupon == "" && t.Rules.PercentBP == 0 && t.Rules.AmountCents == 0 {
+			return errInvalid("a coupon template requires a billing coupon or discount")
+		}
+		p.CouponTemplates[i] = t
+	}
 	p.Title, p.Welcome = strings.TrimSpace(p.Title), strings.TrimSpace(p.Welcome)
+	if len(p.TermsRevision) > 100 || len(p.PayoutTerms) > 6000 {
+		return errInvalid("terms_revision is at most 100 characters; payout_terms at most 6,000")
+	}
+	for _, v := range []*string{&p.HomeURL, &p.SupportURL} {
+		if *v != "" {
+			u, err := utm.Destination(*v)
+			if err != nil || !strings.HasPrefix(u, "https://") {
+				return errInvalid("portal website and support links must use https")
+			}
+			*v = u
+		}
+	}
+	if p.SupportEmail != "" {
+		a, err := mail.ParseAddress(p.SupportEmail)
+		if err != nil || a.Address != p.SupportEmail || len(p.SupportEmail) > 320 {
+			return errInvalid("support_email must be an email address")
+		}
+	}
+	for _, links := range [][]portalNavLink{p.HeaderLinks, p.FooterLinks, p.LandingPages} {
+		if len(links) > 12 {
+			return errInvalid("each portal link list has at most 12 links")
+		}
+		for _, l := range links {
+			u, err := utm.Destination(l.URL)
+			if strings.TrimSpace(l.Label) == "" || len(l.Label) > 80 || err != nil || !strings.HasPrefix(u, "https://") {
+				return errInvalid("portal links need a label of 1 to 80 characters and an https address")
+			}
+		}
+	}
+	if len(p.HelpArticles) > 40 {
+		return errInvalid("help_articles has at most 40 articles")
+	}
+	ids := map[string]bool{}
+	for _, a := range p.HelpArticles {
+		if !fieldKeyRE.MatchString(a.ID) || ids[a.ID] || strings.TrimSpace(a.Title) == "" || len(a.Title) > 160 || len(a.Body) > 20000 || strings.TrimSpace(a.Body) == "" || !slices.Contains([]string{"getting_started", "promotion", "tracking", "payouts", "integrations", "rules"}, a.Category) {
+			return errInvalid("help articles need a unique lowercase id, title, body and a supported category")
+		}
+		ids[a.ID] = true
+	}
+
 	switch {
 	case len(p.Title) > 120:
 		return errInvalid("portal.title is at most 120 characters")
@@ -221,6 +329,10 @@ func (s *Server) portalBase(ctx context.Context, program string, subdomain *stri
 // ---- Admin: the portal's settings, assets and impersonation ----
 
 func (s *Server) routesPartnerPortal(mux *http.ServeMux) {
+	// Unknown portal paths must never reach the dashboard SPA fallback.
+	mux.HandleFunc("/p/", http.NotFound)
+	s.routesPartnerProposals(mux)
+	s.routesPartnerTasks(mux)
 	s.routesPartnerPostbacks(mux)
 	s.routesPartnerImports(mux)
 	s.routesPartnerSite(mux)
@@ -230,6 +342,7 @@ func (s *Server) routesPartnerPortal(mux *http.ServeMux) {
 	mux.HandleFunc("POST /v1/workspaces/{ws}/partner-programs/{id}/assets", s.inBrand(manage, s.createPartnerAsset))
 	mux.HandleFunc("DELETE /v1/workspaces/{ws}/partner-programs/{id}/assets/{asset}", s.inBrand(manage, s.deletePartnerAsset))
 	mux.HandleFunc("POST /v1/workspaces/{ws}/partners/{id}/impersonate", s.inBrand(manage, s.impersonatePartner))
+	mux.HandleFunc("POST /v1/workspaces/{ws}/partner-programs/{id}/portal-sessions", s.inBrand(auth.ScopePartnersConversions, s.createWidgetSession))
 	mux.HandleFunc("POST /v1/workspaces/{ws}/partner-programs/{id}/widget-sessions", s.inBrand(auth.ScopePartnersConversions, s.createWidgetSession))
 
 	// The portal itself. Public: the session cookie names the partner.
@@ -240,10 +353,14 @@ func (s *Server) routesPartnerPortal(mux *http.ServeMux) {
 	mux.HandleFunc("POST /p/{program}/api/sign-in", s.portalSignIn)
 	mux.HandleFunc("POST /p/{program}/api/session", s.portalSession)
 	mux.HandleFunc("POST /p/{program}/api/sign-out", s.portalSignOut)
+	mux.HandleFunc("POST /p/{program}/api/promo-codes", s.inPortal(s.portalCreatePromoCode))
+	mux.HandleFunc("PATCH /v1/workspaces/{ws}/partners/{id}/promo-codes/{code}", s.inBrand(manage, s.togglePartnerPromoCode))
+	mux.HandleFunc("POST /p/{program}/api/accept-terms", s.inPortal(s.portalAcceptTerms))
 	mux.HandleFunc("GET /p/{program}/api/me", s.inPortal(s.portalMe))
 	mux.HandleFunc("PATCH /p/{program}/api/me", s.inPortal(s.portalUpdateMe))
 	mux.HandleFunc("GET /p/{program}/api/referrals", s.inPortal(s.portalReferrals))
 	mux.HandleFunc("GET /p/{program}/api/rewards", s.inPortal(s.portalRewards))
+	mux.HandleFunc("POST /p/{program}/api/payouts", s.inPortal(s.portalRequestPayout))
 	mux.HandleFunc("GET /p/{program}/api/payouts", s.inPortal(s.portalPayouts))
 	mux.HandleFunc("GET /p/{program}/api/assets", s.inPortal(s.portalAssets))
 }
@@ -278,10 +395,22 @@ func (s *Server) setPartnerPortal(w http.ResponseWriter, r *http.Request) {
 		if settings.SignupFields == nil {
 			settings.SignupFields = []portalField{}
 		}
+		for i := range settings.CouponTemplates {
+			if settings.CouponTemplates[i].Rules.Currency == "" {
+				settings.CouponTemplates[i].Rules.Currency = cur.Currency
+			}
+		}
 		if s.allocError(w, r, settings.check()) {
 			return
 		}
 	}
+	for _, page := range settings.LandingPages {
+		if cur.LandingURL == "" || landingPage(cur.LandingURL, page.URL) != page.URL {
+			writeError(w, r, http.StatusBadRequest, "invalid_request", "landing pages must be on the program landing website or its subdomains")
+			return
+		}
+	}
+
 	sub := cur.PortalSubdomain
 	if in.Subdomain != nil {
 		v := strings.ToLower(strings.TrimSpace(*in.Subdomain))
@@ -533,6 +662,7 @@ type portalProgram struct {
 	brandID                                                 *string
 	subdomain                                               *string
 	enabled, autoAccept                                     bool
+	tasksEnabled                                            bool
 	minPayout                                               int64
 	holdDays                                                int
 	payoutTerm                                              *int
@@ -565,10 +695,11 @@ func (s *Server) portalProgramByID(ctx context.Context, id string) (*portalProgr
 	var p portalProgram
 	var raw []byte
 	err := s.pool.QueryRow(ctx, `SELECT workspace_id::text, id::text, name, kind, status, currency, terms_url, landing_url, brand_id::text,
-		portal_subdomain, portal_enabled, auto_accept, min_payout_cents, hold_days, payout_term_days, payout_methods, payout_tokens, portal
+		portal_subdomain, portal_enabled, auto_accept, min_payout_cents, hold_days, payout_term_days, payout_methods, payout_tokens, portal,
+ EXISTS(SELECT 1 FROM partner_tasks t WHERE t.program_id=partner_programs.id AND t.workspace_id=partner_programs.workspace_id AND t.brand_id IS NOT DISTINCT FROM partner_programs.brand_id)
 		FROM partner_programs WHERE id = $1`, id).
 		Scan(&p.ws, &p.id, &p.name, &p.kind, &p.status, &p.currency, &p.termsURL, &p.landing, &p.brandID, &p.subdomain, &p.enabled, &p.autoAccept,
-			&p.minPayout, &p.holdDays, &p.payoutTerm, &p.payoutMethods, &p.payoutTokens, &raw)
+			&p.minPayout, &p.holdDays, &p.payoutTerm, &p.payoutMethods, &p.payoutTokens, &raw, &p.tasksEnabled)
 	if err != nil {
 		return nil, err
 	}
@@ -642,34 +773,69 @@ func (s *Server) portalPage(w http.ResponseWriter, r *http.Request) {
 	head, scriptSrc, connectSrc := s.portalAnalytics(r, id)
 	h.Set("Content-Security-Policy", "default-src 'self'; img-src https: data:; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'"+scriptSrc+
 		"; connect-src 'self'"+connectSrc+"; frame-ancestors 'none'; base-uri 'none'; form-action 'self'")
-	page := strings.ReplaceAll(partnerPortalHTML, "{{BASE}}", html.EscapeString(base))
+	page := strings.ReplaceAll(s.partnerPortalDocument(), "{{BASE}}", html.EscapeString(base))
 	_, _ = w.Write([]byte(strings.Replace(page, "</head>", head+"</head>", 1)))
+}
+
+// Use the dashboard's compiled portal entry when available; API-only installs retain the fallback.
+func (s *Server) partnerPortalDocument() string {
+	if s.webDir != "" {
+		if data, err := os.ReadFile(filepath.Join(s.webDir, "portal.html")); err == nil {
+			return string(data)
+		}
+	}
+	return partnerPortalHTML
+
 }
 
 // portalPublicInfo is what anyone sees of a portal before signing in.
 type portalPublicInfo struct {
-	Name         string        `json:"name"`
-	Kind         string        `json:"kind"`
-	Title        string        `json:"title"`
-	LogoURL      string        `json:"logo_url"`
-	FaviconURL   string        `json:"favicon_url"`
-	Color        string        `json:"color"`
-	CustomCSS    string        `json:"custom_css"`
-	Welcome      string        `json:"welcome"`
-	Pages        []string      `json:"pages"`
-	SignupOpen   bool          `json:"signup_open"`
-	SignupFields []portalField `json:"signup_fields"`
-	TermsURL     string        `json:"terms_url"`
-	Currency     string        `json:"currency"`
-	PoweredBy    bool          `json:"powered_by"`
+	CouponTemplates []partnerCouponTemplate `json:"coupon_templates"`
+	HomeURL         string                  `json:"home_url"`
+	SupportURL      string                  `json:"support_url"`
+	SupportEmail    string                  `json:"support_email"`
+	HeaderLinks     []portalNavLink         `json:"header_links"`
+	FooterLinks     []portalNavLink         `json:"footer_links"`
+	HelpArticles    []portalArticle         `json:"help_articles"`
+	LandingPages    []portalNavLink         `json:"landing_pages"`
+	PayoutTerms     string                  `json:"payout_terms"`
+	TermsVersion    string                  `json:"terms_version"`
+	Name            string                  `json:"name"`
+	Kind            string                  `json:"kind"`
+	Title           string                  `json:"title"`
+	LogoURL         string                  `json:"logo_url"`
+	FaviconURL      string                  `json:"favicon_url"`
+	Color           string                  `json:"color"`
+	CustomCSS       string                  `json:"custom_css"`
+	Welcome         string                  `json:"welcome"`
+	Pages           []string                `json:"pages"`
+	SignupOpen      bool                    `json:"signup_open"`
+	SignupFields    []portalField           `json:"signup_fields"`
+	TermsURL        string                  `json:"terms_url"`
+	Currency        string                  `json:"currency"`
+	PoweredBy       bool                    `json:"powered_by"`
 }
 
 func (p *portalProgram) public() portalPublicInfo {
+	if !slices.Contains(p.settings.Pages, "proposals") {
+		p.settings.Pages = append(p.settings.Pages, "proposals")
+	}
+	if p.tasksEnabled {
+		pages := []string{"tasks", "profiles"}
+		for _, page := range p.settings.Pages {
+			if page != "tasks" && page != "profiles" {
+				pages = append(pages, page)
+			}
+		}
+		p.settings.Pages = pages
+	}
 	t := p.settings.Title
 	if t == "" {
 		t = p.name
 	}
-	return portalPublicInfo{Name: p.name, Kind: p.kind, Title: t, LogoURL: p.settings.LogoURL, FaviconURL: p.settings.FaviconURL, Color: p.settings.Color, CustomCSS: p.settings.CustomCSS,
+	return portalPublicInfo{CouponTemplates: p.settings.CouponTemplates, HomeURL: p.settings.HomeURL, SupportURL: p.settings.SupportURL, SupportEmail: p.settings.SupportEmail,
+		HeaderLinks: p.settings.HeaderLinks, FooterLinks: p.settings.FooterLinks, HelpArticles: p.settings.HelpArticles, LandingPages: p.settings.LandingPages,
+		PayoutTerms: p.settings.PayoutTerms, TermsVersion: p.termsVersion(), Name: p.name, Kind: p.kind, Title: t, LogoURL: p.settings.LogoURL, FaviconURL: p.settings.FaviconURL, Color: p.settings.Color, CustomCSS: p.settings.CustomCSS,
 		Welcome: p.settings.Welcome, Pages: p.settings.Pages, SignupOpen: p.settings.SignupOpen && p.status == "active", SignupFields: p.settings.SignupFields,
 		TermsURL: p.termsURL, Currency: p.currency, PoweredBy: !p.settings.HidePoweredBy}
 }
@@ -810,10 +976,11 @@ func (s *Server) portalSignup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var in struct {
-		Email       string         `json:"email"`
-		Name        string         `json:"name"`
-		Answers     map[string]any `json:"answers"`
-		AcceptTerms bool           `json:"accept_terms"`
+		Email        string         `json:"email"`
+		Name         string         `json:"name"`
+		Answers      map[string]any `json:"answers"`
+		AcceptTerms  bool           `json:"accept_terms"`
+		TermsVersion string         `json:"terms_version"`
 		// Group is the group whose sign-up link they came from.
 		Group string `json:"group"`
 	}
@@ -832,9 +999,6 @@ func (s *Server) portalSignup(w http.ResponseWriter, r *http.Request) {
 		return
 	case in.Name == "" || len(in.Name) > 200:
 		writeError(w, r, http.StatusBadRequest, "invalid_request", "name is 1 to 200 characters")
-		return
-	case p.termsURL != "" && !in.AcceptTerms:
-		writeError(w, r, http.StatusBadRequest, "invalid_request", "accept the program's terms to join")
 		return
 	case p.settings.EmailFrom == "":
 		s.portalEmailError(w, r, errPortalEmail)
@@ -903,16 +1067,12 @@ func (s *Server) portalSignup(w http.ResponseWriter, r *http.Request) {
 				}
 			}
 			prog := &partnerProgramView{ID: p.id, Kind: p.kind, BrandID: p.brandID}
-			now := time.Now()
-			var terms *time.Time
-			if in.AcceptTerms {
-				terms = &now
-			}
 			if _, err := s.joinPartner(ctx, tx, p.ws, nil, prog, partnerJoin{rec: rec, status: status, source: "signup",
-				group: group, application: answers, termsAt: terms}); err != nil {
+				group: group, application: answers}); err != nil {
 				return err
 			}
 		}
+
 		// Already a partner: the same answer, and a sign-in link.
 		return s.sendSignInLink(ctx, tx, p, rec, email, in.Name)
 	})
@@ -1054,28 +1214,42 @@ func (s *Server) inPortal(next func(http.ResponseWriter, *http.Request, *portalC
 			s.internal(w, r, err)
 			return
 		}
+		if r.Method != http.MethodGet && !strings.HasSuffix(r.URL.Path, "/accept-terms") && !strings.HasSuffix(r.URL.Path, "/sign-out") && p.termsURL != "" {
+			var accepted string
+			if err := s.pool.QueryRow(r.Context(), `SELECT accepted_terms_version FROM partner_memberships WHERE workspace_id=$1 AND program_id=$2 AND id=$3`, p.ws, p.id, member).Scan(&accepted); err != nil {
+				s.internal(w, r, err)
+				return
+			}
+			if accepted != p.termsVersion() {
+				writeError(w, r, http.StatusForbidden, "forbidden", "review and accept the current program terms before continuing")
+				return
+			}
+		}
 		next(w, r, &portalCaller{program: p, partner: v, readOnly: by != nil})
 	}
 }
 
 // portalMeView is the partner's own view of their membership.
 type portalMeView struct {
-	Name           string          `json:"name"`
-	Email          string          `json:"email"`
-	Code           string          `json:"code"`
-	Status         string          `json:"status"`
-	Link           string          `json:"link"`
-	CampaignLink   string          `json:"campaign_link"`
-	PromoCodes     []string        `json:"promo_codes"`
-	PayoutMethod   string          `json:"payout_method"`
-	PayoutType     *string         `json:"payout_type"`
-	PayoutToken    *string         `json:"payout_token"`
-	PostbackURL    string          `json:"postback_url"`
-	Notify         map[string]bool `json:"notify"`
-	Currency       string          `json:"currency"`
-	Stats          partnerStats    `json:"stats"`
-	MinPayoutCents int64           `json:"min_payout_cents"`
-	HoldDays       int             `json:"hold_days"`
+	PromoCodeDetails     []partnerPromoCode `json:"promo_code_details"`
+	RequiresTerms        bool               `json:"requires_terms"`
+	AcceptedTermsVersion string             `json:"accepted_terms_version"`
+	Name                 string             `json:"name"`
+	Email                string             `json:"email"`
+	Code                 string             `json:"code"`
+	Status               string             `json:"status"`
+	Link                 string             `json:"link"`
+	CampaignLink         string             `json:"campaign_link"`
+	PromoCodes           []string           `json:"promo_codes"`
+	PayoutMethod         string             `json:"payout_method"`
+	PayoutType           *string            `json:"payout_type"`
+	PayoutToken          *string            `json:"payout_token"`
+	PostbackURL          string             `json:"postback_url"`
+	Notify               map[string]bool    `json:"notify"`
+	Currency             string             `json:"currency"`
+	Stats                partnerStats       `json:"stats"`
+	MinPayoutCents       int64              `json:"min_payout_cents"`
+	HoldDays             int                `json:"hold_days"`
 	// PayoutTermDays, PayoutMethods and PayoutTokens are the program's:
 	// Net N after the month a reward was earned, and what partners choose
 	// from (empty: any, in their own words).
@@ -1090,12 +1264,13 @@ func (s *Server) portalMe(w http.ResponseWriter, r *http.Request, c *portalCalle
 	v := c.partner
 	notify := map[string]bool{"conversions": true, "payouts": true}
 	var raw []byte
-	if err := s.pool.QueryRow(r.Context(), `SELECT notify FROM partner_memberships WHERE id = $1`, v.ID).Scan(&raw); err != nil {
+	var accepted string
+	if err := s.pool.QueryRow(r.Context(), `SELECT notify, accepted_terms_version FROM partner_memberships WHERE id = $1 AND workspace_id=$2 AND program_id=$3`, v.ID, c.program.ws, c.program.id).Scan(&raw, &accepted); err != nil {
 		s.internal(w, r, err)
 		return
 	}
 	_ = json.Unmarshal(raw, &notify)
-	writeJSON(w, http.StatusOK, portalMeView{Name: v.Name, Email: v.Email, Code: v.Code, Status: v.Status, Link: v.Link, CampaignLink: v.CampaignLink,
+	writeJSON(w, http.StatusOK, portalMeView{PromoCodeDetails: v.PromoCodes, RequiresTerms: c.program.termsURL != "" && accepted != c.program.termsVersion(), AcceptedTermsVersion: accepted, Name: v.Name, Email: v.Email, Code: v.Code, Status: v.Status, Link: v.Link, CampaignLink: v.CampaignLink,
 		PromoCodes: promoCodeNames(v.PromoCodes), PayoutMethod: v.PayoutMethod, PayoutType: v.PayoutType, PayoutToken: v.PayoutToken, PostbackURL: v.PostbackURL, Notify: notify, Currency: v.Currency, Stats: v.Stats,
 		MinPayoutCents: c.program.minPayout, HoldDays: c.program.holdDays, PayoutTermDays: c.program.payoutTerm,
 		PayoutMethods: c.program.payoutMethods, PayoutTokens: c.program.payoutTokens, ReadOnly: c.readOnly, Program: c.program.public()})
@@ -1354,6 +1529,11 @@ func (s *Server) createWidgetSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ctx := r.Context()
+	hosted := strings.HasSuffix(r.URL.Path, "/portal-sessions")
+	if hosted && (!prog.PortalEnabled || strings.TrimSpace(in.CustomerID) == "") {
+		writeError(w, r, http.StatusBadRequest, "invalid_request", "open the portal and supply your stable customer_id for automatic sign-in")
+		return
+	}
 	var token, member string
 	err := pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
 		run := &conversionRun{s: s, tx: tx, p: &a.principal, ws: a.WorkspaceID, in: ci}
@@ -1379,6 +1559,16 @@ func (s *Server) createWidgetSession(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			return err
 		}
+		if hosted {
+			token, err = newSignInLink(ctx, tx, a.WorkspaceID, prog.ID, rec, nil)
+			if err != nil {
+				return err
+			}
+			if _, err = tx.Exec(ctx, `UPDATE partner_sign_in_links SET expires_at=now()+interval '60 seconds' WHERE token_hash=$1 AND workspace_id=$2 AND program_id=$3`, auth.HashToken(token), a.WorkspaceID, prog.ID); err != nil {
+				return err
+			}
+			return partnerRecord(ctx, tx, &a.principal, a.WorkspaceID, "partner.portal_handoff_created", "partner", member, map[string]any{"program_id": prog.ID})
+		}
 		var hash []byte
 		token, hash = auth.NewToken(auth.PrefixPartnerSession)
 		_, err = tx.Exec(ctx, `INSERT INTO partner_sessions (workspace_id, program_id, record_id, token_hash, widget, expires_at) VALUES ($1, $2, $3, $4, true, $5)`,
@@ -1396,6 +1586,11 @@ func (s *Server) createWidgetSession(w http.ResponseWriter, r *http.Request) {
 	base, err := s.portalBase(ctx, prog.ID, prog.PortalSubdomain)
 	if err != nil {
 		s.internal(w, r, err)
+		return
+	}
+	if hosted {
+		w.Header().Set("Cache-Control", "no-store")
+		writeJSON(w, http.StatusCreated, map[string]any{"sign_in_url": base + "#signin=" + token, "expires_in_seconds": 60, "partner_id": v.ID, "status": v.Status})
 		return
 	}
 	writeJSON(w, http.StatusCreated, map[string]any{"token": token, "embed_url": base + "embed#token=" + token,
@@ -1422,5 +1617,44 @@ func (s *Server) portalEmbed(w http.ResponseWriter, r *http.Request) {
 	// here another site may frame.
 	h.Del("X-Frame-Options")
 	h.Set("Content-Security-Policy", "default-src 'self'; img-src https: data:; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; frame-ancestors https:; base-uri 'none'; form-action 'none'")
-	_, _ = w.Write([]byte(strings.ReplaceAll(partnerWidgetHTML, "{{BASE}}", html.EscapeString(base))))
+	template := partnerWidgetHTML
+	if r.URL.Query().Get("view") == "portal" {
+		template = s.partnerPortalDocument()
+	}
+	_, _ = w.Write([]byte(strings.ReplaceAll(template, "{{BASE}}", html.EscapeString(base))))
+}
+
+// termsVersion binds acceptance to the address and brand-supplied revision.
+func (p *portalProgram) termsVersion() string {
+	if p.termsURL == "" {
+		return ""
+	}
+	return fmt.Sprintf("%x", sha256.Sum256([]byte(p.termsURL+"\n"+p.settings.TermsRevision)))
+}
+func (s *Server) portalAcceptTerms(w http.ResponseWriter, r *http.Request, c *portalCaller) {
+	if c.readOnly {
+		writeError(w, r, http.StatusForbidden, "forbidden", "a preview cannot accept terms for a partner")
+		return
+	}
+	var in struct {
+		Version string `json:"version"`
+		Accept  bool   `json:"accept"`
+	}
+	if !decode(w, r, &in) {
+		return
+	}
+	if !in.Accept || in.Version == "" || in.Version != c.program.termsVersion() {
+		writeError(w, r, http.StatusConflict, "conflict", "the program terms changed; reload and review the current version")
+		return
+	}
+	err := pgx.BeginFunc(r.Context(), s.pool, func(tx pgx.Tx) error {
+		if _, err := tx.Exec(r.Context(), `UPDATE partner_memberships SET accepted_terms_version=$4,terms_accepted_at=now() WHERE workspace_id=$1 AND program_id=$2 AND id=$3`, c.program.ws, c.program.id, c.partner.ID, in.Version); err != nil {
+			return err
+		}
+		return partnerRecord(r.Context(), tx, nil, c.program.ws, "partner.terms_accepted", "partner", c.partner.ID, map[string]any{"program_id": c.program.id, "version": in.Version})
+	})
+	if s.allocError(w, r, err) {
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"accepted": true})
 }

@@ -59,7 +59,7 @@ func (Stripe) Definition() c.Definition {
 		Fields: []c.Field{{Name: "api_key", Label: "Restricted key", Secret: true, Placeholder: "rk_live_...",
 			Help: "In Stripe: Developers, API keys, Create restricted key. Give it Read access to Customers, Charges, Events, Products, " +
 				"Prices and Subscriptions (under Billing). To create partners' promo codes from Outflare, also give it Write access to " +
-				"Promotion codes and Read access to Coupons. A test-mode key reads test data."}},
+				"Promotion codes, and Write access to Coupons when creating new discounts. A test-mode key reads test data."}},
 		Capabilities: []string{c.CapPayments, c.CapPromoCodes},
 		Pricing:      "Free: Stripe does not charge for API calls",
 	}
@@ -580,4 +580,58 @@ func (Stripe) apply(ctx context.Context, cl *c.Client, creds c.Creds, events []s
 		}
 	}
 	return page, nil
+}
+
+// CreateManagedPromoCode creates a coupon when a new discount is specified,
+// then a promotion code with Stripe enforcing expiry, first-order and limits.
+func (Stripe) CreateManagedPromoCode(ctx context.Context, cl *c.Client, creds c.Creds, code, coupon string, r c.PromoCodeRules, metadata map[string]string) (string, error) {
+	if coupon == "" {
+		f := url.Values{"duration": {r.Duration}}
+		if r.PercentBP > 0 {
+			f.Set("percent_off", strconv.FormatFloat(float64(r.PercentBP)/100, 'f', 2, 64))
+		} else {
+			f.Set("amount_off", strconv.FormatInt(r.AmountCents, 10))
+			f.Set("currency", strings.ToLower(r.Currency))
+		}
+		if r.Duration == "repeating" {
+			f.Set("duration_in_months", strconv.Itoa(r.Months))
+		}
+		for i, p := range r.ProductIDs {
+			f.Set("applies_to[products]["+strconv.Itoa(i)+"]", p)
+		}
+		var out struct {
+			ID string `json:"id"`
+		}
+		if err := post(ctx, cl, creds, "/v1/coupons", f, "outflare-discount-"+metadata["outflare_promo_code"]+"-"+code, &out); err != nil {
+			return "", err
+		}
+		coupon = out.ID
+	}
+	f := url.Values{"code": {code}, "coupon": {coupon}, "active": {strconv.FormatBool(!r.Disabled)}}
+	if r.EndsAt != nil {
+		f.Set("expires_at", strconv.FormatInt(r.EndsAt.Unix(), 10))
+	}
+	if r.MaxRedemptions > 0 {
+		f.Set("max_redemptions", strconv.Itoa(r.MaxRedemptions))
+	}
+	if r.FirstOrderOnly {
+		f.Set("restrictions[first_time_transaction]", "true")
+	}
+	if r.MinOrderCents > 0 {
+		f.Set("restrictions[minimum_amount]", strconv.FormatInt(r.MinOrderCents, 10))
+		f.Set("restrictions[minimum_amount_currency]", strings.ToLower(r.Currency))
+	}
+	for k, v := range metadata {
+		f.Set("metadata["+k+"]", v)
+	}
+	var out struct {
+		ID string `json:"id"`
+	}
+	if err := post(ctx, cl, creds, "/v1/promotion_codes", f, "outflare-managed-promo-"+metadata["outflare_promo_code"]+"-"+code, &out); err != nil {
+		return "", err
+	}
+	return out.ID, nil
+}
+func (Stripe) SetPromoCodeActive(ctx context.Context, cl *c.Client, creds c.Creds, id string, active bool) error {
+	return post(ctx, cl, creds, "/v1/promotion_codes/"+url.PathEscape(id), url.Values{"active": {strconv.FormatBool(active)}}, "", nil)
 }

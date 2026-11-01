@@ -61,6 +61,28 @@ const rule = z.object({
   target_group_id: z.string().uuid().optional().describe("kind group: the group the partner moves to."),
 });
 
+const promoRules = z.object({
+  disabled: z.boolean().optional(),
+  starts_at: z.string().nullable().optional(),
+  ends_at: z.string().nullable().optional(),
+  percent_bp: z.number().int().min(0).max(10000).optional(),
+  amount_cents: z.number().int().min(0).optional(),
+  currency: z.string().length(3).optional(),
+  max_redemptions: z.number().int().min(0).optional(),
+  first_order_only: z.boolean().optional(),
+  min_order_cents: z.number().int().min(0).optional(),
+  duration: z.enum(["once", "repeating", "forever"]).optional(),
+  months: z.number().int().optional(),
+  product_ids: z.array(z.string()).max(50).optional(),
+});
+
+const proposalConfig = z.object({
+ partner_site_name:z.string().max(160).optional(),partner_site_url:z.string().optional(),partner_site_icon_url:z.string().optional(),
+ title:z.string().min(1).max(160),brief:z.string().min(1).max(10000),reply_to:z.string(),request_quote:z.boolean().optional(),brand_kit_url:z.string().optional(),product_url:z.string().optional(),terms:z.string().max(10000).optional(),commission_terms:z.string().max(2000).optional(),
+ deliverables:z.array(z.object({id:z.string(),title:z.string(),channel:z.string().optional(),format:z.string().optional(),placement_url:z.string().optional(),requirements:z.string().optional(),deadline:z.string().optional(),live_days:z.number().int().min(0).max(3650).optional(),link_url:z.string().optional(),link_text:z.string().optional(),link_attribute:z.string().optional()})).min(1).max(30),
+ milestones:z.array(z.object({id:z.string(),title:z.string(),deliverable_id:z.string(),amount_cents:z.number().int().min(0).max(100000000).optional(),benefit:z.string().optional(),wait_days:z.number().int().min(0).max(3650).optional()})).max(30),
+});
+
 const programSettings = {
   name: z.string().max(120).optional(),
   brand: z.string().optional().describe("A brand's id or handle."),
@@ -97,6 +119,42 @@ export function registerPartnerTools(server: McpServer, gtm: MissionClient, work
   const program = z.string().describe("The program's id or slug.");
   const partner = id.describe("The partner's id (their membership in one program), from list_partners.");
   const path = () => ({ ws: workspace() });
+
+  server.registerTool("list_partner_proposals",{title:"List one-to-one partnership proposals",inputSchema:{program},annotations:read},({program:id})=>call(()=>gtm.GET("/v1/workspaces/{ws}/partner-programs/{id}/proposals",{params:{path:{...path(),id}}})));
+  if(!readOnly){
+    server.registerTool("create_partner_proposal",{title:"Draft a private partnership proposal",description:"One named recipient, cross-platform deliverables and manually approved milestones. No outreach is sent. Use invite after reviewing the draft.",inputSchema:{program,partner_id:id.optional(),email:z.string().optional(),name:z.string().optional(),config:proposalConfig},annotations:write},({program:id,...body})=>call(()=>gtm.POST("/v1/workspaces/{ws}/partner-programs/{id}/proposals",{params:{path:{...path(),id}},body})));
+    server.registerTool("update_partner_proposal",{title:"Manage a partnership proposal",description:"Revise before acceptance, generate an invitation link, explicitly verify submitted work, or approve an eligible milestone. Time never automatically releases payment.",inputSchema:{program,proposal:id,version:z.number().int(),action:z.enum(["revise","invite","verify","approve","complete"]),config:proposalConfig.optional(),deliverable_id:z.string().optional(),milestone_id:z.string().optional(),note:z.string().max(4000).optional()},annotations:write},({program:id,proposal,...body})=>call(()=>gtm.POST("/v1/workspaces/{ws}/partner-programs/{id}/proposals/{proposal}",{params:{path:{...path(),id,proposal}},body})));
+  }
+  server.registerTool("list_partner_tasks", {
+    title: "List partner tasks", description: "Paid and voluntary opportunities, private website proposals and their assignments.",
+    inputSchema: { program }, annotations: read,
+  }, ({ program: id }) => call(() => gtm.GET("/v1/workspaces/{ws}/partner-programs/{id}/tasks", { params: { path: { ...path(), id } } })));
+  server.registerTool("list_partner_audiences", {
+    title: "List partner audience profiles", description: "Partner websites, channels and communities, with reach sources and website ownership status. Scraped reach is not proof of ownership.",
+    inputSchema: { program }, annotations: read,
+  }, ({ program: id }) => call(() => gtm.GET("/v1/workspaces/{ws}/partner-programs/{id}/audiences", { params: { path: { ...path(), id } } })));
+  if (!readOnly) {
+    server.registerTool("create_partner_task", {
+      title: "Create a partner task", description: "Create a paid or voluntary opportunity. target_host makes it a private proposal unlocked by verified website ownership. Ranged/custom prices require an accepted offer. Automatic verification checks a required link on a verified website using the workspace's own page reader.",
+      inputSchema: {
+        program, title: z.string().min(1).max(160), description: z.string().min(1).max(6000),
+        category: z.enum(["blog","video","social","newsletter","banner","community","other"]).optional(),
+        reward_kind: z.enum(["free","cash","action"]).optional(), pricing: z.enum(["fixed","range","custom"]).optional(),
+        amount_cents: z.number().int().min(0).max(100000000).optional(), max_amount_cents: z.number().int().min(0).max(100000000).optional(),
+        reward_label: z.string().max(200).optional(), action: z.string().max(60).optional(), action_data: z.record(z.string(),z.unknown()).optional(),
+        claim_mode: z.enum(["instant","application"]).optional(), verification: z.enum(["human","auto","auto_hold"]).optional(),
+        hold_days: z.number().int().min(0).max(365).optional(), asset_kind: z.enum(["","website","youtube","x","linkedin","instagram","tiktok","newsletter","reddit","facebook","discord","podcast","other"]).optional(),
+        min_reach: z.number().int().min(0).optional(), target_host: z.string().max(253).optional(), required_link: z.string().max(2000).optional(), slots: z.number().int().min(1).max(10000).optional(),
+      }, annotations: write,
+    }, ({ program: id, ...body }) => call(() => gtm.POST("/v1/workspaces/{ws}/partner-programs/{id}/tasks", { params: { path: { ...path(), id } }, body })));
+    server.registerTool("update_partner_task", {
+      title: "Pause or resume a partner task", inputSchema: { program, task: id, action: z.enum(["pause","resume"]) }, annotations: write,
+    }, ({ program: id, task, action }) => call(() => gtm.POST("/v1/workspaces/{ws}/partner-programs/{id}/tasks/{task}", { params: { path: { ...path(), id, task } }, body: { action } })));
+    server.registerTool("review_partner_task", {
+      title: "Review partner work or offer a price", description: "Offer a fixed price for an application, approve submitted work into the reward ledger, or reject it. Partners accept offered prices before doing the work.",
+      inputSchema: { program, submission: id, action: z.enum(["offer","approve","reject"]), amount_cents: z.number().int().min(0).max(100000000).optional(), note: z.string().max(2000).optional() }, annotations: write,
+    }, ({ program: id, submission, ...body }) => call(() => gtm.POST("/v1/workspaces/{ws}/partner-programs/{id}/task-submissions/{submission}", { params: { path: { ...path(), id, submission } }, body })));
+  }
 
   server.registerTool(
     "list_partner_programs",
@@ -485,6 +543,7 @@ export function registerPartnerTools(server: McpServer, gtm: MissionClient, work
       title: "Tie a promo code to a partner",
       description: "The code as customers type it at checkout; conversions reporting it credit the partner. With coupon, Outflare makes it in the connected Stripe account; otherwise make it there yourself.",
       inputSchema: {
+        rules: promoRules.optional(),
         partner_id: partner,
         code: z.string().max(64),
         coupon: z.string().max(200).optional().describe("A coupon id in the connected Stripe account: Outflare makes the code there too."),
@@ -625,6 +684,14 @@ export function registerPartnerTools(server: McpServer, gtm: MissionClient, work
     ({ payout_id, ...body }) => call(() => gtm.POST("/v1/workspaces/{ws}/partner-payouts/{id}/paid", { params: { path: { ws: workspace(), id: payout_id } }, body })),
   );
 
+  server.registerTool("create_partner_portal_session", {
+    title: "Open a hosted partner portal session", description: "Backend-only one-use sign-in URL valid for 60 seconds. Provisions a brand-authenticated customer using their stable customer_id. Terms acceptance still applies. Never expose workspace tokens in a browser.",
+    inputSchema: { program, customer_id: z.string().min(1), email: z.string().optional(), name: z.string().optional() }, annotations: write,
+  }, ({ program: id, ...body }) => call(() => gtm.POST("/v1/workspaces/{ws}/partner-programs/{id}/portal-sessions", { params: { path: { ws: workspace(), id } }, body })));
+  server.registerTool("update_partner_promo_code", {
+    title: "Enable or disable a partner coupon", inputSchema: { partner, code: z.string(), enabled: z.boolean() }, annotations: write,
+  }, ({ partner: id, code, ...body }) => call(() => gtm.PATCH("/v1/workspaces/{ws}/partners/{id}/promo-codes/{code}", { params: { path: { ws: workspace(), id, code } }, body })));
+
   server.registerTool(
     "set_partner_portal",
     {
@@ -638,12 +705,19 @@ export function registerPartnerTools(server: McpServer, gtm: MissionClient, work
         enabled: z.boolean().optional(),
         subdomain: z.string().max(63).optional().describe("Its subdomain of the server's partners domain; \"\" for none."),
         settings: z.object({
+          home_url: z.string().optional(), support_url: z.string().optional(), support_email: z.string().optional(),
+          terms_revision: z.string().max(100).optional(), payout_terms: z.string().max(6000).optional(),
+          header_links: z.array(z.object({ label: z.string().max(80), url: z.string() })).max(12).optional(),
+          footer_links: z.array(z.object({ label: z.string().max(80), url: z.string() })).max(12).optional(),
+          landing_pages: z.array(z.object({ label: z.string().max(80), url: z.string() })).max(12).optional(),
+          help_articles: z.array(z.object({ id: z.string(), title: z.string().max(160), category: z.enum(["getting_started", "promotion", "tracking", "payouts", "integrations", "rules"]), body: z.string().max(20000) })).max(40).optional(),
+          coupon_templates: z.array(z.object({ id: z.string(), label: z.string().max(100), coupon: z.string().max(200), rules: promoRules })).max(12).optional(),
           title: z.string().max(120).optional(),
           logo_url: z.string().optional(),
           favicon_url: z.string().optional().describe("The browser tab's icon, an https image."),
           color: z.string().optional().describe("Hex, such as #0f766e."),
           welcome: z.string().max(4000).optional(),
-          pages: z.array(z.enum(["dashboard", "links", "assets", "referrals", "payouts", "settings"])).optional(),
+          pages: z.array(z.enum(["dashboard", "tasks", "profiles", "links", "assets", "referrals", "payouts", "settings", "help", "proposals"])).optional(),
           signup_open: z.boolean().optional(),
           signup_fields: z.array(z.object({ key: z.string(), label: z.string(), type: z.enum(["text", "textarea", "url", "select"]), required: z.boolean().optional(), options: z.array(z.string()).optional() })).max(20).optional(),
           email_from: z.string().optional(),

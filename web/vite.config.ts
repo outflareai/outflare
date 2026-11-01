@@ -57,6 +57,7 @@ export function parseChangelog(md: string, max = 40): Release[] {
 export default defineConfig({
   plugins: [react(), tailwindcss(), changelog()],
   resolve: { alias: { "@": decodeURIComponent(new URL("./src", import.meta.url).pathname) } },
+  build: { rolldownOptions: { input: { app: decodeURIComponent(new URL("./index.html",import.meta.url).pathname), portal: decodeURIComponent(new URL("./portal.html",import.meta.url).pathname) } } },
   server: {
     proxy: {
       "/v1": "http://localhost:8080",

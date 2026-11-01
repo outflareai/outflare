@@ -114,7 +114,8 @@ func (s *Server) partnerBillingConversionJob(ctx context.Context, job jobs.Job) 
 // ---- Promo codes in the billing account ----
 
 type partnerPromoJob struct {
-	ID string `json:"id"`
+	Force bool   `json:"force,omitempty"`
+	ID    string `json:"id"`
 }
 
 // partnerPromoCodeJob makes a partner's promo code in the workspace's
@@ -125,10 +126,14 @@ func (s *Server) partnerPromoCodeJob(ctx context.Context, job jobs.Job) error {
 		return fmt.Errorf("%w: bad payload", jobs.ErrPermanent)
 	}
 	ws := *job.WorkspaceID
+
 	var code, coupon, membership string
+	var external *string
+	var raw []byte
+	var rules connectors.PromoCodeRules
 	var integration *string
-	err := s.pool.QueryRow(ctx, `SELECT code, coupon, integration_id::text, membership_id::text FROM partner_promo_codes
-		WHERE workspace_id = $1 AND id = $2 AND sync_status = 'pending'`, ws, p.ID).Scan(&code, &coupon, &integration, &membership)
+	err := s.pool.QueryRow(ctx, `SELECT code, coupon, integration_id::text, membership_id::text,external_id,rules FROM partner_promo_codes
+		WHERE workspace_id = $1 AND id = $2 AND (sync_status = 'pending' OR $3)`, ws, p.ID, p.Force).Scan(&code, &coupon, &integration, &membership, &external, &raw)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil
 	}
@@ -138,7 +143,7 @@ func (s *Server) partnerPromoCodeJob(ctx context.Context, job jobs.Job) error {
 	fail := func(code string, err error) error {
 		track.Fail(ctx, s.log, track.Event{Name: "partner.promo_code_failed", WorkspaceID: ws, Surface: "job",
 			Props: map[string]any{"partner_id": membership}}, code, err)
-		_, uerr := s.pool.Exec(ctx, `UPDATE partner_promo_codes SET sync_status = 'failed', sync_error = $2 WHERE id = $1`, p.ID, cutUTF8(err.Error(), 500))
+		_, uerr := s.pool.Exec(ctx, `UPDATE partner_promo_codes SET sync_status = 'failed', sync_error = $2 WHERE id = $1 AND workspace_id=$3 AND rules=$4::jsonb`, p.ID, cutUTF8(err.Error(), 500), ws, raw)
 		return uerr
 	}
 	if integration == nil {
@@ -155,7 +160,30 @@ func (s *Server) partnerPromoCodeJob(ctx context.Context, job jobs.Job) error {
 	if !ok || o.Status != connectors.StatusConnected {
 		return fail("connector_needed", errors.New("the billing connection can't make promo codes, or isn't connected"))
 	}
-	id, err := writer.CreatePromoCode(ctx, s.integrations.Client, o.Creds, code, coupon, map[string]string{"outflare_partner": membership})
+
+	_ = json.Unmarshal(raw, &rules)
+	if rules.StartsAt != nil && rules.StartsAt.After(time.Now()) {
+		return nil
+	} // creation is queued at its start time
+	var id string
+	if _, ok := o.Connector.(connectors.ManagedPromoCodeWriter); !ok && string(raw) != "{}" {
+		return fail("connector_needed", errors.New("the billing connector does not support these coupon restrictions"))
+	}
+	if rich, ok := o.Connector.(connectors.ManagedPromoCodeWriter); ok && string(raw) != "{}" {
+		if external != nil && *external != "" {
+			id = *external
+			active := !rules.Disabled && (rules.EndsAt == nil || rules.EndsAt.After(time.Now()))
+			err = rich.SetPromoCodeActive(ctx, s.integrations.Client, o.Creds, id, active)
+		} else {
+			id, err = rich.CreateManagedPromoCode(ctx, s.integrations.Client, o.Creds, code, coupon, rules, map[string]string{"outflare_partner": membership, "outflare_promo_code": p.ID})
+			if err == nil {
+				err = rich.SetPromoCodeActive(ctx, s.integrations.Client, o.Creds, id, !rules.Disabled && (rules.EndsAt == nil || rules.EndsAt.After(time.Now())))
+			}
+		}
+	} else {
+		id, err = writer.CreatePromoCode(ctx, s.integrations.Client, o.Creds, code, coupon, map[string]string{"outflare_partner": membership, "outflare_promo_code": p.ID})
+	}
+
 	if err != nil {
 		if connectors.KindOf(err) == connectors.ErrUnavailable || connectors.KindOf(err) == connectors.ErrQuota {
 			return err // tried again
@@ -163,9 +191,17 @@ func (s *Server) partnerPromoCodeJob(ctx context.Context, job jobs.Job) error {
 		return fail("connector_"+connectors.KindOf(err), err)
 	}
 	return pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
-		if _, err := tx.Exec(ctx, `UPDATE partner_promo_codes SET sync_status = 'created', external_id = $2, sync_error = '' WHERE id = $1`, p.ID, id); err != nil {
+
+		var current bool
+		if err := tx.QueryRow(ctx, `UPDATE partner_promo_codes SET sync_status=CASE WHEN rules=$3::jsonb THEN 'created' ELSE 'pending' END, external_id=$2,sync_error='' WHERE workspace_id=$4 AND id=$1 RETURNING rules=$3::jsonb`, p.ID, id, raw, ws).Scan(&current); err != nil {
 			return err
 		}
+		if !current {
+			if _, err := jobs.Enqueue(ctx, tx, jobs.NewJob{Kind: jobPartnerPromoCode, WorkspaceID: &ws, Payload: partnerPromoJob{ID: p.ID, Force: true}, MaxAttempts: 5}); err != nil {
+				return err
+			}
+		}
+
 		return partnerRecord(ctx, tx, nil, ws, "partner.promo_code_created", "partner", membership,
 			map[string]any{"promo_code_id": p.ID, "connector": o.Connector.Definition().ID})
 	})

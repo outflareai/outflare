@@ -269,3 +269,19 @@ No tag values, notes, query strings or page URLs are included. Server writes
 record `search_work.saved`, `search_work.fix_created`, `search_report.saved`,
 `search_report.ran`, `search_report.deleted`, `search_schedule.saved` and
 `search_schedule.deleted` as audited workspace actions with brand/site context.
+
+Partner tasks also record `partner_task.created`, `partner_task.updated`,
+`partner_task_submission.updated`, `.reviewed`, `.checked`,
+`partner_audience.created`, `.updated`, `.checked`, `.check_failed`, and
+`partner_task.checked`, and `partner_task.check_failed`. API writes and jobs use the existing event helpers.
+Opening the task composer records `ui.partner_task_composer_opened`. Properties
+contain ids, bounded status/kind values and counts, never profile URLs or notes.
+
+Portal navigation, opportunity details and adding a profile use the shared web
+event helper: `ui.partner_portal_navigated`,
+`ui.partner_opportunity_opened`, and `ui.partner_profile_composer_opened`.
+Properties are bounded page/category labels, never URLs, names or search text.
+
+Partner portal actions also emit `partner.portal_handoff_created` and `partner.terms_accepted`. Partner-initiated cash requests use `partner_payout.created` with `requested_by_partner` in the audit record. Coupon enable/disable emits `partner.promo_code_updated`; checkout work uses the existing `partners.promo_code` job metrics. Browser help navigation and editors emit `ui.partner_help_opened`, `ui.partner_help_composer_opened`, and `ui.partner_coupon_composer_opened`, with categories only and no article text or coupon codes.
+
+Private partnership proposals emit `partner_proposal.created` and `partner_proposal.updated` audit/product events; action, status and version are retained in the audit record. Browser-only actions use `ui.partner_proposal_composer_opened` and `ui.partner_agreement_downloaded`. Invitation tokens, offer text, recipient addresses and invoice instructions never become analytics properties. Sign-in mail uses the existing transactional email queue and monitoring.

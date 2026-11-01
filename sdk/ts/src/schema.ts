@@ -22344,7 +22344,11 @@ export interface paths {
         delete: operations["removePartnerPromoCode"];
         options?: never;
         head?: never;
-        patch?: never;
+        /**
+         * Enable or disable a partner promo code
+         * @description Updates attribution immediately and queues the matching checkout change for connected billing codes. Local codes must also be updated in your own checkout.
+         */
+        patch: operations["updatePartnerPromoCode"];
         trace?: never;
     };
     "/v1/workspaces/{ws}/partners/{id}/fees": {
@@ -24123,6 +24127,167 @@ export interface paths {
         post?: never;
         /** Delete saved schedules */
         delete: operations["deleteSearchSchedule"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/workspaces/{ws}/partner-programs/{id}/portal-sessions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                /** @description A program's id or slug. */
+                id: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Automatically sign a customer into the hosted partner portal
+         * @description Scope: partners.conversions. Backend-only automatic provisioning and sign-in for an open portal.
+         *     Supply your stable customer_id and optionally email/name. Returns a single-use sign-in URL valid for 60 seconds.
+         *     Redirect only the authenticated customer to it; never cache it. Existing identity resolution is shared with
+         *     conversions and embedded sessions. Program admission and explicit terms acceptance still apply.
+         */
+        post: operations["createPartnerPortalSession"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/workspaces/{ws}/partner-programs/{id}/tasks": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                ws: string;
+                id: string;
+            };
+            cookie?: never;
+        };
+        /** List tasks, custom website proposals and submissions */
+        get: operations["listPartnerTasks"];
+        put?: never;
+        /** Create a paid or voluntary partner task */
+        post: operations["createPartnerTask"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/workspaces/{ws}/partner-programs/{id}/tasks/{task}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                ws: string;
+                id: string;
+                task: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Pause or resume a partner task */
+        post: operations["updatePartnerTask"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/workspaces/{ws}/partner-programs/{id}/task-submissions/{submission}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                ws: string;
+                id: string;
+                submission: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Offer a price, approve or reject submitted work */
+        post: operations["reviewPartnerTask"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/workspaces/{ws}/partner-programs/{id}/audiences": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                ws: string;
+                id: string;
+            };
+            cookie?: never;
+        };
+        /** List partner social profiles, websites and communities */
+        get: operations["listPartnerAudiences"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/workspaces/{ws}/partner-programs/{id}/proposals": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        /** List one-to-one partnership proposals */
+        get: operations["listPartnerProposals"];
+        put?: never;
+        /**
+         * Draft a proposal for exactly one recipient
+         * @description Assign an existing partner_id or supply an email to provision a customer-backed partner. Invite with updatePartnerProposal after reviewing the draft. No outreach is sent automatically.
+         */
+        post: operations["createPartnerProposal"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/workspaces/{ws}/partner-programs/{id}/proposals/{proposal}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                id: string;
+                proposal: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Revise, invite, verify a deliverable or approve a milestone
+         * @description Manual approval is mandatory. verify anchors a deliverable's required live period; approve creates rewards only after its milestone wait. Accepted agreements cannot be edited. invite returns an unguessable preview URL; the recipient must verify their email to accept.
+         */
+        post: operations["updatePartnerProposal"];
+        delete?: never;
         options?: never;
         head?: never;
         patch?: never;
@@ -30172,7 +30337,7 @@ export interface components {
             custom_css?: string;
             /** @description Shown on the sign-in page. Plain text. */
             welcome?: string;
-            pages?: ("dashboard" | "links" | "assets" | "referrals" | "payouts" | "settings")[];
+            pages?: ("dashboard" | "tasks" | "profiles" | "links" | "assets" | "referrals" | "payouts" | "settings" | "help" | "proposals")[];
             /** @description Anyone can apply on the portal. */
             signup_open?: boolean;
             signup_fields?: components["schemas"]["PartnerPortalField"][];
@@ -30188,6 +30353,35 @@ export interface components {
             site_key_id?: string;
             /** @description A Google Analytics 4 measurement id (G-...) to add to the portal. It loads through the website script, which holds it back until the visitor allows analytics where consent is needed, so it needs site_key_id. "" for none. */
             ga_measurement_id?: string;
+            /** @description Discount offers from which active partners may generate codes; checkout creation requires the workspace billing connection. */
+            coupon_templates?: {
+                id: string;
+                label: string;
+                coupon: string;
+                rules: components["schemas"]["PartnerPromoRules"];
+            }[];
+            /** @description Brand homepage; https or empty. */
+            home_url?: string;
+            /** @description Brand support page; https or empty. */
+            support_url?: string;
+            /** @description Public program support email; empty to hide. */
+            support_email?: string;
+            /** @description Change this when the terms at terms_url change to require fresh acceptance. */
+            terms_revision?: string;
+            /** @description Plain text payment schedule and program-specific payout guidance. */
+            payout_terms?: string;
+            header_links?: components["schemas"]["PartnerPortalLink"][];
+            footer_links?: components["schemas"]["PartnerPortalLink"][];
+            /** @description Suggested landing pages partners can select in the link builder. */
+            landing_pages?: components["schemas"]["PartnerPortalLink"][];
+            help_articles?: {
+                id: string;
+                title: string;
+                /** @enum {string} */
+                category: "getting_started" | "promotion" | "tracking" | "payouts" | "integrations" | "rules";
+                /** @description Plain text; never rendered as HTML. */
+                body: string;
+            }[];
         };
         PartnerImport: {
             /** Format: uuid */
@@ -30426,6 +30620,7 @@ export interface components {
             updated_at: string;
         };
         PartnerPromoCode: {
+            rules?: components["schemas"]["PartnerPromoRules"];
             /** @description As customers type it at checkout. */
             code: string;
             /** @description The billing account's coupon it was made for; '' when made there by you. */
@@ -44499,6 +44694,128 @@ export interface components {
             conversions: number | null;
             /** @default  */
             notes: string;
+        };
+        PartnerTaskInput: {
+            title: string;
+            description: string;
+            /** @enum {string} */
+            category?: "blog" | "video" | "social" | "newsletter" | "banner" | "community" | "other";
+            /** @enum {string} */
+            reward_kind?: "free" | "cash" | "action";
+            /** @enum {string} */
+            pricing?: "fixed" | "range" | "custom";
+            amount_cents?: number;
+            max_amount_cents?: number;
+            reward_label?: string;
+            action?: string;
+            action_data?: {
+                [key: string]: unknown;
+            };
+            /** @enum {string} */
+            claim_mode?: "instant" | "application";
+            /** @enum {string} */
+            verification?: "human" | "auto" | "auto_hold";
+            hold_days?: number;
+            /** @enum {string} */
+            asset_kind?: "" | "website" | "youtube" | "x" | "linkedin" | "instagram" | "tiktok" | "newsletter" | "reddit" | "facebook" | "discord" | "podcast" | "other";
+            min_reach?: number;
+            target_host?: string;
+            required_link?: string;
+            slots?: number;
+        };
+        PartnerTaskAction: {
+            /** @enum {string} */
+            action: "offer" | "approve" | "reject" | "pause" | "resume";
+            note?: string;
+            amount_cents?: number;
+        };
+        PartnerPortalLink: {
+            label: string;
+            /** @description An https address. */
+            url: string;
+        };
+        PartnerPromoRules: {
+            disabled?: boolean;
+            /** Format: date-time */
+            starts_at?: string | null;
+            /** Format: date-time */
+            ends_at?: string | null;
+            /** @description Customer discount in basis points; 1000 is 10%. Mutually exclusive with amount_cents and an existing billing coupon. */
+            percent_bp?: number;
+            amount_cents?: number;
+            currency?: string;
+            /** @description Zero leaves the provider limit unset; this is per code. */
+            max_redemptions?: number;
+            first_order_only?: boolean;
+            min_order_cents?: number;
+            /** @enum {string} */
+            duration?: "once" | "repeating" | "forever" | "";
+            months?: number;
+            product_ids?: string[] | null;
+        };
+        PartnerProposalConfig: {
+            /** @description Public name on the invitation teaser. */
+            partner_site_name?: string;
+            /** @description Public website or channel URL on the invitation teaser. */
+            partner_site_url?: string;
+            /** @description Optional https icon; the website favicon is used when omitted. */
+            partner_site_icon_url?: string;
+            title: string;
+            brief: string;
+            request_quote?: boolean;
+            reply_to?: string;
+            brand_kit_url?: string;
+            product_url?: string;
+            terms?: string;
+            /** @description Describes the program reward rules; does not independently change commission calculation. */
+            commission_terms?: string;
+            deliverables: {
+                id: string;
+                title: string;
+                /** @description Free-form channel or platform. */
+                channel?: string;
+                format?: string;
+                placement_url?: string;
+                requirements?: string;
+                /** @description Brand-written deadline or timing. */
+                deadline?: string;
+                live_days?: number;
+                link_url?: string;
+                link_text?: string;
+                link_attribute?: string;
+            }[];
+            milestones: {
+                id: string;
+                title: string;
+                deliverable_id: string;
+                amount_cents?: number;
+                /** @description Product/credit benefit fulfilled through the existing action reward workflow. */
+                benefit?: string;
+                wait_days?: number;
+            }[];
+        };
+        PartnerProposal: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            membership_id: string;
+            /** Format: uuid */
+            record_id: string;
+            recipient: string;
+            /** @enum {string} */
+            status: "draft" | "quote_requested" | "quote_received" | "offered" | "accepted" | "declined" | "completed";
+            version: number;
+            config: components["schemas"]["PartnerProposalConfig"];
+            progress: {
+                [key: string]: unknown;
+            };
+            /** Format: date-time */
+            accepted_at: string | null;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            updated_at: string;
+            invitation_url?: string;
         };
     };
     responses: {
@@ -84584,6 +84901,7 @@ export interface operations {
             content: {
                 "application/json": {
                     code: string;
+                    rules?: components["schemas"]["PartnerPromoRules"];
                     /** @description A coupon's id in the workspace's billing account (Stripe): Outflare makes the code there too, with the workspace's own key, which needs Write access to Promotion codes. Leave it out when you make the code yourself. */
                     coupon?: string;
                 };
@@ -84637,6 +84955,39 @@ export interface operations {
                 content?: never;
             };
             404: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    updatePartnerPromoCode: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                id: string;
+                code: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    enabled: boolean;
+                };
+            };
+        };
+        responses: {
+            /** @description The partner with updated codes. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Partner"];
+                };
+            };
+            202: components["responses"]["MissionHeld"];
             default: components["responses"]["Error"];
         };
     };
@@ -88660,6 +89011,314 @@ export interface operations {
                 };
                 content?: never;
             };
+            default: components["responses"]["Error"];
+        };
+    };
+    createPartnerPortalSession: {
+        parameters: {
+            query?: never;
+            header?: {
+                /**
+                 * @description Makes the write safe to retry. A repeat with the same key from the same caller within 24 hours gets the first
+                 *     answer back (with `Idempotent-Replayed: true`) instead of running again. The same key for a different request
+                 *     is refused with 422 `idempotency_key_reused`; while the first is still running, 409 `idempotency_in_progress`.
+                 *     Use a new random key, such as a UUID, for each distinct write.
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                /** @description A program's id or slug. */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @description Your own id for the customer. */
+                    customer_id?: string;
+                    /** Format: email */
+                    email?: string;
+                    /** Format: uuid */
+                    record_id?: string;
+                    /** @description Set on a new customer record only. */
+                    name?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The one-use portal handoff. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        sign_in_url: string;
+                        expires_in_seconds: number;
+                        /** Format: uuid */
+                        partner_id: string;
+                        /** @enum {string} */
+                        status: "pending" | "active" | "suspended" | "rejected";
+                        code?: string;
+                        link?: string;
+                    };
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            400: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    listPartnerTasks: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                ws: string;
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Result. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    createPartnerTask: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                ws: string;
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PartnerTaskInput"];
+            };
+        };
+        responses: {
+            /** @description Result. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            default: components["responses"]["Error"];
+        };
+    };
+    updatePartnerTask: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                ws: string;
+                id: string;
+                task: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PartnerTaskAction"];
+            };
+        };
+        responses: {
+            /** @description Result. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            default: components["responses"]["Error"];
+        };
+    };
+    reviewPartnerTask: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                ws: string;
+                id: string;
+                submission: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PartnerTaskAction"];
+            };
+        };
+        responses: {
+            /** @description Result. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            default: components["responses"]["Error"];
+        };
+    };
+    listPartnerAudiences: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                ws: string;
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Result. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    listPartnerProposals: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Proposals and their milestone progress. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["PartnerProposal"][];
+                    };
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    createPartnerProposal: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    partner_id?: string;
+                    email?: string;
+                    name?: string;
+                    config: components["schemas"]["PartnerProposalConfig"];
+                };
+            };
+        };
+        responses: {
+            /** @description The proposal. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PartnerProposal"];
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            default: components["responses"]["Error"];
+        };
+    };
+    updatePartnerProposal: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                id: string;
+                proposal: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @enum {string} */
+                    action: "revise" | "invite" | "verify" | "approve" | "complete";
+                    version: number;
+                    config?: components["schemas"]["PartnerProposalConfig"];
+                    deliverable_id?: string;
+                    milestone_id?: string;
+                    note?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description Updated proposal. invitation_url is returned only when a link is generated. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PartnerProposal"];
+                };
+            };
+            202: components["responses"]["MissionHeld"];
             default: components["responses"]["Error"];
         };
     };

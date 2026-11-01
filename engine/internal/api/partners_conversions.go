@@ -433,8 +433,11 @@ func (c *conversionRun) named(ctx context.Context) (m *membershipRow, via, click
 	var promo, ref, click *membershipRow
 	if in.PromoCode != "" {
 		if promo, err = optMembership(tx.QueryRow(ctx, `SELECT `+membershipCols+`
-			WHERE m.workspace_id = $1 AND (m.id IN (SELECT membership_id FROM partner_promo_codes WHERE workspace_id = $1 AND lower(code) = lower($2))
-			OR lower(m.code) = lower($2))`, ws, in.PromoCode)); err != nil {
+			WHERE m.workspace_id = $1 AND (m.id IN (SELECT membership_id FROM partner_promo_codes WHERE workspace_id = $1 AND lower(code) = lower($2)
+ AND NOT COALESCE((rules->>'disabled')::boolean,false)
+ AND (NULLIF(rules->>'starts_at','') IS NULL OR (rules->>'starts_at')::timestamptz<=$3)
+ AND (NULLIF(rules->>'ends_at','') IS NULL OR (rules->>'ends_at')::timestamptz>$3))
+			OR (lower(m.code)=lower($2) AND NOT EXISTS(SELECT 1 FROM partner_promo_codes pc WHERE pc.workspace_id=$1 AND lower(pc.code)=lower($2))))`, ws, in.PromoCode, in.at)); err != nil {
 			return
 		}
 	}

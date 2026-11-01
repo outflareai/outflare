@@ -285,6 +285,7 @@ func (s *Server) RegisterJobs(q *jobs.Queue) {
 	(&alerts.Service{Pool: s.pool, Log: s.log, Send: s.sendAccountEmail, PublicURL: s.publicURL, Store: s.integrations}).Register(q)
 	q.Handle(jobFixTicketWrite, s.fixTicketWriteJob)
 	q.Handle(indexability.JobSnapshot, indexability.Handler(s.pool))
+	q.Handle(jobPartnerTaskCheck, s.partnerTaskCheckJob)
 	s.registerSocialJobs(q)
 	s.registerSemanticJobs(q)
 }

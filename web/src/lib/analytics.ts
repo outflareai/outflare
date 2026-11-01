@@ -82,6 +82,9 @@ export function page(name: string) {
 // without a request. Names are object.verb in the past tense, like the
 // server's; add new ones to this list (AGENTS.md, "Events").
 export type UiEvent =
+ | "ui.partner_agreement_downloaded"
+  | "ui.partner_proposal_composer_opened"
+  | "ui.partner_coupon_composer_opened"
   | "ui.review_view_opened" // review module subview selected
   | "ui.review_campaign_step_opened" // review campaign editor step selected
   | "ui.coverage_view_opened"
@@ -98,6 +101,12 @@ export type UiEvent =
   | "ui.search_work_saved"
   | "ui.search_fix_created"
   | "ui.search_insight_report_selected"
+  | "ui.partner_help_composer_opened"
+  | "ui.partner_help_opened"
+  | "ui.partner_portal_navigated"
+ | "ui.partner_opportunity_opened"
+ | "ui.partner_profile_composer_opened"
+  | "ui.partner_task_composer_opened"
   | "ui.error_shown" // an error message was shown to the person (error_code)
   | "ui.crashed" // a script error or a page that failed to render
   | "ui.dns_one_click_used" // a way to add DNS records outside Lifecycle (where: seo_site, tracking_domain, sending_domain, brand_setup, brand_dns; way: cloudflare, ai, developer, manual; how: sign_in, connected, added, approval, approved, approval_cancelled, copied, claude, chatgpt, email; groups for brand_dns)

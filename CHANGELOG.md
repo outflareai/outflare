@@ -6,6 +6,29 @@ Each pull request that changes what Outflare does adds a change note in [changes
 
 ## [Unreleased]
 
+## [0.75.0] - 2026-11-01
+
+### Added
+
+- Pitch one partner with a branded website teaser, then reveal their proposal after secure sign-in. Agree on flexible deliverables, cash or product benefits, and held or split payment milestones; partners submit work and brands manually verify it before approving payment.
+- Create paid or voluntary partner tasks with fixed prices, ranges or custom offers. Partners add channels, verify websites to unlock private proposals, and submit work through a hosted or embedded portal that shares the dashboard's design system. Approved rewards join your existing ledger.
+
+### Changed
+
+- Building Outflare from source now needs Go 1.26 or later; the Docker image already has it.
+- Customize your partner portal's navigation, support, help, landing pages and payment guidance. Require fresh agreement when terms change. Automatically sign customers in with one-use backend handoffs. Partners can request cash payouts and generate brand-approved coupon codes; brands control discounts, schedules and limits through their billing connection.
+- Partners → Log shows every conversion your backend or tracker reported in the last 30 days, by the API or a postback URL: what it sent, what Outflare answered, and whether it was credited, with the reason when it wasn't. Search it by order id, customer id, ref, promo code or email.
+- Webhook deliveries keep every try, not only the last: open a delivery to see its payload and each attempt's status code, error and answer time, and send it again from there. Each endpoint shows its error rate over the last 24 hours, and its deliveries page shows the last 7 days of tries and failures.
+
+### Security
+
+- Security improvements to the help centre and page reading.
+
+### Upgrading
+
+- Partners review current terms again.
+- Review custom portal CSS that targets the old template.
+
 ## [0.74.0] - 2026-11-01
 
 ### Changed

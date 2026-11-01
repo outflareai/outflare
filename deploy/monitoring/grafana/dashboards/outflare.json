@@ -9726,6 +9726,52 @@
           "sort": "desc"
         }
       }
+    },
+    {
+      "id": 473,
+      "title": "Partner task checks",
+      "description": "Ownership, audience reach and submitted link checks. Successful jobs can leave evidence for human review; retries or dead jobs need investigation.",
+      "type": "timeseries",
+      "gridPos": {
+        "x": 0,
+        "y": 757,
+        "w": 12,
+        "h": 8
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (outcome) (rate(outflare_jobs_processed_total{kind=\"partners.task_check\"}[5m]))",
+          "legendFormat": "{{outcome}}"
+        }
+      ]
+    },
+    {
+      "id": 474,
+      "title": "Partner task check backlog",
+      "description": "Seconds the oldest due check has waited. Future review holds are not due and should not appear here. Normally near zero.",
+      "type": "timeseries",
+      "gridPos": {
+        "x": 12,
+        "y": 757,
+        "w": 12,
+        "h": 8
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "outflare_jobs_oldest_due_seconds{kind=\"partners.task_check\"}",
+          "legendFormat": "{{outcome}}"
+        }
+      ]
     }
   ]
 }

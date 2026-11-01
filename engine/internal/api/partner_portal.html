@@ -51,9 +51,13 @@ footer#powered a { color: inherit; }
 (function () {
   "use strict";
   var BASE = "{{BASE}}";
+  var embedToken = new URLSearchParams(location.search).get("view") === "portal" ? (location.hash.match(/token=([A-Za-z0-9_\-]+)/) || [])[1] || "" : "";
+  if (embedToken) history.replaceState(null, "", location.pathname + location.search + "#tasks");
+  var invitedWebsite = new URLSearchParams(location.search).get("website");
+  if (invitedWebsite) { try { sessionStorage.setItem("outflare-partner-website:" + BASE, invitedWebsite); } catch (_) {} }
   var main = document.getElementById("main");
   var program = null, me = null;
-  var labels = { dashboard: "Dashboard", links: "Links", assets: "Assets", referrals: "Referrals", payouts: "Payouts", settings: "Settings" };
+  var labels = { proposals: "Proposals", tasks: "Opportunities", profiles: "Your profiles", dashboard: "Dashboard", links: "Links", assets: "Assets", referrals: "Referrals", payouts: "Payouts", settings: "Settings" };
 
   function el(tag, attrs, kids) {
     var e = document.createElement(tag);
@@ -67,9 +71,11 @@ footer#powered a { color: inherit; }
     return e;
   }
   function api(method, path, body) {
+    var headers = body ? { "Content-Type": "application/json" } : {};
+    if (embedToken) headers.Authorization = "Bearer " + embedToken;
     return fetch(BASE + "api/" + path, {
       method: method, credentials: "same-origin",
-      headers: body ? { "Content-Type": "application/json" } : {},
+      headers: headers,
       body: body ? JSON.stringify(body) : undefined
     }).then(function (r) {
       return r.json().catch(function () { return {}; }).then(function (j) {
@@ -286,24 +292,147 @@ footer#powered a { color: inherit; }
         ["Answer", function (x) { return x.http_status ? String(x.http_status) : ""; }], ["Note", function (x) { return x.error; }]], r.data, "None yet."));
     }, function () {});
   }
+  function taskReward(c) {
+    if (c.reward_kind === "free") return "Voluntary · unpaid";
+    if (c.reward_kind === "action") return c.reward_label;
+    if (c.pricing === "custom") return "Custom proposal";
+    return c.pricing === "range" ? money(c.amount_cents) + " – " + money(c.max_amount_cents) : money(c.amount_cents);
+  }
+  function taskMatches(c, a) {
+    return (!c.asset_kind || c.asset_kind === a.kind) && a.reach >= (c.min_reach || 0) && (!c.target_host || (a.host === c.target_host && a.verified_at));
+  }
+  function taskNeedsAsset(c) { return !!(c.asset_kind || c.min_reach || c.target_host); }
+  function tasks() {
+    render([el("p", { text: "Finding opportunities…", "class": "muted" })]);
+    Promise.all([api("GET", "tasks"), api("GET", "audiences")]).then(function (results) {
+      var available = results[0].data, submissions = results[0].submissions, profiles = results[1].data;
+      var filter = el("select", { "aria-label": "Filter opportunities" }, [el("option", { value: "recommended", text: "Recommended for you" }),el("option", { value: "all", text: "All opportunities" }),el("option", { value: "mine", text: "My tasks" })]);
+      var list = el("div", {});
+      function paint() {
+        list.textContent = "";
+        var shown = 0;
+        available.forEach(function (t) {
+          var c = t.config, own = submissions.find(function (x) { return x.task_id === t.id; });
+          var eligible = profiles.filter(function (a) { return taskMatches(c,a); });
+          var matches = !taskNeedsAsset(c) || eligible.length > 0;
+          if (filter.value === "mine" && !own || filter.value === "recommended" && !matches && !own) return;
+          shown++;
+          var status = el("p", { "class": "muted", "aria-live": "polite" });
+          var select = el("select", { "aria-label": "Choose your profile", disabled: own ? "" : null }, [el("option", { value: "", text: taskNeedsAsset(c) ? "Choose a profile" : "No profile required" })].concat(eligible.map(function (a) { return el("option", { value: a.id, text: a.url + " · " + a.reach.toLocaleString() + " reach" }); })));
+          if (own && own.audience_id) select.value = own.audience_id;
+          else if (eligible.length === 1) select.value = eligible[0].id;
+          var evidence = el("input", { type: "url", placeholder: "https://example.com/your-published-work", required: c.verification === "human" ? null : "", "aria-label": "Published work URL" });
+          var note = el("textarea", { rows: "2", maxlength: "2000", placeholder: "Anything the brand should know (optional)", "aria-label": "Note to brand" });
+          function act(action) {
+            var body = { action: action, audience_id: own ? own.audience_id || "" : select.value, note: note.value };
+            if (action === "submit") { if (!evidence.reportValidity()) return; body.evidence_url = evidence.value; }
+            if (taskNeedsAsset(c) && !body.audience_id) { status.textContent = "Choose an eligible profile first."; return; }
+            buttons.forEach(function (b) { b.disabled = true; });
+            api("POST", "tasks/" + t.id, body).then(tasks, function (err) { status.className = "err"; status.textContent = err.message; buttons.forEach(function (b) { b.disabled = false; }); });
+          }
+          var buttons = [], content = [el("div", { "class": "row" }, [el("span", { "class": "pill", text: c.category }),el("b", { text: taskReward(c) }),own ? el("span", { "class": "pill", text: own.status }) : null]),el("h2", { text: c.title }),el("p", { text: c.description, style: "white-space:pre-wrap" })];
+          if (c.target_host) content.push(el("p", { "class": "banner ok", text: "Your verified website unlocked this proposal." }));
+          if (own && c.reward_kind === "cash" && own.status !== "applied") content.push(el("p", { text: "Your agreed reward: " + money(own.amount_cents) }));
+          if (own && own.note) content.push(el("p", { text: own.note }));
+          if (own && own.check_status) content.push(el("p", { "class": "muted", text: "Verification: " + own.check_status.replace(/_/g, " ") + (own.hold_until ? " · review until " + date(own.hold_until) : "") }));
+          if (!matches && !own) content.push(el("p", { "class": "muted" }, ["Add a qualifying profile to participate. ",el("a", { href: "#profiles", text: "Manage profiles" })]));
+          if (!me.read_only && me.status === "active" && (matches || own)) {
+            if (!own && t.status === "active") {
+              if (taskNeedsAsset(c)) content.push(select);
+              content.push(note);
+              buttons.push(el("button", { type: "button", text: c.claim_mode === "application" || c.pricing !== "fixed" ? "Request an offer" : "Accept task", onclick: function () { act("apply"); } }));
+            } else if (own && own.status === "offered") {
+              buttons.push(el("button", { type: "button", text: "Accept offer", onclick: function () { act("accept"); } }));
+            } else if (own && own.status === "accepted") {
+              content.push(el("label", { text: c.verification === "human" ? "Link to completed work, or describe completion below" : "Link to completed work" }),evidence,note);
+              buttons.push(el("button", { type: "button", text: "Submit work", onclick: function () { act("submit"); } }));
+            }
+          }
+          content.push(el("div", { "class": "row" }, buttons),status);
+          list.appendChild(el("section", { "class": "card" },content));
+        });
+        if (!shown) list.appendChild(el("div", { "class": "card" }, [el("h3", { text: "No opportunities here yet" }),el("p", { "class": "muted" },["Add your websites and channels to unlock relevant tasks, or browse all opportunities. ",el("a", { href: "#profiles", text: "Add profiles" })])]));
+      }
+      filter.addEventListener("change",paint);
+      render([el("h2", { text: "Earn with " + program.title }),el("p", { "class": "muted", text: "Pick a task, agree on the reward, and submit your work. Referral commissions follow your program's existing rules." }),el("div", { "class": "card" },[filter]),list]);paint();
+    }).catch(fail);
+  }
+  function profiles() {
+    api("GET", "audiences").then(function (result) {
+      var list = result.data.map(function (a) {
+        if (a.verified_at) { try { if (sessionStorage.getItem("outflare-partner-website:" + BASE) === a.host) sessionStorage.removeItem("outflare-partner-website:" + BASE); } catch (_) {} }
+        var note = el("p", { "aria-live": "polite", "class": "muted", text: a.last_error || "" });
+        function act(action) {
+          note.textContent = "Working…";
+          api("POST", "audiences/" + a.id, { action: action }).then(function () { if (action === "remove") return profiles(); note.textContent = "Check queued. Refresh this page shortly to see the result."; },function (err) { note.className = "err"; note.textContent = err.message; });
+        }
+        var content = [el("div", { "class": "row" },[el("b", { text: a.url }),el("span", { "class": "pill", text: a.kind }),el("span", { "class": "pill", text: a.verified_at ? "Website ownership verified" : "Ownership unverified" })]),el("p", { "class": "muted", text: a.role + " · " + a.reach.toLocaleString() + " reach · " + (a.reach_source === "scraped" ? "Read from public page" : "Self-reported") + (a.measured_at ? " · checked " + date(a.measured_at) : "") }),a.topics ? el("p", { text: a.topics }) : null];
+        if (a.kind === "website" && !a.verified_at) content.push(el("div", { "class": "banner" },[el("b", { text: "Verify ownership to unlock website proposals" }),el("p", { text: "Add this DNS TXT record in your domain's DNS settings:" }),el("p", {},["Name: ",el("code", { text: a.dns_name }),copyBtn(a.dns_name)]),el("p", {},["Value: ",el("code", { text: "outflare-partner=" + a.challenge }),copyBtn("outflare-partner=" + a.challenge)]),el("p", { text: "DNS changes can take time to appear. A follower count does not verify ownership." })]));
+        if (!me.read_only && me.status === "active") content.push(el("div", { "class": "row" },[
+          a.kind === "website" ? el("button", { type: "button", text: a.verified_at ? "Recheck ownership" : "Verify website", onclick: function () { act("verify"); } }) : null,
+          el("button", { type: "button", "class": "ghost", text: "Refresh reach", onclick: function () { act("refresh"); } }),
+          el("button", { type: "button", "class": "ghost", text: "Remove", onclick: function () { act("remove"); } })
+        ]));
+        content.push(note); return el("section", { "class": "card" },content);
+      });
+      var hint = new URLSearchParams(location.search).get("website") || "";
+      try { hint = hint || sessionStorage.getItem("outflare-partner-website:" + BASE) || ""; } catch (_) {}
+      var raw = el("input", { type: "url", required: "", maxlength: "2000", placeholder: "https://example.com", value: hint ? "https://" + hint : "" });
+      var kind = el("select", {},["website","youtube","x","linkedin","instagram","tiktok","newsletter","reddit","facebook","discord","podcast","other"].map(function (v) { return el("option", { value: v, text: v }); }));
+      var role = el("select", {},["owner","admin","moderator","contributor"].map(function (v) { return el("option", { value: v, text: v }); }));
+      var reach = el("input", { type: "number", min: "0", max: "10000000000", value: "0" });
+      var topics = el("input", { maxlength: "500", placeholder: "Developer tools, marketing, startups…" });
+      var note = el("p", { "aria-live": "polite" });
+      var submit = el("button", { text: "Add profile" });
+      var form = el("form", { "class": "card", onsubmit: function (e) {
+        e.preventDefault();submit.disabled=true;
+        api("POST", "audiences", { url: raw.value, kind: kind.value, role: role.value, reach: Number(reach.value), topics: topics.value }).then(profiles,function (err) { note.className="err";note.textContent=err.message;submit.disabled=false; });
+      } },[el("h3", { text: "Add a website, channel or community" }),el("label", { text: "Profile URL" }),raw,el("label", { text: "Type" }),kind,el("label", { text: "Your role" }),role,el("label", { text: "Topics" }),topics,el("label", { text: "Followers, subscribers or members (optional)" }),reach,el("p", { "class": "muted", text: "Your brand can read public reach through its own connected page reader. Figures you enter are labeled self-reported. Website ownership is verified separately." }),submit,note]);
+      render([el("div", { "class": "row" },[el("h2", { text: "Your profiles & reach" }),el("button", { "class": "ghost", text: "Refresh status", onclick: profiles })]),el("p", { "class": "muted" },["Add your profiles once to get personalized opportunities. ",el("a", { href: "#tasks", text: "See your tasks" })])].concat(list).concat(!me.read_only && me.status === "active" ? [form] : []));
+    }).catch(fail);
+  }
+
   function fail(err) {
     if (err.status === 401) { me = null; return route(); }
     render([el("p", { "class": "err", text: err.message })]);
   }
 
-  var pages = { dashboard: dashboard, links: links, assets: assets, referrals: referrals, payouts: payouts, settings: settings };
+  function proposals() {
+    api("GET","proposals").then(function(r){
+      render([el("h2",{text:"Your proposals"})].concat(r.data.map(function(p){
+        var children=[el("h3",{text:p.config.title}),el("p",{text:p.status+" · Version "+p.version}),el("p",{text:p.config.brief}),el("pre",{text:JSON.stringify(p.config,null,2),style:"white-space:pre-wrap"}),el("a",{href:"mailto:"+p.config.reply_to,text:"Discuss changes by email"})];
+        function act(action,extra){var body=Object.assign({action:action,version:p.version},extra||{});api("POST","proposals/"+p.id,body).then(proposals,fail);}
+        if(!me.read_only && p.status==="offered"){children.push(el("button",{text:"Accept proposal",onclick:function(){act("accept");}}),el("button",{text:"Decline",onclick:function(){act("decline");}}));}
+        if(!me.read_only && p.status==="quote_requested"){var amount=el("input",{type:"number",min:"0.01",step:"0.01",placeholder:"Quote amount"});children.push(amount,el("button",{text:"Submit quote",onclick:function(){act("quote",{amount_cents:Math.round(Number(amount.value)*100)});}}));}
+        if(p.status==="accepted"){p.config.deliverables.forEach(function(d){var input=el("input",{type:"url",placeholder:"Published URL for "+d.title});children.push(el("h4",{text:d.title}),input,el("button",{text:"Submit work",disabled:me.read_only,onclick:function(){act("submit",{deliverable_id:d.id,url:input.value});}}));});}
+        return el("div",{"class":"card"},children);
+      })));
+    },fail);
+  }
+  var pages = { proposals: proposals, tasks: tasks, profiles: profiles, dashboard: dashboard, links: links, assets: assets, referrals: referrals, payouts: payouts, settings: settings };
   function route() {
     var page = location.hash.slice(1);
     nav();
     if (!me) return page === "apply" && program.signup_open ? apply() : signIn();
-    if (program.pages.indexOf(page) < 0) page = "dashboard";
+    if (me.requires_terms) {
+      var agreed=el("input",{type:"checkbox"}),note=el("p",{"class":"err"});
+      var submit=el("button",{text:"Agree and continue",onclick:function(){if(!agreed.checked)return;submit.disabled=true;api("POST","accept-terms",{accept:true,version:program.terms_version}).then(function(){return api("GET","me");}).then(function(x){me=x;route();},function(err){note.textContent=err.message;submit.disabled=false;});}});
+      if(me.read_only)submit.disabled=true;
+      return render([el("div",{"class":"card"},[el("h2",{text:"Review your program terms"}),el("a",{href:program.terms_url,target:"_blank",rel:"noopener noreferrer",text:"Read the current terms"}),el("label",{},[agreed," I have read and agree to the current program terms."]),submit,note])]);
+    }
+
+    if (program.pages.indexOf(page) < 0) page = program.pages.indexOf("tasks") >= 0 ? "tasks" : "dashboard";
     pages[page]();
   }
   window.addEventListener("hashchange", route);
 
   function start() {
+    if (embedToken) {
+      api("GET", "me").then(function (x) { me=x;program=x.program;brand();route(); }).catch(fail);
+      return;
+    }
     var m = /^#signin=(ofpl_[A-Za-z0-9_-]+)$/.exec(location.hash);
-    var signedIn = m ? api("POST", "session", { token: m[1] }).then(function () { history.replaceState(null, "", location.pathname); }, function (err) { return err.message; }) : Promise.resolve();
+    var signedIn = m ? api("POST", "session", { token: m[1] }).then(function () { var pendingWebsite = null; try { pendingWebsite = sessionStorage.getItem("outflare-partner-website:" + BASE); } catch (_) {} history.replaceState(null, "", location.pathname + (pendingWebsite ? "#profiles" : "#tasks")); }, function (err) { return err.message; }) : Promise.resolve();
     signedIn.then(function (linkErr) {
       return api("GET", "program").then(function (p) {
         program = p; brand();

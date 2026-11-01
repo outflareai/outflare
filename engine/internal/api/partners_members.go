@@ -17,7 +17,6 @@ import (
 
 	"github.com/outflareai/outflare/engine/internal/connectors"
 	"github.com/outflareai/outflare/engine/internal/customers"
-	"github.com/outflareai/outflare/engine/internal/jobs"
 	"github.com/outflareai/outflare/engine/internal/metrics"
 	"github.com/outflareai/outflare/engine/internal/secrets"
 	"github.com/outflareai/outflare/engine/internal/utm"
@@ -37,10 +36,11 @@ var partnerCodeRE = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$`)
 // lives only in Outflare (you made it in your billing system yourself), or
 // pending, created or failed when Outflare makes it in the billing account.
 type partnerPromoCode struct {
-	Code   string `json:"code"`
-	Coupon string `json:"coupon"`
-	Status string `json:"status"`
-	Error  string `json:"error"`
+	Code   string                    `json:"code"`
+	Coupon string                    `json:"coupon"`
+	Status string                    `json:"status"`
+	Error  string                    `json:"error"`
+	Rules  connectors.PromoCodeRules `json:"rules"`
 }
 
 type partnerStats struct {
@@ -100,7 +100,7 @@ const partnerSelect = `
 	                 ORDER BY i.verified DESC, i.valid_from LIMIT 1), ''),
 	       m.code, m.status, m.group_id::text, m.campaign_id::text, m.payout_method, m.payout_type, m.payout_token, m.postback_url, m.note, m.source, p.currency, p.landing_url,
 	       COALESCE(c.slug, ''), COALESCE(c.code, ''), COALESCE(c.source, ''), COALESCE(c.medium, ''),
-	       COALESCE((SELECT json_agg(json_build_object('code', pc.code, 'coupon', pc.coupon, 'status', pc.sync_status, 'error', pc.sync_error)
+	       COALESCE((SELECT json_agg(json_build_object('code', pc.code, 'coupon', pc.coupon, 'status', pc.sync_status, 'error', pc.sync_error, 'rules', pc.rules)
 	                 ORDER BY pc.created_at) FROM partner_promo_codes pc WHERE pc.membership_id = m.id), '[]'),
 	       (SELECT count(*) FROM partner_clicks k WHERE k.membership_id = m.id)::int,
 	       (SELECT count(*) FROM partner_referrals f WHERE f.membership_id = m.id)::int,
@@ -633,75 +633,15 @@ func (s *Server) addPartnerPromoCode(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	var in struct {
-		Code string `json:"code"`
-		// Coupon makes the code in the workspace's billing account too,
-		// for this coupon (its id there).
-		Coupon string `json:"coupon"`
-	}
+	var in partnerPromoCodeInput
 	if !decode(w, r, &in) {
 		return
 	}
-	if !partnerCodeRE.MatchString(in.Code) {
-		writeError(w, r, http.StatusBadRequest, "invalid_request", "code is 1 to 64 letters, digits, hyphens or underscores, such as ANA20")
+
+	if err := s.storePartnerPromoCode(r.Context(), a.WorkspaceID, &a.principal, cur, in); s.partnerCouponError(w, r, err) {
 		return
 	}
-	if in.Coupon = strings.TrimSpace(in.Coupon); len(in.Coupon) > 200 {
-		writeError(w, r, http.StatusBadRequest, "invalid_request", "coupon is the id of a coupon in your billing account")
-		return
-	}
-	var integration *string
-	if in.Coupon != "" {
-		var err error
-		if integration, err = s.promoCodeConnection(r.Context(), a.WorkspaceID, cur.ProgramID); err != nil {
-			s.internal(w, r, err)
-			return
-		}
-		if integration == nil {
-			writeError(w, r, http.StatusConflict, "connector_needed", "connect a billing account that can make promo codes (Stripe, with Write access to Promotion codes), or leave coupon out and make the code there yourself")
-			return
-		}
-	}
-	if len(cur.PromoCodes) >= maxPartnerPromoCodes {
-		writeError(w, r, http.StatusBadRequest, "invalid_request", "a partner can have at most 20 promo codes")
-		return
-	}
-	ctx := r.Context()
-	err := pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
-		// A partner's own ref code may double as their promo code.
-		var taken bool
-		if err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM partner_memberships WHERE workspace_id = $1 AND lower(code) = lower($2) AND id <> $3)
-			OR EXISTS (SELECT 1 FROM partner_promo_codes WHERE workspace_id = $1 AND lower(code) = lower($2))`, a.WorkspaceID, in.Code, cur.ID).Scan(&taken); err != nil {
-			return err
-		}
-		if taken {
-			return errConflict
-		}
-		var id string
-		status := "local"
-		if integration != nil {
-			status = "pending"
-		}
-		if err := tx.QueryRow(ctx, `INSERT INTO partner_promo_codes (workspace_id, membership_id, code, coupon, integration_id, sync_status)
-			VALUES ($1, $2, $3, $4, $5, $6) RETURNING id::text`, a.WorkspaceID, cur.ID, in.Code, in.Coupon, integration, status).Scan(&id); err != nil {
-			return err
-		}
-		if integration != nil {
-			if _, err := jobs.Enqueue(ctx, tx, jobs.NewJob{Kind: jobPartnerPromoCode, WorkspaceID: &a.WorkspaceID, Payload: partnerPromoJob{ID: id},
-				MaxAttempts: 5, IdempotencyKey: "partner-promo:" + id}); err != nil {
-				return err
-			}
-		}
-		return partnerRecord(ctx, tx, &a.principal, a.WorkspaceID, "partner.promo_code_added", "partner", cur.ID,
-			map[string]any{"program_id": cur.ProgramID, "promo_code_id": id})
-	})
-	if errors.Is(err, errConflict) {
-		writeError(w, r, http.StatusConflict, "conflict", "another partner or promo code already uses "+in.Code)
-		return
-	}
-	if s.allocError(w, r, err) {
-		return
-	}
+
 	if v, ok := s.findPartner(w, r, a.WorkspaceID, cur.ID); ok {
 		writeJSON(w, http.StatusCreated, v)
 	}

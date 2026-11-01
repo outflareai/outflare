@@ -503,6 +503,11 @@ func (s *Server) createPartnerPayouts(w http.ResponseWriter, r *http.Request) {
 	made := []string{}
 	waiting := 0
 	err := pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
+		// Serialize allocation with partner-initiated payout requests.
+		if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1,0))`, "partner-payout:"+a.WorkspaceID); err != nil {
+			return err
+		}
+
 		rows, err := tx.Query(ctx, `SELECT m.id::text, p.id::text, p.currency, p.min_payout_cents, sum(w.amount_cents)::bigint,
 			m.source = 'import' AND m.payout_method IS NULL
 			FROM partner_rewards w JOIN partner_memberships m ON m.id = w.membership_id JOIN partner_programs p ON p.id = m.program_id

@@ -313,3 +313,9 @@ The Review invitations dashboard row shows dispatch results, due-job delay and b
 - `OutflareCoverageReviewsFailing`: repeated Coverage AI review failures need provider or response investigation.
 
 Coverage records page outcomes in `outflare_coverage_checks_total{health}` and accuracy outcomes in `outflare_coverage_reviews_total{status}`. Page checks, accuracy reviews and commercial extraction use the shared job duration, backlog and error metrics. Fixed accuracy schedules reuse unchanged analyses before calling a model.
+
+Partner task ownership, reach and evidence checks use the `partners.task_check`
+queue kind. The partner panels show outcome rate and oldest due age; future
+human-review holds do not count as overdue. `OutflarePartnerTaskChecksFailing`
+warns about repeated retries or dead checks, and `OutflareJobBacklog` covers
+checks waiting for workers.

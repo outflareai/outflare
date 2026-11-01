@@ -637,7 +637,7 @@ Keys are handled with care, because an AI key can run up a bill. Each is encrypt
 
 ## Develop
 
-You need Go 1.25+, Node 22+, pnpm 10 and Postgres 16, with [pgvector](docs/workspace-search.md#self-hosting-pgvector) for meaning-based search (optional; the rest works without it).
+You need Go 1.26+, Node 22+, pnpm 10 and Postgres 16, with [pgvector](docs/workspace-search.md#self-hosting-pgvector) for meaning-based search (optional; the rest works without it).
 
 ```sh
 make migrate          # create the schema in DATABASE_URL

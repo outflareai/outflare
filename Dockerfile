@@ -19,7 +19,7 @@ RUN pnpm --filter @outflare/sdk build && pnpm --filter @outflare/web build
 # The MCP server as one file, which the engine runs and serves at /mcp.
 RUN pnpm --filter @outflare/mcp build && pnpm --filter @outflare/mcp bundle
 
-FROM --platform=$BUILDPLATFORM golang:1.25-alpine AS engine
+FROM --platform=$BUILDPLATFORM golang:1.26-alpine AS engine
 WORKDIR /src
 COPY go.mod go.sum ./
 RUN go mod download
