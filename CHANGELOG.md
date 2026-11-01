@@ -6,6 +6,12 @@ Each pull request that changes what Outflare does adds a change note in [changes
 
 ## [Unreleased]
 
+## [0.71.0] - 2026-11-01
+
+### Added
+
+- Four new playbooks assess sign-ups for partnership potential: a review across partnership types, SDK and bandwidth suppliers, integration partners, and resellers or agencies. Each returns evidence, confidence and suggested next steps for review.
+
 ## [0.70.0] - 2026-11-01
 
 ### Added

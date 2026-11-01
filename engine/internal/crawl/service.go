@@ -254,6 +254,18 @@ func StartRun(ctx context.Context, tx pgx.Tx, ws, siteID, trigger string, actorI
 	lim := LimitsFor(verifiedAt != nil)
 	maxPages, delay = min(maxPages, lim.MaxPages), max(delay, lim.MinDelayMS)
 	obey = obey || !lim.MayIgnoreRobots
+	// A run still queued or running, or finishing in a transaction not yet
+	// committed, means this site is busy. Checked before the insert: an
+	// insert that waits on the one-active-run index for a finishing run's
+	// transaction can deadlock with it (that transaction goes on to update
+	// the run again), and fail instead of answering that a crawl is running.
+	var busy bool
+	if err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM crawl_runs WHERE site_id = $1 AND status IN ('queued', 'running'))`, siteID).Scan(&busy); err != nil {
+		return "", err
+	}
+	if busy {
+		return "", ErrRunning
+	}
 	var id string
 	err = tx.QueryRow(ctx, `
 		INSERT INTO crawl_runs (workspace_id, site_id, host, trigger, max_pages, delay_ms, obey_robots, settings, created_by)

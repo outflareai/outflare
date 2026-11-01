@@ -94,6 +94,7 @@ import { LinkAutopilot } from "./pages/LinkAutopilot";
 import { Coverage } from "./pages/Coverage";
 import { News } from "./pages/News";
 import { Stories } from "./pages/Stories";
+import { PRAutopilot } from "./pages/PRAutopilot";
 import { Warmup } from "./pages/Warmup";
 import { ConnectAI } from "./pages/ConnectAI";
 import { Authorize } from "./pages/Authorize";
@@ -607,6 +608,11 @@ function Shell({ me, onSignOut, onReload }: { me: Me; onSignOut: () => void; onR
         {ready && ws && tab === "coverage" && <Coverage key={ws.id} ws={ws.id} myId={me.user.id ?? ""} can={can} go={setTab} />}
         {ready && ws && tab === "news" && <News key={ws.id} ws={ws.id} canManage={can("seo.manage")} canLists={can("customers.manage")} go={setTab} />}
         {ready && ws && tab === "stories" && <Stories key={ws.id} ws={ws.id} canManage={can("seo.manage")} go={setTab} />}
+        {ready && ws && tab === "pr-autopilot" && (
+          <CloudPage feature={cloudFeature("pr-autopilot")!}>
+            <PRAutopilot key={ws.id} ws={ws.id} canManage={can("missions.run")} go={setTab} />
+          </CloudPage>
+        )}
         {ready && ws && tab === "allocation" && <Allocation key={ws.id} ws={ws.id} canManage={writer} canSetMode={isAdmin} go={setTab} />}
         {ready && ws && tab === "senders" && <Senders key={ws.id} ws={ws.id} canManage={writer} canManageTeams={isAdmin} />}
         {ready && ws && tab === "servers" && <Servers key={ws.id} ws={ws.id} canManage={writer} open={item ?? ""} onOpen={(id) => setItem(id || undefined)} go={setTab} />}

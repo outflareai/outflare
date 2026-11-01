@@ -23,6 +23,12 @@ export const cloudFeatures: CloudFeature[] = [
     name: "Link autopilot",
     line: "Set how many new live links you want a month and a budget; Outflare's agent runs the link building playbooks toward it, and you approve each change.",
   },
+  {
+    tab: "pr-autopilot",
+    capability: "pr_autopilot",
+    name: "Reactive PR autopilot",
+    line: "Each morning, your experts' comments on today's news, drafted for them to approve and pitched to the journalists covering it.",
+  },
 ];
 
 export const cloudFeature = (tab: Tab) => cloudFeatures.find((f) => f.tab === tab);

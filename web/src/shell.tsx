@@ -67,6 +67,7 @@ export const tabNames: Record<Tab, string> = {
   coverage: "Coverage",
   news: "News watch",
   stories: "Stories",
+  "pr-autopilot": "PR autopilot",
   reddit: "Reddit",
   "reddit-campaigns": "Reddit campaigns",
   social: "Accounts",
@@ -158,6 +159,7 @@ export const tabBlurbs: Record<Tab, string> = {
   coverage: "Publisher relationships, mentions, placements and ongoing maintenance.",
   news: "Saved news searches on your own Geonode: follow a topic and who writes about it, and keep every article about your brand as its coverage.",
   stories: "Press releases with a source behind every number and only quotes your experts approved, checked before a person approves them.",
+  "pr-autopilot": "Each morning, your experts' comments on today's news, drafted for them to approve and pitched to the journalists covering it.",
   allocation: "Which mailbox sends for which sequence, and which sequences are short of mailboxes.",
   senders: "Who your mailboxes send as, and which team owns which senders and sequences.",
   outcomes: "Meetings and deals your outreach produced, what they cost, and the cost of each.",
@@ -289,7 +291,7 @@ export type Module = { id: string; label: string; icon: IconName; tabs: Tab[] };
 export const modules: Module[] = [
   { id: "crm", label: "CRM", icon: "leads", tabs: ["people", "leads", "lists", "lead-finder", "email-finder", "suppression"] },
   { id: "visitors", label: "Visitors", icon: "visitors", tabs: ["visitors"] },
-  { id: "outreach", label: "Outreach", icon: "sequences", tabs: ["sequences", "link-building", "link-autopilot", "coverage", "news", "stories", "allocation", "reports"] },
+  { id: "outreach", label: "Outreach", icon: "sequences", tabs: ["sequences", "link-building", "link-autopilot", "coverage", "news", "stories", "pr-autopilot", "allocation", "reports"] },
   { id: "deliverability", label: "Deliverability", icon: "mailboxes", tabs: ["infrastructure", "mailboxes", "domains", "warmup", "servers", "senders"] },
   { id: "lifecycle", label: "Lifecycle", icon: "lifecycle", tabs: ["lifecycle", "broadcasts", "journeys", "rules", "automations", "templates", "topics", "emails", "providers"] },
   { id: "seo", label: "SEO", icon: "seo", tabs: ["seo-overview", "search-insights", "audits", "fixes", "experiments", "keywords", "seo", "backlinks", "ai-visibility", "competitors"] },
@@ -313,7 +315,7 @@ const allModules = modules;
 
 // Pages that work for someone kept to some brands. The others need every
 // brand (the API answers 403), so they are hidden from them.
-const brandTabs: readonly Tab[] = ["overview", "seo-overview", "search-insights", "audits", "fixes", "experiments", "keywords", "ai-visibility", "backlinks", "competitors", "link-building", "link-autopilot", "coverage", "news", "stories", "reddit", "reddit-campaigns", "social", "reviews", "ads", "visitors", "tracking", "flags", "ab-tests", "inbox", "sequences", "people", "leads", "lists", "rules", "lead-finder", "suppression", "mailboxes", "domains", "knowledge", "company", "brands", "setup", "ideal-customers", "members", "account", "instance", "ai-accounts", "support", "help-centre"];
+const brandTabs: readonly Tab[] = ["overview", "seo-overview", "search-insights", "audits", "fixes", "experiments", "keywords", "ai-visibility", "backlinks", "competitors", "link-building", "link-autopilot", "coverage", "news", "stories", "pr-autopilot", "reddit", "reddit-campaigns", "social", "reviews", "ads", "visitors", "tracking", "flags", "ab-tests", "inbox", "sequences", "people", "leads", "lists", "rules", "lead-finder", "suppression", "mailboxes", "domains", "knowledge", "company", "brands", "setup", "ideal-customers", "members", "account", "instance", "ai-accounts", "support", "help-centre"];
 // Pages of parts of Outflare switched on per workspace while they are
 // tested (GET /v1/me lists each workspace's features).
 const featureTabs: Partial<Record<Tab, string>> = { "ai-accounts": "ai_accounts" };
@@ -952,6 +954,8 @@ function callFor(tab: Tab, ws: string, item?: string): Call {
       return { title: "Brand coverage", path: "/v1/workspaces/{ws}/brands", params: base, scope: "coverage.read", ask: "Find this brand, then use its coverage API to review placements, outstanding work and publisher relationships." };
     case "news":
       return { title: "Coverage of your brands", path: "/v1/workspaces/{ws}/coverage", params: base, mcp: "list_coverage", ask: "What was written about us this week, which outlets covered us without a link, and which topics should we comment on?", scope: "seo.read" };
+    case "pr-autopilot":
+      return { title: "Reactive PR autopilots", path: "/v1/workspaces/{ws}/cloud/pr-autopilot", params: base, ask: "Set up the reactive PR autopilot for our brand, at most 3 stories a week.", scope: "missions.read" };
     case "stories":
       return { title: "Your stories", path: "/v1/workspaces/{ws}/stories", params: base, mcp: "list_stories", ask: "Suggest three stories we could pitch this week from our coverage and the news, and draft the best one from facts we can source.", scope: "seo.read" };
     case "backlinks":

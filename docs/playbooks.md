@@ -87,3 +87,20 @@ The first kit, **Creator partnerships**, adds a Partnerships record type with a 
 ## Events
 
 Starting a playbook records `playbook.started` (with `playbook_id`, `playbook_version`, `mode`, `publisher` and `kit_applied`) beside `mission.created`. An automation's run records it too, with `automation_id`, `trigger` (schedule, event or manual) and `events`, and `playbook_automation.ran`. Automations record `playbook_automation.created`, `updated`, `approved`, `paused`, `held` (with the reason) and `deleted`. All of these are webhook events. Applying a kit records `kit.applied` (with `kit_id`, `kit_version` and how many parts were added, extended and reused), and each part records its own action with `kit_id`. The web app records `ui.playbook_opened` and `ui.playbook_prompt_copied`.
+
+## Partnership qualification from sign-ups
+
+Use **Assess every sign-up for partnership potential** to evaluate affiliate,
+creator (including YouTube and social), SDK or bandwidth supplier, integration,
+and reseller opportunities together. A person or company can fit several routes.
+For a focused review, use **Find SDK and bandwidth suppliers among sign-ups**,
+**Find integration partners among sign-ups**, or **Find resellers and agency
+partners among sign-ups**. The existing **Recruit affiliates and creators from
+your own sign-ups** playbook covers audience partners and approved invitations.
+
+The qualification playbooks take your sign-up event, a time window and partner
+criteria. They return a report linked to existing records, with evidence,
+confidence, missing information and next steps. They do not send invitations.
+They can be run manually or selected for a scheduled automation; they do not
+install a signup webhook or turn on recurring runs. Choose a window that covers
+the interval between runs and review new or changed evidence on each run.
